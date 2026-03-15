@@ -1,0 +1,451 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000200 /* DroneUAVDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000100 /* DroneUAVDemoApp.swift */; };
+		100000000000000000000201 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000101 /* ContentView.swift */; };
+		100000000000000000000202 /* ControlPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000102 /* ControlPanelView.swift */; };
+		100000000000000000000203 /* SceneViewportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000103 /* SceneViewportView.swift */; };
+		100000000000000000000204 /* TelemetryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000104 /* TelemetryPanelView.swift */; };
+		100000000000000000000205 /* DroneSimulationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000105 /* DroneSimulationViewModel.swift */; };
+		100000000000000000000206 /* DroneFlightMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000106 /* DroneFlightMode.swift */; };
+		100000000000000000000207 /* DroneState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000107 /* DroneState.swift */; };
+		100000000000000000000208 /* DroneControlInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000108 /* DroneControlInput.swift */; };
+		100000000000000000000209 /* DroneControlValues.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000109 /* DroneControlValues.swift */; };
+		10000000000000000000020A /* TelemetrySnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010A /* TelemetrySnapshot.swift */; };
+		10000000000000000000020B /* DronePhysicsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010B /* DronePhysicsEngine.swift */; };
+		10000000000000000000020C /* SimpleDronePhysicsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010C /* SimpleDronePhysicsEngine.swift */; };
+		10000000000000000000020D /* SceneFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010D /* SceneFactory.swift */; };
+		10000000000000000000020E /* DroneModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010E /* DroneModelBuilder.swift */; };
+		10000000000000000000020F /* DroneSceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010F /* DroneSceneController.swift */; };
+		100000000000000000000210 /* DroneModelProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000110 /* DroneModelProfile.swift */; };
+		100000000000000000000211 /* WeatherModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000111 /* WeatherModel.swift */; };
+		100000000000000000000212 /* TerrainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000112 /* TerrainModel.swift */; };
+		100000000000000000000213 /* CameraConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000113 /* CameraConfiguration.swift */; };
+		100000000000000000000214 /* DamageThermalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000114 /* DamageThermalModel.swift */; };
+		100000000000000000000215 /* BatteryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000115 /* BatteryState.swift */; };
+		100000000000000000000216 /* CollisionAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000116 /* CollisionAnalysis.swift */; };
+		100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000117 /* BatteryThermalSimulationService.swift */; };
+		100000000000000000000218 /* CollisionAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000118 /* CollisionAnalysisService.swift */; };
+		100000000000000000000219 /* DroneSimulationContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000119 /* DroneSimulationContext.swift */; };
+		10000000000000000000021A /* KeyboardInputService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011A /* KeyboardInputService.swift */; };
+		10000000000000000000021B /* TelemetryExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011B /* TelemetryExportService.swift */; };
+		10000000000000000000021C /* EnvironmentObjectFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011C /* EnvironmentObjectFactory.swift */; };
+		10000000000000000000021D /* ScenePopulationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011D /* ScenePopulationService.swift */; };
+		10000000000000000000021E /* DroneFleetModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011E /* DroneFleetModel.swift */; };
+		10000000000000000000021F /* DroneFleetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011F /* DroneFleetManager.swift */; };
+		100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000120 /* DroneSceneViewRepresentable.swift */; };
+		100000000000000000000221 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000121 /* AppLanguage.swift */; };
+		100000000000000000000222 /* AutoPathPlannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000122 /* AutoPathPlannerService.swift */; };
+		100000000000000000000223 /* AbstractModelEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000123 /* AbstractModelEditorView.swift */; };
+		100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000124 /* CompactTelemetryHUDView.swift */; };
+		100000000000000000000225 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000126 /* Localizable.strings */; };
+		100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000129 /* KeyBindingsSettingsView.swift */; };
+		100000000000000000000227 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012A /* Assets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000005 /* DroneUAVDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DroneUAVDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000100 /* DroneUAVDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneUAVDemoApp.swift; sourceTree = "<group>"; };
+		100000000000000000000101 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		100000000000000000000102 /* ControlPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlPanelView.swift; sourceTree = "<group>"; };
+		100000000000000000000103 /* SceneViewportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneViewportView.swift; sourceTree = "<group>"; };
+		100000000000000000000104 /* TelemetryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryPanelView.swift; sourceTree = "<group>"; };
+		100000000000000000000105 /* DroneSimulationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSimulationViewModel.swift; sourceTree = "<group>"; };
+		100000000000000000000106 /* DroneFlightMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFlightMode.swift; sourceTree = "<group>"; };
+		100000000000000000000107 /* DroneState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneState.swift; sourceTree = "<group>"; };
+		100000000000000000000108 /* DroneControlInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneControlInput.swift; sourceTree = "<group>"; };
+		100000000000000000000109 /* DroneControlValues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneControlValues.swift; sourceTree = "<group>"; };
+		10000000000000000000010A /* TelemetrySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetrySnapshot.swift; sourceTree = "<group>"; };
+		10000000000000000000010B /* DronePhysicsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DronePhysicsEngine.swift; sourceTree = "<group>"; };
+		10000000000000000000010C /* SimpleDronePhysicsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleDronePhysicsEngine.swift; sourceTree = "<group>"; };
+		10000000000000000000010D /* SceneFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneFactory.swift; sourceTree = "<group>"; };
+		10000000000000000000010E /* DroneModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelBuilder.swift; sourceTree = "<group>"; };
+		10000000000000000000010F /* DroneSceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneController.swift; sourceTree = "<group>"; };
+		100000000000000000000110 /* DroneModelProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelProfile.swift; sourceTree = "<group>"; };
+		100000000000000000000111 /* WeatherModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherModel.swift; sourceTree = "<group>"; };
+		100000000000000000000112 /* TerrainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainModel.swift; sourceTree = "<group>"; };
+		100000000000000000000113 /* CameraConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConfiguration.swift; sourceTree = "<group>"; };
+		100000000000000000000114 /* DamageThermalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DamageThermalModel.swift; sourceTree = "<group>"; };
+		100000000000000000000115 /* BatteryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryState.swift; sourceTree = "<group>"; };
+		100000000000000000000116 /* CollisionAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysis.swift; sourceTree = "<group>"; };
+		100000000000000000000117 /* BatteryThermalSimulationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryThermalSimulationService.swift; sourceTree = "<group>"; };
+		100000000000000000000118 /* CollisionAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysisService.swift; sourceTree = "<group>"; };
+		100000000000000000000119 /* DroneSimulationContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSimulationContext.swift; sourceTree = "<group>"; };
+		10000000000000000000011A /* KeyboardInputService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputService.swift; sourceTree = "<group>"; };
+		10000000000000000000011B /* TelemetryExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryExportService.swift; sourceTree = "<group>"; };
+		10000000000000000000011C /* EnvironmentObjectFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentObjectFactory.swift; sourceTree = "<group>"; };
+		10000000000000000000011D /* ScenePopulationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenePopulationService.swift; sourceTree = "<group>"; };
+		10000000000000000000011E /* DroneFleetModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFleetModel.swift; sourceTree = "<group>"; };
+		10000000000000000000011F /* DroneFleetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFleetManager.swift; sourceTree = "<group>"; };
+		100000000000000000000120 /* DroneSceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneViewRepresentable.swift; sourceTree = "<group>"; };
+		100000000000000000000121 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		100000000000000000000122 /* AutoPathPlannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPathPlannerService.swift; sourceTree = "<group>"; };
+		100000000000000000000123 /* AbstractModelEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbstractModelEditorView.swift; sourceTree = "<group>"; };
+		100000000000000000000124 /* CompactTelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactTelemetryHUDView.swift; sourceTree = "<group>"; };
+		100000000000000000000127 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		100000000000000000000128 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
+		100000000000000000000129 /* KeyBindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingsSettingsView.swift; sourceTree = "<group>"; };
+		10000000000000000000012A /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Assets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000010 /* DroneUAVDemo */,
+				100000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000005 /* DroneUAVDemo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		100000000000000000000010 /* DroneUAVDemo */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000100 /* DroneUAVDemoApp.swift */,
+				100000000000000000000011 /* Domain */,
+				100000000000000000000012 /* Simulation */,
+				100000000000000000000013 /* Scene */,
+				100000000000000000000014 /* Presentation */,
+				100000000000000000000017 /* Input */,
+				100000000000000000000018 /* Services */,
+				10000000000000000000012A /* Assets */,
+				100000000000000000000125 /* Resources */,
+			);
+			path = DroneUAVDemo;
+			sourceTree = "<group>";
+		};
+		100000000000000000000011 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000121 /* AppLanguage.swift */,
+				100000000000000000000115 /* BatteryState.swift */,
+				100000000000000000000113 /* CameraConfiguration.swift */,
+				100000000000000000000116 /* CollisionAnalysis.swift */,
+				100000000000000000000114 /* DamageThermalModel.swift */,
+				100000000000000000000108 /* DroneControlInput.swift */,
+				100000000000000000000109 /* DroneControlValues.swift */,
+				10000000000000000000011E /* DroneFleetModel.swift */,
+				100000000000000000000106 /* DroneFlightMode.swift */,
+				100000000000000000000110 /* DroneModelProfile.swift */,
+				100000000000000000000107 /* DroneState.swift */,
+				10000000000000000000010A /* TelemetrySnapshot.swift */,
+				100000000000000000000112 /* TerrainModel.swift */,
+				100000000000000000000111 /* WeatherModel.swift */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		100000000000000000000012 /* Simulation */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000122 /* AutoPathPlannerService.swift */,
+				100000000000000000000117 /* BatteryThermalSimulationService.swift */,
+				100000000000000000000118 /* CollisionAnalysisService.swift */,
+				10000000000000000000011F /* DroneFleetManager.swift */,
+				10000000000000000000010B /* DronePhysicsEngine.swift */,
+				100000000000000000000119 /* DroneSimulationContext.swift */,
+				10000000000000000000010C /* SimpleDronePhysicsEngine.swift */,
+			);
+			path = Simulation;
+			sourceTree = "<group>";
+		};
+		100000000000000000000013 /* Scene */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000010E /* DroneModelBuilder.swift */,
+				10000000000000000000010F /* DroneSceneController.swift */,
+				10000000000000000000011C /* EnvironmentObjectFactory.swift */,
+				10000000000000000000010D /* SceneFactory.swift */,
+				10000000000000000000011D /* ScenePopulationService.swift */,
+			);
+			path = Scene;
+			sourceTree = "<group>";
+		};
+		100000000000000000000014 /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000016 /* ViewModels */,
+				100000000000000000000015 /* Views */,
+			);
+			path = Presentation;
+			sourceTree = "<group>";
+		};
+		100000000000000000000015 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000123 /* AbstractModelEditorView.swift */,
+				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
+				100000000000000000000101 /* ContentView.swift */,
+				100000000000000000000102 /* ControlPanelView.swift */,
+				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
+				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
+				100000000000000000000103 /* SceneViewportView.swift */,
+				100000000000000000000104 /* TelemetryPanelView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		100000000000000000000016 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000105 /* DroneSimulationViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		100000000000000000000017 /* Input */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000011A /* KeyboardInputService.swift */,
+			);
+			path = Input;
+			sourceTree = "<group>";
+		};
+		100000000000000000000018 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				10000000000000000000011B /* TelemetryExportService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		100000000000000000000125 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000126 /* Localizable.strings */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000004 /* DroneUAVDemo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 10000000000000000000000A /* Build configuration list for PBXNativeTarget "DroneUAVDemo" */;
+			buildPhases = (
+				100000000000000000000006 /* Sources */,
+				100000000000000000000007 /* Frameworks */,
+				100000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DroneUAVDemo;
+			productName = DroneUAVDemo;
+			productReference = 100000000000000000000005 /* DroneUAVDemo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					100000000000000000000004 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 100000000000000000000009 /* Build configuration list for PBXProject "DroneUAVDemo" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				ru,
+				Base,
+			);
+			mainGroup = 100000000000000000000002;
+			productRefGroup = 100000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000004 /* DroneUAVDemo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000225 /* Localizable.strings in Resources */,
+				100000000000000000000227 /* Assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000200 /* DroneUAVDemoApp.swift in Sources */,
+				100000000000000000000201 /* ContentView.swift in Sources */,
+				100000000000000000000202 /* ControlPanelView.swift in Sources */,
+				100000000000000000000203 /* SceneViewportView.swift in Sources */,
+				100000000000000000000204 /* TelemetryPanelView.swift in Sources */,
+				100000000000000000000205 /* DroneSimulationViewModel.swift in Sources */,
+				100000000000000000000206 /* DroneFlightMode.swift in Sources */,
+				100000000000000000000207 /* DroneState.swift in Sources */,
+				100000000000000000000208 /* DroneControlInput.swift in Sources */,
+				100000000000000000000209 /* DroneControlValues.swift in Sources */,
+				10000000000000000000020A /* TelemetrySnapshot.swift in Sources */,
+				10000000000000000000020B /* DronePhysicsEngine.swift in Sources */,
+				10000000000000000000020C /* SimpleDronePhysicsEngine.swift in Sources */,
+				10000000000000000000020D /* SceneFactory.swift in Sources */,
+				10000000000000000000020E /* DroneModelBuilder.swift in Sources */,
+				10000000000000000000020F /* DroneSceneController.swift in Sources */,
+				100000000000000000000210 /* DroneModelProfile.swift in Sources */,
+				100000000000000000000211 /* WeatherModel.swift in Sources */,
+				100000000000000000000212 /* TerrainModel.swift in Sources */,
+				100000000000000000000213 /* CameraConfiguration.swift in Sources */,
+				100000000000000000000214 /* DamageThermalModel.swift in Sources */,
+				100000000000000000000215 /* BatteryState.swift in Sources */,
+				100000000000000000000216 /* CollisionAnalysis.swift in Sources */,
+				100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */,
+				100000000000000000000218 /* CollisionAnalysisService.swift in Sources */,
+				100000000000000000000219 /* DroneSimulationContext.swift in Sources */,
+				10000000000000000000021A /* KeyboardInputService.swift in Sources */,
+				10000000000000000000021B /* TelemetryExportService.swift in Sources */,
+				10000000000000000000021C /* EnvironmentObjectFactory.swift in Sources */,
+				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
+				10000000000000000000021E /* DroneFleetModel.swift in Sources */,
+				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
+				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
+				100000000000000000000221 /* AppLanguage.swift in Sources */,
+				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
+				100000000000000000000223 /* AbstractModelEditorView.swift in Sources */,
+				100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */,
+				100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		100000000000000000000126 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				100000000000000000000127 /* en */,
+				100000000000000000000128 /* ru */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		10000000000000000000000B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		10000000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		10000000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = DroneUAVDemo;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.DroneUAVDemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		10000000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = DroneUAVDemo;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.DroneUAVDemo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000009 /* Build configuration list for PBXProject "DroneUAVDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				10000000000000000000000B /* Debug */,
+				10000000000000000000000C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		10000000000000000000000A /* Build configuration list for PBXNativeTarget "DroneUAVDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				10000000000000000000000D /* Debug */,
+				10000000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000001 /* Project object */;
+}
