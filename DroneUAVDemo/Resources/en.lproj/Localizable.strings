@@ -11,7 +11,7 @@
 "language.russian" = "Russian";
 
 "panel.title" = "UAV Digital Twin Simulator";
-"panel.keyboard_hint" = "I/K pitch, A/D roll, Q/E thrust, J/L yaw, Shift boost, 1..5 cameras, arrows FPV look, +/- zoom";
+"panel.keyboard_hint" = "WASD/QE fly, Shift boost, 1..5 cameras, arrows FPV look, +/- zoom";
 "panel.workflow_hint" = "Main controls are in the top toolstrip. Use toolbar buttons to show or hide parameters.";
 "panel.toggle_collapse" = "Collapse/Expand Control Panel";
 "panel.collapse" = "Collapse Panel";
@@ -248,8 +248,8 @@
 "keybind.category.camera" = "Camera controls";
 "keybind.category.ui" = "UI controls";
 "keybind.category.debug" = "Debug / overlays";
-"keybind.flight.forward" = "Pitch forward";
-"keybind.flight.backward" = "Pitch backward";
+"keybind.flight.forward" = "Forward";
+"keybind.flight.backward" = "Backward";
 "keybind.flight.left" = "Left";
 "keybind.flight.right" = "Right";
 "keybind.flight.descend" = "Descend";

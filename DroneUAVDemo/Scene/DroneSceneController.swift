@@ -74,7 +74,6 @@ final class DroneSceneController {
     }
 
     private var freeLookAngles = SIMD2<Float>(repeating: 0.0)   // yaw, pitch
-    private var followLookAngles = SIMD2<Float>(repeating: 0.0) // yaw, pitch
     private var orbitLookAngles = SIMD2<Float>(repeating: 0.0)  // yaw, pitch
     private var fpvLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
     private var topLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
@@ -200,18 +199,11 @@ final class DroneSceneController {
             freeLookAngles.y = (freeLookAngles.y + pitchDelta).clamped(to: -1.2...1.2)
             freeCameraNode.eulerAngles.y = CGFloat(freeLookAngles.x)
             freeCameraNode.eulerAngles.x = CGFloat(freeLookAngles.y)
-        case .follow:
-            followLookAngles.x += yawDelta
-            followLookAngles.y = (followLookAngles.y + pitchDelta).clamped(to: -0.72...0.72)
-        case .orbit:
-            orbitLookAngles.x += yawDelta
-            orbitLookAngles.y = (orbitLookAngles.y + pitchDelta).clamped(to: -0.72...0.72)
         case .fpv:
             fpvLookAngles.x = (fpvLookAngles.x + yawDelta).clamped(to: -0.9...0.9)
             fpvLookAngles.y = (fpvLookAngles.y + pitchDelta).clamped(to: -0.7...0.7)
-        case .top:
-            topLookAngles.x += yawDelta
-            topLookAngles.y = (topLookAngles.y + pitchDelta).clamped(to: -0.35...0.22)
+        case .follow, .orbit, .top:
+            return
         }
     }
 
@@ -220,7 +212,7 @@ final class DroneSceneController {
         case .free:
             freeLookAngles = .zero
         case .follow:
-            followLookAngles = .zero
+            return
         case .orbit:
             orbitLookAngles = .zero
         case .fpv:
@@ -236,7 +228,6 @@ final class DroneSceneController {
         }
 
         if oldMode == .fpv, newMode != .fpv {
-            followLookAngles = .zero
             orbitLookAngles = .zero
             topLookAngles = .zero
             fpvObstructionHidingActive = false
@@ -245,22 +236,11 @@ final class DroneSceneController {
 
         // Safe external-mode initialization: avoid stale transforms/angles when switching hotkeys.
         switch newMode {
-        case .follow:
-            followLookAngles = .zero
         case .orbit:
             orbitLookAngles = .zero
         case .top:
             topLookAngles = .zero
-        case .free, .fpv:
-            break
-        }
-
-        switch (oldMode, newMode) {
-        case (.follow, .orbit):
-            orbitLookAngles = followLookAngles
-        case (.orbit, .follow):
-            followLookAngles = orbitLookAngles
-        default:
+        case .free, .follow, .fpv:
             break
         }
     }
@@ -299,7 +279,6 @@ final class DroneSceneController {
         componentNodes = droneVisual.componentNodes
         spinAngles = Array(repeating: 0.0, count: propellerNodes.count)
         fpvLookAngles = .zero
-        followLookAngles = .zero
         orbitLookAngles = .zero
         topLookAngles = .zero
         lastComponentOverlaySignature = nil
@@ -693,11 +672,12 @@ final class DroneSceneController {
             SIMD3<Float>(repeating: followResponse)
         )
 
+        // Tail view is a strict follow camera with no user yaw/pitch offsets.
         let followOrientation = cameraOrientation(
             from: followCameraNode.simdPosition,
             to: chaseTarget,
-            yawOffset: followLookAngles.x,
-            pitchOffset: followLookAngles.y
+            yawOffset: 0.0,
+            pitchOffset: 0.0
         )
         followCameraNode.simdOrientation = simd_normalize(
             simd_slerp(followCameraNode.simdOrientation, followOrientation, followResponse)
@@ -721,8 +701,8 @@ final class DroneSceneController {
         let orbitOrientation = cameraOrientation(
             from: orbitCameraNode.simdPosition,
             to: chaseAnchor + up * max(0.16, subjectScale * 0.14),
-            yawOffset: orbitLookAngles.x,
-            pitchOffset: orbitLookAngles.y
+            yawOffset: 0.0,
+            pitchOffset: 0.0
         )
         orbitCameraNode.simdOrientation = simd_normalize(
             simd_slerp(orbitCameraNode.simdOrientation, orbitOrientation, response)
@@ -738,8 +718,7 @@ final class DroneSceneController {
         let topTarget = chaseAnchor + forward * topForwardLead
         let topPosition = topTarget + up * topHeight
         topCameraNode.simdPosition = simd_mix(topCameraNode.simdPosition, topPosition, SIMD3<Float>(repeating: response))
-        let topPitch = (-Float.pi / 2.0 + topLookAngles.y).clamped(to: -1.54...(-1.08))
-        topCameraNode.eulerAngles = SCNVector3(topPitch, topLookAngles.x, 0.0)
+        topCameraNode.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
 
         cameraNoisePhase += deltaTime * 5.6
         let shake = settings.fpv.shake.clamped(to: 0.0...0.3)

@@ -11,7 +11,7 @@
 "language.russian" = "Русский";
 
 "panel.title" = "Симулятор цифрового двойника БПЛА";
-"panel.keyboard_hint" = "I/K тангаж, A/D крен, Q/E тяга, J/L рыскание, Shift ускорение, 1..5 камеры, стрелки только FPV, +/- зум";
+"panel.keyboard_hint" = "WASD/QE полет, Shift ускорение, 1..5 камеры, стрелки только FPV, +/- зум";
 "panel.workflow_hint" = "Основные команды находятся в верхней ленте. Показывайте и скрывайте параметры кнопками панели.";
 "panel.toggle_collapse" = "Свернуть/развернуть панель";
 "panel.collapse" = "Свернуть панель";
@@ -248,8 +248,8 @@
 "keybind.category.camera" = "Управление камерой";
 "keybind.category.ui" = "Управление интерфейсом";
 "keybind.category.debug" = "Отладка / оверлеи";
-"keybind.flight.forward" = "Тангаж вперед";
-"keybind.flight.backward" = "Тангаж назад";
+"keybind.flight.forward" = "Вперед";
+"keybind.flight.backward" = "Назад";
 "keybind.flight.left" = "Влево";
 "keybind.flight.right" = "Вправо";
 "keybind.flight.descend" = "Снижение";

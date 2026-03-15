@@ -220,7 +220,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 control.targetOrientation.y.clamped(to: -stabilizedLimit...stabilizedLimit),
                 wrap(control.targetOrientation.z)
             )
-            return angleTrackingRates(desiredAngles: desiredAngles, state: state)
+            var rates = angleTrackingRates(desiredAngles: desiredAngles, state: state)
+            rates.z = desiredManualYawRate(
+                control: control,
+                state: state,
+                authority: authority,
+                fallbackHeading: desiredAngles.z,
+                headingGain: 2.2,
+                manualRateScale: 1.65
+            )
+            return rates
 
         case .hoverAssist:
             let desiredAngles = SIMD3<Float>(
@@ -228,13 +237,29 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 control.targetOrientation.y.clamped(to: -hoverLimit...hoverLimit),
                 wrap(control.targetOrientation.z)
             )
-            return angleTrackingRates(desiredAngles: desiredAngles, state: state)
+            var rates = angleTrackingRates(desiredAngles: desiredAngles, state: state)
+            rates.z = desiredManualYawRate(
+                control: control,
+                state: state,
+                authority: authority,
+                fallbackHeading: desiredAngles.z,
+                headingGain: 2.2,
+                manualRateScale: 1.65
+            )
+            return rates
 
         case .acro:
             return SIMD3<Float>(
                 control.targetOrientation.x.clamped(to: -1.0...1.0) * acroRate,
                 control.targetOrientation.y.clamped(to: -1.0...1.0) * acroRate,
-                wrap(control.targetOrientation.z - state.orientation.z) * 2.4
+                desiredManualYawRate(
+                    control: control,
+                    state: state,
+                    authority: authority,
+                    fallbackHeading: wrap(control.targetOrientation.z),
+                    headingGain: 2.4,
+                    manualRateScale: 2.10
+                )
             )
         }
     }
@@ -282,7 +307,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         } else if control.controlMode.isRateMode {
             let rollRateCommand = control.targetOrientation.x.clamped(to: -1.0...1.0) * (2.6 * authority * wing.turnAuthority.clamped(to: 0.5...1.4))
             let pitchRateCommand = (-control.targetOrientation.y).clamped(to: -1.0...1.0) * (2.1 * authority)
-            let yawRateCommand = wrap(targetYaw - state.orientation.z) * (2.0 * wing.turnAuthority.clamped(to: 0.4...1.4))
+            let yawRateCommand = desiredFixedWingYawRate(
+                control: control,
+                state: state,
+                authority: authority,
+                turnAuthority: wing.turnAuthority,
+                fallbackHeading: targetYaw
+            )
             let rateCommand = SIMD3<Float>(rollRateCommand, pitchRateCommand, yawRateCommand)
             let rateGain = SIMD3<Float>(6.2 * authority, 5.0 * authority, 4.0 * authority)
             let damping = SIMD3<Float>(1.5, 1.4, 1.3)
@@ -294,7 +325,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let targetPitch = (-control.targetOrientation.y).clamped(to: -maxPitch...maxPitch)
             next.orientation.x = approach(current: state.orientation.x, target: targetRoll, increaseRate: 2.6 * authority, decreaseRate: 2.8 * authority, dt: dt)
             next.orientation.y = approach(current: state.orientation.y, target: targetPitch, increaseRate: 2.2 * authority, decreaseRate: 2.4 * authority, dt: dt)
-            next.orientation.z = wrap(approach(current: state.orientation.z, target: targetYaw, increaseRate: 1.8 * authority, decreaseRate: 1.8 * authority, dt: dt))
+            if abs(control.yawIntent) > 0.001 {
+                let yawRate = desiredFixedWingYawRate(
+                    control: control,
+                    state: state,
+                    authority: authority,
+                    turnAuthority: wing.turnAuthority,
+                    fallbackHeading: targetYaw
+                )
+                next.orientation.z = wrap(state.orientation.z + yawRate * dt)
+            } else {
+                next.orientation.z = wrap(approach(current: state.orientation.z, target: targetYaw, increaseRate: 1.8 * authority, decreaseRate: 1.8 * authority, dt: dt))
+            }
             next.angularVelocity = SIMD3<Float>(
                 (next.orientation.x - state.orientation.x) / max(0.0001, dt),
                 (next.orientation.y - state.orientation.y) / max(0.0001, dt),
@@ -355,6 +397,39 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             pitchError * 4.8,
             yawError * 2.2
         )
+    }
+
+    private func desiredManualYawRate(
+        control: DroneControlInput,
+        state: DroneState,
+        authority: Float,
+        fallbackHeading: Float,
+        headingGain: Float,
+        manualRateScale: Float
+    ) -> Float {
+        let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
+        if abs(manualIntent) > 0.001 {
+            return manualIntent * manualRateScale * authority
+        }
+
+        let yawError = wrap(fallbackHeading - state.orientation.z)
+        return yawError * headingGain
+    }
+
+    private func desiredFixedWingYawRate(
+        control: DroneControlInput,
+        state: DroneState,
+        authority: Float,
+        turnAuthority: Float,
+        fallbackHeading: Float
+    ) -> Float {
+        let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
+        let turnScale = turnAuthority.clamped(to: 0.4...1.4)
+        if abs(manualIntent) > 0.001 {
+            return manualIntent * 1.10 * authority * turnScale
+        }
+
+        return wrap(fallbackHeading - state.orientation.z) * (2.0 * turnScale)
     }
 
     private func emitStartupDiagnosticsIfNeeded(

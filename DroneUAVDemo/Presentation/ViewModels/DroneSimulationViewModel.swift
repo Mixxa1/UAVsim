@@ -38,6 +38,93 @@ struct SimulationDiagnostics {
     )
 }
 
+private struct DroneControlInputBuilder {
+    private struct YawRouting {
+        let targetYaw: Float
+        let intent: Float
+    }
+
+    let controls: DroneControlValues
+    let state: DroneState
+    let isArmed: Bool
+    let mode: DroneFlightMode
+    let controlMode: FlightControlMode
+    let manualYawIntent: Float
+
+    func build() -> DroneControlInput {
+        let yawRouting = resolveYawRouting()
+        let targetPosition = SIMD3<Float>(Float(controls.x), Float(controls.y), Float(controls.z))
+        let targetOrientation = SIMD3<Float>(
+            Float(controls.roll).degreesToRadians,
+            Float(controls.pitch).degreesToRadians,
+            yawRouting.targetYaw
+        )
+
+        return DroneControlInput(
+            targetPosition: targetPosition,
+            targetOrientation: targetOrientation,
+            yawIntent: yawRouting.intent,
+            throttle: Float(controls.throttle),
+            isArmed: isArmed,
+            mode: mode,
+            controlMode: controlMode
+        )
+    }
+
+    private func resolveYawRouting() -> YawRouting {
+        guard mode == .manual else {
+            return YawRouting(
+                targetYaw: Float(controls.yaw).degreesToRadians,
+                intent: 0.0
+            )
+        }
+
+        return YawRouting(
+            targetYaw: state.orientation.z,
+            intent: manualYawIntent
+        )
+    }
+}
+
+private struct DroneWarningBuilder {
+    let isArmed: Bool
+    let physicalState: DronePhysicalState
+    let collisionAnalysis: CollisionAnalysisSnapshot
+    let weather: WeatherModel
+    let batteryState: BatteryState
+    let damageState: DamageState
+    let selectedDroneProfile: DroneModelProfile
+    let state: DroneState
+    let fleetStatus: FleetStatus
+    let mode: DroneFlightMode
+
+    func build() -> [String] {
+        var output: [String] = []
+
+        if !isArmed { output.append("warning.disarmed") }
+        if physicalState == .crashed { output.append("warning.crashed") }
+        if collisionAnalysis.riskScore >= 0.65 { output.append("warning.collision_high") }
+        if weather.severityScore >= 0.7 { output.append("warning.weather_severe") }
+        if batteryState.chargePercent <= 20 { output.append("warning.battery_low") }
+        if damageState.averageHealth <= 0.70 { output.append("warning.integrity_low") }
+        if damageState.isFlightCritical { output.append("warning.integrity_critical") }
+        if selectedDroneProfile.airframeClass == .fixedWing,
+           let wing = selectedDroneProfile.fixedWingParameters,
+           state.forwardAirspeed < wing.minSustainableSpeedMps * 0.9 {
+            output.append("warning.fixedwing_low_speed")
+        }
+        if fleetStatus.enabled, fleetStatus.interDroneRisk >= 0.5 { output.append("warning.fleet_risk") }
+        if fleetStatus.enabled,
+           fleetStatus.nearestInterDroneDistance.isFinite,
+           fleetStatus.nearestInterDroneDistance < 1.5 {
+            output.append("warning.interdrone_critical")
+        }
+        if mode == .emergencyStop { output.append("warning.emergency") }
+
+        return output
+    }
+}
+
 private enum ReturnHomeStage: String {
     case idle
     case ascend
@@ -125,6 +212,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var collisionDebugAccumulator: Float = 0.0
     private var lastCollisionDebugEnabled: Bool = false
     private var autosaveAccumulator: Float = 0.0
+    private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var autoFlightGoal: SIMD3<Float>?
     private var autoFlightGoalIndex: Int = 0
@@ -332,6 +420,7 @@ final class DroneSimulationViewModel: ObservableObject {
             values.roll = 0.0
             values.pitch = 0.0
         }, markManual: false)
+        manualYawIntent = 0.0
     }
 
     func reset() {
@@ -362,6 +451,7 @@ final class DroneSimulationViewModel: ObservableObject {
         airborneAccumulator = 0.0
         impactSeverityAccumulator = 0.0
         collisionCooldown = 0.0
+        manualYawIntent = 0.0
         cameraLookVelocity = .zero
         lastCollisionDebugEnabled = false
         autoPathPlanner.invalidate()
@@ -629,7 +719,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
-        guard cameraConfiguration.mode != .free else {
+        guard cameraConfiguration.mode == .fpv else {
             return
         }
         sceneController.applyCameraNudge(
@@ -1270,11 +1360,14 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func applyKeyboardControls(deltaTime: Float) {
         let axis = keyboardInputService.currentAxisInput()
+        let yawInput = keyboardInputService.currentYawInput()
         let hasAnyInput =
             abs(axis.forward) > 0.001 ||
             abs(axis.strafe) > 0.001 ||
             abs(axis.vertical) > 0.001 ||
-            abs(axis.yaw) > 0.001
+            abs(yawInput.intent) > 0.001
+
+        manualYawIntent = yawInput.intent * (yawInput.speedBoost ? 1.35 : 1.0)
 
         let maxAltitude = Double(terrain.maxFlightAltitude)
 
@@ -1288,7 +1381,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.throttle = (values.throttle + throttleDelta).clamped(to: 0.0...1.0)
                 values.roll = Double((-axis.strafe * (flightControlMode == .acro ? 62.0 : 32.0)).clamped(to: -85.0...85.0))
                 values.pitch = Double((-axis.forward * (flightControlMode == .acro ? 54.0 : 24.0)).clamped(to: -85.0...85.0))
-                values.yaw = (values.yaw + Double(axis.yaw) * Double(axis.speedBoost ? 72.0 : 42.0) * Double(deltaTime)).clamped(to: -180.0...180.0)
+                values.yaw = Double(state.orientation.z.radiansToDegrees)
                 values.y = state.position.y > 0.05
                     ? Double(state.position.y).clamped(to: 0.0...maxAltitude)
                     : values.y.clamped(to: 0.0...maxAltitude)
@@ -1303,14 +1396,13 @@ final class DroneSimulationViewModel: ObservableObject {
         let climb = axis.vertical * (axis.speedBoost ? 5.4 : 3.0) * deltaTime
         let pitchScale: Float = flightControlMode == .acro ? 52.0 : 28.0
         let rollScale: Float = flightControlMode == .acro ? 52.0 : 26.0
-        let yawRateDeg: Float = axis.yaw * (axis.speedBoost ? 78.0 : 46.0) * deltaTime
 
         updateControlValues({ values in
             values.y = (values.y + Double(climb)).clamped(to: 0.0...maxAltitude)
 
             let verticalThrottleDelta = Double(axis.vertical) * (axis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
             values.throttle = (values.throttle + verticalThrottleDelta).clamped(to: 0.0...1.0)
-            values.yaw = (values.yaw + Double(yawRateDeg)).clamped(to: -180.0...180.0)
+            values.yaw = Double(state.orientation.z.radiansToDegrees)
 
             switch flightControlMode {
             case .stabilized, .hoverAssist:
@@ -1824,42 +1916,30 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func buildControlInput(from controls: DroneControlValues) -> DroneControlInput {
-        DroneControlInput(
-            targetPosition: SIMD3<Float>(Float(controls.x), Float(controls.y), Float(controls.z)),
-            targetOrientation: SIMD3<Float>(
-                Float(controls.roll).degreesToRadians,
-                Float(controls.pitch).degreesToRadians,
-                Float(controls.yaw).degreesToRadians
-            ),
-            throttle: Float(controls.throttle),
+        let builder = DroneControlInputBuilder(
+            controls: controls,
+            state: state,
             isArmed: isArmed,
             mode: mode,
-            controlMode: flightControlMode
+            controlMode: flightControlMode,
+            manualYawIntent: manualYawIntent
         )
+        return builder.build()
     }
 
     private func buildWarnings() -> [String] {
-        var output: [String] = []
-
-        if !isArmed { output.append("warning.disarmed") }
-        if physicalState == .crashed { output.append("warning.crashed") }
-        if collisionAnalysis.riskScore >= 0.65 { output.append("warning.collision_high") }
-        if weather.severityScore >= 0.7 { output.append("warning.weather_severe") }
-        if batteryState.chargePercent <= 20 { output.append("warning.battery_low") }
-        if damageState.averageHealth <= 0.70 { output.append("warning.integrity_low") }
-        if damageState.isFlightCritical { output.append("warning.integrity_critical") }
-        if selectedDroneProfile.airframeClass == .fixedWing,
-           let wing = selectedDroneProfile.fixedWingParameters,
-           state.forwardAirspeed < wing.minSustainableSpeedMps * 0.9 {
-            output.append("warning.fixedwing_low_speed")
-        }
-        if fleetStatus.enabled, fleetStatus.interDroneRisk >= 0.5 { output.append("warning.fleet_risk") }
-        if fleetStatus.enabled, fleetStatus.nearestInterDroneDistance.isFinite, fleetStatus.nearestInterDroneDistance < 1.5 {
-            output.append("warning.interdrone_critical")
-        }
-        if mode == .emergencyStop { output.append("warning.emergency") }
-
-        return output
+        return DroneWarningBuilder(
+            isArmed: isArmed,
+            physicalState: physicalState,
+            collisionAnalysis: collisionAnalysis,
+            weather: weather,
+            batteryState: batteryState,
+            damageState: damageState,
+            selectedDroneProfile: selectedDroneProfile,
+            state: state,
+            fleetStatus: fleetStatus,
+            mode: mode
+        ).build()
     }
 
     private func buildTelemetryMetadata() -> TelemetrySessionMetadata {

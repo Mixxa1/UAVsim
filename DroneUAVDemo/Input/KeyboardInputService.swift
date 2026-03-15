@@ -5,10 +5,16 @@ struct KeyboardAxisInput {
     var forward: Float
     var strafe: Float
     var vertical: Float
-    var yaw: Float
     var speedBoost: Bool
 
-    static let zero = KeyboardAxisInput(forward: 0.0, strafe: 0.0, vertical: 0.0, yaw: 0.0, speedBoost: false)
+    static let zero = KeyboardAxisInput(forward: 0.0, strafe: 0.0, vertical: 0.0, speedBoost: false)
+}
+
+struct KeyboardYawInput {
+    var intent: Float
+    var speedBoost: Bool
+
+    static let zero = KeyboardYawInput(intent: 0.0, speedBoost: false)
 }
 
 struct KeyboardLookInput {
@@ -54,8 +60,6 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case moveRight
     case descend
     case ascend
-    case yawLeft
-    case yawRight
     case accelerate
 
     case hover
@@ -85,7 +89,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     var category: KeyBindingCategory {
         switch self {
-        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone:
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .accelerate, .hover, .resetDrone:
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .resetCameraOrientation:
@@ -99,7 +103,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     var isContinuous: Bool {
         switch self {
-        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .accelerate,
              .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown:
             return true
         case .hover, .resetDrone, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
@@ -123,10 +127,6 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.flight.descend"
         case .ascend:
             return "keybind.flight.ascend"
-        case .yawLeft:
-            return "keybind.flight.yaw_left"
-        case .yawRight:
-            return "keybind.flight.yaw_right"
         case .accelerate:
             return "keybind.flight.accelerate"
         case .hover:
@@ -191,14 +191,12 @@ struct KeyBindingProfile {
 
     static let `default` = KeyBindingProfile(
         bindings: [
-            .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 34, keyLabel: "I"),
-            .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 40, keyLabel: "K"),
+            .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 13, keyLabel: "W"),
+            .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 1, keyLabel: "S"),
             .moveLeft: KeyBindingDescriptor(command: .moveLeft, keyCode: 0, keyLabel: "A"),
             .moveRight: KeyBindingDescriptor(command: .moveRight, keyCode: 2, keyLabel: "D"),
             .descend: KeyBindingDescriptor(command: .descend, keyCode: 12, keyLabel: "Q"),
             .ascend: KeyBindingDescriptor(command: .ascend, keyCode: 14, keyLabel: "E"),
-            .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
-            .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
             .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
             .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
@@ -292,6 +290,7 @@ protocol KeyboardInputProviding {
     func start()
     func stop()
     func currentAxisInput() -> KeyboardAxisInput
+    func currentYawInput() -> KeyboardYawInput
     func currentLookInput() -> KeyboardLookInput
     func consumeActions() -> [KeyboardAction]
     func setInputProcessingMode(_ mode: InputProcessingMode)
@@ -302,6 +301,8 @@ protocol KeyboardInputProviding {
 }
 
 final class KeyboardInputService: KeyboardInputProviding {
+    private static let disabledControlKeyCodes: Set<UInt16> = [34, 40, 37, 38] // I / K / L / J
+
     private var localKeyDownMonitor: Any?
     private var localKeyUpMonitor: Any?
     private var localFlagsChangedMonitor: Any?
@@ -322,14 +323,20 @@ final class KeyboardInputService: KeyboardInputProviding {
 
     private let bindingsStorageKey = "input.bindings.profile.v1"
     private let canonicalFlightCameraBindings: [KeyboardCommand: KeyBindingDescriptor] = [
-        .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 34, keyLabel: "I"),
-        .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 40, keyLabel: "K"),
-        .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
-        .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
+        .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 13, keyLabel: "W"),
+        .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 1, keyLabel: "S"),
+        .moveLeft: KeyBindingDescriptor(command: .moveLeft, keyCode: 0, keyLabel: "A"),
+        .moveRight: KeyBindingDescriptor(command: .moveRight, keyCode: 2, keyLabel: "D"),
+        .descend: KeyBindingDescriptor(command: .descend, keyCode: 12, keyLabel: "Q"),
+        .ascend: KeyBindingDescriptor(command: .ascend, keyCode: 14, keyLabel: "E"),
+        .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
+        .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
+        .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
         .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "Left"),
         .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "Right"),
         .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "Up"),
-        .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "Down")
+        .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "Down"),
+        .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V")
     ]
 
     init(profile: KeyBindingProfile? = nil, userDefaults: UserDefaults = .standard) {
@@ -402,16 +409,18 @@ final class KeyboardInputService: KeyboardInputProviding {
         let forward: Float = (activeContinuousCommands.contains(.moveForward) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.moveBackward) ? 1.0 : 0.0)
         let strafe: Float = (activeContinuousCommands.contains(.moveRight) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.moveLeft) ? 1.0 : 0.0)
         let vertical: Float = (activeContinuousCommands.contains(.ascend) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.descend) ? 1.0 : 0.0)
-        let yaw: Float = (activeContinuousCommands.contains(.yawLeft) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.yawRight) ? 1.0 : 0.0)
         let speedBoost = activeContinuousCommands.contains(.accelerate)
 
         return KeyboardAxisInput(
             forward: forward,
             strafe: strafe,
             vertical: vertical,
-            yaw: yaw,
             speedBoost: speedBoost
         )
+    }
+
+    func currentYawInput() -> KeyboardYawInput {
+        .zero
     }
 
     func currentLookInput() -> KeyboardLookInput {
@@ -444,6 +453,7 @@ final class KeyboardInputService: KeyboardInputProviding {
 
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String) {
         profile.rebind(command: command, keyCode: keyCode, keyLabel: keyLabel)
+        sanitizeCanonicalFlightCameraBindings()
         // Prevent stale pressed-state links when a command changes key while held.
         activeContinuousCommands.removeAll()
         activeContinuousByKey.removeAll()
@@ -569,7 +579,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         case .toggleThermalOverlay:
             enqueueAction(.toggleThermalOverlay)
         case .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown,
-             .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate:
+             .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .accelerate:
             break
         }
     }
@@ -582,6 +592,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func commands(for keyCode: UInt16) -> [KeyboardCommand] {
+        guard !Self.disabledControlKeyCodes.contains(keyCode) else {
+            return []
+        }
         let direct = profile.commands(for: keyCode)
         if !direct.isEmpty {
             return direct
@@ -611,12 +624,12 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func sanitizeCanonicalFlightCameraBindings() {
-        let reservedKeyCodes = Set(canonicalFlightCameraBindings.values.map(\.keyCode))
+        let canonicalKeyCodes = Set(canonicalFlightCameraBindings.values.map(\.keyCode))
         var didChange = false
 
         for (command, descriptor) in profile.bindings {
             guard canonicalFlightCameraBindings[command] == nil,
-                  reservedKeyCodes.contains(descriptor.keyCode),
+                  canonicalKeyCodes.contains(descriptor.keyCode),
                   let fallback = KeyBindingProfile.default.descriptor(for: command) else {
                 continue
             }
@@ -624,6 +637,32 @@ final class KeyboardInputService: KeyboardInputProviding {
             if descriptor.keyCode != fallback.keyCode || descriptor.keyLabel != fallback.keyLabel {
                 profile.bindings[command] = fallback
                 didChange = true
+            }
+        }
+
+        for (command, descriptor) in profile.bindings {
+            guard canonicalFlightCameraBindings[command] == nil,
+                  Self.disabledControlKeyCodes.contains(descriptor.keyCode),
+                  let fallback = KeyBindingProfile.default.descriptor(for: command) else {
+                continue
+            }
+
+            if descriptor.keyCode != fallback.keyCode || descriptor.keyLabel != fallback.keyLabel {
+                profile.bindings[command] = fallback
+                didChange = true
+            }
+        }
+
+        for retiredKeyCode in Self.disabledControlKeyCodes {
+            let commandsOnRetiredKey = profile.commands(for: retiredKeyCode)
+            for command in commandsOnRetiredKey {
+                guard let fallback = KeyBindingProfile.default.descriptor(for: command) else {
+                    continue
+                }
+                if profile.bindings[command] != fallback {
+                    profile.bindings[command] = fallback
+                    didChange = true
+                }
             }
         }
 
