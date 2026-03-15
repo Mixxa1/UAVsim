@@ -1,0 +1,472 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 361
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.emergency_stop",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 405
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.stop_animation",
+        "location": {
+          "startingColumn": 78,
+          "startingLine": 387
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.start_animation",
+        "location": {
+          "startingColumn": 124,
+          "startingLine": 387
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.reset",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 392
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.takeoff",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 399
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.hover",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 400
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.land",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 401
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.model",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 414
+        }
+      },
+      {
+        "comment": "",
+        "key": "control_mode.title",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 424
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.throttle",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 438
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.throttle",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 443
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.reset_orientation",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 477
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.zoom_in",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 482
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.zoom_out",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 487
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.preset.title",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 495
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.weather",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 508
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.terrain",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 530
+        }
+      },
+      {
+        "comment": "",
+        "key": "terrain.scale",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 540
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.collision_debug",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 563
+        }
+      },
+      {
+        "comment": "",
+        "key": "ui.toggle_telemetry_hud",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 573
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.toggle_thermal",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 567
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.toggle_damage",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 569
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.save.action",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 580
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.save_as.action",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 582
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.duplicate.action",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 584
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.open.action",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 589
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.delete.action",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 591
+        }
+      },
+      {
+        "comment": "",
+        "key": "window.fullscreen",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 593
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.title",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 678
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.title",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 932
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.save",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 681
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.save_exit",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 684
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.exit_without",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 687
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 690
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.ok",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 700
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.delete.confirm.title",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 705
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.delete.action",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 707
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.cancel",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 710
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.saved_projects",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 726
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.search",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 731
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.sort",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 734
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.title",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 772
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.create_project",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 784
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.recent_project",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 802
+        }
+      },
+      {
+        "comment": "",
+        "key": "•",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 833
+        }
+      },
+      {
+        "comment": "",
+        "key": "workspace.toolstrip",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 838
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.hide",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 859
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.show",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 868
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.open",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 870
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.parameters.off",
+        "location": {
+          "startingColumn": 62,
+          "startingLine": 846
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.parameters.on",
+        "location": {
+          "startingColumn": 87,
+          "startingLine": 846
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.charge",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 936
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.restart",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 939
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.message",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 943
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.ok",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 952
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.name",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 973
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 978
+        }
+      }
+    ]
+  },
+  "version": 1
+}

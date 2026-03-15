@@ -1,0 +1,24 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "telemetry.export.select_folder",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 655
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.export",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 656
+        }
+      }
+    ]
+  },
+  "version": 1
+}
