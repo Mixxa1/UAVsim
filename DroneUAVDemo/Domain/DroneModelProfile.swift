@@ -14,8 +14,8 @@ enum FixedWingFamily: String, CaseIterable {
 
 enum DroneVisualClass: String, CaseIterable {
     case miniCompact
-    case airMidDual
-    case mavicProTriple
+    case vectorMidDual
+    case atlasProTriple
     case abstract
     case fixedWingRectangular
     case fixedWingDelta
@@ -25,10 +25,10 @@ enum DroneVisualClass: String, CaseIterable {
         switch self {
         case .miniCompact:
             return "drone.visual.mini"
-        case .airMidDual:
-            return "drone.visual.air"
-        case .mavicProTriple:
-            return "drone.visual.mavic"
+        case .vectorMidDual:
+            return "drone.visual.vector"
+        case .atlasProTriple:
+            return "drone.visual.atlas"
         case .abstract:
             return "drone.visual.abstract"
         case .fixedWingRectangular:
@@ -151,16 +151,27 @@ protocol DroneModelRepository {
     var defaultProfile: DroneModelProfile { get }
 }
 
-struct DJIDroneModelRepository: DroneModelRepository {
+struct LIPODroneModelRepository: DroneModelRepository {
+    // Keep legacy saved model IDs loadable after the branding rename.
+    static let legacyModelIDMap: [String: String] = [
+        "dji-mini-4-pro": "lipo-scout-4",
+        "dji-air-3s": "lipo-vector-3s",
+        "dji-mavic-3-pro": "lipo-atlas-3-pro"
+    ]
+
+    static func canonicalModelID(_ id: String) -> String {
+        legacyModelIDMap[id] ?? id
+    }
+
     let allProfiles: [DroneModelProfile]
 
     init(abstractParameters: AbstractDroneParameters = .default) {
         allProfiles = [
             DroneModelProfile(
-                id: "dji-mini-4-pro",
-                displayName: "DJI Mini 4 Pro",
-                displayNameKey: "drone.model.mini4pro",
-                manufacturer: "DJI",
+                id: "lipo-scout-4",
+                displayName: "LIPO Scout 4",
+                displayNameKey: "drone.model.lipo_scout4",
+                manufacturer: "LIPO",
                 takeoffMassKg: 0.249,
                 dimensionsFoldedMm: DroneDimensionsMM(x: 148, y: 94, z: 64),
                 dimensionsUnfoldedMm: DroneDimensionsMM(x: 298, y: 373, z: 101),
@@ -181,13 +192,13 @@ struct DJIDroneModelRepository: DroneModelRepository {
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 7.4, followHeight: 2.6),
                 collisionRadiusMeters: 0.22,
                 notes: "Light compact quadcopter",
-                sourceURL: URL(string: "https://www.dji.com/mini-4-pro/specs")
+                sourceURL: nil
             ),
             DroneModelProfile(
-                id: "dji-air-3s",
-                displayName: "DJI Air 3S",
-                displayNameKey: "drone.model.air3s",
-                manufacturer: "DJI",
+                id: "lipo-vector-3s",
+                displayName: "LIPO Vector 3S",
+                displayNameKey: "drone.model.lipo_vector3s",
+                manufacturer: "LIPO",
                 takeoffMassKg: 0.724,
                 dimensionsFoldedMm: DroneDimensionsMM(x: 214.19, y: 100.63, z: 89.17),
                 dimensionsUnfoldedMm: DroneDimensionsMM(x: 266.11, y: 325.47, z: 106.0),
@@ -200,7 +211,7 @@ struct DJIDroneModelRepository: DroneModelRepository {
                 batteryCapacitymAh: 4276,
                 batteryEnergyWh: 62.5,
                 cameraLayoutKey: "drone.camera.dual_front",
-                visualClass: .airMidDual,
+                visualClass: .vectorMidDual,
                 airframeClass: .multirotor,
                 fixedWingParameters: nil,
                 controlResponsiveness: 0.86,
@@ -208,13 +219,13 @@ struct DJIDroneModelRepository: DroneModelRepository {
                 cameraPreset: DroneCameraPreset(fpvFov: 82.0, followDistance: 8.8, followHeight: 3.1),
                 collisionRadiusMeters: 0.28,
                 notes: "Mid-size dual-camera quadcopter",
-                sourceURL: URL(string: "https://www.dji.com/air-3s/specs")
+                sourceURL: nil
             ),
             DroneModelProfile(
-                id: "dji-mavic-3-pro",
-                displayName: "DJI Mavic 3 Pro",
-                displayNameKey: "drone.model.mavic3pro",
-                manufacturer: "DJI",
+                id: "lipo-atlas-3-pro",
+                displayName: "LIPO Atlas 3 Pro",
+                displayNameKey: "drone.model.lipo_atlas3pro",
+                manufacturer: "LIPO",
                 takeoffMassKg: 0.958,
                 dimensionsFoldedMm: DroneDimensionsMM(x: 231.1, y: 98.0, z: 95.4),
                 dimensionsUnfoldedMm: DroneDimensionsMM(x: 347.5, y: 290.8, z: 107.7),
@@ -227,7 +238,7 @@ struct DJIDroneModelRepository: DroneModelRepository {
                 batteryCapacitymAh: 5000,
                 batteryEnergyWh: 77.0,
                 cameraLayoutKey: "drone.camera.triple_front",
-                visualClass: .mavicProTriple,
+                visualClass: .atlasProTriple,
                 airframeClass: .multirotor,
                 fixedWingParameters: nil,
                 controlResponsiveness: 0.77,
@@ -235,7 +246,7 @@ struct DJIDroneModelRepository: DroneModelRepository {
                 cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 9.4, followHeight: 3.3),
                 collisionRadiusMeters: 0.32,
                 notes: "Larger professional quadcopter",
-                sourceURL: URL(string: "https://www.dji.com/mavic-3-pro/specs")
+                sourceURL: nil
             ),
             DroneModelProfile(
                 id: "fixedwing-rectangular",

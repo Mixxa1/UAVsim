@@ -191,8 +191,8 @@ struct KeyBindingProfile {
 
     static let `default` = KeyBindingProfile(
         bindings: [
-            .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 13, keyLabel: "W"),
-            .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 1, keyLabel: "S"),
+            .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 34, keyLabel: "I"),
+            .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 40, keyLabel: "K"),
             .moveLeft: KeyBindingDescriptor(command: .moveLeft, keyCode: 0, keyLabel: "A"),
             .moveRight: KeyBindingDescriptor(command: .moveRight, keyCode: 2, keyLabel: "D"),
             .descend: KeyBindingDescriptor(command: .descend, keyCode: 12, keyLabel: "Q"),
@@ -321,6 +321,16 @@ final class KeyboardInputService: KeyboardInputProviding {
     ]
 
     private let bindingsStorageKey = "input.bindings.profile.v1"
+    private let canonicalFlightCameraBindings: [KeyboardCommand: KeyBindingDescriptor] = [
+        .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 34, keyLabel: "I"),
+        .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 40, keyLabel: "K"),
+        .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
+        .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
+        .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "Left"),
+        .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "Right"),
+        .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "Up"),
+        .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "Down")
+    ]
 
     init(profile: KeyBindingProfile? = nil, userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -332,6 +342,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             self.profile = .default
         }
         sanitizeLegacyPanelToggleBinding()
+        sanitizeCanonicalFlightCameraBindings()
     }
 
     func start() {
@@ -391,7 +402,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         let forward: Float = (activeContinuousCommands.contains(.moveForward) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.moveBackward) ? 1.0 : 0.0)
         let strafe: Float = (activeContinuousCommands.contains(.moveRight) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.moveLeft) ? 1.0 : 0.0)
         let vertical: Float = (activeContinuousCommands.contains(.ascend) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.descend) ? 1.0 : 0.0)
-        let yaw: Float = (activeContinuousCommands.contains(.yawRight) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.yawLeft) ? 1.0 : 0.0)
+        let yaw: Float = (activeContinuousCommands.contains(.yawLeft) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.yawRight) ? 1.0 : 0.0)
         let speedBoost = activeContinuousCommands.contains(.accelerate)
 
         return KeyboardAxisInput(
@@ -597,6 +608,36 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
         profile.rebind(command: .toggleControlPanel, keyCode: UInt16.max, keyLabel: "—")
         persistProfile()
+    }
+
+    private func sanitizeCanonicalFlightCameraBindings() {
+        let reservedKeyCodes = Set(canonicalFlightCameraBindings.values.map(\.keyCode))
+        var didChange = false
+
+        for (command, descriptor) in profile.bindings {
+            guard canonicalFlightCameraBindings[command] == nil,
+                  reservedKeyCodes.contains(descriptor.keyCode),
+                  let fallback = KeyBindingProfile.default.descriptor(for: command) else {
+                continue
+            }
+
+            if descriptor.keyCode != fallback.keyCode || descriptor.keyLabel != fallback.keyLabel {
+                profile.bindings[command] = fallback
+                didChange = true
+            }
+        }
+
+        for (command, descriptor) in canonicalFlightCameraBindings {
+            let current = profile.bindings[command]
+            if current?.keyCode != descriptor.keyCode || current?.keyLabel != descriptor.keyLabel {
+                profile.bindings[command] = descriptor
+                didChange = true
+            }
+        }
+
+        if didChange {
+            persistProfile()
+        }
     }
 
     private static func loadPersistedProfile(from defaults: UserDefaults, key: String) -> KeyBindingProfile? {

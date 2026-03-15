@@ -47,6 +47,7 @@
 		100000000000000000000225 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000126 /* Localizable.strings */; };
 		100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000129 /* KeyBindingsSettingsView.swift */; };
 		100000000000000000000227 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012A /* Assets */; };
+		100000000000000000000228 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012B /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -92,6 +93,7 @@
 		100000000000000000000128 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000129 /* KeyBindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingsSettingsView.swift; sourceTree = "<group>"; };
 		10000000000000000000012A /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Assets; sourceTree = "<group>"; };
+		10000000000000000000012B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -235,6 +237,7 @@
 		100000000000000000000125 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				10000000000000000000012B /* Assets.xcassets */,
 				100000000000000000000126 /* Localizable.strings */,
 			);
 			path = Resources;
@@ -301,6 +304,7 @@
 			files = (
 				100000000000000000000225 /* Localizable.strings in Resources */,
 				100000000000000000000227 /* Assets in Resources */,
+				100000000000000000000228 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -386,6 +390,7 @@
 		10000000000000000000000D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -406,6 +411,7 @@
 		10000000000000000000000E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;

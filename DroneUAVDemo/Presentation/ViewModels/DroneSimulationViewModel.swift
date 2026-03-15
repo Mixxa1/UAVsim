@@ -156,7 +156,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let abstract = AbstractDroneParameters.default
         self.abstractParameters = abstract
-        let models = DJIDroneModelRepository(abstractParameters: abstract).allProfiles
+        let models = LIPODroneModelRepository(abstractParameters: abstract).allProfiles
 
         let selectedProfile = models[1]
         self.selectedDroneProfile = selectedProfile
@@ -508,7 +508,8 @@ final class DroneSimulationViewModel: ObservableObject {
     // MARK: - Drone models
 
     func selectDroneModel(id: String) {
-        guard let profile = availableDroneProfiles.first(where: { $0.id == id }) else {
+        let canonicalID = LIPODroneModelRepository.canonicalModelID(id)
+        guard let profile = availableDroneProfiles.first(where: { $0.id == canonicalID }) else {
             return
         }
 
@@ -526,7 +527,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func applyAbstractParameters(_ parameters: AbstractDroneParameters) {
         abstractParameters = parameters
-        let abstractProfile = DJIDroneModelRepository.abstractProfile(from: parameters)
+        let abstractProfile = LIPODroneModelRepository.abstractProfile(from: parameters)
 
         if let index = availableDroneProfiles.firstIndex(where: { $0.id == abstractProfile.id }) {
             availableDroneProfiles[index] = abstractProfile
@@ -1269,14 +1270,19 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func applyKeyboardControls(deltaTime: Float) {
         let axis = keyboardInputService.currentAxisInput()
-        guard abs(axis.forward) > 0.001 || abs(axis.strafe) > 0.001 || abs(axis.vertical) > 0.001 || abs(axis.yaw) > 0.001 else {
-            return
-        }
+        let hasAnyInput =
+            abs(axis.forward) > 0.001 ||
+            abs(axis.strafe) > 0.001 ||
+            abs(axis.vertical) > 0.001 ||
+            abs(axis.yaw) > 0.001
 
-        mode = .manual
         let maxAltitude = Double(terrain.maxFlightAltitude)
 
         if selectedDroneProfile.airframeClass == .fixedWing {
+            guard hasAnyInput else {
+                return
+            }
+            mode = .manual
             updateControlValues({ values in
                 let throttleDelta = Double(axis.vertical) * (axis.speedBoost ? 0.55 : 0.32) * Double(deltaTime)
                 values.throttle = (values.throttle + throttleDelta).clamped(to: 0.0...1.0)
@@ -1288,6 +1294,10 @@ final class DroneSimulationViewModel: ObservableObject {
                     : values.y.clamped(to: 0.0...maxAltitude)
             }, markManual: false)
             return
+        }
+
+        if hasAnyInput {
+            mode = .manual
         }
 
         let climb = axis.vertical * (axis.speedBoost ? 5.4 : 3.0) * deltaTime
@@ -1996,9 +2006,10 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionRadiusMeters: snapshot.abstractParameters.collisionRadiusMeters
         )
         abstractParameters = abstract
-        availableDroneProfiles = DJIDroneModelRepository(abstractParameters: abstract).allProfiles
+        availableDroneProfiles = LIPODroneModelRepository(abstractParameters: abstract).allProfiles
 
-        if let profile = availableDroneProfiles.first(where: { $0.id == snapshot.selectedDroneModelID }) {
+        let selectedModelID = LIPODroneModelRepository.canonicalModelID(snapshot.selectedDroneModelID)
+        if let profile = availableDroneProfiles.first(where: { $0.id == selectedModelID }) {
             selectedDroneProfile = profile
             sceneController.setDroneProfile(profile)
         }

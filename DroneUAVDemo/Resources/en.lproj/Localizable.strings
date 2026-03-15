@@ -11,7 +11,7 @@
 "language.russian" = "Russian";
 
 "panel.title" = "UAV Digital Twin Simulator";
-"panel.keyboard_hint" = "WASD/QE fly, J/L yaw, Shift boost, 1..5 cameras, arrows FPV look, +/- zoom";
+"panel.keyboard_hint" = "I/K pitch, A/D roll, Q/E thrust, J/L yaw, Shift boost, 1..5 cameras, arrows FPV look, +/- zoom";
 "panel.workflow_hint" = "Main controls are in the top toolstrip. Use toolbar buttons to show or hide parameters.";
 "panel.toggle_collapse" = "Collapse/Expand Control Panel";
 "panel.collapse" = "Collapse Panel";
@@ -214,14 +214,14 @@
 "abstract.validation.speed" = "Horizontal speed must be >= ascent/descent speeds.";
 "abstract.validation.radius" = "Collision radius is too large for selected dimensions.";
 
-"drone.model.mini4pro" = "DJI Mini 4 Pro";
-"drone.model.air3s" = "DJI Air 3S";
-"drone.model.mavic3pro" = "DJI Mavic 3 Pro";
+"drone.model.lipo_scout4" = "LIPO Scout 4";
+"drone.model.lipo_vector3s" = "LIPO Vector 3S";
+"drone.model.lipo_atlas3pro" = "LIPO Atlas 3 Pro";
 "drone.model.abstract" = "Abstract UAV";
 
 "drone.visual.mini" = "Light compact quadcopter";
-"drone.visual.air" = "Mid-size dual-camera quadcopter";
-"drone.visual.mavic" = "Larger professional quadcopter";
+"drone.visual.vector" = "Mid-size dual-camera quadcopter";
+"drone.visual.atlas" = "Larger professional quadcopter";
 "drone.visual.abstract" = "Custom abstract profile";
 
 "drone.camera.single_compact" = "Single compact front gimbal";
@@ -248,8 +248,8 @@
 "keybind.category.camera" = "Camera controls";
 "keybind.category.ui" = "UI controls";
 "keybind.category.debug" = "Debug / overlays";
-"keybind.flight.forward" = "Forward";
-"keybind.flight.backward" = "Backward";
+"keybind.flight.forward" = "Pitch forward";
+"keybind.flight.backward" = "Pitch backward";
 "keybind.flight.left" = "Left";
 "keybind.flight.right" = "Right";
 "keybind.flight.descend" = "Descend";

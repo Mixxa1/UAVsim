@@ -828,10 +828,12 @@ final class DroneSceneController {
         }
 
         let forward = simd_normalize(toTarget)
-        let base = simd_quatf(from: SIMD3<Float>(0, 0, -1), to: forward)
-        let yaw = simd_quatf(angle: yawOffset, axis: SIMD3<Float>(0, 1, 0))
-        let pitch = simd_quatf(angle: pitchOffset, axis: SIMD3<Float>(1, 0, 0))
-        return simd_normalize(base * yaw * pitch)
+        let planarLength = max(0.0001, simd_length(SIMD2<Float>(forward.x, forward.z)))
+        let baseYaw = atan2(forward.x, -forward.z)
+        let basePitch = atan2(forward.y, planarLength)
+        let yaw = simd_quatf(angle: baseYaw + yawOffset, axis: SIMD3<Float>(0, 1, 0))
+        let pitch = simd_quatf(angle: basePitch + pitchOffset, axis: SIMD3<Float>(1, 0, 0))
+        return simd_normalize(yaw * pitch)
     }
 
     private func modelForwardLocal() -> SIMD3<Float> {

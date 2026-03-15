@@ -14,10 +14,10 @@ enum DroneModelBuilder {
         switch profile.visualClass {
         case .miniCompact:
             return buildMini(profile: profile)
-        case .airMidDual:
-            return buildAir(profile: profile)
-        case .mavicProTriple:
-            return buildMavic(profile: profile)
+        case .vectorMidDual:
+            return buildVector(profile: profile)
+        case .atlasProTriple:
+            return buildAtlas(profile: profile)
         case .abstract:
             return buildAbstract(profile: profile)
         case .fixedWingRectangular:
@@ -47,7 +47,7 @@ enum DroneModelBuilder {
         return buildQuadcopter(profile: profile, config: config, cameraLenses: 1)
     }
 
-    private static func buildAir(profile: DroneModelProfile) -> DroneVisualModel {
+    private static func buildVector(profile: DroneModelProfile) -> DroneVisualModel {
         let config = BuildConfig(
             body: SIMD3<Float>(0.22, 0.060, 0.160),
             armReach: 0.225,
@@ -65,7 +65,7 @@ enum DroneModelBuilder {
         return buildQuadcopter(profile: profile, config: config, cameraLenses: 2)
     }
 
-    private static func buildMavic(profile: DroneModelProfile) -> DroneVisualModel {
+    private static func buildAtlas(profile: DroneModelProfile) -> DroneVisualModel {
         let config = BuildConfig(
             body: SIMD3<Float>(0.255, 0.074, 0.188),
             armReach: 0.255,
