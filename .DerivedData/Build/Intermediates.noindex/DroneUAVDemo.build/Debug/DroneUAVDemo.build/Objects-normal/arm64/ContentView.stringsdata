@@ -15,7 +15,7 @@
         "key": "command.emergency_stop",
         "location": {
           "startingColumn": 24,
-          "startingLine": 405
+          "startingLine": 419
         }
       },
       {
@@ -68,10 +68,42 @@
       },
       {
         "comment": "",
+        "key": "command.arm",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 407
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.disarm",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 409
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.arm",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 412
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.disarm",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 414
+        }
+      },
+      {
+        "comment": "",
         "key": "panel.model",
         "location": {
           "startingColumn": 24,
-          "startingLine": 414
+          "startingLine": 428
         }
       },
       {
@@ -79,7 +111,15 @@
         "key": "control_mode.title",
         "location": {
           "startingColumn": 24,
-          "startingLine": 424
+          "startingLine": 438
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.select",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 448
         }
       },
       {
@@ -87,7 +127,7 @@
         "key": "panel.throttle",
         "location": {
           "startingColumn": 30,
-          "startingLine": 438
+          "startingLine": 457
         }
       },
       {
@@ -95,7 +135,7 @@
         "key": "panel.throttle",
         "location": {
           "startingColumn": 47,
-          "startingLine": 443
+          "startingLine": 462
         }
       },
       {
@@ -103,7 +143,7 @@
         "key": "camera.reset_orientation",
         "location": {
           "startingColumn": 28,
-          "startingLine": 477
+          "startingLine": 496
         }
       },
       {
@@ -111,7 +151,7 @@
         "key": "camera.zoom_in",
         "location": {
           "startingColumn": 28,
-          "startingLine": 482
+          "startingLine": 501
         }
       },
       {
@@ -119,7 +159,7 @@
         "key": "camera.zoom_out",
         "location": {
           "startingColumn": 28,
-          "startingLine": 487
+          "startingLine": 506
         }
       },
       {
@@ -127,7 +167,7 @@
         "key": "camera.preset.title",
         "location": {
           "startingColumn": 24,
-          "startingLine": 495
+          "startingLine": 514
         }
       },
       {
@@ -135,7 +175,7 @@
         "key": "panel.weather",
         "location": {
           "startingColumn": 24,
-          "startingLine": 508
+          "startingLine": 527
         }
       },
       {
@@ -143,7 +183,7 @@
         "key": "panel.terrain",
         "location": {
           "startingColumn": 24,
-          "startingLine": 530
+          "startingLine": 549
         }
       },
       {
@@ -151,7 +191,7 @@
         "key": "terrain.scale",
         "location": {
           "startingColumn": 24,
-          "startingLine": 540
+          "startingLine": 559
         }
       },
       {
@@ -159,7 +199,7 @@
         "key": "panel.collision_debug",
         "location": {
           "startingColumn": 24,
-          "startingLine": 563
+          "startingLine": 587
         }
       },
       {
@@ -167,7 +207,7 @@
         "key": "ui.toggle_telemetry_hud",
         "location": {
           "startingColumn": 24,
-          "startingLine": 573
+          "startingLine": 597
         }
       },
       {
@@ -175,7 +215,7 @@
         "key": "diagnostic.toggle_thermal",
         "location": {
           "startingColumn": 28,
-          "startingLine": 567
+          "startingLine": 591
         }
       },
       {
@@ -183,7 +223,7 @@
         "key": "diagnostic.toggle_damage",
         "location": {
           "startingColumn": 28,
-          "startingLine": 569
+          "startingLine": 593
         }
       },
       {
@@ -191,7 +231,7 @@
         "key": "project.save.action",
         "location": {
           "startingColumn": 28,
-          "startingLine": 580
+          "startingLine": 604
         }
       },
       {
@@ -199,7 +239,7 @@
         "key": "project.save_as.action",
         "location": {
           "startingColumn": 28,
-          "startingLine": 582
+          "startingLine": 606
         }
       },
       {
@@ -207,7 +247,7 @@
         "key": "project.duplicate.action",
         "location": {
           "startingColumn": 28,
-          "startingLine": 584
+          "startingLine": 608
         }
       },
       {
@@ -215,7 +255,7 @@
         "key": "project.open.action",
         "location": {
           "startingColumn": 28,
-          "startingLine": 589
+          "startingLine": 613
         }
       },
       {
@@ -223,7 +263,7 @@
         "key": "project.delete.action",
         "location": {
           "startingColumn": 28,
-          "startingLine": 591
+          "startingLine": 615
         }
       },
       {
@@ -231,7 +271,7 @@
         "key": "window.fullscreen",
         "location": {
           "startingColumn": 28,
-          "startingLine": 593
+          "startingLine": 617
         }
       },
       {
@@ -239,7 +279,7 @@
         "key": "project.unsaved.title",
         "location": {
           "startingColumn": 18,
-          "startingLine": 678
+          "startingLine": 702
         }
       },
       {
@@ -247,7 +287,15 @@
         "key": "battery.depleted.title",
         "location": {
           "startingColumn": 16,
-          "startingLine": 932
+          "startingLine": 958
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.select",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 984
         }
       },
       {
@@ -255,7 +303,7 @@
         "key": "project.unsaved.save",
         "location": {
           "startingColumn": 20,
-          "startingLine": 681
+          "startingLine": 705
         }
       },
       {
@@ -263,7 +311,7 @@
         "key": "project.unsaved.save_exit",
         "location": {
           "startingColumn": 20,
-          "startingLine": 684
+          "startingLine": 708
         }
       },
       {
@@ -271,7 +319,7 @@
         "key": "project.unsaved.exit_without",
         "location": {
           "startingColumn": 20,
-          "startingLine": 687
+          "startingLine": 711
         }
       },
       {
@@ -279,7 +327,7 @@
         "key": "common.cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 690
+          "startingLine": 714
         }
       },
       {
@@ -287,7 +335,7 @@
         "key": "common.ok",
         "location": {
           "startingColumn": 46,
-          "startingLine": 700
+          "startingLine": 724
         }
       },
       {
@@ -295,7 +343,7 @@
         "key": "project.delete.confirm.title",
         "location": {
           "startingColumn": 29,
-          "startingLine": 705
+          "startingLine": 729
         }
       },
       {
@@ -303,7 +351,7 @@
         "key": "project.delete.action",
         "location": {
           "startingColumn": 50,
-          "startingLine": 707
+          "startingLine": 731
         }
       },
       {
@@ -311,7 +359,7 @@
         "key": "common.cancel",
         "location": {
           "startingColumn": 47,
-          "startingLine": 710
+          "startingLine": 734
         }
       },
       {
@@ -319,7 +367,7 @@
         "key": "menu.saved_projects",
         "location": {
           "startingColumn": 22,
-          "startingLine": 726
+          "startingLine": 750
         }
       },
       {
@@ -327,7 +375,7 @@
         "key": "menu.search",
         "location": {
           "startingColumn": 49,
-          "startingLine": 731
+          "startingLine": 755
         }
       },
       {
@@ -335,7 +383,7 @@
         "key": "menu.sort",
         "location": {
           "startingColumn": 28,
-          "startingLine": 734
+          "startingLine": 758
         }
       },
       {
@@ -343,7 +391,7 @@
         "key": "menu.title",
         "location": {
           "startingColumn": 26,
-          "startingLine": 772
+          "startingLine": 796
         }
       },
       {
@@ -351,7 +399,7 @@
         "key": "menu.create_project",
         "location": {
           "startingColumn": 34,
-          "startingLine": 784
+          "startingLine": 808
         }
       },
       {
@@ -359,7 +407,7 @@
         "key": "menu.recent_project",
         "location": {
           "startingColumn": 34,
-          "startingLine": 802
+          "startingLine": 826
         }
       },
       {
@@ -367,7 +415,7 @@
         "key": "•",
         "location": {
           "startingColumn": 26,
-          "startingLine": 833
+          "startingLine": 857
         }
       },
       {
@@ -375,7 +423,7 @@
         "key": "workspace.toolstrip",
         "location": {
           "startingColumn": 22,
-          "startingLine": 838
+          "startingLine": 862
         }
       },
       {
@@ -383,7 +431,7 @@
         "key": "panel.hide",
         "location": {
           "startingColumn": 41,
-          "startingLine": 859
+          "startingLine": 883
         }
       },
       {
@@ -391,7 +439,7 @@
         "key": "panel.show",
         "location": {
           "startingColumn": 41,
-          "startingLine": 868
+          "startingLine": 892
         }
       },
       {
@@ -399,6 +447,14 @@
         "key": "keybind.open",
         "location": {
           "startingColumn": 24,
+          "startingLine": 894
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.parameters.on",
+        "location": {
+          "startingColumn": 63,
           "startingLine": 870
         }
       },
@@ -406,16 +462,8 @@
         "comment": "",
         "key": "panel.parameters.off",
         "location": {
-          "startingColumn": 62,
-          "startingLine": 846
-        }
-      },
-      {
-        "comment": "",
-        "key": "panel.parameters.on",
-        "location": {
           "startingColumn": 87,
-          "startingLine": 846
+          "startingLine": 870
         }
       },
       {
@@ -423,7 +471,7 @@
         "key": "battery.depleted.charge",
         "location": {
           "startingColumn": 20,
-          "startingLine": 936
+          "startingLine": 962
         }
       },
       {
@@ -431,7 +479,7 @@
         "key": "battery.depleted.restart",
         "location": {
           "startingColumn": 20,
-          "startingLine": 939
+          "startingLine": 965
         }
       },
       {
@@ -439,7 +487,7 @@
         "key": "battery.depleted.message",
         "location": {
           "startingColumn": 18,
-          "startingLine": 943
+          "startingLine": 969
         }
       },
       {
@@ -447,7 +495,23 @@
         "key": "common.ok",
         "location": {
           "startingColumn": 46,
-          "startingLine": 952
+          "startingLine": 978
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.ok",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 988
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.placeholder.message",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 990
         }
       },
       {
@@ -455,7 +519,7 @@
         "key": "project.name",
         "location": {
           "startingColumn": 41,
-          "startingLine": 973
+          "startingLine": 1007
         }
       },
       {
@@ -463,7 +527,7 @@
         "key": "common.cancel",
         "location": {
           "startingColumn": 24,
-          "startingLine": 978
+          "startingLine": 1012
         }
       }
     ]

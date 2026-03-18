@@ -7,9 +7,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>DroneUAVDemo</string>
+	<string>UAVsim</string>
 	<key>CFBundleExecutable</key>
 	<string>DroneUAVDemo</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.example.DroneUAVDemo</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -45,6 +49,6 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>15.6</string>
 </dict>
 </plist>
