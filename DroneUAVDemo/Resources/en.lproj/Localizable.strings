@@ -148,6 +148,11 @@
 "warnings.none" = "No active warnings";
 "summary.damage.none" = "No critical damage";
 
+"signal_loss.warning" = "Signal will be lost in %d...";
+"signal_loss.lost_title" = "Signal lost";
+"signal_loss.lost_message" = "The UAV has left the map bounds. Flight controls are locked until the signal is restored.";
+"signal_loss.recover" = "Restore signal";
+
 "telemetry.position" = "Position";
 "telemetry.velocity" = "Velocity";
 "telemetry.attitude" = "Attitude";

@@ -7,7 +7,7 @@
         "key": "hud.title",
         "location": {
           "startingColumn": 26,
-          "startingLine": 24
+          "startingLine": 28
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "%@: %@ | %@: %@",
         "location": {
           "startingColumn": 26,
-          "startingLine": 26
+          "startingLine": 30
         }
       }
     ]

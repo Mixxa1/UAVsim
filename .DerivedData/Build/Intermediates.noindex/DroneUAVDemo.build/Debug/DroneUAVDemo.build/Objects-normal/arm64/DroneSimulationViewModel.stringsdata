@@ -4,10 +4,34 @@
     "Localizable": [
       {
         "comment": "",
+        "key": "signal_loss.lost_title",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 259
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.lost_message",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 262
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.recover",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 265
+        }
+      },
+      {
+        "comment": "",
         "key": "telemetry.export.select_folder",
         "location": {
           "startingColumn": 43,
-          "startingLine": 876
+          "startingLine": 1044
         }
       },
       {
@@ -15,7 +39,7 @@
         "key": "common.export",
         "location": {
           "startingColumn": 42,
-          "startingLine": 877
+          "startingLine": 1045
         }
       }
     ]

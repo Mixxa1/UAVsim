@@ -148,6 +148,11 @@
 "warnings.none" = "Активных предупреждений нет";
 "summary.damage.none" = "Критичных повреждений нет";
 
+"signal_loss.warning" = "Сигнал будет утерян через %d...";
+"signal_loss.lost_title" = "Сигнал потерян";
+"signal_loss.lost_message" = "Аппарат вышел за пределы карты. Управление заблокировано до восстановления сигнала.";
+"signal_loss.recover" = "Восстановить сигнал";
+
 "telemetry.position" = "Координаты";
 "telemetry.velocity" = "Скорость (вектор)";
 "telemetry.attitude" = "Ориентация";

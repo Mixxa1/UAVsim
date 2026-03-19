@@ -133,6 +133,55 @@ private enum ReturnHomeStage: String {
     case descend
 }
 
+enum UAVSignalState: Equatable {
+    case normal
+    case outOfBoundsWarning
+    case signalDegrading
+    case signalLost
+    case recoveryPending
+
+    var isCountdownActive: Bool {
+        switch self {
+        case .outOfBoundsWarning, .signalDegrading:
+            return true
+        case .normal, .signalLost, .recoveryPending:
+            return false
+        }
+    }
+
+    var isInteractionBlocking: Bool {
+        switch self {
+        case .signalLost, .recoveryPending:
+            return true
+        case .normal, .outOfBoundsWarning, .signalDegrading:
+            return false
+        }
+    }
+}
+
+struct SignalInterferencePresentation: Equatable {
+    let state: UAVSignalState
+    let countdownText: String?
+    let intensity: Double
+    let lostTitle: String?
+    let lostMessage: String?
+    let recoveryButtonTitle: String?
+
+    var isVisible: Bool {
+        state != .normal
+    }
+
+    var isInteractionBlocking: Bool {
+        state.isInteractionBlocking
+    }
+}
+
+private enum SignalLossConfiguration {
+    static let countdownDuration = 8
+    static let boundaryInset: Float = 0.6
+    static let reentryInset: Float = 0.35
+}
+
 @MainActor
 final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var controlValues: DroneControlValues
@@ -174,6 +223,8 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isArmed: Bool
     @Published private(set) var physicalState: DronePhysicalState
     @Published var showPayloadPlaceholder: Bool
+    @Published private(set) var signalState: UAVSignalState
+    @Published private(set) var signalCountdownSecondsRemaining: Int
 
     var scene: SCNScene {
         sceneController.scene
@@ -181,6 +232,47 @@ final class DroneSimulationViewModel: ObservableObject {
 
     var activeCameraNode: SCNNode {
         sceneController.pointOfView(for: cameraConfiguration.mode)
+    }
+
+    var signalInterferencePresentation: SignalInterferencePresentation {
+        let intensity: Double
+        switch signalState {
+        case .normal:
+            intensity = 0.0
+        case .outOfBoundsWarning, .signalDegrading:
+            let elapsed = Double(SignalLossConfiguration.countdownDuration - max(0, signalCountdownSecondsRemaining))
+            let progress = elapsed / Double(SignalLossConfiguration.countdownDuration)
+            intensity = min(0.92, 0.18 + progress * 0.72)
+        case .signalLost, .recoveryPending:
+            intensity = 1.0
+        }
+
+        let countdownText: String?
+        if signalState.isCountdownActive {
+            let format = NSLocalizedString("signal_loss.warning", comment: "")
+            countdownText = String.localizedStringWithFormat(format, signalCountdownSecondsRemaining)
+        } else {
+            countdownText = nil
+        }
+
+        let lostTitle = signalState.isInteractionBlocking
+            ? String(localized: "signal_loss.lost_title")
+            : nil
+        let lostMessage = signalState.isInteractionBlocking
+            ? String(localized: "signal_loss.lost_message")
+            : nil
+        let recoveryButtonTitle = signalState == .signalLost
+            ? String(localized: "signal_loss.recover")
+            : nil
+
+        return SignalInterferencePresentation(
+            state: signalState,
+            countdownText: countdownText,
+            intensity: intensity,
+            lostTitle: lostTitle,
+            lostMessage: lostMessage,
+            recoveryButtonTitle: recoveryButtonTitle
+        )
     }
 
     private let physicsEngine: DronePhysicsEngine
@@ -220,6 +312,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var navigationSnapshot: NavigationPathSnapshot = .idle
     private var cachedDiagnostics: SimulationDiagnostics = .zero
     private var pendingTerrainRegenerationTask: Task<Void, Never>?
+    private var signalLossSecondAccumulator: Float = 0.0
 
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
@@ -344,6 +437,8 @@ final class DroneSimulationViewModel: ObservableObject {
         self.isArmed = false
         self.physicalState = initialState.physicalState
         self.showPayloadPlaceholder = false
+        self.signalState = .normal
+        self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
         self.telemetry = .zero
         self.cachedDiagnostics = .zero
 
@@ -427,6 +522,7 @@ final class DroneSimulationViewModel: ObservableObject {
         ensureSimulationRunning()
         mode = .manual
         flightControlMode = .stabilized
+        clearSignalLossState(restoringInputMode: false)
         state = DroneState.initial
         lastFiniteState = state
         controlValues = DroneControlValues()
@@ -486,6 +582,59 @@ final class DroneSimulationViewModel: ObservableObject {
         telemetryExporter.append(snapshot: telemetry)
         hasUnsavedChanges = true
         emitLaunchDiagnostics(context: "reset")
+    }
+
+    func recoverSignal() {
+        guard signalState == .signalLost else {
+            return
+        }
+
+        signalState = .recoveryPending
+        signalLossSecondAccumulator = 0.0
+
+        mode = .manual
+        isArmed = false
+        manualYawIntent = 0.0
+        cameraLookVelocity = .zero
+        autoPathPlanner.invalidate()
+        autoFlightGoal = nil
+        autoFlightGoalIndex = 0
+        returnHomeStage = .idle
+        navigationSnapshot = .idle
+        collisionCooldown = 0.0
+
+        sanitizeDynamicStateForSpawn(context: "signal_recovery")
+        controlValues = neutralControls(from: state)
+        collisionAnalysis = .safe
+        showBatteryDepletedDialog = false
+
+        sceneController.update(
+            with: state,
+            camera: cameraConfiguration,
+            damage: damageState,
+            thermal: thermalState,
+            diagnosticMode: diagnosticMode,
+            deltaTime: 0.0
+        )
+        sceneController.updateFleetWingmen(
+            wingmen,
+            profile: selectedDroneProfile,
+            throttle: state.throttle,
+            deltaTime: 0.0
+        )
+        sceneController.updatePathDebug(
+            path: [],
+            currentWaypointIndex: 0,
+            start: nil,
+            goal: nil,
+            enabled: false
+        )
+
+        clearSignalLossState(restoringInputMode: false)
+        keyboardInputService.setInputProcessingMode(.flight)
+        warnings = buildWarnings()
+        telemetry = buildTelemetrySnapshot()
+        hasUnsavedChanges = true
     }
 
     func takeoff() {
@@ -719,7 +868,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
-        guard cameraConfiguration.mode == .fpv else {
+        guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             return
         }
         sceneController.applyCameraNudge(
@@ -1097,6 +1246,11 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        if signalState.isInteractionBlocking {
+            renderSignalLossFrame()
+            return
+        }
+
         collisionCooldown = max(0.0, collisionCooldown - dt)
 
         applyKeyboardControls(deltaTime: dt)
@@ -1149,6 +1303,12 @@ final class DroneSimulationViewModel: ObservableObject {
         applyGroundedSafetyIfNeeded(deltaTime: dt)
         handleModeTransitions()
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
+        updateSignalLossSequence(deltaTime: dt)
+
+        if signalState.isInteractionBlocking {
+            renderSignalLossFrame()
+            return
+        }
 
         let maneuverAggressiveness = (abs(Float(controlValues.roll)) + abs(Float(controlValues.pitch))) / 120.0
         batteryState = batteryThermalService.updateBattery(
@@ -1417,6 +1577,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func processKeyboardActions() {
+        guard !signalState.isInteractionBlocking else {
+            _ = keyboardInputService.consumeActions()
+            return
+        }
         let actions = keyboardInputService.consumeActions()
         for action in actions {
             switch action {
@@ -1457,7 +1621,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func applyContinuousCameraLook(deltaTime: Float) {
-        guard cameraConfiguration.mode == .fpv else {
+        guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             cameraLookVelocity = .zero
             return
         }
@@ -2430,6 +2594,100 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    private var playableBoundaryHalfExtent: Float {
+        max(6.0, terrain.worldHalfExtent - SignalLossConfiguration.boundaryInset)
+    }
+
+    private var reentryBoundaryHalfExtent: Float {
+        max(1.0, playableBoundaryHalfExtent - SignalLossConfiguration.reentryInset)
+    }
+
+    private func updateSignalLossSequence(deltaTime: Float) {
+        switch signalState {
+        case .normal:
+            if isOutsidePlayableBounds(state.position) {
+                signalState = .outOfBoundsWarning
+                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+                signalLossSecondAccumulator = 0.0
+            }
+
+        case .outOfBoundsWarning, .signalDegrading:
+            if isInsidePlayableRecoveryBounds(state.position) {
+                clearSignalLossState(restoringInputMode: false)
+                return
+            }
+
+            signalLossSecondAccumulator += deltaTime
+            while signalLossSecondAccumulator >= 1.0 {
+                signalLossSecondAccumulator -= 1.0
+                signalCountdownSecondsRemaining -= 1
+
+                if signalCountdownSecondsRemaining <= 0 {
+                    enterSignalLostState()
+                    return
+                }
+
+                if signalCountdownSecondsRemaining < SignalLossConfiguration.countdownDuration {
+                    signalState = .signalDegrading
+                }
+            }
+
+        case .signalLost, .recoveryPending:
+            break
+        }
+    }
+
+    private func renderSignalLossFrame() {
+        sceneController.applyWeatherVisual(weather)
+        sceneController.update(
+            with: state,
+            camera: cameraConfiguration,
+            damage: damageState,
+            thermal: thermalState,
+            diagnosticMode: diagnosticMode,
+            deltaTime: 0.0
+        )
+        sceneController.updateFleetWingmen(
+            wingmen,
+            profile: selectedDroneProfile,
+            throttle: state.throttle,
+            deltaTime: 0.0
+        )
+    }
+
+    private func enterSignalLostState() {
+        guard signalState != .signalLost else {
+            return
+        }
+
+        signalState = .signalLost
+        signalCountdownSecondsRemaining = 0
+        signalLossSecondAccumulator = 0.0
+        manualYawIntent = 0.0
+        cameraLookVelocity = .zero
+        keyboardInputService.setInputProcessingMode(.editing)
+        hasUnsavedChanges = true
+    }
+
+    private func clearSignalLossState(restoringInputMode: Bool) {
+        let hadBlockingState = signalState.isInteractionBlocking
+        signalState = .normal
+        signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+        signalLossSecondAccumulator = 0.0
+
+        if restoringInputMode && hadBlockingState {
+            keyboardInputService.setInputProcessingMode(.flight)
+        }
+    }
+
+    private func isOutsidePlayableBounds(_ position: SIMD3<Float>) -> Bool {
+        abs(position.x) > playableBoundaryHalfExtent || abs(position.z) > playableBoundaryHalfExtent
+    }
+
+    private func isInsidePlayableRecoveryBounds(_ position: SIMD3<Float>) -> Bool {
+        abs(position.x) <= reentryBoundaryHalfExtent && abs(position.z) <= reentryBoundaryHalfExtent
+    }
+
     private func enforceRuntimeSafetyAndBounds(context: String) {
         let spawn = sceneController.currentDockSpawnPoint()
 
@@ -2443,24 +2701,8 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let halfExtent = max(6.0, terrain.worldHalfExtent - 0.6)
+        let halfExtent = playableBoundaryHalfExtent
         let maxAltitude = max(80.0, terrain.maxFlightAltitude)
-
-        if state.position.x > halfExtent {
-            state.position.x = halfExtent
-            if state.velocity.x > 0.0 { state.velocity.x = 0.0 }
-        } else if state.position.x < -halfExtent {
-            state.position.x = -halfExtent
-            if state.velocity.x < 0.0 { state.velocity.x = 0.0 }
-        }
-
-        if state.position.z > halfExtent {
-            state.position.z = halfExtent
-            if state.velocity.z > 0.0 { state.velocity.z = 0.0 }
-        } else if state.position.z < -halfExtent {
-            state.position.z = -halfExtent
-            if state.velocity.z < 0.0 { state.velocity.z = 0.0 }
-        }
 
         if state.position.y < 0.0 {
             state.position.y = 0.0
@@ -2524,15 +2766,19 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func sanitizeDynamicStateForSpawn(context: String) {
         let hardReset = (context == "init" || context == "reset")
+        let forceSpawnRelocation = hardReset || context == "signal_recovery"
         let spawn = sceneController.currentDockSpawnPoint()
-        let halfExtent = max(6.0, terrain.worldHalfExtent - 0.6)
+        let halfExtent = playableBoundaryHalfExtent
         let maxAltitude = max(80.0, terrain.maxFlightAltitude)
 
-        if hardReset {
+        if forceSpawnRelocation {
             state.position = spawn
             state.orientation = SIMD3<Float>(repeating: 0.0)
-            weather = .normal
             homePosition = spawn
+        }
+
+        if hardReset {
+            weather = .normal
         }
 
         if !state.position.x.isFinite || !state.position.y.isFinite || !state.position.z.isFinite {

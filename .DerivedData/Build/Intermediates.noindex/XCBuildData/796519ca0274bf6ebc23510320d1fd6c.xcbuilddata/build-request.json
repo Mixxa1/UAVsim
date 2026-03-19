@@ -42,8 +42,7 @@
     "overrides" : {
       "commandLine" : {
         "table" : {
-          "CODE_SIGNING_ALLOWED" : "NO",
-          "SDKROOT" : "macosx26.2"
+
         }
       },
       "synthesized" : {

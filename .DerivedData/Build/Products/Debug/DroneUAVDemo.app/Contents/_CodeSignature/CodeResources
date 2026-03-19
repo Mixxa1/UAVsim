@@ -10,7 +10,7 @@
 		</data>
 		<key>Resources/Assets.car</key>
 		<data>
-		euK7YGKIB+yscW4NQKjkfxH4o50=
+		LF4N6PDjJ0Oa/NJxJqUDPF2ORqo=
 		</data>
 		<key>Resources/Assets/Buildings/.gitkeep</key>
 		<data>
@@ -92,30 +92,6 @@
 		<data>
 		C9p8HPaqKFRa0qxVB8H+31UWzpk=
 		</data>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_01.mtl</key>
-		<data>
-		iiVFuCJx4wD6aE6Q/AtVp767bdo=
-		</data>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_01.obj</key>
-		<data>
-		r//pbbYhEiv4XYrDtxgeY+w0mxQ=
-		</data>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_02.mtl</key>
-		<data>
-		NcjfeNsuSqUwbKIINIBuOsylrDQ=
-		</data>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_02.obj</key>
-		<data>
-		0Kizhe7sUI36xTvs/+oZS+MQlao=
-		</data>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_03.mtl</key>
-		<data>
-		mu892NsY2RoMlH9JT2bm3FnQ3BE=
-		</data>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_03.obj</key>
-		<data>
-		xPPiYJViGwFyo6b13lqFVS0d5CQ=
-		</data>
 		<key>Resources/Assets/Trees/RAWCATALOG_SOURCES.md</key>
 		<data>
 		oOLYP9y3ZrAuEgMCAnuUyyKlWcY=
@@ -128,7 +104,7 @@
 		<dict>
 			<key>hash</key>
 			<data>
-			Z0NVLJKE6ZUNTVkaegu2evlgXPg=
+			3px+5gjGT9J8Yubv0LCBToI1xlY=
 			</data>
 			<key>optional</key>
 			<true/>
@@ -137,7 +113,7 @@
 		<dict>
 			<key>hash</key>
 			<data>
-			kpj3EaZI2Wlx0v21QnEJ6ratClg=
+			jIQ3negsNcs6aKGofjrksvENiPk=
 			</data>
 			<key>optional</key>
 			<true/>
@@ -156,7 +132,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			p1ucn/VEG759/kTm7KCtIxM64tgCgLz2RGX/Vlpg+RU=
+			dvY4zJYNTCPetchKmuuXfUnF8i0bgpg1iPBi1ExsR7A=
 			</data>
 		</dict>
 		<key>Resources/Assets/Buildings/.gitkeep</key>
@@ -299,48 +275,6 @@
 			g9+vmbKBfH+0p6GgsKCkO1vi6x39cWImOBnw8zw3mck=
 			</data>
 		</dict>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_01.mtl</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			pVrOMjUPKD3X1FJ0Op5Ea2HhhfG+Iqd3FuSQXnnrPLc=
-			</data>
-		</dict>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_01.obj</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			X70i8/Oj/JpMraeTI/v8vXgeF23CNpJTl4IDpdxXC18=
-			</data>
-		</dict>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_02.mtl</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			MgJ3v31e3H2CUYxArnA5Blp0eSMSmRVXnVOPftTxejc=
-			</data>
-		</dict>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_02.obj</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			0627yGsmKgu4u5EQhb31JwmpsVXA3iIvJbBdyz0HEnw=
-			</data>
-		</dict>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_03.mtl</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			XT1vf4aW0SQ8nP7RqUcVYm+lwVIKcIMnkWpLXXrtAuE=
-			</data>
-		</dict>
-		<key>Resources/Assets/Trees/Models/tree_lowpoly_03.obj</key>
-		<dict>
-			<key>hash2</key>
-			<data>
-			FLfO5aia/ZaOeiDXAp54st7iIyPmFAuwRSF6F+yyEp8=
-			</data>
-		</dict>
 		<key>Resources/Assets/Trees/RAWCATALOG_SOURCES.md</key>
 		<dict>
 			<key>hash2</key>
@@ -359,7 +293,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			o27AwiE/pUlqEkDBsoj9jl35gaAZCrgKMn2dWPzyGT8=
+			qcnOGOaxDhR/BZwgW3p4kG5TyipVpPZOaN7ryeA+sT8=
 			</data>
 			<key>optional</key>
 			<true/>
@@ -368,7 +302,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			u20pvigpm3WFZ7BeAIfLm9WTBB1YzuWVrpe+ZivLL/o=
+			Kk3i6hCFZjk8fo7SCcKp9GX54/Wdt9ZLafQwVNiVOjY=
 			</data>
 			<key>optional</key>
 			<true/>

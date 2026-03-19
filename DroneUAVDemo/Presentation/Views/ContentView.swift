@@ -337,6 +337,165 @@ private struct SimulationViewModelObserver<Content: View>: View {
     }
 }
 
+private struct SignalInterferenceOverlayView: View {
+    let presentation: SignalInterferencePresentation
+    let onRecover: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 18.0)) { timeline in
+            GeometryReader { geometry in
+                let time = timeline.date.timeIntervalSinceReferenceDate
+
+                ZStack {
+                    Color.black
+                        .opacity(presentation.state.isInteractionBlocking ? 0.74 : 0.10)
+
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.04 + presentation.intensity * 0.12),
+                                    Color.black.opacity(0.0),
+                                    Color.white.opacity(0.02 + presentation.intensity * 0.08)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .opacity(0.55 + abs(sin(time * 4.2)) * 0.18)
+
+                    SignalInterferenceCanvas(
+                        intensity: presentation.intensity,
+                        time: time,
+                        isSignalLost: presentation.state.isInteractionBlocking
+                    )
+
+                    VStack(spacing: 24) {
+                        if let countdownText = presentation.countdownText {
+                            Text(countdownText)
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(Color.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color.black.opacity(0.72), in: Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .stroke(Color.orange.opacity(0.78), lineWidth: 1.2)
+                                )
+                                .shadow(color: Color.black.opacity(0.34), radius: 18, y: 8)
+                        }
+
+                        Spacer()
+
+                        if presentation.state.isInteractionBlocking {
+                            VStack(spacing: 12) {
+                                if let lostTitle = presentation.lostTitle {
+                                    Text(lostTitle)
+                                        .font(.title2.weight(.bold))
+                                        .foregroundStyle(.white)
+                                }
+
+                                if let lostMessage = presentation.lostMessage {
+                                    Text(lostMessage)
+                                        .font(.body)
+                                        .foregroundStyle(Color.white.opacity(0.88))
+                                        .multilineTextAlignment(.center)
+                                        .frame(maxWidth: 360)
+                                }
+
+                                if let recoveryButtonTitle = presentation.recoveryButtonTitle {
+                                    Button(recoveryButtonTitle, action: onRecover)
+                                        .buttonStyle(.borderedProminent)
+                                        .controlSize(.large)
+                                        .tint(Color.white.opacity(0.92))
+                                        .foregroundStyle(.black)
+                                        .padding(.top, 6)
+                                }
+                            }
+                            .padding(.horizontal, 28)
+                            .padding(.vertical, 24)
+                            .background(Color.black.opacity(0.76), in: RoundedRectangle(cornerRadius: 20))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.white.opacity(0.22), lineWidth: 1.0)
+                            )
+                            .shadow(color: Color.black.opacity(0.38), radius: 22, y: 14)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 22)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(presentation.isInteractionBlocking)
+    }
+}
+
+private struct SignalInterferenceCanvas: View {
+    let intensity: Double
+    let time: TimeInterval
+    let isSignalLost: Bool
+
+    var body: some View {
+        Canvas(rendersAsynchronously: true) { context, size in
+            let clampedIntensity = max(0.0, min(1.0, intensity))
+            let spacing = max(2.0, 7.0 - clampedIntensity * 3.5)
+            let scanAlpha = 0.04 + clampedIntensity * 0.16
+
+            for y in stride(from: 0.0, through: size.height, by: spacing) {
+                let rect = CGRect(x: 0.0, y: y, width: size.width, height: 1.0)
+                context.fill(Path(rect), with: .color(Color.white.opacity(scanAlpha)))
+            }
+
+            let bandCount = isSignalLost ? 18 : 7
+            for index in 0..<bandCount {
+                let seed = time * 7.1 + Double(index) * 19.37
+                let y = size.height * Self.noise(seed)
+                let height = size.height * CGFloat(0.02 + Self.noise(seed + 1.7) * (isSignalLost ? 0.18 : 0.08))
+                let widthScale = CGFloat(0.62 + Self.noise(seed + 3.3) * 0.38)
+                let xOffset = size.width * CGFloat((Self.noise(seed + 5.1) - 0.5) * clampedIntensity * 0.22)
+                let rect = CGRect(x: xOffset, y: y, width: size.width * widthScale, height: height)
+                let opacity = 0.05 + clampedIntensity * (isSignalLost ? 0.28 : 0.14)
+                context.fill(Path(rect), with: .color(Color.white.opacity(opacity)))
+            }
+
+            let noiseCount = isSignalLost ? 180 : Int(40 + clampedIntensity * 36.0)
+            let timeBucket = floor(time * (isSignalLost ? 18.0 : 9.0))
+            for index in 0..<noiseCount {
+                let seed = timeBucket + Double(index) * 13.11
+                let x = size.width * Self.noise(seed)
+                let y = size.height * Self.noise(seed + 2.4)
+                let width = max(1.0, size.width * CGFloat(0.002 + Self.noise(seed + 4.2) * 0.012))
+                let height = max(1.0, size.height * CGFloat(0.002 + Self.noise(seed + 6.8) * 0.018))
+                let opacity = (0.03 + clampedIntensity * (isSignalLost ? 0.42 : 0.18)) * Self.noise(seed + 8.5)
+                context.fill(
+                    Path(CGRect(x: x, y: y, width: width, height: height)),
+                    with: .color(Color.white.opacity(opacity))
+                )
+            }
+
+            let flashCount = isSignalLost ? 4 : 2
+            for index in 0..<flashCount {
+                let seed = time * 2.8 + Double(index) * 11.0
+                let x = size.width * Self.noise(seed + 0.7)
+                let width = size.width * CGFloat(0.10 + Self.noise(seed + 1.9) * 0.20)
+                let opacity = (0.04 + clampedIntensity * 0.20) * abs(sin(time * (2.0 + Double(index))))
+                let rect = CGRect(x: x, y: 0.0, width: width, height: size.height)
+                context.fill(Path(rect), with: .color(Color.white.opacity(opacity)))
+            }
+        }
+    }
+
+    private static func noise(_ input: Double) -> Double {
+        let value = sin(input * 12.9898) * 43758.5453
+        return value - floor(value)
+    }
+}
+
 private struct SimulationToolstripView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
     @Binding var selectedTab: ToolstripTab
@@ -847,112 +1006,123 @@ struct ContentView: View {
     }
 
     private func simulationWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 10) {
-                Text(viewModel.currentProjectName)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                if viewModel.hasUnsavedChanges {
-                    Text("•")
-                        .foregroundStyle(.orange)
-                }
-
-                Spacer()
-                Text("workspace.toolstrip")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-                    .frame(height: 18)
-
-                Toggle(isOn: parametersVisibilityBinding(for: viewModel)) {
-                    Text(viewModel.isParametersPanelVisible ? "panel.parameters.on" : "panel.parameters.off")
-                        .font(.caption)
-                }
-                .toggleStyle(.checkbox)
-                .frame(width: 168, alignment: .leading)
-
-                Button {
-                    viewModel.setToolPanelVisible(false)
-                } label: {
-                    Image(systemName: "chevron.up")
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.isToolPanelVisible)
-                .help(String(localized: "panel.hide"))
-
-                Button {
-                    viewModel.setToolPanelVisible(true)
-                } label: {
-                    Image(systemName: "chevron.down")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isToolPanelVisible)
-                .help(String(localized: "panel.show"))
-
-                Button("keybind.open") {
-                    showBindingsSettings = true
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(Color(nsColor: .windowBackgroundColor))
-
-            if viewModel.isToolPanelVisible {
-                Divider()
-
-                SimulationToolstripView(
-                    viewModel: viewModel,
-                    selectedTab: $selectedToolstripTab,
-                    onSave: {
-                        appShell.saveActiveProject()
-                    },
-                    onSaveAs: {
-                        nameDraft = "\(viewModel.currentProjectName) Copy"
-                        nameDialogMode = .saveAs
-                    },
-                    onDuplicate: {
-                        nameDraft = "\(viewModel.currentProjectName) Clone"
-                        nameDialogMode = .duplicate
-                    },
-                    onOpenProjects: {
-                        appShell.requestReturnToMenu()
-                    },
-                    onDeleteProject: {
-                        deleteCandidate = ProjectRecordSummary(
-                            id: viewModel.currentProjectID,
-                            name: viewModel.currentProjectName,
-                            createdAt: Date(),
-                            modifiedAt: Date(),
-                            lastOpenedAt: Date(),
-                            lastSavedAt: Date()
-                        )
-                    },
-                    onToggleFullscreen: {
-                        toggleFullscreen()
+        ZStack {
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 10) {
+                    Text(viewModel.currentProjectName)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    if viewModel.hasUnsavedChanges {
+                        Text("•")
+                            .foregroundStyle(.orange)
                     }
-                )
 
-                Divider()
-            }
+                    Spacer()
+                    Text("workspace.toolstrip")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-            HStack(spacing: 0) {
-                if viewModel.isParametersPanelVisible {
-                    ControlPanelView(
+                    Divider()
+                        .frame(height: 18)
+
+                    Toggle(isOn: parametersVisibilityBinding(for: viewModel)) {
+                        Text(viewModel.isParametersPanelVisible ? "panel.parameters.on" : "panel.parameters.off")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    .frame(width: 168, alignment: .leading)
+
+                    Button {
+                        viewModel.setToolPanelVisible(false)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.isToolPanelVisible)
+                    .help(String(localized: "panel.hide"))
+
+                    Button {
+                        viewModel.setToolPanelVisible(true)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isToolPanelVisible)
+                    .help(String(localized: "panel.show"))
+
+                    Button("keybind.open") {
+                        showBindingsSettings = true
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Color(nsColor: .windowBackgroundColor))
+
+                if viewModel.isToolPanelVisible {
+                    Divider()
+
+                    SimulationToolstripView(
                         viewModel: viewModel,
-                        appLanguage: selectedLanguageBinding
+                        selectedTab: $selectedToolstripTab,
+                        onSave: {
+                            appShell.saveActiveProject()
+                        },
+                        onSaveAs: {
+                            nameDraft = "\(viewModel.currentProjectName) Copy"
+                            nameDialogMode = .saveAs
+                        },
+                        onDuplicate: {
+                            nameDraft = "\(viewModel.currentProjectName) Clone"
+                            nameDialogMode = .duplicate
+                        },
+                        onOpenProjects: {
+                            appShell.requestReturnToMenu()
+                        },
+                        onDeleteProject: {
+                            deleteCandidate = ProjectRecordSummary(
+                                id: viewModel.currentProjectID,
+                                name: viewModel.currentProjectName,
+                                createdAt: Date(),
+                                modifiedAt: Date(),
+                                lastOpenedAt: Date(),
+                                lastSavedAt: Date()
+                            )
+                        },
+                        onToggleFullscreen: {
+                            toggleFullscreen()
+                        }
                     )
-                    .frame(width: 430)
 
                     Divider()
                 }
 
-                SceneViewportView(viewModel: viewModel)
-                    .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    if viewModel.isParametersPanelVisible {
+                        ControlPanelView(
+                            viewModel: viewModel,
+                            appLanguage: selectedLanguageBinding
+                        )
+                        .frame(width: 430)
+
+                        Divider()
+                    }
+
+                    SceneViewportView(viewModel: viewModel)
+                        .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if viewModel.signalInterferencePresentation.isVisible {
+                SignalInterferenceOverlayView(
+                    presentation: viewModel.signalInterferencePresentation,
+                    onRecover: {
+                        viewModel.recoverSignal()
+                    }
+                )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .alert("battery.depleted.title", isPresented: Binding(
