@@ -31,7 +31,7 @@
         "key": "telemetry.export.select_folder",
         "location": {
           "startingColumn": 43,
-          "startingLine": 1040
+          "startingLine": 1053
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "common.export",
         "location": {
           "startingColumn": 42,
-          "startingLine": 1041
+          "startingLine": 1054
         }
       }
     ]

@@ -312,6 +312,7 @@ struct ControlPanelView: View {
                         range: 0.0...1.0,
                         step: 0.01,
                         formatter: Self.throttleFormatter,
+                        onEditingChanged: viewModel.setTerrainDensityEditing,
                         onCommit: viewModel.commitTerrainDensityChange
                     )
 

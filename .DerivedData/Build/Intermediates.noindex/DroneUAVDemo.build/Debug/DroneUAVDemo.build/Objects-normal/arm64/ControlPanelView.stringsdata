@@ -7,7 +7,7 @@
         "key": "panel.telemetry",
         "location": {
           "startingColumn": 37,
-          "startingLine": 477
+          "startingLine": 478
         }
       },
       {
@@ -407,7 +407,7 @@
         "key": "environment.boundary_barrier_visible",
         "location": {
           "startingColumn": 28,
-          "startingLine": 318
+          "startingLine": 319
         }
       },
       {
@@ -415,7 +415,7 @@
         "key": "section.environment",
         "location": {
           "startingColumn": 22,
-          "startingLine": 325
+          "startingLine": 326
         }
       },
       {
@@ -423,7 +423,7 @@
         "key": "diagnostic.mode",
         "location": {
           "startingColumn": 28,
-          "startingLine": 335
+          "startingLine": 336
         }
       },
       {
@@ -431,7 +431,7 @@
         "key": "diagnostic.collision_debug",
         "location": {
           "startingColumn": 28,
-          "startingLine": 344
+          "startingLine": 345
         }
       },
       {
@@ -439,7 +439,7 @@
         "key": "diagnostic.last_collision_source",
         "location": {
           "startingColumn": 30,
-          "startingLine": 347
+          "startingLine": 348
         }
       },
       {
@@ -447,7 +447,7 @@
         "key": "diagnostic.active_objects",
         "location": {
           "startingColumn": 30,
-          "startingLine": 354
+          "startingLine": 355
         }
       },
       {
@@ -455,7 +455,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 356
+          "startingLine": 357
         }
       },
       {
@@ -463,7 +463,7 @@
         "key": "diagnostic.active_physics",
         "location": {
           "startingColumn": 30,
-          "startingLine": 359
+          "startingLine": 360
         }
       },
       {
@@ -471,7 +471,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 361
+          "startingLine": 362
         }
       },
       {
@@ -479,7 +479,7 @@
         "key": "diagnostic.active_particles",
         "location": {
           "startingColumn": 30,
-          "startingLine": 364
+          "startingLine": 365
         }
       },
       {
@@ -487,7 +487,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 366
+          "startingLine": 367
         }
       },
       {
@@ -495,7 +495,7 @@
         "key": "section.diagnostics",
         "location": {
           "startingColumn": 22,
-          "startingLine": 372
+          "startingLine": 373
         }
       },
       {
@@ -503,7 +503,7 @@
         "key": "section.advanced",
         "location": {
           "startingColumn": 22,
-          "startingLine": 388
+          "startingLine": 389
         }
       },
       {
@@ -511,7 +511,7 @@
         "key": "panel.fleet",
         "location": {
           "startingColumn": 18,
-          "startingLine": 396
+          "startingLine": 397
         }
       },
       {
@@ -519,7 +519,7 @@
         "key": "fleet.separation",
         "location": {
           "startingColumn": 55,
-          "startingLine": 413
+          "startingLine": 414
         }
       },
       {
@@ -527,7 +527,7 @@
         "key": "diagnostic.fleet_mode",
         "location": {
           "startingColumn": 20,
-          "startingLine": 399
+          "startingLine": 400
         }
       },
       {
@@ -535,7 +535,7 @@
         "key": "fleet.formation",
         "location": {
           "startingColumn": 20,
-          "startingLine": 404
+          "startingLine": 405
         }
       },
       {
@@ -543,7 +543,7 @@
         "key": "panel.damage",
         "location": {
           "startingColumn": 18,
-          "startingLine": 419
+          "startingLine": 420
         }
       },
       {
@@ -551,7 +551,7 @@
         "key": "damage.reset",
         "location": {
           "startingColumn": 24,
-          "startingLine": 423
+          "startingLine": 424
         }
       },
       {
@@ -559,7 +559,7 @@
         "key": "damage.clear_selection",
         "location": {
           "startingColumn": 24,
-          "startingLine": 427
+          "startingLine": 428
         }
       },
       {
@@ -567,7 +567,7 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 26,
-          "startingLine": 444
+          "startingLine": 445
         }
       },
       {
@@ -575,7 +575,7 @@
         "key": "damage.hide",
         "location": {
           "startingColumn": 28,
-          "startingLine": 447
+          "startingLine": 448
         }
       },
       {
@@ -583,7 +583,7 @@
         "key": "panel.warnings",
         "location": {
           "startingColumn": 18,
-          "startingLine": 459
+          "startingLine": 460
         }
       },
       {
@@ -591,7 +591,7 @@
         "key": "warnings.none",
         "location": {
           "startingColumn": 22,
-          "startingLine": 463
+          "startingLine": 464
         }
       },
       {
@@ -599,7 +599,7 @@
         "key": "• %@",
         "location": {
           "startingColumn": 26,
-          "startingLine": 468
+          "startingLine": 469
         }
       },
       {
@@ -607,7 +607,7 @@
         "key": "telemetry.export",
         "location": {
           "startingColumn": 24,
-          "startingLine": 481
+          "startingLine": 482
         }
       }
     ]

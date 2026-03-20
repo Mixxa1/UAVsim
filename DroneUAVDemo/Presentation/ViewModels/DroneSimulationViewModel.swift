@@ -18,7 +18,7 @@ struct KeyBindingSection: Identifiable {
     var id: String { category.id }
 }
 
-struct SimulationDiagnostics {
+struct SimulationDiagnostics: Equatable {
     var frameTimeMs: Double
     var physicsTimeMs: Double
     var renderTimeMs: Double
@@ -201,10 +201,10 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var terrain: TerrainConfiguration
     @Published private(set) var cameraConfiguration: CameraConfiguration
 
-    @Published private(set) var batteryState: BatteryState
-    @Published private(set) var collisionAnalysis: CollisionAnalysisSnapshot
+    private(set) var batteryState: BatteryState
+    private(set) var collisionAnalysis: CollisionAnalysisSnapshot
     @Published private(set) var damageState: DamageState
-    @Published private(set) var thermalState: ThermalState
+    private(set) var thermalState: ThermalState
     @Published private(set) var fleetStatus: FleetStatus
 
     @Published private(set) var warnings: [String]
@@ -314,6 +314,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private var cachedDiagnostics: SimulationDiagnostics = .zero
     private var pendingTerrainRegenerationTask: Task<Void, Never>?
     private var signalLossSecondAccumulator: Float = 0.0
+    private var fleetInterDroneRisk: Float = 0.0
+    private var fleetNearestInterDroneDistance: Float = .infinity
+    private var isTerrainDensitySliderEditing: Bool = false
 
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
@@ -421,6 +424,8 @@ final class DroneSimulationViewModel: ObservableObject {
         self.damageState = .pristine
         self.thermalState = .nominal
         self.fleetStatus = .disabled
+        self.fleetInterDroneRisk = 0.0
+        self.fleetNearestInterDroneDistance = .infinity
 
         self.warnings = []
         self.diagnostics = .zero
@@ -537,8 +542,8 @@ final class DroneSimulationViewModel: ObservableObject {
         isArmed = false
         showPayloadPlaceholder = false
         wingmen.removeAll()
-        fleetStatus.interDroneRisk = 0.0
-        fleetStatus.nearestInterDroneDistance = .infinity
+        fleetInterDroneRisk = 0.0
+        fleetNearestInterDroneDistance = .infinity
         showBatteryDepletedDialog = false
         homePosition = sceneController.currentDockSpawnPoint()
         simulationTime = 0.0
@@ -610,6 +615,8 @@ final class DroneSimulationViewModel: ObservableObject {
         controlValues = neutralControls(from: state)
         collisionAnalysis = .safe
         showBatteryDepletedDialog = false
+        fleetInterDroneRisk = 0.0
+        fleetNearestInterDroneDistance = .infinity
 
         sceneController.update(
             with: state,
@@ -948,7 +955,9 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
         terrain.density = clampedValue
-        scheduleTerrainDensityRegeneration()
+        if !isTerrainDensitySliderEditing {
+            scheduleTerrainDensityRegeneration()
+        }
     }
 
     func setTerrainSeed(_ value: UInt64) {
@@ -960,6 +969,10 @@ final class DroneSimulationViewModel: ObservableObject {
     func commitTerrainDensityChange() {
         cancelPendingTerrainDensityRegeneration()
         regenerateEnvironment()
+    }
+
+    func setTerrainDensityEditing(_ editing: Bool) {
+        isTerrainDensitySliderEditing = editing
     }
 
     // MARK: - Diagnostics
@@ -996,8 +1009,8 @@ final class DroneSimulationViewModel: ObservableObject {
         fleetStatus.enabled.toggle()
         if !fleetStatus.enabled {
             fleetStatus.mode = .off
-            fleetStatus.interDroneRisk = 0.0
-            fleetStatus.nearestInterDroneDistance = .infinity
+            fleetInterDroneRisk = 0.0
+            fleetNearestInterDroneDistance = .infinity
             wingmen.removeAll()
             sceneController.updateFleetWingmen([], profile: selectedDroneProfile, throttle: state.throttle, deltaTime: 0.0)
         } else if fleetStatus.mode == .off {
@@ -1185,12 +1198,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func scheduleTerrainDensityRegeneration() {
         cancelPendingTerrainDensityRegeneration()
-        pendingTerrainRegenerationTask = Task { [weak self] in
+        pendingTerrainRegenerationTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled, let self else {
                 return
             }
-            await self.commitPendingTerrainDensityRegeneration()
+            self.commitPendingTerrainDensityRegeneration()
         }
     }
 
@@ -1207,7 +1220,12 @@ final class DroneSimulationViewModel: ObservableObject {
     private func startSimulationLoop() {
         simulationTimer?.invalidate()
         simulationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 45.0, repeats: true) { [weak self] _ in
-            self?.tick()
+            guard let self else {
+                return
+            }
+            MainActor.assumeIsolated {
+                self.tick()
+            }
         }
 
         if let simulationTimer {
@@ -1388,7 +1406,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 activeParticleCount: sceneStats.activeParticleCount
             )
             cachedDiagnostics = nextDiagnostics
-            diagnostics = nextDiagnostics
+            if diagnostics != nextDiagnostics {
+                diagnostics = nextDiagnostics
+            }
             diagnosticsSamplingAccumulator = 0.0
         }
 
@@ -1400,7 +1420,9 @@ final class DroneSimulationViewModel: ObservableObject {
             let latestTelemetry = buildTelemetrySnapshot()
 
             if shouldPublishHUD {
-                warnings = latestWarnings
+                if warnings != latestWarnings {
+                    warnings = latestWarnings
+                }
                 telemetry = latestTelemetry
                 hudPublishAccumulator = 0.0
             }
@@ -2049,8 +2071,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func updateFleetStatus(deltaTime: Float) -> [CollisionObstacle] {
         guard fleetStatus.enabled, fleetStatus.mode != .off else {
-            fleetStatus.interDroneRisk = 0.0
-            fleetStatus.nearestInterDroneDistance = .infinity
+            fleetInterDroneRisk = 0.0
+            fleetNearestInterDroneDistance = .infinity
             wingmen.removeAll()
             return []
         }
@@ -2079,8 +2101,8 @@ final class DroneSimulationViewModel: ObservableObject {
             wingmen: wingmen
         )
 
-        fleetStatus.interDroneRisk = interDrone.riskScore
-        fleetStatus.nearestInterDroneDistance = interDrone.nearestSeparation
+        fleetInterDroneRisk = interDrone.riskScore
+        fleetNearestInterDroneDistance = interDrone.nearestSeparation
 
         return fleetManager.collisionObstacles(for: wingmen)
     }
@@ -2110,6 +2132,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func buildWarnings() -> [String] {
+        let fleetWarningStatus = currentFleetStatusSnapshot()
         return DroneWarningBuilder(
             isArmed: isArmed,
             physicalState: physicalState,
@@ -2119,7 +2142,7 @@ final class DroneSimulationViewModel: ObservableObject {
             damageState: damageState,
             selectedDroneProfile: selectedDroneProfile,
             state: state,
-            fleetStatus: fleetStatus,
+            fleetStatus: fleetWarningStatus,
             mode: mode
         ).build()
     }
@@ -2442,6 +2465,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func buildTelemetrySnapshot() -> TelemetrySnapshot {
+        let fleetSnapshot = currentFleetStatusSnapshot()
         let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
         let safeVelocity = finiteVector(state.velocity, fallback: lastFiniteState.velocity)
         let safeOrientation = finiteVector(state.orientation, fallback: lastFiniteState.orientation)
@@ -2452,8 +2476,8 @@ final class DroneSimulationViewModel: ObservableObject {
         let nearestObstacleDistance = collisionAnalysis.nearestObstacleDistance.isFinite
             ? collisionAnalysis.nearestObstacleDistance
             : Float(terrain.worldHalfExtent * 2.0)
-        let nearestInterDroneDistance = fleetStatus.nearestInterDroneDistance.isFinite
-            ? fleetStatus.nearestInterDroneDistance
+        let nearestInterDroneDistance = fleetSnapshot.nearestInterDroneDistance.isFinite
+            ? fleetSnapshot.nearestInterDroneDistance
             : Float(terrain.worldHalfExtent * 2.0)
 
         return TelemetrySnapshot(
@@ -2502,10 +2526,10 @@ final class DroneSimulationViewModel: ObservableObject {
             emergencyActionKey: collisionAnalysis.emergencyAction.titleKey,
             damageSummary: damageState.summary,
             thermalSummary: thermalState.summary,
-            fleetMode: fleetStatus.mode.title,
-            fleetModeKey: fleetStatus.mode.titleKey,
-            wingmanCount: fleetStatus.enabled ? wingmen.count : 0,
-            interDroneRisk: Double(fleetStatus.interDroneRisk),
+            fleetMode: fleetSnapshot.mode.title,
+            fleetModeKey: fleetSnapshot.mode.titleKey,
+            wingmanCount: fleetSnapshot.enabled ? wingmen.count : 0,
+            interDroneRisk: Double(fleetSnapshot.interDroneRisk),
             nearestInterDroneDistance: Double(nearestInterDroneDistance),
             frameTimeMs: cachedDiagnostics.frameTimeMs,
             physicsTimeMs: cachedDiagnostics.physicsTimeMs,
@@ -2515,6 +2539,13 @@ final class DroneSimulationViewModel: ObservableObject {
             activePhysicsBodyCount: cachedDiagnostics.activePhysicsBodyCount,
             activeParticleCount: cachedDiagnostics.activeParticleCount
         )
+    }
+
+    private func currentFleetStatusSnapshot() -> FleetStatus {
+        var snapshot = fleetStatus
+        snapshot.interDroneRisk = fleetInterDroneRisk
+        snapshot.nearestInterDroneDistance = fleetNearestInterDroneDistance
+        return snapshot
     }
 
     private func finiteVector(_ value: SIMD3<Float>, fallback: SIMD3<Float>) -> SIMD3<Float> {
@@ -3014,7 +3045,9 @@ final class DroneSimulationViewModel: ObservableObject {
             let family = profile.fixedWingParameters?.family.rawValue ?? "n/a"
             print(
                 "[UAVCatalog][UI] id=\(profile.id) name=\(profile.displayName) " +
-                "airframe=\(profile.airframeClass.rawValue) visual=\(profile.visualClass.rawValue) family=\(family) " +
+                "category=\(profile.operationalCategory.rawValue) airframe=\(profile.airframeClass.rawValue) " +
+                "style=\(profile.airframeStyle.rawValue) visual=\(profile.visualClass.rawValue) family=\(family) " +
+                "launch=\(profile.launchMethod.rawValue) landing=\(profile.landingMethod.rawValue) " +
                 "maxSpeed=\(profile.maxHorizontalSpeedMps)mps collisionRadius=\(profile.collisionRadius)m"
             )
         }

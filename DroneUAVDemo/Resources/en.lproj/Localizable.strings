@@ -462,9 +462,17 @@
 "drone.model.fixed_rect" = "Rectangular Wing UAV";
 "drone.model.fixed_delta" = "Delta Wing UAV";
 "drone.model.fixed_swept" = "Swept Wing UAV";
+"drone.model.ebee_class" = "eBee-class Mapping UAV";
+"drone.model.ux11_class" = "UX11-class Survey UAV";
+"drone.model.wingtra_class" = "Wingtra-class VTOL UAV";
+"drone.model.trinity_class" = "Trinity-class Pro UAV";
 
 "drone.visual.fixed_rect" = "Fixed-wing rectangular family";
 "drone.visual.fixed_delta" = "Fixed-wing delta family";
 "drone.visual.fixed_swept" = "Fixed-wing swept family";
+"drone.visual.ebee_class" = "Tailless flying-wing mapping platform";
+"drone.visual.ux11_class" = "Conventional survey fixed-wing platform";
+"drone.visual.wingtra_class" = "Tailsitter VTOL fixed-wing platform";
+"drone.visual.trinity_class" = "Professional survey eVTOL platform";
 
 "drone.camera.fixed_front" = "Fixed-wing front camera";

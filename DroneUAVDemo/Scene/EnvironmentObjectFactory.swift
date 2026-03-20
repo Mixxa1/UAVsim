@@ -472,9 +472,14 @@ enum EnvironmentObjectFactory {
 
 enum EnvironmentMaterialRegistry {
     static func groundMaterial(for terrain: TerrainPreset) -> SCNMaterial {
+        if let cached = groundMaterialCache[terrain] {
+            return cached
+        }
+
+        let material: SCNMaterial
         switch terrain {
         case .gridDemo:
-            return terrainMaterial(
+            material = terrainMaterial(
                 albedo: ["Assets/Terrain/Ground/field_ground_01", "Assets/Terrain/Field/field_ground_01"],
                 detail: ["Assets/Terrain/Ground/field_dirt_01", "Assets/Terrain/Field/field_dirt_01"],
                 fallback: NSColor(calibratedRed: 0.12, green: 0.14, blue: 0.17, alpha: 1.0),
@@ -482,7 +487,7 @@ enum EnvironmentMaterialRegistry {
                 metalness: 0.04
             )
         case .field:
-            return terrainMaterial(
+            material = terrainMaterial(
                 albedo: [
                     "Assets/Terrain/Ground/field_ground_01",
                     "Assets/Terrain/Ground/field_ground_02",
@@ -495,7 +500,7 @@ enum EnvironmentMaterialRegistry {
                 metalness: 0.02
             )
         case .forest:
-            return terrainMaterial(
+            material = terrainMaterial(
                 albedo: [
                     "Assets/Terrain/Forest/forest_ground_01",
                     "Assets/Terrain/Forest/forest_ground_02"
@@ -506,7 +511,7 @@ enum EnvironmentMaterialRegistry {
                 metalness: 0.01
             )
         case .city:
-            return terrainMaterial(
+            material = terrainMaterial(
                 albedo: [
                     "Assets/Terrain/Asphalt/city_ground_asphalt_01",
                     "Assets/Terrain/Asphalt/city_ground_concrete_01",
@@ -522,18 +527,34 @@ enum EnvironmentMaterialRegistry {
                 metalness: 0.08
             )
         }
+
+        groundMaterialCache[terrain] = material
+        return material
     }
 
     static func barkMaterial(variant: Int) -> SCNMaterial {
-        pbrMaterial(
+        let normalizedVariant = variant % barkTextureSlots.count
+        if let cached = barkMaterialCache[normalizedVariant] {
+            return cached
+        }
+
+        let material = pbrMaterial(
             textureCandidates: [barkTextureSlots[variant % barkTextureSlots.count]],
             fallbackColor: barkFallbacks[variant % barkFallbacks.count],
             roughness: 0.88,
             metalness: 0.02
         )
+        barkMaterialCache[normalizedVariant] = material
+        return material
     }
 
     static func leafMaterial(variant: Int, biome: TerrainPreset) -> SCNMaterial {
+        let normalizedVariant = variant % leafTextureSlots.count
+        let cacheKey = "\(biome.rawValue)-\(normalizedVariant)"
+        if let cached = leafMaterialCache[cacheKey] {
+            return cached
+        }
+
         let tone: NSColor
         switch biome {
         case .forest:
@@ -547,13 +568,14 @@ enum EnvironmentMaterialRegistry {
         }
 
         let material = pbrMaterial(
-            textureCandidates: [leafTextureSlots[variant % leafTextureSlots.count]],
+            textureCandidates: [leafTextureSlots[normalizedVariant]],
             fallbackColor: tone,
             roughness: 0.84,
             metalness: 0.0
         )
         material.isDoubleSided = true
         material.transparencyMode = SCNTransparencyMode.dualLayer
+        leafMaterialCache[cacheKey] = material
         return material
     }
 
@@ -589,23 +611,39 @@ enum EnvironmentMaterialRegistry {
     fileprivate static func facadeMaterial(family: BuildingFacadeFamily, variant: Int) -> SCNMaterial {
         let slots = facadeTextureSlots[family] ?? facadeTextureSlots[.concretePanel]!
         let fallbacks = facadeFallbacks[family] ?? [NSColor(calibratedWhite: 0.52, alpha: 1.0)]
-        return pbrMaterial(
-            textureCandidates: [slots[variant % slots.count]],
-            fallbackColor: fallbacks[variant % fallbacks.count],
+        let normalizedVariant = variant % slots.count
+        let cacheKey = "\(family.cacheKey)-\(normalizedVariant)"
+        if let cached = facadeMaterialCache[cacheKey] {
+            return cached.copy() as? SCNMaterial ?? cached
+        }
+
+        let material = pbrMaterial(
+            textureCandidates: [slots[normalizedVariant]],
+            fallbackColor: fallbacks[normalizedVariant % fallbacks.count],
             roughness: 0.70,
             metalness: family == .glassAccent ? 0.22 : 0.08
         )
+        facadeMaterialCache[cacheKey] = material
+        return material.copy() as? SCNMaterial ?? material
     }
 
     fileprivate static func roofMaterial(family: BuildingRoofFamily, variant: Int) -> SCNMaterial {
         let slots = roofTextureSlots[family] ?? roofTextureSlots[.flatMetal]!
         let fallbacks = roofFallbacks[family] ?? [NSColor(calibratedWhite: 0.34, alpha: 1.0)]
-        return pbrMaterial(
-            textureCandidates: [slots[variant % slots.count]],
-            fallbackColor: fallbacks[variant % fallbacks.count],
+        let normalizedVariant = variant % slots.count
+        let cacheKey = "\(family.cacheKey)-\(normalizedVariant)"
+        if let cached = roofMaterialCache[cacheKey] {
+            return cached
+        }
+
+        let material = pbrMaterial(
+            textureCandidates: [slots[normalizedVariant]],
+            fallbackColor: fallbacks[normalizedVariant % fallbacks.count],
             roughness: family == .flatMetal ? 0.56 : 0.74,
             metalness: family == .flatMetal ? 0.24 : 0.06
         )
+        roofMaterialCache[cacheKey] = material
+        return material
     }
 
     static let utilityPoleMaterial = pbrMaterial(
@@ -911,19 +949,30 @@ enum EnvironmentMaterialRegistry {
     }
 
     private static func image(named name: String) -> NSImage? {
+        if let cached = textureImageCache[name] {
+            return cached
+        }
+        if missingTextureNames.contains(name) {
+            return nil
+        }
+
         if let direct = NSImage(named: NSImage.Name(name)) {
+            textureImageCache[name] = direct
             return direct
         }
         if let shortName = name.split(separator: "/").last {
             if let short = NSImage(named: NSImage.Name(String(shortName))) {
+                textureImageCache[name] = short
                 return short
             }
         }
         for url in candidateTextureFileURLs(for: name) {
             if let fileImage = NSImage(contentsOf: url) {
+                textureImageCache[name] = fileImage
                 return fileImage
             }
         }
+        missingTextureNames.insert(name)
         return nil
     }
 
@@ -955,6 +1004,13 @@ enum EnvironmentMaterialRegistry {
 
     private static let textureFileExtensions = ["png", "jpg", "jpeg"]
     private static var facadeWindowOverlayCache: [String: NSImage] = [:]
+    private static var textureImageCache: [String: NSImage] = [:]
+    private static var missingTextureNames: Set<String> = []
+    private static var groundMaterialCache: [TerrainPreset: SCNMaterial] = [:]
+    private static var barkMaterialCache: [Int: SCNMaterial] = [:]
+    private static var leafMaterialCache: [String: SCNMaterial] = [:]
+    private static var facadeMaterialCache: [String: SCNMaterial] = [:]
+    private static var roofMaterialCache: [String: SCNMaterial] = [:]
 }
 
 private enum TreeArchetype: CaseIterable {
@@ -1014,6 +1070,15 @@ fileprivate enum BuildingFacadeFamily {
 fileprivate enum BuildingRoofFamily {
     case tile
     case flatMetal
+
+    var cacheKey: String {
+        switch self {
+        case .tile:
+            return "tile"
+        case .flatMetal:
+            return "flat-metal"
+        }
+    }
 }
 
 private struct DeterministicRNG {

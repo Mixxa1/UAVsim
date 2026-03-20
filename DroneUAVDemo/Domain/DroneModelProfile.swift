@@ -6,10 +6,40 @@ enum AirframeClass: String, CaseIterable {
     case fixedWing
 }
 
+enum DroneOperationalCategory: String, CaseIterable {
+    case multirotor
+    case fixedWing
+    case fixedWingVTOL
+}
+
+enum AirframeStyle: String, CaseIterable {
+    case multirotorQuad
+    case conventionalFixedWing
+    case flyingWing
+    case tailsitterVTOL
+    case surveyEVTOL
+}
+
+enum LaunchMethod: String, CaseIterable {
+    case vertical
+    case handLaunch
+}
+
+enum LandingMethod: String, CaseIterable {
+    case vertical
+    case bellyLanding
+    case linearBellyLanding
+    case tailsitterVerticalLanding
+}
+
 enum FixedWingFamily: String, CaseIterable {
     case rectangular
     case delta
     case swept
+    case flyingWing
+    case conventionalSurvey
+    case tailsitterVTOL
+    case surveyEVTOL
 }
 
 enum DroneVisualClass: String, CaseIterable {
@@ -20,6 +50,10 @@ enum DroneVisualClass: String, CaseIterable {
     case fixedWingRectangular
     case fixedWingDelta
     case fixedWingSwept
+    case ebeeClass
+    case delairUX11Class
+    case wingtraClass
+    case trinityClass
 
     var titleKey: String {
         switch self {
@@ -37,6 +71,14 @@ enum DroneVisualClass: String, CaseIterable {
             return "drone.visual.fixed_delta"
         case .fixedWingSwept:
             return "drone.visual.fixed_swept"
+        case .ebeeClass:
+            return "drone.visual.ebee_class"
+        case .delairUX11Class:
+            return "drone.visual.ux11_class"
+        case .wingtraClass:
+            return "drone.visual.wingtra_class"
+        case .trinityClass:
+            return "drone.visual.trinity_class"
         }
     }
 }
@@ -111,8 +153,12 @@ struct DroneModelProfile: Identifiable, Hashable {
 
     let cameraLayoutKey: String
     let visualClass: DroneVisualClass
+    let operationalCategory: DroneOperationalCategory
     let airframeClass: AirframeClass
+    let airframeStyle: AirframeStyle
     let fixedWingParameters: FixedWingParameters?
+    let launchMethod: LaunchMethod
+    let landingMethod: LandingMethod
 
     let controlResponsiveness: Float
     let hoverThrottle: Float
@@ -185,8 +231,12 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 batteryEnergyWh: 18.96,
                 cameraLayoutKey: "drone.camera.single_compact",
                 visualClass: .miniCompact,
+                operationalCategory: .multirotor,
                 airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
                 fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
                 controlResponsiveness: 0.92,
                 hoverThrottle: 0.54,
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 7.4, followHeight: 2.6),
@@ -212,8 +262,12 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 batteryEnergyWh: 62.5,
                 cameraLayoutKey: "drone.camera.dual_front",
                 visualClass: .vectorMidDual,
+                operationalCategory: .multirotor,
                 airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
                 fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
                 controlResponsiveness: 0.86,
                 hoverThrottle: 0.56,
                 cameraPreset: DroneCameraPreset(fpvFov: 82.0, followDistance: 8.8, followHeight: 3.1),
@@ -239,8 +293,12 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 batteryEnergyWh: 77.0,
                 cameraLayoutKey: "drone.camera.triple_front",
                 visualClass: .atlasProTriple,
+                operationalCategory: .multirotor,
                 airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
                 fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
                 controlResponsiveness: 0.77,
                 hoverThrottle: 0.58,
                 cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 9.4, followHeight: 3.3),
@@ -266,7 +324,9 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 batteryEnergyWh: 102.0,
                 cameraLayoutKey: "drone.camera.fixed_front",
                 visualClass: .fixedWingRectangular,
+                operationalCategory: .fixedWing,
                 airframeClass: .fixedWing,
+                airframeStyle: .conventionalFixedWing,
                 fixedWingParameters: FixedWingParameters(
                     family: .rectangular,
                     minSustainableSpeedMps: 11.0,
@@ -274,6 +334,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     turnAuthority: 0.75,
                     maxBankAngleDeg: 48.0
                 ),
+                launchMethod: .handLaunch,
+                landingMethod: .bellyLanding,
                 controlResponsiveness: 0.68,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 74.0, followDistance: 12.0, followHeight: 4.2),
@@ -299,7 +361,9 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 batteryEnergyWh: 86.0,
                 cameraLayoutKey: "drone.camera.fixed_front",
                 visualClass: .fixedWingDelta,
+                operationalCategory: .fixedWing,
                 airframeClass: .fixedWing,
+                airframeStyle: .flyingWing,
                 fixedWingParameters: FixedWingParameters(
                     family: .delta,
                     minSustainableSpeedMps: 13.5,
@@ -307,6 +371,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     turnAuthority: 1.0,
                     maxBankAngleDeg: 62.0
                 ),
+                launchMethod: .handLaunch,
+                landingMethod: .bellyLanding,
                 controlResponsiveness: 0.82,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 13.0, followHeight: 4.5),
@@ -332,7 +398,9 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 batteryEnergyWh: 118.0,
                 cameraLayoutKey: "drone.camera.fixed_front",
                 visualClass: .fixedWingSwept,
+                operationalCategory: .fixedWing,
                 airframeClass: .fixedWing,
+                airframeStyle: .conventionalFixedWing,
                 fixedWingParameters: FixedWingParameters(
                     family: .swept,
                     minSustainableSpeedMps: 12.0,
@@ -340,11 +408,161 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     turnAuthority: 0.70,
                     maxBankAngleDeg: 52.0
                 ),
+                launchMethod: .handLaunch,
+                landingMethod: .bellyLanding,
                 controlResponsiveness: 0.64,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 72.0, followDistance: 14.5, followHeight: 5.0),
                 collisionRadiusMeters: 0.50,
                 notes: "Swept/curved wing long-endurance profile",
+                sourceURL: nil
+            ),
+            DroneModelProfile(
+                id: "ebeeClass",
+                displayName: "eBee-class Mapping UAV",
+                displayNameKey: "drone.model.ebee_class",
+                manufacturer: "GeoSurvey",
+                takeoffMassKg: 1.6,
+                dimensionsFoldedMm: DroneDimensionsMM(x: 680, y: 240, z: 140),
+                dimensionsUnfoldedMm: DroneDimensionsMM(x: 1160, y: 700, z: 180),
+                maxHorizontalSpeedMps: 19.0,
+                maxAscentSpeedMps: 4.2,
+                maxDescentSpeedMps: 5.8,
+                maxFlightTimeMin: 90.0,
+                maxHoverTimeMin: 0.0,
+                maxWindResistanceMps: 12.0,
+                batteryCapacitymAh: 6300,
+                batteryEnergyWh: 94.0,
+                cameraLayoutKey: "drone.camera.fixed_front",
+                visualClass: .ebeeClass,
+                operationalCategory: .fixedWing,
+                airframeClass: .fixedWing,
+                airframeStyle: .flyingWing,
+                fixedWingParameters: FixedWingParameters(
+                    family: .flyingWing,
+                    minSustainableSpeedMps: 9.5,
+                    cruiseSpeedMps: 12.0,
+                    turnAuthority: 0.78,
+                    maxBankAngleDeg: 46.0
+                ),
+                launchMethod: .handLaunch,
+                landingMethod: .linearBellyLanding,
+                controlResponsiveness: 0.74,
+                hoverThrottle: 0.0,
+                cameraPreset: DroneCameraPreset(fpvFov: 76.0, followDistance: 11.8, followHeight: 3.8),
+                collisionRadiusMeters: 0.39,
+                notes: "Compact flying-wing mapping class with hand-launch survey profile",
+                sourceURL: nil
+            ),
+            DroneModelProfile(
+                id: "delairUX11Class",
+                displayName: "UX11-class Survey UAV",
+                displayNameKey: "drone.model.ux11_class",
+                manufacturer: "GeoSurvey",
+                takeoffMassKg: 1.6,
+                dimensionsFoldedMm: DroneDimensionsMM(x: 720, y: 260, z: 160),
+                dimensionsUnfoldedMm: DroneDimensionsMM(x: 1200, y: 790, z: 220),
+                maxHorizontalSpeedMps: 21.0,
+                maxAscentSpeedMps: 4.8,
+                maxDescentSpeedMps: 6.2,
+                maxFlightTimeMin: 80.0,
+                maxHoverTimeMin: 0.0,
+                maxWindResistanceMps: 13.0,
+                batteryCapacitymAh: 6600,
+                batteryEnergyWh: 99.0,
+                cameraLayoutKey: "drone.camera.fixed_front",
+                visualClass: .delairUX11Class,
+                operationalCategory: .fixedWing,
+                airframeClass: .fixedWing,
+                airframeStyle: .conventionalFixedWing,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 10.5,
+                    cruiseSpeedMps: 15.0,
+                    turnAuthority: 0.72,
+                    maxBankAngleDeg: 44.0
+                ),
+                launchMethod: .handLaunch,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.70,
+                hoverThrottle: 0.0,
+                cameraPreset: DroneCameraPreset(fpvFov: 74.0, followDistance: 12.4, followHeight: 4.0),
+                collisionRadiusMeters: 0.43,
+                notes: "Classical survey fixed-wing with slender fuselage, tailplane, and belly landing profile",
+                sourceURL: nil
+            ),
+            DroneModelProfile(
+                id: "wingtraClass",
+                displayName: "Wingtra-class VTOL UAV",
+                displayNameKey: "drone.model.wingtra_class",
+                manufacturer: "GeoSurvey",
+                takeoffMassKg: 4.8,
+                dimensionsFoldedMm: DroneDimensionsMM(x: 860, y: 320, z: 230),
+                dimensionsUnfoldedMm: DroneDimensionsMM(x: 1250, y: 940, z: 300),
+                maxHorizontalSpeedMps: 26.0,
+                maxAscentSpeedMps: 5.8,
+                maxDescentSpeedMps: 7.0,
+                maxFlightTimeMin: 59.0,
+                maxHoverTimeMin: 0.0,
+                maxWindResistanceMps: 14.0,
+                batteryCapacitymAh: 10800,
+                batteryEnergyWh: 160.0,
+                cameraLayoutKey: "drone.camera.fixed_front",
+                visualClass: .wingtraClass,
+                operationalCategory: .fixedWingVTOL,
+                airframeClass: .fixedWing,
+                airframeStyle: .tailsitterVTOL,
+                fixedWingParameters: FixedWingParameters(
+                    family: .tailsitterVTOL,
+                    minSustainableSpeedMps: 11.8,
+                    cruiseSpeedMps: 16.0,
+                    turnAuthority: 0.68,
+                    maxBankAngleDeg: 40.0
+                ),
+                launchMethod: .vertical,
+                landingMethod: .tailsitterVerticalLanding,
+                controlResponsiveness: 0.62,
+                hoverThrottle: 0.0,
+                cameraPreset: DroneCameraPreset(fpvFov: 72.0, followDistance: 13.8, followHeight: 4.6),
+                collisionRadiusMeters: 0.50,
+                notes: "Tailsitter VTOL survey platform with vertical launch/landing cues and cruise wing geometry",
+                sourceURL: nil
+            ),
+            DroneModelProfile(
+                id: "trinityClass",
+                displayName: "Trinity-class Pro UAV",
+                displayNameKey: "drone.model.trinity_class",
+                manufacturer: "GeoSurvey",
+                takeoffMassKg: 5.75,
+                dimensionsFoldedMm: DroneDimensionsMM(x: 1420, y: 420, z: 260),
+                dimensionsUnfoldedMm: DroneDimensionsMM(x: 2400, y: 1220, z: 320),
+                maxHorizontalSpeedMps: 28.0,
+                maxAscentSpeedMps: 5.4,
+                maxDescentSpeedMps: 6.6,
+                maxFlightTimeMin: 90.0,
+                maxHoverTimeMin: 0.0,
+                maxWindResistanceMps: 15.5,
+                batteryCapacitymAh: 13200,
+                batteryEnergyWh: 198.0,
+                cameraLayoutKey: "drone.camera.fixed_front",
+                visualClass: .trinityClass,
+                operationalCategory: .fixedWingVTOL,
+                airframeClass: .fixedWing,
+                airframeStyle: .surveyEVTOL,
+                fixedWingParameters: FixedWingParameters(
+                    family: .surveyEVTOL,
+                    minSustainableSpeedMps: 12.5,
+                    cruiseSpeedMps: 17.0,
+                    turnAuthority: 0.60,
+                    maxBankAngleDeg: 38.0
+                ),
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.58,
+                hoverThrottle: 0.0,
+                cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 16.8, followHeight: 5.8),
+                collisionRadiusMeters: 0.72,
+                notes: "Larger professional mapping fixed-wing eVTOL with twin-boom survey proportions",
                 sourceURL: nil
             ),
             Self.abstractProfile(from: abstractParameters)
@@ -374,8 +592,12 @@ struct LIPODroneModelRepository: DroneModelRepository {
             batteryEnergyWh: parameters.batteryEnergyWh,
             cameraLayoutKey: "drone.camera.custom",
             visualClass: .abstract,
+            operationalCategory: .multirotor,
             airframeClass: .multirotor,
+            airframeStyle: .multirotorQuad,
             fixedWingParameters: nil,
+            launchMethod: .vertical,
+            landingMethod: .vertical,
             controlResponsiveness: parameters.controlResponsiveness,
             hoverThrottle: 0.56,
             cameraPreset: DroneCameraPreset(fpvFov: 82.0, followDistance: 8.0, followHeight: 2.8),

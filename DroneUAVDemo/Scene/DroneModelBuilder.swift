@@ -26,6 +26,14 @@ enum DroneModelBuilder {
             return buildFixedWing(profile: profile, family: .delta)
         case .fixedWingSwept:
             return buildFixedWing(profile: profile, family: .swept)
+        case .ebeeClass:
+            return buildEBeeClass(profile: profile)
+        case .delairUX11Class:
+            return buildUX11Class(profile: profile)
+        case .wingtraClass:
+            return buildWingtraClass(profile: profile)
+        case .trinityClass:
+            return buildTrinityClass(profile: profile)
         }
     }
 
@@ -314,13 +322,13 @@ enum DroneModelBuilder {
         let fuselageLength: Float
         let fuselageRadius: Float
         switch family {
-        case .rectangular:
+        case .rectangular, .conventionalSurvey:
             fuselageLength = 0.62
             fuselageRadius = 0.042
-        case .delta:
+        case .delta, .flyingWing:
             fuselageLength = 0.56
             fuselageRadius = 0.036
-        case .swept:
+        case .swept, .tailsitterVTOL, .surveyEVTOL:
             fuselageLength = 0.72
             fuselageRadius = 0.048
         }
@@ -371,7 +379,7 @@ enum DroneModelBuilder {
         componentNodes[.frontCameraGimbal, default: []].append(fpvAnchor)
 
         switch family {
-        case .rectangular:
+        case .rectangular, .conventionalSurvey:
             let wing = SCNNode(geometry: SCNBox(
                 width: 0.98,
                 height: CGFloat(fuselageRadius * 0.32),
@@ -384,7 +392,7 @@ enum DroneModelBuilder {
             componentNodes[.armFL, default: []].append(wing)
             componentNodes[.armFR, default: []].append(wing)
 
-        case .delta:
+        case .delta, .flyingWing:
             let wing = SCNNode(geometry: SCNPyramid(
                 width: 0.90,
                 height: CGFloat(fuselageRadius * 0.26),
@@ -397,7 +405,7 @@ enum DroneModelBuilder {
             componentNodes[.armFL, default: []].append(wing)
             componentNodes[.armFR, default: []].append(wing)
 
-        case .swept:
+        case .swept, .tailsitterVTOL, .surveyEVTOL:
             let centerWing = SCNNode(geometry: SCNBox(
                 width: 0.38,
                 height: CGFloat(fuselageRadius * 0.28),
@@ -469,6 +477,581 @@ enum DroneModelBuilder {
             componentNodes: componentNodes,
             fpvAnchorNode: fpvAnchor
         )
+    }
+
+    private static func buildEBeeClass(profile: DroneModelProfile) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "droneRoot"
+
+        let bodyMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.92, green: 0.94, blue: 0.95, alpha: 1.0),
+            roughness: 0.40,
+            metalness: 0.16
+        )
+        let wingMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.34, green: 0.39, blue: 0.46, alpha: 1.0),
+            roughness: 0.44,
+            metalness: 0.24
+        )
+        let accentMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.16, green: 0.19, blue: 0.24, alpha: 1.0),
+            roughness: 0.28,
+            metalness: 0.42
+        )
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let wing = makePlanformNode(
+            points: [
+                CGPoint(x: 0.00, y: 0.34),
+                CGPoint(x: 0.21, y: 0.27),
+                CGPoint(x: 0.58, y: 0.03),
+                CGPoint(x: 0.49, y: -0.12),
+                CGPoint(x: 0.16, y: -0.11),
+                CGPoint(x: 0.00, y: -0.02),
+                CGPoint(x: -0.16, y: -0.11),
+                CGPoint(x: -0.49, y: -0.12),
+                CGPoint(x: -0.58, y: 0.03),
+                CGPoint(x: -0.21, y: 0.27)
+            ],
+            thickness: 0.024,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.02, 0.0)
+        root.addChildNode(wing)
+        componentNodes[.armFL, default: []].append(wing)
+        componentNodes[.armFR, default: []].append(wing)
+
+        let centerBody = SCNNode()
+        let fuselage = horizontalCapsule(length: 0.40, radius: 0.040, material: bodyMaterial)
+        centerBody.addChildNode(fuselage)
+
+        let canopy = SCNNode(geometry: SCNSphere(radius: 0.042))
+        canopy.position = SCNVector3(0.0, 0.016, 0.11)
+        canopy.scale = SCNVector3(1.0, 0.55, 1.25)
+        canopy.geometry?.materials = [accentMaterial]
+        centerBody.addChildNode(canopy)
+
+        let noseCone = SCNNode(geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.040, height: 0.11))
+        noseCone.position = SCNVector3(0.0, 0.0, 0.22)
+        noseCone.eulerAngles = SCNVector3(-Float.pi / 2, 0.0, 0.0)
+        noseCone.geometry?.materials = [bodyMaterial]
+        centerBody.addChildNode(noseCone)
+
+        let keel = SCNNode(geometry: SCNBox(width: 0.10, height: 0.030, length: 0.16, chamferRadius: 0.008))
+        keel.position = SCNVector3(0.0, -0.020, 0.02)
+        keel.geometry?.materials = [accentMaterial]
+        centerBody.addChildNode(keel)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.010, 0.23)
+        centerBody.addChildNode(fpvAnchor)
+        componentNodes[.frontCameraGimbal, default: []].append(fpvAnchor)
+
+        root.addChildNode(centerBody)
+        componentNodes[.flightControllerCore, default: []].append(centerBody)
+        componentNodes[.battery, default: []].append(keel)
+
+        let rearPylon = SCNNode(geometry: SCNBox(width: 0.035, height: 0.070, length: 0.055, chamferRadius: 0.006))
+        rearPylon.position = SCNVector3(0.0, 0.018, -0.13)
+        rearPylon.geometry?.materials = [accentMaterial]
+        root.addChildNode(rearPylon)
+        componentNodes[.escPower, default: []].append(rearPylon)
+
+        let motor = forwardMotorNode(radius: 0.016, length: 0.042, material: accentMaterial)
+        motor.position = SCNVector3(0.0, 0.025, -0.17)
+        root.addChildNode(motor)
+        componentNodes[.motorFL, default: []].append(motor)
+
+        let propeller = forwardPropellerNode(material: material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.82), roughness: 0.24, metalness: 0.08), radius: 0.085)
+        propeller.position = SCNVector3(0.0, 0.025, -0.205)
+        root.addChildNode(propeller)
+        componentNodes[.propellerFL, default: []].append(propeller)
+
+        let leftWinglet = makeVerticalSurfaceNode(
+            points: [
+                CGPoint(x: -0.02, y: 0.0),
+                CGPoint(x: 0.06, y: 0.0),
+                CGPoint(x: 0.03, y: 0.12),
+                CGPoint(x: -0.01, y: 0.10)
+            ],
+            thickness: 0.012,
+            material: wingMaterial
+        )
+        leftWinglet.position = SCNVector3(-0.50, 0.018, -0.06)
+        root.addChildNode(leftWinglet)
+        componentNodes[.armRL, default: []].append(leftWinglet)
+
+        let rightWinglet = leftWinglet.clone()
+        rightWinglet.position.x = 0.50
+        root.addChildNode(rightWinglet)
+        componentNodes[.armRR, default: []].append(rightWinglet)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [propeller],
+            propellerSpinDirections: [1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor
+        )
+    }
+
+    private static func buildUX11Class(profile: DroneModelProfile) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "droneRoot"
+
+        let bodyMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.86, green: 0.88, blue: 0.90, alpha: 1.0),
+            roughness: 0.38,
+            metalness: 0.18
+        )
+        let wingMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.33, green: 0.36, blue: 0.41, alpha: 1.0),
+            roughness: 0.42,
+            metalness: 0.26
+        )
+        let accentMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.18, green: 0.21, blue: 0.25, alpha: 1.0),
+            roughness: 0.28,
+            metalness: 0.40
+        )
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.66, radius: 0.028, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        componentNodes[.flightControllerCore, default: []].append(fuselage)
+
+        let noseCone = SCNNode(geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.030, height: 0.11))
+        noseCone.position = SCNVector3(0.0, 0.0, 0.36)
+        noseCone.eulerAngles = SCNVector3(-Float.pi / 2, 0.0, 0.0)
+        noseCone.geometry?.materials = [bodyMaterial]
+        root.addChildNode(noseCone)
+
+        let payloadNose = SCNNode(geometry: SCNSphere(radius: 0.030))
+        payloadNose.position = SCNVector3(0.0, -0.010, 0.29)
+        payloadNose.scale = SCNVector3(1.0, 0.68, 1.22)
+        payloadNose.geometry?.materials = [accentMaterial]
+        root.addChildNode(payloadNose)
+        componentNodes[.frontCameraGimbal, default: []].append(payloadNose)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.002, 0.34)
+        root.addChildNode(fpvAnchor)
+
+        let wing = makePlanformNode(
+            points: [
+                CGPoint(x: -0.60, y: 0.05),
+                CGPoint(x: -0.16, y: 0.14),
+                CGPoint(x: 0.16, y: 0.14),
+                CGPoint(x: 0.60, y: 0.05),
+                CGPoint(x: 0.54, y: -0.11),
+                CGPoint(x: -0.54, y: -0.11)
+            ],
+            thickness: 0.020,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.018, 0.03)
+        root.addChildNode(wing)
+        componentNodes[.armFL, default: []].append(wing)
+        componentNodes[.armFR, default: []].append(wing)
+
+        let tailPlane = makePlanformNode(
+            points: [
+                CGPoint(x: -0.20, y: 0.03),
+                CGPoint(x: 0.20, y: 0.03),
+                CGPoint(x: 0.16, y: -0.07),
+                CGPoint(x: -0.16, y: -0.07)
+            ],
+            thickness: 0.014,
+            material: wingMaterial
+        )
+        tailPlane.position = SCNVector3(0.0, 0.050, -0.28)
+        root.addChildNode(tailPlane)
+        componentNodes[.armRL, default: []].append(tailPlane)
+        componentNodes[.armRR, default: []].append(tailPlane)
+
+        let fin = makeVerticalSurfaceNode(
+            points: [
+                CGPoint(x: -0.02, y: 0.0),
+                CGPoint(x: 0.09, y: 0.0),
+                CGPoint(x: 0.03, y: 0.15),
+                CGPoint(x: -0.01, y: 0.12)
+            ],
+            thickness: 0.012,
+            material: wingMaterial
+        )
+        fin.position = SCNVector3(0.0, 0.054, -0.30)
+        root.addChildNode(fin)
+        componentNodes[.armRR, default: []].append(fin)
+
+        let pylon = SCNNode(geometry: SCNBox(width: 0.030, height: 0.075, length: 0.040, chamferRadius: 0.005))
+        pylon.position = SCNVector3(0.0, 0.062, -0.16)
+        pylon.geometry?.materials = [accentMaterial]
+        root.addChildNode(pylon)
+        componentNodes[.escPower, default: []].append(pylon)
+
+        let batteryPack = SCNNode(geometry: SCNBox(width: 0.060, height: 0.030, length: 0.18, chamferRadius: 0.006))
+        batteryPack.position = SCNVector3(0.0, -0.012, -0.02)
+        batteryPack.geometry?.materials = [accentMaterial]
+        root.addChildNode(batteryPack)
+        componentNodes[.battery, default: []].append(batteryPack)
+
+        let motor = forwardMotorNode(radius: 0.015, length: 0.038, material: accentMaterial)
+        motor.position = SCNVector3(0.0, 0.066, -0.20)
+        root.addChildNode(motor)
+        componentNodes[.motorFL, default: []].append(motor)
+
+        let propeller = forwardPropellerNode(material: material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.82), roughness: 0.24, metalness: 0.08), radius: 0.095)
+        propeller.position = SCNVector3(0.0, 0.066, -0.235)
+        root.addChildNode(propeller)
+        componentNodes[.propellerFL, default: []].append(propeller)
+
+        let bellySkid = SCNNode(geometry: SCNBox(width: 0.10, height: 0.018, length: 0.30, chamferRadius: 0.006))
+        bellySkid.position = SCNVector3(0.0, -0.040, 0.02)
+        bellySkid.geometry?.materials = [accentMaterial]
+        root.addChildNode(bellySkid)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [propeller],
+            propellerSpinDirections: [1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor
+        )
+    }
+
+    private static func buildWingtraClass(profile: DroneModelProfile) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "droneRoot"
+
+        let bodyMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.83, green: 0.85, blue: 0.88, alpha: 1.0),
+            roughness: 0.36,
+            metalness: 0.18
+        )
+        let wingMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.28, green: 0.32, blue: 0.38, alpha: 1.0),
+            roughness: 0.44,
+            metalness: 0.24
+        )
+        let accentMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.17, green: 0.20, blue: 0.24, alpha: 1.0),
+            roughness: 0.30,
+            metalness: 0.42
+        )
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.74, radius: 0.035, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        componentNodes[.flightControllerCore, default: []].append(fuselage)
+
+        let bodySkid = SCNNode(geometry: SCNBox(width: 0.085, height: 0.026, length: 0.24, chamferRadius: 0.006))
+        bodySkid.position = SCNVector3(0.0, -0.020, -0.02)
+        bodySkid.geometry?.materials = [accentMaterial]
+        root.addChildNode(bodySkid)
+        componentNodes[.battery, default: []].append(bodySkid)
+
+        let noseCone = SCNNode(geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.038, height: 0.12))
+        noseCone.position = SCNVector3(0.0, 0.0, 0.40)
+        noseCone.eulerAngles = SCNVector3(-Float.pi / 2, 0.0, 0.0)
+        noseCone.geometry?.materials = [bodyMaterial]
+        root.addChildNode(noseCone)
+
+        let wing = makePlanformNode(
+            points: [
+                CGPoint(x: -0.625, y: 0.05),
+                CGPoint(x: -0.18, y: 0.15),
+                CGPoint(x: 0.18, y: 0.15),
+                CGPoint(x: 0.625, y: 0.05),
+                CGPoint(x: 0.48, y: -0.14),
+                CGPoint(x: -0.48, y: -0.14)
+            ],
+            thickness: 0.022,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.018, 0.02)
+        root.addChildNode(wing)
+        componentNodes[.armFL, default: []].append(wing)
+        componentNodes[.armFR, default: []].append(wing)
+
+        let leftFin = makeVerticalSurfaceNode(
+            points: [
+                CGPoint(x: -0.03, y: 0.0),
+                CGPoint(x: 0.11, y: 0.0),
+                CGPoint(x: 0.04, y: 0.18),
+                CGPoint(x: -0.02, y: 0.15)
+            ],
+            thickness: 0.012,
+            material: wingMaterial
+        )
+        leftFin.position = SCNVector3(-0.43, 0.015, -0.18)
+        root.addChildNode(leftFin)
+        componentNodes[.armRL, default: []].append(leftFin)
+
+        let rightFin = leftFin.clone()
+        rightFin.position.x = 0.43
+        root.addChildNode(rightFin)
+        componentNodes[.armRR, default: []].append(rightFin)
+
+        let tailSkid = SCNNode(geometry: SCNBox(width: 0.05, height: 0.11, length: 0.018, chamferRadius: 0.004))
+        tailSkid.position = SCNVector3(0.0, -0.005, -0.31)
+        tailSkid.geometry?.materials = [accentMaterial]
+        root.addChildNode(tailSkid)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.006, 0.37)
+        root.addChildNode(fpvAnchor)
+        componentNodes[.frontCameraGimbal, default: []].append(fpvAnchor)
+
+        let leftPylon = SCNNode(geometry: SCNBox(width: 0.032, height: 0.090, length: 0.036, chamferRadius: 0.005))
+        leftPylon.position = SCNVector3(-0.30, 0.054, 0.06)
+        leftPylon.geometry?.materials = [accentMaterial]
+        root.addChildNode(leftPylon)
+
+        let rightPylon = leftPylon.clone()
+        rightPylon.position.x = 0.30
+        root.addChildNode(rightPylon)
+        componentNodes[.escPower, default: []].append(leftPylon)
+        componentNodes[.escPower, default: []].append(rightPylon)
+
+        let leftMotor = forwardMotorNode(radius: 0.018, length: 0.044, material: accentMaterial)
+        leftMotor.position = SCNVector3(-0.30, 0.060, 0.09)
+        root.addChildNode(leftMotor)
+        componentNodes[.motorFL, default: []].append(leftMotor)
+
+        let rightMotor = forwardMotorNode(radius: 0.018, length: 0.044, material: accentMaterial)
+        rightMotor.position = SCNVector3(0.30, 0.060, 0.09)
+        root.addChildNode(rightMotor)
+        componentNodes[.motorFR, default: []].append(rightMotor)
+
+        let leftProp = forwardPropellerNode(material: material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.24, metalness: 0.08), radius: 0.115)
+        leftProp.position = SCNVector3(-0.30, 0.060, 0.13)
+        root.addChildNode(leftProp)
+        componentNodes[.propellerFL, default: []].append(leftProp)
+
+        let rightProp = forwardPropellerNode(material: material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.24, metalness: 0.08), radius: 0.115)
+        rightProp.position = SCNVector3(0.30, 0.060, 0.13)
+        root.addChildNode(rightProp)
+        componentNodes[.propellerFR, default: []].append(rightProp)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [leftProp, rightProp],
+            propellerSpinDirections: [1.0, -1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor
+        )
+    }
+
+    private static func buildTrinityClass(profile: DroneModelProfile) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "droneRoot"
+
+        let bodyMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.88, green: 0.89, blue: 0.91, alpha: 1.0),
+            roughness: 0.34,
+            metalness: 0.20
+        )
+        let wingMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.26, green: 0.30, blue: 0.35, alpha: 1.0),
+            roughness: 0.42,
+            metalness: 0.26
+        )
+        let accentMaterial = material(
+            diffuse: NSColor(calibratedRed: 0.16, green: 0.18, blue: 0.22, alpha: 1.0),
+            roughness: 0.30,
+            metalness: 0.44
+        )
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 1.04, radius: 0.048, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        componentNodes[.flightControllerCore, default: []].append(fuselage)
+
+        let payloadBay = SCNNode(geometry: SCNBox(width: 0.12, height: 0.055, length: 0.30, chamferRadius: 0.010))
+        payloadBay.position = SCNVector3(0.0, -0.020, 0.10)
+        payloadBay.geometry?.materials = [accentMaterial]
+        root.addChildNode(payloadBay)
+        componentNodes[.battery, default: []].append(payloadBay)
+
+        let noseCone = SCNNode(geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.050, height: 0.18))
+        noseCone.position = SCNVector3(0.0, 0.0, 0.58)
+        noseCone.eulerAngles = SCNVector3(-Float.pi / 2, 0.0, 0.0)
+        noseCone.geometry?.materials = [bodyMaterial]
+        root.addChildNode(noseCone)
+
+        let wing = makePlanformNode(
+            points: [
+                CGPoint(x: -1.20, y: 0.10),
+                CGPoint(x: -0.34, y: 0.22),
+                CGPoint(x: 0.34, y: 0.22),
+                CGPoint(x: 1.20, y: 0.10),
+                CGPoint(x: 1.02, y: -0.18),
+                CGPoint(x: -1.02, y: -0.18)
+            ],
+            thickness: 0.028,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.024, 0.02)
+        root.addChildNode(wing)
+        componentNodes[.armFL, default: []].append(wing)
+        componentNodes[.armFR, default: []].append(wing)
+
+        let leftBoom = horizontalCapsule(length: 0.70, radius: 0.022, material: accentMaterial)
+        leftBoom.position = SCNVector3(-0.32, 0.010, -0.18)
+        root.addChildNode(leftBoom)
+        componentNodes[.armRL, default: []].append(leftBoom)
+
+        let rightBoom = horizontalCapsule(length: 0.70, radius: 0.022, material: accentMaterial)
+        rightBoom.position = SCNVector3(0.32, 0.010, -0.18)
+        root.addChildNode(rightBoom)
+        componentNodes[.armRR, default: []].append(rightBoom)
+
+        let tailPlane = makePlanformNode(
+            points: [
+                CGPoint(x: -0.32, y: 0.04),
+                CGPoint(x: 0.32, y: 0.04),
+                CGPoint(x: 0.26, y: -0.08),
+                CGPoint(x: -0.26, y: -0.08)
+            ],
+            thickness: 0.018,
+            material: wingMaterial
+        )
+        tailPlane.position = SCNVector3(0.0, 0.070, -0.52)
+        root.addChildNode(tailPlane)
+        componentNodes[.armRL, default: []].append(tailPlane)
+        componentNodes[.armRR, default: []].append(tailPlane)
+
+        let leftFin = makeVerticalSurfaceNode(
+            points: [
+                CGPoint(x: -0.03, y: 0.0),
+                CGPoint(x: 0.13, y: 0.0),
+                CGPoint(x: 0.05, y: 0.22),
+                CGPoint(x: -0.02, y: 0.18)
+            ],
+            thickness: 0.014,
+            material: wingMaterial
+        )
+        leftFin.position = SCNVector3(-0.32, 0.070, -0.56)
+        root.addChildNode(leftFin)
+
+        let rightFin = leftFin.clone()
+        rightFin.position.x = 0.32
+        root.addChildNode(rightFin)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.008, 0.54)
+        root.addChildNode(fpvAnchor)
+        componentNodes[.frontCameraGimbal, default: []].append(fpvAnchor)
+
+        let rotorMaterial = material(
+            diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84),
+            roughness: 0.24,
+            metalness: 0.08
+        )
+
+        let podPositions: [(SIMD3<Float>, DamageComponent, DamageComponent)] = [
+            (SIMD3<Float>(-0.52, 0.095, 0.12), .motorFL, .propellerFL),
+            (SIMD3<Float>(0.52, 0.095, 0.12), .motorFR, .propellerFR),
+            (SIMD3<Float>(-0.52, 0.095, -0.14), .motorRL, .propellerRL),
+            (SIMD3<Float>(0.52, 0.095, -0.14), .motorRR, .propellerRR)
+        ]
+
+        var props: [SCNNode] = []
+        let spinDirections: [Float] = [1.0, -1.0, -1.0, 1.0]
+
+        for (index, pod) in podPositions.enumerated() {
+            let mast = SCNNode(geometry: SCNBox(width: 0.030, height: 0.090, length: 0.030, chamferRadius: 0.005))
+            mast.position = SCNVector3(pod.0.x, 0.050, pod.0.z)
+            mast.geometry?.materials = [accentMaterial]
+            root.addChildNode(mast)
+
+            let motor = SCNNode(geometry: SCNCylinder(radius: 0.020, height: 0.022))
+            motor.position = SCNVector3(pod.0.x, pod.0.y, pod.0.z)
+            motor.geometry?.materials = [accentMaterial]
+            root.addChildNode(motor)
+            componentNodes[pod.1, default: []].append(motor)
+
+            let propeller = makePropellerNode(material: rotorMaterial, radius: 0.12)
+            propeller.position = SCNVector3(pod.0.x, pod.0.y + 0.020, pod.0.z)
+            propeller.name = "trinity_vtol_prop_\(index)"
+            root.addChildNode(propeller)
+            props.append(propeller)
+            componentNodes[pod.2, default: []].append(propeller)
+        }
+
+        let cruiseNose = SCNNode(geometry: SCNBox(width: 0.038, height: 0.038, length: 0.075, chamferRadius: 0.010))
+        cruiseNose.position = SCNVector3(0.0, 0.0, 0.45)
+        cruiseNose.geometry?.materials = [accentMaterial]
+        root.addChildNode(cruiseNose)
+        componentNodes[.escPower, default: []].append(cruiseNose)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: props,
+            propellerSpinDirections: spinDirections,
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor
+        )
+    }
+
+    private static func makePlanformNode(points: [CGPoint], thickness: Float, material: SCNMaterial) -> SCNNode {
+        let shape = makeExtrudedShape(points: points, thickness: thickness, material: material)
+        let node = SCNNode(geometry: shape)
+        node.pivot = SCNMatrix4MakeTranslation(0.0, 0.0, CGFloat(thickness * 0.5))
+        node.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+        return node
+    }
+
+    private static func makeVerticalSurfaceNode(points: [CGPoint], thickness: Float, material: SCNMaterial) -> SCNNode {
+        let shape = makeExtrudedShape(points: points, thickness: thickness, material: material)
+        let node = SCNNode(geometry: shape)
+        node.pivot = SCNMatrix4MakeTranslation(0.0, 0.0, CGFloat(thickness * 0.5))
+        node.eulerAngles = SCNVector3(0.0, Float.pi / 2.0, 0.0)
+        return node
+    }
+
+    private static func makeExtrudedShape(points: [CGPoint], thickness: Float, material: SCNMaterial) -> SCNShape {
+        let path = NSBezierPath()
+        if let first = points.first {
+            path.move(to: first)
+            for point in points.dropFirst() {
+                path.line(to: point)
+            }
+            path.close()
+        }
+
+        let shape = SCNShape(path: path, extrusionDepth: CGFloat(thickness))
+        shape.chamferRadius = CGFloat(thickness * 0.18)
+        shape.materials = [material]
+        return shape
+    }
+
+    private static func horizontalCapsule(length: Float, radius: Float, material: SCNMaterial) -> SCNNode {
+        let node = SCNNode(geometry: SCNCapsule(capRadius: CGFloat(radius), height: CGFloat(length)))
+        node.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        node.geometry?.materials = [material]
+        return node
+    }
+
+    private static func forwardMotorNode(radius: Float, length: Float, material: SCNMaterial) -> SCNNode {
+        let node = SCNNode(geometry: SCNCylinder(radius: CGFloat(radius), height: CGFloat(length)))
+        node.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        node.geometry?.materials = [material]
+        return node
+    }
+
+    private static func forwardPropellerNode(material: SCNMaterial, radius: Float) -> SCNNode {
+        let node = makePropellerNode(material: material, radius: radius)
+        node.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        return node
     }
 
     private static func material(diffuse: NSColor, roughness: CGFloat, metalness: CGFloat) -> SCNMaterial {

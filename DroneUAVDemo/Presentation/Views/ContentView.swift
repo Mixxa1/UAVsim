@@ -733,6 +733,7 @@ private struct SimulationToolstripView: View {
                     in: 0.1...1.0,
                     step: 0.01,
                     onEditingChanged: { editing in
+                        viewModel.setTerrainDensityEditing(editing)
                         if !editing {
                             viewModel.commitTerrainDensityChange()
                         }

@@ -6,13 +6,6 @@
     "object" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.o",
     "swift-dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.swiftdeps"
   },
-  "/Users/misha/Documents/New project/DroneUAVDemo/Services/TelemetryExportService.swift" : {
-    "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.swiftconstvalues",
-    "dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.d",
-    "diagnostics" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.dia",
-    "object" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.o",
-    "swift-dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.swiftdeps"
-  },
   "/Users/misha/Documents/New project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift" : {
     "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.swiftconstvalues",
     "dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.d",

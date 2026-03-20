@@ -1,10 +1,10 @@
 {
-  "/Users/misha/Documents/New project/DroneUAVDemo/Scene/DroneModelBuilder.swift" : {
-    "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelBuilder.swiftconstvalues",
-    "dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelBuilder.d",
-    "diagnostics" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelBuilder.dia",
-    "object" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelBuilder.o",
-    "swift-dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelBuilder.swiftdeps"
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/TelemetrySnapshot.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetrySnapshot.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetrySnapshot.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetrySnapshot.dia",
+    "object" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetrySnapshot.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetrySnapshot.swiftdeps"
   },
   "/Users/misha/Documents/New project/DroneUAVDemo/Scene/SceneFactory.swift" : {
     "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/SceneFactory.swiftconstvalues",

@@ -1,10 +1,10 @@
 {
-  "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/DerivedSources/GeneratedAssetSymbols.swift" : {
-    "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
-    "dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
-    "diagnostics" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
-    "object" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
-    "swift-dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps"
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/AbstractModelEditorView.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AbstractModelEditorView.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AbstractModelEditorView.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AbstractModelEditorView.dia",
+    "object" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AbstractModelEditorView.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AbstractModelEditorView.swiftdeps"
   },
   "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/CompactTelemetryHUDView.swift" : {
     "const-values" : "/Users/misha/Documents/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CompactTelemetryHUDView.swiftconstvalues",

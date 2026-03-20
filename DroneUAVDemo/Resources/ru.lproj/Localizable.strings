@@ -461,9 +461,17 @@
 "drone.model.fixed_rect" = "БПЛА с прямым крылом";
 "drone.model.fixed_delta" = "БПЛА с дельта-крылом";
 "drone.model.fixed_swept" = "БПЛА со стреловидным крылом";
+"drone.model.ebee_class" = "Картографический БПЛА класса eBee";
+"drone.model.ux11_class" = "Съёмочный БПЛА класса UX11";
+"drone.model.wingtra_class" = "VTOL БПЛА класса Wingtra";
+"drone.model.trinity_class" = "Профессиональный БПЛА класса Trinity";
 
 "drone.visual.fixed_rect" = "Семейство fixed-wing с прямым крылом";
 "drone.visual.fixed_delta" = "Семейство fixed-wing с дельта-крылом";
 "drone.visual.fixed_swept" = "Семейство fixed-wing со стреловидным крылом";
+"drone.visual.ebee_class" = "Бесхвостая летающая платформа для картографии";
+"drone.visual.ux11_class" = "Классический fixed-wing для аэросъёмки";
+"drone.visual.wingtra_class" = "VTOL fixed-wing типа tailsitter";
+"drone.visual.trinity_class" = "Профессиональная survey eVTOL-платформа";
 
 "drone.camera.fixed_front" = "Фронтальная камера fixed-wing";
