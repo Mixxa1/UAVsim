@@ -6,6 +6,7 @@ private final class FocusableSCNView: SCNView {
     var onLookDelta: ((Float, Float) -> Void)?
 
     private var lastDragPoint: NSPoint?
+    private static let suppressedSceneControlKeyCodes: Set<UInt16> = [37, 38] // L / J
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -44,6 +45,20 @@ private final class FocusableSCNView: SCNView {
         super.rightMouseUp(with: event)
     }
 
+    override func keyDown(with event: NSEvent) {
+        guard !Self.suppressedSceneControlKeyCodes.contains(event.keyCode) else {
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard !Self.suppressedSceneControlKeyCodes.contains(event.keyCode) else {
+            return
+        }
+        super.keyUp(with: event)
+    }
+
     private func handleLookDrag(_ event: NSEvent) {
         let point = event.locationInWindow
         let previous = lastDragPoint ?? point
@@ -76,7 +91,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.rendersContinuously = false
         view.backgroundColor = .black
         view.isPlaying = true
-        view.onLookDelta = onLookDelta
+        view.onLookDelta = cameraMode == .fpv ? onLookDelta : nil
 
         configureCameraControl(on: view)
 
@@ -94,7 +109,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
 
         view.pointOfView = pointOfView
         if let view = view as? FocusableSCNView {
-            view.onLookDelta = onLookDelta
+            view.onLookDelta = cameraMode == .fpv ? onLookDelta : nil
         }
         configureCameraControl(on: view)
     }

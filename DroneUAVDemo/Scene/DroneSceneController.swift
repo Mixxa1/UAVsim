@@ -13,6 +13,7 @@ final class DroneSceneController {
     let scene: SCNScene
 
     private let freeCameraNode: SCNNode
+    private let followRigNode = SCNNode()
     private let followCameraNode = SCNNode()
     private let fpvYawNode = SCNNode()
     private let fpvPitchNode = SCNNode()
@@ -81,6 +82,7 @@ final class DroneSceneController {
     private var orbitAngle: Float = 0.0
     private var activeProfile: DroneModelProfile
     private var currentWeather: WeatherModel = .normal
+    private var areWorldBoundsVisible: Bool = false
     private(set) var dockSpawnPosition = SIMD3<Float>(0.0, 0.0, 0.0)
     private let dockDeckSurfaceHeight: Float = 0.037
 
@@ -113,7 +115,9 @@ final class DroneSceneController {
         configureCameraNode(orbitCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(topCameraNode, fov: initialProfile.cameraPreset.fpvFov)
 
-        scene.rootNode.addChildNode(followCameraNode)
+        followRigNode.name = "followRigNode"
+        followRigNode.addChildNode(followCameraNode)
+        scene.rootNode.addChildNode(followRigNode)
         scene.rootNode.addChildNode(orbitCameraNode)
         scene.rootNode.addChildNode(topCameraNode)
 
@@ -181,6 +185,14 @@ final class DroneSceneController {
         dockSpawnPosition
     }
 
+    func setWorldBoundsVisible(_ visible: Bool) {
+        guard areWorldBoundsVisible != visible else {
+            return
+        }
+        areWorldBoundsVisible = visible
+        applyWorldBoundsVisibility()
+    }
+
     func applyCameraNudge(
         mode: CameraMode,
         yawDeltaDeg: Float,
@@ -211,6 +223,7 @@ final class DroneSceneController {
         switch mode {
         case .free:
             freeLookAngles = .zero
+            freeCameraNode.eulerAngles = SCNVector3Zero
         case .follow:
             return
         case .orbit:
@@ -234,7 +247,6 @@ final class DroneSceneController {
             restoreAfterFPVIfNeeded()
         }
 
-        // Safe external-mode initialization: avoid stale transforms/angles when switching hotkeys.
         switch newMode {
         case .orbit:
             orbitLookAngles = .zero
@@ -385,7 +397,12 @@ final class DroneSceneController {
 
         rotatePropellers(state: state, deltaTime: deltaTime)
         applyComponentOverlays(damage: damage, thermal: thermal, mode: diagnosticMode)
-        updateCameras(state: state, droneOrientation: droneOrientation, settings: camera, deltaTime: deltaTime)
+        updateCameras(
+            state: state,
+            droneOrientation: droneOrientation,
+            settings: camera,
+            deltaTime: deltaTime
+        )
         updateWeatherAnimation(deltaTime: deltaTime, weather: currentWeather)
     }
 
@@ -618,7 +635,6 @@ final class DroneSceneController {
     ) {
         let response: Float
         if deltaTime <= 0.0001 {
-            // Snap instantly for mode switches / reset passes where caller uses deltaTime = 0.
             response = 1.0
         } else {
             let blend = (1.0 - settings.smoothing.clamped(to: 0.0...0.95)) * deltaTime * 8.0
@@ -629,7 +645,6 @@ final class DroneSceneController {
         let yawOnly = simd_quatf(angle: state.orientation.z, axis: SIMD3<Float>(0, 1, 0))
         let bodyForward = modelForwardLocal()
         let forward = simd_normalize(simd_act(yawOnly, bodyForward))
-        let right = simd_normalize(SIMD3<Float>(forward.z, 0.0, -forward.x))
         let up = SIMD3<Float>(0.0, 1.0, 0.0)
 
         let dims = activeProfile.dimensions
@@ -637,17 +652,14 @@ final class DroneSceneController {
 
         let chaseDistanceRange: ClosedRange<Float>
         let chaseHeightRange: ClosedRange<Float>
-        let chaseLeadRange: ClosedRange<Float>
         let anchorLift: Float
         if activeProfile.airframeClass == .fixedWing {
             chaseDistanceRange = max(3.4, subjectScale * 3.0)...max(7.2, subjectScale * 5.6)
             chaseHeightRange = max(0.8, subjectScale * 0.22)...max(2.2, subjectScale * 0.68)
-            chaseLeadRange = max(1.3, subjectScale * 0.70)...max(3.4, subjectScale * 1.75)
             anchorLift = max(0.20, subjectScale * 0.10)
         } else {
             chaseDistanceRange = max(1.6, subjectScale * 2.8)...max(3.9, subjectScale * 5.0)
             chaseHeightRange = max(0.36, subjectScale * 0.18)...max(1.35, subjectScale * 0.52)
-            chaseLeadRange = max(0.45, subjectScale * 0.55)...max(1.55, subjectScale * 1.55)
             anchorLift = max(0.10, subjectScale * 0.08)
         }
 
@@ -655,33 +667,28 @@ final class DroneSceneController {
         let chaseDistance = chaseDistanceRequested.clamped(to: chaseDistanceRange)
         let chaseHeightRequested = settings.follow.height + (activeProfile.airframeClass == .fixedWing ? Float(0.30) : Float(0.14))
         let chaseHeight = chaseHeightRequested.clamped(to: chaseHeightRange)
-        let chaseLeadBase = activeProfile.airframeClass == .fixedWing ? Float(2.1) : Float(0.95)
-        let chaseLead = chaseLeadBase.clamped(to: chaseLeadRange)
         let chaseAnchor = dronePos + up * anchorLift
-        let chaseLeadOffset = forward * chaseLead
         let chaseVerticalOffset = up * max(0.12, subjectScale * 0.14)
-        let chaseTarget = chaseAnchor + chaseLeadOffset + chaseVerticalOffset
 
-        var followTargetPos = chaseAnchor - forward * chaseDistance + right * settings.follow.lateralOffset + up * chaseHeight
-        followTargetPos.y = max(followTargetPos.y, chaseAnchor.y + max(0.30, subjectScale * 0.28))
+        followRigNode.simdPosition = chaseAnchor
+        followRigNode.simdOrientation = simd_quatf(from: SIMD3<Float>(0.0, 0.0, -1.0), to: forward)
 
-        let followResponse = max(response, 0.24)
-        followCameraNode.simdPosition = simd_mix(
-            followCameraNode.simdPosition,
-            followTargetPos,
-            SIMD3<Float>(repeating: followResponse)
+        var followLocalPosition = SIMD3<Float>(
+            settings.follow.lateralOffset,
+            chaseHeight,
+            chaseDistance
         )
+        followLocalPosition.y = max(followLocalPosition.y, max(0.30, subjectScale * 0.28))
+        followCameraNode.simdPosition = followLocalPosition
 
-        // Tail view is a strict follow camera with no user yaw/pitch offsets.
+        let followLocalLookTarget = SIMD3<Float>(0.0, chaseVerticalOffset.y, 0.0)
         let followOrientation = cameraOrientation(
-            from: followCameraNode.simdPosition,
-            to: chaseTarget,
+            from: followLocalPosition,
+            to: followLocalLookTarget,
             yawOffset: 0.0,
             pitchOffset: 0.0
         )
-        followCameraNode.simdOrientation = simd_normalize(
-            simd_slerp(followCameraNode.simdOrientation, followOrientation, followResponse)
-        )
+        followCameraNode.simdOrientation = followOrientation
 
         orbitAngle += deltaTime * settings.orbit.angularSpeed.clamped(to: 0.05...2.0)
         let orbitDistanceRange: ClosedRange<Float> = activeProfile.airframeClass == .fixedWing
@@ -727,7 +734,6 @@ final class DroneSceneController {
             sin(cameraNoisePhase * 1.9 + 0.5) * 0.010 * shake,
             0.0
         )
-        // Mount offset z is interpreted as forward distance from anchor; forward differs by airframe class.
         let mountForwardDistance = max(0.018, abs(settings.fpv.mountOffset.z))
         let mountForwardOffset = bodyForward * mountForwardDistance
         let mountLateralOffset = SIMD3<Float>(settings.fpv.mountOffset.x, settings.fpv.mountOffset.y, 0.0)
@@ -1025,6 +1031,13 @@ final class DroneSceneController {
         worldBoundsNode.addChildNode(south)
         worldBoundsNode.addChildNode(east)
         worldBoundsNode.addChildNode(west)
+        applyWorldBoundsVisibility()
+    }
+
+    private func applyWorldBoundsVisibility() {
+        for node in worldBoundsNode.childNodes {
+            node.isHidden = !areWorldBoundsVisible
+        }
     }
 
     private func buildSupplementalCollisionObstacles(for terrain: TerrainConfiguration) -> [SupplementalCollisionObstacle] {

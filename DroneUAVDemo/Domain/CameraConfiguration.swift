@@ -54,6 +54,23 @@ enum CameraMode: String, CaseIterable, Identifiable {
             return .free
         }
     }
+
+    static func fromStoredRaw(_ rawValue: String) -> CameraMode? {
+        switch rawValue {
+        case CameraMode.free.rawValue:
+            return .free
+        case CameraMode.follow.rawValue, "thirdPerson":
+            return .follow
+        case CameraMode.orbit.rawValue:
+            return .orbit
+        case CameraMode.fpv.rawValue:
+            return .fpv
+        case CameraMode.top.rawValue, "topDown":
+            return .top
+        default:
+            return nil
+        }
+    }
 }
 
 enum CameraSensitivityProfile: String, CaseIterable, Identifiable {
@@ -172,7 +189,6 @@ struct CameraConfiguration {
     var fpv: FPVCameraState
     var top: TopCameraState
 
-    // MARK: Backward-compatible accessors
     var orbitDistance: Float {
         get { orbit.distance }
         set { orbit.distance = newValue.clamped(to: orbit.minDistance...orbit.maxDistance) }

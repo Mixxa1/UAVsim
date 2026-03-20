@@ -314,6 +314,11 @@ struct ControlPanelView: View {
                         formatter: Self.throttleFormatter,
                         onCommit: viewModel.commitTerrainDensityChange
                     )
+
+                    Toggle("environment.boundary_barrier_visible", isOn: Binding(
+                        get: { viewModel.isBoundaryBarrierVisible },
+                        set: { viewModel.setBoundaryBarrierVisible($0) }
+                    ))
                 }
                 .padding(.top, 6)
             } label: {

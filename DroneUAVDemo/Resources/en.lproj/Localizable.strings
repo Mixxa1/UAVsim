@@ -50,9 +50,11 @@
 
 "camera.mode.free" = "Free";
 "camera.mode.follow" = "Tail / Chase";
+"camera.mode.third_person" = "Third Person";
 "camera.mode.fpv" = "FPV";
 "camera.mode.orbit" = "Orbit";
 "camera.mode.top" = "Top";
+"camera.mode.top_down" = "Top Down";
 "camera.fov" = "FOV";
 "camera.sensitivity" = "Sensitivity";
 "camera.smoothing" = "Smoothing";
@@ -96,6 +98,7 @@
 "terrain.scale.8x8" = "8x8";
 "terrain.scale.16x16" = "16x16";
 "terrain.scale.32x32" = "32x32";
+"environment.boundary_barrier_visible" = "Show boundary barrier";
 
 "diagnostic.mode" = "Diagnostic mode";
 "diagnostic.mode.normal" = "Normal view";

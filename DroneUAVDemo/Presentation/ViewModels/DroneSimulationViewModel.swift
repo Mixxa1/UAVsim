@@ -215,6 +215,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published var diagnosticMode: DiagnosticOverlayMode
     @Published var isToolPanelVisible: Bool
     @Published var isParametersPanelVisible: Bool
+    @Published var isBoundaryBarrierVisible: Bool
     @Published var isCompactTelemetryHUDEnabled: Bool
     @Published var telemetryExportAlert: TelemetryExportAlert?
     @Published private(set) var keyBindingSections: [KeyBindingSection]
@@ -429,6 +430,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.diagnosticMode = .normal
         self.isToolPanelVisible = true
         self.isParametersPanelVisible = true
+        self.isBoundaryBarrierVisible = false
         self.isCompactTelemetryHUDEnabled = true
         self.telemetryExportAlert = nil
         self.keyBindingSections = []
@@ -443,6 +445,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.cachedDiagnostics = .zero
 
         sceneController.regenerateEnvironment(terrain)
+        sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
         sanitizeDynamicStateForSpawn(context: "init")
         sceneController.applyWeatherVisual(weather)
         sceneController.update(
@@ -736,6 +739,14 @@ final class DroneSimulationViewModel: ObservableObject {
         isParametersPanelVisible = visible
     }
 
+    func setBoundaryBarrierVisible(_ visible: Bool) {
+        guard isBoundaryBarrierVisible != visible else {
+            return
+        }
+        isBoundaryBarrierVisible = visible
+        sceneController.setWorldBoundsVisible(visible)
+    }
+
     func toggleToolPanel() {
         isToolPanelVisible.toggle()
     }
@@ -756,7 +767,6 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.setDroneProfile(profile)
 
         cameraConfiguration.fov = profile.cameraPreset.fpvFov
-        cameraConfiguration.orbitDistance = profile.cameraPreset.followDistance
         cameraConfiguration.followOffset = SIMD3<Float>(0.0, profile.cameraPreset.followHeight, profile.cameraPreset.followDistance)
         selectedCameraPreset = .pilot
 
@@ -786,41 +796,27 @@ final class DroneSimulationViewModel: ObservableObject {
     func setCameraMode(_ mode: CameraMode) {
         let oldMode = cameraConfiguration.mode
         cameraConfiguration.mode = mode
-        sceneController.syncCameraTransition(from: oldMode, to: mode)
-        sceneController.update(
-            with: state,
-            camera: cameraConfiguration,
-            damage: damageState,
-            thermal: thermalState,
-            diagnosticMode: diagnosticMode,
-            deltaTime: 0.0
-        )
+        syncCameraSystem(from: oldMode)
     }
 
     func cycleCameraMode() {
         let oldMode = cameraConfiguration.mode
         let nextMode = cameraConfiguration.mode.next()
         cameraConfiguration.mode = nextMode
-        sceneController.syncCameraTransition(from: oldMode, to: nextMode)
-        sceneController.update(
-            with: state,
-            camera: cameraConfiguration,
-            damage: damageState,
-            thermal: thermalState,
-            diagnosticMode: diagnosticMode,
-            deltaTime: 0.0
-        )
+        syncCameraSystem(from: oldMode)
     }
 
     func setCameraPreset(_ preset: CameraPreset) {
+        let previousMode = cameraConfiguration.mode
         selectedCameraPreset = preset
         cameraConfiguration.applyPreset(preset)
-        sceneController.resetCameraOrientation(for: cameraConfiguration.mode)
+        syncCameraSystem(from: previousMode, resetOrientation: true)
     }
 
     func resetCameraToPreset() {
+        let previousMode = cameraConfiguration.mode
         cameraConfiguration.applyPreset(selectedCameraPreset)
-        sceneController.resetCameraOrientation(for: cameraConfiguration.mode)
+        syncCameraSystem(from: previousMode, resetOrientation: true)
     }
 
     func setCameraFov(_ value: Double) { cameraConfiguration.fov = Float(value) }
@@ -1174,6 +1170,7 @@ final class DroneSimulationViewModel: ObservableObject {
             returnHomeStage = .ascend
         }
         sceneController.regenerateEnvironment(terrain)
+        sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
         homePosition = sceneController.currentDockSpawnPoint()
         enforceRuntimeSafetyAndBounds(context: "regenerate_environment")
         sceneController.update(
@@ -1607,7 +1604,9 @@ final class DroneSimulationViewModel: ObservableObject {
             case .cycleCameraMode:
                 cycleCameraMode()
             case .toggleControlPanel:
-                break
+                toggleControlPanel()
+            case .toggleToolPanel:
+                toggleToolPanel()
             case .toggleTelemetryHUD:
                 toggleCompactTelemetryHUD()
             case .zoomInCamera:
@@ -1615,7 +1614,7 @@ final class DroneSimulationViewModel: ObservableObject {
             case .zoomOutCamera:
                 adjustCameraZoom(inward: false)
             case .resetCameraOrientation:
-                sceneController.resetCameraOrientation(for: cameraConfiguration.mode)
+                syncCameraSystem(resetOrientation: true)
             }
         }
     }
@@ -1666,6 +1665,25 @@ final class DroneSimulationViewModel: ObservableObject {
             pitchDeltaDeg: pitchDeg * cameraConfiguration.effectiveLookSensitivity,
             invertX: cameraConfiguration.invertLookX,
             invertY: cameraConfiguration.invertLookY
+        )
+    }
+
+    private func syncCameraSystem(from previousMode: CameraMode? = nil, resetOrientation: Bool = false) {
+        if let previousMode {
+            sceneController.syncCameraTransition(from: previousMode, to: cameraConfiguration.mode)
+        }
+
+        if resetOrientation {
+            sceneController.resetCameraOrientation(for: cameraConfiguration.mode)
+        }
+
+        sceneController.update(
+            with: state,
+            camera: cameraConfiguration,
+            damage: damageState,
+            thermal: thermalState,
+            diagnosticMode: diagnosticMode,
+            deltaTime: 0.0
         )
     }
 
@@ -2168,7 +2186,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 mapScaleRaw: terrain.mapScale.rawValue,
                 density: terrain.density,
                 seed: terrain.seed,
-                safeSpawnRadius: terrain.safeSpawnRadius
+                safeSpawnRadius: terrain.safeSpawnRadius,
+                showsBoundaryBarrier: isBoundaryBarrierVisible
             ),
             camera: ProjectSnapshot.Camera(
                 modeRaw: cameraConfiguration.mode.rawValue,
@@ -2300,8 +2319,9 @@ final class DroneSimulationViewModel: ObservableObject {
         terrain.safeSpawnRadius = snapshot.terrain.safeSpawnRadius > 0.1
             ? snapshot.terrain.safeSpawnRadius
             : recommendedSafeSpawnRadius(for: terrain.mapScale)
+        isBoundaryBarrierVisible = snapshot.terrain.showsBoundaryBarrier ?? false
 
-        if let cameraMode = CameraMode(rawValue: snapshot.camera.modeRaw) {
+        if let cameraMode = CameraMode.fromStoredRaw(snapshot.camera.modeRaw) {
             cameraConfiguration.mode = cameraMode
         }
         cameraConfiguration.fov = snapshot.camera.fov

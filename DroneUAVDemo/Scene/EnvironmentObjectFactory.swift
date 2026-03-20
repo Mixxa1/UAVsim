@@ -115,13 +115,19 @@ enum EnvironmentObjectFactory {
         var rng = DeterministicRNG(seed: descriptorSeed(descriptor))
         let facadeFamily = pickFacadeFamily(for: descriptor.biome, random: rng.nextFloat())
         let roofFamily = pickRoofFamily(random: rng.nextFloat())
-
-        let facadeMaterial = EnvironmentMaterialRegistry.facadeMaterial(family: facadeFamily, variant: Int(rng.next() % 4))
-        let roofMaterial = EnvironmentMaterialRegistry.roofMaterial(family: roofFamily, variant: Int(rng.next() % 3))
-
         let width = max(6.0, descriptor.size.x)
         let depth = max(6.0, descriptor.size.z)
         let height = max(9.0, descriptor.size.y)
+
+        let facadeMaterials = EnvironmentMaterialRegistry.buildingFacadeMaterials(
+            family: facadeFamily,
+            variant: Int(rng.next() % 4),
+            width: width,
+            depth: depth,
+            height: height,
+            seed: descriptorSeed(descriptor)
+        )
+        let roofMaterial = EnvironmentMaterialRegistry.roofMaterial(family: roofFamily, variant: Int(rng.next() % 3))
 
         let root = SCNNode()
         root.name = "obstacle_building_\(descriptor.id.uuidString)"
@@ -135,7 +141,7 @@ enum EnvironmentObjectFactory {
             chamferRadius: CGFloat(min(width, depth) * 0.02)
         ))
         body.position = SCNVector3(0, height * 0.5, 0)
-        body.geometry?.materials = [facadeMaterial]
+        body.geometry?.materials = facadeMaterials
 
         let roofHeight = max(0.5, min(2.4, height * 0.05))
         let roof = SCNNode(geometry: SCNBox(
@@ -551,6 +557,35 @@ enum EnvironmentMaterialRegistry {
         return material
     }
 
+    fileprivate static func buildingFacadeMaterials(
+        family: BuildingFacadeFamily,
+        variant: Int,
+        width: Float,
+        depth: Float,
+        height: Float,
+        seed: UInt64
+    ) -> [SCNMaterial] {
+        let frontMaterial = facadeMaterial(family: family, variant: variant)
+        configureBuildingFacade(frontMaterial, family: family, faceWidth: width, faceHeight: height, seed: seed &+ 0x11)
+
+        let sideMaterial = facadeMaterial(family: family, variant: variant)
+        configureBuildingFacade(sideMaterial, family: family, faceWidth: depth, faceHeight: height, seed: seed &+ 0x27)
+
+        let capMaterial = facadeMaterial(family: family, variant: variant)
+        capMaterial.multiply.contents = NSColor(calibratedWhite: 0.90, alpha: 1.0)
+        capMaterial.roughness.contents = family == .glassAccent ? 0.62 : 0.84
+        capMaterial.emission.contents = NSColor.clear
+
+        return [
+            frontMaterial,
+            sideMaterial,
+            frontMaterial.copy() as? SCNMaterial ?? frontMaterial,
+            sideMaterial.copy() as? SCNMaterial ?? sideMaterial,
+            capMaterial,
+            capMaterial.copy() as? SCNMaterial ?? capMaterial
+        ]
+    }
+
     fileprivate static func facadeMaterial(family: BuildingFacadeFamily, variant: Int) -> SCNMaterial {
         let slots = facadeTextureSlots[family] ?? facadeTextureSlots[.concretePanel]!
         let fallbacks = facadeFallbacks[family] ?? [NSColor(calibratedWhite: 0.52, alpha: 1.0)]
@@ -766,6 +801,104 @@ enum EnvironmentMaterialRegistry {
         return material
     }
 
+    private static func configureBuildingFacade(
+        _ material: SCNMaterial,
+        family: BuildingFacadeFamily,
+        faceWidth: Float,
+        faceHeight: Float,
+        seed: UInt64
+    ) {
+        let tileX = CGFloat(max(1.0, faceWidth / 6.0))
+        let tileY = CGFloat(max(1.0, faceHeight / 7.5))
+        material.diffuse.wrapS = .repeat
+        material.diffuse.wrapT = .repeat
+        material.diffuse.contentsTransform = SCNMatrix4MakeScale(tileX, tileY, 1.0)
+        material.emission.contents = facadeWindowOverlay(
+            family: family,
+            faceWidth: faceWidth,
+            faceHeight: faceHeight,
+            seed: seed
+        )
+        material.emission.intensity = family == .glassAccent ? 0.52 : 0.72
+    }
+
+    private static func facadeWindowOverlay(
+        family: BuildingFacadeFamily,
+        faceWidth: Float,
+        faceHeight: Float,
+        seed: UInt64
+    ) -> NSImage {
+        let columns: Int
+        let rows: Int
+        switch family {
+        case .glassAccent:
+            columns = max(3, min(10, Int((faceWidth / 2.8).rounded())))
+            rows = max(4, min(18, Int((faceHeight / 2.3).rounded())))
+        case .brick, .plaster, .concretePanel:
+            columns = max(3, min(9, Int((faceWidth / 3.2).rounded())))
+            rows = max(4, min(16, Int((faceHeight / 2.9).rounded())))
+        }
+
+        let cacheKey = "\(family.cacheKey)-\(columns)x\(rows)-\(seed & 0xF)"
+        if let cached = facadeWindowOverlayCache[cacheKey] {
+            return cached
+        }
+
+        let canvasSize = NSSize(width: 512, height: 512)
+        let image = NSImage(size: canvasSize)
+        image.lockFocus()
+
+        NSColor.clear.setFill()
+        NSBezierPath(rect: NSRect(origin: .zero, size: canvasSize)).fill()
+
+        let marginX = canvasSize.width * 0.08
+        let marginY = canvasSize.height * 0.07
+        let spacingX = family == .glassAccent ? canvasSize.width * 0.014 : canvasSize.width * 0.022
+        let spacingY = family == .glassAccent ? canvasSize.height * 0.013 : canvasSize.height * 0.020
+        let availableWidth = canvasSize.width - marginX * 2.0 - spacingX * CGFloat(max(columns - 1, 0))
+        let availableHeight = canvasSize.height - marginY * 2.0 - spacingY * CGFloat(max(rows - 1, 0))
+        let windowWidth = max(16.0, availableWidth / CGFloat(max(columns, 1)))
+        let windowHeight = max(14.0, availableHeight / CGFloat(max(rows, 1)))
+        let cornerRadius = min(windowWidth, windowHeight) * (family == .glassAccent ? 0.16 : 0.10)
+
+        let dimColor = family == .glassAccent
+            ? NSColor(calibratedRed: 0.38, green: 0.52, blue: 0.66, alpha: 0.22)
+            : NSColor(calibratedRed: 0.24, green: 0.34, blue: 0.42, alpha: 0.15)
+        let litPalette: [NSColor] = family == .glassAccent
+            ? [
+                NSColor(calibratedRed: 0.78, green: 0.90, blue: 1.0, alpha: 0.78),
+                NSColor(calibratedRed: 0.60, green: 0.80, blue: 1.0, alpha: 0.68)
+            ]
+            : [
+                NSColor(calibratedRed: 0.98, green: 0.90, blue: 0.66, alpha: 0.72),
+                NSColor(calibratedRed: 0.72, green: 0.84, blue: 1.0, alpha: 0.62)
+            ]
+        var rng = DeterministicRNG(seed: seed &+ UInt64(columns * 31 + rows * 17))
+
+        for row in 0..<rows {
+            if family != .glassAccent {
+                let bandY = marginY + CGFloat(row) * (windowHeight + spacingY) - spacingY * 0.45
+                let bandRect = NSRect(x: marginX * 0.75, y: bandY, width: canvasSize.width - marginX * 1.5, height: max(2.0, spacingY * 0.32))
+                NSColor(calibratedWhite: 1.0, alpha: 0.045).setFill()
+                NSBezierPath(roundedRect: bandRect, xRadius: 1.6, yRadius: 1.6).fill()
+            }
+
+            for column in 0..<columns {
+                let originX = marginX + CGFloat(column) * (windowWidth + spacingX)
+                let originY = marginY + CGFloat(row) * (windowHeight + spacingY)
+                let rect = NSRect(x: originX, y: originY, width: windowWidth, height: windowHeight)
+                let isLit = rng.nextFloat() < (family == .glassAccent ? 0.78 : 0.58)
+                let fillColor = isLit ? litPalette[Int(rng.next() % UInt64(litPalette.count))] : dimColor
+                fillColor.setFill()
+                NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+            }
+        }
+
+        image.unlockFocus()
+        facadeWindowOverlayCache[cacheKey] = image
+        return image
+    }
+
     private static func resolveTexture(_ candidates: [[String]]) -> NSImage? {
         for entry in candidates {
             for name in entry {
@@ -821,6 +954,7 @@ enum EnvironmentMaterialRegistry {
     }
 
     private static let textureFileExtensions = ["png", "jpg", "jpeg"]
+    private static var facadeWindowOverlayCache: [String: NSImage] = [:]
 }
 
 private enum TreeArchetype: CaseIterable {
@@ -862,6 +996,19 @@ fileprivate enum BuildingFacadeFamily {
     case plaster
     case concretePanel
     case glassAccent
+
+    var cacheKey: String {
+        switch self {
+        case .brick:
+            return "brick"
+        case .plaster:
+            return "plaster"
+        case .concretePanel:
+            return "concrete"
+        case .glassAccent:
+            return "glass"
+        }
+    }
 }
 
 fileprivate enum BuildingRoofFamily {

@@ -60,6 +60,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case moveRight
     case descend
     case ascend
+    case yawLeft
+    case yawRight
     case accelerate
 
     case hover
@@ -89,7 +91,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     var category: KeyBindingCategory {
         switch self {
-        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .accelerate, .hover, .resetDrone:
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone:
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .resetCameraOrientation:
@@ -103,7 +105,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     var isContinuous: Bool {
         switch self {
-        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .accelerate,
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
              .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown:
             return true
         case .hover, .resetDrone, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
@@ -127,6 +129,10 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.flight.descend"
         case .ascend:
             return "keybind.flight.ascend"
+        case .yawLeft:
+            return "keybind.flight.yaw_left"
+        case .yawRight:
+            return "keybind.flight.yaw_right"
         case .accelerate:
             return "keybind.flight.accelerate"
         case .hover:
@@ -197,6 +203,8 @@ struct KeyBindingProfile {
             .moveRight: KeyBindingDescriptor(command: .moveRight, keyCode: 2, keyLabel: "D"),
             .descend: KeyBindingDescriptor(command: .descend, keyCode: 12, keyLabel: "Q"),
             .ascend: KeyBindingDescriptor(command: .ascend, keyCode: 14, keyLabel: "E"),
+            .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
+            .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
             .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
             .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
@@ -280,6 +288,7 @@ enum KeyboardAction: Equatable {
     case toggleDamageOverlay
     case cycleCameraMode
     case toggleControlPanel
+    case toggleToolPanel
     case toggleTelemetryHUD
     case zoomInCamera
     case zoomOutCamera
@@ -301,7 +310,9 @@ protocol KeyboardInputProviding {
 }
 
 final class KeyboardInputService: KeyboardInputProviding {
-    private static let disabledControlKeyCodes: Set<UInt16> = [34, 40, 37, 38] // I / K / L / J
+    private static let reservedDirectShortcutKeyCodes: Set<UInt16> = [30, 33, 34, 40] // ] / [ / I / K
+    private static let parametersPanelToggleKeyCode: UInt16 = 33 // [
+    private static let toolPanelToggleKeyCode: UInt16 = 30 // ]
 
     private var localKeyDownMonitor: Any?
     private var localKeyUpMonitor: Any?
@@ -321,7 +332,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         78: .zoomOut  // keypad -
     ]
 
-    private let bindingsStorageKey = "input.bindings.profile.v1"
+    private let bindingsStorageKey = "input.bindings.profile.v3"
     private let canonicalFlightCameraBindings: [KeyboardCommand: KeyBindingDescriptor] = [
         .moveForward: KeyBindingDescriptor(command: .moveForward, keyCode: 13, keyLabel: "W"),
         .moveBackward: KeyBindingDescriptor(command: .moveBackward, keyCode: 1, keyLabel: "S"),
@@ -329,6 +340,8 @@ final class KeyboardInputService: KeyboardInputProviding {
         .moveRight: KeyBindingDescriptor(command: .moveRight, keyCode: 2, keyLabel: "D"),
         .descend: KeyBindingDescriptor(command: .descend, keyCode: 12, keyLabel: "Q"),
         .ascend: KeyBindingDescriptor(command: .ascend, keyCode: 14, keyLabel: "E"),
+        .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
+        .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
         .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
         .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
         .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
@@ -420,7 +433,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     func currentYawInput() -> KeyboardYawInput {
-        .zero
+        let intent: Float = (activeContinuousCommands.contains(.yawLeft) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.yawRight) ? 1.0 : 0.0)
+        let speedBoost = activeContinuousCommands.contains(.accelerate)
+        return KeyboardYawInput(intent: intent, speedBoost: speedBoost)
     }
 
     func currentLookInput() -> KeyboardLookInput {
@@ -478,6 +493,10 @@ final class KeyboardInputService: KeyboardInputProviding {
 
         guard processingMode == .flight else {
             return event
+        }
+
+        if !event.isARepeat, handleDirectUIShortcut(for: event.keyCode) {
+            return nil
         }
 
         let commands = commands(for: event.keyCode)
@@ -579,8 +598,21 @@ final class KeyboardInputService: KeyboardInputProviding {
         case .toggleThermalOverlay:
             enqueueAction(.toggleThermalOverlay)
         case .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown,
-             .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .accelerate:
+             .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate:
             break
+        }
+    }
+
+    private func handleDirectUIShortcut(for keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case Self.parametersPanelToggleKeyCode:
+            enqueueAction(.toggleControlPanel)
+            return true
+        case Self.toolPanelToggleKeyCode:
+            enqueueAction(.toggleToolPanel)
+            return true
+        default:
+            return false
         }
     }
 
@@ -592,7 +624,7 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func commands(for keyCode: UInt16) -> [KeyboardCommand] {
-        guard !Self.disabledControlKeyCodes.contains(keyCode) else {
+        guard !Self.reservedDirectShortcutKeyCodes.contains(keyCode) else {
             return []
         }
         let direct = profile.commands(for: keyCode)
@@ -642,7 +674,7 @@ final class KeyboardInputService: KeyboardInputProviding {
 
         for (command, descriptor) in profile.bindings {
             guard canonicalFlightCameraBindings[command] == nil,
-                  Self.disabledControlKeyCodes.contains(descriptor.keyCode),
+                  Self.reservedDirectShortcutKeyCodes.contains(descriptor.keyCode),
                   let fallback = KeyBindingProfile.default.descriptor(for: command) else {
                 continue
             }
@@ -653,7 +685,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             }
         }
 
-        for retiredKeyCode in Self.disabledControlKeyCodes {
+        for retiredKeyCode in Self.reservedDirectShortcutKeyCodes {
             let commandsOnRetiredKey = profile.commands(for: retiredKeyCode)
             for command in commandsOnRetiredKey {
                 guard let fallback = KeyBindingProfile.default.descriptor(for: command) else {

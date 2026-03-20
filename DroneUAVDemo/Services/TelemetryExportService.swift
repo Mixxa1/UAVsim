@@ -80,6 +80,7 @@ struct ProjectSnapshot: Codable {
         var density: Float
         var seed: UInt64
         var safeSpawnRadius: Float
+        var showsBoundaryBarrier: Bool?
     }
 
     struct Camera: Codable {

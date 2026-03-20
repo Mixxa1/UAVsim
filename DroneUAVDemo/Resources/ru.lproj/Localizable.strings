@@ -50,9 +50,11 @@
 
 "camera.mode.free" = "Свободная";
 "camera.mode.follow" = "Вид от хвоста";
+"camera.mode.third_person" = "Вид сзади";
 "camera.mode.fpv" = "FPV";
 "camera.mode.orbit" = "Орбита";
 "camera.mode.top" = "Вид сверху";
+"camera.mode.top_down" = "Вид сверху";
 "camera.fov" = "Угол обзора";
 "camera.sensitivity" = "Чувствительность";
 "camera.smoothing" = "Сглаживание";
@@ -96,6 +98,7 @@
 "terrain.scale.8x8" = "8x8";
 "terrain.scale.16x16" = "16x16";
 "terrain.scale.32x32" = "32x32";
+"environment.boundary_barrier_visible" = "Показывать граничный барьер";
 
 "diagnostic.mode" = "Режим диагностики";
 "diagnostic.mode.normal" = "Обычный вид";
@@ -283,10 +286,10 @@
 "damage.severity.light" = "Легкие";
 "damage.severity.medium" = "Средние";
 "damage.severity.critical" = "Критические";
-"keybind.camera.mode2" = "Камера 2 (Хвост)";
+"keybind.camera.mode2" = "Камера 2 (Вид от хвоста)";
 "keybind.camera.mode3" = "Камера 3 (Орбита)";
 "keybind.camera.mode4" = "Камера 4 (FPV)";
-"keybind.camera.mode5" = "Камера 5 (Сверху)";
+"keybind.camera.mode5" = "Камера 5 (Вид сверху)";
 "keybind.camera.toggle_fpv" = "Переключить FPV";
 "keybind.camera.cycle_mode" = "Смена режима камеры";
 "keybind.camera.zoom_in" = "Приблизить";

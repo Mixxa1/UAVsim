@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>F6D4586E-912E-4C6A-8573-6158DE500E54</key>
+		<key>27D41E0B-FB85-42F7-9785-53E05DFF1776</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,21 +15,21 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>F6D4586E-912E-4C6A-8573-6158DE500E54.xcactivitylog</string>
+			<string>27D41E0B-FB85-42F7-9785-53E05DFF1776.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
 			<dict>
 				<key>highLevelStatus</key>
-				<string>E</string>
+				<string>W</string>
 				<key>totalNumberOfAnalyzerIssues</key>
 				<integer>0</integer>
 				<key>totalNumberOfErrors</key>
-				<integer>1</integer>
+				<integer>0</integer>
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>1</integer>
+				<integer>3</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>DroneUAVDemo project</string>
@@ -40,13 +40,13 @@
 			<key>signature</key>
 			<string>Building project DroneUAVDemo with scheme DroneUAVDemo and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>795042110.532745</real>
+			<real>795648113.37069798</real>
 			<key>timeStoppedRecording</key>
-			<real>795042111.474015</real>
+			<real>795648120.53958499</real>
 			<key>title</key>
 			<string>Building project DroneUAVDemo with scheme DroneUAVDemo and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>F6D4586E-912E-4C6A-8573-6158DE500E54</string>
+			<string>27D41E0B-FB85-42F7-9785-53E05DFF1776</string>
 		</dict>
 	</dict>
 </dict>

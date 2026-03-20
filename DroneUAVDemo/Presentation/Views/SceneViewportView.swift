@@ -9,7 +9,7 @@ struct SceneViewportView: View {
                 scene: viewModel.scene,
                 pointOfView: viewModel.activeCameraNode,
                 cameraMode: viewModel.cameraConfiguration.mode,
-                cameraSensitivity: viewModel.cameraConfiguration.effectiveLookSensitivity,
+                cameraSensitivity: viewModel.cameraConfiguration.sensitivity,
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
