@@ -27,9 +27,9 @@ struct TelemetryPanelView: View {
             row(titleKey: "telemetry.collision_risk", value: String(format: "%.0f %%", telemetry.collisionRisk * 100.0))
             row(titleKey: "telemetry.nearest_obstacle", value: telemetry.nearestObstacleDistance.isFinite ? String(format: "%.2f m", telemetry.nearestObstacleDistance) : localized("common.na"))
             row(titleKey: "telemetry.nearest_obstacle_source", value: telemetry.nearestObstacleSource)
-            rowRaw(title: "Path status", value: telemetry.pathStatus)
-            rowRaw(title: "Waypoint", value: "idx \(telemetry.currentWaypointIndex), left \(telemetry.remainingWaypoints)")
-            rowRaw(title: "Path remaining", value: String(format: "%.2f / %.2f m", telemetry.pathRemainingDistanceMeters, telemetry.pathLengthMeters))
+            row(titleKey: "telemetry.path_status", value: localizedPathStatus(telemetry.pathStatus))
+            row(titleKey: "telemetry.waypoint", value: String(format: localized("telemetry.waypoint.value"), telemetry.currentWaypointIndex, telemetry.remainingWaypoints))
+            row(titleKey: "telemetry.path_remaining", value: String(format: "%.2f / %.2f m", telemetry.pathRemainingDistanceMeters, telemetry.pathLengthMeters))
             row(titleKey: "telemetry.emergency", valueKey: telemetry.emergencyActionKey)
             row(titleKey: "telemetry.damage", value: telemetry.damageSummary)
             row(titleKey: "telemetry.thermal", value: telemetry.thermalSummary)
@@ -72,14 +72,18 @@ struct TelemetryPanelView: View {
         }
     }
 
-    private func rowRaw(title: String, value: String) -> some View {
-        HStack(alignment: .top) {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .multilineTextAlignment(.trailing)
-                .foregroundStyle(.primary)
+    private func localizedPathStatus(_ status: String) -> String {
+        switch status {
+        case "idle":
+            return localized("telemetry.path_status.idle")
+        case "valid":
+            return localized("telemetry.path_status.valid")
+        case "recomputing":
+            return localized("telemetry.path_status.recomputing")
+        case "blocked":
+            return localized("telemetry.path_status.blocked")
+        default:
+            return status
         }
     }
 }

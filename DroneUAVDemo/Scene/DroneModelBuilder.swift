@@ -3,38 +3,83 @@ import SceneKit
 
 struct DroneVisualModel {
     let rootNode: SCNNode
+    let visualRootNode: SCNNode
+    let cameraAnchorNode: SCNNode
+    let groundReferenceNode: SCNNode
     let propellerNodes: [SCNNode]
     let propellerSpinDirections: [Float]
     let componentNodes: [DamageComponent: [SCNNode]]
     let fpvAnchorNode: SCNNode
+    let payloadMountNode: SCNNode
+    let visualBoundsCenter: SIMD3<Float>
+    let visualBoundsSize: SIMD3<Float>
+    let subjectScale: Float
+
+    init(
+        rootNode: SCNNode,
+        visualRootNode: SCNNode = SCNNode(),
+        cameraAnchorNode: SCNNode = SCNNode(),
+        groundReferenceNode: SCNNode = SCNNode(),
+        propellerNodes: [SCNNode],
+        propellerSpinDirections: [Float],
+        componentNodes: [DamageComponent: [SCNNode]],
+        fpvAnchorNode: SCNNode,
+        payloadMountNode: SCNNode,
+        visualBoundsCenter: SIMD3<Float> = .zero,
+        visualBoundsSize: SIMD3<Float> = SIMD3<Float>(repeating: 0.36),
+        subjectScale: Float = 0.36
+    ) {
+        self.rootNode = rootNode
+        self.visualRootNode = visualRootNode
+        self.cameraAnchorNode = cameraAnchorNode
+        self.groundReferenceNode = groundReferenceNode
+        self.propellerNodes = propellerNodes
+        self.propellerSpinDirections = propellerSpinDirections
+        self.componentNodes = componentNodes
+        self.fpvAnchorNode = fpvAnchorNode
+        self.payloadMountNode = payloadMountNode
+        self.visualBoundsCenter = visualBoundsCenter
+        self.visualBoundsSize = visualBoundsSize
+        self.subjectScale = subjectScale
+    }
 }
 
 enum DroneModelBuilder {
     static func build(profile: DroneModelProfile) -> DroneVisualModel {
-        switch profile.visualClass {
-        case .miniCompact:
-            return buildMini(profile: profile)
-        case .vectorMidDual:
-            return buildVector(profile: profile)
-        case .atlasProTriple:
-            return buildAtlas(profile: profile)
-        case .abstract:
-            return buildAbstract(profile: profile)
-        case .fixedWingRectangular:
-            return buildFixedWing(profile: profile, family: .rectangular)
-        case .fixedWingDelta:
-            return buildFixedWing(profile: profile, family: .delta)
-        case .fixedWingSwept:
-            return buildFixedWing(profile: profile, family: .swept)
-        case .ebeeClass:
-            return buildEBeeClass(profile: profile)
-        case .delairUX11Class:
-            return buildUX11Class(profile: profile)
-        case .wingtraClass:
-            return buildWingtraClass(profile: profile)
-        case .trinityClass:
-            return buildTrinityClass(profile: profile)
+        let rawModel: DroneVisualModel
+        if let uavProfile = profile.resolvedUAVProfile {
+            rawModel = UAVVisualFactory.build(profile: uavProfile)
+            if profile.airframeClass == .multirotor {
+                // Keep new real-world rotorcraft aligned with the legacy chase-camera frame.
+                rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
+            }
+        } else {
+            switch profile.visualClass {
+            case .miniCompact:
+                rawModel = buildMini(profile: profile)
+            case .vectorMidDual:
+                rawModel = buildVector(profile: profile)
+            case .atlasProTriple:
+                rawModel = buildAtlas(profile: profile)
+            case .abstract:
+                rawModel = buildAbstract(profile: profile)
+            case .fixedWingRectangular:
+                rawModel = buildFixedWing(profile: profile, family: .rectangular)
+            case .fixedWingDelta:
+                rawModel = buildFixedWing(profile: profile, family: .delta)
+            case .fixedWingSwept:
+                rawModel = buildFixedWing(profile: profile, family: .swept)
+            case .ebeeClass:
+                rawModel = buildEBeeClass(profile: profile)
+            case .delairUX11Class:
+                rawModel = buildUX11Class(profile: profile)
+            case .wingtraClass:
+                rawModel = buildWingtraClass(profile: profile)
+            case .trinityClass:
+                rawModel = buildTrinityClass(profile: profile)
+            }
         }
+        return wrapVisualModel(rawModel, for: profile)
     }
 
     private static func buildMini(profile: DroneModelProfile) -> DroneVisualModel {
@@ -225,12 +270,18 @@ enum DroneModelBuilder {
             componentNodes[armData.0, default: []].append(leg)
         }
 
+        let payloadMount = SCNNode()
+        payloadMount.name = "payloadMountNode"
+        payloadMount.position = SCNVector3(0.0, -config.body.y * 0.78, -config.body.z * 0.04)
+        root.addChildNode(payloadMount)
+
         return DroneVisualModel(
             rootNode: root,
             propellerNodes: propellers,
             propellerSpinDirections: spinDirections,
             componentNodes: componentNodes,
-            fpvAnchorNode: fpvMount
+            fpvAnchorNode: fpvMount,
+            payloadMountNode: payloadMount
         )
     }
 
@@ -470,12 +521,18 @@ enum DroneModelBuilder {
         root.addChildNode(propeller)
         componentNodes[.propellerFL, default: []].append(propeller)
 
+        let payloadMount = SCNNode()
+        payloadMount.name = "payloadMountNode"
+        payloadMount.position = SCNVector3(0.0, -fuselageRadius * 0.95, -fuselageLength * 0.04)
+        root.addChildNode(payloadMount)
+
         return DroneVisualModel(
             rootNode: root,
             propellerNodes: [propeller],
             propellerSpinDirections: [1.0],
             componentNodes: componentNodes,
-            fpvAnchorNode: fpvAnchor
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMount
         )
     }
 
@@ -588,12 +645,18 @@ enum DroneModelBuilder {
         root.addChildNode(rightWinglet)
         componentNodes[.armRR, default: []].append(rightWinglet)
 
+        let payloadMount = SCNNode()
+        payloadMount.name = "payloadMountNode"
+        payloadMount.position = SCNVector3(0.0, -0.055, 0.02)
+        root.addChildNode(payloadMount)
+
         return DroneVisualModel(
             rootNode: root,
             propellerNodes: [propeller],
             propellerSpinDirections: [1.0],
             componentNodes: componentNodes,
-            fpvAnchorNode: fpvAnchor
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMount
         )
     }
 
@@ -714,12 +777,18 @@ enum DroneModelBuilder {
         bellySkid.geometry?.materials = [accentMaterial]
         root.addChildNode(bellySkid)
 
+        let payloadMount = SCNNode()
+        payloadMount.name = "payloadMountNode"
+        payloadMount.position = SCNVector3(0.0, -0.055, 0.10)
+        root.addChildNode(payloadMount)
+
         return DroneVisualModel(
             rootNode: root,
             propellerNodes: [propeller],
             propellerSpinDirections: [1.0],
             componentNodes: componentNodes,
-            fpvAnchorNode: fpvAnchor
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMount
         )
     }
 
@@ -839,12 +908,18 @@ enum DroneModelBuilder {
         root.addChildNode(rightProp)
         componentNodes[.propellerFR, default: []].append(rightProp)
 
+        let payloadMount = SCNNode()
+        payloadMount.name = "payloadMountNode"
+        payloadMount.position = SCNVector3(0.0, -0.060, 0.05)
+        root.addChildNode(payloadMount)
+
         return DroneVisualModel(
             rootNode: root,
             propellerNodes: [leftProp, rightProp],
             propellerSpinDirections: [1.0, -1.0],
             componentNodes: componentNodes,
-            fpvAnchorNode: fpvAnchor
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMount
         )
     }
 
@@ -993,12 +1068,18 @@ enum DroneModelBuilder {
         root.addChildNode(cruiseNose)
         componentNodes[.escPower, default: []].append(cruiseNose)
 
+        let payloadMount = SCNNode()
+        payloadMount.name = "payloadMountNode"
+        payloadMount.position = SCNVector3(0.0, -0.090, 0.12)
+        root.addChildNode(payloadMount)
+
         return DroneVisualModel(
             rootNode: root,
             propellerNodes: props,
             propellerSpinDirections: spinDirections,
             componentNodes: componentNodes,
-            fpvAnchorNode: fpvAnchor
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMount
         )
     }
 
@@ -1054,6 +1135,141 @@ enum DroneModelBuilder {
         return node
     }
 
+    private static func wrapVisualModel(_ rawModel: DroneVisualModel, for profile: DroneModelProfile) -> DroneVisualModel {
+        let bounds = measureStaticVisualBounds(of: rawModel.rootNode)
+        let groundLift = max(0.0, -bounds.min.y)
+        let adjustedMin = bounds.min + SIMD3<Float>(0.0, groundLift, 0.0)
+        let adjustedMax = bounds.max + SIMD3<Float>(0.0, groundLift, 0.0)
+        let adjustedCenter = (adjustedMin + adjustedMax) * 0.5
+        let adjustedSize = simd_max(adjustedMax - adjustedMin, SIMD3<Float>(repeating: 0.001))
+        let subjectScale = max(
+            0.36,
+            adjustedSize.x,
+            adjustedSize.z,
+            adjustedSize.y * 1.4,
+            profile.collisionRadius * 2.0
+        )
+
+        let flightRoot = SCNNode()
+        flightRoot.name = "droneFlightRoot"
+
+        let visualRoot = SCNNode()
+        visualRoot.name = "droneVisualRoot"
+
+        let groundReferenceNode = SCNNode()
+        groundReferenceNode.name = "groundReferenceNode"
+
+        let cameraAnchorNode = SCNNode()
+        cameraAnchorNode.name = "cameraAnchorNode"
+        cameraAnchorNode.simdPosition = stableCameraAnchorPosition(
+            center: adjustedCenter,
+            size: adjustedSize,
+            profile: profile
+        )
+
+        rawModel.rootNode.removeFromParentNode()
+        rawModel.rootNode.simdPosition += SIMD3<Float>(0.0, groundLift, 0.0)
+        visualRoot.addChildNode(rawModel.rootNode)
+
+        flightRoot.addChildNode(groundReferenceNode)
+        flightRoot.addChildNode(visualRoot)
+        flightRoot.addChildNode(cameraAnchorNode)
+
+        return DroneVisualModel(
+            rootNode: flightRoot,
+            visualRootNode: visualRoot,
+            cameraAnchorNode: cameraAnchorNode,
+            groundReferenceNode: groundReferenceNode,
+            propellerNodes: rawModel.propellerNodes,
+            propellerSpinDirections: rawModel.propellerSpinDirections,
+            componentNodes: rawModel.componentNodes,
+            fpvAnchorNode: rawModel.fpvAnchorNode,
+            payloadMountNode: rawModel.payloadMountNode,
+            visualBoundsCenter: adjustedCenter,
+            visualBoundsSize: adjustedSize,
+            subjectScale: subjectScale
+        )
+    }
+
+    private static func stableCameraAnchorPosition(
+        center: SIMD3<Float>,
+        size: SIMD3<Float>,
+        profile: DroneModelProfile
+    ) -> SIMD3<Float> {
+        let topY = max(size.y, center.y + size.y * 0.5)
+        let lowerBias = center.y + size.y * (profile.airframeClass == .fixedWing ? 0.10 : 0.08)
+        let upperBias = topY - max(0.06, size.y * 0.14)
+        let anchorY = max(0.08, min(upperBias, lowerBias))
+        return SIMD3<Float>(center.x, anchorY, center.z)
+    }
+
+    private static func measureStaticVisualBounds(of rootNode: SCNNode) -> StaticVisualBounds {
+        var boundsMin = SIMD3<Float>(repeating: Float.greatestFiniteMagnitude)
+        var boundsMax = SIMD3<Float>(repeating: -Float.greatestFiniteMagnitude)
+        var foundGeometry = false
+
+        accumulateStaticVisualBounds(
+            from: rootNode,
+            rootNode: rootNode,
+            boundsMin: &boundsMin,
+            boundsMax: &boundsMax,
+            foundGeometry: &foundGeometry
+        )
+
+        guard foundGeometry else {
+            return StaticVisualBounds(
+                min: SIMD3<Float>(0.0, 0.0, 0.0),
+                max: SIMD3<Float>(0.36, 0.36, 0.36)
+            )
+        }
+
+        return StaticVisualBounds(min: boundsMin, max: boundsMax)
+    }
+
+    private static func accumulateStaticVisualBounds(
+        from node: SCNNode,
+        rootNode: SCNNode,
+        boundsMin: inout SIMD3<Float>,
+        boundsMax: inout SIMD3<Float>,
+        foundGeometry: inout Bool
+    ) {
+        if node.geometry != nil {
+            let box = node.boundingBox
+            let localMin = SIMD3<Float>(Float(box.min.x), Float(box.min.y), Float(box.min.z))
+            let localMax = SIMD3<Float>(Float(box.max.x), Float(box.max.y), Float(box.max.z))
+
+            for corner in boundingBoxCorners(min: localMin, max: localMax) {
+                let converted = rootNode.simdConvertPosition(corner, from: node)
+                boundsMin = simd_min(boundsMin, converted)
+                boundsMax = simd_max(boundsMax, converted)
+            }
+            foundGeometry = true
+        }
+
+        for child in node.childNodes {
+            accumulateStaticVisualBounds(
+                from: child,
+                rootNode: rootNode,
+                boundsMin: &boundsMin,
+                boundsMax: &boundsMax,
+                foundGeometry: &foundGeometry
+            )
+        }
+    }
+
+    private static func boundingBoxCorners(min: SIMD3<Float>, max: SIMD3<Float>) -> [SIMD3<Float>] {
+        [
+            SIMD3<Float>(min.x, min.y, min.z),
+            SIMD3<Float>(min.x, min.y, max.z),
+            SIMD3<Float>(min.x, max.y, min.z),
+            SIMD3<Float>(min.x, max.y, max.z),
+            SIMD3<Float>(max.x, min.y, min.z),
+            SIMD3<Float>(max.x, min.y, max.z),
+            SIMD3<Float>(max.x, max.y, min.z),
+            SIMD3<Float>(max.x, max.y, max.z)
+        ]
+    }
+
     private static func material(diffuse: NSColor, roughness: CGFloat, metalness: CGFloat) -> SCNMaterial {
         let material = SCNMaterial()
         material.diffuse.contents = diffuse
@@ -1077,4 +1293,9 @@ private struct BuildConfig {
     let colorBody: NSColor
     let colorArms: NSColor
     let colorAccent: NSColor
+}
+
+private struct StaticVisualBounds {
+    let min: SIMD3<Float>
+    let max: SIMD3<Float>
 }

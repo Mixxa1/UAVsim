@@ -1,0 +1,32 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/UAVProfileCardView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Selected UAV",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 8
+        }
+      },
+      {
+        "comment": "",
+        "key": "No selected UAV profile",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 61
+        }
+      },
+      {
+        "comment": "",
+        "key": "Armament note",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 45
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -589,7 +589,7 @@ private struct SimulationToolstripView: View {
                     set: { viewModel.selectDroneModel(id: $0) }
                 )) {
                     ForEach(viewModel.availableDroneProfiles, id: \.id) { profile in
-                        Text(LocalizedStringKey(profile.displayNameKey)).tag(profile.id)
+                        Text(profile.uiDisplayName).tag(profile.id)
                     }
                 }
                 .frame(width: 230)

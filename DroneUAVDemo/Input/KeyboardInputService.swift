@@ -298,6 +298,7 @@ enum KeyboardAction: Equatable {
 protocol KeyboardInputProviding {
     func start()
     func stop()
+    func resetTransientState()
     func currentAxisInput() -> KeyboardAxisInput
     func currentYawInput() -> KeyboardYawInput
     func currentLookInput() -> KeyboardLookInput
@@ -415,6 +416,10 @@ final class KeyboardInputService: KeyboardInputProviding {
             self.resignActiveObserver = nil
         }
 
+        clearInputState(keepPendingActions: false)
+    }
+
+    func resetTransientState() {
         clearInputState(keepPendingActions: false)
     }
 

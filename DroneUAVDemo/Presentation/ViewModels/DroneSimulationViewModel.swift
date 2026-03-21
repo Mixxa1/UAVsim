@@ -100,26 +100,30 @@ private struct DroneWarningBuilder {
 
     func build() -> [String] {
         var output: [String] = []
+        let grounded = physicalState.isGroundRestState || state.position.y <= 0.08
+        let activelyFlying = isArmed && !grounded
 
         if !isArmed { output.append("warning.disarmed") }
         if physicalState == .crashed { output.append("warning.crashed") }
-        if collisionAnalysis.riskScore >= 0.65 { output.append("warning.collision_high") }
+        if activelyFlying, collisionAnalysis.riskScore >= 0.65 { output.append("warning.collision_high") }
         if weather.severityScore >= 0.7 { output.append("warning.weather_severe") }
         if batteryState.chargePercent <= 20 { output.append("warning.battery_low") }
         if damageState.averageHealth <= 0.70 { output.append("warning.integrity_low") }
         if damageState.isFlightCritical { output.append("warning.integrity_critical") }
         if selectedDroneProfile.airframeClass == .fixedWing,
            let wing = selectedDroneProfile.fixedWingParameters,
+           activelyFlying,
            state.forwardAirspeed < wing.minSustainableSpeedMps * 0.9 {
             output.append("warning.fixedwing_low_speed")
         }
-        if fleetStatus.enabled, fleetStatus.interDroneRisk >= 0.5 { output.append("warning.fleet_risk") }
+        if activelyFlying, fleetStatus.enabled, fleetStatus.interDroneRisk >= 0.5 { output.append("warning.fleet_risk") }
         if fleetStatus.enabled,
+           activelyFlying,
            fleetStatus.nearestInterDroneDistance.isFinite,
            fleetStatus.nearestInterDroneDistance < 1.5 {
             output.append("warning.interdrone_critical")
         }
-        if mode == .emergencyStop { output.append("warning.emergency") }
+        if mode == .emergencyStop, activelyFlying { output.append("warning.emergency") }
 
         return output
     }
@@ -195,6 +199,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
+    @Published private(set) var activeUAVProfile: UAVProfile?
+    @Published private(set) var uavCatalogFilterState: UAVFilterState
     @Published private(set) var abstractParameters: AbstractDroneParameters
 
     @Published private(set) var weather: WeatherModel
@@ -341,11 +347,13 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let abstract = AbstractDroneParameters.default
         self.abstractParameters = abstract
-        let models = LIPODroneModelRepository(abstractParameters: abstract).allProfiles
-
-        let selectedProfile = models[1]
+        let repository = LIPODroneModelRepository(abstractParameters: abstract)
+        let models = repository.allProfiles
+        let selectedProfile = repository.defaultProfile
         self.selectedDroneProfile = selectedProfile
+        self.activeUAVProfile = Self.resolveActiveUAVProfile(for: selectedProfile, abstractParameters: abstract)
         self.availableDroneProfiles = models
+        self.uavCatalogFilterState = UAVFilterState()
 
         self.sceneController = DroneSceneController(initialProfile: selectedProfile)
 
@@ -524,6 +532,11 @@ final class DroneSimulationViewModel: ObservableObject {
             values.pitch = 0.0
         }, markManual: false)
         manualYawIntent = 0.0
+        keyboardInputService.resetTransientState()
+
+        if state.position.y <= 0.08 || physicalState.isGroundRestState {
+            settleDisarmedGroundedState()
+        }
     }
 
     func reset() {
@@ -564,6 +577,8 @@ final class DroneSimulationViewModel: ObservableObject {
         returnHomeStage = .idle
         navigationSnapshot = .idle
         keyboardInputService.setInputProcessingMode(.flight)
+        keyboardInputService.resetTransientState()
+        sceneController.resetCameraRuntimeState()
 
         sanitizeDynamicStateForSpawn(context: "reset")
         controlValues = neutralControls(from: state)
@@ -642,6 +657,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         clearSignalLossState(restoringInputMode: false)
         keyboardInputService.setInputProcessingMode(.flight)
+        keyboardInputService.resetTransientState()
+        sceneController.resetCameraRuntimeState()
         warnings = buildWarnings()
         telemetry = buildTelemetrySnapshot()
         hasUnsavedChanges = true
@@ -771,11 +788,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         selectedDroneProfile = profile
+        activeUAVProfile = Self.resolveActiveUAVProfile(for: profile, abstractParameters: abstractParameters)
         sceneController.setDroneProfile(profile)
-
-        cameraConfiguration.fov = profile.cameraPreset.fpvFov
-        cameraConfiguration.followOffset = SIMD3<Float>(0.0, profile.cameraPreset.followHeight, profile.cameraPreset.followDistance)
-        selectedCameraPreset = .pilot
+        resetCameraConfigurationForSelectedProfile()
 
         batteryState = .full
         reset()
@@ -796,6 +811,47 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         logAvailableUAVCatalog(models: availableDroneProfiles)
+    }
+
+    var uavCatalogSelectionState: UAVSelectionState {
+        UAVCatalog.selectionState(
+            runtimeProfiles: availableDroneProfiles,
+            selectedRuntimeProfileID: selectedDroneProfile.id,
+            abstractParameters: abstractParameters,
+            filterState: uavCatalogFilterState
+        )
+    }
+
+    func setUAVVehicleTypeFilter(_ filter: UAVVehicleTypeFilter) {
+        guard uavCatalogFilterState.vehicleType != filter else {
+            return
+        }
+        uavCatalogFilterState.vehicleType = filter
+    }
+
+    func setUAVMassCategoryFilter(_ filter: UAVMassCategoryFilter) {
+        guard uavCatalogFilterState.massCategory != filter else {
+            return
+        }
+        uavCatalogFilterState.massCategory = filter
+    }
+
+    private func resetCameraConfigurationForSelectedProfile() {
+        selectedCameraPreset = .pilot
+        cameraConfiguration.applyPreset(.pilot)
+        cameraConfiguration.fov = selectedDroneProfile.cameraPreset.fpvFov
+        cameraConfiguration.follow.distance = selectedDroneProfile.cameraPreset.followDistance
+        cameraConfiguration.follow.height = selectedDroneProfile.cameraPreset.followHeight
+        cameraConfiguration.follow.lateralOffset = 0.0
+        cameraConfiguration.orbit.distance = max(
+            cameraConfiguration.orbit.minDistance,
+            min(cameraConfiguration.orbit.maxDistance, selectedDroneProfile.cameraPreset.followDistance + 0.8)
+        )
+        cameraConfiguration.orbit.height = max(
+            cameraConfiguration.orbit.minDistance * 0.5,
+            min(cameraConfiguration.orbit.height, selectedDroneProfile.cameraPreset.followHeight + 0.6)
+        )
+        cameraConfiguration.top.forwardLead = 0.0
     }
 
     // MARK: - Camera
@@ -2297,6 +2353,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let selectedModelID = LIPODroneModelRepository.canonicalModelID(snapshot.selectedDroneModelID)
         if let profile = availableDroneProfiles.first(where: { $0.id == selectedModelID }) {
             selectedDroneProfile = profile
+            activeUAVProfile = Self.resolveActiveUAVProfile(for: profile, abstractParameters: abstract)
             sceneController.setDroneProfile(profile)
         }
 
@@ -2462,6 +2519,17 @@ final class DroneSimulationViewModel: ObservableObject {
             deltaTime: 0.0
         )
         emitLaunchDiagnostics(context: "load_project")
+    }
+
+    private static func resolveActiveUAVProfile(
+        for profile: DroneModelProfile,
+        abstractParameters: AbstractDroneParameters
+    ) -> UAVProfile? {
+        if profile.isAbstract {
+            return UAVReferenceCatalog.abstractProfile(from: abstractParameters)
+        }
+
+        return profile.resolvedUAVProfile
     }
 
     private func buildTelemetrySnapshot() -> TelemetrySnapshot {
@@ -2824,7 +2892,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if forceSpawnRelocation {
             state.position = spawn
-            state.orientation = SIMD3<Float>(repeating: 0.0)
+            state.orientation = spawnOrientation(for: selectedDroneProfile)
             homePosition = spawn
         }
 
@@ -2871,6 +2939,13 @@ final class DroneSimulationViewModel: ObservableObject {
         lastFiniteState = state
     }
 
+    private func spawnOrientation(for profile: DroneModelProfile) -> SIMD3<Float> {
+        if profile.airframeClass == .fixedWing, profile.launchMethod == .handLaunch {
+            return SIMD3<Float>(0.0, 0.0, Float.pi * 0.25)
+        }
+        return .zero
+    }
+
     private func neutralControls(from state: DroneState) -> DroneControlValues {
         DroneControlValues(
             x: Double(state.position.x),
@@ -2881,6 +2956,26 @@ final class DroneSimulationViewModel: ObservableObject {
             yaw: Double(state.orientation.z.radiansToDegrees),
             throttle: isArmed && state.position.y > 0.10 ? Double(selectedDroneProfile.hoverThrottle) : 0.0
         )
+    }
+
+    private func settleDisarmedGroundedState() {
+        state.position.y = 0.0
+        state.velocity = .zero
+        state.angularVelocity = .zero
+        state.rotorAngularSpeed = .zero
+        state.forwardAirspeed = 0.0
+        state.throttle = 0.0
+        state.motorThrottle = 0.0
+        state.orientation.x = 0.0
+        state.orientation.y = 0.0
+        state.mode = .manual
+        mode = .manual
+        collisionCooldown = 0.0
+        groundContactAccumulator = 0.0
+        stableGroundAccumulator = 0.0
+        airborneAccumulator = 0.0
+        transitionPhysicalState(.disarmed)
+        controlValues = neutralControls(from: state)
     }
 
     private func transitionPhysicalState(_ newState: DronePhysicalState) {
@@ -2986,6 +3081,10 @@ final class DroneSimulationViewModel: ObservableObject {
             state.motorThrottle = 0.0
             state.rotorAngularSpeed = .zero
         case .disarmed, .armedOnGround, .landed:
+            if !isArmed {
+                settleDisarmedGroundedState()
+                return
+            }
             state.position.y = 0.0
             state.velocity.x *= max(0.0, 1.0 - deltaTime * 14.0)
             state.velocity.z *= max(0.0, 1.0 - deltaTime * 14.0)

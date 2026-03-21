@@ -147,29 +147,18 @@ struct ControlPanelView: View {
     }
 
     private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("panel.model", selection: Binding(
-                get: { viewModel.selectedDroneProfile.id },
-                set: { viewModel.selectDroneModel(id: $0) }
-            )) {
-                ForEach(viewModel.availableDroneProfiles, id: \.id) { profile in
-                    Text(localized(profile.displayNameKey)).tag(profile.id)
-                }
+        UAVCatalogView(
+            selectionState: viewModel.uavCatalogSelectionState,
+            filterState: viewModel.uavCatalogFilterState,
+            onVehicleTypeChange: viewModel.setUAVVehicleTypeFilter,
+            onMassCategoryChange: viewModel.setUAVMassCategoryFilter,
+            onSelectEntry: { entry in
+                viewModel.selectDroneModel(id: entry.id)
+            },
+            onEditAbstract: {
+                showAbstractEditor = true
             }
-
-            if viewModel.selectedDroneProfile.isAbstract {
-                Button("abstract.edit") {
-                    showAbstractEditor = true
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            modelRow("panel.mass", String(format: "%.3f kg", viewModel.selectedDroneProfile.massKg))
-            modelRow("panel.max_flight", String(format: "%.0f min", viewModel.selectedDroneProfile.maxFlightTimeMin))
-            modelRow("panel.max_wind", String(format: "%.1f m/s", viewModel.selectedDroneProfile.maxWindResistanceMps))
-            modelRow("panel.camera_layout", localized(viewModel.selectedDroneProfile.cameraLayoutKey))
-            modelRow("panel.visual_class", localized(viewModel.selectedDroneProfile.visualClass.titleKey))
-        }
+        )
     }
 
     private var cameraSection: some View {
@@ -487,15 +476,6 @@ struct ControlPanelView: View {
             }
             .padding(.top, 4)
         }
-    }
-
-    private func modelRow(_ key: String, _ value: String) -> some View {
-        HStack {
-            Text(LocalizedStringKey(key))
-            Spacer()
-            Text(value)
-        }
-        .font(.caption)
     }
 
     private func binding(get: @escaping () -> Double, set: @escaping (Double) -> Void) -> Binding<Double> {

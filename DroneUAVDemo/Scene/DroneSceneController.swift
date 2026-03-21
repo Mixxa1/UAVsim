@@ -37,11 +37,18 @@ final class DroneSceneController {
     private let scenePopulationService: ScenePopulationService
 
     private var droneNode: SCNNode
+    private var visualRootNode: SCNNode
+    private var cameraAnchorNode: SCNNode
+    private var groundReferenceNode: SCNNode
     private var fpvAnchorNode: SCNNode
+    private var payloadMountNode: SCNNode
     private var propellerNodes: [SCNNode]
     private var spinDirections: [Float]
     private var spinAngles: [Float]
     private var componentNodes: [DamageComponent: [SCNNode]]
+    private var visualBoundsCenter = SIMD3<Float>(repeating: 0.0)
+    private var visualBoundsSize = SIMD3<Float>(repeating: 0.36)
+    private var cachedSubjectScale: Float = 0.36
     private let droneCollisionProxyNode = SCNNode()
     private var droneCollisionProxyRadius: Float = 0.18
     private var fpvObstructionHidingActive: Bool = false
@@ -99,11 +106,18 @@ final class DroneSceneController {
 
         let droneVisual = DroneModelBuilder.build(profile: initialProfile)
         self.droneNode = droneVisual.rootNode
+        self.visualRootNode = droneVisual.visualRootNode
+        self.cameraAnchorNode = droneVisual.cameraAnchorNode
+        self.groundReferenceNode = droneVisual.groundReferenceNode
         self.fpvAnchorNode = droneVisual.fpvAnchorNode
+        self.payloadMountNode = droneVisual.payloadMountNode
         self.propellerNodes = droneVisual.propellerNodes
         self.spinDirections = droneVisual.propellerSpinDirections
         self.spinAngles = Array(repeating: 0.0, count: droneVisual.propellerNodes.count)
         self.componentNodes = droneVisual.componentNodes
+        self.visualBoundsCenter = droneVisual.visualBoundsCenter
+        self.visualBoundsSize = droneVisual.visualBoundsSize
+        self.cachedSubjectScale = droneVisual.subjectScale
 
         scene.rootNode.addChildNode(droneNode)
 
@@ -183,6 +197,10 @@ final class DroneSceneController {
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
         dockSpawnPosition
+    }
+
+    func currentPayloadMountNode() -> SCNNode {
+        payloadMountNode
     }
 
     func setWorldBoundsVisible(_ visible: Bool) {
@@ -285,19 +303,38 @@ final class DroneSceneController {
 
         let droneVisual = DroneModelBuilder.build(profile: profile)
         droneNode = droneVisual.rootNode
+        visualRootNode = droneVisual.visualRootNode
+        cameraAnchorNode = droneVisual.cameraAnchorNode
+        groundReferenceNode = droneVisual.groundReferenceNode
         fpvAnchorNode = droneVisual.fpvAnchorNode
+        payloadMountNode = droneVisual.payloadMountNode
         propellerNodes = droneVisual.propellerNodes
         spinDirections = droneVisual.propellerSpinDirections
         componentNodes = droneVisual.componentNodes
         spinAngles = Array(repeating: 0.0, count: propellerNodes.count)
+        visualBoundsCenter = droneVisual.visualBoundsCenter
+        visualBoundsSize = droneVisual.visualBoundsSize
+        cachedSubjectScale = droneVisual.subjectScale
         fpvLookAngles = .zero
         orbitLookAngles = .zero
         topLookAngles = .zero
         lastComponentOverlaySignature = nil
+        fpvObstructionHidingActive = false
 
         scene.rootNode.addChildNode(droneNode)
         fpvAnchorNode.addChildNode(fpvYawNode)
         configureDroneCollisionProxy(for: profile)
+        resetCameraRuntimeState()
+    }
+
+    func resetCameraRuntimeState() {
+        orbitAngle = 0.0
+        fpvObstructionHidingActive = false
+        restoreAfterFPVIfNeeded()
+        followRigNode.simdPosition = .zero
+        followRigNode.simdOrientation = simd_quatf()
+        followCameraNode.simdPosition = .zero
+        followCameraNode.simdOrientation = simd_quatf()
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
@@ -781,8 +818,6 @@ final class DroneSceneController {
         fpvCameraNode.camera?.zNear = CGFloat(settings.fpv.nearClip.clamped(to: 0.005...0.25))
         topCameraNode.camera?.zNear = 0.03
         freeCameraNode.camera?.zNear = 0.01
-
-        _ = droneOrientation
     }
 
     private func restoreAfterFPVIfNeeded() {
@@ -1127,7 +1162,6 @@ final class DroneSceneController {
         sphere.firstMaterial?.diffuse.contents = NSColor.clear
         sphere.firstMaterial?.lightingModel = .constant
         droneCollisionProxyNode.geometry = sphere
-        droneCollisionProxyNode.position = SCNVector3(0.0, compactRadius * 0.92, 0.0)
         droneCollisionProxyNode.name = "drone_collision_proxy"
         droneCollisionProxyNode.isHidden = true
 
@@ -1143,6 +1177,13 @@ final class DroneSceneController {
         body.collisionBitMask = PhysicsCategory.environment
         body.contactTestBitMask = PhysicsCategory.environment
         droneCollisionProxyNode.physicsBody = body
+
+        let proxyCenter = SIMD3<Float>(
+            visualBoundsCenter.x,
+            max(compactRadius * 1.02, visualBoundsCenter.y),
+            visualBoundsCenter.z
+        )
+        droneCollisionProxyNode.simdPosition = proxyCenter
 
         droneNode.addChildNode(droneCollisionProxyNode)
     }

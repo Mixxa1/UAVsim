@@ -476,3 +476,110 @@
 "drone.visual.trinity_class" = "Professional survey eVTOL platform";
 
 "drone.camera.fixed_front" = "Fixed-wing front camera";
+
+"common.not_specified" = "Not specified";
+
+"country.china" = "China";
+"country.united_states" = "United States";
+"country.norway" = "Norway";
+"country.switzerland" = "Switzerland";
+"country.germany" = "Germany";
+"country.israel" = "Israel";
+"country.poland" = "Poland";
+"country.canada" = "Canada";
+"country.user_defined" = "User Defined";
+
+"uav.filter.type" = "Type";
+"uav.filter.mass" = "Mass";
+"uav.filter.vehicle.all" = "All";
+"uav.filter.vehicle.multicopters" = "Multicopters";
+"uav.filter.vehicle.helicopters" = "Helicopters";
+"uav.filter.vehicle.fixed_wing" = "Fixed-Wing";
+"uav.filter.vehicle.hybrid_vtol" = "Hybrid VTOL";
+"uav.filter.mass.all" = "All";
+"uav.filter.mass.nano" = "Nano";
+"uav.filter.mass.micro" = "Micro";
+"uav.filter.mass.light" = "Light";
+"uav.filter.mass.medium" = "Medium";
+"uav.filter.mass.heavy" = "Heavy";
+
+"uav.vehicle.multicopter" = "Multicopter";
+"uav.vehicle.fixed_wing" = "Fixed-Wing";
+"uav.vehicle.hybrid_vtol" = "Hybrid VTOL";
+"uav.vehicle.helicopter" = "Helicopter";
+"uav.vehicle.custom" = "Custom";
+
+"uav.mass.nano" = "Nano";
+"uav.mass.micro" = "Micro";
+"uav.mass.light" = "Light";
+"uav.mass.medium" = "Medium";
+"uav.mass.heavy" = "Heavy";
+"uav.mass.custom" = "Custom";
+
+"uav.spec.verified" = "Verified";
+"uav.spec.partial" = "Partial";
+"uav.spec.custom" = "Custom";
+
+"uav.badge.custom" = "CUSTOM";
+"uav.catalog.title" = "UAV Catalog";
+"uav.catalog.empty" = "No UAV profiles match the current filters.";
+"uav.catalog.edit_abstract" = "Edit Abstract UAV";
+"uav.catalog.selected_outside_filter" = "Selected model is outside current filter";
+
+"uav.card.title" = "Selected UAV";
+"uav.card.manufacturer" = "Manufacturer";
+"uav.card.country" = "Country";
+"uav.card.type" = "Type";
+"uav.card.mass_class" = "Mass class";
+"uav.card.base_mass" = "Base mass";
+"uav.card.max_payload" = "Max payload";
+"uav.card.mtow" = "MTOW";
+"uav.card.role" = "Role";
+"uav.card.status" = "Status";
+"uav.card.armament_note" = "Armament note";
+"uav.card.empty" = "No selected UAV profile";
+
+"uav.manufacturer.custom" = "Custom";
+
+"uav.profile.abstract-uav.display_name" = "Abstract UAV";
+"uav.profile.dji-matrice-350-rtk.short_description" = "Enterprise quadcopter with landing gear, central gimbal bay, and modular payload support.";
+"uav.profile.dji-matrice-350-rtk.mission_role" = "Enterprise inspection, mapping, and public-safety operations";
+"uav.profile.dji-flycart-30.short_description" = "Heavy cargo multicopter with coaxial lift groups and a central underslung freight bay.";
+"uav.profile.dji-flycart-30.mission_role" = "Cargo transport and logistics";
+"uav.profile.dji-mavic-4-pro.short_description" = "Foldable consumer camera multicopter with a triple-camera forward gimbal section.";
+"uav.profile.dji-mavic-4-pro.mission_role" = "Consumer aerial imaging and creator capture";
+"uav.profile.dji-neo.short_description" = "Ultra-compact protected-prop multicopter designed as a lightweight personal flying camera.";
+"uav.profile.dji-neo.mission_role" = "Personal aerial video capture";
+"uav.profile.dji-phantom-3-standard.short_description" = "Classic Phantom consumer quadcopter with integrated landing gear and a front gimbal camera bay.";
+"uav.profile.dji-phantom-3-standard.mission_role" = "Consumer aerial imaging";
+"uav.profile.freefly-alta-x.short_description" = "Heavy-lift open-frame cinema and industrial multirotor with a central underslung payload section.";
+"uav.profile.freefly-alta-x.mission_role" = "Heavy-lift cinema and industrial payload carriage";
+"uav.profile.griff-30.short_description" = "Heavy-lift cargo UAV with a large transport frame and an underslung load zone.";
+"uav.profile.griff-30.mission_role" = "Heavy-lift cargo transport";
+"uav.profile.griff-60.short_description" = "Large heavy-lift cargo UAV with a higher-capacity airframe than Griff 30.";
+"uav.profile.griff-60.mission_role" = "Heavy-lift cargo transport";
+"uav.profile.avidrone-490tl.short_description" = "Tandem-rotor cargo UAV with a long central fuselage and underslung freight position.";
+"uav.profile.avidrone-490tl.mission_role" = "Cargo transport and utility lift";
+"uav.profile.wingtraone-gen-ii.short_description" = "Hybrid VTOL mapping aircraft with a belly survey compartment and fixed-wing cruise layout.";
+"uav.profile.wingtraone-gen-ii.mission_role" = "Survey mapping and photogrammetry";
+"uav.profile.quantum-systems-trinity-pro.short_description" = "Long-span eVTOL survey aircraft with a central sensor compartment under the fuselage.";
+"uav.profile.quantum-systems-trinity-pro.mission_role" = "Survey mapping and corridor inspection";
+"uav.profile.mq-9b-skyguardian.short_description" = "Large MALE fixed-wing platform with long wings, nose sensor architecture, and multi-hardpoint payload capacity.";
+"uav.profile.mq-9b-skyguardian.mission_role" = "Long-endurance ISR and multi-mission patrol";
+"uav.profile.hermes-900.short_description" = "Multi-role MALE UAV with a long wing, pusher layout, and sensor stations under the nose and fuselage.";
+"uav.profile.hermes-900.mission_role" = "Multi-role MALE ISR and maritime patrol";
+"uav.profile.ft5-los.short_description" = "Twin-engine tactical fixed-wing platform with a compact surveillance airframe and modular payload integration.";
+"uav.profile.ft5-los.mission_role" = "Tactical reconnaissance and ISTAR";
+"uav.profile.flyeye.short_description" = "Lightweight fixed-wing observation UAV with a compact fuselage and underbelly electro-optical payload zone.";
+"uav.profile.flyeye.mission_role" = "Close-range reconnaissance and observation";
+"uav.profile.abstract-uav.short_description" = "User-defined custom UAV profile kept for future parameter tuning.";
+"uav.profile.abstract-uav.mission_role" = "User-defined custom mission";
+
+"telemetry.path_status" = "Path status";
+"telemetry.path_status.idle" = "Idle";
+"telemetry.path_status.valid" = "Valid";
+"telemetry.path_status.recomputing" = "Recomputing";
+"telemetry.path_status.blocked" = "Blocked";
+"telemetry.waypoint" = "Waypoint";
+"telemetry.waypoint.value" = "idx %d, left %d";
+"telemetry.path_remaining" = "Path remaining";

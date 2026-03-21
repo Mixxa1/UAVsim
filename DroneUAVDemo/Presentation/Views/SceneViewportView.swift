@@ -27,7 +27,7 @@ struct SceneViewportView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("hud.title")
                         .font(.caption.weight(.semibold))
-                    Text("\(localized("hud.camera")): \(localized(viewModel.cameraConfiguration.mode.titleKey)) | \(localized("hud.drone")): \(localized(viewModel.selectedDroneProfile.displayNameKey))")
+                    Text("\(localized("hud.camera")): \(localized(viewModel.cameraConfiguration.mode.titleKey)) | \(localized("hud.drone")): \(viewModel.selectedDroneProfile.uiDisplayName)")
                         .font(.caption2)
                     if let warningKey = viewModel.warnings.first {
                         Text(LocalizedStringKey(warningKey))

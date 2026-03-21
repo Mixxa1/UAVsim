@@ -1,0 +1,40 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "UAV Catalog",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 13
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Abstract UAV",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 41
+        }
+      },
+      {
+        "comment": "",
+        "key": "No UAV profiles match the current filters.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 33
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ / %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 60
+        }
+      }
+    ]
+  },
+  "version": 1
+}

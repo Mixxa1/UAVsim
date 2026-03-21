@@ -213,7 +213,7 @@
 "battery.depleted.restart" = "Перезапустить сценарий";
 
 "abstract.edit" = "Редактировать параметры";
-"abstract.editor.title" = "Параметры Abstract UAV";
+"abstract.editor.title" = "Параметры абстрактного БЛА";
 "abstract.editor.mass" = "Масса";
 "abstract.editor.dimensions" = "Габариты";
 "abstract.editor.energy" = "Энергия и ограничения";
@@ -225,7 +225,7 @@
 "drone.model.lipo_scout4" = "LIPO Scout 4";
 "drone.model.lipo_vector3s" = "LIPO Vector 3S";
 "drone.model.lipo_atlas3pro" = "LIPO Atlas 3 Pro";
-"drone.model.abstract" = "Abstract UAV";
+"drone.model.abstract" = "Абстрактный БЛА";
 
 "drone.visual.mini" = "Легкий компактный квадрокоптер";
 "drone.visual.vector" = "Средний квадрокоптер с двумя камерами";
@@ -270,14 +270,14 @@
 "keybind.camera.mode1" = "Камера 1 (Свободная)";
 "payload.select" = "Выбор полезной нагрузки";
 "payload.placeholder.message" = "Функция будет добавлена позже.";
-"control_mode.angle" = "Angle";
-"command.arm" = "Arm";
-"command.disarm" = "Disarm";
-"telemetry.arm_state" = "Состояние Arm";
-"arm_state.armed" = "Armed";
-"arm_state.disarmed" = "Disarmed";
-"flight_state.disarmed" = "Disarmed";
-"flight_state.armed_idle" = "Armed Idle";
+"control_mode.angle" = "Угловой";
+"command.arm" = "Армировать";
+"command.disarm" = "Разармировать";
+"telemetry.arm_state" = "Состояние армирования";
+"arm_state.armed" = "Армирован";
+"arm_state.disarmed" = "Разармлен";
+"flight_state.disarmed" = "Разармлен";
+"flight_state.armed_idle" = "Армирован, ожидание";
 "flight_state.crashed" = "Крушение";
 "warning.disarmed" = "Аппарат разармлен";
 "warning.integrity_critical" = "Критическое повреждение конструкции";
@@ -418,8 +418,8 @@
 "project.unsaved.exit_without" = "Выйти без сохранения";
 
 "telemetry.export.select_folder" = "Выберите папку для экспорта файла телеметрии.";
-"control_mode.acro" = "Acro / Rate";
-"control_mode.hover_assist" = "Hover / Alt-Hold";
+"control_mode.acro" = "Акро / скоростной";
+"control_mode.hover_assist" = "Зависание / удержание высоты";
 
 "section.flight" = "Полет";
 "section.camera" = "Камера";
@@ -475,3 +475,110 @@
 "drone.visual.trinity_class" = "Профессиональная survey eVTOL-платформа";
 
 "drone.camera.fixed_front" = "Фронтальная камера fixed-wing";
+
+"common.not_specified" = "Не указано";
+
+"country.china" = "Китай";
+"country.united_states" = "США";
+"country.norway" = "Норвегия";
+"country.switzerland" = "Швейцария";
+"country.germany" = "Германия";
+"country.israel" = "Израиль";
+"country.poland" = "Польша";
+"country.canada" = "Канада";
+"country.user_defined" = "Задано пользователем";
+
+"uav.filter.type" = "Тип";
+"uav.filter.mass" = "Масса";
+"uav.filter.vehicle.all" = "Все";
+"uav.filter.vehicle.multicopters" = "Мультикоптеры";
+"uav.filter.vehicle.helicopters" = "Вертолетные";
+"uav.filter.vehicle.fixed_wing" = "Самолетные";
+"uav.filter.vehicle.hybrid_vtol" = "Гибриды VTOL";
+"uav.filter.mass.all" = "Все";
+"uav.filter.mass.nano" = "Нано";
+"uav.filter.mass.micro" = "Микро";
+"uav.filter.mass.light" = "Легкие";
+"uav.filter.mass.medium" = "Средние";
+"uav.filter.mass.heavy" = "Тяжелые";
+
+"uav.vehicle.multicopter" = "Мультикоптер";
+"uav.vehicle.fixed_wing" = "Самолетный";
+"uav.vehicle.hybrid_vtol" = "Гибрид VTOL";
+"uav.vehicle.helicopter" = "Вертолетный";
+"uav.vehicle.custom" = "Пользовательский";
+
+"uav.mass.nano" = "Нано";
+"uav.mass.micro" = "Микро";
+"uav.mass.light" = "Легкий";
+"uav.mass.medium" = "Средний";
+"uav.mass.heavy" = "Тяжелый";
+"uav.mass.custom" = "Пользовательский";
+
+"uav.spec.verified" = "Проверен";
+"uav.spec.partial" = "Частичный";
+"uav.spec.custom" = "Пользовательский";
+
+"uav.badge.custom" = "КАСТОМ";
+"uav.catalog.title" = "Каталог БЛА";
+"uav.catalog.empty" = "Нет профилей БЛА, соответствующих текущим фильтрам.";
+"uav.catalog.edit_abstract" = "Редактировать абстрактный БЛА";
+"uav.catalog.selected_outside_filter" = "Выбранная модель не входит в текущий фильтр";
+
+"uav.card.title" = "Выбранный БЛА";
+"uav.card.manufacturer" = "Производитель";
+"uav.card.country" = "Страна";
+"uav.card.type" = "Тип";
+"uav.card.mass_class" = "Массовый класс";
+"uav.card.base_mass" = "Масса БЛА";
+"uav.card.max_payload" = "Макс. полезная нагрузка";
+"uav.card.mtow" = "Макс. взлетная масса";
+"uav.card.role" = "Роль";
+"uav.card.status" = "Статус";
+"uav.card.armament_note" = "Примечание по вооружению";
+"uav.card.empty" = "Профиль БЛА не выбран";
+
+"uav.manufacturer.custom" = "Пользовательский";
+
+"uav.profile.abstract-uav.display_name" = "Абстрактный БЛА";
+"uav.profile.dji-matrice-350-rtk.short_description" = "Промышленный квадрокоптер с шасси, центральным отсеком подвеса и поддержкой модульной полезной нагрузки.";
+"uav.profile.dji-matrice-350-rtk.mission_role" = "Инспекция, картография и задачи общественной безопасности";
+"uav.profile.dji-flycart-30.short_description" = "Тяжелый грузовой мультикоптер с коаксиальными подъемными группами и центральным нижним грузовым отсеком.";
+"uav.profile.dji-flycart-30.mission_role" = "Грузовая доставка и логистика";
+"uav.profile.dji-mavic-4-pro.short_description" = "Складной потребительский мультикоптер с трехкамерным передним подвесом.";
+"uav.profile.dji-mavic-4-pro.mission_role" = "Потребительская аэросъемка и съемка для создателей контента";
+"uav.profile.dji-neo.short_description" = "Сверхкомпактный мультикоптер с защитой пропеллеров для роли легкой персональной летающей камеры.";
+"uav.profile.dji-neo.mission_role" = "Персональная аэросъемка";
+"uav.profile.dji-phantom-3-standard.short_description" = "Классический квадрокоптер Phantom со встроенным шасси и передним отсеком подвеса камеры.";
+"uav.profile.dji-phantom-3-standard.mission_role" = "Потребительская аэросъемка";
+"uav.profile.freefly-alta-x.short_description" = "Тяжелый мультикоптер с открытой рамой для кино- и индустриальных задач и центральной нижней секцией полезной нагрузки.";
+"uav.profile.freefly-alta-x.mission_role" = "Тяжелая кино- и индустриальная перевозка полезной нагрузки";
+"uav.profile.griff-30.short_description" = "Тяжелый грузовой БЛА с крупной транспортной рамой и нижней зоной подвеса груза.";
+"uav.profile.griff-30.mission_role" = "Тяжелая грузовая перевозка";
+"uav.profile.griff-60.short_description" = "Крупный тяжелый грузовой БЛА с более грузоподъемной рамой, чем у Griff 30.";
+"uav.profile.griff-60.mission_role" = "Тяжелая грузовая перевозка";
+"uav.profile.avidrone-490tl.short_description" = "Грузовой БЛА вертолетного типа с тандемными роторами, вытянутым фюзеляжем и нижней грузовой позицией.";
+"uav.profile.avidrone-490tl.mission_role" = "Грузовая перевозка и утилитарный подъем";
+"uav.profile.wingtraone-gen-ii.short_description" = "Гибридный картографический VTOL-самолет с нижним отсеком съемочного оборудования и крейсерской самолетной схемой.";
+"uav.profile.wingtraone-gen-ii.mission_role" = "Картографическая съемка и фотограмметрия";
+"uav.profile.quantum-systems-trinity-pro.short_description" = "Дальнопролетный eVTOL-самолет для съемки с центральным сенсорным отсеком под фюзеляжем.";
+"uav.profile.quantum-systems-trinity-pro.mission_role" = "Картография и инспекция линейных объектов";
+"uav.profile.mq-9b-skyguardian.short_description" = "Крупная платформа MALE самолетного типа с длинным крылом, носовой сенсорной архитектурой и многоточечной полезной нагрузкой.";
+"uav.profile.mq-9b-skyguardian.mission_role" = "Длительное ISR-наблюдение и многоцелевая патрульная работа";
+"uav.profile.hermes-900.short_description" = "Многоцелевая платформа MALE с длинным крылом, толкающей схемой и сенсорными станциями под носом и фюзеляжем.";
+"uav.profile.hermes-900.mission_role" = "Многоцелевая ISR-разведка и морское патрулирование";
+"uav.profile.ft5-los.short_description" = "Двухдвигательная тактическая самолетная платформа с компактным разведывательным планером и модульной интеграцией полезной нагрузки.";
+"uav.profile.ft5-los.mission_role" = "Тактическая разведка и ISTAR";
+"uav.profile.flyeye.short_description" = "Легкий самолетный разведывательный БЛА с компактным фюзеляжем и нижней электрооптической полезной нагрузкой.";
+"uav.profile.flyeye.mission_role" = "Ближняя разведка и наблюдение";
+"uav.profile.abstract-uav.short_description" = "Пользовательский профиль БЛА для будущей настройки параметров.";
+"uav.profile.abstract-uav.mission_role" = "Пользовательская задача";
+
+"telemetry.path_status" = "Статус маршрута";
+"telemetry.path_status.idle" = "Ожидание";
+"telemetry.path_status.valid" = "Готов";
+"telemetry.path_status.recomputing" = "Перестроение";
+"telemetry.path_status.blocked" = "Заблокирован";
+"telemetry.waypoint" = "Маршрутная точка";
+"telemetry.waypoint.value" = "индекс %d, осталось %d";
+"telemetry.path_remaining" = "Остаток маршрута";
