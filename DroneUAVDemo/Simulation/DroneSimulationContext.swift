@@ -8,4 +8,5 @@ struct DroneSimulationContext {
     let batteryState: BatteryState
     let collisionRisk: Float
     let windVector: SIMD3<Float>
+    let vehicleMassModel: VehicleMassModel
 }

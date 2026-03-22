@@ -48,10 +48,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         let profile = context.profile
         let weather = context.weather.effectiveFactors
-        let authority = context.damageState.controlAuthorityMultiplier.clamped(to: 0.20...1.00)
+        let payloadMassModel = context.vehicleMassModel
+        let maneuverAuthorityPenalty = max(0.0, 1.0 - payloadMassModel.maneuverPenalty)
+        let authority = (context.damageState.controlAuthorityMultiplier * maneuverAuthorityPenalty).clamped(to: 0.18...1.00)
         let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
-        let mass = max(0.20, profile.massKg)
-        let hoverThrottle = profile.hoverThrottle.clamped(to: 0.20...0.82)
+        let mass = max(0.20, payloadMassModel.effectiveMass)
+        let hoverThrottle = (profile.hoverThrottle + payloadMassModel.hoverThrottleAdjustment).clamped(to: 0.20...0.90)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
         let groundRestThrottleThreshold = max(0.18, hoverThrottle * 0.68)
 
@@ -113,7 +115,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
 
         let q = orientationQuaternion(from: next.orientation)
-        let maxThrust = mass * Tuning.gravity * (2.10 * authority + 0.45) * batteryFactor
+        let liftPenalty = max(0.72, 1.0 - payloadMassModel.verticalLoadPenalty)
+        let maxThrust = mass * Tuning.gravity * (2.10 * authority + 0.45) * batteryFactor * liftPenalty
         let thrustMagnitude = motorThrottle * maxThrust
         let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
 
@@ -280,7 +283,9 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             turnAuthority: 0.7,
             maxBankAngleDeg: 42.0
         )
-        let authority = context.damageState.controlAuthorityMultiplier.clamped(to: 0.20...1.00)
+        let payloadMassModel = context.vehicleMassModel
+        let authorityPenalty = max(0.0, 1.0 - payloadMassModel.maneuverPenalty * 0.9)
+        let authority = (context.damageState.controlAuthorityMultiplier * authorityPenalty).clamped(to: 0.18...1.00)
         let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
 
@@ -344,7 +349,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             )
         }
 
-        let cruiseTarget = max(wing.minSustainableSpeedMps * 0.78, wing.cruiseSpeedMps)
+        let cruiseTarget = max(
+            wing.minSustainableSpeedMps * (0.78 + payloadMassModel.verticalLoadPenalty * 0.14),
+            wing.cruiseSpeedMps * (1.0 + payloadMassModel.verticalLoadPenalty * 0.10)
+        )
         let targetForwardSpeed = motorThrottle * min(profile.maxHorizontalSpeedMps, cruiseTarget * 1.45) * (0.55 + 0.45 * batteryFactor)
         let forwardSpeed = approach(current: max(0.0, state.forwardAirspeed), target: targetForwardSpeed, increaseRate: 6.8, decreaseRate: 5.2, dt: dt)
 

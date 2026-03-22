@@ -603,11 +603,6 @@ private struct SimulationToolstripView: View {
                     }
                 }
                 .frame(width: 230)
-
-                Button("payload.select") {
-                    viewModel.showPayloadSelectionPlaceholder()
-                }
-                .buttonStyle(.bordered)
             }
 
             sectionCard("toolstrip.section.throttle") {
@@ -1034,6 +1029,14 @@ struct ContentView: View {
                     .toggleStyle(.checkbox)
                     .frame(width: 168, alignment: .leading)
 
+                    PayloadToolbarEntry(
+                        isPresented: viewModel.isPayloadPanelVisible,
+                        payloadState: viewModel.payloadState,
+                        payloadMountState: viewModel.payloadMountState
+                    ) {
+                        viewModel.togglePayloadPanel()
+                    }
+
                     Button {
                         viewModel.setToolPanelVisible(false)
                     } label: {
@@ -1116,6 +1119,11 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
+            if viewModel.isPayloadPanelVisible {
+                payloadOverlay(for: viewModel)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+
             if viewModel.signalInterferencePresentation.isVisible {
                 SignalInterferenceOverlayView(
                     presentation: viewModel.signalInterferencePresentation,
@@ -1125,6 +1133,7 @@ struct ContentView: View {
                 )
             }
         }
+        .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .alert("battery.depleted.title", isPresented: Binding(
             get: { viewModel.showBatteryDepletedDialog },
@@ -1152,14 +1161,42 @@ struct ContentView: View {
         .sheet(isPresented: $showBindingsSettings) {
             KeyBindingsSettingsView(viewModel: viewModel)
         }
-        .alert("payload.select", isPresented: Binding(
-            get: { viewModel.showPayloadPlaceholder },
-            set: { viewModel.showPayloadPlaceholder = $0 }
-        )) {
-            Button("common.ok", role: .cancel) {}
-        } message: {
-            Text("payload.placeholder.message")
+    }
+
+    @ViewBuilder
+    private func payloadOverlay(for viewModel: DroneSimulationViewModel) -> some View {
+        ZStack(alignment: .top) {
+            Color.black.opacity(0.34)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    viewModel.setPayloadPanelVisible(false)
+                }
+
+            ScrollView(.vertical, showsIndicators: false) {
+                PayloadView(
+                    configuration: viewModel.payloadDraftConfiguration,
+                    payloadState: viewModel.payloadState,
+                    payloadMountState: viewModel.payloadMountState,
+                    capabilityCheck: viewModel.payloadCapabilityCheck,
+                    massModel: viewModel.vehicleMassModel,
+                    statusMessageKey: viewModel.payloadStatusMessageKey,
+                    activeUAVProfile: viewModel.activeUAVProfile,
+                    onTypeChange: viewModel.setPayloadType,
+                    onMassChange: viewModel.setPayloadMass,
+                    onCustomNameChange: viewModel.setPayloadCustomName,
+                    onAttach: viewModel.attachPayload,
+                    onRemove: viewModel.removePayload,
+                    onClose: {
+                        viewModel.setPayloadPanelVisible(false)
+                    }
+                )
+                .frame(maxWidth: 1040)
+                .padding(.horizontal, 28)
+                .padding(.top, viewModel.isToolPanelVisible ? 116 : 72)
+                .padding(.bottom, 40)
+            }
         }
+        .zIndex(4)
     }
 
     private func parametersVisibilityBinding(for viewModel: DroneSimulationViewModel) -> Binding<Bool> {

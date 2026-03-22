@@ -1,0 +1,64 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "keybind.section.title",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 14
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.done",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 17
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.capture.idle",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 34
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.reset_defaults",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 41
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.capturing",
+        "location": {
+          "startingColumn": 100,
+          "startingLine": 70
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.rebind",
+        "location": {
+          "startingColumn": 141,
+          "startingLine": 70
+        }
+      },
+      {
+        "comment": "",
+        "key": "⚠︎ %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 84
+        }
+      }
+    ]
+  },
+  "version": 1
+}

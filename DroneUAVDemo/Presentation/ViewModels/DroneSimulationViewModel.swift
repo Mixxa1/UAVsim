@@ -221,6 +221,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published var diagnosticMode: DiagnosticOverlayMode
     @Published var isToolPanelVisible: Bool
     @Published var isParametersPanelVisible: Bool
+    @Published private(set) var isPayloadPanelVisible: Bool
     @Published var isBoundaryBarrierVisible: Bool
     @Published var isCompactTelemetryHUDEnabled: Bool
     @Published var telemetryExportAlert: TelemetryExportAlert?
@@ -229,7 +230,12 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var selectedCameraPreset: CameraPreset
     @Published private(set) var isArmed: Bool
     @Published private(set) var physicalState: DronePhysicalState
-    @Published var showPayloadPlaceholder: Bool
+    @Published private(set) var payloadDraftConfiguration: PayloadConfiguration
+    @Published private(set) var payloadState: PayloadState
+    @Published private(set) var payloadMountState: PayloadMountState
+    @Published private(set) var payloadCapabilityCheck: PayloadCapabilityCheck
+    @Published private(set) var vehicleMassModel: VehicleMassModel
+    @Published private(set) var payloadStatusMessageKey: String?
     @Published private(set) var signalState: UAVSignalState
     @Published private(set) var signalCountdownSecondsRemaining: Int
 
@@ -323,6 +329,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fleetInterDroneRisk: Float = 0.0
     private var fleetNearestInterDroneDistance: Float = .infinity
     private var isTerrainDensitySliderEditing: Bool = false
+    private var installedPayloadConfiguration: PayloadConfiguration?
 
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
@@ -350,8 +357,9 @@ final class DroneSimulationViewModel: ObservableObject {
         let repository = LIPODroneModelRepository(abstractParameters: abstract)
         let models = repository.allProfiles
         let selectedProfile = repository.defaultProfile
+        let initialActiveUAVProfile = Self.resolveActiveUAVProfile(for: selectedProfile, abstractParameters: abstract)
         self.selectedDroneProfile = selectedProfile
-        self.activeUAVProfile = Self.resolveActiveUAVProfile(for: selectedProfile, abstractParameters: abstract)
+        self.activeUAVProfile = initialActiveUAVProfile
         self.availableDroneProfiles = models
         self.uavCatalogFilterState = UAVFilterState()
 
@@ -443,6 +451,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.diagnosticMode = .normal
         self.isToolPanelVisible = true
         self.isParametersPanelVisible = true
+        self.isPayloadPanelVisible = false
         self.isBoundaryBarrierVisible = false
         self.isCompactTelemetryHUDEnabled = true
         self.telemetryExportAlert = nil
@@ -451,7 +460,21 @@ final class DroneSimulationViewModel: ObservableObject {
         self.selectedCameraPreset = .pilot
         self.isArmed = false
         self.physicalState = initialState.physicalState
-        self.showPayloadPlaceholder = false
+        let initialPayloadConfiguration = PayloadController.defaultConfiguration()
+        self.payloadDraftConfiguration = initialPayloadConfiguration
+        self.payloadState = .noPayload
+        self.payloadMountState = initialActiveUAVProfile == nil ? .unavailable : .ready
+        self.payloadCapabilityCheck = PayloadController.capabilityCheck(
+            for: initialPayloadConfiguration,
+            profile: initialActiveUAVProfile
+        )
+        self.vehicleMassModel = PayloadController.massModel(
+            for: selectedProfile,
+            uavProfile: initialActiveUAVProfile,
+            installedPayload: nil,
+            payloadState: .noPayload
+        )
+        self.payloadStatusMessageKey = nil
         self.signalState = .normal
         self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
         self.telemetry = .zero
@@ -497,7 +520,85 @@ final class DroneSimulationViewModel: ObservableObject {
     func setPitch(_ value: Double) { updateControlValues({ $0.pitch = value }, markManual: true) }
     func setYaw(_ value: Double) { updateControlValues({ $0.yaw = value }, markManual: true) }
     func setThrottle(_ value: Double) { updateControlValues({ $0.throttle = value }, markManual: true) }
-    func showPayloadSelectionPlaceholder() { showPayloadPlaceholder = true }
+
+    func setPayloadType(_ type: PayloadType) {
+        guard payloadDraftConfiguration.payloadType != type else {
+            return
+        }
+
+        payloadDraftConfiguration.payloadType = type
+        payloadDraftConfiguration.visualPreset = type.defaultVisualPreset
+        payloadDraftConfiguration.payloadMass = type.defaultMass
+        if type != .custom {
+            payloadDraftConfiguration.customName = ""
+        }
+        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
+        payloadStatusMessageKey = nil
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func setPayloadMass(_ value: Double) {
+        let clamped = Float(max(0.0, min(value, 5000.0)))
+        guard abs(payloadDraftConfiguration.payloadMass - clamped) > 0.0001 else {
+            return
+        }
+
+        payloadDraftConfiguration.payloadMass = clamped
+        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
+        payloadStatusMessageKey = nil
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func setPayloadCustomName(_ value: String) {
+        guard payloadDraftConfiguration.customName != value else {
+            return
+        }
+
+        payloadDraftConfiguration.customName = value
+        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
+        payloadStatusMessageKey = nil
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func attachPayload() {
+        let capabilityCheck = PayloadController.capabilityCheck(
+            for: payloadDraftConfiguration,
+            profile: activeUAVProfile
+        )
+        payloadCapabilityCheck = capabilityCheck
+
+        guard capabilityCheck.isAllowed else {
+            payloadStatusMessageKey = capabilityCheck.rejectReason?.messageKey
+            return
+        }
+
+        var attachedConfiguration = payloadDraftConfiguration
+        attachedConfiguration.isAttached = true
+        installedPayloadConfiguration = attachedConfiguration
+        payloadDraftConfiguration = attachedConfiguration
+        payloadState = .attached
+        payloadStatusMessageKey = "payload.message.attached"
+        sceneController.attachPayloadVisual(attachedConfiguration)
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func removePayload() {
+        guard installedPayloadConfiguration != nil || payloadState == .attached else {
+            return
+        }
+
+        installedPayloadConfiguration = nil
+        payloadDraftConfiguration.isAttached = false
+        payloadState = .removed
+        payloadStatusMessageKey = "payload.message.removed"
+        sceneController.removePayloadVisual()
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
 
     func arm() {
         ensureSimulationRunning()
@@ -553,7 +654,6 @@ final class DroneSimulationViewModel: ObservableObject {
         diagnosticMode = .normal
         collisionAnalysis = .safe
         isArmed = false
-        showPayloadPlaceholder = false
         wingmen.removeAll()
         fleetInterDroneRisk = 0.0
         fleetNearestInterDroneDistance = .infinity
@@ -598,6 +698,7 @@ final class DroneSimulationViewModel: ObservableObject {
             goal: nil,
             enabled: false
         )
+        refreshPayloadRuntimeState()
 
         warnings = []
         lastCollisionSource = "n/a"
@@ -763,6 +864,14 @@ final class DroneSimulationViewModel: ObservableObject {
         isParametersPanelVisible = visible
     }
 
+    func togglePayloadPanel() {
+        isPayloadPanelVisible.toggle()
+    }
+
+    func setPayloadPanelVisible(_ visible: Bool) {
+        isPayloadPanelVisible = visible
+    }
+
     func setBoundaryBarrierVisible(_ visible: Bool) {
         guard isBoundaryBarrierVisible != visible else {
             return
@@ -790,6 +899,7 @@ final class DroneSimulationViewModel: ObservableObject {
         selectedDroneProfile = profile
         activeUAVProfile = Self.resolveActiveUAVProfile(for: profile, abstractParameters: abstractParameters)
         sceneController.setDroneProfile(profile)
+        resetPayloadForProfileSwitch()
         resetCameraConfigurationForSelectedProfile()
 
         batteryState = .full
@@ -1349,7 +1459,8 @@ final class DroneSimulationViewModel: ObservableObject {
             damageState: damageState,
             batteryState: batteryState,
             collisionRisk: collisionAnalysis.riskScore,
-            windVector: weather.windVector
+            windVector: weather.windVector,
+            vehicleMassModel: vehicleMassModel
         )
 
         let previousState = state
@@ -2355,6 +2466,7 @@ final class DroneSimulationViewModel: ObservableObject {
             selectedDroneProfile = profile
             activeUAVProfile = Self.resolveActiveUAVProfile(for: profile, abstractParameters: abstract)
             sceneController.setDroneProfile(profile)
+            resetPayloadForProfileSwitch()
         }
 
         _ = DroneFlightMode(rawValue: snapshot.flightModeRaw)
@@ -2519,6 +2631,50 @@ final class DroneSimulationViewModel: ObservableObject {
             deltaTime: 0.0
         )
         emitLaunchDiagnostics(context: "load_project")
+    }
+
+    private func refreshPayloadRuntimeState() {
+        payloadMountState = resolvePayloadMountState()
+        payloadCapabilityCheck = PayloadController.capabilityCheck(
+            for: payloadDraftConfiguration,
+            profile: activeUAVProfile
+        )
+        vehicleMassModel = PayloadController.massModel(
+            for: selectedDroneProfile,
+            uavProfile: activeUAVProfile,
+            installedPayload: installedPayloadConfiguration,
+            payloadState: payloadState
+        )
+    }
+
+    private func payloadDraftMatchesInstalledPayload() -> Bool {
+        guard payloadState == .attached,
+              let installedPayloadConfiguration else {
+            return false
+        }
+
+        return installedPayloadConfiguration.payloadType == payloadDraftConfiguration.payloadType &&
+            installedPayloadConfiguration.customName == payloadDraftConfiguration.customName &&
+            abs(installedPayloadConfiguration.payloadMass - payloadDraftConfiguration.payloadMass) <= 0.0001 &&
+            installedPayloadConfiguration.visualPreset == payloadDraftConfiguration.visualPreset
+    }
+
+    private func resolvePayloadMountState() -> PayloadMountState {
+        guard activeUAVProfile != nil else {
+            return .unavailable
+        }
+
+        return payloadState == .attached ? .occupied : .ready
+    }
+
+    private func resetPayloadForProfileSwitch() {
+        installedPayloadConfiguration = nil
+        payloadDraftConfiguration = PayloadController.defaultConfiguration()
+        payloadDraftConfiguration.isAttached = false
+        payloadState = .noPayload
+        payloadStatusMessageKey = nil
+        sceneController.removePayloadVisual()
+        refreshPayloadRuntimeState()
     }
 
     private static func resolveActiveUAVProfile(

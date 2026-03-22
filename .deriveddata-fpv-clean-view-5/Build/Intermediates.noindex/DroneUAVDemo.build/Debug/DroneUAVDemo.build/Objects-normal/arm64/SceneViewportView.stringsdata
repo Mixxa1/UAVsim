@@ -1,0 +1,24 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "hud.title",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 28
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@: %@ | %@: %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 30
+        }
+      }
+    ]
+  },
+  "version": 1
+}

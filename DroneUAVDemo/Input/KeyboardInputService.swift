@@ -492,6 +492,11 @@ final class KeyboardInputService: KeyboardInputProviding {
             return event
         }
 
+        if isTextInputActive(for: event) {
+            clearInputState(keepPendingActions: true)
+            return event
+        }
+
         if event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {
             return event
         }
@@ -531,6 +536,11 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func handleKeyUp(_ event: NSEvent) -> NSEvent? {
+        if isTextInputActive(for: event) {
+            clearInputState(keepPendingActions: true)
+            return event
+        }
+
         let continuousForKey = activeContinuousByKey.removeValue(forKey: event.keyCode) ?? []
         if !continuousForKey.isEmpty {
             activeContinuousCommands.subtract(continuousForKey)
@@ -540,6 +550,11 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) -> NSEvent? {
+        if isTextInputActive(for: event) {
+            clearInputState(keepPendingActions: true)
+            return event
+        }
+
         if isAccelerateBoundToShift {
             if event.modifierFlags.contains(.shift) {
                 activeContinuousCommands.insert(.accelerate)
@@ -556,6 +571,14 @@ final class KeyboardInputService: KeyboardInputProviding {
         if !keepPendingActions {
             pendingActions.removeAll()
         }
+    }
+
+    private func isTextInputActive(for event: NSEvent) -> Bool {
+        let responder = event.window?.firstResponder ?? NSApp.keyWindow?.firstResponder
+        guard let textView = responder as? NSTextView else {
+            return false
+        }
+        return textView.isEditable || textView.isFieldEditor
     }
 
     private var isAccelerateBoundToShift: Bool {

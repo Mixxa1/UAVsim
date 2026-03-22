@@ -13,7 +13,7 @@ enum UAVReferenceCatalog {
             specConfidence: .verified,
             payloadCapabilityMode: .modular,
             baseMass: 3.77,
-            batteryMass: nil,
+            batteryMass: 2.70,
             maxPayloadMass: 0.96,
             maxTakeoffMass: 9.2,
             dimensions: UAVDimensions(
@@ -59,8 +59,11 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .sensor,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 0.33,
             maxPayloadMass: nil,
+            estimatedMaxPayloadMass: 0.10,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 1.15,
             dimensions: UAVDimensions(),
             payloadMountOffset: SIMD3<Float>(0.0, -0.07, 0.09),
             visualPreset: .djiMavic4Pro,
@@ -79,8 +82,11 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .sensor,
             baseMass: nil,
             batteryMass: 0.045,
+            estimatedBatteryMass: nil,
             maxPayloadMass: nil,
+            estimatedMaxPayloadMass: 0.02,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 0.155,
             dimensions: UAVDimensions(
                 unfoldedMillimeters: DroneDimensionsMM(x: 130, y: 157, z: 48.5)
             ),
@@ -101,8 +107,11 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .sensor,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 0.365,
             maxPayloadMass: nil,
+            estimatedMaxPayloadMass: 0.15,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 1.35,
             dimensions: UAVDimensions(
                 diagonalWheelbaseMillimeters: 350
             ),
@@ -123,6 +132,7 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .modular,
             baseMass: 10.86,
             batteryMass: nil,
+            estimatedBatteryMass: 8.94,
             maxPayloadMass: 15.06,
             maxTakeoffMass: 34.86,
             dimensions: UAVDimensions(
@@ -146,8 +156,10 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .cargo,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 8.0,
             maxPayloadMass: 30.0,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 48.0,
             dimensions: UAVDimensions(),
             payloadMountOffset: SIMD3<Float>(0.0, -0.32, 0.0),
             visualPreset: .griff30,
@@ -166,8 +178,10 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .cargo,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 14.0,
             maxPayloadMass: 60.0,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 92.0,
             dimensions: UAVDimensions(),
             payloadMountOffset: SIMD3<Float>(0.0, -0.42, 0.0),
             visualPreset: .griff60,
@@ -186,6 +200,7 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .cargo,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 10.0,
             maxPayloadMass: 23.0,
             maxTakeoffMass: 57.0,
             dimensions: UAVDimensions(),
@@ -206,6 +221,7 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .sensor,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 0.85,
             maxPayloadMass: 0.8,
             maxTakeoffMass: 4.5,
             dimensions: UAVDimensions(
@@ -228,6 +244,7 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .sensor,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 1.25,
             maxPayloadMass: 1.0,
             maxTakeoffMass: 5.75,
             dimensions: UAVDimensions(
@@ -251,6 +268,7 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .modular,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 0.0,
             maxPayloadMass: 2177.0,
             maxTakeoffMass: 5670.0,
             dimensions: UAVDimensions(
@@ -274,6 +292,7 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .modular,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 0.0,
             maxPayloadMass: 350.0,
             maxTakeoffMass: 1180.0,
             dimensions: UAVDimensions(
@@ -296,8 +315,10 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .modular,
             baseMass: 85.0,
             batteryMass: nil,
+            estimatedBatteryMass: 5.0,
             maxPayloadMass: 30.0,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 120.0,
             dimensions: UAVDimensions(
                 wingspanMillimeters: 6400,
                 fuselageLengthMillimeters: 3100
@@ -319,8 +340,11 @@ enum UAVReferenceCatalog {
             payloadCapabilityMode: .sensor,
             baseMass: nil,
             batteryMass: nil,
+            estimatedBatteryMass: 1.6,
             maxPayloadMass: nil,
+            estimatedMaxPayloadMass: 1.2,
             maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 12.0,
             dimensions: UAVDimensions(
                 wingspanMillimeters: 3600,
                 fuselageLengthMillimeters: 1800

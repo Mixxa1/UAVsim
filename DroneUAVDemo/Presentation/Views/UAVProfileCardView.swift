@@ -10,6 +10,8 @@ struct UAVProfileCardView: View {
                 .foregroundStyle(.secondary)
 
             if let entry {
+                let payloadData = entry.profile.payloadDataResolution
+
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -33,11 +35,12 @@ struct UAVProfileCardView: View {
                     infoRow(localized("uav.card.country"), entry.profile.localizedCountryOfOrigin ?? localized("common.not_specified"))
                     infoRow(localized("uav.card.type"), entry.profile.vehicleType.catalogTitle)
                     infoRow(localized("uav.card.mass_class"), entry.profile.massCategory?.catalogTitle ?? localized("common.not_specified"))
-                    infoRow(localized("uav.card.base_mass"), massText(entry.profile.baseMass))
-                    infoRow(localized("uav.card.max_payload"), massText(entry.profile.maxPayloadMass))
-                    infoRow(localized("uav.card.mtow"), massText(entry.profile.maxTakeoffMass))
+                    infoRow(localized("uav.card.base_mass"), massText(payloadData.baseMass))
+                    infoRow(localized("uav.card.max_payload"), massText(payloadData.maxPayloadMass))
+                    infoRow(localized("uav.card.mtow"), massText(payloadData.maxTakeoffMass))
                     infoRow(localized("uav.card.role"), entry.profile.localizedMissionRole ?? localized("common.not_specified"))
                     infoRow(localized("uav.card.status"), entry.profile.specConfidence.catalogTitle)
+                    infoRow(localized("uav.card.payload_data_source"), payloadData.sourceQuality.title)
 
                     if let armamentCapabilityNote = entry.profile.localizedArmamentCapabilityNote {
                         VStack(alignment: .leading, spacing: 4) {
@@ -93,6 +96,17 @@ struct UAVProfileCardView: View {
             return .green
         case .partial:
             return .yellow
+        case .custom:
+            return .orange
+        }
+    }
+
+    private func badgeTint(for quality: PayloadDataQualitySource) -> Color {
+        switch quality {
+        case .verified:
+            return .green
+        case .estimated:
+            return .blue
         case .custom:
             return .orange
         }

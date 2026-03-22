@@ -12,8 +12,11 @@ struct UAVProfile: Identifiable, Hashable {
     let payloadCapabilityMode: UAVPayloadCapabilityMode
     let baseMass: Float?
     let batteryMass: Float?
+    let estimatedBatteryMass: Float?
     let maxPayloadMass: Float?
+    let estimatedMaxPayloadMass: Float?
     let maxTakeoffMass: Float?
+    let estimatedMaxTakeoffMass: Float?
     let dimensions: UAVDimensions
     let payloadMountOffset: SIMD3<Float>
     let visualPreset: UAVVisualPreset
@@ -33,8 +36,11 @@ struct UAVProfile: Identifiable, Hashable {
         payloadCapabilityMode: UAVPayloadCapabilityMode,
         baseMass: Float?,
         batteryMass: Float?,
+        estimatedBatteryMass: Float? = nil,
         maxPayloadMass: Float?,
+        estimatedMaxPayloadMass: Float? = nil,
         maxTakeoffMass: Float?,
+        estimatedMaxTakeoffMass: Float? = nil,
         dimensions: UAVDimensions,
         payloadMountOffset: SIMD3<Float>,
         visualPreset: UAVVisualPreset,
@@ -53,8 +59,11 @@ struct UAVProfile: Identifiable, Hashable {
         self.payloadCapabilityMode = payloadCapabilityMode
         self.baseMass = baseMass
         self.batteryMass = batteryMass
+        self.estimatedBatteryMass = estimatedBatteryMass
         self.maxPayloadMass = maxPayloadMass
+        self.estimatedMaxPayloadMass = estimatedMaxPayloadMass
         self.maxTakeoffMass = maxTakeoffMass
+        self.estimatedMaxTakeoffMass = estimatedMaxTakeoffMass
         self.dimensions = dimensions
         self.payloadMountOffset = payloadMountOffset
         self.visualPreset = visualPreset
@@ -126,6 +135,46 @@ extension UAVProfile {
         }
 
         return localizedCatalogString(key: "uav.profile.\(id).armament_note", fallback: armamentCapabilityNote)
+    }
+
+    var payloadDataResolution: PayloadDataResolution {
+        let resolvedBatteryMass = batteryMass ?? estimatedBatteryMass
+        let resolvedMaxPayloadMass = maxPayloadMass ?? estimatedMaxPayloadMass
+        let resolvedMaxTakeoffMass = maxTakeoffMass ?? estimatedMaxTakeoffMass
+
+        let derivedBaseMass: Float?
+        if baseMass == nil,
+           let resolvedBatteryMass,
+           let resolvedMaxPayloadMass,
+           let resolvedMaxTakeoffMass {
+            let inferred = resolvedMaxTakeoffMass - resolvedBatteryMass - resolvedMaxPayloadMass
+            derivedBaseMass = inferred > 0.01 ? inferred : nil
+        } else {
+            derivedBaseMass = nil
+        }
+
+        let usesEstimatedValues = estimatedBatteryMass != nil && batteryMass == nil ||
+            estimatedMaxPayloadMass != nil && maxPayloadMass == nil ||
+            estimatedMaxTakeoffMass != nil && maxTakeoffMass == nil ||
+            derivedBaseMass != nil && baseMass == nil
+
+        let sourceQuality: PayloadDataQualitySource
+        if specConfidence == .custom {
+            sourceQuality = .custom
+        } else if usesEstimatedValues {
+            sourceQuality = .estimated
+        } else {
+            sourceQuality = .verified
+        }
+
+        return PayloadDataResolution(
+            baseMass: baseMass ?? derivedBaseMass,
+            batteryMass: resolvedBatteryMass,
+            maxPayloadMass: resolvedMaxPayloadMass,
+            maxTakeoffMass: resolvedMaxTakeoffMass,
+            sourceQuality: sourceQuality,
+            usesEstimatedValues: usesEstimatedValues
+        )
     }
 }
 

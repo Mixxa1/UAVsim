@@ -15,6 +15,8 @@ final class DroneSceneController {
     private let freeCameraNode: SCNNode
     private let followRigNode = SCNNode()
     private let followCameraNode = SCNNode()
+    private let fpvPresentationRootNode = SCNNode()
+    private let fpvCameraAnchorNode = SCNNode()
     private let fpvYawNode = SCNNode()
     private let fpvPitchNode = SCNNode()
     private let fpvCameraNode = SCNNode()
@@ -52,6 +54,9 @@ final class DroneSceneController {
     private let droneCollisionProxyNode = SCNNode()
     private var droneCollisionProxyRadius: Float = 0.18
     private var fpvObstructionHidingActive: Bool = false
+    private var fpvPresentationActive: Bool = false
+    private var payloadVisualNode: SCNNode?
+    private let fpvPayloadPresentationNode = SCNNode()
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
@@ -135,11 +140,18 @@ final class DroneSceneController {
         scene.rootNode.addChildNode(orbitCameraNode)
         scene.rootNode.addChildNode(topCameraNode)
 
+        fpvPresentationRootNode.name = "fpvPresentationRootNode"
         fpvYawNode.name = "fpvYawMount"
         fpvPitchNode.name = "fpvPitchMount"
+        fpvCameraAnchorNode.name = "fpvCameraAnchorNode"
+        fpvPayloadPresentationNode.name = "fpvPayloadPresentationNode"
+        fpvPayloadPresentationNode.isHidden = true
+        fpvCameraAnchorNode.addChildNode(fpvPayloadPresentationNode)
+        fpvCameraAnchorNode.addChildNode(fpvYawNode)
         fpvYawNode.addChildNode(fpvPitchNode)
         fpvPitchNode.addChildNode(fpvCameraNode)
-        fpvAnchorNode.addChildNode(fpvYawNode)
+        fpvPresentationRootNode.addChildNode(fpvCameraAnchorNode)
+        scene.rootNode.addChildNode(fpvPresentationRootNode)
 
         weatherNode.name = "weatherNode"
         scene.rootNode.addChildNode(weatherNode)
@@ -201,6 +213,21 @@ final class DroneSceneController {
 
     func currentPayloadMountNode() -> SCNNode {
         payloadMountNode
+    }
+
+    func attachPayloadVisual(_ configuration: PayloadConfiguration) {
+        removePayloadVisual()
+        let node = PayloadVisualFactory.build(configuration: configuration)
+        payloadMountNode.addChildNode(node)
+        payloadVisualNode = node
+        installFPVPayloadPresentation(from: node)
+        applyPayloadFPVPresentation()
+    }
+
+    func removePayloadVisual() {
+        payloadVisualNode?.removeFromParentNode()
+        payloadVisualNode = nil
+        resetFPVPayloadPresentation()
     }
 
     func setWorldBoundsVisible(_ visible: Bool) {
@@ -320,9 +347,12 @@ final class DroneSceneController {
         topLookAngles = .zero
         lastComponentOverlaySignature = nil
         fpvObstructionHidingActive = false
+        fpvPresentationActive = false
+        payloadVisualNode = nil
+        resetFPVPayloadPresentation()
 
         scene.rootNode.addChildNode(droneNode)
-        fpvAnchorNode.addChildNode(fpvYawNode)
+        fpvPresentationRootNode.simdTransform = matrix_identity_float4x4
         configureDroneCollisionProxy(for: profile)
         resetCameraRuntimeState()
     }
@@ -330,11 +360,18 @@ final class DroneSceneController {
     func resetCameraRuntimeState() {
         orbitAngle = 0.0
         fpvObstructionHidingActive = false
+        fpvPresentationActive = false
         restoreAfterFPVIfNeeded()
+        fpvPresentationRootNode.simdTransform = matrix_identity_float4x4
         followRigNode.simdPosition = .zero
         followRigNode.simdOrientation = simd_quatf()
         followCameraNode.simdPosition = .zero
         followCameraNode.simdOrientation = simd_quatf()
+        fpvCameraAnchorNode.simdPosition = .zero
+        fpvCameraAnchorNode.simdOrientation = simd_quatf()
+        fpvYawNode.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
+        fpvPitchNode.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
+        fpvPitchNode.simdPosition = .zero
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
@@ -426,11 +463,14 @@ final class DroneSceneController {
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
 
+        fpvPresentationActive = camera.mode == .fpv
         fpvObstructionHidingActive = (camera.mode == .fpv) && camera.fpv.hideObstructingParts
+        visualRootNode.isHidden = fpvPresentationActive
         if camera.mode != .fpv {
             droneNode.isHidden = false
             droneNode.opacity = 1.0
         }
+        applyPayloadFPVPresentation()
 
         rotatePropellers(state: state, deltaTime: deltaTime)
         applyComponentOverlays(damage: damage, thermal: thermal, mode: diagnosticMode)
@@ -771,16 +811,27 @@ final class DroneSceneController {
             sin(cameraNoisePhase * 1.9 + 0.5) * 0.010 * shake,
             0.0
         )
-        let mountForwardDistance = max(0.018, abs(settings.fpv.mountOffset.z))
-        let mountForwardOffset = bodyForward * mountForwardDistance
+        let fpvAnchor = FPVCameraAnchor.resolved(
+            for: activeProfile,
+            subjectScale: max(subjectScale, cachedSubjectScale)
+        )
+        fpvPresentationRootNode.simdWorldTransform = fpvAnchorNode.simdWorldTransform
+        let fpvLocalForward = resolvedFPVLocalForward(desiredWorldForward: forward)
+        let mountForwardDistance = max(fpvAnchor.forwardClearance, abs(settings.fpv.mountOffset.z))
+        let mountForwardOffset = fpvLocalForward * mountForwardDistance
         let mountLateralOffset = SIMD3<Float>(settings.fpv.mountOffset.x, settings.fpv.mountOffset.y, 0.0)
-        fpvPitchNode.simdPosition = mountLateralOffset + mountForwardOffset + sway
+        fpvCameraAnchorNode.simdPosition = fpvAnchor.baseOffset + mountLateralOffset + mountForwardOffset + sway
+        updateFPVPayloadPresentationPose(
+            bodyForward: fpvLocalForward,
+            subjectScale: max(subjectScale, cachedSubjectScale)
+        )
+        fpvPitchNode.simdPosition = .zero
 
         let planarVelocity = SIMD2<Float>(state.velocity.x, state.velocity.z)
         let planarSpeed = simd_length(planarVelocity)
         let velocityYaw: Float
         if planarSpeed > 0.35 {
-            if bodyForward.z < 0.0 {
+            if fpvLocalForward.z < 0.0 {
                 velocityYaw = atan2(-state.velocity.x, -state.velocity.z)
             } else {
                 velocityYaw = atan2(state.velocity.x, state.velocity.z)
@@ -795,7 +846,7 @@ final class DroneSceneController {
         let userYaw = fpvLookAngles.x.clamped(
             to: (-settings.fpv.yawLimitDeg.degreesToRadians)...(settings.fpv.yawLimitDeg.degreesToRadians)
         )
-        let fpvBaseYaw: Float = activeProfile.airframeClass == .fixedWing ? .pi : 0.0
+        let fpvBaseYaw = atan2(fpvLocalForward.x, -fpvLocalForward.z)
         fpvYawNode.eulerAngles.y = CGFloat(fpvBaseYaw + relativeYaw + userYaw)
 
         let gimbalPitch = (-state.velocity.y * 0.05).clamped(
@@ -815,7 +866,7 @@ final class DroneSceneController {
         fpvCameraNode.camera?.fieldOfView = fov
         topCameraNode.camera?.fieldOfView = fov
         freeCameraNode.camera?.fieldOfView = fov
-        fpvCameraNode.camera?.zNear = CGFloat(settings.fpv.nearClip.clamped(to: 0.005...0.25))
+        fpvCameraNode.camera?.zNear = CGFloat(max(0.015, settings.fpv.nearClip.clamped(to: 0.005...0.25)))
         topCameraNode.camera?.zNear = 0.03
         freeCameraNode.camera?.zNear = 0.01
     }
@@ -823,16 +874,17 @@ final class DroneSceneController {
     private func restoreAfterFPVIfNeeded() {
         droneNode.isHidden = false
         droneNode.opacity = 1.0
+        visualRootNode.isHidden = false
+        fpvObstructionHidingActive = false
+        fpvPresentationActive = false
+        applyPayloadFPVPresentation()
 
-        let fpvHidden: Set<DamageComponent> = [
-            .propellerFL, .propellerFR, .propellerRL, .propellerRR,
-            .armFL, .armFR
-        ]
-        for component in fpvHidden {
-            for node in componentNodes[component] ?? [] {
+        for nodes in componentNodes.values {
+            for node in nodes {
                 node.isHidden = false
             }
         }
+        lastComponentOverlaySignature = nil
     }
 
     private func cameraOrientation(
@@ -863,6 +915,17 @@ final class DroneSceneController {
         case .fixedWing:
             return SIMD3<Float>(0.0, 0.0, 1.0)
         }
+    }
+
+    private func resolvedFPVLocalForward(desiredWorldForward: SIMD3<Float>) -> SIMD3<Float> {
+        let worldOrientation = simd_quatf(fpvPresentationRootNode.simdWorldTransform)
+        let localForward = simd_act(simd_inverse(worldOrientation), desiredWorldForward)
+        let planarForward = SIMD3<Float>(localForward.x, 0.0, localForward.z)
+        let planarLength = simd_length(SIMD2<Float>(planarForward.x, planarForward.z))
+        if planarLength < 0.0001 {
+            return modelForwardLocal()
+        }
+        return planarForward / planarLength
     }
 
     private func wrapAngle(_ value: Float) -> Float {
@@ -1301,15 +1364,18 @@ final class DroneSceneController {
 
         let fpvHidden: Set<DamageComponent> = [
             .propellerFL, .propellerFR, .propellerRL, .propellerRR,
+            .motorFL, .motorFR,
             .armFL, .armFR
         ]
 
         for component in DamageComponent.allCases {
             let nodes = componentNodes[component] ?? []
-            let hidden = damage.hiddenComponents.contains(component) || (fpvObstructionHidingActive && fpvHidden.contains(component))
             let selected = damage.selectedComponent == component
 
             for node in nodes {
+                let hiddenByDamage = damage.hiddenComponents.contains(component)
+                let hiddenBySelectiveFPV = fpvObstructionHidingActive && fpvHidden.contains(component)
+                let hidden = hiddenByDamage || hiddenBySelectiveFPV
                 node.isHidden = hidden
 
                 switch mode {
@@ -1329,6 +1395,54 @@ final class DroneSceneController {
                 }
             }
         }
+    }
+
+    private func applyPayloadFPVPresentation() {
+        let useFPVPresentation = fpvPresentationActive
+        fpvPayloadPresentationNode.isHidden = !useFPVPresentation || fpvPayloadPresentationNode.childNodes.isEmpty
+
+        guard let payloadVisualNode else {
+            return
+        }
+
+        let useFPVProxy = useFPVPresentation
+        if let standardPresentation = payloadVisualNode.childNode(withName: "payloadStandardPresentationNode", recursively: false),
+           let fpvProxyPresentation = payloadVisualNode.childNode(withName: "payloadFPVProxyNode", recursively: false) {
+            standardPresentation.isHidden = useFPVProxy
+            fpvProxyPresentation.isHidden = !useFPVProxy
+            payloadVisualNode.isHidden = false
+        } else {
+            payloadVisualNode.isHidden = useFPVProxy
+        }
+    }
+
+    private func installFPVPayloadPresentation(from payloadVisualNode: SCNNode) {
+        resetFPVPayloadPresentation()
+
+        let proxySource = payloadVisualNode.childNode(withName: "payloadFPVProxyNode", recursively: false) ?? payloadVisualNode
+        let proxyNode = proxySource.clone()
+        proxyNode.name = "fpvDetachedPayloadProxyNode"
+        proxyNode.isHidden = false
+        fpvPayloadPresentationNode.addChildNode(proxyNode)
+    }
+
+    private func resetFPVPayloadPresentation() {
+        for child in fpvPayloadPresentationNode.childNodes {
+            child.removeFromParentNode()
+        }
+        fpvPayloadPresentationNode.isHidden = true
+        fpvPayloadPresentationNode.simdPosition = .zero
+    }
+
+    private func updateFPVPayloadPresentationPose(bodyForward: SIMD3<Float>, subjectScale: Float) {
+        guard fpvPayloadPresentationNode.childNodes.isEmpty == false else {
+            return
+        }
+
+        let forwardOffset = bodyForward * max(0.022, min(0.080, subjectScale * 0.14))
+        let verticalOffset = SIMD3<Float>(0.0, -max(0.055, min(0.16, subjectScale * 0.18)), 0.0)
+        let aftBias = -bodyForward * max(0.008, min(0.030, subjectScale * 0.05))
+        fpvPayloadPresentationNode.simdPosition = forwardOffset + verticalOffset + aftBias
     }
 
     private func applyEmission(on node: SCNNode, color: NSColor) {

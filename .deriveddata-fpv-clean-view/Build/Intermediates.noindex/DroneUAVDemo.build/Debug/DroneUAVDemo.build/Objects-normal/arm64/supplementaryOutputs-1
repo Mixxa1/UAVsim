@@ -1,0 +1,51 @@
+{
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/DroneFlightMode.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFlightMode.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFlightMode.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFlightMode.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFlightMode.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFlightMode.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/DroneUAVDemoApp.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneUAVDemoApp.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneUAVDemoApp.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneUAVDemoApp.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneUAVDemoApp.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneUAVDemoApp.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSimulationViewModel.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSimulationViewModel.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSimulationViewModel.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSimulationViewModel.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSimulationViewModel.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/ContentView.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ContentView.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ContentView.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ContentView.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ContentView.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ContentView.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/ControlPanelView.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ControlPanelView.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ControlPanelView.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ControlPanelView.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ControlPanelView.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ControlPanelView.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/SceneViewportView.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/SceneViewportView.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/SceneViewportView.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/SceneViewportView.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/SceneViewportView.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/TelemetryPanelView.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryPanelView.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryPanelView.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryPanelView.dia",
+    "object" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryPanelView.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.deriveddata-fpv-clean-view/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryPanelView.swiftdeps"
+  }
+}
