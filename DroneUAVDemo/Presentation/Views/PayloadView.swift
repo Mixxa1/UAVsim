@@ -13,6 +13,7 @@ struct PayloadView: View {
     let onMassChange: (Double) -> Void
     let onCustomNameChange: (String) -> Void
     let onAttach: () -> Void
+    let onRelease: () -> Void
     let onRemove: () -> Void
     let onClose: (() -> Void)?
 
@@ -389,6 +390,14 @@ struct PayloadView: View {
                 onAttach()
             }
 
+            actionButton(
+                title: "payload.release",
+                tint: Color(red: 0.25, green: 0.54, blue: 0.90),
+                isDisabled: payloadState != .attached
+            ) {
+                onRelease()
+            }
+
             VStack(alignment: .center, spacing: 5) {
                 Text("payload.total_mass")
                     .font(.caption2.weight(.semibold))
@@ -420,7 +429,13 @@ struct PayloadView: View {
     }
 
     private var projectedTotalMassText: String {
-        let value = payloadState == .attached ? massModel.currentTotalMass : capabilityCheck.resultingTotalMass
+        let value: Float?
+        switch payloadState {
+        case .noPayload:
+            value = capabilityCheck.resultingTotalMass ?? massModel.currentTotalMass
+        case .attached, .removed, .released, .falling, .landed, .cleanedUp:
+            value = massModel.currentTotalMass ?? capabilityCheck.resultingTotalMass
+        }
         return massText(value)
     }
 
@@ -439,6 +454,14 @@ struct PayloadView: View {
             return Color(red: 0.50, green: 0.84, blue: 0.40)
         case .removed:
             return Color(red: 0.95, green: 0.58, blue: 0.28)
+        case .released:
+            return Color(red: 0.30, green: 0.74, blue: 0.98)
+        case .falling:
+            return Color(red: 0.96, green: 0.66, blue: 0.22)
+        case .landed:
+            return Color(red: 0.54, green: 0.82, blue: 0.72)
+        case .cleanedUp:
+            return Color(red: 0.74, green: 0.80, blue: 0.86)
         }
     }
 
@@ -701,12 +724,18 @@ struct PayloadView: View {
         switch key {
         case "payload.message.attached":
             return Color(red: 0.52, green: 0.84, blue: 0.42)
-        case "payload.message.removed":
+        case "payload.message.released":
+            return Color(red: 0.30, green: 0.74, blue: 0.98)
+        case "payload.message.dropped_successfully":
+            return Color(red: 0.54, green: 0.82, blue: 0.72)
+        case "payload.message.removed",
+             "payload.message.cleanup_completed":
             return Color(red: 0.96, green: 0.66, blue: 0.22)
         case "payload.message.payload_limit_exceeded",
              "payload.message.takeoff_limit_exceeded",
              "payload.message.data_unavailable",
-             "payload.message.invalid_mass":
+             "payload.message.invalid_mass",
+             "payload.message.no_payload_attached":
             return Color(red: 0.98, green: 0.52, blue: 0.42)
         default:
             return .white.opacity(0.70)
@@ -720,12 +749,18 @@ struct PayloadView: View {
                     switch key {
                     case "payload.message.attached":
                         return Color.green.opacity(0.16)
-                    case "payload.message.removed":
+                    case "payload.message.released":
+                        return Color.blue.opacity(0.16)
+                    case "payload.message.dropped_successfully":
+                        return Color.teal.opacity(0.16)
+                    case "payload.message.removed",
+                         "payload.message.cleanup_completed":
                         return Color.orange.opacity(0.16)
                     case "payload.message.payload_limit_exceeded",
                          "payload.message.takeoff_limit_exceeded",
                          "payload.message.data_unavailable",
-                         "payload.message.invalid_mass":
+                         "payload.message.invalid_mass",
+                         "payload.message.no_payload_attached":
                         return Color.red.opacity(0.16)
                     default:
                         return Color.white.opacity(0.06)

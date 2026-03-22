@@ -330,6 +330,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fleetNearestInterDroneDistance: Float = .infinity
     private var isTerrainDensitySliderEditing: Bool = false
     private var installedPayloadConfiguration: PayloadConfiguration?
+    private var activePayloadReleaseID: UUID?
 
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
@@ -577,6 +578,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         var attachedConfiguration = payloadDraftConfiguration
         attachedConfiguration.isAttached = true
+        activePayloadReleaseID = nil
         installedPayloadConfiguration = attachedConfiguration
         payloadDraftConfiguration = attachedConfiguration
         payloadState = .attached
@@ -591,11 +593,29 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        activePayloadReleaseID = nil
         installedPayloadConfiguration = nil
         payloadDraftConfiguration.isAttached = false
         payloadState = .removed
         payloadStatusMessageKey = "payload.message.removed"
         sceneController.removePayloadVisual()
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func releasePayload() {
+        guard installedPayloadConfiguration != nil, payloadState == .attached else {
+            payloadStatusMessageKey = "payload.message.no_payload_attached"
+            refreshPayloadRuntimeState()
+            return
+        }
+
+        let releaseID = sceneController.releasePayloadVisual()
+        activePayloadReleaseID = releaseID
+        installedPayloadConfiguration = nil
+        payloadDraftConfiguration.isAttached = false
+        payloadState = .released
+        payloadStatusMessageKey = "payload.message.released"
         refreshPayloadRuntimeState()
         hasUnsavedChanges = true
     }
@@ -676,9 +696,15 @@ final class DroneSimulationViewModel: ObservableObject {
         autoFlightGoalIndex = 0
         returnHomeStage = .idle
         navigationSnapshot = .idle
+        activePayloadReleaseID = nil
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.resetTransientState()
         sceneController.resetCameraRuntimeState()
+        sceneController.clearDroppedPayloadVisuals()
+        if payloadState == .released || payloadState == .falling || payloadState == .landed {
+            payloadState = .cleanedUp
+            payloadStatusMessageKey = nil
+        }
 
         sanitizeDynamicStateForSpawn(context: "reset")
         controlValues = neutralControls(from: state)
@@ -1424,11 +1450,13 @@ final class DroneSimulationViewModel: ObservableObject {
                 diagnosticMode: diagnosticMode,
                 deltaTime: 0.0
             )
+            syncPayloadLifecycleEvents()
             return
         }
 
         if signalState.isInteractionBlocking {
             renderSignalLossFrame()
+            syncPayloadLifecycleEvents()
             return
         }
 
@@ -1489,6 +1517,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if signalState.isInteractionBlocking {
             renderSignalLossFrame()
+            syncPayloadLifecycleEvents()
             return
         }
 
@@ -1543,6 +1572,7 @@ final class DroneSimulationViewModel: ObservableObject {
             throttle: state.throttle,
             deltaTime: dt
         )
+        syncPayloadLifecycleEvents()
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 
         collisionDebugAccumulator += dt
@@ -1774,6 +1804,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 hover()
             case .requestReset:
                 reset()
+            case .releasePayload:
+                releasePayload()
             case .selectFreeCamera:
                 setCameraMode(.free)
             case .selectChaseCamera:
@@ -2647,6 +2679,36 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    private func syncPayloadLifecycleEvents() {
+        let events = sceneController.consumePayloadLifecycleEvents()
+        guard events.isEmpty == false else {
+            return
+        }
+
+        var didApplyEvent = false
+        for event in events {
+            guard event.releaseID == activePayloadReleaseID else {
+                continue
+            }
+            guard payloadState != .attached else {
+                continue
+            }
+
+            payloadState = event.state
+            if let messageKey = event.messageKey {
+                payloadStatusMessageKey = messageKey
+            }
+            if event.state == .cleanedUp {
+                activePayloadReleaseID = nil
+            }
+            didApplyEvent = true
+        }
+
+        if didApplyEvent {
+            refreshPayloadRuntimeState()
+        }
+    }
+
     private func payloadDraftMatchesInstalledPayload() -> Bool {
         guard payloadState == .attached,
               let installedPayloadConfiguration else {
@@ -2668,11 +2730,13 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func resetPayloadForProfileSwitch() {
+        activePayloadReleaseID = nil
         installedPayloadConfiguration = nil
         payloadDraftConfiguration = PayloadController.defaultConfiguration()
         payloadDraftConfiguration.isAttached = false
         payloadState = .noPayload
         payloadStatusMessageKey = nil
+        sceneController.clearDroppedPayloadVisuals()
         sceneController.removePayloadVisual()
         refreshPayloadRuntimeState()
     }

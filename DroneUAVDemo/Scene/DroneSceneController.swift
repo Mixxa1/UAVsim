@@ -57,6 +57,8 @@ final class DroneSceneController {
     private var fpvPresentationActive: Bool = false
     private var payloadVisualNode: SCNNode?
     private let fpvPayloadPresentationNode = SCNNode()
+    private var droppedPayloadNodes: [UUID: SCNNode] = [:]
+    private var pendingPayloadLifecycleEvents: [(releaseID: UUID, state: PayloadState, messageKey: String?)] = []
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
@@ -84,6 +86,11 @@ final class DroneSceneController {
     private enum PhysicsCategory {
         static let environment = 1 << 1
         static let drone = 1 << 2
+    }
+
+    private enum RenderCategory {
+        static let droppedPayload = 1 << 6
+        static let visibleInFPV = Int.max & ~droppedPayload
     }
 
     private var freeLookAngles = SIMD2<Float>(repeating: 0.0)   // yaw, pitch
@@ -130,7 +137,7 @@ final class DroneSceneController {
         configureDroneCollisionProxy(for: initialProfile)
 
         configureCameraNode(followCameraNode, fov: initialProfile.cameraPreset.fpvFov)
-        configureCameraNode(fpvCameraNode, fov: initialProfile.cameraPreset.fpvFov)
+        configureCameraNode(fpvCameraNode, fov: initialProfile.cameraPreset.fpvFov, hidesDroppedPayload: true)
         configureCameraNode(orbitCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(topCameraNode, fov: initialProfile.cameraPreset.fpvFov)
 
@@ -215,6 +222,12 @@ final class DroneSceneController {
         payloadMountNode
     }
 
+    func consumePayloadLifecycleEvents() -> [(releaseID: UUID, state: PayloadState, messageKey: String?)] {
+        let events = pendingPayloadLifecycleEvents
+        pendingPayloadLifecycleEvents.removeAll(keepingCapacity: true)
+        return events
+    }
+
     func attachPayloadVisual(_ configuration: PayloadConfiguration) {
         removePayloadVisual()
         let node = PayloadVisualFactory.build(configuration: configuration)
@@ -228,6 +241,97 @@ final class DroneSceneController {
         payloadVisualNode?.removeFromParentNode()
         payloadVisualNode = nil
         resetFPVPayloadPresentation()
+    }
+
+    @discardableResult
+    func releasePayloadVisual() -> UUID? {
+        guard let attachedPayloadNode = payloadVisualNode else {
+            return nil
+        }
+
+        let releaseID = UUID()
+        let worldTransform = attachedPayloadNode.presentation.simdWorldTransform
+        attachedPayloadNode.removeAllActions()
+        attachedPayloadNode.removeFromParentNode()
+        payloadVisualNode = nil
+        resetFPVPayloadPresentation()
+
+        scene.rootNode.addChildNode(attachedPayloadNode)
+        attachedPayloadNode.simdWorldTransform = worldTransform
+        applyCategoryBitMask(RenderCategory.droppedPayload, to: attachedPayloadNode)
+
+        let startPosition = attachedPayloadNode.simdWorldPosition
+        let landedY = min(startPosition.y, max(Float(groundNode.presentation.position.y) + 0.04, 0.04))
+        let dropHeight = max(0.0, startPosition.y - landedY)
+        let gravity: Float = 9.8
+        let unconstrainedDuration = sqrt(max(0.0001, (2.0 * dropHeight) / gravity))
+        let fallDuration = Double(dropHeight > 0.01 ? unconstrainedDuration.clamped(to: 0.18...2.4) : 0.08)
+
+        droppedPayloadNodes[releaseID] = attachedPayloadNode
+
+        let startFalling = SCNAction.run { [weak self] _ in
+            self?.pendingPayloadLifecycleEvents.append((
+                releaseID: releaseID,
+                state: .falling,
+                messageKey: nil
+            ))
+        }
+
+        let fallAction = SCNAction.customAction(duration: fallDuration) { node, elapsedTime in
+            let elapsed = Float(elapsedTime)
+            let distance = min(dropHeight, 0.5 * gravity * elapsed * elapsed)
+            let nextY = max(landedY, startPosition.y - distance)
+            node.simdWorldPosition = SIMD3<Float>(startPosition.x, nextY, startPosition.z)
+        }
+
+        let landedAction = SCNAction.run { [weak self] _ in
+            guard let self else {
+                return
+            }
+            attachedPayloadNode.simdWorldPosition = SIMD3<Float>(startPosition.x, landedY, startPosition.z)
+            self.pendingPayloadLifecycleEvents.append((
+                releaseID: releaseID,
+                state: .landed,
+                messageKey: "payload.message.dropped_successfully"
+            ))
+        }
+
+        let cleanupAction = SCNAction.run { [weak self, weak attachedPayloadNode] _ in
+            guard let self else {
+                return
+            }
+            attachedPayloadNode?.removeAllActions()
+            attachedPayloadNode?.removeFromParentNode()
+            self.droppedPayloadNodes.removeValue(forKey: releaseID)
+            self.pendingPayloadLifecycleEvents.append((
+                releaseID: releaseID,
+                state: .cleanedUp,
+                messageKey: "payload.message.cleanup_completed"
+            ))
+        }
+
+        attachedPayloadNode.runAction(
+            .sequence([
+                .wait(duration: 0.06),
+                startFalling,
+                fallAction,
+                landedAction,
+                .wait(duration: 1.2),
+                cleanupAction
+            ]),
+            forKey: "payloadDropLifecycle"
+        )
+
+        return releaseID
+    }
+
+    func clearDroppedPayloadVisuals() {
+        for node in droppedPayloadNodes.values {
+            node.removeAllActions()
+            node.removeFromParentNode()
+        }
+        droppedPayloadNodes.removeAll(keepingCapacity: false)
+        pendingPayloadLifecycleEvents.removeAll(keepingCapacity: false)
     }
 
     func setWorldBoundsVisible(_ visible: Bool) {
@@ -327,6 +431,7 @@ final class DroneSceneController {
         activeProfile = profile
 
         droneNode.removeFromParentNode()
+        clearDroppedPayloadVisuals()
 
         let droneVisual = DroneModelBuilder.build(profile: profile)
         droneNode = droneVisual.rootNode
@@ -696,11 +801,12 @@ final class DroneSceneController {
         }
     }
 
-    private func configureCameraNode(_ node: SCNNode, fov: Float) {
+    private func configureCameraNode(_ node: SCNNode, fov: Float, hidesDroppedPayload: Bool = false) {
         let camera = SCNCamera()
         camera.fieldOfView = CGFloat(fov)
         camera.zNear = 0.01
         camera.zFar = 900
+        camera.categoryBitMask = hidesDroppedPayload ? RenderCategory.visibleInFPV : Int.max
         node.camera = camera
     }
 
@@ -1456,6 +1562,13 @@ final class DroneSceneController {
 
     private func clearEmission(on node: SCNNode) {
         applyEmission(on: node, color: .clear)
+    }
+
+    private func applyCategoryBitMask(_ mask: Int, to node: SCNNode) {
+        node.categoryBitMask = mask
+        for child in node.childNodes {
+            applyCategoryBitMask(mask, to: child)
+        }
     }
 
     private func warningColor(_ state: ComponentWarningState, selected: Bool) -> NSColor {

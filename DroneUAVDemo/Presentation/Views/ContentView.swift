@@ -1185,6 +1185,7 @@ struct ContentView: View {
                     onMassChange: viewModel.setPayloadMass,
                     onCustomNameChange: viewModel.setPayloadCustomName,
                     onAttach: viewModel.attachPayload,
+                    onRelease: viewModel.releasePayload,
                     onRemove: viewModel.removePayload,
                     onClose: {
                         viewModel.setPayloadPanelVisible(false)

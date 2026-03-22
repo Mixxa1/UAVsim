@@ -66,6 +66,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     case hover
     case resetDrone
+    case releasePayload
 
     case cameraModeFree
     case cameraModeChase
@@ -91,7 +92,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     var category: KeyBindingCategory {
         switch self {
-        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone:
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone, .releasePayload:
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .resetCameraOrientation:
@@ -108,7 +109,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
              .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown:
             return true
-        case .hover, .resetDrone, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
+        case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .resetCameraOrientation,
              .toggleControlPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
             return false
@@ -139,6 +140,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.flight.hover"
         case .resetDrone:
             return "keybind.flight.reset"
+        case .releasePayload:
+            return "keybind.flight.release_payload"
         case .cameraModeFree:
             return "keybind.camera.mode1"
         case .cameraModeChase:
@@ -208,6 +211,7 @@ struct KeyBindingProfile {
             .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
             .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
+            .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
             .cameraModeFree: KeyBindingDescriptor(command: .cameraModeFree, keyCode: 18, keyLabel: "1"),
             .cameraModeChase: KeyBindingDescriptor(command: .cameraModeChase, keyCode: 19, keyLabel: "2"),
             .cameraModeOrbit: KeyBindingDescriptor(command: .cameraModeOrbit, keyCode: 20, keyLabel: "3"),
@@ -225,7 +229,7 @@ struct KeyBindingProfile {
             .toggleControlPanel: KeyBindingDescriptor(command: .toggleControlPanel, keyCode: UInt16.max, keyLabel: "—"),
             .toggleTelemetryHUD: KeyBindingDescriptor(command: .toggleTelemetryHUD, keyCode: 17, keyLabel: "T"),
             .toggleDamageOverlay: KeyBindingDescriptor(command: .toggleDamageOverlay, keyCode: 4, keyLabel: "H"),
-            .toggleThermalOverlay: KeyBindingDescriptor(command: .toggleThermalOverlay, keyCode: 5, keyLabel: "G")
+            .toggleThermalOverlay: KeyBindingDescriptor(command: .toggleThermalOverlay, keyCode: 11, keyLabel: "B")
         ]
     )
 
@@ -278,6 +282,7 @@ struct KeyBindingProfile {
 enum KeyboardAction: Equatable {
     case requestHover
     case requestReset
+    case releasePayload
     case selectFreeCamera
     case selectChaseCamera
     case selectOrbitCamera
@@ -346,6 +351,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
         .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
         .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
+        .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
         .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "Left"),
         .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "Right"),
         .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "Up"),
@@ -597,6 +603,8 @@ final class KeyboardInputService: KeyboardInputProviding {
             enqueueAction(.requestHover)
         case .resetDrone:
             enqueueAction(.requestReset)
+        case .releasePayload:
+            enqueueAction(.releasePayload)
         case .cameraModeFree:
             enqueueAction(.selectFreeCamera)
         case .cameraModeChase:

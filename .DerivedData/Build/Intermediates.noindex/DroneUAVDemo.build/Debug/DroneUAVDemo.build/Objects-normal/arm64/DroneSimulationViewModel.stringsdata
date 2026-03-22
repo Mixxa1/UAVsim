@@ -7,7 +7,7 @@
         "key": "signal_loss.lost_title",
         "location": {
           "startingColumn": 33,
-          "startingLine": 261
+          "startingLine": 272
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "signal_loss.lost_message",
         "location": {
           "startingColumn": 33,
-          "startingLine": 264
+          "startingLine": 275
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "signal_loss.recover",
         "location": {
           "startingColumn": 33,
-          "startingLine": 267
+          "startingLine": 278
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "telemetry.export.select_folder",
         "location": {
           "startingColumn": 43,
-          "startingLine": 1056
+          "startingLine": 1245
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "common.export",
         "location": {
           "startingColumn": 42,
-          "startingLine": 1057
+          "startingLine": 1246
         }
       }
     ]
