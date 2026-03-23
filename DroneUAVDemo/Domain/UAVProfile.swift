@@ -24,6 +24,7 @@ struct UAVProfile: Identifiable, Hashable {
     let notes: String
     let missionRole: String?
     let armamentCapabilityNote: String?
+    let flightTuningProfile: UAVFlightTuningProfile
 
     init(
         id: String,
@@ -47,7 +48,8 @@ struct UAVProfile: Identifiable, Hashable {
         shortDescription: String,
         notes: String,
         missionRole: String? = nil,
-        armamentCapabilityNote: String? = nil
+        armamentCapabilityNote: String? = nil,
+        flightTuningProfile: UAVFlightTuningProfile? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -71,6 +73,18 @@ struct UAVProfile: Identifiable, Hashable {
         self.notes = notes
         self.missionRole = missionRole
         self.armamentCapabilityNote = armamentCapabilityNote
+        self.flightTuningProfile = flightTuningProfile ?? UAVFlightTuningProfile.catalogDefault(
+            vehicleType: vehicleType,
+            specConfidence: specConfidence,
+            baseMass: baseMass,
+            batteryMass: batteryMass,
+            estimatedBatteryMass: estimatedBatteryMass,
+            maxPayloadMass: maxPayloadMass,
+            estimatedMaxPayloadMass: estimatedMaxPayloadMass,
+            maxTakeoffMass: maxTakeoffMass,
+            estimatedMaxTakeoffMass: estimatedMaxTakeoffMass,
+            visualPreset: visualPreset
+        )
     }
 }
 

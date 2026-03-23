@@ -76,6 +76,8 @@
 		100000000000000000000242 /* PayloadMountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000145 /* PayloadMountState.swift */; };
 		100000000000000000000243 /* PayloadToolbarEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000146 /* PayloadToolbarEntry.swift */; };
 		100000000000000000000244 /* PayloadDataQualitySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000147 /* PayloadDataQualitySource.swift */; };
+		100000000000000000000245 /* UAVFlightTuningProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000148 /* UAVFlightTuningProfile.swift */; };
+		100000000000000000000246 /* FlightBaselineResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000149 /* FlightBaselineResolver.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -150,6 +152,8 @@
 		100000000000000000000145 /* PayloadMountState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadMountState.swift; sourceTree = "<group>"; };
 		100000000000000000000146 /* PayloadToolbarEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadToolbarEntry.swift; sourceTree = "<group>"; };
 		100000000000000000000147 /* PayloadDataQualitySource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadDataQualitySource.swift; sourceTree = "<group>"; };
+		100000000000000000000148 /* UAVFlightTuningProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVFlightTuningProfile.swift; sourceTree = "<group>"; };
+		100000000000000000000149 /* FlightBaselineResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightBaselineResolver.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -224,6 +228,7 @@
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
 				100000000000000000000137 /* UAVSelectionState.swift */,
 				10000000000000000000012E /* UAVSpecConfidence.swift */,
+				100000000000000000000148 /* UAVFlightTuningProfile.swift */,
 				10000000000000000000012C /* UAVVehicleType.swift */,
 				100000000000000000000133 /* UAVVisualPreset.swift */,
 				100000000000000000000140 /* VehicleMassModel.swift */,
@@ -244,6 +249,7 @@
 				10000000000000000000011F /* DroneFleetManager.swift */,
 				10000000000000000000010B /* DronePhysicsEngine.swift */,
 				100000000000000000000119 /* DroneSimulationContext.swift */,
+				100000000000000000000149 /* FlightBaselineResolver.swift */,
 				100000000000000000000141 /* PayloadController.swift */,
 				10000000000000000000010C /* SimpleDronePhysicsEngine.swift */,
 			);
@@ -465,6 +471,8 @@
 				100000000000000000000242 /* PayloadMountState.swift in Sources */,
 				100000000000000000000243 /* PayloadToolbarEntry.swift in Sources */,
 				100000000000000000000244 /* PayloadDataQualitySource.swift in Sources */,
+				100000000000000000000245 /* UAVFlightTuningProfile.swift in Sources */,
+				100000000000000000000246 /* FlightBaselineResolver.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -3,6 +3,7 @@ import simd
 
 struct DroneSimulationContext {
     let profile: DroneModelProfile
+    let activeUAVProfile: UAVProfile?
     let weather: WeatherModel
     let damageState: DamageState
     let batteryState: BatteryState

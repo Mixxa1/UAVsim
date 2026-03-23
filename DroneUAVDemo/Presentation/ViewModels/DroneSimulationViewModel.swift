@@ -796,6 +796,7 @@ final class DroneSimulationViewModel: ObservableObject {
         guard isArmed else {
             return
         }
+        let baseline = resolvedFlightBaseline(for: .takeoff)
         mode = .takeoff
         if state.position.y <= 0.10 {
             transitionPhysicalState(.takeoffTransition)
@@ -804,20 +805,21 @@ final class DroneSimulationViewModel: ObservableObject {
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = max(values.pitch, 10.0)
-                values.throttle = max(values.throttle, 0.78)
+                values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
             }, markManual: false)
         } else {
             updateControlValues({ values in
                 values.y = max(values.y, 3.0)
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = max(values.throttle, 0.68)
+                values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
             }, markManual: false)
         }
     }
 
     func land() {
         ensureSimulationRunning()
+        let baseline = resolvedFlightBaseline(for: .landing)
         mode = .landing
         if state.position.y > 0.05 {
             transitionPhysicalState(.landing)
@@ -826,31 +828,32 @@ final class DroneSimulationViewModel: ObservableObject {
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = min(max(values.pitch, 6.0), 14.0)
-                values.throttle = min(values.throttle, 0.22)
+                values.throttle = min(values.throttle, Double(baseline.landingThrottleReference))
             }, markManual: false)
         } else {
             updateControlValues({ values in
                 values.y = 0.0
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = min(values.throttle, 0.35)
+                values.throttle = min(values.throttle, Double(baseline.landingThrottleReference))
             }, markManual: false)
         }
     }
 
     func hover() {
         ensureSimulationRunning()
-        guard selectedDroneProfile.airframeClass == .multirotor else {
+        let baseline = resolvedFlightBaseline(for: .hover)
+        guard baseline.hoverCapable else {
             mode = .manual
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = max(values.throttle, 0.42)
+                values.throttle = max(values.throttle, Double(baseline.cruiseReferenceThrottle))
             }, markManual: false)
             return
         }
         mode = .hover
-        lockControlsToCurrentState(overrideThrottle: 0.54)
+        lockControlsToCurrentState(overrideThrottle: Double(baseline.hoverLockThrottle))
     }
 
     func activateAutoPath() {
@@ -1226,7 +1229,7 @@ final class DroneSimulationViewModel: ObservableObject {
         batteryState.chargePercent = 100
         showBatteryDepletedDialog = false
         mode = .hover
-        lockControlsToCurrentState(overrideThrottle: 0.54)
+        lockControlsToCurrentState(overrideThrottle: Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle))
     }
 
     func simulateAgainFromStart() {
@@ -1483,6 +1486,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let control = buildControlInput(from: controlValues)
         let context = DroneSimulationContext(
             profile: selectedDroneProfile,
+            activeUAVProfile: activeUAVProfile,
             weather: weather,
             damageState: damageState,
             batteryState: batteryState,
@@ -1715,7 +1719,9 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         case .hover:
             mode = .hover
-            lockControlsToCurrentState(overrideThrottle: Double(max(0.45, state.throttle)))
+            lockControlsToCurrentState(
+                overrideThrottle: Double(max(resolvedFlightBaseline(for: .hover).hoverLockThrottle, state.throttle))
+            )
         case .avoid:
             guard let obstacleID = collisionAnalysis.nearestObstacleID,
                   let obstacle = sceneController.obstacleCenter(for: obstacleID) else {
@@ -1934,10 +1940,11 @@ final class DroneSimulationViewModel: ObservableObject {
 
         case .hover:
             navigationSnapshot = .idle
+            let hoverBaseline = Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle)
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = max(0.50, min(values.throttle, 0.62))
+                values.throttle = max(max(0.28, hoverBaseline - 0.04), min(values.throttle, hoverBaseline + 0.06))
             }, markManual: false)
 
         case .emergencyStop:
@@ -2010,10 +2017,11 @@ final class DroneSimulationViewModel: ObservableObject {
         navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
 
         guard let target = autoPathPlanner.currentTarget() else {
+            let holdThrottle = Double(resolvedFlightBaseline(for: .autoPath).cruiseReferenceThrottle)
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = max(values.throttle, Double(selectedDroneProfile.hoverThrottle))
+                values.throttle = max(values.throttle, holdThrottle)
             }, markManual: false)
             return
         }
@@ -2041,13 +2049,14 @@ final class DroneSimulationViewModel: ObservableObject {
 
         case .ascend:
             navigationSnapshot = .idle
+            let ascentThrottle = Double(resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference)
             updateControlValues({ values in
                 values.x = Double(state.position.x)
                 values.z = Double(state.position.z)
                 values.y = Double(safeTravelAltitude)
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = max(values.throttle, Double(selectedDroneProfile.hoverThrottle + 0.06))
+                values.throttle = max(values.throttle, ascentThrottle)
             }, markManual: false)
 
             if state.position.y >= safeTravelAltitude - 0.35 {
@@ -2094,10 +2103,11 @@ final class DroneSimulationViewModel: ObservableObject {
                     deltaTime: deltaTime
                 )
             } else {
+                let cruiseThrottle = Double(resolvedFlightBaseline(for: .returnHome).cruiseReferenceThrottle)
                 updateControlValues({ values in
                     values.roll = 0.0
                     values.pitch = 0.0
-                    values.throttle = max(values.throttle, Double(selectedDroneProfile.hoverThrottle))
+                    values.throttle = max(values.throttle, cruiseThrottle)
                 }, markManual: false)
             }
 
@@ -2108,6 +2118,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
         case .align:
             navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
+            let alignmentBaseline = resolvedFlightBaseline(for: .returnHome)
+            let alignmentThrottle = Double(
+                alignmentBaseline.hoverCapable
+                    ? alignmentBaseline.hoverLockThrottle
+                    : alignmentBaseline.cruiseReferenceThrottle
+            )
             updateControlValues({ values in
                 values.x = Double(homePosition.x)
                 values.z = Double(homePosition.z)
@@ -2115,7 +2131,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.roll = 0.0
                 values.pitch = 0.0
                 values.yaw = 0.0
-                values.throttle = max(Double(selectedDroneProfile.hoverThrottle), values.throttle * 0.96)
+                values.throttle = max(alignmentThrottle, values.throttle * 0.96)
             }, markManual: false)
 
             let horizontalDistance = simd_length(SIMD2<Float>(state.position.x - homePosition.x, state.position.z - homePosition.z))
@@ -2125,6 +2141,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         case .descend:
             navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
+            let landingThrottle = Double(resolvedFlightBaseline(for: .landing).landingThrottleReference)
             updateControlValues({ values in
                 values.x = Double(homePosition.x)
                 values.z = Double(homePosition.z)
@@ -2132,7 +2149,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.roll = 0.0
                 values.pitch = 0.0
                 values.yaw = 0.0
-                values.throttle = max(0.22, min(values.throttle, Double(selectedDroneProfile.hoverThrottle - 0.10)))
+                values.throttle = max(0.22, min(values.throttle, landingThrottle))
             }, markManual: false)
 
             let horizontalDistance = simd_length(SIMD2<Float>(state.position.x - homePosition.x, state.position.z - homePosition.z))
@@ -2166,6 +2183,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let speedBoost: Float = (simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)) < 1.0 && speedScale > 0.6) ? 1.2 : 1.0
         let controlScale = speedScale * speedBoost
+        let flightBaseline = resolvedFlightBaseline(for: mode)
 
         updateControlValues({ values in
             if selectedDroneProfile.airframeClass == .multirotor {
@@ -2176,8 +2194,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.pitch = Double((headingVector.y * 0.95 * controlScale).clamped(to: -16.0...16.0))
 
                 let altitudeError = targetAltitude - state.position.y
-                let verticalComp = altitudeError * 0.06 - state.velocity.y * 0.03
-                let commandedThrottle = (selectedDroneProfile.hoverThrottle + verticalComp).clamped(to: 0.18...0.90)
+                let verticalComp = (altitudeError * 0.06 - state.velocity.y * 0.03) * flightBaseline.effectiveVerticalResponseFactor
+                let commandedThrottle = (flightBaseline.hoverLockThrottle + verticalComp).clamped(to: 0.18...0.90)
                 let followBlend = (deltaTime * 3.4).clamped(to: 0.06...0.30)
                 let blendedThrottle = Float(values.throttle) + (commandedThrottle - Float(values.throttle)) * followBlend
                 values.throttle = Double(blendedThrottle.clamped(to: 0.0...1.0))
@@ -2185,7 +2203,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.y = Double(targetAltitude)
                 values.roll = Double((-headingVector.x * 1.8 * controlScale).clamped(to: -38.0...38.0))
                 values.pitch = Double((pitchToTarget.radiansToDegrees).clamped(to: -22.0...22.0))
-                values.throttle = max(values.throttle, Double(0.55 + 0.18 * speedScale))
+                values.throttle = max(values.throttle, Double(max(flightBaseline.cruiseReferenceThrottle, 0.55 + 0.18 * speedScale)))
             }
 
             if yawAlignToHome, simd_length(headingVector) < 1.2 {
@@ -2246,7 +2264,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 let targetAltitude = Float(controlValues.y)
                 if physicalState == .airborne && state.position.y >= targetAltitude - 0.08 && abs(state.velocity.y) < 0.45 {
                     mode = .hover
-                    lockControlsToCurrentState(overrideThrottle: 0.54)
+                    lockControlsToCurrentState(overrideThrottle: Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle))
                 }
             }
         }
@@ -2316,6 +2334,15 @@ final class DroneSimulationViewModel: ObservableObject {
             values.yaw = Double(state.orientation.z.radiansToDegrees)
             values.throttle = overrideThrottle
         }, markManual: false)
+    }
+
+    private func resolvedFlightBaseline(for flightMode: DroneFlightMode? = nil) -> ResolvedFlightBaseline {
+        FlightBaselineResolver.resolve(
+            runtimeProfile: selectedDroneProfile,
+            activeUAVProfile: activeUAVProfile,
+            vehicleMassModel: vehicleMassModel,
+            flightMode: flightMode ?? mode
+        )
     }
 
     private func buildControlInput(from controls: DroneControlValues) -> DroneControlInput {
@@ -3167,14 +3194,16 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func neutralControls(from state: DroneState) -> DroneControlValues {
-        DroneControlValues(
+        let baseline = resolvedFlightBaseline(for: .manual)
+        let airborneThrottle = baseline.hoverCapable ? baseline.hoverLockThrottle : baseline.cruiseReferenceThrottle
+        return DroneControlValues(
             x: Double(state.position.x),
             y: Double(max(0.0, state.position.y)),
             z: Double(state.position.z),
             roll: 0.0,
             pitch: 0.0,
             yaw: Double(state.orientation.z.radiansToDegrees),
-            throttle: isArmed && state.position.y > 0.10 ? Double(selectedDroneProfile.hoverThrottle) : 0.0
+            throttle: isArmed && state.position.y > 0.10 ? Double(airborneThrottle) : 0.0
         )
     }
 
@@ -3215,8 +3244,9 @@ final class DroneSimulationViewModel: ObservableObject {
             planarSpeed <= 0.75 &&
             angularSpeed <= 1.8
         let confidentlyAirborne = state.position.y >= 0.18 || (!nearGround && abs(state.velocity.y) > 0.28)
-        let takeoffThrottleThreshold = max(0.22, selectedDroneProfile.hoverThrottle * 0.72)
-        let lowThrottle = max(Float(controlValues.throttle), state.throttle, state.motorThrottle) <= max(0.16, selectedDroneProfile.hoverThrottle * 0.55)
+        let groundedBaseline = resolvedFlightBaseline(for: mode)
+        let takeoffThrottleThreshold = groundedBaseline.groundedTakeoffThreshold
+        let lowThrottle = max(Float(controlValues.throttle), state.throttle, state.motorThrottle) <= groundedBaseline.groundedIdleThreshold
 
         if nearGround {
             groundContactAccumulator += deltaTime
@@ -3286,7 +3316,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let requestedThrottle = max(Float(controlValues.throttle), state.throttle, state.motorThrottle)
-        let idleHoldThreshold = max(0.16, selectedDroneProfile.hoverThrottle * 0.55)
+        let idleHoldThreshold = resolvedFlightBaseline(for: mode).groundedIdleThreshold
 
         switch physicalState {
         case .airborne, .takeoffTransition, .landing:

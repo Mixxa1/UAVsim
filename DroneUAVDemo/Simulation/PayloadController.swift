@@ -64,41 +64,17 @@ enum PayloadController {
         installedPayload: PayloadConfiguration?,
         payloadState: PayloadState
     ) -> VehicleMassModel {
-        guard payloadState == .attached,
-              let installedPayload else {
-            return VehicleMassModel.baseline(for: runtimeProfile, uavProfile: uavProfile)
-        }
-
-        let payloadMass = max(0.0, installedPayload.payloadMass)
-        let baselineMass = max(0.30, runtimeProfile.takeoffMassKg)
-        let resolution = uavProfile?.payloadDataResolution
-        let payloadReference = max(
-            0.25,
-            max(resolution?.maxPayloadMass ?? payloadMass, payloadMass > 0.0 ? payloadMass : 0.25)
-        )
-        let normalizedLoad = min(1.0, max(0.0, payloadMass / payloadReference))
-        let verticalLoadPenalty = min(0.18, max(0.0, 0.04 + normalizedLoad * 0.12))
-        let maneuverPenalty = min(0.16, max(0.0, 0.03 + normalizedLoad * 0.11))
-        let hoverThrottleAdjustment = runtimeProfile.airframeClass == .multirotor
-            ? min(0.14, max(0.0, 0.015 + normalizedLoad * 0.11))
-            : 0.0
-
-        let currentTotalMass: Float?
-        if let baseMass = resolution?.baseMass, let batteryMass = resolution?.batteryMass {
-            currentTotalMass = baseMass + batteryMass + payloadMass
+        let payloadMass: Float
+        if payloadState == .attached, let installedPayload {
+            payloadMass = max(0.0, installedPayload.payloadMass)
         } else {
-            currentTotalMass = nil
+            payloadMass = 0.0
         }
 
-        return VehicleMassModel(
-            baseMass: resolution?.baseMass,
-            batteryMass: resolution?.batteryMass,
-            payloadMass: payloadMass,
-            currentTotalMass: currentTotalMass,
-            effectiveMass: baselineMass + payloadMass,
-            verticalLoadPenalty: verticalLoadPenalty,
-            maneuverPenalty: maneuverPenalty,
-            hoverThrottleAdjustment: hoverThrottleAdjustment
+        return VehicleMassModel.resolve(
+            for: runtimeProfile,
+            uavProfile: uavProfile,
+            payloadMass: payloadMass
         )
     }
 }

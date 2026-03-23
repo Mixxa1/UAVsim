@@ -49,11 +49,17 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let profile = context.profile
         let weather = context.weather.effectiveFactors
         let payloadMassModel = context.vehicleMassModel
-        let maneuverAuthorityPenalty = max(0.0, 1.0 - payloadMassModel.maneuverPenalty)
+        let baseline = FlightBaselineResolver.resolve(
+            runtimeProfile: profile,
+            activeUAVProfile: context.activeUAVProfile,
+            vehicleMassModel: payloadMassModel,
+            flightMode: control.mode
+        )
+        let maneuverAuthorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (context.damageState.controlAuthorityMultiplier * maneuverAuthorityPenalty).clamped(to: 0.18...1.00)
         let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
-        let mass = max(0.20, payloadMassModel.effectiveMass)
-        let hoverThrottle = (profile.hoverThrottle + payloadMassModel.hoverThrottleAdjustment).clamped(to: 0.20...0.90)
+        let mass = max(0.20, payloadMassModel.resolvedCurrentTotalMass)
+        let hoverThrottle = baseline.hoverLockThrottle.clamped(to: 0.20...0.90)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
         let groundRestThrottleThreshold = max(0.18, hoverThrottle * 0.68)
 
@@ -65,12 +71,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         if control.mode == .hover || control.controlMode == .hoverAssist {
             let altitudeError = control.targetPosition.y - state.position.y
             let verticalDamping = -state.velocity.y
-            let correction = altitudeError * 0.05 + verticalDamping * 0.03
+            let correction = (altitudeError * 0.05 + verticalDamping * 0.03) * baseline.effectiveVerticalResponseFactor
             throttleCommand = (hoverThrottle + correction + (throttleCommand - hoverThrottle) * 0.25).clamped(to: 0.0...1.0)
         }
 
-        let spoolUpRate = (2.6 + authority * 2.4).clamped(to: 1.6...5.2)
-        let spoolDownRate = (3.4 + authority * 1.8).clamped(to: 2.0...5.8)
+        let spoolUpRate = (2.1 + authority * 1.8 + baseline.effectiveThrottleAuthority * 1.4).clamped(to: 1.6...5.4)
+        let spoolDownRate = (2.8 + authority * 1.2 + baseline.effectiveThrottleAuthority * 1.0).clamped(to: 2.0...5.8)
         let motorThrottle = approach(
             current: state.motorThrottle,
             target: throttleCommand,
@@ -115,8 +121,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
 
         let q = orientationQuaternion(from: next.orientation)
-        let liftPenalty = max(0.72, 1.0 - payloadMassModel.verticalLoadPenalty)
-        let maxThrust = mass * Tuning.gravity * (2.10 * authority + 0.45) * batteryFactor * liftPenalty
+        let liftPenalty = baseline.liftPenaltyMultiplier.clamped(to: 0.78...1.02)
+        let maxThrust = mass * Tuning.gravity * (baseline.effectiveStabilizationThrust + authority * 0.35) * batteryFactor * liftPenalty
         let thrustMagnitude = motorThrottle * maxThrust
         let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
 
@@ -284,7 +290,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             maxBankAngleDeg: 42.0
         )
         let payloadMassModel = context.vehicleMassModel
-        let authorityPenalty = max(0.0, 1.0 - payloadMassModel.maneuverPenalty * 0.9)
+        let baseline = FlightBaselineResolver.resolve(
+            runtimeProfile: profile,
+            activeUAVProfile: context.activeUAVProfile,
+            vehicleMassModel: payloadMassModel,
+            flightMode: control.mode
+        )
+        let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (context.damageState.controlAuthorityMultiplier * authorityPenalty).clamped(to: 0.18...1.00)
         let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
@@ -292,13 +304,40 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
         if crashOrDisarmed || context.batteryState.isDepleted || control.mode == .emergencyStop {
             throttleCommand = 0.0
+        } else {
+            let throttleFloor: Float
+            switch baseline.vehicleType {
+            case .fixedWing:
+                switch control.mode {
+                case .takeoff:
+                    throttleFloor = baseline.takeoffThrottleReference
+                case .landing:
+                    throttleFloor = baseline.landingThrottleReference
+                default:
+                    throttleFloor = state.position.y > 0.15 ? baseline.effectiveMinimumSafeFlightThrottle : 0.0
+                }
+            case .hybridVTOL:
+                switch control.mode {
+                case .hover, .takeoff:
+                    throttleFloor = baseline.takeoffThrottleReference
+                case .landing:
+                    throttleFloor = baseline.landingThrottleReference
+                default:
+                    throttleFloor = state.position.y > 0.15
+                        ? max(baseline.cruiseReferenceThrottle, baseline.effectiveMinimumSafeFlightThrottle)
+                        : 0.0
+                }
+            case .multicopter, .helicopter, .custom:
+                throttleFloor = state.position.y > 0.15 ? baseline.cruiseReferenceThrottle : 0.0
+            }
+            throttleCommand = max(throttleCommand, throttleFloor)
         }
 
         let motorThrottle = approach(
             current: state.motorThrottle,
             target: throttleCommand,
-            increaseRate: 1.8,
-            decreaseRate: 2.4,
+            increaseRate: (1.6 + baseline.effectiveThrottleAuthority * 0.7).clamped(to: 1.4...2.6),
+            decreaseRate: (2.0 + baseline.effectiveThrottleAuthority * 0.6).clamped(to: 1.8...2.8),
             dt: dt
         )
 
@@ -350,11 +389,21 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         }
 
         let cruiseTarget = max(
-            wing.minSustainableSpeedMps * (0.78 + payloadMassModel.verticalLoadPenalty * 0.14),
-            wing.cruiseSpeedMps * (1.0 + payloadMassModel.verticalLoadPenalty * 0.10)
+            wing.minSustainableSpeedMps * (0.82 + baseline.stallProtectionBias),
+            wing.cruiseSpeedMps * baseline.payloadCruisePenaltyMultiplier
         )
-        let targetForwardSpeed = motorThrottle * min(profile.maxHorizontalSpeedMps, cruiseTarget * 1.45) * (0.55 + 0.45 * batteryFactor)
-        let forwardSpeed = approach(current: max(0.0, state.forwardAirspeed), target: targetForwardSpeed, increaseRate: 6.8, decreaseRate: 5.2, dt: dt)
+        let speedEnvelope = cruiseTarget * (control.mode == .takeoff ? 1.12 : 1.45)
+        let targetForwardSpeed = motorThrottle * min(profile.maxHorizontalSpeedMps, speedEnvelope) * (0.55 + 0.45 * batteryFactor)
+        let minimumForwardSpeed = state.position.y > 0.15
+            ? wing.minSustainableSpeedMps * (0.90 + baseline.stallProtectionBias * 0.40)
+            : 0.0
+        let forwardSpeed = approach(
+            current: max(0.0, state.forwardAirspeed),
+            target: max(minimumForwardSpeed, targetForwardSpeed),
+            increaseRate: (6.2 + baseline.effectiveThrottleAuthority * 0.8).clamped(to: 5.0...7.2),
+            decreaseRate: (4.8 + baseline.effectiveThrottleAuthority * 0.5).clamped(to: 4.0...5.6),
+            dt: dt
+        )
 
         let q = orientationQuaternion(from: next.orientation)
         var velocity = simd_act(q, SIMD3<Float>(0.0, 0.0, forwardSpeed))
