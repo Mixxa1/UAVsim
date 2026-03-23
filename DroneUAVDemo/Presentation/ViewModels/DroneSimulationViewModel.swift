@@ -221,6 +221,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published var diagnosticMode: DiagnosticOverlayMode
     @Published var isToolPanelVisible: Bool
     @Published var isParametersPanelVisible: Bool
+    @Published var activeControlModule: ControlModule?
     @Published private(set) var isPayloadPanelVisible: Bool
     @Published var isBoundaryBarrierVisible: Bool
     @Published var isCompactTelemetryHUDEnabled: Bool
@@ -331,6 +332,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var isTerrainDensitySliderEditing: Bool = false
     private var installedPayloadConfiguration: PayloadConfiguration?
     private var activePayloadReleaseID: UUID?
+    private var lastSidebarModule: ControlModule = .flightOps
 
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
@@ -451,7 +453,8 @@ final class DroneSimulationViewModel: ObservableObject {
         self.showBatteryDepletedDialog = false
         self.diagnosticMode = .normal
         self.isToolPanelVisible = true
-        self.isParametersPanelVisible = true
+        self.isParametersPanelVisible = false
+        self.activeControlModule = nil
         self.isPayloadPanelVisible = false
         self.isBoundaryBarrierVisible = false
         self.isCompactTelemetryHUDEnabled = true
@@ -886,11 +889,34 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func toggleControlPanel() {
-        isParametersPanelVisible.toggle()
+        setControlPanelVisible(!isParametersPanelVisible)
     }
 
     func setControlPanelVisible(_ visible: Bool) {
-        isParametersPanelVisible = visible
+        if visible {
+            if activeControlModule == nil {
+                activeControlModule = lastSidebarModule
+            }
+            isParametersPanelVisible = activeControlModule != nil
+        } else {
+            isParametersPanelVisible = false
+        }
+    }
+
+    func setActiveControlModule(_ module: ControlModule?) {
+        if let activeControlModule {
+            lastSidebarModule = activeControlModule
+        }
+        if let module {
+            lastSidebarModule = module
+        }
+        activeControlModule = module
+        isParametersPanelVisible = module != nil
+        isPayloadPanelVisible = false
+    }
+
+    func toggleActiveControlModule(_ module: ControlModule) {
+        setActiveControlModule(activeControlModule == module ? nil : module)
     }
 
     func togglePayloadPanel() {

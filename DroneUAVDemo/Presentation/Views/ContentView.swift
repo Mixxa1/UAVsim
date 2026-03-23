@@ -300,34 +300,6 @@ private final class WindowResolveView: NSView {
     }
 }
 
-private enum ToolstripTab: String, CaseIterable, Identifiable {
-    case simulation
-    case flight
-    case camera
-    case environment
-    case debug
-    case projects
-
-    var id: String { rawValue }
-
-    var titleKey: String {
-        switch self {
-        case .simulation:
-            return "toolstrip.tab.simulation"
-        case .flight:
-            return "toolstrip.tab.flight"
-        case .camera:
-            return "toolstrip.tab.camera"
-        case .environment:
-            return "toolstrip.tab.environment"
-        case .debug:
-            return "toolstrip.tab.debug"
-        case .projects:
-            return "toolstrip.tab.projects"
-        }
-    }
-}
-
 private struct SimulationViewModelObserver<Content: View>: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
     let content: (DroneSimulationViewModel) -> Content
@@ -498,317 +470,66 @@ private struct SignalInterferenceCanvas: View {
 
 private struct SimulationToolstripView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
-    @Binding var selectedTab: ToolstripTab
 
-    let onSave: () -> Void
-    let onSaveAs: () -> Void
-    let onDuplicate: () -> Void
-    let onOpenProjects: () -> Void
-    let onDeleteProject: () -> Void
-    let onToggleFullscreen: () -> Void
-
-    private static let throttleFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return formatter
-    }()
+    private static let selectorButtonWidth: CGFloat = 142
+    private static let selectorButtonHeight: CGFloat = 46
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("", selection: $selectedTab) {
-                ForEach(ToolstripTab.allCases) { tab in
-                    Text(LocalizedStringKey(tab.titleKey)).tag(tab)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ControlModule.allCases) { module in
+                    moduleButton(module)
                 }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 10) {
-                    sectionsForSelectedTab
+                PayloadToolbarEntry(
+                    isPresented: viewModel.isPayloadPanelVisible,
+                    payloadState: viewModel.payloadState,
+                    payloadMountState: viewModel.payloadMountState
+                ) {
+                    viewModel.togglePayloadPanel()
                 }
-                .padding(.vertical, 1)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(GroundControlPalette.shell)
     }
 
-    @ViewBuilder
-    private var sectionsForSelectedTab: some View {
-        switch selectedTab {
-        case .simulation:
-            sectionCard("toolstrip.section.run") {
-                HStack(spacing: 8) {
-                    Button(viewModel.isSimulationRunning ? String(localized: "command.stop_animation") : String(localized: "command.start_animation")) {
-                        viewModel.toggleSimulation()
-                    }
-                    .buttonStyle(.borderedProminent)
+    private func moduleButton(_ module: ControlModule) -> some View {
+        Button {
+            viewModel.toggleActiveControlModule(module)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: module.iconSystemName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 16)
 
-                    Button("command.reset") {
-                        viewModel.reset()
-                    }
-                    .buttonStyle(.bordered)
-                }
+                Text(LocalizedStringKey(module.toolbarTitleKey))
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
 
-                HStack(spacing: 8) {
-                    Button("command.takeoff") { viewModel.takeoff() }
-                    Button("command.hover") { viewModel.hover() }
-                    Button("command.land") { viewModel.land() }
-                }
-                .buttonStyle(.bordered)
+                Spacer(minLength: 4)
 
-                HStack(spacing: 8) {
-                    if viewModel.isArmed {
-                        Button("command.arm") { viewModel.arm() }
-                            .buttonStyle(.bordered)
-                        Button("command.disarm") { viewModel.disarm() }
-                            .buttonStyle(.borderedProminent)
-                    } else {
-                        Button("command.arm") { viewModel.arm() }
-                            .buttonStyle(.borderedProminent)
-                        Button("command.disarm") { viewModel.disarm() }
-                            .buttonStyle(.bordered)
-                    }
-                }
-
-                Button("command.emergency_stop") {
-                    viewModel.activateEmergencyStop()
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
-            }
-
-        case .flight:
-            sectionCard("toolstrip.section.flight_model") {
-                Picker("panel.model", selection: Binding(
-                    get: { viewModel.selectedDroneProfile.id },
-                    set: { viewModel.selectDroneModel(id: $0) }
-                )) {
-                    ForEach(viewModel.availableDroneProfiles, id: \.id) { profile in
-                        Text(profile.uiDisplayName).tag(profile.id)
-                    }
-                }
-                .frame(width: 230)
-
-                Picker("control_mode.title", selection: Binding(
-                    get: { viewModel.flightControlMode },
-                    set: { viewModel.setFlightControlMode($0) }
-                )) {
-                    ForEach(FlightControlMode.allCases) { mode in
-                        Text(LocalizedStringKey(mode.titleKey)).tag(mode)
-                    }
-                }
-                .frame(width: 230)
-            }
-
-            sectionCard("toolstrip.section.throttle") {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text("panel.throttle")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        TextField(
-                            String(localized: "panel.throttle"),
-                            value: Binding(
-                                get: { viewModel.controlValues.throttle },
-                                set: { viewModel.setThrottle($0) }
-                            ),
-                            formatter: Self.throttleFormatter
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 86)
-                    }
-
-                    Slider(
-                        value: Binding(
-                            get: { viewModel.controlValues.throttle },
-                            set: { viewModel.setThrottle($0) }
-                        ),
-                        in: 0.0...1.0,
-                        step: 0.01
-                    )
-                    .frame(width: 220)
+                if viewModel.activeControlModule == module {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(GroundControlPalette.accent)
                 }
             }
-
-        case .camera:
-            sectionCard("toolstrip.section.camera_modes") {
-                HStack(spacing: 8) {
-                    cameraModeButton("1", mode: .free)
-                    cameraModeButton("2", mode: .follow)
-                    cameraModeButton("3", mode: .orbit)
-                    cameraModeButton("4", mode: .fpv)
-                    cameraModeButton("5", mode: .top)
-                }
-
-                HStack(spacing: 8) {
-                    Button("camera.reset_orientation") {
-                        viewModel.resetCameraToPreset()
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("camera.zoom_in") {
-                        viewModel.setActiveCameraDistance(max(viewModel.activeCameraDistanceRange.lowerBound, viewModel.activeCameraDistance - 0.9))
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("camera.zoom_out") {
-                        viewModel.setActiveCameraDistance(min(viewModel.activeCameraDistanceRange.upperBound, viewModel.activeCameraDistance + 0.9))
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-
-            sectionCard("toolstrip.section.camera_quick") {
-                Picker("camera.preset.title", selection: Binding(
-                    get: { viewModel.selectedCameraPreset },
-                    set: { viewModel.setCameraPreset($0) }
-                )) {
-                    ForEach(CameraPreset.allCases) { preset in
-                        Text(LocalizedStringKey(preset.titleKey)).tag(preset)
-                    }
-                }
-                .frame(width: 220)
-            }
-
-        case .environment:
-            sectionCard("toolstrip.section.weather") {
-                Picker("panel.weather", selection: Binding(
-                    get: { viewModel.weather.preset },
-                    set: { viewModel.setWeatherPreset($0) }
-                )) {
-                    ForEach(WeatherPreset.allCases) { preset in
-                        Text(LocalizedStringKey(preset.titleKey)).tag(preset)
-                    }
-                }
-                .frame(width: 170)
-
-                Slider(
-                    value: Binding(
-                        get: { Double(viewModel.weather.intensity) },
-                        set: { viewModel.setWeatherIntensity($0) }
-                    ),
-                    in: 0.0...1.0,
-                    step: 0.01
-                )
-                .frame(width: 170)
-            }
-
-            sectionCard("toolstrip.section.terrain") {
-                Picker("panel.terrain", selection: Binding(
-                    get: { viewModel.terrain.preset },
-                    set: { viewModel.setTerrainPreset($0) }
-                )) {
-                    ForEach(TerrainPreset.allCases) { preset in
-                        Text(LocalizedStringKey(preset.titleKey)).tag(preset)
-                    }
-                }
-                .frame(width: 170)
-
-                Picker("terrain.scale", selection: Binding(
-                    get: { viewModel.terrain.mapScale },
-                    set: { viewModel.setTerrainMapScale($0) }
-                )) {
-                    ForEach(MapScale.allCases) { scale in
-                        Text(LocalizedStringKey(scale.titleKey)).tag(scale)
-                    }
-                }
-                .frame(width: 170)
-
-                Slider(
-                    value: Binding(
-                        get: { Double(viewModel.terrain.density) },
-                        set: { viewModel.setTerrainDensity($0) }
-                    ),
-                    in: 0.1...1.0,
-                    step: 0.01,
-                    onEditingChanged: { editing in
-                        viewModel.setTerrainDensityEditing(editing)
-                        if !editing {
-                            viewModel.commitTerrainDensityChange()
-                        }
-                    }
-                )
-                .frame(width: 170)
-            }
-
-        case .debug:
-            sectionCard("toolstrip.section.debug") {
-                Toggle("panel.collision_debug", isOn: $viewModel.collisionDebugEnabled)
-                    .toggleStyle(.switch)
-
-                HStack(spacing: 8) {
-                    Button("diagnostic.toggle_thermal") { viewModel.toggleThermalOverlay() }
-                        .buttonStyle(.bordered)
-                    Button("diagnostic.toggle_damage") { viewModel.toggleDamageOverlay() }
-                        .buttonStyle(.bordered)
-                }
-
-                Button("ui.toggle_telemetry_hud") { viewModel.toggleCompactTelemetryHUD() }
-                    .buttonStyle(.bordered)
-            }
-
-        case .projects:
-            sectionCard("toolstrip.section.projects") {
-                HStack(spacing: 8) {
-                    Button("project.save.action") { onSave() }
-                        .buttonStyle(.borderedProminent)
-                    Button("project.save_as.action") { onSaveAs() }
-                        .buttonStyle(.bordered)
-                    Button("project.duplicate.action") { onDuplicate() }
-                        .buttonStyle(.bordered)
-                }
-
-                HStack(spacing: 8) {
-                    Button("project.open.action") { onOpenProjects() }
-                        .buttonStyle(.bordered)
-                    Button("project.delete.action", role: .destructive) { onDeleteProject() }
-                        .buttonStyle(.bordered)
-                    Button("window.fullscreen") { onToggleFullscreen() }
-                        .buttonStyle(.bordered)
-                }
-            }
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .padding(.horizontal, 10)
+            .frame(width: Self.selectorButtonWidth, height: Self.selectorButtonHeight, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(viewModel.activeControlModule == module ? GroundControlPalette.accent.opacity(0.18) : GroundControlPalette.panelRaised)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(viewModel.activeControlModule == module ? GroundControlPalette.accent.opacity(0.58) : GroundControlPalette.border, lineWidth: 1)
+            )
         }
-    }
-
-    @ViewBuilder
-    private func cameraModeButton(_ title: String, mode: CameraMode) -> some View {
-        if viewModel.cameraConfiguration.mode == mode {
-            Button(title) {
-                viewModel.setCameraMode(mode)
-            }
-            .buttonStyle(.borderedProminent)
-        } else {
-            Button(title) {
-                viewModel.setCameraMode(mode)
-            }
-            .buttonStyle(.bordered)
-        }
-    }
-
-    private func sectionCard<Content: View>(
-        _ titleKey: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(LocalizedStringKey(titleKey))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            content()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 }
 
@@ -819,7 +540,6 @@ struct ContentView: View {
     @State private var nameDialogMode: NameDialogMode?
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
-    @State private var selectedToolstripTab: ToolstripTab = .simulation
     @State private var showBindingsSettings: Bool = false
 
     private var selectedLanguage: AppLanguage {
@@ -1007,84 +727,63 @@ struct ContentView: View {
                 HStack(alignment: .center, spacing: 10) {
                     Text(viewModel.currentProjectName)
                         .font(.headline)
+                        .foregroundStyle(GroundControlPalette.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.78)
                     if viewModel.hasUnsavedChanges {
                         Text("•")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(GroundControlPalette.warning)
                     }
 
                     Spacer()
-                    Text("workspace.toolstrip")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
-                    Divider()
-                        .frame(height: 18)
+                    if let activeModule = viewModel.activeControlModule {
+                        HStack(spacing: 8) {
+                            Image(systemName: activeModule.iconSystemName)
+                            Text(LocalizedStringKey(activeModule.titleKey))
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(GroundControlPalette.panelRaised)
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(GroundControlPalette.border, lineWidth: 1)
+                        )
+                    }
 
                     Toggle(isOn: parametersVisibilityBinding(for: viewModel)) {
-                        Text(viewModel.isParametersPanelVisible ? "panel.parameters.on" : "panel.parameters.off")
+                        Text(viewModel.isParametersPanelVisible ? "panel.modules.on" : "panel.modules.off")
                             .font(.caption)
                     }
                     .toggleStyle(.checkbox)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
                     .frame(width: 168, alignment: .leading)
 
-                    PayloadToolbarEntry(
-                        isPresented: viewModel.isPayloadPanelVisible,
-                        payloadState: viewModel.payloadState,
-                        payloadMountState: viewModel.payloadMountState
-                    ) {
-                        viewModel.togglePayloadPanel()
-                    }
-
-                    Button {
-                        viewModel.setToolPanelVisible(false)
-                    } label: {
-                        Image(systemName: "chevron.up")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!viewModel.isToolPanelVisible)
-                    .help(String(localized: "panel.hide"))
-
-                    Button {
-                        viewModel.setToolPanelVisible(true)
-                    } label: {
-                        Image(systemName: "chevron.down")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isToolPanelVisible)
-                    .help(String(localized: "panel.show"))
-
-                    Button("keybind.open") {
-                        showBindingsSettings = true
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(Color(nsColor: .windowBackgroundColor))
-
-                if viewModel.isToolPanelVisible {
-                    Divider()
-
-                    SimulationToolstripView(
-                        viewModel: viewModel,
-                        selectedTab: $selectedToolstripTab,
-                        onSave: {
+                    Menu {
+                        Button("project.save.action") {
                             appShell.saveActiveProject()
-                        },
-                        onSaveAs: {
+                        }
+                        Button("project.save_as.action") {
                             nameDraft = "\(viewModel.currentProjectName) Copy"
                             nameDialogMode = .saveAs
-                        },
-                        onDuplicate: {
+                        }
+                        Button("project.duplicate.action") {
                             nameDraft = "\(viewModel.currentProjectName) Clone"
                             nameDialogMode = .duplicate
-                        },
-                        onOpenProjects: {
+                        }
+                        Divider()
+                        Button("project.open.action") {
                             appShell.requestReturnToMenu()
-                        },
-                        onDeleteProject: {
+                        }
+                        Button("window.fullscreen") {
+                            toggleFullscreen()
+                        }
+                        Button("project.delete.action", role: .destructive) {
                             deleteCandidate = ProjectRecordSummary(
                                 id: viewModel.currentProjectID,
                                 name: viewModel.currentProjectName,
@@ -1093,18 +792,56 @@ struct ContentView: View {
                                 lastOpenedAt: Date(),
                                 lastSavedAt: Date()
                             )
-                        },
-                        onToggleFullscreen: {
-                            toggleFullscreen()
                         }
+                    } label: {
+                        headerUtilityButtonLabel(systemImage: "folder.badge.gearshape")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help(String(localized: "toolbar.header.project"))
+
+                    Button {
+                        showBindingsSettings = true
+                    } label: {
+                        headerUtilityButtonLabel(systemImage: "keyboard")
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "keybind.open"))
+
+                    Button {
+                        viewModel.setToolPanelVisible(false)
+                    } label: {
+                        headerUtilityButtonLabel(systemImage: "chevron.up")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!viewModel.isToolPanelVisible)
+                    .help(String(localized: "panel.hide"))
+
+                    Button {
+                        viewModel.setToolPanelVisible(true)
+                    } label: {
+                        headerUtilityButtonLabel(systemImage: "chevron.down")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isToolPanelVisible)
+                    .help(String(localized: "panel.show"))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(GroundControlPalette.panel)
+
+                if viewModel.isToolPanelVisible {
+                    Divider()
+
+                    SimulationToolstripView(
+                        viewModel: viewModel
                     )
 
                     Divider()
                 }
 
                 HStack(spacing: 0) {
-                    if viewModel.isParametersPanelVisible {
-                        ControlPanelView(
+                    if viewModel.isParametersPanelVisible, viewModel.activeControlModule != nil {
+                        SidebarModuleHostView(
                             viewModel: viewModel,
                             appLanguage: selectedLanguageBinding
                         )
@@ -1193,7 +930,7 @@ struct ContentView: View {
                 )
                 .frame(maxWidth: 1040)
                 .padding(.horizontal, 28)
-                .padding(.top, viewModel.isToolPanelVisible ? 116 : 72)
+                .padding(.top, viewModel.isToolPanelVisible ? 132 : 88)
                 .padding(.bottom, 40)
             }
         }
@@ -1202,9 +939,24 @@ struct ContentView: View {
 
     private func parametersVisibilityBinding(for viewModel: DroneSimulationViewModel) -> Binding<Bool> {
         Binding(
-            get: { viewModel.isParametersPanelVisible },
+            get: { viewModel.isParametersPanelVisible && viewModel.activeControlModule != nil },
             set: { viewModel.setControlPanelVisible($0) }
         )
+    }
+
+    private func headerUtilityButtonLabel(systemImage: String) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .frame(width: 30, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(GroundControlPalette.panelRaised)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
+            )
     }
 
     @ViewBuilder

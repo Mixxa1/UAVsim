@@ -6,8 +6,8 @@ struct UAVProfileCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("uav.card.title")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
 
             if let entry {
                 let payloadData = entry.profile.payloadDataResolution
@@ -17,9 +17,10 @@ struct UAVProfileCardView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.profile.localizedDisplayName)
                                 .font(.headline)
+                                .foregroundStyle(GroundControlPalette.textPrimary)
                             Text(entry.profile.localizedShortDescription)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(GroundControlPalette.textSecondary)
                         }
 
                         Spacer(minLength: 8)
@@ -46,10 +47,10 @@ struct UAVProfileCardView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("uav.card.armament_note")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(GroundControlPalette.textSecondary)
                             Text(armamentCapabilityNote)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(GroundControlPalette.textSecondary)
                         }
                     }
                 }
@@ -57,12 +58,16 @@ struct UAVProfileCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.primary.opacity(0.05))
+                        .fill(GroundControlPalette.inset)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(GroundControlPalette.border, lineWidth: 1)
                 )
             } else {
                 Text("uav.card.empty")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
             }
         }
     }
@@ -71,11 +76,12 @@ struct UAVProfileCardView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(GroundControlPalette.textSecondary)
             Spacer(minLength: 8)
             Text(value)
                 .font(.caption)
                 .multilineTextAlignment(.trailing)
+                .foregroundStyle(GroundControlPalette.textPrimary)
         }
     }
 

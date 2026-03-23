@@ -5,24 +5,35 @@ struct CompactTelemetryHUDView: View {
     let warningKeys: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("hud.telemetry")
-                .font(.caption.weight(.semibold))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
 
-            Text(String(format: "x %.1f y %.1f z %.1f", telemetry.x, telemetry.y, telemetry.z))
+            Text(String(format: "POS  x %.1f  y %.1f  z %.1f", telemetry.x, telemetry.y, telemetry.z))
                 .font(.caption2.monospaced())
-            Text(String(format: "%.1f m/s | %.0f%%", telemetry.speed, telemetry.batteryPercent))
+            Text(String(format: "SPD  %.1f m/s   BAT %.0f%%", telemetry.speed, telemetry.batteryPercent))
                 .font(.caption2.monospaced())
+            Text(LocalizedStringKey(telemetry.modeKey))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.textPrimary)
 
             if let warning = warningKeys.first {
                 Text(LocalizedStringKey(warning))
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(GroundControlPalette.warning)
             }
         }
-        .foregroundStyle(Color.white.opacity(0.94))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 10))
+        .foregroundStyle(GroundControlPalette.textPrimary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.56))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+        )
     }
 }

@@ -105,6 +105,8 @@
 "diagnostic.mode.thermal" = "Thermal / Load";
 "diagnostic.mode.damage" = "Damage / Integrity";
 "diagnostic.collision_debug" = "Collision debug";
+"diagnostic.toggle_thermal" = "Thermal Layer";
+"diagnostic.toggle_damage" = "Damage Layer";
 "diagnostic.fleet_mode" = "Enable fleet";
 
 "fleet.formation" = "Formation";
@@ -639,3 +641,118 @@
 "telemetry.waypoint" = "Waypoint";
 "telemetry.waypoint.value" = "idx %d, left %d";
 "telemetry.path_remaining" = "Path remaining";
+
+"panel.modules.on" = "Modules: On";
+"panel.modules.off" = "Modules: Off";
+
+"toolbar.cluster.status" = "Live Status";
+"toolbar.cluster.status.subtitle" = "Current mission stack and active module";
+"toolbar.cluster.project" = "Project Actions";
+"toolbar.cluster.project.subtitle" = "Session persistence and workspace control";
+"toolbar.cluster.utility" = "Operator Tools";
+"toolbar.cluster.utility.subtitle" = "Bindings, HUD and language";
+
+"sidebar.metric.mode" = "Mode";
+"sidebar.metric.state" = "State";
+"sidebar.metric.camera" = "Camera";
+"sidebar.metric.platform" = "Platform";
+"sidebar.metric.battery" = "Battery";
+"sidebar.metric.warnings" = "Warnings";
+"sidebar.metric.throttle" = "Throttle";
+"sidebar.metric.preset" = "Preset";
+"sidebar.metric.fov" = "FOV";
+"sidebar.metric.distance" = "Distance";
+"sidebar.metric.weather" = "Weather";
+"sidebar.metric.terrain" = "Terrain";
+"sidebar.metric.wind" = "Wind";
+"sidebar.metric.boundary" = "Boundary";
+"sidebar.metric.manufacturer" = "Manufacturer";
+"sidebar.value.on" = "On";
+"sidebar.value.off" = "Off";
+
+"toolbar.header.project" = "Project actions";
+
+"module.panel.idle" = "MODULES";
+"module.panel.idle.subtitle" = "Select a tool from the toolbar to open a control module";
+
+"module.flight_ops.title" = "FLIGHT OPS";
+"module.flight_ops.toolbar_title" = "Flight";
+"module.flight_ops.subtitle" = "Launch, recovery and thrust control";
+"module.flight_ops.command_stack" = "Command Stack";
+"module.flight_ops.command_stack.subtitle" = "Primary airframe actions and automatic routines";
+"module.flight_ops.control_law" = "Flight Control";
+"module.flight_ops.control_law.subtitle" = "Switch between control laws without leaving the scene";
+"module.flight_ops.active_mode" = "ACTIVE";
+"module.flight_ops.thrust" = "Thrust Channel";
+"module.flight_ops.thrust.subtitle" = "Direct throttle authority and fixed setpoints";
+"module.flight_ops.override" = "Safety / Reset";
+"module.flight_ops.override.subtitle" = "Simulation power state, recovery and emergency stop";
+
+"module.uav_catalog.title" = "UAV CATALOG";
+"module.uav_catalog.toolbar_title" = "UAV";
+"module.uav_catalog.subtitle" = "Platform selection and active airframe context";
+"module.uav_catalog.selection" = "Platform Snapshot";
+"module.uav_catalog.selection.subtitle" = "Filtered catalog status and current selection";
+"module.uav_catalog.metric.active" = "Active Profile";
+"module.uav_catalog.metric.filtered" = "Filtered Set";
+"module.uav_catalog.metric.type" = "Vehicle Type";
+"module.uav_catalog.metric.mass" = "Mass Class";
+"module.uav_catalog.list.subtitle" = "Catalog filters, platform list and profile card";
+
+"module.payload.title" = "PAYLOAD";
+"module.payload.toolbar_title" = "Payload";
+
+"module.camera.title" = "CAMERA";
+"module.camera.toolbar_title" = "Camera";
+"module.camera.subtitle" = "Sensor viewpoint, optics and FPV tuning";
+"module.camera.mode_stack" = "Mode Stack";
+"module.camera.mode_stack.subtitle" = "Operational camera modes for scene control";
+"module.camera.active_mode" = "LIVE";
+"module.camera.presets" = "Preset Rack";
+"module.camera.presets.subtitle" = "Mission-specific camera presets and reset controls";
+"module.camera.optics" = "Optics";
+"module.camera.optics.subtitle" = "Distance and field-of-view tuning";
+"module.camera.advanced.subtitle" = "Expand only when deeper camera tuning is required";
+"module.camera.show_advanced" = "Show advanced camera tuning";
+"module.camera.hide_advanced" = "Hide advanced camera tuning";
+"module.camera.fpv_stack" = "FPV Calibration";
+"module.camera.preset_hint.cinematic" = "Wide, smooth and presentation-focused";
+"module.camera.preset_hint.pilot" = "Balanced operator view for general flying";
+"module.camera.preset_hint.inspection" = "Closer framing for structure checks";
+"module.camera.preset_hint.wide_follow" = "Longer chase spacing for situational awareness";
+"module.camera.preset_hint.tight_follow" = "Closer chase spacing for precision work";
+"module.camera.preset_hint.fpv" = "Cockpit view with direct alignment";
+
+"module.scenario.title" = "SCENARIO";
+"module.scenario.toolbar_title" = "Scenario";
+"module.scenario.subtitle" = "Weather, terrain and boundary envelope";
+"module.scenario.weather" = "Weather Profile";
+"module.scenario.weather.subtitle" = "Preset severity and wind conditions";
+"module.scenario.show_weather_tuning" = "Show wind tuning";
+"module.scenario.hide_weather_tuning" = "Hide wind tuning";
+"module.scenario.active_preset" = "LIVE";
+"module.scenario.terrain" = "Terrain Profile";
+"module.scenario.terrain.subtitle" = "Map scale, density and containment controls";
+"module.scenario.active_profile" = "LIVE";
+
+"module.diagnostics.title" = "DIAGNOSTICS";
+"module.diagnostics.toolbar_title" = "Diagnostics";
+"module.diagnostics.subtitle" = "Telemetry, runtime states and technical health";
+"module.diagnostics.overlay" = "Overlay Modes";
+"module.diagnostics.overlay.subtitle" = "Runtime rendering and debug visibility controls";
+"module.diagnostics.runtime_summary" = "Runtime Summary";
+"module.diagnostics.runtime_summary.subtitle" = "Frame, physics, render and object load counters";
+"module.diagnostics.telemetry" = "Telemetry Rack";
+"module.diagnostics.telemetry.subtitle" = "Expanded mission, power and performance readout";
+"module.diagnostics.warning_bus" = "Warning Bus";
+"module.diagnostics.warning_bus.subtitle" = "Current alarms from flight, battery and environment";
+"module.diagnostics.fleet" = "Fleet Coordination";
+"module.diagnostics.fleet.subtitle" = "Wingman behavior and formation spacing";
+"module.diagnostics.damage" = "Damage / Thermal";
+"module.diagnostics.damage.subtitle" = "Component visibility and integrity inspection";
+"module.diagnostics.station" = "Station Settings";
+"module.diagnostics.station.subtitle" = "Operator language and local workstation preferences";
+"module.diagnostics.panel.overview" = "Overview";
+"module.diagnostics.panel.telemetry" = "Telemetry";
+"module.diagnostics.panel.fleet" = "Fleet";
+"module.diagnostics.panel.service" = "Service";

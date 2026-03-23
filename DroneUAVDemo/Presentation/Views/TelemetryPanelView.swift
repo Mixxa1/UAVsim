@@ -2,13 +2,14 @@ import SwiftUI
 
 struct TelemetryPanelView: View {
     let telemetry: TelemetrySnapshot
+    private let labelColumnWidth: CGFloat = 142
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             row(titleKey: "telemetry.position", value: String(format: "x %.2f | y %.2f | z %.2f m", telemetry.x, telemetry.y, telemetry.z))
             row(titleKey: "telemetry.velocity", value: String(format: "vx %.2f | vy %.2f | vz %.2f m/s", telemetry.velocityX, telemetry.velocityY, telemetry.velocityZ))
 
-            Divider()
+            rackDivider()
 
             row(titleKey: "telemetry.attitude", value: String(format: "R %.1f° | P %.1f° | Y %.1f°", telemetry.roll, telemetry.pitch, telemetry.yaw))
             row(titleKey: "telemetry.speed", value: String(format: "%.2f m/s", telemetry.speed))
@@ -18,7 +19,7 @@ struct TelemetryPanelView: View {
             row(titleKey: "telemetry.arm_state", valueKey: telemetry.armStateKey)
             row(titleKey: "telemetry.state", valueKey: telemetry.flightStateKey)
 
-            Divider()
+            rackDivider()
 
             row(titleKey: "telemetry.battery", value: String(format: "%.1f %%", telemetry.batteryPercent))
             row(titleKey: "telemetry.power", value: String(format: "%.1f W", telemetry.powerDrawW))
@@ -37,7 +38,7 @@ struct TelemetryPanelView: View {
             row(titleKey: "telemetry.fleet_risk", value: String(format: "%.0f %%", telemetry.interDroneRisk * 100.0))
             row(titleKey: "telemetry.nearest_interdrone", value: telemetry.nearestInterDroneDistance.isFinite ? String(format: "%.2f m", telemetry.nearestInterDroneDistance) : localized("common.na"))
 
-            Divider()
+            rackDivider()
 
             row(titleKey: "telemetry.frame_time", value: String(format: "%.2f ms", telemetry.frameTimeMs))
             row(titleKey: "telemetry.physics_time", value: String(format: "%.2f ms", telemetry.physicsTimeMs))
@@ -47,29 +48,64 @@ struct TelemetryPanelView: View {
             row(titleKey: "telemetry.active_physics_bodies", value: String(telemetry.activePhysicsBodyCount))
             row(titleKey: "telemetry.particle_count", value: String(telemetry.activeParticleCount))
         }
-        .font(.system(size: 12.0, weight: .regular, design: .monospaced))
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(GroundControlPalette.inset)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.border, lineWidth: 1)
+        )
     }
 
     private func row(titleKey: String, value: String) -> some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: 12) {
             Text(LocalizedStringKey(titleKey))
-                .foregroundStyle(.secondary)
-            Spacer()
+                .font(.caption)
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: labelColumnWidth, alignment: .leading)
             Text(value)
+                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                 .multilineTextAlignment(.trailing)
-                .foregroundStyle(.primary)
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .lineLimit(2)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .layoutPriority(1)
         }
+        .padding(.vertical, 5)
     }
 
     private func row(titleKey: String, valueKey: String) -> some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: 12) {
             Text(LocalizedStringKey(titleKey))
-                .foregroundStyle(.secondary)
-            Spacer()
+                .font(.caption)
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: labelColumnWidth, alignment: .leading)
             Text(LocalizedStringKey(valueKey))
+                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                 .multilineTextAlignment(.trailing)
-                .foregroundStyle(.primary)
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .lineLimit(2)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .layoutPriority(1)
         }
+        .padding(.vertical, 5)
+    }
+
+    private func rackDivider() -> some View {
+        Rectangle()
+            .fill(GroundControlPalette.border)
+            .frame(height: 1)
+            .padding(.vertical, 6)
     }
 
     private func localizedPathStatus(_ status: String) -> String {

@@ -11,8 +11,8 @@ struct UAVCatalogView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("uav.catalog.title")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
 
             UAVFilterBarView(
                 filterState: filterState,
@@ -32,7 +32,7 @@ struct UAVCatalogView: View {
                 if selectionState.filteredEntries.isEmpty {
                     Text("uav.catalog.empty")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
                         .padding(.vertical, 6)
                 }
             }
@@ -56,13 +56,13 @@ struct UAVCatalogView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(entry.profile.localizedDisplayName)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(GroundControlPalette.textPrimary)
                     Text("\(entry.profile.localizedManufacturer) / \(entry.profile.localizedCountryOfOrigin ?? localized("common.not_specified"))")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
                     Text(entry.profile.localizedShortDescription)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
                         .lineLimit(2)
                 }
 
@@ -78,11 +78,11 @@ struct UAVCatalogView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.04))
+                    .fill(isSelected ? GroundControlPalette.accent.opacity(0.18) : GroundControlPalette.inset)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.65) : Color.clear, lineWidth: 1.0)
+                    .stroke(isSelected ? GroundControlPalette.accent.opacity(0.65) : GroundControlPalette.border, lineWidth: 1.0)
             )
         }
         .buttonStyle(.plain)

@@ -29,11 +29,21 @@ struct UAVFilterBarView: View {
                 }
                 .pickerStyle(.menu)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(GroundControlPalette.inset)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
+            )
 
             if selectedModelOutsideCurrentFilter {
                 Text("uav.catalog.selected_outside_filter")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
             }
         }
     }

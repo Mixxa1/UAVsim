@@ -105,6 +105,8 @@
 "diagnostic.mode.thermal" = "Тепло / Нагрузка";
 "diagnostic.mode.damage" = "Повреждения / Целостность";
 "diagnostic.collision_debug" = "Отладка коллизий";
+"diagnostic.toggle_thermal" = "Тепловой слой";
+"diagnostic.toggle_damage" = "Слой повреждений";
 "diagnostic.fleet_mode" = "Включить группу";
 
 "fleet.formation" = "Построение";
@@ -638,3 +640,118 @@
 "telemetry.waypoint" = "Маршрутная точка";
 "telemetry.waypoint.value" = "индекс %d, осталось %d";
 "telemetry.path_remaining" = "Остаток маршрута";
+
+"panel.modules.on" = "Модули: Вкл";
+"panel.modules.off" = "Модули: Выкл";
+
+"toolbar.cluster.status" = "Живой статус";
+"toolbar.cluster.status.subtitle" = "Текущий контур управления и активный модуль";
+"toolbar.cluster.project" = "Действия проекта";
+"toolbar.cluster.project.subtitle" = "Сохранение сессии и управление окном";
+"toolbar.cluster.utility" = "Инструменты оператора";
+"toolbar.cluster.utility.subtitle" = "Бинды, HUD и язык";
+
+"sidebar.metric.mode" = "Режим";
+"sidebar.metric.state" = "Состояние";
+"sidebar.metric.camera" = "Камера";
+"sidebar.metric.platform" = "Платформа";
+"sidebar.metric.battery" = "Батарея";
+"sidebar.metric.warnings" = "Предупреждения";
+"sidebar.metric.throttle" = "Тяга";
+"sidebar.metric.preset" = "Пресет";
+"sidebar.metric.fov" = "FOV";
+"sidebar.metric.distance" = "Дистанция";
+"sidebar.metric.weather" = "Погода";
+"sidebar.metric.terrain" = "Рельеф";
+"sidebar.metric.wind" = "Ветер";
+"sidebar.metric.boundary" = "Контур";
+"sidebar.metric.manufacturer" = "Производитель";
+"sidebar.value.on" = "Вкл";
+"sidebar.value.off" = "Выкл";
+
+"toolbar.header.project" = "Действия проекта";
+
+"module.panel.idle" = "МОДУЛИ";
+"module.panel.idle.subtitle" = "Выберите инструмент в toolbar, чтобы открыть рабочий модуль";
+
+"module.flight_ops.title" = "ПОЛЕТНЫЕ ОПЕРАЦИИ";
+"module.flight_ops.toolbar_title" = "Полет";
+"module.flight_ops.subtitle" = "Запуск, возврат и управление тягой";
+"module.flight_ops.command_stack" = "Командный стек";
+"module.flight_ops.command_stack.subtitle" = "Основные действия по борту и автоматические режимы";
+"module.flight_ops.control_law" = "Контур управления";
+"module.flight_ops.control_law.subtitle" = "Переключение законов управления без выхода из сцены";
+"module.flight_ops.active_mode" = "АКТИВЕН";
+"module.flight_ops.thrust" = "Канал тяги";
+"module.flight_ops.thrust.subtitle" = "Прямая тяга и фиксированные уставки";
+"module.flight_ops.override" = "Безопасность / Сброс";
+"module.flight_ops.override.subtitle" = "Питание симуляции, восстановление и аварийный стоп";
+
+"module.uav_catalog.title" = "КАТАЛОГ БЛА";
+"module.uav_catalog.toolbar_title" = "БЛА";
+"module.uav_catalog.subtitle" = "Выбор платформы и активного профиля";
+"module.uav_catalog.selection" = "Срез платформ";
+"module.uav_catalog.selection.subtitle" = "Состояние фильтра и текущего выбора";
+"module.uav_catalog.metric.active" = "Активный профиль";
+"module.uav_catalog.metric.filtered" = "После фильтра";
+"module.uav_catalog.metric.type" = "Тип аппарата";
+"module.uav_catalog.metric.mass" = "Массовый класс";
+"module.uav_catalog.list.subtitle" = "Фильтры каталога, список платформ и карточка профиля";
+
+"module.payload.title" = "ПОЛЕЗНАЯ НАГРУЗКА";
+"module.payload.toolbar_title" = "ПН";
+
+"module.camera.title" = "КАМЕРА";
+"module.camera.toolbar_title" = "Камера";
+"module.camera.subtitle" = "Ракурс, оптика и FPV-настройка";
+"module.camera.mode_stack" = "Режимы камеры";
+"module.camera.mode_stack.subtitle" = "Рабочие режимы наблюдения за сценой";
+"module.camera.active_mode" = "В РАБОТЕ";
+"module.camera.presets" = "Стойка пресетов";
+"module.camera.presets.subtitle" = "Миссионные пресеты и быстрый сброс вида";
+"module.camera.optics" = "Оптика";
+"module.camera.optics.subtitle" = "Дистанция камеры и угол обзора";
+"module.camera.advanced.subtitle" = "Раскрывать только при необходимости глубокой настройки";
+"module.camera.show_advanced" = "Показать расширенную настройку камеры";
+"module.camera.hide_advanced" = "Скрыть расширенную настройку камеры";
+"module.camera.fpv_stack" = "FPV-калибровка";
+"module.camera.preset_hint.cinematic" = "Широкий и плавный ракурс для презентационного полета";
+"module.camera.preset_hint.pilot" = "Сбалансированный операторский вид для общего пилотажа";
+"module.camera.preset_hint.inspection" = "Более близкое кадрирование для осмотра объектов";
+"module.camera.preset_hint.wide_follow" = "Увеличенная дистанция следования для обстановки";
+"module.camera.preset_hint.tight_follow" = "Плотное следование для точной работы";
+"module.camera.preset_hint.fpv" = "Кокпитный вид с прямой осью наблюдения";
+
+"module.scenario.title" = "СЦЕНАРИЙ";
+"module.scenario.toolbar_title" = "Сценарий";
+"module.scenario.subtitle" = "Погода, местность и габариты рабочей зоны";
+"module.scenario.weather" = "Погодный профиль";
+"module.scenario.weather.subtitle" = "Пресеты и интенсивность внешних условий";
+"module.scenario.show_weather_tuning" = "Показать ветер";
+"module.scenario.hide_weather_tuning" = "Скрыть ветер";
+"module.scenario.active_preset" = "АКТИВЕН";
+"module.scenario.terrain" = "Профиль местности";
+"module.scenario.terrain.subtitle" = "Масштаб карты, плотность и граничный контур";
+"module.scenario.active_profile" = "АКТИВЕН";
+
+"module.diagnostics.title" = "ДИАГНОСТИКА";
+"module.diagnostics.toolbar_title" = "Диагностика";
+"module.diagnostics.subtitle" = "Телеметрия, runtime-состояния и техническое здоровье";
+"module.diagnostics.overlay" = "Overlay-режимы";
+"module.diagnostics.overlay.subtitle" = "Отрисовка runtime-слоев и диагностическая видимость";
+"module.diagnostics.runtime_summary" = "Сводка runtime";
+"module.diagnostics.runtime_summary.subtitle" = "Счетчики кадра, физики, рендера и объектной нагрузки";
+"module.diagnostics.telemetry" = "Стойка телеметрии";
+"module.diagnostics.telemetry.subtitle" = "Расширенный вывод миссии, питания и производительности";
+"module.diagnostics.warning_bus" = "Шина предупреждений";
+"module.diagnostics.warning_bus.subtitle" = "Текущие тревоги от полета, батареи и среды";
+"module.diagnostics.fleet" = "Координация группы";
+"module.diagnostics.fleet.subtitle" = "Поведение ведомых и дистанция строя";
+"module.diagnostics.damage" = "Повреждения / Тепло";
+"module.diagnostics.damage.subtitle" = "Видимость компонентов и контроль целостности";
+"module.diagnostics.station" = "Станционные настройки";
+"module.diagnostics.station.subtitle" = "Язык оператора и локальные параметры рабочего места";
+"module.diagnostics.panel.overview" = "Обзор";
+"module.diagnostics.panel.telemetry" = "Телеметрия";
+"module.diagnostics.panel.fleet" = "Группа";
+"module.diagnostics.panel.service" = "Сервис";

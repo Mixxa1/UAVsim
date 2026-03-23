@@ -10,29 +10,30 @@ struct PayloadToolbarEntry: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 16)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("payload.configure")
-                        .font(.caption.weight(.semibold))
-                    Text(payloadState.title)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Text("module.payload.toolbar_title")
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
 
-                Circle()
+                Spacer(minLength: 4)
+
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(mountTint)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 10, height: 10)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .frame(width: 142, height: 46, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isPresented ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isPresented ? GroundControlPalette.accent.opacity(0.18) : GroundControlPalette.panelRaised)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isPresented ? Color.accentColor.opacity(0.70) : Color.secondary.opacity(0.18), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isPresented ? GroundControlPalette.accent.opacity(0.62) : GroundControlPalette.border, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
