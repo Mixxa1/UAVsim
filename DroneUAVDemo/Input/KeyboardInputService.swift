@@ -283,12 +283,15 @@ enum KeyboardAction: Equatable {
     case requestHover
     case requestReset
     case releasePayload
+    case armAircraft
+    case disarmAircraft
     case selectFreeCamera
     case selectChaseCamera
     case selectOrbitCamera
     case selectFPVCamera
     case selectTopCamera
     case toggleFPV
+    case toggleTerrainMap
     case toggleThermalOverlay
     case toggleDamageOverlay
     case cycleCameraMode
@@ -515,6 +518,11 @@ final class KeyboardInputService: KeyboardInputProviding {
             return nil
         }
 
+        if !event.isARepeat, let action = directAction(for: event) {
+            enqueueAction(action)
+            return nil
+        }
+
         let commands = commands(for: event.keyCode)
         guard !commands.isEmpty else {
             return event
@@ -637,6 +645,58 @@ final class KeyboardInputService: KeyboardInputProviding {
              .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate:
             break
         }
+    }
+
+    private func directAction(for event: NSEvent) -> KeyboardAction? {
+        if matchesTerrainMapToggle(event) {
+            return .toggleTerrainMap
+        }
+        if matchesArmShortcut(event) {
+            return .armAircraft
+        }
+        if matchesDisarmShortcut(event) {
+            return .disarmAircraft
+        }
+        return nil
+    }
+
+    private func matchesTerrainMapToggle(_ event: NSEvent) -> Bool {
+        if event.keyCode == 46 {
+            return true
+        }
+
+        guard let characters = event.charactersIgnoringModifiers?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              !characters.isEmpty else {
+            return false
+        }
+
+        return characters == "m"
+    }
+
+    private func matchesArmShortcut(_ event: NSEvent) -> Bool {
+        if event.characters == "<" {
+            return true
+        }
+
+        if event.keyCode == 43 {
+            return true
+        }
+
+        return event.charactersIgnoringModifiers == ","
+    }
+
+    private func matchesDisarmShortcut(_ event: NSEvent) -> Bool {
+        if event.characters == ">" {
+            return true
+        }
+
+        if event.keyCode == 47 {
+            return true
+        }
+
+        return event.charactersIgnoringModifiers == "."
     }
 
     private func handleDirectUIShortcut(for keyCode: UInt16) -> Bool {

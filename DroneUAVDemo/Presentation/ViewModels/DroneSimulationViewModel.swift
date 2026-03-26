@@ -186,6 +186,35 @@ private enum SignalLossConfiguration {
     static let reentryInset: Float = 0.35
 }
 
+extension DroneSimulationViewModel {
+    struct TerrainMapObject: Identifiable, Equatable {
+        let id: UUID
+        let kind: EnvironmentObjectKind
+        let position: SIMD2<Float>
+        let footprint: SIMD2<Float>
+    }
+
+    struct TerrainMapSnapshot: Equatable {
+        let worldHalfExtent: Float
+        let dockPosition: SIMD2<Float>
+        let dronePosition: SIMD2<Float>
+        let droneYawRadians: Float
+        let droneAltitude: Float
+        let trail: [SIMD2<Float>]
+        let objects: [TerrainMapObject]
+
+        static let empty = TerrainMapSnapshot(
+            worldHalfExtent: TerrainConfiguration.default.worldHalfExtent,
+            dockPosition: SIMD2<Float>(repeating: 0.0),
+            dronePosition: SIMD2<Float>(repeating: 0.0),
+            droneYawRadians: 0.0,
+            droneAltitude: 0.0,
+            trail: [],
+            objects: []
+        )
+    }
+}
+
 @MainActor
 final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var controlValues: DroneControlValues
@@ -239,6 +268,8 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var payloadStatusMessageKey: String?
     @Published private(set) var signalState: UAVSignalState
     @Published private(set) var signalCountdownSecondsRemaining: Int
+    @Published private(set) var isTerrainMapVisible: Bool
+    @Published private(set) var terrainMapSnapshot: TerrainMapSnapshot
 
     var scene: SCNScene {
         sceneController.scene
@@ -330,6 +361,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fleetInterDroneRisk: Float = 0.0
     private var fleetNearestInterDroneDistance: Float = .infinity
     private var isTerrainDensitySliderEditing: Bool = false
+    private var terrainMapTrail: [SIMD2<Float>] = []
     private var installedPayloadConfiguration: PayloadConfiguration?
     private var activePayloadReleaseID: UUID?
     private var lastSidebarModule: ControlModule = .flightOps
@@ -481,6 +513,8 @@ final class DroneSimulationViewModel: ObservableObject {
         self.payloadStatusMessageKey = nil
         self.signalState = .normal
         self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+        self.isTerrainMapVisible = false
+        self.terrainMapSnapshot = .empty
         self.telemetry = .zero
         self.cachedDiagnostics = .zero
 
@@ -499,6 +533,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         homePosition = sceneController.currentDockSpawnPoint()
         lastFiniteState = state
+        resetTerrainMapTrail()
+        refreshTerrainMapSnapshot(recordTrail: false)
         telemetry = buildTelemetrySnapshot()
 
         logAvailableUAVCatalog(models: models)
@@ -728,6 +764,7 @@ final class DroneSimulationViewModel: ObservableObject {
             enabled: false
         )
         refreshPayloadRuntimeState()
+        refreshTerrainMapSnapshot(recordTrail: false)
 
         warnings = []
         lastCollisionSource = "n/a"
@@ -789,6 +826,7 @@ final class DroneSimulationViewModel: ObservableObject {
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.resetTransientState()
         sceneController.resetCameraRuntimeState()
+        refreshTerrainMapSnapshot(recordTrail: false)
         warnings = buildWarnings()
         telemetry = buildTelemetrySnapshot()
         hasUnsavedChanges = true
@@ -933,6 +971,11 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         isBoundaryBarrierVisible = visible
         sceneController.setWorldBoundsVisible(visible)
+    }
+
+    func toggleTerrainMap() {
+        refreshTerrainMapSnapshot(recordTrail: false)
+        isTerrainMapVisible.toggle()
     }
 
     func toggleToolPanel() {
@@ -1415,6 +1458,8 @@ final class DroneSimulationViewModel: ObservableObject {
             diagnosticMode: diagnosticMode,
             deltaTime: 0.0
         )
+        resetTerrainMapTrail()
+        refreshTerrainMapSnapshot(recordTrail: false)
     }
 
     private func scheduleTerrainDensityRegeneration() {
@@ -1643,6 +1688,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let shouldPublishHUD = hudPublishAccumulator >= 0.15 || telemetry.timestampISO8601.isEmpty
         let shouldPersistTelemetry = telemetrySamplingAccumulator + dt >= 0.2
         if shouldPublishHUD || shouldPersistTelemetry {
+            refreshTerrainMapSnapshot(recordTrail: true)
             let latestWarnings = buildWarnings()
             let latestTelemetry = buildTelemetrySnapshot()
 
@@ -1838,6 +1884,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 reset()
             case .releasePayload:
                 releasePayload()
+            case .armAircraft:
+                arm()
+            case .disarmAircraft:
+                disarm()
             case .selectFreeCamera:
                 setCameraMode(.free)
             case .selectChaseCamera:
@@ -1850,6 +1900,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 setCameraMode(.top)
             case .toggleFPV:
                 setCameraMode(cameraConfiguration.mode == .fpv ? .follow : .fpv)
+            case .toggleTerrainMap:
+                toggleTerrainMap()
             case .toggleThermalOverlay:
                 toggleThermalOverlay()
             case .toggleDamageOverlay:
@@ -2882,6 +2934,78 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    private func refreshTerrainMapSnapshot(recordTrail: Bool) {
+        let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
+        let safeOrientation = finiteVector(state.orientation, fallback: lastFiniteState.orientation)
+        let dronePlanarPosition = SIMD2<Float>(safePosition.x, safePosition.z)
+        let dock = sceneController.currentDockSpawnPoint()
+        let extent = max(1.0, terrain.worldHalfExtent)
+
+        if recordTrail {
+            appendTerrainMapTrailSample(dronePlanarPosition)
+        } else if terrainMapTrail.isEmpty {
+            terrainMapTrail = [dronePlanarPosition]
+        }
+
+        let mapObjects = sceneController.environmentMapDescriptors
+            .filter { descriptor in
+                descriptor.kind != .distantBelt &&
+                abs(descriptor.position.x) <= extent + descriptor.boundingRadius &&
+                abs(descriptor.position.z) <= extent + descriptor.boundingRadius
+            }
+            .map { descriptor in
+                TerrainMapObject(
+                    id: descriptor.id,
+                    kind: descriptor.kind,
+                    position: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
+                    footprint: SIMD2<Float>(
+                        max(0.35, descriptor.size.x),
+                        max(0.35, descriptor.size.z)
+                    )
+                )
+            }
+            .sorted { lhs, rhs in
+                max(lhs.footprint.x, lhs.footprint.y) > max(rhs.footprint.x, rhs.footprint.y)
+            }
+
+        let nextSnapshot = TerrainMapSnapshot(
+            worldHalfExtent: extent,
+            dockPosition: SIMD2<Float>(dock.x, dock.z),
+            dronePosition: dronePlanarPosition,
+            droneYawRadians: safeOrientation.z,
+            droneAltitude: max(0.0, safePosition.y),
+            trail: terrainMapTrail,
+            objects: mapObjects
+        )
+
+        if nextSnapshot != terrainMapSnapshot {
+            terrainMapSnapshot = nextSnapshot
+        }
+    }
+
+    private func resetTerrainMapTrail() {
+        let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
+        terrainMapTrail = [SIMD2<Float>(safePosition.x, safePosition.z)]
+    }
+
+    private func appendTerrainMapTrailSample(_ planarPosition: SIMD2<Float>) {
+        guard planarPosition.x.isFinite, planarPosition.y.isFinite else {
+            return
+        }
+
+        let minimumSampleSpacing = max(0.9, terrain.worldHalfExtent * 0.015)
+        if let lastPoint = terrainMapTrail.last,
+           simd_distance(lastPoint, planarPosition) < minimumSampleSpacing {
+            return
+        }
+
+        terrainMapTrail.append(planarPosition)
+        let overflow = terrainMapTrail.count - 72
+        if overflow > 0 {
+            terrainMapTrail.removeFirst(overflow)
+        }
+    }
+
     private func currentFleetStatusSnapshot() -> FleetStatus {
         var snapshot = fleetStatus
         snapshot.interDroneRisk = fleetInterDroneRisk
@@ -3197,6 +3321,7 @@ final class DroneSimulationViewModel: ObservableObject {
         stableGroundAccumulator = 0.0
         airborneAccumulator = 0.0
         impactSeverityAccumulator = 0.0
+        resetTerrainMapTrail()
 
         if weather.preset == .normal || hardReset {
             weather.intensity = 0.0

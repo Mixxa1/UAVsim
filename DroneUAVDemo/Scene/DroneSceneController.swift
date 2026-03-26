@@ -62,6 +62,7 @@ final class DroneSceneController {
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
+    private(set) var environmentMapDescriptors: [EnvironmentObjectDescriptor] = []
     private var dynamicObstacleCenters: [UUID: SIMD3<Float>] = [:]
     private var wingmanVisuals: [UUID: WingmanVisual] = [:]
     private var obstacleSourceByID: [UUID: String] = [:]
@@ -481,6 +482,7 @@ final class DroneSceneController {
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
         let (descriptors, nodesByID) = scenePopulationService.populate(with: terrain)
+        environmentMapDescriptors = descriptors.filter(\.isCollidable)
 
         obstacleMap = [:]
         obstacleSourceByID = [:]
