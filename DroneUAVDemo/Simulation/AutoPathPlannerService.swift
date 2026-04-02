@@ -518,6 +518,7 @@ final class AutoPathPlannerService {
             base = 1.8
         case .x32:
             base = 2.4
+
         }
 
         let densityAdjustment: Float = terrain.density > 0.75 ? 0.28 : (terrain.density > 0.55 ? 0.14 : 0.0)

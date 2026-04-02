@@ -19,6 +19,7 @@ enum MapScale: String, CaseIterable, Identifiable {
             return 16
         case .x32:
             return 32
+        
         }
     }
 

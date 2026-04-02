@@ -47,6 +47,9 @@ struct TelemetrySnapshot {
     var collisionRisk: Double
     var nearestObstacleDistance: Double
     var nearestObstacleSource: String
+    var autoNavigationActive: Bool
+    var targetDistanceMeters: Double
+    var targetBearingDegrees: Double
     var pathStatus: String
     var currentWaypointIndex: Int
     var remainingWaypoints: Int
@@ -109,6 +112,9 @@ struct TelemetrySnapshot {
         collisionRisk: 0.0,
         nearestObstacleDistance: .infinity,
         nearestObstacleSource: "n/a",
+        autoNavigationActive: false,
+        targetDistanceMeters: .nan,
+        targetBearingDegrees: .nan,
         pathStatus: "idle",
         currentWaypointIndex: 0,
         remainingWaypoints: 0,

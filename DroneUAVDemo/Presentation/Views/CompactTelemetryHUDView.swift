@@ -14,6 +14,10 @@ struct CompactTelemetryHUDView: View {
                 .font(.caption2.monospaced())
             Text(String(format: "SPD  %.1f m/s   BAT %.0f%%", telemetry.speed, telemetry.batteryPercent))
                 .font(.caption2.monospaced())
+            if telemetry.autoNavigationActive || telemetry.targetDistanceMeters.isFinite {
+                Text(autoNavigationLine)
+                    .font(.caption2.monospaced())
+            }
             Text(LocalizedStringKey(telemetry.modeKey))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(GroundControlPalette.textPrimary)
@@ -35,5 +39,19 @@ struct CompactTelemetryHUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
         )
+    }
+
+    private var autoNavigationLine: String {
+        let state = telemetry.autoNavigationActive
+            ? NSLocalizedString("telemetry.auto_nav.active", comment: "")
+            : NSLocalizedString("telemetry.auto_nav.inactive", comment: "")
+        let distanceText = telemetry.targetDistanceMeters.isFinite
+            ? String(format: "%.1f m", telemetry.targetDistanceMeters)
+            : "—"
+        let bearingText = telemetry.targetBearingDegrees.isFinite
+            ? String(format: "%03.0f°", telemetry.targetBearingDegrees)
+            : "—"
+
+        return "AUTO \(state)  DST \(distanceText)  BRG \(bearingText)"
     }
 }

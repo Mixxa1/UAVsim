@@ -11,7 +11,7 @@
 "language.russian" = "Русский";
 
 "panel.title" = "Симулятор цифрового двойника БПЛА";
-"panel.keyboard_hint" = "WASD/QE полет, Shift ускорение, 1..5 камеры, стрелки только FPV, +/- зум";
+"panel.keyboard_hint" = "WASD/QE полет, Shift ускорение, 1..5 камеры, M карта, / компас, стрелки только FPV, +/- зум";
 "panel.workflow_hint" = "Основные команды находятся в верхней ленте. Показывайте и скрывайте параметры кнопками панели.";
 "panel.toggle_collapse" = "Свернуть/развернуть панель";
 "panel.collapse" = "Свернуть панель";
@@ -637,6 +637,11 @@
 "telemetry.path_status.valid" = "Готов";
 "telemetry.path_status.recomputing" = "Перестроение";
 "telemetry.path_status.blocked" = "Заблокирован";
+"telemetry.auto_nav" = "Автонавигация";
+"telemetry.auto_nav.active" = "ACTIVE";
+"telemetry.auto_nav.inactive" = "INACTIVE";
+"telemetry.target_distance" = "Дист. до цели";
+"telemetry.target_bearing" = "Пеленг на цель";
 "telemetry.waypoint" = "Маршрутная точка";
 "telemetry.waypoint.value" = "индекс %d, осталось %d";
 "telemetry.path_remaining" = "Остаток маршрута";

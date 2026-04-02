@@ -85,6 +85,10 @@
 		10000000000000000000024B /* CameraModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014E /* CameraModuleView.swift */; };
 		10000000000000000000024C /* ScenarioModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014F /* ScenarioModuleView.swift */; };
 		10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000150 /* DiagnosticsModuleView.swift */; };
+		10000000000000000000024E /* TargetMarkerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000151 /* TargetMarkerState.swift */; };
+		10000000000000000000024F /* AutoNavigationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000152 /* AutoNavigationController.swift */; };
+		100000000000000000000250 /* CompassViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000153 /* CompassViewModel.swift */; };
+		100000000000000000000251 /* CompassOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000154 /* CompassOverlayView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -168,6 +172,10 @@
 		10000000000000000000014E /* CameraModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000014F /* ScenarioModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioModuleView.swift; sourceTree = "<group>"; };
 		100000000000000000000150 /* DiagnosticsModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModuleView.swift; sourceTree = "<group>"; };
+		100000000000000000000151 /* TargetMarkerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TargetMarkerState.swift; sourceTree = "<group>"; };
+		100000000000000000000152 /* AutoNavigationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoNavigationController.swift; sourceTree = "<group>"; };
+		100000000000000000000153 /* CompassViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassViewModel.swift; sourceTree = "<group>"; };
+		100000000000000000000154 /* CompassOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassOverlayView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -249,6 +257,7 @@
 				100000000000000000000107 /* DroneState.swift */,
 				10000000000000000000010A /* TelemetrySnapshot.swift */,
 				100000000000000000000112 /* TerrainModel.swift */,
+				100000000000000000000151 /* TargetMarkerState.swift */,
 				100000000000000000000111 /* WeatherModel.swift */,
 			);
 			path = Domain;
@@ -258,6 +267,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000122 /* AutoPathPlannerService.swift */,
+				100000000000000000000152 /* AutoNavigationController.swift */,
 				100000000000000000000117 /* BatteryThermalSimulationService.swift */,
 				100000000000000000000118 /* CollisionAnalysisService.swift */,
 				10000000000000000000011F /* DroneFleetManager.swift */,
@@ -299,6 +309,7 @@
 			children = (
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
+				100000000000000000000154 /* CompassOverlayView.swift */,
 				100000000000000000000101 /* ContentView.swift */,
 				10000000000000000000014A /* ControlModule.swift */,
 				100000000000000000000102 /* ControlPanelView.swift */,
@@ -324,6 +335,7 @@
 		100000000000000000000016 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				100000000000000000000153 /* CompassViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
 			);
 			path = ViewModels;
@@ -437,6 +449,7 @@
 				100000000000000000000208 /* DroneControlInput.swift in Sources */,
 				100000000000000000000209 /* DroneControlValues.swift in Sources */,
 				10000000000000000000020A /* TelemetrySnapshot.swift in Sources */,
+				10000000000000000000024E /* TargetMarkerState.swift in Sources */,
 				10000000000000000000020B /* DronePhysicsEngine.swift in Sources */,
 				10000000000000000000020C /* SimpleDronePhysicsEngine.swift in Sources */,
 				10000000000000000000020D /* SceneFactory.swift in Sources */,
@@ -461,8 +474,11 @@
 				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
 				100000000000000000000221 /* AppLanguage.swift in Sources */,
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
+				10000000000000000000024F /* AutoNavigationController.swift in Sources */,
 				100000000000000000000223 /* AbstractModelEditorView.swift in Sources */,
 				100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */,
+				100000000000000000000251 /* CompassOverlayView.swift in Sources */,
+				100000000000000000000250 /* CompassViewModel.swift in Sources */,
 				100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */,
 				100000000000000000000229 /* UAVVehicleType.swift in Sources */,
 				10000000000000000000022A /* UAVMassCategory.swift in Sources */,

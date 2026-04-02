@@ -292,6 +292,7 @@ enum KeyboardAction: Equatable {
     case selectTopCamera
     case toggleFPV
     case toggleTerrainMap
+    case toggleCompassOverlay
     case toggleThermalOverlay
     case toggleDamageOverlay
     case cycleCameraMode
@@ -648,6 +649,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func directAction(for event: NSEvent) -> KeyboardAction? {
+        if matchesCompassOverlayToggle(event) {
+            return .toggleCompassOverlay
+        }
         if matchesTerrainMapToggle(event) {
             return .toggleTerrainMap
         }
@@ -673,6 +677,20 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
 
         return characters == "m"
+    }
+
+    private func matchesCompassOverlayToggle(_ event: NSEvent) -> Bool {
+        if event.keyCode == 44 {
+            return true
+        }
+
+        guard let characters = event.charactersIgnoringModifiers?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !characters.isEmpty else {
+            return false
+        }
+
+        return characters == "/"
     }
 
     private func matchesArmShortcut(_ event: NSEvent) -> Bool {

@@ -63,15 +63,23 @@ struct SceneViewportView: View {
                 .padding(.top, overlayInset)
             }
         }
+        .overlay(alignment: .top) {
+            if viewModel.isCompassVisible {
+                CompassOverlayView(viewModel: viewModel.compassViewModel)
+                    .padding(.top, 12)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if viewModel.isTerrainMapVisible {
                 TerrainMapOverlayView(
                     snapshot: viewModel.terrainMapSnapshot,
-                    telemetry: viewModel.telemetry
+                    telemetry: viewModel.telemetry,
+                    targetMarker: viewModel.targetMarkerState,
+                    onSelectTarget: { viewModel.setTargetMarker(at: $0) },
+                    onClearTarget: { viewModel.clearTargetMarker() }
                 )
                 .padding(.top, 12)
                 .padding(.trailing, 12)
-                .allowsHitTesting(false)
             }
         }
         .background(Color.black)
@@ -81,16 +89,32 @@ struct SceneViewportView: View {
 private struct TerrainMapOverlayView: View {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let telemetry: TelemetrySnapshot
+    let targetMarker: TargetMarkerState?
+    let onSelectTarget: (SIMD2<Float>) -> Void
+    let onClearTarget: () -> Void
 
     private var headingDegreesText: String {
-        let degrees = snapshot.droneYawRadians * 180.0 / .pi
-        let normalized = degrees.truncatingRemainder(dividingBy: 360.0)
-        let wrapped = normalized < 0.0 ? normalized + 360.0 : normalized
-        return String(format: "%03.0f", wrapped)
+        String(format: "%03.0f", bodyHeadingDegrees(fromYawRadians: snapshot.droneYawRadians))
     }
 
     private var mapSpanText: String {
         String(format: "%.0f m", snapshot.worldHalfExtent * 2.0)
+    }
+
+    private var autoNavigationLabel: String {
+        telemetry.autoNavigationActive ? localized("telemetry.auto_nav.active") : localized("telemetry.auto_nav.inactive")
+    }
+
+    private var targetMetricsText: String {
+        guard telemetry.targetDistanceMeters.isFinite, telemetry.targetBearingDegrees.isFinite else {
+            return "DST —   BRG —"
+        }
+
+        return String(
+            format: "DST %.1f m   BRG %03.0f°",
+            telemetry.targetDistanceMeters,
+            telemetry.targetBearingDegrees
+        )
     }
 
     var body: some View {
@@ -100,42 +124,78 @@ private struct TerrainMapOverlayView: View {
                     Text("TERRAIN MAP")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textPrimary)
-                    Text("Scene bounds / dock / obstacles / UAV")
+                    Text("Click to place single target marker")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
 
                 Spacer(minLength: 8)
 
-                Text("M")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(GroundControlPalette.textPrimary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(GroundControlPalette.inset, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
-                    )
+                HStack(spacing: 6) {
+                    if targetMarker != nil {
+                        Button(action: onClearTarget) {
+                            Text("CLR")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundStyle(GroundControlPalette.textPrimary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(GroundControlPalette.inset, in: Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Text("M")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(GroundControlPalette.textPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(GroundControlPalette.inset, in: Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+                        )
+                }
             }
 
-            TerrainMapCanvas(snapshot: snapshot)
-                .frame(width: 288, height: 288)
-                .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(GroundControlPalette.border, lineWidth: 1)
-                )
+            ZStack {
+                TerrainMapCanvas(snapshot: snapshot)
+
+                GeometryReader { geometry in
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0.0, coordinateSpace: .local)
+                                .onEnded { value in
+                                    let projection = TerrainMapProjection(snapshot: snapshot, size: geometry.size)
+                                    guard let planarPoint = projection.unproject(value.location) else {
+                                        return
+                                    }
+                                    onSelectTarget(planarPoint)
+                                }
+                        )
+                }
+            }
+            .frame(width: 288, height: 288)
+            .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("HDG \(headingDegreesText)°   ALT \(String(format: "%.1f", snapshot.droneAltitude)) m   OBJ \(snapshot.objects.count)")
                 Text("X \(String(format: "%+.1f", telemetry.x))   Z \(String(format: "%+.1f", telemetry.z))   MAP \(mapSpanText)")
+                Text("AUTO NAV \(autoNavigationLabel)   \(targetMetricsText)")
             }
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(GroundControlPalette.textSecondary)
         }
         .padding(12)
-        .frame(width: 316, alignment: .leading)
+        .frame(width: 332, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(GroundControlPalette.panel.opacity(0.95))
@@ -153,56 +213,59 @@ private struct TerrainMapCanvas: View {
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
-            let outerRect = CGRect(origin: .zero, size: size).insetBy(dx: 10, dy: 10)
-            let side = min(outerRect.width, outerRect.height)
-            let mapRect = CGRect(
-                x: outerRect.midX - side * 0.5,
-                y: outerRect.midY - side * 0.5,
-                width: side,
-                height: side
-            )
+            let projection = TerrainMapProjection(snapshot: snapshot, size: size)
 
             context.fill(
-                Path(mapRect),
+                Path(projection.mapRect),
                 with: .color(GroundControlPalette.inset.opacity(0.98))
             )
-            drawGrid(in: &context, mapRect: mapRect)
-            drawTrail(in: &context, mapRect: mapRect)
+            drawGrid(in: &context, projection: projection)
+            drawTrail(in: &context, projection: projection)
 
-            for object in snapshot.objects {
-                drawObject(object, in: &context, mapRect: mapRect)
+            if let targetMarkerPosition = snapshot.targetMarkerPosition {
+                drawTargetLink(to: targetMarkerPosition, in: &context, projection: projection)
             }
 
-            drawDock(in: &context, mapRect: mapRect)
-            drawDrone(in: &context, mapRect: mapRect)
+            for object in snapshot.objects {
+                drawObject(object, in: &context, projection: projection)
+            }
+
+            drawDock(in: &context, projection: projection)
+            if let targetMarkerPosition = snapshot.targetMarkerPosition {
+                drawTargetMarker(at: targetMarkerPosition, in: &context, projection: projection)
+            }
+            drawDrone(in: &context, projection: projection)
 
             context.stroke(
-                Path(mapRect),
+                Path(projection.mapRect),
                 with: .color(GroundControlPalette.borderStrong),
                 lineWidth: 1.2
             )
         }
     }
 
-    private func drawGrid(in context: inout GraphicsContext, mapRect: CGRect) {
+    private func drawGrid(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
         var gridPath = Path()
         let divisions = 4
 
         for index in 1..<divisions {
             let ratio = CGFloat(index) / CGFloat(divisions)
-            let x = mapRect.minX + mapRect.width * ratio
-            let y = mapRect.minY + mapRect.height * ratio
+            let x = projection.mapRect.minX + projection.mapRect.width * ratio
+            let y = projection.mapRect.minY + projection.mapRect.height * ratio
 
-            gridPath.move(to: CGPoint(x: x, y: mapRect.minY))
-            gridPath.addLine(to: CGPoint(x: x, y: mapRect.maxY))
-            gridPath.move(to: CGPoint(x: mapRect.minX, y: y))
-            gridPath.addLine(to: CGPoint(x: mapRect.maxX, y: y))
+            gridPath.move(to: CGPoint(x: x, y: projection.mapRect.minY))
+            gridPath.addLine(to: CGPoint(x: x, y: projection.mapRect.maxY))
+            gridPath.move(to: CGPoint(x: projection.mapRect.minX, y: y))
+            gridPath.addLine(to: CGPoint(x: projection.mapRect.maxX, y: y))
         }
 
-        gridPath.move(to: CGPoint(x: mapRect.midX, y: mapRect.minY))
-        gridPath.addLine(to: CGPoint(x: mapRect.midX, y: mapRect.maxY))
-        gridPath.move(to: CGPoint(x: mapRect.minX, y: mapRect.midY))
-        gridPath.addLine(to: CGPoint(x: mapRect.maxX, y: mapRect.midY))
+        gridPath.move(to: CGPoint(x: projection.mapRect.midX, y: projection.mapRect.minY))
+        gridPath.addLine(to: CGPoint(x: projection.mapRect.midX, y: projection.mapRect.maxY))
+        gridPath.move(to: CGPoint(x: projection.mapRect.minX, y: projection.mapRect.midY))
+        gridPath.addLine(to: CGPoint(x: projection.mapRect.maxX, y: projection.mapRect.midY))
 
         context.stroke(
             gridPath,
@@ -211,16 +274,18 @@ private struct TerrainMapCanvas: View {
         )
     }
 
-    private func drawTrail(in context: inout GraphicsContext, mapRect: CGRect) {
+    private func drawTrail(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
         guard snapshot.trail.count > 1 else {
             return
         }
 
         var trailPath = Path()
-        let firstPoint = project(snapshot.trail[0], in: mapRect)
-        trailPath.move(to: firstPoint)
+        trailPath.move(to: projection.project(snapshot.trail[0]))
         for point in snapshot.trail.dropFirst() {
-            trailPath.addLine(to: project(point, in: mapRect))
+            trailPath.addLine(to: projection.project(point))
         }
 
         context.stroke(
@@ -230,13 +295,29 @@ private struct TerrainMapCanvas: View {
         )
     }
 
+    private func drawTargetLink(
+        to targetMarker: SIMD2<Float>,
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        var path = Path()
+        path.move(to: projection.project(snapshot.dronePosition))
+        path.addLine(to: projection.project(targetMarker))
+
+        context.stroke(
+            path,
+            with: .color(GroundControlPalette.warning.opacity(0.82)),
+            style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3])
+        )
+    }
+
     private func drawObject(
         _ object: DroneSimulationViewModel.TerrainMapObject,
         in context: inout GraphicsContext,
-        mapRect: CGRect
+        projection: TerrainMapProjection
     ) {
-        let center = project(object.position, in: mapRect)
-        let size = projectedSize(for: object.footprint, in: mapRect)
+        let center = projection.project(object.position)
+        let size = projection.projectedSize(for: object.footprint)
         let rect = CGRect(
             x: center.x - size.width * 0.5,
             y: center.y - size.height * 0.5,
@@ -263,7 +344,12 @@ private struct TerrainMapCanvas: View {
             context.fill(path, with: .color(Color(red: 0.68, green: 0.52, blue: 0.24).opacity(0.76)))
             context.stroke(path, with: .color(Color.black.opacity(0.22)), lineWidth: 0.6)
         case .pole:
-            let poleRect = CGRect(x: center.x - 1.3, y: center.y - max(3.2, size.height * 0.5), width: 2.6, height: max(6.4, size.height))
+            let poleRect = CGRect(
+                x: center.x - 1.3,
+                y: center.y - max(3.2, size.height * 0.5),
+                width: 2.6,
+                height: max(6.4, size.height)
+            )
             let path = Path(roundedRect: poleRect, cornerRadius: 1.0, style: .continuous)
             context.fill(path, with: .color(Color(red: 0.80, green: 0.67, blue: 0.28).opacity(0.84)))
         case .marker:
@@ -280,8 +366,11 @@ private struct TerrainMapCanvas: View {
         }
     }
 
-    private func drawDock(in context: inout GraphicsContext, mapRect: CGRect) {
-        let center = project(snapshot.dockPosition, in: mapRect)
+    private func drawDock(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let center = projection.project(snapshot.dockPosition)
         let dockRect = CGRect(x: center.x - 5.5, y: center.y - 5.5, width: 11, height: 11)
         let dockPath = Path(roundedRect: dockRect, cornerRadius: 1.5, style: .continuous)
         context.stroke(dockPath, with: .color(GroundControlPalette.warning), lineWidth: 1.4)
@@ -294,10 +383,33 @@ private struct TerrainMapCanvas: View {
         context.stroke(crosshair, with: .color(GroundControlPalette.warning.opacity(0.82)), lineWidth: 1.0)
     }
 
-    private func drawDrone(in context: inout GraphicsContext, mapRect: CGRect) {
-        let center = project(snapshot.dronePosition, in: mapRect)
+    private func drawTargetMarker(
+        at targetMarker: SIMD2<Float>,
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let center = projection.project(targetMarker)
+        let outerRect = CGRect(x: center.x - 7, y: center.y - 7, width: 14, height: 14)
+        let innerRect = CGRect(x: center.x - 3, y: center.y - 3, width: 6, height: 6)
+
+        context.stroke(Path(ellipseIn: outerRect), with: .color(GroundControlPalette.warning), lineWidth: 1.6)
+        context.fill(Path(ellipseIn: innerRect), with: .color(GroundControlPalette.warning))
+
+        var crosshair = Path()
+        crosshair.move(to: CGPoint(x: center.x - 10, y: center.y))
+        crosshair.addLine(to: CGPoint(x: center.x + 10, y: center.y))
+        crosshair.move(to: CGPoint(x: center.x, y: center.y - 10))
+        crosshair.addLine(to: CGPoint(x: center.x, y: center.y + 10))
+        context.stroke(crosshair, with: .color(GroundControlPalette.warning.opacity(0.78)), lineWidth: 1.0)
+    }
+
+    private func drawDrone(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let center = projection.project(snapshot.dronePosition)
         let heading = CGFloat(snapshot.droneYawRadians)
-        let forward = CGVector(dx: -sin(heading), dy: -cos(heading))
+        let forward = CGVector(dx: sin(heading), dy: cos(heading))
         let right = CGVector(dx: -forward.dy, dy: forward.dx)
 
         func point(_ origin: CGPoint, offset: CGVector, scale: CGFloat) -> CGPoint {
@@ -322,8 +434,27 @@ private struct TerrainMapCanvas: View {
         let bodyRect = CGRect(x: center.x - 2.1, y: center.y - 2.1, width: 4.2, height: 4.2)
         context.fill(Path(ellipseIn: bodyRect), with: .color(Color.white.opacity(0.92)))
     }
+}
 
-    private func project(_ point: SIMD2<Float>, in mapRect: CGRect) -> CGPoint {
+private struct TerrainMapProjection {
+    let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
+    let size: CGSize
+
+    var outerRect: CGRect {
+        CGRect(origin: .zero, size: size).insetBy(dx: 10, dy: 10)
+    }
+
+    var mapRect: CGRect {
+        let side = min(outerRect.width, outerRect.height)
+        return CGRect(
+            x: outerRect.midX - side * 0.5,
+            y: outerRect.midY - side * 0.5,
+            width: side,
+            height: side
+        )
+    }
+
+    func project(_ point: SIMD2<Float>) -> CGPoint {
         let extent = max(1.0, snapshot.worldHalfExtent)
         let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
         return CGPoint(
@@ -332,7 +463,24 @@ private struct TerrainMapCanvas: View {
         )
     }
 
-    private func projectedSize(for footprint: SIMD2<Float>, in mapRect: CGRect) -> CGSize {
+    func unproject(_ point: CGPoint) -> SIMD2<Float>? {
+        guard mapRect.contains(point) else {
+            return nil
+        }
+
+        let extent = max(1.0, snapshot.worldHalfExtent)
+        let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
+        guard scale > 0.0001 else {
+            return nil
+        }
+
+        return SIMD2<Float>(
+            Float((point.x - mapRect.midX) / scale),
+            Float((mapRect.midY - point.y) / scale)
+        )
+    }
+
+    func projectedSize(for footprint: SIMD2<Float>) -> CGSize {
         let extent = max(1.0, snapshot.worldHalfExtent)
         let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
         return CGSize(

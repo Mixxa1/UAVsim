@@ -200,6 +200,7 @@ extension DroneSimulationViewModel {
         let dronePosition: SIMD2<Float>
         let droneYawRadians: Float
         let droneAltitude: Float
+        let targetMarkerPosition: SIMD2<Float>?
         let trail: [SIMD2<Float>]
         let objects: [TerrainMapObject]
 
@@ -209,6 +210,7 @@ extension DroneSimulationViewModel {
             dronePosition: SIMD2<Float>(repeating: 0.0),
             droneYawRadians: 0.0,
             droneAltitude: 0.0,
+            targetMarkerPosition: nil,
             trail: [],
             objects: []
         )
@@ -270,6 +272,10 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var signalCountdownSecondsRemaining: Int
     @Published private(set) var isTerrainMapVisible: Bool
     @Published private(set) var terrainMapSnapshot: TerrainMapSnapshot
+    @Published private(set) var targetMarkerState: TargetMarkerState?
+    @Published private(set) var isCompassVisible: Bool
+
+    let compassViewModel: CompassViewModel
 
     var scene: SCNScene {
         sceneController.scene
@@ -329,6 +335,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let projectStorage: ProjectStorageManaging
     private let fleetManager: DroneFleetManager
     private let autoPathPlanner: AutoPathPlannerService
+    private let autoNavigationController: AutoNavigationController
 
     private var state: DroneState
     private var lastFiniteState: DroneState
@@ -375,6 +382,7 @@ final class DroneSimulationViewModel: ObservableObject {
         projectStorage: ProjectStorageManaging = ProjectStorageService(),
         fleetManager: DroneFleetManager = DroneFleetManager(),
         autoPathPlanner: AutoPathPlannerService = AutoPathPlannerService(),
+        autoNavigationController: AutoNavigationController = AutoNavigationController(),
         initialProjectID: String? = nil,
         initialProjectName: String? = nil
     ) {
@@ -386,6 +394,8 @@ final class DroneSimulationViewModel: ObservableObject {
         self.projectStorage = projectStorage
         self.fleetManager = fleetManager
         self.autoPathPlanner = autoPathPlanner
+        self.autoNavigationController = autoNavigationController
+        self.compassViewModel = CompassViewModel()
 
         let abstract = AbstractDroneParameters.default
         self.abstractParameters = abstract
@@ -515,6 +525,8 @@ final class DroneSimulationViewModel: ObservableObject {
         self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
         self.isTerrainMapVisible = false
         self.terrainMapSnapshot = .empty
+        self.targetMarkerState = nil
+        self.isCompassVisible = false
         self.telemetry = .zero
         self.cachedDiagnostics = .zero
 
@@ -535,6 +547,7 @@ final class DroneSimulationViewModel: ObservableObject {
         lastFiniteState = state
         resetTerrainMapTrail()
         refreshTerrainMapSnapshot(recordTrail: false)
+        refreshCompassOverlay()
         telemetry = buildTelemetrySnapshot()
 
         logAvailableUAVCatalog(models: models)
@@ -676,6 +689,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func disarm(forceEmergency: Bool = false) {
+        cancelTargetMarkerAutoNavigation()
         isArmed = false
         if forceEmergency {
             mode = .emergencyStop
@@ -701,6 +715,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func reset() {
         ensureSimulationRunning()
+        clearTargetMarker()
         mode = .manual
         flightControlMode = .stabilized
         clearSignalLossState(restoringInputMode: false)
@@ -765,6 +780,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         refreshPayloadRuntimeState()
         refreshTerrainMapSnapshot(recordTrail: false)
+        refreshCompassOverlay()
 
         warnings = []
         lastCollisionSource = "n/a"
@@ -779,6 +795,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        cancelTargetMarkerAutoNavigation()
         signalState = .recoveryPending
         signalLossSecondAccumulator = 0.0
 
@@ -827,6 +844,7 @@ final class DroneSimulationViewModel: ObservableObject {
         keyboardInputService.resetTransientState()
         sceneController.resetCameraRuntimeState()
         refreshTerrainMapSnapshot(recordTrail: false)
+        refreshCompassOverlay()
         warnings = buildWarnings()
         telemetry = buildTelemetrySnapshot()
         hasUnsavedChanges = true
@@ -837,6 +855,7 @@ final class DroneSimulationViewModel: ObservableObject {
         guard isArmed else {
             return
         }
+        cancelTargetMarkerAutoNavigation()
         let baseline = resolvedFlightBaseline(for: .takeoff)
         mode = .takeoff
         if state.position.y <= 0.10 {
@@ -860,6 +879,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func land() {
         ensureSimulationRunning()
+        cancelTargetMarkerAutoNavigation()
         let baseline = resolvedFlightBaseline(for: .landing)
         mode = .landing
         if state.position.y > 0.05 {
@@ -883,6 +903,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func hover() {
         ensureSimulationRunning()
+        cancelTargetMarkerAutoNavigation()
         let baseline = resolvedFlightBaseline(for: .hover)
         guard baseline.hoverCapable else {
             mode = .manual
@@ -899,6 +920,18 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func activateAutoPath() {
         ensureSimulationRunning()
+        if targetMarkerState != nil {
+            guard canStartTargetMarkerAutoNavigation else {
+                return
+            }
+            autoPathPlanner.invalidate()
+            autoFlightGoal = nil
+            autoNavigationController.start()
+            mode = .autoPath
+            navigationSnapshot = .idle
+            refreshTerrainMapSnapshot(recordTrail: false)
+            return
+        }
         mode = .autoPath
         returnHomeStage = .idle
         autoPathPlanner.invalidate()
@@ -908,6 +941,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func activateReturnHome() {
         ensureSimulationRunning()
+        cancelTargetMarkerAutoNavigation()
         mode = .returnHome
         returnHomeStage = .ascend
         autoFlightGoal = nil
@@ -917,6 +951,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func activateEmergencyStop() {
         ensureSimulationRunning()
+        cancelTargetMarkerAutoNavigation()
         disarm(forceEmergency: true)
         lockControlsToCurrentState(overrideThrottle: 0.0)
     }
@@ -976,6 +1011,44 @@ final class DroneSimulationViewModel: ObservableObject {
     func toggleTerrainMap() {
         refreshTerrainMapSnapshot(recordTrail: false)
         isTerrainMapVisible.toggle()
+    }
+
+    func toggleCompassOverlay() {
+        refreshCompassOverlay()
+        isCompassVisible.toggle()
+    }
+
+    func setTargetMarker(at planarPosition: SIMD2<Float>) {
+        let clampedPosition = SIMD2<Float>(
+            planarPosition.x.clamped(to: -playableBoundaryHalfExtent...playableBoundaryHalfExtent),
+            planarPosition.y.clamped(to: -playableBoundaryHalfExtent...playableBoundaryHalfExtent)
+        )
+        let marker = TargetMarkerState(position: clampedPosition)
+        targetMarkerState = marker
+        autoNavigationController.replaceTarget(marker)
+        autoPathPlanner.invalidate()
+        autoFlightGoal = nil
+        navigationSnapshot = .idle
+
+        if canStartTargetMarkerAutoNavigation {
+            autoNavigationController.start()
+            mode = .autoPath
+        }
+
+        refreshTerrainMapSnapshot(recordTrail: false)
+        refreshCompassOverlay()
+    }
+
+    func clearTargetMarker() {
+        targetMarkerState = nil
+        autoNavigationController.clearTarget()
+        autoPathPlanner.invalidate()
+        if mode == .autoPath {
+            mode = .manual
+        }
+        navigationSnapshot = .idle
+        refreshTerrainMapSnapshot(recordTrail: false)
+        refreshCompassOverlay()
     }
 
     func toggleToolPanel() {
@@ -1439,6 +1512,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func regenerateEnvironment() {
         cancelPendingTerrainDensityRegeneration()
+        clearTargetMarker()
         autoPathPlanner.invalidate()
         navigationSnapshot = .idle
         autoFlightGoal = nil
@@ -1504,6 +1578,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let now = CACurrentMediaTime()
         guard let lastTimestamp else {
             self.lastTimestamp = now
+            refreshCompassOverlay()
             return
         }
 
@@ -1524,12 +1599,14 @@ final class DroneSimulationViewModel: ObservableObject {
                 diagnosticMode: diagnosticMode,
                 deltaTime: 0.0
             )
+            refreshCompassOverlay()
             syncPayloadLifecycleEvents()
             return
         }
 
         if signalState.isInteractionBlocking {
             renderSignalLossFrame()
+            refreshCompassOverlay()
             syncPayloadLifecycleEvents()
             return
         }
@@ -1592,6 +1669,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if signalState.isInteractionBlocking {
             renderSignalLossFrame()
+            refreshCompassOverlay()
             syncPayloadLifecycleEvents()
             return
         }
@@ -1647,6 +1725,7 @@ final class DroneSimulationViewModel: ObservableObject {
             throttle: state.throttle,
             deltaTime: dt
         )
+        refreshCompassOverlay()
         syncPayloadLifecycleEvents()
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 
@@ -1813,28 +1892,46 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func applyKeyboardControls(deltaTime: Float) {
-        let axis = keyboardInputService.currentAxisInput()
+        let manualAxis = keyboardInputService.currentAxisInput()
         let yawInput = keyboardInputService.currentYawInput()
-        let hasAnyInput =
-            abs(axis.forward) > 0.001 ||
-            abs(axis.strafe) > 0.001 ||
-            abs(axis.vertical) > 0.001 ||
-            abs(yawInput.intent) > 0.001
+        let hasManualAxisInput =
+            abs(manualAxis.forward) > 0.001 ||
+            abs(manualAxis.strafe) > 0.001 ||
+            abs(manualAxis.vertical) > 0.001
+        let hasManualYawInput = abs(yawInput.intent) > 0.001
+        let hasManualInput = hasManualAxisInput || hasManualYawInput
 
         manualYawIntent = yawInput.intent * (yawInput.speedBoost ? 1.35 : 1.0)
 
         let maxAltitude = Double(terrain.maxFlightAltitude)
+        var effectiveAxis = manualAxis
+
+        if hasManualInput {
+            if mode == .autoPath, targetMarkerState != nil {
+                cancelTargetMarkerAutoNavigation()
+                mode = .manual
+            }
+        } else if mode == .autoPath,
+                  targetMarkerState != nil,
+                  let directive = updateTargetMarkerAutoNavigation(deltaTime: deltaTime) {
+            effectiveAxis = keyboardAxisInput(from: directive)
+        }
+
+        let hasEffectiveInput =
+            abs(effectiveAxis.forward) > 0.001 ||
+            abs(effectiveAxis.strafe) > 0.001 ||
+            abs(effectiveAxis.vertical) > 0.001 ||
+            hasManualYawInput
 
         if selectedDroneProfile.airframeClass == .fixedWing {
-            guard hasAnyInput else {
+            guard hasEffectiveInput else {
                 return
             }
-            mode = .manual
             updateControlValues({ values in
-                let throttleDelta = Double(axis.vertical) * (axis.speedBoost ? 0.55 : 0.32) * Double(deltaTime)
+                let throttleDelta = Double(effectiveAxis.vertical) * (effectiveAxis.speedBoost ? 0.55 : 0.32) * Double(deltaTime)
                 values.throttle = (values.throttle + throttleDelta).clamped(to: 0.0...1.0)
-                values.roll = Double((-axis.strafe * (flightControlMode == .acro ? 62.0 : 32.0)).clamped(to: -85.0...85.0))
-                values.pitch = Double((-axis.forward * (flightControlMode == .acro ? 54.0 : 24.0)).clamped(to: -85.0...85.0))
+                values.roll = Double((-effectiveAxis.strafe * (flightControlMode == .acro ? 62.0 : 32.0)).clamped(to: -85.0...85.0))
+                values.pitch = Double((-effectiveAxis.forward * (flightControlMode == .acro ? 54.0 : 24.0)).clamped(to: -85.0...85.0))
                 values.yaw = Double(state.orientation.z.radiansToDegrees)
                 values.y = state.position.y > 0.05
                     ? Double(state.position.y).clamped(to: 0.0...maxAltitude)
@@ -1843,29 +1940,25 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        if hasAnyInput {
-            mode = .manual
-        }
-
-        let climb = axis.vertical * (axis.speedBoost ? 5.4 : 3.0) * deltaTime
+        let climb = effectiveAxis.vertical * (effectiveAxis.speedBoost ? 5.4 : 3.0) * deltaTime
         let pitchScale: Float = flightControlMode == .acro ? 52.0 : 28.0
         let rollScale: Float = flightControlMode == .acro ? 52.0 : 26.0
 
         updateControlValues({ values in
             values.y = (values.y + Double(climb)).clamped(to: 0.0...maxAltitude)
 
-            let verticalThrottleDelta = Double(axis.vertical) * (axis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
+            let verticalThrottleDelta = Double(effectiveAxis.vertical) * (effectiveAxis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
             values.throttle = (values.throttle + verticalThrottleDelta).clamped(to: 0.0...1.0)
             values.yaw = Double(state.orientation.z.radiansToDegrees)
 
             switch flightControlMode {
             case .stabilized, .hoverAssist:
                 // W must command forward acceleration for multirotors (nose down => negative pitch in this frame convention).
-                values.pitch = Double((-axis.forward * pitchScale).clamped(to: -36.0...36.0))
-                values.roll = Double((-axis.strafe * rollScale).clamped(to: -36.0...36.0))
+                values.pitch = Double((-effectiveAxis.forward * pitchScale).clamped(to: -36.0...36.0))
+                values.roll = Double((-effectiveAxis.strafe * rollScale).clamped(to: -36.0...36.0))
             case .acro:
-                values.pitch = Double((-axis.forward * pitchScale).clamped(to: -82.0...82.0))
-                values.roll = Double((-axis.strafe * rollScale).clamped(to: -82.0...82.0))
+                values.pitch = Double((-effectiveAxis.forward * pitchScale).clamped(to: -82.0...82.0))
+                values.roll = Double((-effectiveAxis.strafe * rollScale).clamped(to: -82.0...82.0))
             }
         }, markManual: false)
     }
@@ -1902,6 +1995,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 setCameraMode(cameraConfiguration.mode == .fpv ? .follow : .fpv)
             case .toggleTerrainMap:
                 toggleTerrainMap()
+            case .toggleCompassOverlay:
+                toggleCompassOverlay()
             case .toggleThermalOverlay:
                 toggleThermalOverlay()
             case .toggleDamageOverlay:
@@ -2011,7 +2106,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private func updateAutopilotTargets(deltaTime: Float) {
         switch mode {
         case .autoPath:
-            updateAutoFlightPath(deltaTime: deltaTime)
+            if targetMarkerState == nil {
+                updateAutoFlightPath(deltaTime: deltaTime)
+            }
 
         case .returnHome:
             updateReturnHomePath(deltaTime: deltaTime)
@@ -2039,6 +2136,94 @@ final class DroneSimulationViewModel: ObservableObject {
         case .manual, .takeoff, .landing:
             navigationSnapshot = .idle
         }
+    }
+
+    private func updateTargetMarkerAutoNavigation(deltaTime: Float) -> AutoNavigationDirective? {
+        guard targetMarkerState != nil else {
+            navigationSnapshot = .idle
+            return nil
+        }
+
+        guard canStartTargetMarkerAutoNavigation else {
+            cancelTargetMarkerAutoNavigation()
+            navigationSnapshot = .idle
+            if mode == .autoPath {
+                mode = .manual
+            }
+            return nil
+        }
+
+        if !autoNavigationController.isActive {
+            autoNavigationController.start()
+        }
+
+        let travelAltitude = targetMarkerTravelAltitude()
+        let input = AutoNavigationUpdateInput(
+            position: state.position,
+            velocity: state.velocity,
+            currentYawRadians: state.orientation.z,
+            physicalState: physicalState,
+            airframeClass: selectedDroneProfile.airframeClass,
+            deltaTime: deltaTime,
+            safeTravelAltitude: travelAltitude
+        )
+
+        guard let directive = autoNavigationController.update(with: input) else {
+            navigationSnapshot = .idle
+            switch autoNavigationController.consumeCompletionReason() {
+            case .reachedTarget:
+                finishTargetMarkerAutoNavigation()
+            case .cancelled, .none:
+                if mode == .autoPath {
+                    mode = .manual
+                }
+            }
+            return nil
+        }
+
+        navigationSnapshot = NavigationPathSnapshot(
+            status: .valid,
+            currentWaypointIndex: 0,
+            remainingWaypoints: 1,
+            pathLengthMeters: directive.distanceToTarget,
+            remainingDistanceMeters: directive.distanceToTarget,
+            waypoints: [directive.targetWorldPosition],
+            start: state.position,
+            goal: directive.targetWorldPosition,
+            reason: "target_marker"
+        )
+        return directive
+    }
+
+    private func keyboardAxisInput(from directive: AutoNavigationDirective) -> KeyboardAxisInput {
+        let axisIntent = directive.axisIntent
+        let speedBoost = autoNavigationController.phase == .takeoff || abs(axisIntent.vertical) > 0.72
+        return KeyboardAxisInput(
+            forward: axisIntent.forward.clamped(to: -1.0...1.0),
+            strafe: axisIntent.strafe.clamped(to: -1.0...1.0),
+            vertical: axisIntent.vertical.clamped(to: -1.0...1.0),
+            speedBoost: speedBoost
+        )
+    }
+
+    private func finishTargetMarkerAutoNavigation() {
+        navigationSnapshot = .idle
+        if selectedDroneProfile.airframeClass == .multirotor {
+            hover()
+            return
+        }
+
+        mode = .manual
+        let cruiseThrottle = Double(resolvedFlightBaseline(for: .autoPath).cruiseReferenceThrottle)
+        updateControlValues({ values in
+            values.x = Double(state.position.x)
+            values.z = Double(state.position.z)
+            values.y = Double(state.position.y)
+            values.roll = 0.0
+            values.pitch = 0.0
+            values.yaw = Double(state.orientation.z.radiansToDegrees)
+            values.throttle = max(cruiseThrottle, values.throttle * 0.96)
+        }, markManual: false)
     }
 
     private func updateAutoFlightPath(deltaTime: Float) {
@@ -2252,11 +2437,12 @@ final class DroneSimulationViewModel: ObservableObject {
         targetAltitude: Float,
         speedScale: Float,
         yawAlignToHome: Bool,
-        deltaTime: Float
+        deltaTime: Float,
+        yawOverrideRadians: Float? = nil
     ) {
         let headingVector = SIMD2<Float>(target.x - state.position.x, target.z - state.position.z)
         let planarDistance = max(0.001, simd_length(headingVector))
-        let yaw = atan2(-headingVector.x, headingVector.y)
+        let yaw = yawOverrideRadians ?? atan2(-headingVector.x, headingVector.y)
         let pitchToTarget = atan2(target.y - state.position.y, planarDistance)
 
         let speedBoost: Float = (simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)) < 1.0 && speedScale > 0.6) ? 1.2 : 1.0
@@ -2433,6 +2619,56 @@ final class DroneSimulationViewModel: ObservableObject {
             manualYawIntent: manualYawIntent
         )
         return builder.build()
+    }
+
+    private var canStartTargetMarkerAutoNavigation: Bool {
+        guard targetMarkerState != nil else {
+            return false
+        }
+        guard isArmed, !signalState.isInteractionBlocking else {
+            return false
+        }
+        guard physicalState != .disarmed, physicalState != .crashed else {
+            return false
+        }
+        return mode != .emergencyStop
+    }
+
+    private func cancelTargetMarkerAutoNavigation() {
+        autoNavigationController.cancel()
+        navigationSnapshot = .idle
+    }
+
+    private func targetMarkerTravelAltitude() -> Float {
+        let maxAltitude = max(6.0, terrain.maxFlightAltitude - 2.0)
+        switch selectedDroneProfile.airframeClass {
+        case .multirotor:
+            return min(
+                maxAltitude,
+                max(3.4, homePosition.y + 4.0, state.position.y + (physicalState.isGroundRestState ? 3.0 : 0.8))
+            )
+        case .fixedWing:
+            return min(
+                maxAltitude,
+                max(10.0, homePosition.y + 8.0, state.position.y + 3.4)
+            )
+        }
+    }
+
+    private func currentAutoNavigationStatus() -> AutoNavigationStatus {
+        let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
+        return autoNavigationController.status(
+            from: SIMD2<Float>(safePosition.x, safePosition.z)
+        )
+    }
+
+    private func refreshCompassOverlay() {
+        let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
+        compassViewModel.update(
+            headingRadians: finiteVector(state.orientation, fallback: lastFiniteState.orientation).z,
+            dronePlanarPosition: SIMD2<Float>(safePosition.x, safePosition.z),
+            targetMarker: targetMarkerState
+        )
     }
 
     private func buildWarnings() -> [String] {
@@ -2756,6 +2992,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         homePosition = state.position
         wingmen.removeAll()
+        targetMarkerState = nil
+        autoNavigationController.clearTarget()
         regenerateEnvironment()
 
         sceneController.applyWeatherVisual(weather)
@@ -2767,6 +3005,7 @@ final class DroneSimulationViewModel: ObservableObject {
             diagnosticMode: diagnosticMode,
             deltaTime: 0.0
         )
+        refreshCompassOverlay()
         emitLaunchDiagnostics(context: "load_project")
     }
 
@@ -2865,6 +3104,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let speed = simd_length(safeVelocity)
         let iso = Self.isoFormatter.string(from: Date())
         let flight = flightState(speed: speed)
+        let autoNavigationStatus = currentAutoNavigationStatus()
         let collisionRisk = collisionAnalysis.riskScore.isFinite ? collisionAnalysis.riskScore : 0.0
         let nearestObstacleDistance = collisionAnalysis.nearestObstacleDistance.isFinite
             ? collisionAnalysis.nearestObstacleDistance
@@ -2910,6 +3150,9 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionRisk: Double(collisionRisk),
             nearestObstacleDistance: Double(nearestObstacleDistance),
             nearestObstacleSource: collisionAnalysis.nearestObstacleSource ?? "n/a",
+            autoNavigationActive: autoNavigationStatus.isActive,
+            targetDistanceMeters: autoNavigationStatus.distanceToTarget.isFinite ? Double(autoNavigationStatus.distanceToTarget) : .nan,
+            targetBearingDegrees: autoNavigationStatus.bearingDegrees.isFinite ? Double(autoNavigationStatus.bearingDegrees) : .nan,
             pathStatus: navigationSnapshot.status.rawValue,
             currentWaypointIndex: navigationSnapshot.currentWaypointIndex,
             remainingWaypoints: navigationSnapshot.remainingWaypoints,
@@ -2974,6 +3217,7 @@ final class DroneSimulationViewModel: ObservableObject {
             dronePosition: dronePlanarPosition,
             droneYawRadians: safeOrientation.z,
             droneAltitude: max(0.0, safePosition.y),
+            targetMarkerPosition: targetMarkerState?.position,
             trail: terrainMapTrail,
             objects: mapObjects
         )
@@ -3106,6 +3350,7 @@ final class DroneSimulationViewModel: ObservableObject {
         controlValues = next
         hasUnsavedChanges = true
         if markManual {
+            cancelTargetMarkerAutoNavigation()
             mode = .manual
         }
     }
@@ -3179,6 +3424,7 @@ final class DroneSimulationViewModel: ObservableObject {
         signalState = .signalLost
         signalCountdownSecondsRemaining = 0
         signalLossSecondAccumulator = 0.0
+        cancelTargetMarkerAutoNavigation()
         manualYawIntent = 0.0
         cameraLookVelocity = .zero
         keyboardInputService.setInputProcessingMode(.editing)

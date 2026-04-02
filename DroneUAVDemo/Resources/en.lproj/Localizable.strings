@@ -11,7 +11,7 @@
 "language.russian" = "Russian";
 
 "panel.title" = "UAV Digital Twin Simulator";
-"panel.keyboard_hint" = "WASD/QE fly, Shift boost, 1..5 cameras, arrows FPV look, +/- zoom";
+"panel.keyboard_hint" = "WASD/QE fly, Shift boost, 1..5 cameras, M map, / compass, arrows FPV look, +/- zoom";
 "panel.workflow_hint" = "Main controls are in the top toolstrip. Use toolbar buttons to show or hide parameters.";
 "panel.toggle_collapse" = "Collapse/Expand Control Panel";
 "panel.collapse" = "Collapse Panel";
@@ -638,6 +638,11 @@
 "telemetry.path_status.valid" = "Valid";
 "telemetry.path_status.recomputing" = "Recomputing";
 "telemetry.path_status.blocked" = "Blocked";
+"telemetry.auto_nav" = "Auto nav";
+"telemetry.auto_nav.active" = "ACTIVE";
+"telemetry.auto_nav.inactive" = "INACTIVE";
+"telemetry.target_distance" = "Dist to target";
+"telemetry.target_bearing" = "Bearing to target";
 "telemetry.waypoint" = "Waypoint";
 "telemetry.waypoint.value" = "idx %d, left %d";
 "telemetry.path_remaining" = "Path remaining";
