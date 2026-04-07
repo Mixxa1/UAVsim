@@ -116,18 +116,15 @@ struct ScenarioModuleView: View {
                 subtitleKey: "module.scenario.terrain.subtitle"
             ) {
                 VStack(alignment: .leading, spacing: 10) {
-                    LazyVGrid(columns: tileColumns, spacing: 8) {
+                    Picker("panel.terrain", selection: Binding(
+                        get: { viewModel.terrain.preset },
+                        set: { viewModel.setTerrainPreset($0) }
+                    )) {
                         ForEach(TerrainPreset.allCases) { preset in
-                            ModuleModeTile(
-                                titleKey: preset.titleKey,
-                                subtitle: preset == viewModel.terrain.preset ? localized("module.scenario.active_profile") : nil,
-                                iconSystemName: terrainIcon(for: preset),
-                                isActive: viewModel.terrain.preset == preset
-                            ) {
-                                viewModel.setTerrainPreset(preset)
-                            }
+                            Text(LocalizedStringKey(preset.titleKey)).tag(preset)
                         }
                     }
+                    .pickerStyle(.menu)
 
                     Picker("terrain.scale", selection: Binding(
                         get: { viewModel.terrain.mapScale },
@@ -137,7 +134,7 @@ struct ScenarioModuleView: View {
                             Text(LocalizedStringKey(scale.titleKey)).tag(scale)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
 
                     ModuleSliderRow(
                         titleKey: "terrain.density",
@@ -190,6 +187,8 @@ struct ScenarioModuleView: View {
             return "leaf"
         case .forest:
             return "tree"
+        case .cargoYard:
+            return "shippingbox"
         case .city:
             return "building.2"
         }

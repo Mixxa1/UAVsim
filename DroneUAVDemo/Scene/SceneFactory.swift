@@ -44,7 +44,7 @@ enum SceneFactory {
         let camera = SCNCamera()
         camera.fieldOfView = 52
         camera.zNear = 0.01
-        camera.zFar = 800
+        camera.zFar = 2200
         node.camera = camera
         node.position = SCNVector3(0, 12.0, 24.0)
         node.eulerAngles = SCNVector3(-0.38, 0, 0)
@@ -55,8 +55,8 @@ enum SceneFactory {
         let node = SCNNode()
         let light = SCNLight()
         light.type = .ambient
-        light.intensity = 380
-        light.color = NSColor(calibratedWhite: 0.82, alpha: 1.0)
+        light.intensity = 300
+        light.color = NSColor(calibratedRed: 0.79, green: 0.82, blue: 0.88, alpha: 1.0)
         node.light = light
         return node
     }
@@ -65,13 +65,14 @@ enum SceneFactory {
         let node = SCNNode()
         let light = SCNLight()
         light.type = .directional
-        light.intensity = 1300
+        light.intensity = 1680
+        light.color = NSColor(calibratedRed: 1.0, green: 0.97, blue: 0.92, alpha: 1.0)
         light.castsShadow = true
         light.shadowMode = .deferred
-        light.shadowRadius = 1.4
-        light.shadowSampleCount = 8
-        light.shadowMapSize = CGSize(width: 1024, height: 1024)
-        light.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        light.shadowRadius = 1.0
+        light.shadowSampleCount = 12
+        light.shadowMapSize = CGSize(width: 1536, height: 1536)
+        light.shadowColor = NSColor.black.withAlphaComponent(0.26)
         node.light = light
         node.position = SCNVector3(18, 35, 14)
         node.eulerAngles = SCNVector3(-0.92, 0.85, 0)
@@ -82,7 +83,7 @@ enum SceneFactory {
         let node = SCNNode()
         let light = SCNLight()
         light.type = .omni
-        light.intensity = 260
+        light.intensity = 340
         light.color = NSColor(calibratedRed: 0.68, green: 0.77, blue: 1.0, alpha: 1.0)
         node.light = light
         node.position = SCNVector3(-20, 16, -12)

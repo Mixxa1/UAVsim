@@ -41,7 +41,7 @@ struct CameraModuleView: View {
                 subtitleKey: "module.camera.mode_stack.subtitle"
             ) {
                 LazyVGrid(columns: tileColumns, spacing: 8) {
-                    ForEach(CameraMode.allCases) { mode in
+                    ForEach(viewModel.availableCameraModes) { mode in
                         ModuleModeTile(
                             titleKey: mode.titleKey,
                             subtitle: nil,
@@ -52,6 +52,13 @@ struct CameraModuleView: View {
                         }
                     }
                 }
+
+                Toggle("camera.payload.auto_switch", isOn: Binding(
+                    get: { viewModel.isPayloadCameraAutoSwitchEnabled },
+                    set: { viewModel.setPayloadCameraAutoSwitchEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+                .foregroundStyle(GroundControlPalette.textPrimary)
             }
 
             ModuleSection(
@@ -340,6 +347,8 @@ struct CameraModuleView: View {
             return "record.circle"
         case .top:
             return "view.2d"
+        case .payload:
+            return "shippingbox"
         }
     }
 

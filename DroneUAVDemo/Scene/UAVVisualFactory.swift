@@ -1287,40 +1287,73 @@ enum UAVVisualFactory {
         append(wing, to: .armFL, componentNodes: &componentNodes)
         append(wing, to: .armFR, componentNodes: &componentNodes)
 
-        let rearSpine = horizontalCapsule(length: 0.38, radius: 0.032, material: accentMaterial)
-        rearSpine.position = SCNVector3(0.0, 0.04, -0.64)
-        root.addChildNode(rearSpine)
-        append(rearSpine, to: .battery, componentNodes: &componentNodes)
+        let enginePylon = beamNode(
+            start: SIMD3<Float>(0.0, 0.04, -0.22),
+            end: SIMD3<Float>(0.0, 0.09, -0.78),
+            radius: 0.026,
+            material: accentMaterial
+        )
+        root.addChildNode(enginePylon)
+        append(enginePylon, to: .battery, componentNodes: &componentNodes)
 
-        let leftTail = SCNNode()
-        leftTail.position = SCNVector3(-0.16, 0.12, -0.78)
-        leftTail.eulerAngles = SCNVector3(-Float.pi / 6.0, 0.0, -Float.pi / 6.5)
-        leftTail.addChildNode(verticalSurfaceNode(
+        let leftBoom = beamNode(
+            start: SIMD3<Float>(-0.34, 0.03, -0.18),
+            end: SIMD3<Float>(-0.26, 0.13, -0.82),
+            radius: 0.018,
+            material: accentMaterial
+        )
+        root.addChildNode(leftBoom)
+        append(leftBoom, to: .armRL, componentNodes: &componentNodes)
+
+        let rightBoom = beamNode(
+            start: SIMD3<Float>(0.34, 0.03, -0.18),
+            end: SIMD3<Float>(0.26, 0.13, -0.82),
+            radius: 0.018,
+            material: accentMaterial
+        )
+        root.addChildNode(rightBoom)
+        append(rightBoom, to: .armRR, componentNodes: &componentNodes)
+
+        let tailPlane = planformNode(
+            points: [
+                CGPoint(x: -0.42, y: 0.03),
+                CGPoint(x: 0.42, y: 0.03),
+                CGPoint(x: 0.32, y: -0.08),
+                CGPoint(x: -0.32, y: -0.08)
+            ],
+            thickness: 0.014,
+            material: wingMaterial
+        )
+        tailPlane.position = SCNVector3(0.0, 0.14, -0.86)
+        root.addChildNode(tailPlane)
+        append(tailPlane, to: .armRL, componentNodes: &componentNodes)
+        append(tailPlane, to: .armRR, componentNodes: &componentNodes)
+
+        let leftFin = verticalSurfaceNode(
             points: [
                 CGPoint(x: 0.0, y: 0.0),
-                CGPoint(x: 0.28, y: 0.0),
-                CGPoint(x: 0.10, y: 0.26)
+                CGPoint(x: 0.20, y: 0.0),
+                CGPoint(x: 0.07, y: 0.26)
+            ],
+            thickness: 0.012,
+            material: wingMaterial
+        )
+        leftFin.position = SCNVector3(-0.28, 0.14, -0.90)
+        root.addChildNode(leftFin)
+
+        let rightFin = SCNNode()
+        rightFin.position = SCNVector3(0.28, 0.14, -0.90)
+        rightFin.eulerAngles = SCNVector3(0.0, Float.pi, 0.0)
+        rightFin.addChildNode(verticalSurfaceNode(
+            points: [
+                CGPoint(x: 0.0, y: 0.0),
+                CGPoint(x: 0.20, y: 0.0),
+                CGPoint(x: 0.07, y: 0.26)
             ],
             thickness: 0.012,
             material: wingMaterial
         ))
-        root.addChildNode(leftTail)
-        append(leftTail, to: .armRL, componentNodes: &componentNodes)
-
-        let rightTail = SCNNode()
-        rightTail.position = SCNVector3(0.16, 0.12, -0.78)
-        rightTail.eulerAngles = SCNVector3(Float.pi / 6.0, Float.pi, -Float.pi / 6.5)
-        rightTail.addChildNode(verticalSurfaceNode(
-            points: [
-                CGPoint(x: 0.0, y: 0.0),
-                CGPoint(x: 0.28, y: 0.0),
-                CGPoint(x: 0.10, y: 0.26)
-            ],
-            thickness: 0.012,
-            material: wingMaterial
-        ))
-        root.addChildNode(rightTail)
-        append(rightTail, to: .armRR, componentNodes: &componentNodes)
+        root.addChildNode(rightFin)
 
         let sensorBall = sphereNode(radius: 0.055, material: accentMaterial)
         sensorBall.scale = SCNVector3(1.0, 0.92, 1.0)
@@ -1329,12 +1362,12 @@ enum UAVVisualFactory {
         append(sensorBall, to: .escPower, componentNodes: &componentNodes)
 
         let rearMotor = forwardMotorNode(radius: 0.030, length: 0.080, material: accentMaterial)
-        rearMotor.position = SCNVector3(0.0, 0.04, -0.80)
+        rearMotor.position = SCNVector3(0.0, 0.09, -0.82)
         root.addChildNode(rearMotor)
         append(rearMotor, to: .motorRR, componentNodes: &componentNodes)
 
         let rearProp = forwardPropellerNode(material: rotorMaterial, radius: 0.18)
-        rearProp.position = SCNVector3(0.0, 0.04, -0.86)
+        rearProp.position = SCNVector3(0.0, 0.09, -0.90)
         rearProp.name = "propeller.mq9b.rear"
         root.addChildNode(rearProp)
         append(rearProp, to: .propellerRR, componentNodes: &componentNodes)

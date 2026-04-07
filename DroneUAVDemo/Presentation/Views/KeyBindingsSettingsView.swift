@@ -146,17 +146,17 @@ struct KeyBindingsSettingsView: View {
         case 78:
             return "Num-"
         case 123:
-            return "Left"
+            return "←"
         case 124:
-            return "Right"
+            return "→"
         case 125:
-            return "Down"
+            return "↓"
         case 126:
-            return "Up"
+            return "↑"
         case 48:
             return "Tab"
         case 49:
-            return "Space"
+            return String(localized: "keybind.key.space")
         case 53:
             return "Esc"
         case 56, 60:
@@ -165,7 +165,10 @@ struct KeyBindingsSettingsView: View {
             if let chars = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines), !chars.isEmpty {
                 return chars.uppercased()
             }
-            return "Key \(event.keyCode)"
+            return String(
+                format: NSLocalizedString("keybind.key.code", comment: ""),
+                event.keyCode
+            )
         }
     }
 }

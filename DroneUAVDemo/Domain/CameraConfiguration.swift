@@ -7,22 +7,12 @@ enum CameraMode: String, CaseIterable, Identifiable {
     case orbit
     case fpv
     case top
+    case payload
 
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .free:
-            return "Free"
-        case .follow:
-            return "Chase"
-        case .orbit:
-            return "Orbit"
-        case .fpv:
-            return "FPV"
-        case .top:
-            return "Top"
-        }
+        NSLocalizedString(titleKey, comment: "")
     }
 
     var titleKey: String {
@@ -37,6 +27,8 @@ enum CameraMode: String, CaseIterable, Identifiable {
             return "camera.mode.fpv"
         case .top:
             return "camera.mode.top"
+        case .payload:
+            return "camera.mode.payload"
         }
     }
 
@@ -51,6 +43,8 @@ enum CameraMode: String, CaseIterable, Identifiable {
         case .fpv:
             return .top
         case .top:
+            return .free
+        case .payload:
             return .free
         }
     }
@@ -67,6 +61,8 @@ enum CameraMode: String, CaseIterable, Identifiable {
             return .fpv
         case CameraMode.top.rawValue, "topDown":
             return .top
+        case CameraMode.payload.rawValue, "payloadDrop":
+            return .payload
         default:
             return nil
         }
@@ -225,6 +221,8 @@ struct CameraConfiguration {
             return 0.0
         case .top:
             return top.height
+        case .payload:
+            return 0.0
         }
     }
 
@@ -244,6 +242,8 @@ struct CameraConfiguration {
             break
         case .top:
             top.height = value.clamped(to: top.minHeight...top.maxHeight)
+        case .payload:
+            break
         }
     }
 

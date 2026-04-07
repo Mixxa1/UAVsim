@@ -25,6 +25,25 @@ struct KeyboardLookInput {
     static let zero = KeyboardLookInput(yaw: 0.0, pitch: 0.0, speedBoost: false)
 }
 
+struct KeyboardInputSnapshot {
+    let axisInput: KeyboardAxisInput
+    let yawInput: KeyboardYawInput
+    let lookInput: KeyboardLookInput
+    let activeContinuousCommands: Set<KeyboardCommand>
+    let processingMode: InputProcessingMode
+
+    var manualFlightInputActive: Bool {
+        guard processingMode == .flight else {
+            return false
+        }
+        return
+            abs(axisInput.forward) > 0.001 ||
+            abs(axisInput.strafe) > 0.001 ||
+            abs(axisInput.vertical) > 0.001 ||
+            abs(yawInput.intent) > 0.001
+    }
+}
+
 enum KeyBindingCategory: String, CaseIterable, Identifiable {
     case flight
     case camera
@@ -47,7 +66,7 @@ enum KeyBindingCategory: String, CaseIterable, Identifiable {
     }
 }
 
-enum InputProcessingMode {
+enum InputProcessingMode: Equatable {
     case flight
     case editing
     case bindingCapture
@@ -73,6 +92,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case cameraModeOrbit
     case cameraModeFPV
     case cameraModeTop
+    case cameraModePayload
     case toggleFPV
     case cycleCameraMode
     case zoomIn
@@ -94,7 +114,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         switch self {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone, .releasePayload:
             return .flight
-        case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
+        case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .resetCameraOrientation:
             return .camera
         case .toggleControlPanel, .toggleTelemetryHUD:
@@ -109,7 +129,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
              .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown:
             return true
-        case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop,
+        case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .resetCameraOrientation,
              .toggleControlPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
             return false
@@ -152,6 +172,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.camera.mode4"
         case .cameraModeTop:
             return "keybind.camera.mode5"
+        case .cameraModePayload:
+            return "keybind.camera.mode6"
         case .toggleFPV:
             return "keybind.camera.toggle_fpv"
         case .cycleCameraMode:
@@ -209,7 +231,7 @@ struct KeyBindingProfile {
             .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
             .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
             .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
-            .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
+            .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
             .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
             .cameraModeFree: KeyBindingDescriptor(command: .cameraModeFree, keyCode: 18, keyLabel: "1"),
@@ -217,14 +239,15 @@ struct KeyBindingProfile {
             .cameraModeOrbit: KeyBindingDescriptor(command: .cameraModeOrbit, keyCode: 20, keyLabel: "3"),
             .cameraModeFPV: KeyBindingDescriptor(command: .cameraModeFPV, keyCode: 21, keyLabel: "4"),
             .cameraModeTop: KeyBindingDescriptor(command: .cameraModeTop, keyCode: 23, keyLabel: "5"),
+            .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 22, keyLabel: "6"),
             .toggleFPV: KeyBindingDescriptor(command: .toggleFPV, keyCode: 3, keyLabel: "F"),
             .cycleCameraMode: KeyBindingDescriptor(command: .cycleCameraMode, keyCode: 8, keyLabel: "C"),
             .zoomIn: KeyBindingDescriptor(command: .zoomIn, keyCode: 24, keyLabel: "+"),
             .zoomOut: KeyBindingDescriptor(command: .zoomOut, keyCode: 27, keyLabel: "-"),
-            .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "Left"),
-            .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "Right"),
-            .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "Up"),
-            .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "Down"),
+            .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "←"),
+            .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "→"),
+            .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "↑"),
+            .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "↓"),
             .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V"),
             .toggleControlPanel: KeyBindingDescriptor(command: .toggleControlPanel, keyCode: UInt16.max, keyLabel: "—"),
             .toggleTelemetryHUD: KeyBindingDescriptor(command: .toggleTelemetryHUD, keyCode: 17, keyLabel: "T"),
@@ -271,9 +294,11 @@ struct KeyBindingProfile {
         let grouped = Dictionary(grouping: bindings.values, by: \.keyCode)
         var conflicts: [String] = []
         for entry in grouped where entry.value.count > 1 {
-            let commandKeys = entry.value.map { $0.command.titleKey }.sorted()
+            let commandTitles = entry.value
+                .map { NSLocalizedString($0.command.titleKey, comment: "") }
+                .sorted()
             let keyName = entry.value.first?.keyLabel ?? String(entry.key)
-            conflicts.append("\(keyName): \(commandKeys.joined(separator: ", "))")
+            conflicts.append("\(keyName): \(commandTitles.joined(separator: ", "))")
         }
         return conflicts.sorted()
     }
@@ -290,6 +315,7 @@ enum KeyboardAction: Equatable {
     case selectOrbitCamera
     case selectFPVCamera
     case selectTopCamera
+    case selectPayloadCamera
     case toggleFPV
     case toggleTerrainMap
     case toggleCompassOverlay
@@ -311,6 +337,7 @@ protocol KeyboardInputProviding {
     func currentAxisInput() -> KeyboardAxisInput
     func currentYawInput() -> KeyboardYawInput
     func currentLookInput() -> KeyboardLookInput
+    func currentInputSnapshot() -> KeyboardInputSnapshot
     func consumeActions() -> [KeyboardAction]
     func setInputProcessingMode(_ mode: InputProcessingMode)
     func currentBindingProfile() -> KeyBindingProfile
@@ -353,13 +380,14 @@ final class KeyboardInputService: KeyboardInputProviding {
         .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
         .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
         .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
-        .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: "Space"),
+        .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
         .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
         .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
-        .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "Left"),
-        .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "Right"),
-        .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "Up"),
-        .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "Down"),
+        .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 22, keyLabel: "6"),
+        .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "←"),
+        .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "→"),
+        .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "↑"),
+        .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "↓"),
         .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V")
     ]
 
@@ -461,6 +489,16 @@ final class KeyboardInputService: KeyboardInputProviding {
         return KeyboardLookInput(yaw: yaw, pitch: pitch, speedBoost: speedBoost)
     }
 
+    func currentInputSnapshot() -> KeyboardInputSnapshot {
+        KeyboardInputSnapshot(
+            axisInput: currentAxisInput(),
+            yawInput: currentYawInput(),
+            lookInput: currentLookInput(),
+            activeContinuousCommands: activeContinuousCommands,
+            processingMode: processingMode
+        )
+    }
+
     func consumeActions() -> [KeyboardAction] {
         defer {
             pendingActions.removeAll(keepingCapacity: true)
@@ -469,6 +507,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     func setInputProcessingMode(_ mode: InputProcessingMode) {
+        guard processingMode != mode else {
+            return
+        }
         processingMode = mode
         clearInputState(keepPendingActions: true)
     }
@@ -624,6 +665,8 @@ final class KeyboardInputService: KeyboardInputProviding {
             enqueueAction(.selectFPVCamera)
         case .cameraModeTop:
             enqueueAction(.selectTopCamera)
+        case .cameraModePayload:
+            enqueueAction(.selectPayloadCamera)
         case .toggleFPV:
             enqueueAction(.toggleFPV)
         case .cycleCameraMode:
@@ -680,7 +723,7 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func matchesCompassOverlayToggle(_ event: NSEvent) -> Bool {
-        if event.keyCode == 44 {
+        if event.keyCode == 44 || event.keyCode == 42 {
             return true
         }
 
@@ -690,7 +733,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             return false
         }
 
-        return characters == "/"
+        return characters == "/" || characters == "\\"
     }
 
     private func matchesArmShortcut(_ event: NSEvent) -> Bool {

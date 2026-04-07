@@ -2,6 +2,23 @@ import AppKit
 import SceneKit
 import SwiftUI
 
+final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate {
+    var cameraMode: CameraMode
+    var onRenderFrame: (TimeInterval, CameraMode) -> Void
+
+    init(
+        cameraMode: CameraMode,
+        onRenderFrame: @escaping (TimeInterval, CameraMode) -> Void
+    ) {
+        self.cameraMode = cameraMode
+        self.onRenderFrame = onRenderFrame
+    }
+
+    func renderer(_ renderer: any SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        onRenderFrame(time, cameraMode)
+    }
+}
+
 private final class FocusableSCNView: SCNView {
     var onLookDelta: ((Float, Float) -> Void)?
 
@@ -82,6 +99,11 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     let cameraSensitivity: Float
     let freeMoveSpeed: Float
     let onLookDelta: (Float, Float) -> Void
+    let onRenderFrame: (TimeInterval, CameraMode) -> Void
+
+    func makeCoordinator() -> SceneRenderCoordinator {
+        SceneRenderCoordinator(cameraMode: cameraMode, onRenderFrame: onRenderFrame)
+    }
 
     func makeNSView(context: Context) -> SCNView {
         let view = FocusableSCNView()
@@ -91,6 +113,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.rendersContinuously = false
         view.backgroundColor = .black
         view.isPlaying = true
+        view.delegate = context.coordinator
         view.onLookDelta = cameraMode == .fpv ? onLookDelta : nil
 
         configureCameraControl(on: view)
@@ -107,6 +130,8 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
             view.scene = scene
         }
 
+        context.coordinator.cameraMode = cameraMode
+        context.coordinator.onRenderFrame = onRenderFrame
         view.pointOfView = pointOfView
         if let view = view as? FocusableSCNView {
             view.onLookDelta = cameraMode == .fpv ? onLookDelta : nil

@@ -169,10 +169,15 @@ struct ControlPanelView: View {
                         get: { viewModel.cameraConfiguration.mode },
                         set: { viewModel.setCameraMode($0) }
                     )) {
-                        ForEach(CameraMode.allCases) { mode in
+                        ForEach(viewModel.availableCameraModes) { mode in
                             Text(LocalizedStringKey(mode.titleKey)).tag(mode)
                         }
                     }
+
+                    Toggle("camera.payload.auto_switch", isOn: Binding(
+                        get: { viewModel.isPayloadCameraAutoSwitchEnabled },
+                        set: { viewModel.setPayloadCameraAutoSwitchEnabled($0) }
+                    ))
 
                     Picker("camera.preset", selection: Binding(
                         get: { viewModel.selectedCameraPreset },
@@ -285,6 +290,7 @@ struct ControlPanelView: View {
                             Text(LocalizedStringKey(preset.titleKey)).tag(preset)
                         }
                     }
+                    .pickerStyle(.menu)
 
                     Picker("terrain.scale", selection: Binding(
                         get: { viewModel.terrain.mapScale },
@@ -294,6 +300,7 @@ struct ControlPanelView: View {
                             Text(LocalizedStringKey(scale.titleKey)).tag(scale)
                         }
                     }
+                    .pickerStyle(.menu)
 
                     SliderControlRow(
                         title: String(localized: "terrain.density"),

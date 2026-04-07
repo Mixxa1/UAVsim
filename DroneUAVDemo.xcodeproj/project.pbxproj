@@ -46,7 +46,6 @@
 		100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000124 /* CompactTelemetryHUDView.swift */; };
 		100000000000000000000225 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000126 /* Localizable.strings */; };
 		100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000129 /* KeyBindingsSettingsView.swift */; };
-		100000000000000000000227 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012A /* Assets */; };
 		100000000000000000000228 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012B /* Assets.xcassets */; };
 		100000000000000000000229 /* UAVVehicleType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012C /* UAVVehicleType.swift */; };
 		10000000000000000000022A /* UAVMassCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012D /* UAVMassCategory.swift */; };
@@ -89,6 +88,13 @@
 		10000000000000000000024F /* AutoNavigationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000152 /* AutoNavigationController.swift */; };
 		100000000000000000000250 /* CompassViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000153 /* CompassViewModel.swift */; };
 		100000000000000000000251 /* CompassOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000154 /* CompassOverlayView.swift */; };
+		100000000000000000000252 /* PayloadCameraController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000155 /* PayloadCameraController.swift */; };
+		100000000000000000000253 /* FlightControlRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000156 /* FlightControlRouting.swift */; };
+		100000000000000000000254 /* PayloadDropCameraController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000157 /* PayloadDropCameraController.swift */; };
+		100000000000000000000255 /* MissionPlanningState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000158 /* MissionPlanningState.swift */; };
+		100000000000000000000256 /* MissionMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000159 /* MissionMapView.swift */; };
+		100000000000000000000257 /* EnvironmentProceduralMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000160 /* EnvironmentProceduralMaterials.swift */; };
+		100000000000000000000258 /* EnvironmentProceduralVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -133,7 +139,6 @@
 		100000000000000000000127 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000128 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000129 /* KeyBindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingsSettingsView.swift; sourceTree = "<group>"; };
-		10000000000000000000012A /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Assets; sourceTree = "<group>"; };
 		10000000000000000000012B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		10000000000000000000012C /* UAVVehicleType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVehicleType.swift; sourceTree = "<group>"; };
 		10000000000000000000012D /* UAVMassCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVMassCategory.swift; sourceTree = "<group>"; };
@@ -176,6 +181,13 @@
 		100000000000000000000152 /* AutoNavigationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoNavigationController.swift; sourceTree = "<group>"; };
 		100000000000000000000153 /* CompassViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassViewModel.swift; sourceTree = "<group>"; };
 		100000000000000000000154 /* CompassOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassOverlayView.swift; sourceTree = "<group>"; };
+		100000000000000000000155 /* PayloadCameraController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadCameraController.swift; sourceTree = "<group>"; };
+		100000000000000000000156 /* FlightControlRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightControlRouting.swift; sourceTree = "<group>"; };
+		100000000000000000000157 /* PayloadDropCameraController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadDropCameraController.swift; sourceTree = "<group>"; };
+		100000000000000000000158 /* MissionPlanningState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPlanningState.swift; sourceTree = "<group>"; };
+		100000000000000000000159 /* MissionMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionMapView.swift; sourceTree = "<group>"; };
+		100000000000000000000160 /* EnvironmentProceduralMaterials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentProceduralMaterials.swift; sourceTree = "<group>"; };
+		100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentProceduralVisualFactory.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -215,7 +227,6 @@
 				100000000000000000000014 /* Presentation */,
 				100000000000000000000017 /* Input */,
 				100000000000000000000018 /* Services */,
-				10000000000000000000012A /* Assets */,
 				100000000000000000000125 /* Resources */,
 			);
 			path = DroneUAVDemo;
@@ -241,6 +252,9 @@
 				100000000000000000000147 /* PayloadDataQualitySource.swift */,
 				10000000000000000000013C /* PayloadType.swift */,
 				10000000000000000000013B /* PayloadVisualPreset.swift */,
+				100000000000000000000155 /* PayloadCameraController.swift */,
+				100000000000000000000156 /* FlightControlRouting.swift */,
+				100000000000000000000158 /* MissionPlanningState.swift */,
 				100000000000000000000130 /* UAVDimensions.swift */,
 				100000000000000000000136 /* UAVCatalog.swift */,
 				100000000000000000000135 /* UAVFilterState.swift */,
@@ -286,8 +300,11 @@
 				10000000000000000000010E /* DroneModelBuilder.swift */,
 				10000000000000000000010F /* DroneSceneController.swift */,
 				10000000000000000000011C /* EnvironmentObjectFactory.swift */,
+				100000000000000000000160 /* EnvironmentProceduralMaterials.swift */,
+				100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */,
 				100000000000000000000142 /* FPVCameraAnchor.swift */,
 				100000000000000000000143 /* PayloadVisualFactory.swift */,
+				100000000000000000000157 /* PayloadDropCameraController.swift */,
 				10000000000000000000010D /* SceneFactory.swift */,
 				10000000000000000000011D /* ScenePopulationService.swift */,
 				100000000000000000000134 /* UAVVisualFactory.swift */,
@@ -320,6 +337,7 @@
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
+				100000000000000000000159 /* MissionMapView.swift */,
 				100000000000000000000103 /* SceneViewportView.swift */,
 				100000000000000000000104 /* TelemetryPanelView.swift */,
 				100000000000000000000144 /* PayloadView.swift */,
@@ -426,7 +444,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000225 /* Localizable.strings in Resources */,
-				100000000000000000000227 /* Assets in Resources */,
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -468,6 +485,8 @@
 				10000000000000000000021A /* KeyboardInputService.swift in Sources */,
 				10000000000000000000021B /* TelemetryExportService.swift in Sources */,
 				10000000000000000000021C /* EnvironmentObjectFactory.swift in Sources */,
+				100000000000000000000257 /* EnvironmentProceduralMaterials.swift in Sources */,
+				100000000000000000000258 /* EnvironmentProceduralVisualFactory.swift in Sources */,
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
 				10000000000000000000021E /* DroneFleetModel.swift in Sources */,
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
@@ -479,6 +498,11 @@
 				100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */,
 				100000000000000000000251 /* CompassOverlayView.swift in Sources */,
 				100000000000000000000250 /* CompassViewModel.swift in Sources */,
+				100000000000000000000252 /* PayloadCameraController.swift in Sources */,
+				100000000000000000000253 /* FlightControlRouting.swift in Sources */,
+				100000000000000000000254 /* PayloadDropCameraController.swift in Sources */,
+				100000000000000000000255 /* MissionPlanningState.swift in Sources */,
+				100000000000000000000256 /* MissionMapView.swift in Sources */,
 				100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */,
 				100000000000000000000229 /* UAVVehicleType.swift in Sources */,
 				10000000000000000000022A /* UAVMassCategory.swift in Sources */,
@@ -564,7 +588,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.DroneUAVDemo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -585,7 +609,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.DroneUAVDemo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

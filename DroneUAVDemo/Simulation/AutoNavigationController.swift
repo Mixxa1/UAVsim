@@ -64,6 +64,7 @@ final class AutoNavigationController {
 
     private var lastCompletionReason: AutoNavigationCompletionReason = .none
     private var lastTurnBiasSign: Float = 1.0
+    private var lockedTravelAltitude: Float?
 
     func replaceTarget(_ targetMarker: TargetMarkerState) {
         self.targetMarker = targetMarker
@@ -71,6 +72,7 @@ final class AutoNavigationController {
         phase = .inactive
         lastCompletionReason = .none
         lastTurnBiasSign = 1.0
+        lockedTravelAltitude = nil
     }
 
     func clearTarget() {
@@ -79,15 +81,17 @@ final class AutoNavigationController {
         phase = .inactive
         lastCompletionReason = .cancelled
         lastTurnBiasSign = 1.0
+        lockedTravelAltitude = nil
     }
 
-    func start() {
+    func start(safeTravelAltitude: Float) {
         guard targetMarker != nil else {
             return
         }
         isActive = true
         phase = .takeoff
         lastCompletionReason = .none
+        lockedTravelAltitude = safeTravelAltitude
     }
 
     func cancel() {
@@ -97,6 +101,7 @@ final class AutoNavigationController {
         isActive = false
         phase = .inactive
         lastCompletionReason = .cancelled
+        lockedTravelAltitude = nil
     }
 
     func consumeCompletionReason() -> AutoNavigationCompletionReason {
@@ -129,7 +134,8 @@ final class AutoNavigationController {
         let delta = targetMarker.position - planarPosition
         let distanceToTarget = simd_length(delta)
         let bearingDegrees = targetMarker.bearingDegrees(from: planarPosition)
-        let targetWorldPosition = targetMarker.worldPosition(altitude: input.safeTravelAltitude)
+        let safeTravelAltitude = lockedTravelAltitude ?? input.safeTravelAltitude
+        let targetWorldPosition = targetMarker.worldPosition(altitude: safeTravelAltitude)
 
         guard distanceToTarget > 0.0001 else {
             return nil
@@ -146,16 +152,22 @@ final class AutoNavigationController {
         let localVelocityRight = simd_dot(planarVelocity, rightWorld)
         let planarSpeed = simd_length(planarVelocity)
 
-        let altitudeError = input.safeTravelAltitude - input.position.y
         let verticalVelocity = input.velocity.y
 
         let axisIntent: AutoNavigationAxisIntent
+        let targetAltitude: Float
 
         switch input.airframeClass {
         case .multirotor:
             let slowdownRadius: Float = 9.5
             let stabilizationRadius: Float = 1.8
             let reachedRadius: Float = 0.85
+            let holdAltitude = min(safeTravelAltitude, input.position.y)
+            let effectiveTargetAltitude =
+                distanceToTarget <= stabilizationRadius
+                ? holdAltitude
+                : safeTravelAltitude
+            let altitudeError = effectiveTargetAltitude - input.position.y
 
             if distanceToTarget <= reachedRadius,
                planarSpeed <= 0.32,
@@ -164,81 +176,85 @@ final class AutoNavigationController {
                 isActive = false
                 phase = .hold
                 lastCompletionReason = .reachedTarget
+                lockedTravelAltitude = nil
                 return nil
             }
 
-            if input.physicalState.isGroundRestState || input.position.y < input.safeTravelAltitude - 1.2 {
+            if input.physicalState.isGroundRestState || input.position.y < safeTravelAltitude - 1.2 {
                 phase = .takeoff
-                let verticalIntent = (altitudeError * 0.40 - verticalVelocity * 0.16).clamped(to: 0.30...1.0)
-                axisIntent = AutoNavigationAxisIntent(forward: 0.0, strafe: 0.0, vertical: verticalIntent)
+                axisIntent = .zero
+                targetAltitude = safeTravelAltitude
             } else if distanceToTarget <= stabilizationRadius {
                 phase = .hold
                 let forwardIntent = (localForward * 0.42 - localVelocityForward * 0.34).clamped(to: -0.38...0.38)
                 let strafeIntent = (localRight * 0.42 - localVelocityRight * 0.34).clamped(to: -0.38...0.38)
-                let verticalIntent = (altitudeError * 0.36 - verticalVelocity * 0.20).clamped(to: -0.55...0.55)
                 axisIntent = AutoNavigationAxisIntent(
                     forward: forwardIntent,
                     strafe: strafeIntent,
-                    vertical: verticalIntent
+                    vertical: 0.0
                 )
+                targetAltitude = effectiveTargetAltitude
             } else {
                 let slowdownScale = (distanceToTarget / slowdownRadius).clamped(to: 0.0...1.0)
                 phase = distanceToTarget > slowdownRadius ? .cruise : .approach
                 let movementScale = slowdownScale
-                let verticalIntent = (altitudeError * 0.34 - verticalVelocity * 0.16).clamped(to: -0.60...0.60)
                 axisIntent = AutoNavigationAxisIntent(
                     forward: (localForward * movementScale - localVelocityForward * 0.18).clamped(to: -1.0...1.0),
                     strafe: (localRight * movementScale - localVelocityRight * 0.18).clamped(to: -1.0...1.0),
-                    vertical: verticalIntent
+                    vertical: 0.0
                 )
+                targetAltitude = effectiveTargetAltitude
             }
 
         case .fixedWing:
-            let slowdownRadius: Float = 18.0
-            let reachedRadius: Float = 4.8
-            if distanceToTarget <= reachedRadius {
+            let slowdownRadius: Float = 22.0
+            let reachedRadius: Float = 5.6
+            let altitudeError = safeTravelAltitude - input.position.y
+            if distanceToTarget <= reachedRadius,
+               abs(altitudeError) <= 1.2,
+               abs(verticalVelocity) <= 1.4 {
                 isActive = false
                 phase = .hold
                 lastCompletionReason = .reachedTarget
+                lockedTravelAltitude = nil
                 return nil
             }
 
-            let slowdownScale = (distanceToTarget / slowdownRadius).clamped(to: 0.18...1.0)
-            let turnBias: Float
-            if localForward < -0.10 {
-                let sign = abs(localRight) > 0.05 ? (localRight > 0 ? 1.0 : -1.0) : lastTurnBiasSign
-                lastTurnBiasSign = sign
-                turnBias = sign * 0.35
-            } else {
-                if abs(localRight) > 0.05 {
-                    lastTurnBiasSign = localRight > 0 ? 1.0 : -1.0
-                }
-                turnBias = 0.0
+            if abs(localRight) > 0.06 {
+                lastTurnBiasSign = localRight > 0 ? 1.0 : -1.0
             }
+
+            var courseError = atan2(localRight, localForward)
+            if localForward < -0.16, abs(localRight) < 0.12 {
+                courseError = lastTurnBiasSign * (.pi * 0.88)
+            }
+            let bankIntent = (courseError / (.pi * 0.55)).clamped(to: -1.0...1.0)
 
             if input.physicalState.isGroundRestState || input.position.y < 1.1 {
                 phase = .takeoff
                 axisIntent = AutoNavigationAxisIntent(
-                    forward: 0.72,
-                    strafe: (localRight * 0.40 + turnBias * 0.4).clamped(to: -0.55...0.55),
+                    forward: (-0.56 - altitudeError.clamped(to: -1.0...6.0) * 0.03).clamped(to: -0.72 ... -0.42),
+                    strafe: (bankIntent * 0.36 - localVelocityRight * 0.08).clamped(to: -0.48...0.48),
                     vertical: 1.0
                 )
+                targetAltitude = safeTravelAltitude
             } else {
+                let slowdownScale = (distanceToTarget / slowdownRadius).clamped(to: 0.28...1.0)
                 phase = distanceToTarget > slowdownRadius ? .cruise : .approach
-                let pitchTrim = (altitudeError * 0.16 - verticalVelocity * 0.08).clamped(to: -0.45...0.45)
-                let forwardBase = max(0.08, slowdownScale * 0.24)
-                let throttleBase = (0.24 + slowdownScale * 0.16).clamped(to: 0.12...0.42)
+                let pitchIntent = (-altitudeError * 0.16 + verticalVelocity * 0.08).clamped(to: -0.60...0.30)
+                let throttleBase = (0.28 + slowdownScale * 0.22).clamped(to: 0.18...0.50)
                 axisIntent = AutoNavigationAxisIntent(
-                    forward: (forwardBase + pitchTrim).clamped(to: -0.35...0.75),
-                    strafe: ((localRight * 0.92 + turnBias) * max(0.30, slowdownScale)).clamped(to: -1.0...1.0),
-                    vertical: (throttleBase + altitudeError * 0.06 - verticalVelocity * 0.04).clamped(to: -0.25...0.85)
+                    forward: pitchIntent,
+                    strafe: (bankIntent * max(0.42, slowdownScale) - localVelocityRight * 0.10).clamped(to: -1.0...1.0),
+                    vertical: (throttleBase + altitudeError * 0.08 - verticalVelocity * 0.05).clamped(to: -0.20...0.88)
                 )
+                targetAltitude = safeTravelAltitude
             }
         }
 
         return AutoNavigationDirective(
             axisIntent: axisIntent,
-            targetAltitude: input.safeTravelAltitude,
+            targetAltitude: targetAltitude,
             targetWorldPosition: targetWorldPosition,
             distanceToTarget: distanceToTarget,
             bearingDegrees: bearingDegrees

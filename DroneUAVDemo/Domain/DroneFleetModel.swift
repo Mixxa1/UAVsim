@@ -9,14 +9,7 @@ enum FormationMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .off:
-            return "Off"
-        case .line:
-            return "Line"
-        case .triangle:
-            return "Triangle"
-        }
+        NSLocalizedString(titleKey, comment: "")
     }
 
     var titleKey: String {

@@ -6,6 +6,46 @@ struct CollisionObstacle {
     let center: SIMD3<Float>
     let radius: Float
     let source: String
+    let baseY: Float
+    let topY: Float
+
+    init(
+        id: UUID,
+        center: SIMD3<Float>,
+        radius: Float,
+        source: String,
+        baseY: Float? = nil,
+        topY: Float? = nil
+    ) {
+        self.id = id
+        self.center = center
+        self.radius = radius
+        self.source = source
+
+        let fallbackBase = center.y - radius
+        let fallbackTop = center.y + radius
+        let resolvedBase = baseY ?? fallbackBase
+        let resolvedTop = topY ?? fallbackTop
+        self.baseY = min(resolvedBase, resolvedTop)
+        self.topY = max(resolvedBase, resolvedTop)
+    }
+
+    var planarCenter: SIMD2<Float> {
+        SIMD2<Float>(center.x, center.z)
+    }
+
+    func verticalGap(toDroneCenterY centerY: Float, droneRadius: Float) -> Float {
+        let droneBottom = centerY - droneRadius
+        let droneTop = centerY + droneRadius
+
+        if droneTop < baseY {
+            return baseY - droneTop
+        }
+        if droneBottom > topY {
+            return droneBottom - topY
+        }
+        return 0.0
+    }
 }
 
 struct CollisionAnalysisInput {
@@ -24,12 +64,20 @@ final class CollisionAnalysisService {
 
         let broadPhaseDistance: Float = 26.0
         let broadPhaseDistanceSq = broadPhaseDistance * broadPhaseDistance
+        let dronePlanar = SIMD2<Float>(input.dronePosition.x, input.dronePosition.z)
         let candidates = input.obstacles
             .compactMap { obstacle -> (CollisionObstacle, Float)? in
-                let delta = obstacle.center - input.dronePosition
-                let distanceSq = simd_dot(delta, delta)
-                if distanceSq <= broadPhaseDistanceSq {
-                    return (obstacle, distanceSq)
+                let planarDelta = obstacle.planarCenter - dronePlanar
+                let planarDistanceSq = simd_length_squared(planarDelta)
+                let planarDistance = sqrt(planarDistanceSq)
+                let verticalGap = obstacle.verticalGap(
+                    toDroneCenterY: input.dronePosition.y,
+                    droneRadius: input.droneRadius
+                )
+                let planarGap = max(0.0, planarDistance - broadPhaseDistance)
+                let combinedGapSq = planarGap * planarGap + verticalGap * verticalGap
+                if combinedGapSq <= broadPhaseDistanceSq {
+                    return (obstacle, combinedGapSq)
                 }
                 return nil
             }
@@ -48,16 +96,51 @@ final class CollisionAnalysisService {
         var maxRisk: Float = 0.0
 
         for obstacle in candidates {
-            let relative = obstacle.center - input.dronePosition
-            let centerDistance = simd_length(relative)
-            let clearance = centerDistance - (input.droneRadius + obstacle.radius)
+            let planarDelta = obstacle.planarCenter - dronePlanar
+            let planarDistance = simd_length(planarDelta)
+            let horizontalClearance = planarDistance - (input.droneRadius + obstacle.radius)
+            let verticalGap = obstacle.verticalGap(
+                toDroneCenterY: input.dronePosition.y,
+                droneRadius: input.droneRadius
+            )
+            let clearance: Float
+            let direction: SIMD3<Float>
+
+            if verticalGap <= 0.0 {
+                clearance = horizontalClearance
+                if planarDistance > 0.001 {
+                    let planarDirection = planarDelta / planarDistance
+                    direction = SIMD3<Float>(planarDirection.x, 0.0, planarDirection.y)
+                } else {
+                    direction = SIMD3<Float>(0.0, 0.0, 1.0)
+                }
+            } else if horizontalClearance <= 0.0 {
+                clearance = verticalGap
+                let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
+            } else {
+                clearance = simd_length(SIMD2<Float>(horizontalClearance, verticalGap))
+
+                let planarDirection = planarDistance > 0.001
+                    ? (planarDelta / planarDistance)
+                    : SIMD2<Float>(0.0, 0.0)
+                let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                let composite = SIMD3<Float>(
+                    planarDirection.x * horizontalClearance,
+                    verticalDirection * verticalGap,
+                    planarDirection.y * horizontalClearance
+                )
+                direction = simd_length_squared(composite) > 0.0001
+                    ? simd_normalize(composite)
+                    : SIMD3<Float>(0.0, 0.0, 1.0)
+            }
+
             if clearance < nearestDistance {
                 nearestDistance = clearance
                 nearestObstacleID = obstacle.id
                 nearestObstacleSource = obstacle.source
             }
 
-            let direction = centerDistance > 0.001 ? relative / centerDistance : SIMD3<Float>(0, 0, 0)
             let closingSpeed = simd_dot(input.droneVelocity, direction)
 
             var obstacleRisk: Float = 0.0

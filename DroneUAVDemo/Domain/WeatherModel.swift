@@ -13,22 +13,7 @@ enum WeatherPreset: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .normal:
-            return "Normal"
-        case .wind:
-            return "Wind"
-        case .rain:
-            return "Rain"
-        case .snow:
-            return "Snow"
-        case .fog:
-            return "Fog"
-        case .smog:
-            return "Smog"
-        case .thunderstorm:
-            return "Thunderstorm"
-        }
+        NSLocalizedString(titleKey, comment: "")
     }
 
     var titleKey: String {

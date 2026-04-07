@@ -420,7 +420,10 @@ private struct SignalInterferenceCanvas: View {
 
             for y in stride(from: 0.0, through: size.height, by: spacing) {
                 let rect = CGRect(x: 0.0, y: y, width: size.width, height: 1.0)
-                context.fill(Path(rect), with: .color(Color.white.opacity(scanAlpha)))
+                context.fill(
+                    Path(rect),
+                    with: .color(Self.paletteColor(seed: y * 0.17, isSignalLost: isSignalLost).opacity(scanAlpha))
+                )
             }
 
             let bandCount = isSignalLost ? 18 : 7
@@ -432,7 +435,10 @@ private struct SignalInterferenceCanvas: View {
                 let xOffset = size.width * CGFloat((Self.noise(seed + 5.1) - 0.5) * clampedIntensity * 0.22)
                 let rect = CGRect(x: xOffset, y: y, width: size.width * widthScale, height: height)
                 let opacity = 0.05 + clampedIntensity * (isSignalLost ? 0.28 : 0.14)
-                context.fill(Path(rect), with: .color(Color.white.opacity(opacity)))
+                context.fill(
+                    Path(rect),
+                    with: .color(Self.paletteColor(seed: seed + 9.4, isSignalLost: isSignalLost).opacity(opacity))
+                )
             }
 
             let noiseCount = isSignalLost ? 180 : Int(40 + clampedIntensity * 36.0)
@@ -446,7 +452,7 @@ private struct SignalInterferenceCanvas: View {
                 let opacity = (0.03 + clampedIntensity * (isSignalLost ? 0.42 : 0.18)) * Self.noise(seed + 8.5)
                 context.fill(
                     Path(CGRect(x: x, y: y, width: width, height: height)),
-                    with: .color(Color.white.opacity(opacity))
+                    with: .color(Self.paletteColor(seed: seed + 11.0, isSignalLost: isSignalLost).opacity(opacity))
                 )
             }
 
@@ -457,7 +463,28 @@ private struct SignalInterferenceCanvas: View {
                 let width = size.width * CGFloat(0.10 + Self.noise(seed + 1.9) * 0.20)
                 let opacity = (0.04 + clampedIntensity * 0.20) * abs(sin(time * (2.0 + Double(index))))
                 let rect = CGRect(x: x, y: 0.0, width: width, height: size.height)
-                context.fill(Path(rect), with: .color(Color.white.opacity(opacity)))
+                context.fill(
+                    Path(rect),
+                    with: .color(Self.paletteColor(seed: seed + 14.0, isSignalLost: isSignalLost).opacity(opacity))
+                )
+            }
+
+            if isSignalLost {
+                let splitCount = 12
+                for index in 0..<splitCount {
+                    let seed = time * 5.3 + Double(index) * 8.7
+                    let y = size.height * Self.noise(seed + 0.8)
+                    let height = size.height * CGFloat(0.008 + Self.noise(seed + 2.1) * 0.04)
+                    let shift = size.width * CGFloat((Self.noise(seed + 3.7) - 0.5) * 0.08)
+                    let baseRect = CGRect(x: 0.0, y: y, width: size.width, height: height)
+                    for offsetIndex in 0..<3 {
+                        let channelRect = baseRect.offsetBy(dx: shift * CGFloat(offsetIndex - 1), dy: 0.0)
+                        context.fill(
+                            Path(channelRect),
+                            with: .color(Self.signalLossChannelColor(offsetIndex).opacity(0.08 + clampedIntensity * 0.10))
+                        )
+                    }
+                }
             }
         }
     }
@@ -466,6 +493,29 @@ private struct SignalInterferenceCanvas: View {
         let value = sin(input * 12.9898) * 43758.5453
         return value - floor(value)
     }
+
+    private static func paletteColor(seed: Double, isSignalLost: Bool) -> Color {
+        let palette = isSignalLost ? signalLossPalette : interferencePalette
+        let index = Int(floor(noise(seed) * Double(palette.count))) % palette.count
+        return palette[max(0, index)]
+    }
+
+    private static func signalLossChannelColor(_ index: Int) -> Color {
+        signalLossPalette[index % signalLossPalette.count]
+    }
+
+    private static let interferencePalette: [Color] = [
+        Color.white,
+        Color(red: 0.78, green: 0.92, blue: 1.0),
+        Color(red: 0.96, green: 0.88, blue: 0.74)
+    ]
+
+    private static let signalLossPalette: [Color] = [
+        Color(red: 0.44, green: 0.92, blue: 1.0),
+        Color(red: 1.0, green: 0.38, blue: 0.78),
+        Color(red: 0.84, green: 1.0, blue: 0.28),
+        Color(red: 1.0, green: 0.72, blue: 0.26)
+    ]
 }
 
 private struct SimulationToolstripView: View {
@@ -769,11 +819,11 @@ struct ContentView: View {
                             appShell.saveActiveProject()
                         }
                         Button("project.save_as.action") {
-                            nameDraft = "\(viewModel.currentProjectName) Copy"
+                            nameDraft = projectDerivedName(from: viewModel.currentProjectName, suffixKey: "project.copy_suffix")
                             nameDialogMode = .saveAs
                         }
                         Button("project.duplicate.action") {
-                            nameDraft = "\(viewModel.currentProjectName) Clone"
+                            nameDraft = projectDerivedName(from: viewModel.currentProjectName, suffixKey: "project.clone_suffix")
                             nameDialogMode = .duplicate
                         }
                         Divider()
@@ -806,6 +856,14 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .help(String(localized: "keybind.open"))
+
+                    Button {
+                        viewModel.toggleMissionMap()
+                    } label: {
+                        headerUtilityButtonLabel(systemImage: "map")
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "mission.map.open_help"))
 
                     Button {
                         viewModel.setToolPanelVisible(false)
@@ -859,6 +917,11 @@ struct ContentView: View {
             if viewModel.isPayloadPanelVisible {
                 payloadOverlay(for: viewModel)
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+
+            if viewModel.isMissionMapVisible {
+                missionMapOverlay(for: viewModel)
+                    .transition(.opacity)
             }
 
             if viewModel.signalInterferencePresentation.isVisible {
@@ -937,6 +1000,30 @@ struct ContentView: View {
         .zIndex(4)
     }
 
+    @ViewBuilder
+    private func missionMapOverlay(for viewModel: DroneSimulationViewModel) -> some View {
+        MissionMapOverlayView(
+            snapshot: viewModel.terrainMapSnapshot,
+            missionPlan: viewModel.missionPlanState,
+            draftPlan: viewModel.missionPlanningDraft,
+            mode: viewModel.missionMapMode,
+            payloadState: viewModel.payloadState,
+            statusLabels: viewModel.missionStatusLabels,
+            isInDropZone: viewModel.isInMissionDropZone,
+            onSetMode: viewModel.setMissionMapMode,
+            onSelectRouteTarget: viewModel.setMissionDraftRouteTarget,
+            onSelectDropZoneCenter: viewModel.setMissionDraftDropZoneCenter,
+            onSetDropZoneRadius: viewModel.setMissionDraftDropZoneRadius,
+            onSetAutoReleaseEnabled: viewModel.setMissionAutoReleaseEnabled,
+            onClearRoute: viewModel.clearMissionDraftRoute,
+            onClearDropZone: viewModel.clearMissionDraftDropZone,
+            onConfirm: viewModel.confirmMissionPlan,
+            onCancel: viewModel.cancelMissionPlanningChanges,
+            onExit: viewModel.exitMissionMap
+        )
+        .zIndex(5)
+    }
+
     private func parametersVisibilityBinding(for viewModel: DroneSimulationViewModel) -> Binding<Bool> {
         Binding(
             get: { viewModel.isParametersPanelVisible && viewModel.activeControlModule != nil },
@@ -1001,7 +1088,14 @@ struct ContentView: View {
     private func projectDefaultName() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return "Project \(formatter.string(from: Date()))"
+        return String(
+            format: NSLocalizedString("project.default_name", comment: ""),
+            formatter.string(from: Date())
+        )
+    }
+
+    private func projectDerivedName(from baseName: String, suffixKey: String) -> String {
+        "\(baseName) \(NSLocalizedString(suffixKey, comment: ""))"
     }
 
     private func projectCard(_ project: ProjectRecordSummary) -> some View {

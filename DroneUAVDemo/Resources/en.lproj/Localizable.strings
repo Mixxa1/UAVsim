@@ -11,7 +11,7 @@
 "language.russian" = "Russian";
 
 "panel.title" = "UAV Digital Twin Simulator";
-"panel.keyboard_hint" = "WASD/QE fly, Shift boost, 1..5 cameras, M map, / compass, arrows FPV look, +/- zoom";
+"panel.keyboard_hint" = "WASD/QE fly, Shift boost, 1..6 cameras, M map, / compass, arrows FPV look, +/- zoom";
 "panel.workflow_hint" = "Main controls are in the top toolstrip. Use toolbar buttons to show or hide parameters.";
 "panel.toggle_collapse" = "Collapse/Expand Control Panel";
 "panel.collapse" = "Collapse Panel";
@@ -54,7 +54,9 @@
 "camera.mode.fpv" = "FPV";
 "camera.mode.orbit" = "Orbit";
 "camera.mode.top" = "Top";
+"camera.mode.payload" = "Payload Drop";
 "camera.mode.top_down" = "Top Down";
+"camera.payload.auto_switch" = "Auto-switch to payload view after release";
 "camera.fov" = "FOV";
 "camera.sensitivity" = "Sensitivity";
 "camera.smoothing" = "Smoothing";
@@ -90,6 +92,7 @@
 "terrain.grid_demo" = "Grid Demo";
 "terrain.field" = "Field";
 "terrain.forest" = "Forest";
+"terrain.cargo_yard" = "Cargo Yard";
 "terrain.city" = "City";
 "terrain.density" = "Object density";
 "terrain.seed" = "Seed";
@@ -98,6 +101,9 @@
 "terrain.scale.8x8" = "8x8";
 "terrain.scale.16x16" = "16x16";
 "terrain.scale.32x32" = "32x32";
+"terrain.scale.64x64" = "64x64";
+"terrain.scale.128x128" = "128x128";
+"terrain.scale.256x256" = "256x256";
 "environment.boundary_barrier_visible" = "Show boundary barrier";
 
 "diagnostic.mode" = "Diagnostic mode";
@@ -172,6 +178,7 @@
 "telemetry.collision_risk" = "Collision risk";
 "telemetry.nearest_obstacle" = "Nearest obstacle";
 "telemetry.emergency" = "Emergency action";
+"telemetry.mission_status" = "Mission status";
 "telemetry.damage" = "Damage";
 "telemetry.thermal" = "Thermal";
 "telemetry.fleet" = "Fleet mode";
@@ -180,6 +187,43 @@
 "telemetry.export" = "Export Telemetry";
 "telemetry.export.success" = "Telemetry exported";
 "telemetry.export.failure" = "Telemetry export failed";
+
+"mission.map.open_help" = "Mission map";
+"mission.map.title" = "MISSION MAP";
+"mission.map.subtitle" = "Planning screen for route and payload delivery zone";
+"mission.map.exit" = "EXIT MAP";
+"mission.map.clear_route" = "CLEAR ROUTE";
+"mission.map.clear_drop_zone" = "CLEAR DROP ZONE";
+"mission.map.cancel" = "CANCEL";
+"mission.map.confirm" = "CONFIRM MISSION";
+"mission.map.instruction.route" = "Click map to set route target";
+"mission.map.instruction.drop_zone_center" = "Click map to set drop zone center";
+"mission.map.instruction.drop_zone_radius" = "Adjust zone radius and confirm mission";
+"mission.map.summary.format" = "UAV %+.1f / %+.1f   HOME %+.1f / %+.1f   MAP %.0f m";
+"mission.map.section.route" = "ROUTE";
+"mission.map.section.drop_zone" = "DROP ZONE";
+"mission.map.section.zone_radius" = "ZONE RADIUS";
+"mission.map.section.payload_delivery" = "PAYLOAD DELIVERY";
+"mission.map.zone_radius.value" = "%.1f m";
+"mission.map.auto_release" = "Auto release over zone center";
+"mission.map.payload_ready" = "Attached payload ready for delivery";
+"mission.map.payload_unavailable" = "No attached payload for delivery stage";
+"mission.map.active_drop_zone" = "ACTIVE DZ";
+"mission.map.no_drop_zone" = "NO DZ";
+"mission.map.active_route" = "ACTIVE ROUTE";
+"mission.map.no_route" = "NO ROUTE";
+"mission.map.footer_hint" = "Mission map never drives the UAV directly. Confirmed targets go through the existing guidance layer.";
+"mission.map.no_route_target" = "No route target";
+"mission.map.no_drop_zone_value" = "No drop zone";
+"mission.map.route.value.format" = "X %+.1f   Z %+.1f";
+"mission.map.drop_zone.value.format" = "CTR %+.1f / %+.1f   R %.1f m";
+"mission.mode.navigation" = "ROUTE";
+"mission.mode.drop_zone" = "DROP ZONE";
+"mission.status.map_active" = "MISSION MAP ACTIVE";
+"mission.status.drop_zone_set" = "DROP ZONE SET";
+"mission.status.delivery_ready" = "DELIVERY MISSION READY";
+"mission.status.in_drop_zone" = "IN DROP ZONE";
+"mission.status.payload_released" = "PAYLOAD RELEASED";
 
 "hud.title" = "Telemetry HUD";
 "hud.telemetry" = "Telemetry";
@@ -346,6 +390,7 @@
 "keybind.camera.mode3" = "Camera 3 (Orbit)";
 "keybind.camera.mode4" = "Camera 4 (FPV)";
 "keybind.camera.mode5" = "Camera 5 (Top)";
+"keybind.camera.mode6" = "Camera 6 (Payload Drop)";
 "keybind.camera.toggle_fpv" = "Toggle FPV";
 "keybind.camera.cycle_mode" = "Cycle camera mode";
 "keybind.camera.zoom_in" = "Zoom in";
@@ -386,6 +431,8 @@
 "keybind.rebind" = "Rebind";
 "keybind.capturing" = "Listening…";
 "keybind.reset_defaults" = "Reset Defaults";
+"keybind.key.space" = "Space";
+"keybind.key.code" = "Key %d";
 
 "control_mode.title" = "Flight control mode";
 "control_mode.stabilized" = "Stabilized";
@@ -641,6 +688,11 @@
 "telemetry.auto_nav" = "Auto nav";
 "telemetry.auto_nav.active" = "ACTIVE";
 "telemetry.auto_nav.inactive" = "INACTIVE";
+"telemetry.control_authority" = "Control authority";
+"telemetry.input_flags" = "Input flags";
+"telemetry.state_flags" = "State flags";
+"common.on" = "ON";
+"common.off" = "OFF";
 "telemetry.target_distance" = "Dist to target";
 "telemetry.target_bearing" = "Bearing to target";
 "telemetry.waypoint" = "Waypoint";
@@ -761,3 +813,49 @@
 "module.diagnostics.panel.telemetry" = "Telemetry";
 "module.diagnostics.panel.fleet" = "Fleet";
 "module.diagnostics.panel.service" = "Service";
+
+"project.default_name" = "Project %@";
+"project.copy_suffix" = "Copy";
+"project.clone_suffix" = "Clone";
+
+"control_authority.none" = "NONE";
+"control_authority.manual" = "MANUAL";
+"control_authority.marker" = "MARKER";
+"control_authority.failsafe" = "FAILSAFE";
+"control_authority.blocked" = "BLOCKED";
+
+"payload_camera.state.inactive" = "INACTIVE";
+"payload_camera.state.falling" = "FALLING";
+"payload_camera.state.impact" = "IMPACT";
+"payload_camera.state.rest" = "AT REST";
+
+"overlay.payload_view.title" = "PAYLOAD VIEW";
+"overlay.payload_view.metric.alt" = "ALT";
+"overlay.payload_view.metric.vertical_speed" = "V/S";
+"overlay.payload_view.metric.time" = "TIME";
+"overlay.payload_view.metric.state" = "STATE";
+
+"overlay.terrain_map.title" = "TERRAIN MAP";
+"overlay.terrain_map.subtitle" = "Filtered obstacle overview and single target marker";
+"overlay.terrain_map.clear" = "CLR";
+"overlay.terrain_map.target_metrics.empty" = "DST —   BRG —";
+"overlay.terrain_map.target_metrics.format" = "DST %.1f m   BRG %03.0f°";
+"overlay.terrain_map.heading_alt_objects.format" = "HDG %@°   ALT %.1f m   OBJ %d";
+"overlay.terrain_map.position_map.format" = "X %+.1f   Z %+.1f   MAP %@";
+"overlay.terrain_map.status.format" = "SIG %@   AUTO NAV %@";
+
+"overlay.compass.title" = "COMPASS";
+"overlay.compass.subtitle" = "Heading / north / target bearing";
+"overlay.compass.metric.heading" = "HDG";
+"overlay.compass.metric.north" = "N";
+"overlay.compass.metric.bearing" = "BRG";
+"overlay.compass.marker.current" = "HDG";
+"overlay.compass.marker.target" = "TGT";
+
+"hud.compact.position" = "POS  x %.1f  y %.1f  z %.1f";
+"hud.compact.speed_battery" = "SPD  %.1f m/s   BAT %.0f%%";
+"hud.compact.auto_nav" = "AUTO %@  DST %@  BRG %@";
+
+"telemetry.flags.input.format" = "MAN %@ | MRK %@ | PV %@ | MAP %@";
+"telemetry.flags.state.format" = "DIS %@ | BLK %@ | SIG %@";
+"telemetry.flags.mission.format" = "MAP %@ | DZ %@ | READY %@ | IN %@ | REL %@";

@@ -141,7 +141,9 @@ final class DroneFleetManager {
                 id: $0.id,
                 center: $0.position,
                 radius: $0.collisionRadius,
-                source: "wingman"
+                source: "wingman",
+                baseY: $0.position.y - $0.collisionRadius,
+                topY: $0.position.y + $0.collisionRadius
             )
         }
     }

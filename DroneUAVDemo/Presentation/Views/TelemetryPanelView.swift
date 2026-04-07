@@ -34,6 +34,10 @@ struct TelemetryPanelView: View {
             row(titleKey: "telemetry.path_status", value: localizedPathStatus(telemetry.pathStatus))
             row(titleKey: "telemetry.waypoint", value: String(format: localized("telemetry.waypoint.value"), telemetry.currentWaypointIndex, telemetry.remainingWaypoints))
             row(titleKey: "telemetry.path_remaining", value: String(format: "%.2f / %.2f m", telemetry.pathRemainingDistanceMeters, telemetry.pathLengthMeters))
+            row(titleKey: "telemetry.control_authority", value: telemetry.controlAuthority)
+            row(titleKey: "telemetry.input_flags", value: inputFlagsLine)
+            row(titleKey: "telemetry.state_flags", value: stateFlagsLine)
+            row(titleKey: "telemetry.mission_status", value: missionFlagsLine)
             row(titleKey: "telemetry.emergency", valueKey: telemetry.emergencyActionKey)
             row(titleKey: "telemetry.damage", value: telemetry.damageSummary)
             row(titleKey: "telemetry.thermal", value: telemetry.thermalSummary)
@@ -124,6 +128,40 @@ struct TelemetryPanelView: View {
         default:
             return status
         }
+    }
+
+    private var inputFlagsLine: String {
+        String(
+            format: localized("telemetry.flags.input.format"),
+            toggleLabel(telemetry.manualInputActive),
+            toggleLabel(telemetry.markerGuidanceActive),
+            toggleLabel(telemetry.payloadViewActive),
+            toggleLabel(telemetry.mapOverlayActive)
+        )
+    }
+
+    private var stateFlagsLine: String {
+        String(
+            format: localized("telemetry.flags.state.format"),
+            toggleLabel(telemetry.disarmedState),
+            toggleLabel(telemetry.blockedState),
+            toggleLabel(telemetry.lostSignalState)
+        )
+    }
+
+    private var missionFlagsLine: String {
+        String(
+            format: localized("telemetry.flags.mission.format"),
+            toggleLabel(telemetry.missionMapActive),
+            toggleLabel(telemetry.dropZoneSet),
+            toggleLabel(telemetry.deliveryMissionReady),
+            toggleLabel(telemetry.inDropZone),
+            toggleLabel(telemetry.payloadReleasedForMission)
+        )
+    }
+
+    private func toggleLabel(_ active: Bool) -> String {
+        localized(active ? "common.on" : "common.off")
     }
 }
 

@@ -53,8 +53,10 @@
   Работа с проектами, autosave, внутренним storage и экспортом телеметрии.
 - `Input`  
   Клавиатурный ввод и бинды.
-- `Resources` / `Assets`  
-  Локализация и визуальные ассеты.
+- `Resources`  
+  Локализация, `Assets.xcassets` и системные ресурсы приложения.
+- `Scene`  
+  Процедурная среда, материалы окружения и генераторы `SceneKit`.
 
 Упрощённая схема потока:
 
@@ -73,6 +75,8 @@ flowchart LR
     D --> L["DroneModelBuilder"]
     D --> M["ScenePopulationService"]
     M --> N["EnvironmentObjectFactory"]
+    N --> O["EnvironmentProceduralVisualFactory"]
+    O --> P["EnvironmentProceduralMaterials"]
 ```
 
 ---
@@ -408,7 +412,13 @@ flowchart LR
   генерирует объекты окружения по preset местности.
 
 - [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)  
-  строит `SCNNode` для объекта окружения по `EnvironmentObjectDescriptor`.
+  совместимый фасад фабрики окружения; делегирует procedural-построение среды.
+
+- [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)  
+  создаёт procedural-геометрию деревьев, зданий, крыш, тротуаров, дорог и дальнего пояса.
+
+- [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)  
+  задаёт procedural-материалы земли, коры, листвы, фасадов, обычных окон и кровли без загрузки из внешней папки `Assets`.
 
 ### Что происходит в сцене
 
@@ -418,7 +428,8 @@ flowchart LR
 2. генерация descriptor-ов объектов через `ScenePopulationService`;
 3. создание реальных `SCNNode` через `EnvironmentObjectFactory`;
 4. установка boundary/dock/world visuals;
-5. обновление obstacle-набора для collision logic и debug.
+5. обновление obstacle-набора для collision logic и debug;
+6. сборка support surface-набора для крыш и других площадок, на которые БЛА может опираться и садиться.
 
 ---
 
@@ -562,31 +573,15 @@ flowchart LR
 
 ---
 
-## `/DroneUAVDemo/Assets`
+## Legacy: `/DroneUAVDemo/Assets`
 
-Нестандартные визуальные ассеты проекта.
+Папка может оставаться в репозитории как архив исходных ассетов, но больше не участвует в runtime-конвейере окружения и не подключена к target как folder resource.
 
-### Структура
+Актуальный pipeline окружения теперь строится через:
 
-- `/Assets/Buildings`
-- `/Assets/Dock`
-- `/Assets/Terrain`
-- `/Assets/Terrain/Asphalt`
-- `/Assets/Terrain/Forest`
-- `/Assets/Terrain/Ground`
-- `/Assets/Trees`
-- `/Assets/Trees/Bark`
-- `/Assets/Trees/Leaves`
-- `/Assets/Trees/Models`
-- `/Assets/UI`
-
-### Что здесь обычно искать
-
-- текстуры земли и покрытия;
-- исходники/варианты деревьев;
-- модели и материалы окружения;
-- ассеты dock station;
-- дополнительные UI-материалы.
+- [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
+- [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
+- [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
 
 ---
 
@@ -696,11 +691,27 @@ flowchart LR
 
 [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
 
-Преобразует descriptor в `SCNNode`.
+Это совместимый входной слой. Фактическую procedural-визуализацию выполняют:
+
+- [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
+- [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
+
+Через них создаются:
+
+- деревья с отдельным стволом и выраженной кроной;
+- здания с фасадами, обычными окнами и физически поддерживаемой крышей;
+- ground-подложки кварталов, дороги и пешеходные полосы;
+- материалы земли, листвы и фасадов без чтения текстур из `/Assets`.
 
 ### Collision и navigation
 
 `DroneSceneController` хранит `environmentObstacles`, а `CollisionAnalysisService` и `AutoPathPlannerService` используют их как вход.
+
+Дополнительно `DroneSceneController` теперь собирает support surfaces для крыш и платформ. `DroneSimulationViewModel` использует их, чтобы:
+
+- считать высоту относительно ближайшей опорной поверхности, а не только от `y = 0`;
+- разрешать посадку и наземные состояния на крыше;
+- не проваливать БЛА сквозь верхние плоскости зданий при мягком касании сверху.
 
 ---
 
@@ -782,7 +793,7 @@ flowchart LR
   -> [CameraConfiguration.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift), [CameraModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift), [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
 
 - генерацию мира  
-  -> [TerrainModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/TerrainModel.swift), [ScenePopulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift), [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
+  -> [TerrainModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/TerrainModel.swift), [ScenePopulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift), [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift), [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift), [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
 
 - collision risk / obstacle avoidance / pathfinding  
   -> [CollisionAnalysisService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift), [AutoPathPlannerService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift), [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
@@ -842,7 +853,9 @@ flowchart LR
   сохранения, autosave, export.
 - `Input/*`  
   клавиатурный ввод.
-- `Resources/*` и `Assets/*`  
-  локализация и материалы.
+- `Resources/*`  
+  локализация и системные ресурсы приложения.
+- `Scene/*`  
+  procedural-среда, материалы окружения и генераторы окружения без внешней folder-resource папки `Assets`.
 
 Если нужен один файл, с которого начинать чтение проекта, это [DroneSimulationViewModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift). Если нужен один файл, с которого начинать чтение UI, это [ContentView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift). Если нужен один файл, чтобы понять сцену, это [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift).

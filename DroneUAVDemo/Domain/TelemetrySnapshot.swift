@@ -55,6 +55,19 @@ struct TelemetrySnapshot {
     var remainingWaypoints: Int
     var pathLengthMeters: Double
     var pathRemainingDistanceMeters: Double
+    var controlAuthority: String
+    var manualInputActive: Bool
+    var markerGuidanceActive: Bool
+    var payloadViewActive: Bool
+    var mapOverlayActive: Bool
+    var missionMapActive: Bool
+    var dropZoneSet: Bool
+    var deliveryMissionReady: Bool
+    var inDropZone: Bool
+    var payloadReleasedForMission: Bool
+    var disarmedState: Bool
+    var blockedState: Bool
+    var lostSignalState: Bool
     var emergencyAction: String
     var emergencyActionKey: String
 
@@ -100,7 +113,7 @@ struct TelemetrySnapshot {
         modeKey: DroneFlightMode.manual.titleKey,
         controlModeKey: FlightControlMode.stabilized.titleKey,
         armStateKey: "arm_state.disarmed",
-        flightState: "On Ground",
+        flightState: NSLocalizedString("flight_state.on_ground", comment: ""),
         flightStateKey: "flight_state.on_ground",
         batteryPercent: 100.0,
         batteryHealthPercent: 100.0,
@@ -120,9 +133,22 @@ struct TelemetrySnapshot {
         remainingWaypoints: 0,
         pathLengthMeters: 0.0,
         pathRemainingDistanceMeters: 0.0,
+        controlAuthority: FlightControlAuthority.none.title,
+        manualInputActive: false,
+        markerGuidanceActive: false,
+        payloadViewActive: false,
+        mapOverlayActive: false,
+        missionMapActive: false,
+        dropZoneSet: false,
+        deliveryMissionReady: false,
+        inDropZone: false,
+        payloadReleasedForMission: false,
+        disarmedState: true,
+        blockedState: false,
+        lostSignalState: false,
         emergencyAction: CollisionEmergencyAction.none.title,
         emergencyActionKey: CollisionEmergencyAction.none.titleKey,
-        damageSummary: "No critical damage",
+        damageSummary: NSLocalizedString("summary.damage.none", comment: ""),
         thermalSummary: "BAT:33C FC:33C",
         fleetMode: FormationMode.off.title,
         fleetModeKey: FormationMode.off.titleKey,

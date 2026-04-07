@@ -16,6 +16,9 @@ struct SceneViewportView: View {
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
+                },
+                onRenderFrame: { time, mode in
+                    viewModel.handleSceneRenderFrame(atTime: time, cameraMode: mode)
                 }
             )
             .ignoresSafeArea()
@@ -70,19 +73,93 @@ struct SceneViewportView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if viewModel.isTerrainMapVisible {
-                TerrainMapOverlayView(
-                    snapshot: viewModel.terrainMapSnapshot,
-                    telemetry: viewModel.telemetry,
-                    targetMarker: viewModel.targetMarkerState,
-                    onSelectTarget: { viewModel.setTargetMarker(at: $0) },
-                    onClearTarget: { viewModel.clearTargetMarker() }
-                )
-                .padding(.top, 12)
-                .padding(.trailing, 12)
+            VStack(alignment: .trailing, spacing: 10) {
+                if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
+                    TerrainMapOverlayView(
+                        snapshot: viewModel.terrainMapSnapshot,
+                        telemetry: viewModel.telemetry,
+                        targetMarker: viewModel.targetMarkerState,
+                        dropZone: viewModel.missionPlanState.dropZone,
+                        onSelectTarget: { viewModel.setTargetMarker(at: $0) },
+                        onClearTarget: { viewModel.clearTargetMarker() }
+                    )
+                }
+
+                if viewModel.cameraConfiguration.mode == .payload, viewModel.payloadCameraStatus.isActive {
+                    PayloadCameraStatusOverlayView(status: viewModel.payloadCameraStatus)
+                }
             }
+            .padding(.top, 12)
+            .padding(.trailing, 12)
         }
         .background(Color.black)
+    }
+}
+
+private struct PayloadCameraStatusOverlayView: View {
+    let status: PayloadCameraStatus
+
+    private var altitudeText: String {
+        String(format: "%06.1f m", max(0.0, status.altitude))
+    }
+
+    private var verticalSpeedText: String {
+        String(format: "%+06.1f m/s", status.verticalSpeed)
+    }
+
+    private var elapsedTimeText: String {
+        String(format: "%05.1f s", max(0.0, status.elapsedTime))
+    }
+
+    private var stateColor: Color {
+        switch status.state {
+        case .impact:
+            return GroundControlPalette.warning
+        case .rest:
+            return GroundControlPalette.success
+        case .falling:
+            return GroundControlPalette.textPrimary
+        case .inactive:
+            return GroundControlPalette.textSecondary
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("overlay.payload_view.title")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textPrimary)
+            metricRow(label: localized("overlay.payload_view.metric.alt"), value: altitudeText, color: GroundControlPalette.textSecondary)
+            metricRow(label: localized("overlay.payload_view.metric.vertical_speed"), value: verticalSpeedText, color: GroundControlPalette.textSecondary)
+            metricRow(label: localized("overlay.payload_view.metric.time"), value: elapsedTimeText, color: GroundControlPalette.textSecondary)
+            metricRow(label: localized("overlay.payload_view.metric.state"), value: status.state.title, color: stateColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(width: 248, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(GroundControlPalette.panel.opacity(0.95))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func metricRow(label: String, value: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .frame(width: 38, alignment: .leading)
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            Text(value)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .foregroundStyle(color)
+        }
+        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .lineLimit(1)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -90,6 +167,7 @@ private struct TerrainMapOverlayView: View {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let telemetry: TelemetrySnapshot
     let targetMarker: TargetMarkerState?
+    let dropZone: DropZoneState?
     let onSelectTarget: (SIMD2<Float>) -> Void
     let onClearTarget: () -> Void
 
@@ -101,17 +179,21 @@ private struct TerrainMapOverlayView: View {
         String(format: "%.0f m", snapshot.worldHalfExtent * 2.0)
     }
 
+    private var signalRadiusText: String {
+        String(format: "%.0f m", snapshot.signalBoundaryRadius)
+    }
+
     private var autoNavigationLabel: String {
         telemetry.autoNavigationActive ? localized("telemetry.auto_nav.active") : localized("telemetry.auto_nav.inactive")
     }
 
     private var targetMetricsText: String {
         guard telemetry.targetDistanceMeters.isFinite, telemetry.targetBearingDegrees.isFinite else {
-            return "DST —   BRG —"
+            return localized("overlay.terrain_map.target_metrics.empty")
         }
 
         return String(
-            format: "DST %.1f m   BRG %03.0f°",
+            format: localized("overlay.terrain_map.target_metrics.format"),
             telemetry.targetDistanceMeters,
             telemetry.targetBearingDegrees
         )
@@ -121,10 +203,10 @@ private struct TerrainMapOverlayView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("TERRAIN MAP")
+                    Text("overlay.terrain_map.title")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textPrimary)
-                    Text("Click to place single target marker")
+                    Text("overlay.terrain_map.subtitle")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
@@ -134,7 +216,7 @@ private struct TerrainMapOverlayView: View {
                 HStack(spacing: 6) {
                     if targetMarker != nil {
                         Button(action: onClearTarget) {
-                            Text("CLR")
+                            Text("overlay.terrain_map.clear")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundStyle(GroundControlPalette.textPrimary)
                                 .padding(.horizontal, 8)
@@ -162,7 +244,12 @@ private struct TerrainMapOverlayView: View {
             }
 
             ZStack {
-                TerrainMapCanvas(snapshot: snapshot)
+                TerrainMapCanvas(
+                    snapshot: snapshot,
+                    routeTargetPosition: targetMarker?.position,
+                    dropZone: dropZone,
+                    highlightDropZone: telemetry.inDropZone
+                )
 
                 GeometryReader { geometry in
                     Color.clear
@@ -187,9 +274,30 @@ private struct TerrainMapOverlayView: View {
             )
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("HDG \(headingDegreesText)°   ALT \(String(format: "%.1f", snapshot.droneAltitude)) m   OBJ \(snapshot.objects.count)")
-                Text("X \(String(format: "%+.1f", telemetry.x))   Z \(String(format: "%+.1f", telemetry.z))   MAP \(mapSpanText)")
-                Text("AUTO NAV \(autoNavigationLabel)   \(targetMetricsText)")
+                Text(
+                    String(
+                        format: localized("overlay.terrain_map.heading_alt_objects.format"),
+                        headingDegreesText,
+                        snapshot.droneAltitude,
+                        snapshot.objects.count
+                    )
+                )
+                Text(
+                    String(
+                        format: localized("overlay.terrain_map.position_map.format"),
+                        telemetry.x,
+                        telemetry.z,
+                        mapSpanText
+                    )
+                )
+                Text(
+                    String(
+                        format: localized("overlay.terrain_map.status.format"),
+                        signalRadiusText,
+                        autoNavigationLabel
+                    )
+                )
+                Text(targetMetricsText)
             }
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(GroundControlPalette.textSecondary)
@@ -208,8 +316,11 @@ private struct TerrainMapOverlayView: View {
     }
 }
 
-private struct TerrainMapCanvas: View {
+struct TerrainMapCanvas: View {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
+    let routeTargetPosition: SIMD2<Float>?
+    let dropZone: DropZoneState?
+    let highlightDropZone: Bool
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
@@ -217,12 +328,16 @@ private struct TerrainMapCanvas: View {
 
             context.fill(
                 Path(projection.mapRect),
-                with: .color(GroundControlPalette.inset.opacity(0.98))
+                with: .color(mapBackgroundColor.opacity(0.98))
             )
             drawGrid(in: &context, projection: projection)
+            drawSignalBoundary(in: &context, projection: projection)
             drawTrail(in: &context, projection: projection)
+            if let dropZone {
+                drawDropZone(dropZone, in: &context, projection: projection)
+            }
 
-            if let targetMarkerPosition = snapshot.targetMarkerPosition {
+            if let targetMarkerPosition = routeTargetPosition ?? snapshot.targetMarkerPosition {
                 drawTargetLink(to: targetMarkerPosition, in: &context, projection: projection)
             }
 
@@ -231,7 +346,7 @@ private struct TerrainMapCanvas: View {
             }
 
             drawDock(in: &context, projection: projection)
-            if let targetMarkerPosition = snapshot.targetMarkerPosition {
+            if let targetMarkerPosition = routeTargetPosition ?? snapshot.targetMarkerPosition {
                 drawTargetMarker(at: targetMarkerPosition, in: &context, projection: projection)
             }
             drawDrone(in: &context, projection: projection)
@@ -241,6 +356,21 @@ private struct TerrainMapCanvas: View {
                 with: .color(GroundControlPalette.borderStrong),
                 lineWidth: 1.2
             )
+        }
+    }
+
+    private var mapBackgroundColor: Color {
+        switch snapshot.preset {
+        case .city:
+            return Color(red: 0.10, green: 0.12, blue: 0.15)
+        case .cargoYard:
+            return Color(red: 0.16, green: 0.15, blue: 0.13)
+        case .forest:
+            return Color(red: 0.10, green: 0.15, blue: 0.11)
+        case .field:
+            return Color(red: 0.13, green: 0.16, blue: 0.11)
+        case .gridDemo:
+            return GroundControlPalette.inset
         }
     }
 
@@ -295,6 +425,26 @@ private struct TerrainMapCanvas: View {
         )
     }
 
+    private func drawSignalBoundary(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let center = projection.project(.zero)
+        let radius = projection.projectedRadius(for: snapshot.signalBoundaryRadius)
+        let rect = CGRect(
+            x: center.x - radius,
+            y: center.y - radius,
+            width: radius * 2.0,
+            height: radius * 2.0
+        )
+
+        context.stroke(
+            Path(ellipseIn: rect),
+            with: .color(Color(red: 0.37, green: 0.73, blue: 0.96).opacity(0.78)),
+            style: StrokeStyle(lineWidth: 1.15, dash: [5, 4])
+        )
+    }
+
     private func drawTargetLink(
         to targetMarker: SIMD2<Float>,
         in context: inout GraphicsContext,
@@ -308,6 +458,31 @@ private struct TerrainMapCanvas: View {
             path,
             with: .color(GroundControlPalette.warning.opacity(0.82)),
             style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3])
+        )
+    }
+
+    private func drawDropZone(
+        _ dropZone: DropZoneState,
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let center = projection.project(dropZone.center)
+        let radius = projection.projectedRadius(for: dropZone.radius)
+        let rect = CGRect(
+            x: center.x - radius,
+            y: center.y - radius,
+            width: radius * 2.0,
+            height: radius * 2.0
+        )
+
+        context.fill(
+            Path(ellipseIn: rect),
+            with: .color(GroundControlPalette.warning.opacity(highlightDropZone ? 0.18 : 0.10))
+        )
+        context.stroke(
+            Path(ellipseIn: rect),
+            with: .color(highlightDropZone ? GroundControlPalette.danger : GroundControlPalette.warning),
+            style: StrokeStyle(lineWidth: highlightDropZone ? 2.2 : 1.4, dash: [6, 4])
         )
     }
 
@@ -327,17 +502,17 @@ private struct TerrainMapCanvas: View {
 
         switch object.kind {
         case .building:
-            let path = Path(roundedRect: rect, cornerRadius: 2, style: .continuous)
-            context.fill(path, with: .color(Color(red: 0.32, green: 0.56, blue: 0.78).opacity(0.72)))
-            context.stroke(path, with: .color(Color.white.opacity(0.22)), lineWidth: 0.8)
+            let path = Path(roundedRect: rect, cornerRadius: 1.5, style: .continuous)
+            context.fill(path, with: .color(Color(red: 0.56, green: 0.60, blue: 0.66).opacity(0.82)))
+            context.stroke(path, with: .color(Color.black.opacity(0.30)), lineWidth: 0.9)
         case .tree:
             let path = Path(ellipseIn: rect)
-            context.fill(path, with: .color(Color(red: 0.31, green: 0.57, blue: 0.34).opacity(0.72)))
-            context.stroke(path, with: .color(Color.black.opacity(0.24)), lineWidth: 0.6)
+            context.fill(path, with: .color(Color(red: 0.29, green: 0.56, blue: 0.30).opacity(0.72)))
+            context.stroke(path, with: .color(Color.black.opacity(0.18)), lineWidth: 0.5)
         case .rock:
-            let rockRect = rect.insetBy(dx: -0.5, dy: 0.3)
+            let rockRect = rect.insetBy(dx: -0.4, dy: 0.2)
             let path = Path(ellipseIn: rockRect)
-            context.fill(path, with: .color(Color(red: 0.55, green: 0.57, blue: 0.60).opacity(0.80)))
+            context.fill(path, with: .color(Color(red: 0.64, green: 0.66, blue: 0.68).opacity(0.70)))
             context.stroke(path, with: .color(Color.black.opacity(0.18)), lineWidth: 0.6)
         case .crate:
             let path = Path(roundedRect: rect, cornerRadius: 1.5, style: .continuous)
@@ -436,7 +611,7 @@ private struct TerrainMapCanvas: View {
     }
 }
 
-private struct TerrainMapProjection {
+struct TerrainMapProjection {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let size: CGSize
 
@@ -487,6 +662,12 @@ private struct TerrainMapProjection {
             width: max(3.0, CGFloat(footprint.x) * scale),
             height: max(3.0, CGFloat(footprint.y) * scale)
         )
+    }
+
+    func projectedRadius(for radius: Float) -> CGFloat {
+        let extent = max(1.0, snapshot.worldHalfExtent)
+        let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
+        return max(6.0, CGFloat(radius) * scale)
     }
 }
 

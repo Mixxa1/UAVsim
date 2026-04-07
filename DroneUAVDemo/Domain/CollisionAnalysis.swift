@@ -8,18 +8,7 @@ enum CollisionEmergencyAction: String {
     case emergencyStop
 
     var title: String {
-        switch self {
-        case .none:
-            return "None"
-        case .slowDown:
-            return "Slow Down"
-        case .hover:
-            return "Hover"
-        case .avoid:
-            return "Avoid"
-        case .emergencyStop:
-            return "Emergency Stop"
-        }
+        NSLocalizedString(titleKey, comment: "")
     }
 
     var titleKey: String {

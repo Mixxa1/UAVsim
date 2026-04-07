@@ -18,10 +18,10 @@ struct CompassOverlayView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("COMPASS")
+                    Text("overlay.compass.title")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textPrimary)
-                    Text("Heading / north / target bearing")
+                    Text("overlay.compass.subtitle")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
@@ -52,9 +52,9 @@ struct CompassOverlayView: View {
             )
 
             HStack(spacing: 16) {
-                metric(label: "HDG", value: "\(headingLabel)°")
-                metric(label: "N", value: "000°")
-                metric(label: "BRG", value: viewModel.targetBearingDegrees.isFinite ? "\(targetLabel)°" : "—")
+                metric(label: localized("overlay.compass.metric.heading"), value: "\(headingLabel)°")
+                metric(label: localized("overlay.compass.metric.north"), value: "000°")
+                metric(label: localized("overlay.compass.metric.bearing"), value: viewModel.targetBearingDegrees.isFinite ? "\(targetLabel)°" : "—")
             }
         }
         .padding(12)
@@ -127,7 +127,7 @@ private struct CompassRibbonView: View {
                     return
                 }
 
-                let label = normalized == 0.0 ? "N" : String(format: "%03.0f", normalized)
+                let label = normalized == 0.0 ? localized("overlay.compass.metric.north") : String(format: "%03.0f", normalized)
                 let resolvedColor = normalized == 0.0
                     ? GroundControlPalette.warning
                     : GroundControlPalette.textSecondary
@@ -145,7 +145,7 @@ private struct CompassRibbonView: View {
                 x: centerX,
                 baselineY: baselineY,
                 color: GroundControlPalette.danger,
-                label: "HDG"
+                label: localized("overlay.compass.marker.current")
             )
 
             if targetBearingDegrees.isFinite {
@@ -157,7 +157,7 @@ private struct CompassRibbonView: View {
                         x: x,
                         baselineY: baselineY,
                         color: GroundControlPalette.warning,
-                        label: "TGT"
+                        label: localized("overlay.compass.marker.target")
                     )
                 }
             }
@@ -204,4 +204,8 @@ private struct CompassRibbonView: View {
         }
         return CGFloat(corrected)
     }
+}
+
+private func localized(_ key: String) -> String {
+    NSLocalizedString(key, comment: "")
 }

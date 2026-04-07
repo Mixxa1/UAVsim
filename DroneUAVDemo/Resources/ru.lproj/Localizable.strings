@@ -11,7 +11,7 @@
 "language.russian" = "Русский";
 
 "panel.title" = "Симулятор цифрового двойника БПЛА";
-"panel.keyboard_hint" = "WASD/QE полет, Shift ускорение, 1..5 камеры, M карта, / компас, стрелки только FPV, +/- зум";
+"panel.keyboard_hint" = "WASD/QE полет, Shift ускорение, 1..6 камеры, M карта, / компас, стрелки только FPV, +/- зум";
 "panel.workflow_hint" = "Основные команды находятся в верхней ленте. Показывайте и скрывайте параметры кнопками панели.";
 "panel.toggle_collapse" = "Свернуть/развернуть панель";
 "panel.collapse" = "Свернуть панель";
@@ -23,9 +23,9 @@
 "panel.drone_profile" = "Профиль БПЛА";
 "panel.model" = "Модель";
 "panel.mass" = "Масса";
-"panel.max_flight" = "Макс. полет";
+"panel.max_flight" = "Макс. время полета";
 "panel.max_wind" = "Сопротивление ветру";
-"panel.camera_layout" = "Камерный модуль";
+"panel.camera_layout" = "Компоновка камер";
 "panel.visual_class" = "Визуальный класс";
 "panel.commands" = "Команды";
 "panel.position" = "Положение";
@@ -54,7 +54,9 @@
 "camera.mode.fpv" = "FPV";
 "camera.mode.orbit" = "Орбита";
 "camera.mode.top" = "Вид сверху";
+"camera.mode.payload" = "Сброс ПН";
 "camera.mode.top_down" = "Вид сверху";
+"camera.payload.auto_switch" = "Автопереход на камеру ПН после сброса";
 "camera.fov" = "Угол обзора";
 "camera.sensitivity" = "Чувствительность";
 "camera.smoothing" = "Сглаживание";
@@ -75,7 +77,7 @@
 "command.start_animation" = "Запустить симуляцию";
 "command.stop_animation" = "Остановить симуляцию";
 
-"weather.normal" = "Норма";
+"weather.normal" = "Обычная";
 "weather.wind" = "Ветер";
 "weather.rain" = "Дождь";
 "weather.snow" = "Снег";
@@ -90,14 +92,18 @@
 "terrain.grid_demo" = "Сетка (демо)";
 "terrain.field" = "Поле";
 "terrain.forest" = "Лес";
+"terrain.cargo_yard" = "Грузовой двор";
 "terrain.city" = "Город";
 "terrain.density" = "Плотность объектов";
-"terrain.seed" = "Сид";
+"terrain.seed" = "Сид генератора";
 "terrain.scale" = "Масштаб карты";
 "terrain.scale.4x4" = "4x4";
 "terrain.scale.8x8" = "8x8";
 "terrain.scale.16x16" = "16x16";
 "terrain.scale.32x32" = "32x32";
+"terrain.scale.64x64" = "64x64";
+"terrain.scale.128x128" = "128x128";
+"terrain.scale.256x256" = "256x256";
 "environment.boundary_barrier_visible" = "Показывать граничный барьер";
 
 "diagnostic.mode" = "Режим диагностики";
@@ -146,7 +152,7 @@
 "warning.weather_severe" = "Сложные погодные условия";
 "warning.battery_low" = "Низкий заряд батареи";
 "warning.integrity_low" = "Низкая структурная целостность";
-"warning.fixedwing_low_speed" = "Низкая скорость fixed-wing / риск сваливания";
+"warning.fixedwing_low_speed" = "Низкая скорость самолётного БПЛА / риск сваливания";
 "warning.fleet_risk" = "Риск в построении группы";
 "warning.interdrone_critical" = "Критическое сближение дронов";
 "warning.emergency" = "Активирован аварийный режим";
@@ -172,14 +178,52 @@
 "telemetry.collision_risk" = "Риск столкновения";
 "telemetry.nearest_obstacle" = "Ближайшее препятствие";
 "telemetry.emergency" = "Аварийное действие";
+"telemetry.mission_status" = "Статус миссии";
 "telemetry.damage" = "Повреждения";
 "telemetry.thermal" = "Тепловая сводка";
 "telemetry.fleet" = "Режим группы";
 "telemetry.fleet_risk" = "Риск группы";
-"telemetry.nearest_interdrone" = "Ближайший междроновый";
+"telemetry.nearest_interdrone" = "До ближайшего дрона";
 "telemetry.export" = "Экспорт телеметрии";
 "telemetry.export.success" = "Телеметрия экспортирована";
 "telemetry.export.failure" = "Ошибка экспорта телеметрии";
+
+"mission.map.open_help" = "Карта миссии";
+"mission.map.title" = "КАРТА МИССИИ";
+"mission.map.subtitle" = "Экран планирования маршрута и зоны доставки полезной нагрузки";
+"mission.map.exit" = "ВЫЙТИ ИЗ КАРТЫ";
+"mission.map.clear_route" = "ОЧИСТИТЬ МАРШРУТ";
+"mission.map.clear_drop_zone" = "ОЧИСТИТЬ ЗОНУ СБРОСА";
+"mission.map.cancel" = "ОТМЕНИТЬ";
+"mission.map.confirm" = "ПОДТВЕРДИТЬ МИССИЮ";
+"mission.map.instruction.route" = "Кликните по карте, чтобы задать целевую точку маршрута";
+"mission.map.instruction.drop_zone_center" = "Кликните по карте, чтобы задать центр зоны сброса";
+"mission.map.instruction.drop_zone_radius" = "Настройте радиус зоны и подтвердите миссию";
+"mission.map.summary.format" = "БЛА %+.1f / %+.1f   БАЗА %+.1f / %+.1f   КАРТА %.0f м";
+"mission.map.section.route" = "МАРШРУТ";
+"mission.map.section.drop_zone" = "ЗОНА СБРОСА";
+"mission.map.section.zone_radius" = "РАДИУС ЗОНЫ";
+"mission.map.section.payload_delivery" = "ДОСТАВКА ПОЛЕЗНОЙ НАГРУЗКИ";
+"mission.map.zone_radius.value" = "%.1f м";
+"mission.map.auto_release" = "Автосброс над центром зоны";
+"mission.map.payload_ready" = "Подвешенная полезная нагрузка готова к доставке";
+"mission.map.payload_unavailable" = "Для этапа доставки нет прикрепленной полезной нагрузки";
+"mission.map.active_drop_zone" = "ЗОНА ЕСТЬ";
+"mission.map.no_drop_zone" = "ЗОНЫ НЕТ";
+"mission.map.active_route" = "МАРШРУТ ЕСТЬ";
+"mission.map.no_route" = "МАРШРУТА НЕТ";
+"mission.map.footer_hint" = "Карта миссии не управляет БЛА напрямую. Подтвержденные цели передаются в существующий контур наведения.";
+"mission.map.no_route_target" = "Маршрут не задан";
+"mission.map.no_drop_zone_value" = "Зона сброса не задана";
+"mission.map.route.value.format" = "X %+.1f   Z %+.1f";
+"mission.map.drop_zone.value.format" = "ЦЕНТР %+.1f / %+.1f   R %.1f м";
+"mission.mode.navigation" = "МАРШРУТ";
+"mission.mode.drop_zone" = "ЗОНА СБРОСА";
+"mission.status.map_active" = "КАРТА МИССИИ АКТИВНА";
+"mission.status.drop_zone_set" = "ЗОНА СБРОСА ЗАДАНА";
+"mission.status.delivery_ready" = "МИССИЯ ДОСТАВКИ ГОТОВА";
+"mission.status.in_drop_zone" = "БЛА В ЗОНЕ СБРОСА";
+"mission.status.payload_released" = "ПОЛЕЗНАЯ НАГРУЗКА СБРОШЕНА";
 
 "hud.title" = "HUD телеметрии";
 "hud.telemetry" = "Телеметрия";
@@ -239,7 +283,7 @@
 "drone.camera.triple_front" = "Тройной фронтальный камерный модуль";
 "drone.camera.custom" = "Пользовательский редактируемый модуль";
 
-"ui.toggle_telemetry_hud" = "Переключить компактный HUD";
+"ui.toggle_telemetry_hud" = "Переключить компактный HUD телеметрии";
 
 "camera.zoom_sensitivity" = "Чувствительность зума";
 "camera.free_speed" = "Скорость свободной камеры";
@@ -253,11 +297,11 @@
 "camera.fpv_hide_obstructing" = "Скрывать мешающие части дрона в FPV";
 
 "keybind.section.title" = "Назначения клавиш";
-"keybind.open" = "Бинды";
+"keybind.open" = "Горячие клавиши";
 "keybind.category.flight" = "Управление полетом";
 "keybind.category.camera" = "Управление камерой";
 "keybind.category.ui" = "Управление интерфейсом";
-"keybind.category.debug" = "Отладка / оверлеи";
+"keybind.category.debug" = "Отладка / наложения";
 "keybind.flight.forward" = "Вперед";
 "keybind.flight.backward" = "Назад";
 "keybind.flight.left" = "Влево";
@@ -278,9 +322,9 @@
 "payload.console.subtitle" = "Операционный модуль полезной нагрузки для активного профиля БЛА";
 "payload.type" = "Тип ПН";
 "payload.data_source" = "Источник данных ПН";
-"payload.data.verified" = "VERIFIED";
-"payload.data.estimated" = "ESTIMATED";
-"payload.data.custom" = "CUSTOM";
+"payload.data.verified" = "ПРОВЕРЕНО";
+"payload.data.estimated" = "ОЦЕНОЧНО";
+"payload.data.custom" = "ВРУЧНУЮ";
 "payload.data.estimated_hint" = "Часть ограничений рассчитана по консервативным оценочным данным модели.";
 "payload.mass" = "Масса ПН";
 "payload.custom_name" = "Название";
@@ -320,7 +364,7 @@
 "payload.type.cargo_box" = "Грузовой контейнер";
 "payload.type.camera_gimbal" = "Камерный подвес";
 "payload.type.thermal_camera" = "Тепловизионная камера";
-"payload.type.lidar_module" = "LiDAR-модуль";
+"payload.type.lidar_module" = "Лидарный модуль";
 "payload.type.rescue_pack" = "Спасательный комплект";
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";
@@ -346,6 +390,7 @@
 "keybind.camera.mode3" = "Камера 3 (Орбита)";
 "keybind.camera.mode4" = "Камера 4 (FPV)";
 "keybind.camera.mode5" = "Камера 5 (Вид сверху)";
+"keybind.camera.mode6" = "Камера 6 (Падение ПН)";
 "keybind.camera.toggle_fpv" = "Переключить FPV";
 "keybind.camera.cycle_mode" = "Смена режима камеры";
 "keybind.camera.zoom_in" = "Приблизить";
@@ -386,6 +431,8 @@
 "keybind.rebind" = "Переназначить";
 "keybind.capturing" = "Ожидание…";
 "keybind.reset_defaults" = "Сброс по умолчанию";
+"keybind.key.space" = "Пробел";
+"keybind.key.code" = "Клавиша %d";
 
 "control_mode.title" = "Режим управления полетом";
 "control_mode.stabilized" = "Стабилизированный";
@@ -434,10 +481,10 @@
 "drone.model.fixed_rect" = "БПЛА с прямым крылом";
 "drone.model.fixed_delta" = "БПЛА дельта-крыло";
 "drone.model.fixed_swept" = "БПЛА со стреловидным крылом";
-"drone.visual.fixed_rect" = "Самолет с прямым крылом";
-"drone.visual.fixed_delta" = "Самолет дельта-крыло";
-"drone.visual.fixed_swept" = "Самолет со стреловидным крылом";
-"drone.camera.fixed_front" = "Фиксированная фронтальная камера";
+"drone.visual.fixed_rect" = "Самолётное семейство с прямым крылом";
+"drone.visual.fixed_delta" = "Самолётное семейство типа «дельта»";
+"drone.visual.fixed_swept" = "Самолётное семейство со стреловидным крылом";
+"drone.camera.fixed_front" = "Фронтальная камера самолётного БПЛА";
 
 "menu.title" = "Проекты БПЛА";
 "menu.saved_projects" = "Сохраненные проекты";
@@ -523,15 +570,15 @@
 "drone.model.wingtra_class" = "VTOL БПЛА класса Wingtra";
 "drone.model.trinity_class" = "Профессиональный БПЛА класса Trinity";
 
-"drone.visual.fixed_rect" = "Семейство fixed-wing с прямым крылом";
-"drone.visual.fixed_delta" = "Семейство fixed-wing с дельта-крылом";
-"drone.visual.fixed_swept" = "Семейство fixed-wing со стреловидным крылом";
+"drone.visual.fixed_rect" = "Самолётное семейство с прямым крылом";
+"drone.visual.fixed_delta" = "Самолётное семейство типа «дельта»";
+"drone.visual.fixed_swept" = "Самолётное семейство со стреловидным крылом";
 "drone.visual.ebee_class" = "Бесхвостая летающая платформа для картографии";
-"drone.visual.ux11_class" = "Классический fixed-wing для аэросъёмки";
+"drone.visual.ux11_class" = "Классический самолётный БПЛА для аэросъёмки";
 "drone.visual.wingtra_class" = "VTOL fixed-wing типа tailsitter";
 "drone.visual.trinity_class" = "Профессиональная survey eVTOL-платформа";
 
-"drone.camera.fixed_front" = "Фронтальная камера fixed-wing";
+"drone.camera.fixed_front" = "Фронтальная камера самолётного БПЛА";
 
 "common.not_specified" = "Не указано";
 
@@ -638,8 +685,13 @@
 "telemetry.path_status.recomputing" = "Перестроение";
 "telemetry.path_status.blocked" = "Заблокирован";
 "telemetry.auto_nav" = "Автонавигация";
-"telemetry.auto_nav.active" = "ACTIVE";
-"telemetry.auto_nav.inactive" = "INACTIVE";
+"telemetry.auto_nav.active" = "ВКЛ";
+"telemetry.auto_nav.inactive" = "ВЫКЛ";
+"telemetry.control_authority" = "Источник управления";
+"telemetry.input_flags" = "Флаги ввода";
+"telemetry.state_flags" = "Флаги состояния";
+"common.on" = "ВКЛ";
+"common.off" = "ВЫКЛ";
 "telemetry.target_distance" = "Дист. до цели";
 "telemetry.target_bearing" = "Пеленг на цель";
 "telemetry.waypoint" = "Маршрутная точка";
@@ -649,12 +701,12 @@
 "panel.modules.on" = "Модули: Вкл";
 "panel.modules.off" = "Модули: Выкл";
 
-"toolbar.cluster.status" = "Живой статус";
+"toolbar.cluster.status" = "Текущий статус";
 "toolbar.cluster.status.subtitle" = "Текущий контур управления и активный модуль";
 "toolbar.cluster.project" = "Действия проекта";
 "toolbar.cluster.project.subtitle" = "Сохранение сессии и управление окном";
 "toolbar.cluster.utility" = "Инструменты оператора";
-"toolbar.cluster.utility.subtitle" = "Бинды, HUD и язык";
+"toolbar.cluster.utility.subtitle" = "Горячие клавиши, HUD и язык";
 
 "sidebar.metric.mode" = "Режим";
 "sidebar.metric.state" = "Состояние";
@@ -664,7 +716,7 @@
 "sidebar.metric.warnings" = "Предупреждения";
 "sidebar.metric.throttle" = "Тяга";
 "sidebar.metric.preset" = "Пресет";
-"sidebar.metric.fov" = "FOV";
+"sidebar.metric.fov" = "Угол обзора";
 "sidebar.metric.distance" = "Дистанция";
 "sidebar.metric.weather" = "Погода";
 "sidebar.metric.terrain" = "Рельеф";
@@ -677,14 +729,14 @@
 "toolbar.header.project" = "Действия проекта";
 
 "module.panel.idle" = "МОДУЛИ";
-"module.panel.idle.subtitle" = "Выберите инструмент в toolbar, чтобы открыть рабочий модуль";
+"module.panel.idle.subtitle" = "Выберите инструмент на панели, чтобы открыть рабочий модуль";
 
 "module.flight_ops.title" = "ПОЛЕТНЫЕ ОПЕРАЦИИ";
 "module.flight_ops.toolbar_title" = "Полет";
 "module.flight_ops.subtitle" = "Запуск, возврат и управление тягой";
-"module.flight_ops.command_stack" = "Командный стек";
-"module.flight_ops.command_stack.subtitle" = "Основные действия по борту и автоматические режимы";
-"module.flight_ops.control_law" = "Контур управления";
+"module.flight_ops.command_stack" = "Блок команд";
+"module.flight_ops.command_stack.subtitle" = "Основные действия аппарата и автоматические режимы";
+"module.flight_ops.control_law" = "Режим управления";
 "module.flight_ops.control_law.subtitle" = "Переключение законов управления без выхода из сцены";
 "module.flight_ops.active_mode" = "АКТИВЕН";
 "module.flight_ops.thrust" = "Канал тяги";
@@ -695,7 +747,7 @@
 "module.uav_catalog.title" = "КАТАЛОГ БЛА";
 "module.uav_catalog.toolbar_title" = "БЛА";
 "module.uav_catalog.subtitle" = "Выбор платформы и активного профиля";
-"module.uav_catalog.selection" = "Срез платформ";
+"module.uav_catalog.selection" = "Сводка платформ";
 "module.uav_catalog.selection.subtitle" = "Состояние фильтра и текущего выбора";
 "module.uav_catalog.metric.active" = "Активный профиль";
 "module.uav_catalog.metric.filtered" = "После фильтра";
@@ -712,14 +764,14 @@
 "module.camera.mode_stack" = "Режимы камеры";
 "module.camera.mode_stack.subtitle" = "Рабочие режимы наблюдения за сценой";
 "module.camera.active_mode" = "В РАБОТЕ";
-"module.camera.presets" = "Стойка пресетов";
+"module.camera.presets" = "Набор пресетов";
 "module.camera.presets.subtitle" = "Миссионные пресеты и быстрый сброс вида";
 "module.camera.optics" = "Оптика";
 "module.camera.optics.subtitle" = "Дистанция камеры и угол обзора";
 "module.camera.advanced.subtitle" = "Раскрывать только при необходимости глубокой настройки";
 "module.camera.show_advanced" = "Показать расширенную настройку камеры";
 "module.camera.hide_advanced" = "Скрыть расширенную настройку камеры";
-"module.camera.fpv_stack" = "FPV-калибровка";
+"module.camera.fpv_stack" = "Параметры FPV";
 "module.camera.preset_hint.cinematic" = "Широкий и плавный ракурс для презентационного полета";
 "module.camera.preset_hint.pilot" = "Сбалансированный операторский вид для общего пилотажа";
 "module.camera.preset_hint.inspection" = "Более близкое кадрирование для осмотра объектов";
@@ -732,8 +784,8 @@
 "module.scenario.subtitle" = "Погода, местность и габариты рабочей зоны";
 "module.scenario.weather" = "Погодный профиль";
 "module.scenario.weather.subtitle" = "Пресеты и интенсивность внешних условий";
-"module.scenario.show_weather_tuning" = "Показать ветер";
-"module.scenario.hide_weather_tuning" = "Скрыть ветер";
+"module.scenario.show_weather_tuning" = "Показать параметры ветра";
+"module.scenario.hide_weather_tuning" = "Скрыть параметры ветра";
 "module.scenario.active_preset" = "АКТИВЕН";
 "module.scenario.terrain" = "Профиль местности";
 "module.scenario.terrain.subtitle" = "Масштаб карты, плотность и граничный контур";
@@ -741,14 +793,14 @@
 
 "module.diagnostics.title" = "ДИАГНОСТИКА";
 "module.diagnostics.toolbar_title" = "Диагностика";
-"module.diagnostics.subtitle" = "Телеметрия, runtime-состояния и техническое здоровье";
-"module.diagnostics.overlay" = "Overlay-режимы";
-"module.diagnostics.overlay.subtitle" = "Отрисовка runtime-слоев и диагностическая видимость";
-"module.diagnostics.runtime_summary" = "Сводка runtime";
+"module.diagnostics.subtitle" = "Телеметрия, системные состояния и техническое состояние";
+"module.diagnostics.overlay" = "Режимы наложения";
+"module.diagnostics.overlay.subtitle" = "Служебные слои и диагностическая видимость";
+"module.diagnostics.runtime_summary" = "Системная сводка";
 "module.diagnostics.runtime_summary.subtitle" = "Счетчики кадра, физики, рендера и объектной нагрузки";
-"module.diagnostics.telemetry" = "Стойка телеметрии";
+"module.diagnostics.telemetry" = "Блок телеметрии";
 "module.diagnostics.telemetry.subtitle" = "Расширенный вывод миссии, питания и производительности";
-"module.diagnostics.warning_bus" = "Шина предупреждений";
+"module.diagnostics.warning_bus" = "Лента предупреждений";
 "module.diagnostics.warning_bus.subtitle" = "Текущие тревоги от полета, батареи и среды";
 "module.diagnostics.fleet" = "Координация группы";
 "module.diagnostics.fleet.subtitle" = "Поведение ведомых и дистанция строя";
@@ -760,3 +812,49 @@
 "module.diagnostics.panel.telemetry" = "Телеметрия";
 "module.diagnostics.panel.fleet" = "Группа";
 "module.diagnostics.panel.service" = "Сервис";
+
+"project.default_name" = "Проект %@";
+"project.copy_suffix" = "копия";
+"project.clone_suffix" = "дубликат";
+
+"control_authority.none" = "НЕТ";
+"control_authority.manual" = "РУЧНОЕ";
+"control_authority.marker" = "МЕТКА";
+"control_authority.failsafe" = "АВАРИЙНЫЙ";
+"control_authority.blocked" = "БЛОК";
+
+"payload_camera.state.inactive" = "ВЫКЛ";
+"payload_camera.state.falling" = "ПАДЕНИЕ";
+"payload_camera.state.impact" = "УДАР";
+"payload_camera.state.rest" = "ПОКОЙ";
+
+"overlay.payload_view.title" = "КАМЕРА ПН";
+"overlay.payload_view.metric.alt" = "ВЫС";
+"overlay.payload_view.metric.vertical_speed" = "V/S";
+"overlay.payload_view.metric.time" = "ВРЕМ";
+"overlay.payload_view.metric.state" = "СТАТ";
+
+"overlay.terrain_map.title" = "КАРТА МЕСТНОСТИ";
+"overlay.terrain_map.subtitle" = "Обзор препятствий и одиночная целевая метка";
+"overlay.terrain_map.clear" = "СБР";
+"overlay.terrain_map.target_metrics.empty" = "ДИСТ —   ПЕЛ —";
+"overlay.terrain_map.target_metrics.format" = "ДИСТ %.1f м   ПЕЛ %03.0f°";
+"overlay.terrain_map.heading_alt_objects.format" = "КУР %@°   ВЫС %.1f м   ОБЪ %d";
+"overlay.terrain_map.position_map.format" = "X %+.1f   Z %+.1f   КАРТА %@";
+"overlay.terrain_map.status.format" = "СИГ %@   АВТОНАВ %@";
+
+"overlay.compass.title" = "КОМПАС";
+"overlay.compass.subtitle" = "Курс / север / пеленг цели";
+"overlay.compass.metric.heading" = "КУР";
+"overlay.compass.metric.north" = "С";
+"overlay.compass.metric.bearing" = "ПЕЛ";
+"overlay.compass.marker.current" = "КУР";
+"overlay.compass.marker.target" = "ЦЕЛ";
+
+"hud.compact.position" = "ПОЗ  x %.1f  y %.1f  z %.1f";
+"hud.compact.speed_battery" = "СКР  %.1f м/с   АКБ %.0f%%";
+"hud.compact.auto_nav" = "АВТО %@  ДИСТ %@  ПЕЛ %@";
+
+"telemetry.flags.input.format" = "РУЧ %@ | МЕТ %@ | ПН %@ | КАРТ %@";
+"telemetry.flags.state.format" = "РАЗ %@ | БЛК %@ | СИГ %@";
+"telemetry.flags.mission.format" = "КАРТ %@ | ЗС %@ | ГОТ %@ | В %@ | СБР %@";

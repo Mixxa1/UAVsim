@@ -511,14 +511,19 @@ final class AutoPathPlannerService {
         let base: Float
         switch terrain.mapScale {
         case .x4:
-            base = 1.0
+            base = 1.25
         case .x8:
-            base = 1.3
+            base = 1.45
         case .x16:
-            base = 1.8
+            base = 1.85
         case .x32:
-            base = 2.4
-
+            base = 2.15
+        case .x64:
+            base = 2.35
+        case .x128:
+            base = 2.75
+        case .x256:
+            base = 3.35
         }
 
         let densityAdjustment: Float = terrain.density > 0.75 ? 0.28 : (terrain.density > 0.55 ? 0.14 : 0.0)
@@ -764,6 +769,8 @@ final class AutoPathPlannerService {
             hasher.combine(Int((obstacle.center.y * 10.0).rounded()))
             hasher.combine(Int((obstacle.center.z * 10.0).rounded()))
             hasher.combine(Int((obstacle.radius * 10.0).rounded()))
+            hasher.combine(Int((obstacle.baseY * 10.0).rounded()))
+            hasher.combine(Int((obstacle.topY * 10.0).rounded()))
             hasher.combine(obstacle.source)
         }
         return hasher.finalize()

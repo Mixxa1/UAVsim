@@ -10,9 +10,9 @@ struct CompactTelemetryHUDView: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(GroundControlPalette.textSecondary)
 
-            Text(String(format: "POS  x %.1f  y %.1f  z %.1f", telemetry.x, telemetry.y, telemetry.z))
+            Text(String(format: localized("hud.compact.position"), telemetry.x, telemetry.y, telemetry.z))
                 .font(.caption2.monospaced())
-            Text(String(format: "SPD  %.1f m/s   BAT %.0f%%", telemetry.speed, telemetry.batteryPercent))
+            Text(String(format: localized("hud.compact.speed_battery"), telemetry.speed, telemetry.batteryPercent))
                 .font(.caption2.monospaced())
             if telemetry.autoNavigationActive || telemetry.targetDistanceMeters.isFinite {
                 Text(autoNavigationLine)
@@ -43,8 +43,8 @@ struct CompactTelemetryHUDView: View {
 
     private var autoNavigationLine: String {
         let state = telemetry.autoNavigationActive
-            ? NSLocalizedString("telemetry.auto_nav.active", comment: "")
-            : NSLocalizedString("telemetry.auto_nav.inactive", comment: "")
+            ? localized("telemetry.auto_nav.active")
+            : localized("telemetry.auto_nav.inactive")
         let distanceText = telemetry.targetDistanceMeters.isFinite
             ? String(format: "%.1f m", telemetry.targetDistanceMeters)
             : "—"
@@ -52,6 +52,15 @@ struct CompactTelemetryHUDView: View {
             ? String(format: "%03.0f°", telemetry.targetBearingDegrees)
             : "—"
 
-        return "AUTO \(state)  DST \(distanceText)  BRG \(bearingText)"
+        return String(
+            format: localized("hud.compact.auto_nav"),
+            state,
+            distanceText,
+            bearingText
+        )
     }
+}
+
+private func localized(_ key: String) -> String {
+    NSLocalizedString(key, comment: "")
 }

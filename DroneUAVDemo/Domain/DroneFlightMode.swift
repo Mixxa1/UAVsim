@@ -10,22 +10,7 @@ enum DroneFlightMode: String, CaseIterable {
     case landing
 
     var title: String {
-        switch self {
-        case .manual:
-            return "Manual"
-        case .autoPath:
-            return "Auto-Path"
-        case .returnHome:
-            return "Return/Home"
-        case .hover:
-            return "Hover"
-        case .emergencyStop:
-            return "Emergency Stop"
-        case .takeoff:
-            return "Takeoff"
-        case .landing:
-            return "Landing"
-        }
+        NSLocalizedString(titleKey, comment: "")
     }
 
     var titleKey: String {
@@ -56,14 +41,7 @@ enum FlightControlMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .stabilized:
-            return "Angle"
-        case .acro:
-            return "Acro"
-        case .hoverAssist:
-            return "Hover Assist"
-        }
+        NSLocalizedString(titleKey, comment: "")
     }
 
     var titleKey: String {
