@@ -1,0 +1,88 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/MissionMapView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "mission.map.title",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 76
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.subtitle",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.no_route_target",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 270
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.no_drop_zone_value",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 281
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.section.zone_radius",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 182
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.section.payload_delivery",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 211
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.payload_ready",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 229
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.payload_unavailable",
+        "location": {
+          "startingColumn": 45,
+          "startingLine": 230
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.auto_release",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 221
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.footer_hint",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 252
+        }
+      }
+    ]
+  },
+  "version": 1
+}

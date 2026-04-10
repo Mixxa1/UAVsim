@@ -119,6 +119,32 @@ struct DiagnosticsModuleView: View {
                     }
                 }
             }
+
+            ModuleSection(
+                titleKey: "module.diagnostics.mission",
+                subtitleKey: "module.diagnostics.mission.subtitle"
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    MissionSafetyPanel(
+                        snapshot: viewModel.missionStatusSnapshot,
+                        showsWarningList: true
+                    )
+
+                    if let explanation = viewModel.missionStatusSnapshot.primaryExplanation {
+                        MissionFailureView(explanation: explanation)
+                    }
+                }
+            }
+
+            ModuleSection(
+                titleKey: "module.diagnostics.mission_history",
+                subtitleKey: "module.diagnostics.mission_history.subtitle"
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    MissionTimelineView(timeline: viewModel.missionTimeline)
+                    MissionDebriefView(debrief: viewModel.missionDebrief)
+                }
+            }
         }
     }
 

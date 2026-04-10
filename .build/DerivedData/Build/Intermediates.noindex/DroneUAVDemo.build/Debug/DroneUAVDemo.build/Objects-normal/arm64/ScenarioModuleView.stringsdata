@@ -1,0 +1,48 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/ScenarioModuleView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "module.scenario.hide_weather_tuning",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.scenario.show_weather_tuning",
+        "location": {
+          "startingColumn": 94,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.terrain",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 119
+        }
+      },
+      {
+        "comment": "",
+        "key": "terrain.scale",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 129
+        }
+      },
+      {
+        "comment": "",
+        "key": "environment.boundary_barrier_visible",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 152
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -186,6 +186,14 @@ private enum SignalLossConfiguration {
 }
 
 extension DroneSimulationViewModel {
+    struct TerrainMapMissionWaypoint: Identifiable, Equatable {
+        let id: UUID
+        let label: String
+        let position: SIMD2<Float>
+        let isActive: Bool
+        let isCompleted: Bool
+    }
+
     struct TerrainMapObject: Identifiable, Equatable {
         let id: UUID
         let kind: EnvironmentObjectKind
@@ -202,6 +210,9 @@ extension DroneSimulationViewModel {
         let droneYawRadians: Float
         let droneAltitude: Float
         let targetMarkerPosition: SIMD2<Float>?
+        let missionRoutePoints: [SIMD2<Float>]
+        let missionWaypoints: [TerrainMapMissionWaypoint]
+        let noFlyZones: [MissionZone]
         let trail: [SIMD2<Float>]
         let objects: [TerrainMapObject]
 
@@ -214,6 +225,9 @@ extension DroneSimulationViewModel {
             droneYawRadians: 0.0,
             droneAltitude: 0.0,
             targetMarkerPosition: nil,
+            missionRoutePoints: [],
+            missionWaypoints: [],
+            noFlyZones: [],
             trail: [],
             objects: []
         )
@@ -281,6 +295,13 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var missionPlanState: MissionPlanningState
     @Published private(set) var missionPlanningDraft: MissionPlanningState
     @Published private(set) var isInMissionDropZone: Bool
+    @Published private(set) var tacticalMapState: TacticalMapState
+    @Published private(set) var tacticalMapMode: TacticalMapMode
+    @Published private(set) var currentMissionPlan: MissionPlan?
+    @Published private(set) var missionExecutionState: MissionExecutionState
+    @Published private(set) var missionStatusSnapshot: MissionStatusSnapshot
+    @Published private(set) var missionTimeline: MissionTimeline?
+    @Published private(set) var missionDebrief: MissionDebrief?
     @Published private(set) var isCompassVisible: Bool
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
@@ -376,6 +397,23 @@ final class DroneSimulationViewModel: ObservableObject {
     private let flightControlRouter: FlightControlRouter
     private let autoNavigationController: AutoNavigationController
     private let payloadCameraController: PayloadCameraController
+    private let tacticalMapCoordinator = TacticalMapCoordinator()
+    private let missionDraftBuilder = MissionDraftBuilder()
+    private let missionPreviewBuilder = MissionPreviewBuilder()
+    private let missionPlanBuilder = MissionPlanBuilder()
+    private let missionExecutionBinder = MissionExecutionBinder()
+    private let missionExecutionCoordinator = MissionExecutionCoordinator()
+    private let missionAutopilotAdapter = MissionAutopilotAdapter()
+    private let missionProgressTracker = MissionProgressTracker()
+    private let missionAuthorityGuard = MissionAuthorityGuard()
+    private let missionRuntimeMonitor = MissionRuntimeMonitor()
+    private let missionSafetyEvaluator = MissionSafetyEvaluator()
+    private let missionFailsafeCoordinator = MissionFailsafeCoordinator()
+    private let missionStatusResolver = MissionStatusResolver()
+    private let missionEventRecorder = MissionEventRecorder()
+    private let missionDebriefService = MissionDebriefService()
+    private let missionEventMapper = MissionEventMapper()
+    private let missionPersistenceAdapter = MissionPersistenceAdapter()
 
     private var state: DroneState
     private var lastFiniteState: DroneState
@@ -413,11 +451,74 @@ final class DroneSimulationViewModel: ObservableObject {
     private var installedPayloadConfiguration: PayloadConfiguration?
     private var activePayloadReleaseID: UUID?
     private var lastSidebarModule: ControlModule = .flightOps
+    private var committedTacticalMissionDraft: MissionDraft = .empty
+    private var workingTacticalMissionDraft: MissionDraft = .empty
+    private var missionSafetyState: MissionSafetyState = .idle
+    private var activeRouteTargetSource: ActiveRouteTargetSource = .none
+    private var missionObservation = MissionObservationAccumulator()
+
+    private enum ActiveRouteTargetSource {
+        case none
+        case manualMarker
+        case mission
+    }
 
     private enum ObstacleImpactClass {
         case foliage
         case softSurface
         case hardSurface
+    }
+
+    private struct MissionObservationAccumulator {
+        var startBatteryPercent: Float?
+        var totalDistanceMeters: Float
+        var maxAltitudeMeters: Float
+        var altitudeSumMeters: Float
+        var altitudeSamples: Int
+        var lastPosition: SIMD3<Float>?
+
+        init() {
+            self.startBatteryPercent = nil
+            self.totalDistanceMeters = 0.0
+            self.maxAltitudeMeters = 0.0
+            self.altitudeSumMeters = 0.0
+            self.altitudeSamples = 0
+            self.lastPosition = nil
+        }
+
+        mutating func begin(position: SIMD3<Float>, batteryPercent: Float) {
+            startBatteryPercent = batteryPercent
+            totalDistanceMeters = 0.0
+            maxAltitudeMeters = max(0.0, position.y)
+            altitudeSumMeters = max(0.0, position.y)
+            altitudeSamples = 1
+            lastPosition = position
+        }
+
+        mutating func resume(position: SIMD3<Float>) {
+            lastPosition = position
+        }
+
+        mutating func sample(position: SIMD3<Float>) {
+            if let lastPosition {
+                totalDistanceMeters += simd_distance(position, lastPosition)
+            }
+            self.lastPosition = position
+            maxAltitudeMeters = max(maxAltitudeMeters, max(0.0, position.y))
+            altitudeSumMeters += max(0.0, position.y)
+            altitudeSamples += 1
+        }
+
+        mutating func reset() {
+            self = MissionObservationAccumulator()
+        }
+
+        var averageAltitudeMeters: Float {
+            guard altitudeSamples > 0 else {
+                return 0.0
+            }
+            return altitudeSumMeters / Float(altitudeSamples)
+        }
     }
 
     init(
@@ -582,6 +683,13 @@ final class DroneSimulationViewModel: ObservableObject {
         self.missionPlanState = .empty
         self.missionPlanningDraft = .empty
         self.isInMissionDropZone = false
+        self.tacticalMapState = .empty
+        self.tacticalMapMode = .waypoint
+        self.currentMissionPlan = nil
+        self.missionExecutionState = .idle
+        self.missionStatusSnapshot = .empty
+        self.missionTimeline = nil
+        self.missionDebrief = nil
         self.isCompassVisible = false
         self.payloadCameraStatus = .inactive
         self.isPayloadCameraAutoSwitchEnabled = false
@@ -607,8 +715,10 @@ final class DroneSimulationViewModel: ObservableObject {
         lastFiniteState = state
         resetTerrainMapTrail()
         refreshTerrainMapSnapshot(recordTrail: false)
+        refreshTacticalMapState()
         refreshCompassOverlay()
         refreshFlightControlDiagnostics()
+        refreshMissionStatus()
         telemetry = buildTelemetrySnapshot()
 
         logAvailableUAVCatalog(models: models)
@@ -750,6 +860,19 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         refreshPayloadCameraStatus()
         refreshPayloadRuntimeState()
+        if missionEventRecorder.currentTimeline != nil {
+            recordMissionEvents([
+                missionEventMapper.payloadTriggeredEvent(
+                    missionID: currentMissionPlan?.id,
+                    projectID: currentProjectID,
+                    projectName: currentProjectName,
+                    payloadState: payloadState,
+                    statusSnapshot: missionStatusSnapshot,
+                    batteryState: batteryState,
+                    detailKey: payloadStatusMessageKey
+                )
+            ])
+        }
         hasUnsavedChanges = true
     }
 
@@ -1114,20 +1237,368 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func openMissionMap() {
         refreshTerrainMapSnapshot(recordTrail: false)
-        missionPlanningDraft = missionPlanState
-        missionMapMode = .navigation
+        workingTacticalMissionDraft = committedTacticalMissionDraft
+        tacticalMapMode = .waypoint
         isMissionMapVisible = true
+        refreshTacticalMapState()
         refreshFlightControlDiagnostics()
     }
 
     func exitMissionMap() {
-        missionPlanningDraft = missionPlanState
+        workingTacticalMissionDraft = committedTacticalMissionDraft
         isMissionMapVisible = false
+        refreshTacticalMapState()
         refreshFlightControlDiagnostics()
     }
 
     func cancelMissionPlanningChanges() {
-        missionPlanningDraft = missionPlanState
+        workingTacticalMissionDraft = committedTacticalMissionDraft
+        refreshTacticalMapState()
+    }
+
+    func setTacticalMapMode(_ mode: TacticalMapMode) {
+        guard tacticalMapMode != mode else {
+            return
+        }
+
+        tacticalMapMode = mode
+        refreshTacticalMapState()
+    }
+
+    func handleTacticalMapTap(at planarPosition: SIMD2<Float>) {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        let viewport = currentTacticalMapViewport()
+        if let zoneType = tacticalMapMode.zoneType {
+            workingTacticalMissionDraft = missionDraftBuilder.upsertZone(
+                type: zoneType,
+                center: planarPosition,
+                in: workingTacticalMissionDraft,
+                viewport: viewport
+            )
+        } else {
+            workingTacticalMissionDraft = missionDraftBuilder.addWaypoint(
+                at: planarPosition,
+                to: workingTacticalMissionDraft,
+                viewport: viewport
+            )
+        }
+
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    func removeLastTacticalWaypoint() {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        workingTacticalMissionDraft = missionDraftBuilder.removeLastWaypoint(
+            from: workingTacticalMissionDraft
+        )
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    func clearTacticalRoute() {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        workingTacticalMissionDraft = missionDraftBuilder.clearRoute(
+            from: workingTacticalMissionDraft
+        )
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    func clearTacticalZones() {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        workingTacticalMissionDraft = missionDraftBuilder.clearZones(
+            from: workingTacticalMissionDraft
+        )
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    func setTacticalZoneRadius(
+        type: MissionZoneType,
+        radius: Float
+    ) {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        workingTacticalMissionDraft = missionDraftBuilder.setZoneRadius(
+            radius,
+            for: type,
+            in: workingTacticalMissionDraft,
+            viewport: currentTacticalMapViewport()
+        )
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    func setTacticalMinimumAltitude(_ altitudeMeters: Float) {
+        updateWorkingMissionConstraints { constraints in
+            constraints.altitude.minimumMeters = max(0.0, altitudeMeters)
+            constraints.altitude.maximumMeters = max(
+                constraints.altitude.minimumMeters,
+                constraints.altitude.maximumMeters
+            )
+        }
+    }
+
+    func setTacticalMaximumAltitude(_ altitudeMeters: Float) {
+        updateWorkingMissionConstraints { constraints in
+            constraints.altitude.maximumMeters = max(0.0, altitudeMeters)
+            constraints.altitude.minimumMeters = min(
+                constraints.altitude.minimumMeters,
+                constraints.altitude.maximumMeters
+            )
+        }
+    }
+
+    func setTacticalMinimumSpeed(_ speedMetersPerSecond: Float) {
+        updateWorkingMissionConstraints { constraints in
+            constraints.speed.minimumMetersPerSecond = max(0.0, speedMetersPerSecond)
+            constraints.speed.maximumMetersPerSecond = max(
+                constraints.speed.minimumMetersPerSecond,
+                constraints.speed.maximumMetersPerSecond
+            )
+        }
+    }
+
+    func setTacticalMaximumSpeed(_ speedMetersPerSecond: Float) {
+        updateWorkingMissionConstraints { constraints in
+            constraints.speed.maximumMetersPerSecond = max(0.1, speedMetersPerSecond)
+            constraints.speed.minimumMetersPerSecond = min(
+                constraints.speed.minimumMetersPerSecond,
+                constraints.speed.maximumMetersPerSecond
+            )
+        }
+    }
+
+    func saveTacticalMissionDraft() {
+        guard tacticalMapState.draftStatus.canSave else {
+            refreshTacticalMapState()
+            return
+        }
+
+        committedTacticalMissionDraft = workingTacticalMissionDraft
+        hasUnsavedChanges = true
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    private func updateWorkingMissionConstraints(
+        _ update: (inout MissionConstraints) -> Void
+    ) {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        var nextDraft = workingTacticalMissionDraft
+        update(&nextDraft.constraints)
+        workingTacticalMissionDraft = nextDraft
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    func prepareMission() {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        let draft = isMissionMapVisible
+            ? workingTacticalMissionDraft
+            : committedTacticalMissionDraft
+        let plan = missionPlanBuilder.buildPlan(
+            from: draft,
+            viewport: currentTacticalMapViewport()
+        )
+        currentMissionPlan = plan
+        missionRuntimeMonitor.reset()
+        if plan.isReadyForExecution {
+            let binding = missionExecutionBinder.bind(
+                plan: plan,
+                currentPosition: currentPlanarPosition()
+            )
+            missionExecutionState = missionExecutionCoordinator.prepare(
+                plan: plan,
+                binding: binding
+            )
+        } else {
+            missionExecutionState = .idle
+        }
+        refreshMissionStatus()
+        beginMissionTimelineSession(for: plan)
+        recordMissionEvents(
+            missionEventMapper.preparedEvents(
+                plan: plan,
+                projectID: currentProjectID,
+                projectName: currentProjectName,
+                statusSnapshot: missionStatusSnapshot,
+                batteryState: batteryState
+            )
+        )
+    }
+
+    func startMissionExecution() {
+        recordMissionEvents([
+            missionEventMapper.missionStartRequestedEvent(
+                plan: currentMissionPlan,
+                projectID: currentProjectID,
+                projectName: currentProjectName,
+                statusSnapshot: missionStatusSnapshot,
+                batteryState: batteryState
+            )
+        ])
+        refreshMissionStatus()
+
+        guard currentMissionPlan != nil,
+              missionExecutionState.canStart,
+              missionStatusSnapshot.canStart else {
+            refreshMissionStatus()
+            recordMissionStartBlockedEvent(plan: currentMissionPlan)
+            return
+        }
+
+        let previousExecutionState = missionExecutionState
+        let previousSafetyState = missionSafetyState
+        let previousSnapshot = missionStatusSnapshot
+
+        guard canBindMissionTargetToAutopilot else {
+            missionExecutionState = missionExecutionCoordinator.blocked(
+                from: missionExecutionState,
+                reason: missionSafetyState.blockReason?.failureReason ?? .missionStartBlocked,
+                detailKey: missionSafetyState.blockReason?.detailKey ?? "mission.status.reason.mission_start_blocked"
+            )
+            refreshMissionStatus()
+            recordMissionStateTransitions(
+                previousExecutionState: previousExecutionState,
+                previousSafetyState: previousSafetyState,
+                previousSnapshot: previousSnapshot
+            )
+            return
+        }
+
+        missionExecutionState = missionExecutionCoordinator.start(
+            state: missionExecutionState
+        )
+        missionRuntimeMonitor.reset()
+        if let activeTarget = missionExecutionState.activeTarget {
+            bindMissionExecutionTarget(activeTarget, startNavigation: true)
+        }
+        missionPlanState = .empty
+        refreshMissionStatus()
+        recordMissionStateTransitions(
+            previousExecutionState: previousExecutionState,
+            previousSafetyState: previousSafetyState,
+            previousSnapshot: previousSnapshot
+        )
+    }
+
+    func pauseMissionExecution() {
+        guard missionExecutionState.canPause else {
+            refreshMissionStatus()
+            return
+        }
+
+        let previousExecutionState = missionExecutionState
+        let previousSafetyState = missionSafetyState
+        let previousSnapshot = missionStatusSnapshot
+        missionExecutionState = missionExecutionCoordinator.pause(
+            state: missionExecutionState
+        )
+        enterMissionExecutionHold()
+        refreshMissionStatus()
+        recordMissionStateTransitions(
+            previousExecutionState: previousExecutionState,
+            previousSafetyState: previousSafetyState,
+            previousSnapshot: previousSnapshot
+        )
+    }
+
+    func resumeMissionExecution() {
+        refreshMissionStatus()
+
+        guard missionExecutionState.canResume else {
+            refreshMissionStatus()
+            return
+        }
+        let previousExecutionState = missionExecutionState
+        let previousSafetyState = missionSafetyState
+        let previousSnapshot = missionStatusSnapshot
+        guard missionStatusSnapshot.canResume,
+              canBindMissionTargetToAutopilot,
+              let activeTarget = missionExecutionState.activeTarget else {
+            missionExecutionState = missionExecutionCoordinator.blocked(
+                from: missionExecutionState,
+                reason: missionSafetyState.blockReason?.failureReason ?? .missionStartBlocked,
+                detailKey: missionSafetyState.blockReason?.detailKey ?? "mission.status.reason.mission_start_blocked"
+            )
+            refreshMissionStatus()
+            recordMissionStateTransitions(
+                previousExecutionState: previousExecutionState,
+                previousSafetyState: previousSafetyState,
+                previousSnapshot: previousSnapshot
+            )
+            return
+        }
+
+        missionExecutionState = missionExecutionCoordinator.resume(
+            state: missionExecutionState
+        )
+        missionRuntimeMonitor.reset()
+        bindMissionExecutionTarget(activeTarget, startNavigation: true)
+        refreshMissionStatus()
+        recordMissionStateTransitions(
+            previousExecutionState: previousExecutionState,
+            previousSafetyState: previousSafetyState,
+            previousSnapshot: previousSnapshot
+        )
+    }
+
+    func abortMissionExecution() {
+        guard missionExecutionState.canAbort else {
+            refreshMissionStatus()
+            return
+        }
+
+        let previousExecutionState = missionExecutionState
+        let previousSafetyState = missionSafetyState
+        let previousSnapshot = missionStatusSnapshot
+        missionExecutionState = missionExecutionCoordinator.abort(
+            state: missionExecutionState
+        )
+        enterMissionExecutionHold()
+        missionRuntimeMonitor.reset()
+        refreshMissionStatus()
+        recordMissionStateTransitions(
+            previousExecutionState: previousExecutionState,
+            previousSafetyState: previousSafetyState,
+            previousSnapshot: previousSnapshot
+        )
     }
 
     func setMissionMapMode(_ mode: MissionMapMode) {
@@ -1178,9 +1649,17 @@ final class DroneSimulationViewModel: ObservableObject {
         isInMissionDropZone = missionPlanState.dropZone?.contains(currentPlanarPosition()) ?? false
 
         if let routeTarget = nextPlan.routeTarget {
-            applyActiveRouteTarget(routeTarget, startNavigationIfPossible: true)
+            applyActiveRouteTarget(
+                routeTarget,
+                source: .manualMarker,
+                startNavigationIfPossible: true
+            )
         } else {
-            applyActiveRouteTarget(nil, startNavigationIfPossible: false)
+            applyActiveRouteTarget(
+                nil,
+                source: .none,
+                startNavigationIfPossible: false
+            )
         }
 
         hasUnsavedChanges = true
@@ -1193,21 +1672,39 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTargetMarker(at planarPosition: SIMD2<Float>) {
+        guard !missionExecutionState.isMissionActive else {
+            refreshMissionStatus()
+            return
+        }
+
         let marker = TargetMarkerState(position: clampedPlanarPosition(planarPosition))
         missionPlanState.routeTarget = marker
         if isMissionMapVisible {
             missionPlanningDraft.routeTarget = marker
         }
-        applyActiveRouteTarget(marker, startNavigationIfPossible: true)
+        applyActiveRouteTarget(
+            marker,
+            source: .manualMarker,
+            startNavigationIfPossible: true
+        )
         hasUnsavedChanges = true
     }
 
     func clearTargetMarker() {
+        guard activeRouteTargetSource != .mission else {
+            refreshMissionStatus()
+            return
+        }
+
         missionPlanState.routeTarget = nil
         if isMissionMapVisible {
             missionPlanningDraft.routeTarget = nil
         }
-        applyActiveRouteTarget(nil, startNavigationIfPossible: false)
+        applyActiveRouteTarget(
+            nil,
+            source: .none,
+            startNavigationIfPossible: false
+        )
         hasUnsavedChanges = true
     }
 
@@ -1920,6 +2417,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         syncMissionDeliveryState(triggerAutoRelease: true)
+        updateMissionExecutionRuntime()
 
         let maneuverAggressiveness = (abs(Float(controlValues.roll)) + abs(Float(controlValues.pitch))) / 120.0
         batteryState = batteryThermalService.updateBattery(
@@ -1955,6 +2453,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 showBatteryDepletedDialog = true
             }
         }
+
+        applyMissionSafetyRuntimeIfNeeded()
+        sampleMissionObservationIfNeeded()
 
         let renderStart = CACurrentMediaTime()
         sceneController.applyWeatherVisual(weather)
@@ -2039,6 +2540,8 @@ final class DroneSimulationViewModel: ObservableObject {
            simd_length(state.velocity) > 0.03 || abs(state.throttle) > 0.02 || mode != .manual {
             hasUnsavedChanges = true
         }
+
+        refreshMissionStatus()
 
         autosaveAccumulator += dt
         if autosaveAccumulator >= 6.0 {
@@ -2406,6 +2909,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 setCameraMode(.payload)
             case .toggleFPV:
                 setCameraMode(cameraConfiguration.mode == .fpv ? .follow : .fpv)
+            case .toggleMissionMap:
+                toggleMissionMap()
+            case .togglePayloadPanel:
+                togglePayloadPanel()
             case .toggleTerrainMap:
                 toggleTerrainMap()
             case .toggleCompassOverlay:
@@ -2534,7 +3041,9 @@ final class DroneSimulationViewModel: ObservableObject {
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.throttle = max(max(0.28, hoverBaseline - 0.04), min(values.throttle, hoverBaseline + 0.06))
+                values.yaw = Double(state.orientation.z.radiansToDegrees)
+                let throttleTarget = hoverBaseline.clamped(to: 0.0...1.0)
+                values.throttle = values.throttle + (throttleTarget - values.throttle) * 0.18
             }, markManual: false)
 
         case .emergencyStop:
@@ -2644,10 +3153,20 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func keyboardAxisInput(from directive: AutoNavigationDirective) -> KeyboardAxisInput {
         let axisIntent = directive.axisIntent
-        let speedBoost = autoNavigationController.phase == .takeoff || abs(axisIntent.vertical) > 0.72
+        let speedEnvelope = missionAutopilotAdapter.controlEnvelope(
+            for: activeMissionAutopilotPlan,
+            currentHorizontalSpeed: simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)),
+            profileMaxSpeed: selectedDroneProfile.maxHorizontalSpeedMps
+        )
+        let shouldBoostForMissionSpeed = directive.distanceToTarget > 1.5 &&
+            autoNavigationController.phase != .hold &&
+            speedEnvelope.forceSpeedBoost
+        let speedBoost = autoNavigationController.phase == .takeoff ||
+            abs(axisIntent.vertical) > 0.72 ||
+            shouldBoostForMissionSpeed
         return KeyboardAxisInput(
-            forward: axisIntent.forward.clamped(to: -1.0...1.0),
-            strafe: axisIntent.strafe.clamped(to: -1.0...1.0),
+            forward: (axisIntent.forward * speedEnvelope.axisScale).clamped(to: -1.0...1.0),
+            strafe: (axisIntent.strafe * speedEnvelope.axisScale).clamped(to: -1.0...1.0),
             vertical: axisIntent.vertical.clamped(to: -1.0...1.0),
             speedBoost: speedBoost
         )
@@ -3108,6 +3627,10 @@ final class DroneSimulationViewModel: ObservableObject {
         guard targetMarkerState != nil else {
             return false
         }
+        return canBindMissionTargetToAutopilot
+    }
+
+    private var canBindMissionTargetToAutopilot: Bool {
         guard isArmed, !signalState.isInteractionBlocking else {
             return false
         }
@@ -3122,20 +3645,30 @@ final class DroneSimulationViewModel: ObservableObject {
         navigationSnapshot = .idle
     }
 
+    private var activeMissionAutopilotPlan: MissionPlan? {
+        activeRouteTargetSource == .mission ? currentMissionPlan : nil
+    }
+
     private func targetMarkerTravelAltitude() -> Float {
-        let maxAltitude = max(6.0, terrain.maxFlightAltitude - 2.0)
+        let executionCeiling = max(6.0, terrain.maxFlightAltitude - 2.0)
+        let baselineAltitude: Float
         switch selectedDroneProfile.airframeClass {
         case .multirotor:
-            return min(
-                maxAltitude,
+            baselineAltitude = min(
+                executionCeiling,
                 max(3.4, homePosition.y + 4.0, state.position.y + (physicalState.isGroundRestState ? 3.0 : 0.8))
             )
         case .fixedWing:
-            return min(
-                maxAltitude,
+            baselineAltitude = min(
+                executionCeiling,
                 max(10.0, homePosition.y + 8.0, state.position.y + 3.4)
             )
         }
+        return missionAutopilotAdapter.resolvedTravelAltitude(
+            for: activeMissionAutopilotPlan,
+            baselineAltitude: baselineAltitude,
+            terrainMaxAltitude: executionCeiling
+        )
     }
 
     private func buildFlightInputState(from snapshot: KeyboardInputSnapshot) -> FlightInputState {
@@ -3173,6 +3706,7 @@ final class DroneSimulationViewModel: ObservableObject {
             inputState: inputState,
             context: context
         )
+        refreshMissionStatus()
     }
 
     private func resolvedFlightControlMode(for authority: FlightControlAuthority) -> FlightControlMode {
@@ -3362,7 +3896,9 @@ final class DroneSimulationViewModel: ObservableObject {
             selectedDamageComponentRaw: damageState.selectedComponent?.rawValue,
             thermalByComponent: Dictionary(
                 uniqueKeysWithValues: thermalState.temperatureByComponent.map { ($0.key.rawValue, $0.value) }
-            )
+            ),
+            missionTimeline: missionPersistenceAdapter.timelineForPersistence(missionTimeline),
+            missionDebrief: missionPersistenceAdapter.debriefForPersistence(missionDebrief)
         )
     }
 
@@ -3543,6 +4079,10 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         let thermalByComponent = Dictionary(uniqueKeysWithValues: thermalPairs)
         thermalState = ThermalState(temperatureByComponent: thermalByComponent)
+        missionTimeline = missionPersistenceAdapter.restoreTimeline(snapshot.missionTimeline)
+        missionDebrief = missionPersistenceAdapter.restoreDebrief(snapshot.missionDebrief)
+        missionEventRecorder.restore(timeline: missionTimeline)
+        missionObservation.reset()
 
         homePosition = state.position
         wingmen.removeAll()
@@ -3615,6 +4155,21 @@ final class DroneSimulationViewModel: ObservableObject {
                 activePayloadReleaseID = nil
             }
             didApplyEvent = true
+
+            if missionEventRecorder.currentTimeline != nil,
+               event.state == .landed || event.state == .cleanedUp {
+                recordMissionEvents([
+                    missionEventMapper.payloadCompletedEvent(
+                        missionID: currentMissionPlan?.id,
+                        projectID: currentProjectID,
+                        projectName: currentProjectName,
+                        payloadState: event.state,
+                        statusSnapshot: missionStatusSnapshot,
+                        batteryState: batteryState,
+                        detailKey: event.messageKey
+                    )
+                ])
+            }
         }
 
         if didApplyEvent {
@@ -3772,6 +4327,8 @@ final class DroneSimulationViewModel: ObservableObject {
         let dronePlanarPosition = SIMD2<Float>(safePosition.x, safePosition.z)
         let dock = sceneController.currentDockSpawnPoint()
         let extent = max(1.0, terrain.worldHalfExtent)
+        let viewport = currentTacticalMapViewport()
+        let missionOverlay = terrainMapMissionOverlay(viewport: viewport)
 
         if recordTrail {
             appendTerrainMapTrailSample(dronePlanarPosition)
@@ -3809,6 +4366,9 @@ final class DroneSimulationViewModel: ObservableObject {
             droneYawRadians: safeOrientation.z,
             droneAltitude: max(0.0, safePosition.y),
             targetMarkerPosition: targetMarkerState?.position,
+            missionRoutePoints: missionOverlay.routePoints,
+            missionWaypoints: missionOverlay.waypoints,
+            noFlyZones: missionOverlay.noFlyZones,
             trail: terrainMapTrail,
             objects: mapObjects
         )
@@ -3816,6 +4376,63 @@ final class DroneSimulationViewModel: ObservableObject {
         if nextSnapshot != terrainMapSnapshot {
             terrainMapSnapshot = nextSnapshot
         }
+
+        if isMissionMapVisible {
+            refreshTacticalMapState()
+        }
+    }
+
+    private func terrainMapMissionOverlay(
+        viewport: MapViewportState
+    ) -> (
+        routePoints: [SIMD2<Float>],
+        waypoints: [TerrainMapMissionWaypoint],
+        noFlyZones: [MissionZone]
+    ) {
+        let routePoints: [SIMD2<Float>]
+        let overlayWaypoints: [TerrainMapMissionWaypoint]
+        let noFlyZones: [MissionZone]
+
+        if let currentMissionPlan, !currentMissionPlan.waypoints.isEmpty {
+            routePoints = currentMissionPlan.routePoints
+            overlayWaypoints = currentMissionPlan.waypoints.map { target in
+                TerrainMapMissionWaypoint(
+                    id: target.waypointID,
+                    label: target.label,
+                    position: target.position,
+                    isActive: missionExecutionState.activeTarget?.waypointID == target.waypointID,
+                    isCompleted: missionExecutionState.waypointProgress.contains {
+                        $0.target.waypointID == target.waypointID && $0.state == .completed
+                    }
+                )
+            }
+            noFlyZones = currentMissionPlan.zones.filter { $0.type == .noFlyZone }
+        } else {
+            let sourceDraft = isMissionMapVisible ? workingTacticalMissionDraft : committedTacticalMissionDraft
+            let previewRoute = missionPreviewBuilder.buildPreview(
+                draft: sourceDraft,
+                viewport: viewport
+            )
+            routePoints = previewRoute?.points ?? []
+            overlayWaypoints = sourceDraft.waypoints.map { waypoint in
+                TerrainMapMissionWaypoint(
+                    id: waypoint.id,
+                    label: waypoint.label,
+                    position: waypoint.position,
+                    isActive: missionExecutionState.activeTarget?.waypointID == waypoint.id,
+                    isCompleted: missionExecutionState.waypointProgress.contains {
+                        $0.target.waypointID == waypoint.id && $0.state == .completed
+                    }
+                )
+            }
+            noFlyZones = sourceDraft.zones.filter { $0.type == .noFlyZone }
+        }
+
+        return (
+            routePoints: routePoints,
+            waypoints: overlayWaypoints,
+            noFlyZones: noFlyZones
+        )
     }
 
     private func resetTerrainMapTrail() {
@@ -3978,8 +4595,10 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func applyActiveRouteTarget(
         _ marker: TargetMarkerState?,
+        source: ActiveRouteTargetSource,
         startNavigationIfPossible: Bool
     ) {
+        activeRouteTargetSource = marker == nil ? .none : source
         targetMarkerState = marker
 
         if let marker {
@@ -4008,12 +4627,526 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func clearMissionPlan() {
+        if activeRouteTargetSource == .mission {
+            applyMissionAutopilotCommand(missionAutopilotAdapter.clear())
+        }
         missionPlanState = .empty
         missionPlanningDraft = .empty
         missionMapMode = .navigation
         isMissionMapVisible = false
         isInMissionDropZone = false
         sceneController.setMissionDropZone(nil)
+        committedTacticalMissionDraft = .empty
+        workingTacticalMissionDraft = .empty
+        tacticalMapMode = .waypoint
+        currentMissionPlan = nil
+        missionExecutionState = .idle
+        missionRuntimeMonitor.reset()
+        missionSafetyState = .idle
+        missionEventRecorder.reset()
+        missionTimeline = nil
+        missionObservation.reset()
+        refreshTacticalMapState()
+        refreshMissionStatus()
+    }
+
+    private func currentTacticalMapViewport() -> MapViewportState {
+        let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
+        let dock = sceneController.currentDockSpawnPoint()
+        return MapViewportState(
+            center: SIMD2<Float>(safePosition.x, safePosition.z),
+            worldHalfExtent: max(1.0, terrain.worldHalfExtent),
+            signalBoundaryRadius: playableBoundaryRadius,
+            dronePosition: SIMD2<Float>(safePosition.x, safePosition.z),
+            dockPosition: SIMD2<Float>(dock.x, dock.z),
+            droneAltitudeMeters: max(0.0, safePosition.y),
+            dockAltitudeMeters: max(0.0, dock.y),
+            terrainMaxAltitudeMeters: max(0.0, terrain.maxFlightAltitude),
+            airframeClass: selectedDroneProfile.airframeClass,
+            profileMaxHorizontalSpeedMps: max(0.0, selectedDroneProfile.maxHorizontalSpeedMps)
+        )
+    }
+
+    private func refreshTacticalMapState() {
+        let nextState = tacticalMapCoordinator.buildState(
+            isVisible: isMissionMapVisible,
+            mode: tacticalMapMode,
+            viewport: currentTacticalMapViewport(),
+            committedDraft: committedTacticalMissionDraft,
+            workingDraft: workingTacticalMissionDraft
+        )
+
+        if nextState != tacticalMapState {
+            tacticalMapState = nextState
+        }
+        refreshMissionStatus()
+    }
+
+    private func invalidatePreparedMissionIfNeeded() {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            return
+        }
+
+        let hadPlan = currentMissionPlan != nil || missionExecutionState.status != .idle
+        currentMissionPlan = nil
+        missionExecutionState = .idle
+        missionRuntimeMonitor.reset()
+        missionSafetyState = .idle
+        missionEventRecorder.reset()
+        missionTimeline = nil
+        missionObservation.reset()
+        if hadPlan && activeRouteTargetSource == .mission {
+            applyMissionAutopilotCommand(missionAutopilotAdapter.clear())
+        }
+    }
+
+    private func applyMissionAutopilotCommand(_ command: MissionAutopilotCommand) {
+        applyActiveRouteTarget(
+            command.targetMarker,
+            source: command.targetMarker == nil ? .none : .mission,
+            startNavigationIfPossible: command.startNavigation
+        )
+    }
+
+    private func bindMissionExecutionTarget(
+        _ target: MissionTarget,
+        startNavigation: Bool
+    ) {
+        applyMissionAutopilotCommand(
+            missionAutopilotAdapter.bind(
+                target: target,
+                startNavigation: startNavigation
+            )
+        )
+
+        missionExecutionState.bindingState = .bound
+        missionExecutionState.hasBoundAutopilotTarget = missionAutopilotAdapter.isBound(
+            activeTarget: target,
+            currentMarker: targetMarkerState
+        )
+
+        let distance = simd_distance(currentPlanarPosition(), target.position)
+        if distance.isFinite {
+            missionExecutionState.distanceToActiveTarget = distance
+        }
+        missionExecutionState.lastUpdatedAt = Date()
+    }
+
+    private func enterMissionExecutionHold() {
+        if let activeTarget = missionExecutionState.activeTarget {
+            let distance = simd_distance(currentPlanarPosition(), activeTarget.position)
+            if distance.isFinite {
+                missionExecutionState.distanceToActiveTarget = distance
+            }
+        }
+
+        missionExecutionState.hasBoundAutopilotTarget = false
+        applyMissionAutopilotCommand(missionAutopilotAdapter.clear())
+
+        if selectedDroneProfile.airframeClass == .multirotor,
+           isArmed,
+           state.position.y > 0.05 {
+            hover()
+        }
+    }
+
+    private func beginMissionTimelineSession(for plan: MissionPlan) {
+        missionTimeline = missionEventRecorder.beginSession(
+            projectID: currentProjectID,
+            projectName: currentProjectName,
+            missionPlanID: plan.id
+        )
+        missionDebrief = nil
+        missionObservation.reset()
+    }
+
+    private func recordMissionEvents(_ events: [MissionEvent]) {
+        guard !events.isEmpty else {
+            return
+        }
+
+        missionTimeline = missionEventRecorder.record(contentsOf: events)
+        hasUnsavedChanges = true
+    }
+
+    private func recordMissionStateTransitions(
+        previousExecutionState: MissionExecutionState,
+        previousSafetyState: MissionSafetyState,
+        previousSnapshot: MissionStatusSnapshot,
+        plan: MissionPlan? = nil
+    ) {
+        let activePlan = plan ?? currentMissionPlan
+        var events = missionEventMapper.executionTransitionEvents(
+            previous: previousExecutionState,
+            current: missionExecutionState,
+            plan: activePlan,
+            projectID: currentProjectID,
+            projectName: currentProjectName,
+            statusSnapshot: missionStatusSnapshot,
+            batteryState: batteryState
+        )
+
+        events.append(contentsOf: missionEventMapper.safetyTransitionEvents(
+            previous: previousSafetyState,
+            current: missionSafetyState,
+            plan: activePlan,
+            projectID: currentProjectID,
+            projectName: currentProjectName,
+            statusSnapshot: missionStatusSnapshot,
+            batteryState: batteryState
+        ))
+
+        recordMissionEvents(events)
+
+        if previousExecutionState.status != missionExecutionState.status {
+            if missionExecutionState.status == .running {
+                if previousExecutionState.status == .paused {
+                    missionObservation.resume(position: state.position)
+                } else {
+                    missionObservation.begin(
+                        position: state.position,
+                        batteryPercent: batteryState.chargePercent
+                    )
+                }
+            }
+        }
+
+        finalizeMissionDebriefIfNeeded(previousExecutionState: previousExecutionState)
+
+        if previousSnapshot != missionStatusSnapshot {
+            hasUnsavedChanges = true
+        }
+    }
+
+    private func currentMissionDebriefInput(timeline: MissionTimeline) -> MissionDebriefInput {
+        MissionDebriefInput(
+            timeline: timeline,
+            plan: currentMissionPlan,
+            executionState: missionExecutionState,
+            statusSnapshot: missionStatusSnapshot,
+            safetyState: missionSafetyState,
+            batteryState: batteryState,
+            payloadState: payloadState,
+            totalDistanceMeters: missionObservation.totalDistanceMeters,
+            maxAltitudeMeters: missionObservation.maxAltitudeMeters,
+            averageAltitudeMeters: missionObservation.averageAltitudeMeters,
+            startBatteryPercent: missionObservation.startBatteryPercent
+        )
+    }
+
+    private func finalizeMissionDebriefIfNeeded(previousExecutionState: MissionExecutionState) {
+        guard previousExecutionState.status != missionExecutionState.status,
+              missionExecutionState.status == .completed ||
+                missionExecutionState.status == .aborted ||
+                missionExecutionState.status == .failed,
+              let timeline = missionEventRecorder.currentTimeline,
+              missionDebrief?.timelineID != timeline.id else {
+            return
+        }
+
+        let outcome = missionDebriefService.resolveOutcome(
+            for: currentMissionDebriefInput(timeline: timeline)
+        )
+        let finalizedTimeline = missionEventRecorder.finishSession(outcome: outcome) ?? timeline
+        missionTimeline = finalizedTimeline
+
+        let debrief = missionDebriefService.buildDebrief(
+            from: currentMissionDebriefInput(timeline: finalizedTimeline)
+        )
+        missionDebrief = debrief
+
+        let debriefEvent = missionEventMapper.debriefGeneratedEvent(
+            debrief: debrief,
+            projectID: currentProjectID,
+            projectName: currentProjectName
+        )
+        missionTimeline = missionEventRecorder.record(debriefEvent)
+        hasUnsavedChanges = true
+    }
+
+    private func sampleMissionObservationIfNeeded() {
+        if missionExecutionState.status == .running {
+            missionObservation.sample(position: state.position)
+        } else if missionExecutionState.status == .paused {
+            missionObservation.resume(position: state.position)
+        }
+    }
+
+    private func recordMissionStartBlockedEvent(plan: MissionPlan?) {
+        let blockedEvent = missionEventMapper.simpleEvent(
+            missionID: plan?.id,
+            category: .execution,
+            severity: missionStatusSnapshot.primaryExplanation?.severity == .critical ? .critical : .warning,
+            code: .missionBlocked,
+            detailKey: missionStatusSnapshot.primaryExplanation?.detailKey ??
+                missionSafetyState.blockReason?.detailKey ??
+                "mission.status.reason.mission_start_blocked",
+            projectID: currentProjectID,
+            projectName: currentProjectName,
+            plan: plan,
+            statusSnapshot: missionStatusSnapshot,
+            batteryState: batteryState
+        )
+        recordMissionEvents([blockedEvent])
+    }
+
+    private func updateMissionExecutionRuntime() {
+        guard let currentMissionPlan,
+              missionExecutionState.status == .running else {
+            return
+        }
+
+        let progress = missionProgressTracker.evaluate(
+            executionState: missionExecutionState,
+            planarPosition: currentPlanarPosition(),
+            currentMarker: targetMarkerState,
+            autoNavigationStatus: currentAutoNavigationStatus(),
+            flightMode: mode,
+            airframeClass: selectedDroneProfile.airframeClass,
+            adapter: missionAutopilotAdapter
+        )
+        let previousState = missionExecutionState
+        let previousSafetyState = missionSafetyState
+        let previousSnapshot = missionStatusSnapshot
+        missionExecutionState = missionExecutionCoordinator.update(
+            state: missionExecutionState,
+            plan: currentMissionPlan,
+            progress: progress
+        )
+
+        let needsTargetRebind =
+            missionExecutionState.status == .running &&
+            missionExecutionState.activeTarget != nil &&
+            (
+                previousState.activeTarget != missionExecutionState.activeTarget ||
+                !missionExecutionState.hasBoundAutopilotTarget
+            )
+
+        guard missionExecutionState != previousState || needsTargetRebind else {
+            return
+        }
+
+        switch missionExecutionState.status {
+        case .running:
+            if let activeTarget = missionExecutionState.activeTarget,
+               previousState.activeTarget != activeTarget || !missionExecutionState.hasBoundAutopilotTarget {
+                if canStartTargetMarkerAutoNavigation {
+                    bindMissionExecutionTarget(activeTarget, startNavigation: true)
+                }
+            }
+        case .completed:
+            enterMissionExecutionHold()
+        case .aborted, .blocked, .failed:
+            enterMissionExecutionHold()
+        case .idle, .ready, .paused:
+            break
+        }
+
+        refreshMissionStatus()
+        recordMissionStateTransitions(
+            previousExecutionState: previousState,
+            previousSafetyState: previousSafetyState,
+            previousSnapshot: previousSnapshot,
+            plan: currentMissionPlan
+        )
+    }
+
+    private func evaluateMissionSafetyState() -> MissionSafetyState {
+        let authorityState = missionAuthorityGuard.evaluate(
+            executionState: missionExecutionState,
+            controlAuthority: flightControlDiagnostics.authority,
+            missionOwnsTargetSource: activeRouteTargetSource == .mission,
+            currentMarker: targetMarkerState,
+            adapter: missionAutopilotAdapter
+        )
+        let runtimeMonitor = missionRuntimeMonitor.evaluate(
+            executionState: missionExecutionState,
+            autoNavigationStatus: currentAutoNavigationStatus(),
+            currentMarker: targetMarkerState,
+            missionOwnsTargetSource: activeRouteTargetSource == .mission,
+            flightMode: mode
+        )
+
+        var safetyState = missionSafetyEvaluator.evaluate(
+            draftStatus: tacticalMapState.draftStatus,
+            currentPlan: currentMissionPlan,
+            executionState: missionExecutionState,
+            authorityState: authorityState,
+            runtimeMonitor: runtimeMonitor,
+            canStartMissionAutopilot: canBindMissionTargetToAutopilot,
+            batteryState: batteryState,
+            collisionAnalysis: collisionAnalysis,
+            thermalState: thermalState,
+            signalState: signalState
+        )
+
+        let failsafeMode = missionFailsafeCoordinator.resolve(
+            executionState: missionExecutionState,
+            safetyState: safetyState,
+            airframeClass: selectedDroneProfile.airframeClass,
+            flightMode: mode
+        )
+        safetyState.failsafeMode = failsafeMode
+        safetyState.abortReason = abortReason(for: failsafeMode, safetyState: safetyState)
+        return safetyState
+    }
+
+    private func applyMissionSafetyRuntimeIfNeeded() {
+        let previousExecutionState = missionExecutionState
+        let previousSafetyState = missionSafetyState
+        let previousSnapshot = missionStatusSnapshot
+        let nextSafetyState = evaluateMissionSafetyState()
+        missionSafetyState = nextSafetyState
+
+        if shouldAutomaticallyResumeMission(from: nextSafetyState) {
+            missionExecutionState = missionExecutionCoordinator.resume(
+                state: missionExecutionState
+            )
+            missionRuntimeMonitor.reset()
+            if let activeTarget = missionExecutionState.activeTarget {
+                bindMissionExecutionTarget(activeTarget, startNavigation: true)
+            }
+            missionSafetyState = evaluateMissionSafetyState()
+            refreshMissionStatus()
+            recordMissionStateTransitions(
+                previousExecutionState: previousExecutionState,
+                previousSafetyState: previousSafetyState,
+                previousSnapshot: previousSnapshot
+            )
+            return
+        }
+
+        guard missionExecutionState.status == .running else {
+            if previousSafetyState != missionSafetyState {
+                refreshMissionStatus()
+                recordMissionStateTransitions(
+                    previousExecutionState: previousExecutionState,
+                    previousSafetyState: previousSafetyState,
+                    previousSnapshot: previousSnapshot
+                )
+            }
+            return
+        }
+
+        switch nextSafetyState.failsafeMode {
+        case .none:
+            break
+        case .hold:
+            missionExecutionState = missionExecutionCoordinator.pause(
+                state: missionExecutionState,
+                reason: .missionPausedByRuntime,
+                detailKey: "mission.status.reason.mission_paused_by_runtime"
+            )
+            enterMissionExecutionHold()
+        case .pauseMission:
+            missionExecutionState = missionExecutionCoordinator.pause(
+                state: missionExecutionState,
+                reason: .missionPausedByRuntime,
+                detailKey: "mission.status.reason.mission_paused_by_runtime"
+            )
+            enterMissionExecutionHold()
+        case .abortMission:
+            missionExecutionState = missionExecutionCoordinator.abort(
+                state: missionExecutionState,
+                reason: .missionAbortedBySafety,
+                abortReason: nextSafetyState.abortReason ?? .safetyAbort,
+                detailKey: "mission.status.reason.mission_aborted_by_safety"
+            )
+            applyMissionAutopilotCommand(missionAutopilotAdapter.clear())
+            missionRuntimeMonitor.reset()
+        case .returnHome:
+            missionExecutionState = missionExecutionCoordinator.abort(
+                state: missionExecutionState,
+                reason: .returnHomeTriggered,
+                abortReason: nextSafetyState.abortReason ?? .returnHomeTriggered,
+                detailKey: "mission.status.reason.return_home_triggered"
+            )
+            applyMissionAutopilotCommand(missionAutopilotAdapter.clear())
+            missionRuntimeMonitor.reset()
+            if mode != .returnHome {
+                activateReturnHome()
+            }
+        }
+
+        missionSafetyState = evaluateMissionSafetyState()
+        refreshMissionStatus()
+        recordMissionStateTransitions(
+            previousExecutionState: previousExecutionState,
+            previousSafetyState: previousSafetyState,
+            previousSnapshot: previousSnapshot
+        )
+    }
+
+    private func shouldAutomaticallyResumeMission(
+        from safetyState: MissionSafetyState
+    ) -> Bool {
+        guard missionExecutionState.status == .paused,
+              missionExecutionState.failureReason == .missionPausedByRuntime,
+              missionExecutionState.canResume,
+              missionExecutionState.activeTarget != nil,
+              safetyState.readiness == .ready,
+              safetyState.blockReason == nil,
+              safetyState.failsafeMode == .none,
+              canBindMissionTargetToAutopilot else {
+            return false
+        }
+        return true
+    }
+
+    private func abortReason(
+        for failsafeMode: MissionFailsafeMode,
+        safetyState: MissionSafetyState
+    ) -> MissionAbortReason? {
+        switch failsafeMode {
+        case .none:
+            return nil
+        case .hold, .pauseMission:
+            return .runtimeUnsafe
+        case .abortMission:
+            switch safetyState.blockReason {
+            case .routeInvalid, .noValidatedPlan:
+                return .routeInvalid
+            case .batteryUnsafe:
+                return .batteryUnsafe
+            case .noControlAuthority:
+                return .authorityLost
+            case .executionContourMissing,
+                 .executionBindingFailed,
+                 .runtimeDistanceUnavailable,
+                 .runtimeStallDetected,
+                 .missionStartBlocked,
+                 .runtimeUnsafe,
+                 .noMissionTarget,
+                 .none:
+                return .safetyAbort
+            }
+        case .returnHome:
+            switch safetyState.blockReason {
+            case .batteryUnsafe:
+                return .batteryUnsafe
+            case .none:
+                return .returnHomeTriggered
+            case .some:
+                return .returnHomeTriggered
+            }
+        }
+    }
+
+    private func refreshMissionStatus() {
+        missionSafetyState = evaluateMissionSafetyState()
+        let nextSnapshot = missionStatusResolver.resolve(
+            draftStatus: tacticalMapState.draftStatus,
+            currentPlan: currentMissionPlan,
+            executionState: missionExecutionState,
+            safetyState: missionSafetyState,
+            controlAuthority: flightControlDiagnostics.authority,
+            flightMode: mode
+        )
+
+        if nextSnapshot != missionStatusSnapshot {
+            missionStatusSnapshot = nextSnapshot
+        }
     }
 
     private func syncMissionDeliveryState(triggerAutoRelease: Bool) {

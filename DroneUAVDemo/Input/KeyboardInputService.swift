@@ -104,6 +104,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case resetCameraOrientation
 
     case toggleControlPanel
+    case toggleMissionMap
+    case togglePayloadPanel
     case toggleTelemetryHUD
     case toggleDamageOverlay
     case toggleThermalOverlay
@@ -117,7 +119,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .resetCameraOrientation:
             return .camera
-        case .toggleControlPanel, .toggleTelemetryHUD:
+        case .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD:
             return .ui
         case .toggleDamageOverlay, .toggleThermalOverlay:
             return .debug
@@ -131,7 +133,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return true
         case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .resetCameraOrientation,
-             .toggleControlPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
+             .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
             return false
         }
     }
@@ -194,6 +196,10 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.camera.reset_orientation"
         case .toggleControlPanel:
             return "keybind.ui.toggle_panel"
+        case .toggleMissionMap:
+            return "keybind.ui.toggle_mission_map"
+        case .togglePayloadPanel:
+            return "keybind.ui.toggle_payload"
         case .toggleTelemetryHUD:
             return "keybind.ui.toggle_hud"
         case .toggleDamageOverlay:
@@ -240,7 +246,7 @@ struct KeyBindingProfile {
             .cameraModeFPV: KeyBindingDescriptor(command: .cameraModeFPV, keyCode: 21, keyLabel: "4"),
             .cameraModeTop: KeyBindingDescriptor(command: .cameraModeTop, keyCode: 23, keyLabel: "5"),
             .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 22, keyLabel: "6"),
-            .toggleFPV: KeyBindingDescriptor(command: .toggleFPV, keyCode: 3, keyLabel: "F"),
+            .toggleFPV: KeyBindingDescriptor(command: .toggleFPV, keyCode: UInt16.max, keyLabel: "—"),
             .cycleCameraMode: KeyBindingDescriptor(command: .cycleCameraMode, keyCode: 8, keyLabel: "C"),
             .zoomIn: KeyBindingDescriptor(command: .zoomIn, keyCode: 24, keyLabel: "+"),
             .zoomOut: KeyBindingDescriptor(command: .zoomOut, keyCode: 27, keyLabel: "-"),
@@ -250,6 +256,8 @@ struct KeyBindingProfile {
             .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "↓"),
             .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V"),
             .toggleControlPanel: KeyBindingDescriptor(command: .toggleControlPanel, keyCode: UInt16.max, keyLabel: "—"),
+            .toggleMissionMap: KeyBindingDescriptor(command: .toggleMissionMap, keyCode: 3, keyLabel: "F"),
+            .togglePayloadPanel: KeyBindingDescriptor(command: .togglePayloadPanel, keyCode: 35, keyLabel: "P"),
             .toggleTelemetryHUD: KeyBindingDescriptor(command: .toggleTelemetryHUD, keyCode: 17, keyLabel: "T"),
             .toggleDamageOverlay: KeyBindingDescriptor(command: .toggleDamageOverlay, keyCode: 4, keyLabel: "H"),
             .toggleThermalOverlay: KeyBindingDescriptor(command: .toggleThermalOverlay, keyCode: 11, keyLabel: "B")
@@ -317,6 +325,8 @@ enum KeyboardAction: Equatable {
     case selectTopCamera
     case selectPayloadCamera
     case toggleFPV
+    case toggleMissionMap
+    case togglePayloadPanel
     case toggleTerrainMap
     case toggleCompassOverlay
     case toggleThermalOverlay
@@ -402,6 +412,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
         sanitizeLegacyPanelToggleBinding()
         sanitizeCanonicalFlightCameraBindings()
+        sanitizeMissionOverlayBindings()
     }
 
     func start() {
@@ -678,7 +689,11 @@ final class KeyboardInputService: KeyboardInputProviding {
         case .resetCameraOrientation:
             enqueueAction(.resetCameraOrientation)
         case .toggleControlPanel:
-            break
+            enqueueAction(.toggleControlPanel)
+        case .toggleMissionMap:
+            enqueueAction(.toggleMissionMap)
+        case .togglePayloadPanel:
+            enqueueAction(.togglePayloadPanel)
         case .toggleTelemetryHUD:
             enqueueAction(.toggleTelemetryHUD)
         case .toggleDamageOverlay:
@@ -861,6 +876,43 @@ final class KeyboardInputService: KeyboardInputProviding {
                 profile.bindings[command] = descriptor
                 didChange = true
             }
+        }
+
+        if didChange {
+            persistProfile()
+        }
+    }
+
+    private func sanitizeMissionOverlayBindings() {
+        let requiredBindings: [KeyboardCommand: KeyBindingDescriptor] = [
+            .toggleMissionMap: KeyBindingDescriptor(command: .toggleMissionMap, keyCode: 3, keyLabel: "F"),
+            .togglePayloadPanel: KeyBindingDescriptor(command: .togglePayloadPanel, keyCode: 35, keyLabel: "P")
+        ]
+        var didChange = false
+
+        for (command, descriptor) in requiredBindings {
+            let current = profile.bindings[command]
+            if current?.keyCode != descriptor.keyCode || current?.keyLabel != descriptor.keyLabel {
+                profile.rebind(
+                    command: command,
+                    keyCode: descriptor.keyCode,
+                    keyLabel: descriptor.keyLabel
+                )
+                didChange = true
+            }
+        }
+
+        let unboundDescriptor = KeyBindingDescriptor(
+            command: .toggleFPV,
+            keyCode: UInt16.max,
+            keyLabel: "—"
+        )
+        if profile.bindings[.toggleFPV] == nil {
+            profile.bindings[.toggleFPV] = unboundDescriptor
+            didChange = true
+        } else if profile.bindings[.toggleFPV]?.keyCode == requiredBindings[.toggleMissionMap]?.keyCode {
+            profile.bindings[.toggleFPV] = unboundDescriptor
+            didChange = true
         }
 
         if didChange {

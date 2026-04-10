@@ -165,6 +165,8 @@ struct ProjectSnapshot: Codable {
     var hiddenDamageComponents: [String]
     var selectedDamageComponentRaw: String?
     var thermalByComponent: [String: Float]
+    var missionTimeline: MissionTimeline?
+    var missionDebrief: MissionDebrief?
 }
 
 protocol ProjectStorageManaging {

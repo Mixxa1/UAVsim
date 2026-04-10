@@ -1,0 +1,105 @@
+import Foundation
+
+final class MissionAuthorityGuard {
+    private let lossConfirmationDelay: TimeInterval
+    private var pendingLossStartedAt: Date?
+    private var pendingLossReason: MissionFailureReason?
+
+    init(lossConfirmationDelay: TimeInterval = 0.8) {
+        self.lossConfirmationDelay = max(0.15, lossConfirmationDelay)
+    }
+
+    func evaluate(
+        executionState: MissionExecutionState,
+        controlAuthority: FlightControlAuthority,
+        missionOwnsTargetSource: Bool,
+        currentMarker: TargetMarkerState?,
+        adapter: MissionAutopilotAdapter
+    ) -> MissionControlAuthorityState {
+        let now = Date()
+        let requiresMissionAuthority = executionState.status == .running
+        let hasBoundMissionTarget = adapter.isBound(
+            activeTarget: executionState.activeTarget,
+            currentMarker: currentMarker
+        )
+
+        guard requiresMissionAuthority else {
+            resetPendingLoss()
+            return MissionControlAuthorityState(
+                expectedAuthority: .none,
+                actualAuthority: controlAuthority,
+                sourceOwnsTarget: missionOwnsTargetSource,
+                hasBoundMissionTarget: hasBoundMissionTarget,
+                requiresMissionAuthority: false,
+                isAuthorityConfirmed: true,
+                lossState: .stable,
+                lossDuration: 0.0,
+                didRecoverTransientLoss: false,
+                failureReason: nil
+            )
+        }
+
+        let failureReason: MissionFailureReason? = {
+            if executionState.activeTarget == nil || !missionOwnsTargetSource || !hasBoundMissionTarget {
+                return .noMissionTarget
+            }
+            if controlAuthority != .markerGuidance {
+                return .noControlAuthority
+            }
+            return nil
+        }()
+
+        if let failureReason {
+            if pendingLossReason != failureReason || pendingLossStartedAt == nil {
+                pendingLossReason = failureReason
+                pendingLossStartedAt = now
+            }
+
+            let duration = max(0.0, now.timeIntervalSince(pendingLossStartedAt ?? now))
+            let lossState: MissionAuthorityLossState = duration >= lossConfirmationDelay
+                ? .confirmedLost
+                : .transientLost
+
+            return MissionControlAuthorityState(
+                expectedAuthority: .markerGuidance,
+                actualAuthority: controlAuthority,
+                sourceOwnsTarget: missionOwnsTargetSource,
+                hasBoundMissionTarget: hasBoundMissionTarget,
+                requiresMissionAuthority: true,
+                isAuthorityConfirmed: false,
+                lossState: lossState,
+                lossDuration: duration,
+                didRecoverTransientLoss: false,
+                failureReason: failureReason
+            )
+        }
+
+        let transientLossDuration: TimeInterval = {
+            guard let pendingLossStartedAt else {
+                return 0.0
+            }
+            return max(0.0, now.timeIntervalSince(pendingLossStartedAt))
+        }()
+        let didRecoverTransientLoss = transientLossDuration > 0.0 &&
+            transientLossDuration < lossConfirmationDelay
+        resetPendingLoss()
+
+        return MissionControlAuthorityState(
+            expectedAuthority: .markerGuidance,
+            actualAuthority: controlAuthority,
+            sourceOwnsTarget: missionOwnsTargetSource,
+            hasBoundMissionTarget: hasBoundMissionTarget,
+            requiresMissionAuthority: true,
+            isAuthorityConfirmed: true,
+            lossState: .stable,
+            lossDuration: 0.0,
+            didRecoverTransientLoss: didRecoverTransientLoss,
+            failureReason: nil
+        )
+    }
+
+    private func resetPendingLoss() {
+        pendingLossStartedAt = nil
+        pendingLossReason = nil
+    }
+}

@@ -336,6 +336,9 @@ struct TerrainMapCanvas: View {
             if let dropZone {
                 drawDropZone(dropZone, in: &context, projection: projection)
             }
+            drawNoFlyZones(in: &context, projection: projection)
+            drawMissionRoute(in: &context, projection: projection)
+            drawMissionWaypoints(in: &context, projection: projection)
 
             if let targetMarkerPosition = routeTargetPosition ?? snapshot.targetMarkerPosition {
                 drawTargetLink(to: targetMarkerPosition, in: &context, projection: projection)
@@ -459,6 +462,96 @@ struct TerrainMapCanvas: View {
             with: .color(GroundControlPalette.warning.opacity(0.82)),
             style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3])
         )
+    }
+
+    private func drawMissionRoute(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard snapshot.missionRoutePoints.count > 1 else {
+            return
+        }
+
+        var routePath = Path()
+        routePath.move(to: projection.project(snapshot.missionRoutePoints[0]))
+        for point in snapshot.missionRoutePoints.dropFirst() {
+            routePath.addLine(to: projection.project(point))
+        }
+
+        context.stroke(
+            routePath,
+            with: .color(GroundControlPalette.accent.opacity(0.78)),
+            style: StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round)
+        )
+    }
+
+    private func drawMissionWaypoints(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        for waypoint in snapshot.missionWaypoints {
+            let center = projection.project(waypoint.position)
+            let rect = CGRect(x: center.x - 6.0, y: center.y - 6.0, width: 12.0, height: 12.0)
+            let tint: Color = {
+                if waypoint.isCompleted {
+                    return GroundControlPalette.success
+                }
+                if waypoint.isActive {
+                    return GroundControlPalette.warning
+                }
+                return GroundControlPalette.accent
+            }()
+
+            context.fill(Path(ellipseIn: rect), with: .color(tint.opacity(0.92)))
+            context.stroke(
+                Path(ellipseIn: rect),
+                with: .color(Color.white.opacity(0.40)),
+                lineWidth: 0.8
+            )
+
+            if waypoint.isActive {
+                let ringRect = rect.insetBy(dx: -3.5, dy: -3.5)
+                context.stroke(
+                    Path(ellipseIn: ringRect),
+                    with: .color(GroundControlPalette.warning.opacity(0.88)),
+                    lineWidth: 1.0
+                )
+            }
+
+            context.draw(
+                Text(waypoint.label)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white),
+                at: CGPoint(x: center.x, y: center.y - 13.5),
+                anchor: .center
+            )
+        }
+    }
+
+    private func drawNoFlyZones(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        for zone in snapshot.noFlyZones {
+            let center = projection.project(zone.center)
+            let radius = projection.projectedRadius(for: zone.radius)
+            let rect = CGRect(
+                x: center.x - radius,
+                y: center.y - radius,
+                width: radius * 2.0,
+                height: radius * 2.0
+            )
+
+            context.fill(
+                Path(ellipseIn: rect),
+                with: .color(GroundControlPalette.danger.opacity(0.08))
+            )
+            context.stroke(
+                Path(ellipseIn: rect),
+                with: .color(GroundControlPalette.danger.opacity(0.86)),
+                style: StrokeStyle(lineWidth: 1.6, dash: [5, 4])
+            )
+        }
     }
 
     private func drawDropZone(

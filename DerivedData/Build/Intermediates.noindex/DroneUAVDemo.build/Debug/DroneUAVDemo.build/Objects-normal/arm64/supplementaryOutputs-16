@@ -1,0 +1,44 @@
+{
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/PayloadDataQualitySource.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/PayloadDataQualitySource.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/PayloadDataQualitySource.d",
+    "diagnostics" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/PayloadDataQualitySource.dia",
+    "object" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/PayloadDataQualitySource.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/PayloadDataQualitySource.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/UAVCatalog.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.d",
+    "diagnostics" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.dia",
+    "object" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/UAVFlightTuningProfile.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFlightTuningProfile.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFlightTuningProfile.d",
+    "diagnostics" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFlightTuningProfile.dia",
+    "object" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFlightTuningProfile.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFlightTuningProfile.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionAutopilotAdapter.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionAutopilotAdapter.d",
+    "diagnostics" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionAutopilotAdapter.dia",
+    "object" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionAutopilotAdapter.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionAutopilotAdapter.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Simulation/MissionDraftBuilder.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftBuilder.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftBuilder.d",
+    "diagnostics" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftBuilder.dia",
+    "object" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftBuilder.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftBuilder.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Simulation/MissionDraftValidator.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftValidator.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftValidator.d",
+    "diagnostics" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftValidator.dia",
+    "object" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftValidator.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/MissionDraftValidator.swiftdeps"
+  }
+}

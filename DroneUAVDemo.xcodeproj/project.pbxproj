@@ -95,6 +95,62 @@
 		100000000000000000000256 /* MissionMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000159 /* MissionMapView.swift */; };
 		100000000000000000000257 /* EnvironmentProceduralMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000160 /* EnvironmentProceduralMaterials.swift */; };
 		100000000000000000000258 /* EnvironmentProceduralVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */; };
+		100000000000000000000259 /* MapViewportState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000162 /* MapViewportState.swift */; };
+		10000000000000000000025A /* MissionConstraints.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000163 /* MissionConstraints.swift */; };
+		10000000000000000000025B /* MissionDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000164 /* MissionDraft.swift */; };
+		10000000000000000000025C /* MissionDraftStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000165 /* MissionDraftStatus.swift */; };
+		10000000000000000000025D /* MissionPreviewRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000166 /* MissionPreviewRoute.swift */; };
+		10000000000000000000025E /* MissionWaypoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000167 /* MissionWaypoint.swift */; };
+		10000000000000000000025F /* MissionZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000168 /* MissionZone.swift */; };
+		100000000000000000000260 /* TacticalMapMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000169 /* TacticalMapMode.swift */; };
+		100000000000000000000261 /* TacticalMapState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000016A /* TacticalMapState.swift */; };
+		100000000000000000000262 /* MissionDraftBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000016B /* MissionDraftBuilder.swift */; };
+		100000000000000000000263 /* MissionDraftValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000016C /* MissionDraftValidator.swift */; };
+		100000000000000000000264 /* MissionPreviewBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000016D /* MissionPreviewBuilder.swift */; };
+		100000000000000000000265 /* TacticalMapCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000016E /* TacticalMapCoordinator.swift */; };
+		100000000000000000000266 /* MissionDraftPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000016F /* MissionDraftPanel.swift */; };
+		100000000000000000000267 /* MissionStatusPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000170 /* MissionStatusPanel.swift */; };
+		100000000000000000000268 /* TacticalMapHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000171 /* TacticalMapHostView.swift */; };
+		100000000000000000000269 /* TacticalMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000172 /* TacticalMapView.swift */; };
+		10000000000000000000026A /* MissionFailureReason.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000173 /* MissionFailureReason.swift */; };
+		10000000000000000000026B /* MissionStatusExplanation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000174 /* MissionStatusExplanation.swift */; };
+		10000000000000000000026C /* MissionPlanStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000175 /* MissionPlanStatus.swift */; };
+		10000000000000000000026D /* MissionTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000176 /* MissionTarget.swift */; };
+		10000000000000000000026E /* MissionWaypointProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000177 /* MissionWaypointProgress.swift */; };
+		10000000000000000000026F /* MissionExecutionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000178 /* MissionExecutionState.swift */; };
+		100000000000000000000270 /* MissionPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000179 /* MissionPlan.swift */; };
+		100000000000000000000271 /* MissionStatusSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000017A /* MissionStatusSnapshot.swift */; };
+		100000000000000000000272 /* MissionPlanBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000017B /* MissionPlanBuilder.swift */; };
+		100000000000000000000273 /* MissionPlanValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000017C /* MissionPlanValidator.swift */; };
+		100000000000000000000274 /* MissionAutopilotAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000017D /* MissionAutopilotAdapter.swift */; };
+		100000000000000000000275 /* MissionProgressTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000017E /* MissionProgressTracker.swift */; };
+		100000000000000000000276 /* MissionExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000017F /* MissionExecutionCoordinator.swift */; };
+		100000000000000000000277 /* MissionStatusResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000180 /* MissionStatusResolver.swift */; };
+		100000000000000000000278 /* MissionWarning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000181 /* MissionWarning.swift */; };
+		100000000000000000000279 /* MissionTruthStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000182 /* MissionTruthStatus.swift */; };
+		10000000000000000000027A /* MissionControlAuthorityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000183 /* MissionControlAuthorityState.swift */; };
+		10000000000000000000027B /* MissionRuntimeConstraintState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000184 /* MissionRuntimeConstraintState.swift */; };
+		10000000000000000000027C /* MissionSafetyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000185 /* MissionSafetyState.swift */; };
+		10000000000000000000027D /* MissionAuthorityGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000186 /* MissionAuthorityGuard.swift */; };
+		10000000000000000000027E /* MissionRuntimeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000187 /* MissionRuntimeMonitor.swift */; };
+		10000000000000000000027F /* MissionSafetyEvaluator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000188 /* MissionSafetyEvaluator.swift */; };
+		100000000000000000000280 /* MissionFailsafeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000189 /* MissionFailsafeCoordinator.swift */; };
+		100000000000000000000281 /* MissionFailureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000018A /* MissionFailureView.swift */; };
+		100000000000000000000282 /* MissionSafetyPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000018B /* MissionSafetyPanel.swift */; };
+		100000000000000000000283 /* MissionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000018C /* MissionEvent.swift */; };
+		100000000000000000000284 /* MissionTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000018D /* MissionTimeline.swift */; };
+		100000000000000000000285 /* MissionOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000018E /* MissionOutcome.swift */; };
+		100000000000000000000286 /* MissionDebrief.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000018F /* MissionDebrief.swift */; };
+		100000000000000000000287 /* MissionTimelineBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000190 /* MissionTimelineBuilder.swift */; };
+		100000000000000000000288 /* MissionEventRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000191 /* MissionEventRecorder.swift */; };
+		100000000000000000000289 /* MissionEventMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000192 /* MissionEventMapper.swift */; };
+		10000000000000000000028A /* MissionDebriefService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000193 /* MissionDebriefService.swift */; };
+		10000000000000000000028B /* MissionPersistenceAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000194 /* MissionPersistenceAdapter.swift */; };
+		10000000000000000000028C /* MissionEventFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000195 /* MissionEventFilterBar.swift */; };
+		10000000000000000000028D /* MissionTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000196 /* MissionTimelineView.swift */; };
+		10000000000000000000028E /* MissionDebriefView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000197 /* MissionDebriefView.swift */; };
+		10000000000000000000028F /* MissionExecutionBindingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000198 /* MissionExecutionBindingState.swift */; };
+		100000000000000000000290 /* MissionExecutionBinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000199 /* MissionExecutionBinder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -188,6 +244,63 @@
 		100000000000000000000159 /* MissionMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionMapView.swift; sourceTree = "<group>"; };
 		100000000000000000000160 /* EnvironmentProceduralMaterials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentProceduralMaterials.swift; sourceTree = "<group>"; };
 		100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentProceduralVisualFactory.swift; sourceTree = "<group>"; };
+		100000000000000000000162 /* MapViewportState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapViewportState.swift; sourceTree = "<group>"; };
+		100000000000000000000163 /* MissionConstraints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionConstraints.swift; sourceTree = "<group>"; };
+		100000000000000000000164 /* MissionDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDraft.swift; sourceTree = "<group>"; };
+		100000000000000000000165 /* MissionDraftStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDraftStatus.swift; sourceTree = "<group>"; };
+		100000000000000000000166 /* MissionPreviewRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPreviewRoute.swift; sourceTree = "<group>"; };
+		100000000000000000000167 /* MissionWaypoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionWaypoint.swift; sourceTree = "<group>"; };
+		100000000000000000000168 /* MissionZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionZone.swift; sourceTree = "<group>"; };
+		100000000000000000000169 /* TacticalMapMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalMapMode.swift; sourceTree = "<group>"; };
+		10000000000000000000016A /* TacticalMapState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalMapState.swift; sourceTree = "<group>"; };
+		10000000000000000000016B /* MissionDraftBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDraftBuilder.swift; sourceTree = "<group>"; };
+		10000000000000000000016C /* MissionDraftValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDraftValidator.swift; sourceTree = "<group>"; };
+		10000000000000000000016D /* MissionPreviewBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPreviewBuilder.swift; sourceTree = "<group>"; };
+		10000000000000000000016E /* TacticalMapCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalMapCoordinator.swift; sourceTree = "<group>"; };
+		10000000000000000000016F /* MissionDraftPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDraftPanel.swift; sourceTree = "<group>"; };
+		100000000000000000000170 /* MissionStatusPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionStatusPanel.swift; sourceTree = "<group>"; };
+		100000000000000000000171 /* TacticalMapHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalMapHostView.swift; sourceTree = "<group>"; };
+		100000000000000000000172 /* TacticalMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalMapView.swift; sourceTree = "<group>"; };
+		100000000000000000000173 /* MissionFailureReason.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionFailureReason.swift; sourceTree = "<group>"; };
+		100000000000000000000174 /* MissionStatusExplanation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionStatusExplanation.swift; sourceTree = "<group>"; };
+		100000000000000000000175 /* MissionPlanStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPlanStatus.swift; sourceTree = "<group>"; };
+		100000000000000000000176 /* MissionTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionTarget.swift; sourceTree = "<group>"; };
+		100000000000000000000177 /* MissionWaypointProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionWaypointProgress.swift; sourceTree = "<group>"; };
+		100000000000000000000178 /* MissionExecutionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionExecutionState.swift; sourceTree = "<group>"; };
+		100000000000000000000179 /* MissionPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPlan.swift; sourceTree = "<group>"; };
+		10000000000000000000017A /* MissionStatusSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionStatusSnapshot.swift; sourceTree = "<group>"; };
+		10000000000000000000017B /* MissionPlanBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPlanBuilder.swift; sourceTree = "<group>"; };
+		10000000000000000000017C /* MissionPlanValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPlanValidator.swift; sourceTree = "<group>"; };
+		10000000000000000000017D /* MissionAutopilotAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionAutopilotAdapter.swift; sourceTree = "<group>"; };
+		10000000000000000000017E /* MissionProgressTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionProgressTracker.swift; sourceTree = "<group>"; };
+		10000000000000000000017F /* MissionExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionExecutionCoordinator.swift; sourceTree = "<group>"; };
+		100000000000000000000180 /* MissionStatusResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionStatusResolver.swift; sourceTree = "<group>"; };
+		100000000000000000000181 /* MissionWarning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionWarning.swift; sourceTree = "<group>"; };
+		100000000000000000000182 /* MissionTruthStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionTruthStatus.swift; sourceTree = "<group>"; };
+		100000000000000000000183 /* MissionControlAuthorityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionControlAuthorityState.swift; sourceTree = "<group>"; };
+		100000000000000000000184 /* MissionRuntimeConstraintState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionRuntimeConstraintState.swift; sourceTree = "<group>"; };
+		100000000000000000000185 /* MissionSafetyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSafetyState.swift; sourceTree = "<group>"; };
+		100000000000000000000186 /* MissionAuthorityGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionAuthorityGuard.swift; sourceTree = "<group>"; };
+		100000000000000000000187 /* MissionRuntimeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionRuntimeMonitor.swift; sourceTree = "<group>"; };
+		100000000000000000000188 /* MissionSafetyEvaluator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSafetyEvaluator.swift; sourceTree = "<group>"; };
+		100000000000000000000189 /* MissionFailsafeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionFailsafeCoordinator.swift; sourceTree = "<group>"; };
+		10000000000000000000018A /* MissionFailureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionFailureView.swift; sourceTree = "<group>"; };
+		10000000000000000000018B /* MissionSafetyPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSafetyPanel.swift; sourceTree = "<group>"; };
+		10000000000000000000018C /* MissionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionEvent.swift; sourceTree = "<group>"; };
+		10000000000000000000018D /* MissionTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionTimeline.swift; sourceTree = "<group>"; };
+		10000000000000000000018E /* MissionOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionOutcome.swift; sourceTree = "<group>"; };
+		10000000000000000000018F /* MissionDebrief.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDebrief.swift; sourceTree = "<group>"; };
+		100000000000000000000190 /* MissionTimelineBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionTimelineBuilder.swift; sourceTree = "<group>"; };
+		100000000000000000000191 /* MissionEventRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionEventRecorder.swift; sourceTree = "<group>"; };
+		100000000000000000000192 /* MissionEventMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionEventMapper.swift; sourceTree = "<group>"; };
+		100000000000000000000193 /* MissionDebriefService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDebriefService.swift; sourceTree = "<group>"; };
+		100000000000000000000194 /* MissionPersistenceAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionPersistenceAdapter.swift; sourceTree = "<group>"; };
+		100000000000000000000195 /* MissionEventFilterBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionEventFilterBar.swift; sourceTree = "<group>"; };
+		100000000000000000000196 /* MissionTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionTimelineView.swift; sourceTree = "<group>"; };
+		100000000000000000000197 /* MissionDebriefView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDebriefView.swift; sourceTree = "<group>"; };
+		100000000000000000000198 /* MissionExecutionBindingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionExecutionBindingState.swift; sourceTree = "<group>"; };
+		100000000000000000000199 /* MissionExecutionBinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionExecutionBinder.swift; sourceTree = "<group>"; };
+		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -205,6 +318,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000010 /* DroneUAVDemo */,
+				C6CCCC242F87BA77008CAEB7 /* Frameworks */,
 				100000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -254,7 +368,34 @@
 				10000000000000000000013B /* PayloadVisualPreset.swift */,
 				100000000000000000000155 /* PayloadCameraController.swift */,
 				100000000000000000000156 /* FlightControlRouting.swift */,
+				100000000000000000000162 /* MapViewportState.swift */,
+				100000000000000000000163 /* MissionConstraints.swift */,
+				100000000000000000000164 /* MissionDraft.swift */,
+				100000000000000000000165 /* MissionDraftStatus.swift */,
+				100000000000000000000173 /* MissionFailureReason.swift */,
+				10000000000000000000018F /* MissionDebrief.swift */,
+				100000000000000000000179 /* MissionPlan.swift */,
+				100000000000000000000175 /* MissionPlanStatus.swift */,
 				100000000000000000000158 /* MissionPlanningState.swift */,
+				10000000000000000000018C /* MissionEvent.swift */,
+				10000000000000000000018E /* MissionOutcome.swift */,
+				100000000000000000000166 /* MissionPreviewRoute.swift */,
+				100000000000000000000174 /* MissionStatusExplanation.swift */,
+				10000000000000000000017A /* MissionStatusSnapshot.swift */,
+				100000000000000000000185 /* MissionSafetyState.swift */,
+				10000000000000000000018D /* MissionTimeline.swift */,
+				100000000000000000000181 /* MissionWarning.swift */,
+				100000000000000000000182 /* MissionTruthStatus.swift */,
+				100000000000000000000183 /* MissionControlAuthorityState.swift */,
+				100000000000000000000184 /* MissionRuntimeConstraintState.swift */,
+				100000000000000000000176 /* MissionTarget.swift */,
+				100000000000000000000178 /* MissionExecutionState.swift */,
+				100000000000000000000198 /* MissionExecutionBindingState.swift */,
+				100000000000000000000177 /* MissionWaypointProgress.swift */,
+				100000000000000000000167 /* MissionWaypoint.swift */,
+				100000000000000000000168 /* MissionZone.swift */,
+				100000000000000000000169 /* TacticalMapMode.swift */,
+				10000000000000000000016A /* TacticalMapState.swift */,
 				100000000000000000000130 /* UAVDimensions.swift */,
 				100000000000000000000136 /* UAVCatalog.swift */,
 				100000000000000000000135 /* UAVFilterState.swift */,
@@ -288,8 +429,28 @@
 				10000000000000000000010B /* DronePhysicsEngine.swift */,
 				100000000000000000000119 /* DroneSimulationContext.swift */,
 				100000000000000000000149 /* FlightBaselineResolver.swift */,
+				10000000000000000000016B /* MissionDraftBuilder.swift */,
+				10000000000000000000016C /* MissionDraftValidator.swift */,
+				10000000000000000000017D /* MissionAutopilotAdapter.swift */,
+				100000000000000000000199 /* MissionExecutionBinder.swift */,
+				10000000000000000000017F /* MissionExecutionCoordinator.swift */,
+				10000000000000000000017B /* MissionPlanBuilder.swift */,
+				10000000000000000000017C /* MissionPlanValidator.swift */,
+				10000000000000000000017E /* MissionProgressTracker.swift */,
+				10000000000000000000016D /* MissionPreviewBuilder.swift */,
+				100000000000000000000186 /* MissionAuthorityGuard.swift */,
+				100000000000000000000193 /* MissionDebriefService.swift */,
+				100000000000000000000192 /* MissionEventMapper.swift */,
+				100000000000000000000191 /* MissionEventRecorder.swift */,
+				100000000000000000000189 /* MissionFailsafeCoordinator.swift */,
+				100000000000000000000194 /* MissionPersistenceAdapter.swift */,
+				100000000000000000000187 /* MissionRuntimeMonitor.swift */,
+				100000000000000000000188 /* MissionSafetyEvaluator.swift */,
+				100000000000000000000180 /* MissionStatusResolver.swift */,
+				100000000000000000000190 /* MissionTimelineBuilder.swift */,
 				100000000000000000000141 /* PayloadController.swift */,
 				10000000000000000000010C /* SimpleDronePhysicsEngine.swift */,
+				10000000000000000000016E /* TacticalMapCoordinator.swift */,
 			);
 			path = Simulation;
 			sourceTree = "<group>";
@@ -337,8 +498,17 @@
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
+				100000000000000000000197 /* MissionDebriefView.swift */,
 				100000000000000000000159 /* MissionMapView.swift */,
+				10000000000000000000016F /* MissionDraftPanel.swift */,
+				100000000000000000000195 /* MissionEventFilterBar.swift */,
+				10000000000000000000018A /* MissionFailureView.swift */,
+				10000000000000000000018B /* MissionSafetyPanel.swift */,
+				100000000000000000000170 /* MissionStatusPanel.swift */,
+				100000000000000000000196 /* MissionTimelineView.swift */,
 				100000000000000000000103 /* SceneViewportView.swift */,
+				100000000000000000000171 /* TacticalMapHostView.swift */,
+				100000000000000000000172 /* TacticalMapView.swift */,
 				100000000000000000000104 /* TelemetryPanelView.swift */,
 				100000000000000000000144 /* PayloadView.swift */,
 				100000000000000000000146 /* PayloadToolbarEntry.swift */,
@@ -382,6 +552,14 @@
 				100000000000000000000126 /* Localizable.strings */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		C6CCCC242F87BA77008CAEB7 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -501,9 +679,36 @@
 				100000000000000000000252 /* PayloadCameraController.swift in Sources */,
 				100000000000000000000253 /* FlightControlRouting.swift in Sources */,
 				100000000000000000000254 /* PayloadDropCameraController.swift in Sources */,
+				100000000000000000000259 /* MapViewportState.swift in Sources */,
+				10000000000000000000025A /* MissionConstraints.swift in Sources */,
+				10000000000000000000025B /* MissionDraft.swift in Sources */,
+				10000000000000000000025C /* MissionDraftStatus.swift in Sources */,
+				10000000000000000000026A /* MissionFailureReason.swift in Sources */,
+				100000000000000000000286 /* MissionDebrief.swift in Sources */,
+				100000000000000000000283 /* MissionEvent.swift in Sources */,
+				100000000000000000000285 /* MissionOutcome.swift in Sources */,
+				100000000000000000000270 /* MissionPlan.swift in Sources */,
+				10000000000000000000026C /* MissionPlanStatus.swift in Sources */,
 				100000000000000000000255 /* MissionPlanningState.swift in Sources */,
 				100000000000000000000256 /* MissionMapView.swift in Sources */,
+				10000000000000000000025D /* MissionPreviewRoute.swift in Sources */,
+				10000000000000000000026B /* MissionStatusExplanation.swift in Sources */,
+				100000000000000000000271 /* MissionStatusSnapshot.swift in Sources */,
+				10000000000000000000027C /* MissionSafetyState.swift in Sources */,
+				100000000000000000000284 /* MissionTimeline.swift in Sources */,
+				100000000000000000000278 /* MissionWarning.swift in Sources */,
+				100000000000000000000279 /* MissionTruthStatus.swift in Sources */,
+				10000000000000000000027A /* MissionControlAuthorityState.swift in Sources */,
+				10000000000000000000027B /* MissionRuntimeConstraintState.swift in Sources */,
+				10000000000000000000026D /* MissionTarget.swift in Sources */,
+				10000000000000000000026F /* MissionExecutionState.swift in Sources */,
+				10000000000000000000028F /* MissionExecutionBindingState.swift in Sources */,
+				10000000000000000000026E /* MissionWaypointProgress.swift in Sources */,
+				10000000000000000000025E /* MissionWaypoint.swift in Sources */,
+				10000000000000000000025F /* MissionZone.swift in Sources */,
 				100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */,
+				100000000000000000000260 /* TacticalMapMode.swift in Sources */,
+				100000000000000000000261 /* TacticalMapState.swift in Sources */,
 				100000000000000000000229 /* UAVVehicleType.swift in Sources */,
 				10000000000000000000022A /* UAVMassCategory.swift in Sources */,
 				10000000000000000000022B /* UAVSpecConfidence.swift in Sources */,
@@ -541,6 +746,35 @@
 				10000000000000000000024B /* CameraModuleView.swift in Sources */,
 				10000000000000000000024C /* ScenarioModuleView.swift in Sources */,
 				10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */,
+				100000000000000000000262 /* MissionDraftBuilder.swift in Sources */,
+				100000000000000000000263 /* MissionDraftValidator.swift in Sources */,
+				100000000000000000000274 /* MissionAutopilotAdapter.swift in Sources */,
+				100000000000000000000290 /* MissionExecutionBinder.swift in Sources */,
+				10000000000000000000028A /* MissionDebriefService.swift in Sources */,
+				100000000000000000000276 /* MissionExecutionCoordinator.swift in Sources */,
+				100000000000000000000289 /* MissionEventMapper.swift in Sources */,
+				100000000000000000000288 /* MissionEventRecorder.swift in Sources */,
+				100000000000000000000272 /* MissionPlanBuilder.swift in Sources */,
+				100000000000000000000273 /* MissionPlanValidator.swift in Sources */,
+				10000000000000000000028B /* MissionPersistenceAdapter.swift in Sources */,
+				100000000000000000000275 /* MissionProgressTracker.swift in Sources */,
+				100000000000000000000264 /* MissionPreviewBuilder.swift in Sources */,
+				10000000000000000000027D /* MissionAuthorityGuard.swift in Sources */,
+				100000000000000000000280 /* MissionFailsafeCoordinator.swift in Sources */,
+				10000000000000000000027E /* MissionRuntimeMonitor.swift in Sources */,
+				10000000000000000000027F /* MissionSafetyEvaluator.swift in Sources */,
+				100000000000000000000277 /* MissionStatusResolver.swift in Sources */,
+				100000000000000000000287 /* MissionTimelineBuilder.swift in Sources */,
+				100000000000000000000265 /* TacticalMapCoordinator.swift in Sources */,
+				10000000000000000000028E /* MissionDebriefView.swift in Sources */,
+				100000000000000000000266 /* MissionDraftPanel.swift in Sources */,
+				10000000000000000000028C /* MissionEventFilterBar.swift in Sources */,
+				100000000000000000000281 /* MissionFailureView.swift in Sources */,
+				100000000000000000000282 /* MissionSafetyPanel.swift in Sources */,
+				100000000000000000000267 /* MissionStatusPanel.swift in Sources */,
+				10000000000000000000028D /* MissionTimelineView.swift in Sources */,
+				100000000000000000000268 /* TacticalMapHostView.swift in Sources */,
+				100000000000000000000269 /* TacticalMapView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -579,8 +813,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = DroneUAVDemo;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -600,8 +835,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = DroneUAVDemo;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";

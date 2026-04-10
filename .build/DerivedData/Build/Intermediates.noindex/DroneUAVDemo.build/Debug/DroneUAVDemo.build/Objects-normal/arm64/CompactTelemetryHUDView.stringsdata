@@ -1,0 +1,16 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/CompactTelemetryHUDView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "hud.telemetry",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 9
+        }
+      }
+    ]
+  },
+  "version": 1
+}

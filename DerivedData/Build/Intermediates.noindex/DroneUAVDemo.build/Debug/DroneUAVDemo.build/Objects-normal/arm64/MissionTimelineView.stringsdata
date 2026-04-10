@@ -1,0 +1,16 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/MissionTimelineView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "mission.timeline.title",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 39
+        }
+      }
+    ]
+  },
+  "version": 1
+}
