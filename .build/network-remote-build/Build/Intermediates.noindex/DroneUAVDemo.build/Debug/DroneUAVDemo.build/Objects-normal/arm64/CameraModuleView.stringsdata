@@ -1,0 +1,64 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "camera.payload.auto_switch",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 56
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.sensitivity_profile",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 171
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.invert_x",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 222
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.invert_y",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 229
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.camera.hide_advanced",
+        "location": {
+          "startingColumn": 53,
+          "startingLine": 243
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.camera.show_advanced",
+        "location": {
+          "startingColumn": 85,
+          "startingLine": 243
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_hide_obstructing",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 328
+        }
+      }
+    ]
+  },
+  "version": 1
+}

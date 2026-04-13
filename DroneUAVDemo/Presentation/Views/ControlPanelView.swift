@@ -517,6 +517,20 @@ private struct SliderControlRow: View {
                     .onSubmit {
                         onCommit?()
                     }
+                    .controllerTextInputTarget(
+                        id: "\(title).legacy.value",
+                        title: title,
+                        currentText: {
+                            formatter.string(from: NSNumber(value: value.wrappedValue)) ?? ""
+                        },
+                        onCommit: { text in
+                            guard let parsed = formatter.controllerDouble(from: text) else {
+                                return
+                            }
+                            value.wrappedValue = parsed
+                            onCommit?()
+                        }
+                    )
             }
 
             Slider(value: value, in: range, step: step, onEditingChanged: { editing in

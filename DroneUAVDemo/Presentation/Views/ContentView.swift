@@ -580,6 +580,9 @@ private struct SimulationToolstripView: View {
             )
         }
         .buttonStyle(.plain)
+        .controllerButtonTarget(id: "toolbar.module.\(module.id)") {
+            viewModel.toggleActiveControlModule(module)
+        }
     }
 }
 
@@ -659,6 +662,19 @@ struct ContentView: View {
                 secondaryButton: .cancel(Text("common.cancel"))
             )
         }
+        .onAppear(perform: syncExternalControllerOverlayState)
+        .onChange(of: nameDialogMode) { _ in
+            if nameDialogMode != nil {
+                appShell.activeSimulation?.setControllerHubVisible(false)
+            }
+            syncExternalControllerOverlayState()
+        }
+        .onChange(of: showBindingsSettings) { _ in
+            if showBindingsSettings {
+                appShell.activeSimulation?.setControllerHubVisible(false)
+            }
+            syncExternalControllerOverlayState()
+        }
     }
 
     private func unsavedMessage() -> String {
@@ -666,6 +682,12 @@ struct ContentView: View {
         return String(
             format: NSLocalizedString("project.unsaved.message", comment: ""),
             projectName
+        )
+    }
+
+    private func syncExternalControllerOverlayState() {
+        appShell.activeSimulation?.setExternalControllerOverlayActive(
+            nameDialogMode != nil || showBindingsSettings
         )
     }
 
@@ -772,8 +794,15 @@ struct ContentView: View {
     }
 
     private func simulationWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
-        ZStack {
-            VStack(spacing: 0) {
+        ControllerInteractionSurface(
+            bridge: viewModel.controllerUIBridge,
+            surfaceID: "simulation-workspace",
+            secondaryAction: {
+                viewModel.handleControllerUICancel()
+            }
+        ) {
+            ZStack {
+                VStack(spacing: 0) {
                 HStack(alignment: .center, spacing: 10) {
                     Text(viewModel.currentProjectName)
                         .font(.headline)
@@ -856,6 +885,9 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .help(String(localized: "keybind.open"))
+                    .controllerButtonTarget(id: "header.keybindings") {
+                        showBindingsSettings = true
+                    }
 
                     Button {
                         viewModel.toggleMissionMap()
@@ -864,6 +896,9 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .help(String(localized: "mission.map.open_help"))
+                    .controllerButtonTarget(id: "header.missionMap") {
+                        viewModel.toggleMissionMap()
+                    }
 
                     Button {
                         viewModel.setToolPanelVisible(false)
@@ -873,6 +908,9 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .disabled(!viewModel.isToolPanelVisible)
                     .help(String(localized: "panel.hide"))
+                    .controllerButtonTarget(id: "header.hideTools") {
+                        viewModel.setToolPanelVisible(false)
+                    }
 
                     Button {
                         viewModel.setToolPanelVisible(true)
@@ -882,6 +920,9 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .disabled(viewModel.isToolPanelVisible)
                     .help(String(localized: "panel.show"))
+                    .controllerButtonTarget(id: "header.showTools") {
+                        viewModel.setToolPanelVisible(true)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
@@ -912,25 +953,31 @@ struct ContentView: View {
                         .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+                }
 
-            if viewModel.isPayloadPanelVisible {
-                payloadOverlay(for: viewModel)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
-            }
+                if viewModel.isPayloadPanelVisible {
+                    payloadOverlay(for: viewModel)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                }
 
-            if viewModel.isMissionMapVisible {
-                missionMapOverlay(for: viewModel)
-                    .transition(.opacity)
-            }
+                if viewModel.isMissionMapVisible {
+                    missionMapOverlay(for: viewModel)
+                        .transition(.opacity)
+                }
 
-            if viewModel.signalInterferencePresentation.isVisible {
-                SignalInterferenceOverlayView(
-                    presentation: viewModel.signalInterferencePresentation,
-                    onRecover: {
-                        viewModel.recoverSignal()
-                    }
-                )
+                if viewModel.isControllerHubVisible {
+                    controllerHubOverlay(for: viewModel)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+
+                if viewModel.signalInterferencePresentation.isVisible {
+                    SignalInterferenceOverlayView(
+                        presentation: viewModel.signalInterferencePresentation,
+                        onRecover: {
+                            viewModel.recoverSignal()
+                        }
+                    )
+                }
             }
         }
         .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
@@ -959,77 +1006,130 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showBindingsSettings) {
-            KeyBindingsSettingsView(viewModel: viewModel)
+            if let controllerBridge = appShell.activeSimulation?.controllerUIBridge {
+                ControllerInteractionSurface(
+                    bridge: controllerBridge,
+                    surfaceID: "keybindings-sheet",
+                    secondaryAction: {
+                        showBindingsSettings = false
+                    }
+                ) {
+                    KeyBindingsSettingsView(viewModel: viewModel)
+                }
+            } else {
+                KeyBindingsSettingsView(viewModel: viewModel)
+            }
         }
     }
 
     @ViewBuilder
     private func payloadOverlay(for viewModel: DroneSimulationViewModel) -> some View {
-        ZStack(alignment: .top) {
-            Color.black.opacity(0.34)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    viewModel.setPayloadPanelVisible(false)
-                }
-
-            ScrollView(.vertical, showsIndicators: false) {
-                PayloadView(
-                    configuration: viewModel.payloadDraftConfiguration,
-                    payloadState: viewModel.payloadState,
-                    payloadMountState: viewModel.payloadMountState,
-                    capabilityCheck: viewModel.payloadCapabilityCheck,
-                    massModel: viewModel.vehicleMassModel,
-                    statusMessageKey: viewModel.payloadStatusMessageKey,
-                    activeUAVProfile: viewModel.activeUAVProfile,
-                    onTypeChange: viewModel.setPayloadType,
-                    onMassChange: viewModel.setPayloadMass,
-                    onCustomNameChange: viewModel.setPayloadCustomName,
-                    onAttach: viewModel.attachPayload,
-                    onRelease: viewModel.releasePayload,
-                    onRemove: viewModel.removePayload,
-                    onClose: {
+        ControllerInteractionSurface(
+            bridge: viewModel.controllerUIBridge,
+            surfaceID: "payload-overlay",
+            secondaryAction: {
+                viewModel.handleControllerUICancel()
+            }
+        ) {
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.34)
+                    .ignoresSafeArea()
+                    .onTapGesture {
                         viewModel.setPayloadPanelVisible(false)
                     }
-                )
-                .frame(maxWidth: 1040)
-                .padding(.horizontal, 28)
-                .padding(.top, viewModel.isToolPanelVisible ? 132 : 88)
-                .padding(.bottom, 40)
+
+                ControllerScrollableRegion(
+                    id: "payload.overlay.scroll",
+                    showsIndicators: false,
+                    isPrimary: true
+                ) {
+                    PayloadView(
+                        configuration: viewModel.payloadDraftConfiguration,
+                        payloadState: viewModel.payloadState,
+                        payloadMountState: viewModel.payloadMountState,
+                        capabilityCheck: viewModel.payloadCapabilityCheck,
+                        massModel: viewModel.vehicleMassModel,
+                        statusMessageKey: viewModel.payloadStatusMessageKey,
+                        activeUAVProfile: viewModel.activeUAVProfile,
+                        onTypeChange: viewModel.setPayloadType,
+                        onMassChange: viewModel.setPayloadMass,
+                        onCustomNameChange: viewModel.setPayloadCustomName,
+                        onAttach: viewModel.attachPayload,
+                        onRelease: viewModel.releasePayload,
+                        onRemove: viewModel.removePayload,
+                        onClose: {
+                            viewModel.setPayloadPanelVisible(false)
+                        }
+                    )
+                    .frame(maxWidth: 1040)
+                    .padding(.horizontal, 28)
+                    .padding(.top, viewModel.isToolPanelVisible ? 132 : 88)
+                    .padding(.bottom, 40)
+                }
             }
+            .zIndex(4)
         }
-        .zIndex(4)
     }
 
     @ViewBuilder
     private func missionMapOverlay(for viewModel: DroneSimulationViewModel) -> some View {
-        TacticalMapHostView(
-            snapshot: viewModel.terrainMapSnapshot,
-            state: viewModel.tacticalMapState,
-            missionPlan: viewModel.currentMissionPlan,
-            executionState: viewModel.missionExecutionState,
-            missionStatus: viewModel.missionStatusSnapshot,
-            missionTimeline: viewModel.missionTimeline,
-            missionDebrief: viewModel.missionDebrief,
-            onSetMode: viewModel.setTacticalMapMode,
-            onMapTap: viewModel.handleTacticalMapTap,
-            onRemoveLastWaypoint: viewModel.removeLastTacticalWaypoint,
-            onClearRoute: viewModel.clearTacticalRoute,
-            onClearZones: viewModel.clearTacticalZones,
-            onSetZoneRadius: viewModel.setTacticalZoneRadius,
-            onSetMinimumAltitude: viewModel.setTacticalMinimumAltitude,
-            onSetMaximumAltitude: viewModel.setTacticalMaximumAltitude,
-            onSetMinimumSpeed: viewModel.setTacticalMinimumSpeed,
-            onSetMaximumSpeed: viewModel.setTacticalMaximumSpeed,
-            onSaveDraft: viewModel.saveTacticalMissionDraft,
-            onPrepareMission: viewModel.prepareMission,
-            onStartMission: viewModel.startMissionExecution,
-            onPauseMission: viewModel.pauseMissionExecution,
-            onResumeMission: viewModel.resumeMissionExecution,
-            onAbortMission: viewModel.abortMissionExecution,
-            onCancel: viewModel.cancelMissionPlanningChanges,
-            onExit: viewModel.exitMissionMap
-        )
-        .zIndex(5)
+        ControllerInteractionSurface(
+            bridge: viewModel.controllerUIBridge,
+            surfaceID: "mission-map-overlay",
+            secondaryAction: {
+                viewModel.handleControllerUICancel()
+            }
+        ) {
+            TacticalMapHostView(
+                snapshot: viewModel.terrainMapSnapshot,
+                state: viewModel.tacticalMapState,
+                missionPlan: viewModel.currentMissionPlan,
+                executionState: viewModel.missionExecutionState,
+                missionStatus: viewModel.missionStatusSnapshot,
+                missionTimeline: viewModel.missionTimeline,
+                missionDebrief: viewModel.missionDebrief,
+                onSetMode: viewModel.setTacticalMapMode,
+                onMapTap: viewModel.handleTacticalMapTap,
+                onRemoveLastWaypoint: viewModel.removeLastTacticalWaypoint,
+                onClearRoute: viewModel.clearTacticalRoute,
+                onClearZones: viewModel.clearTacticalZones,
+                onSetZoneRadius: viewModel.setTacticalZoneRadius,
+                onSetMinimumAltitude: viewModel.setTacticalMinimumAltitude,
+                onSetMaximumAltitude: viewModel.setTacticalMaximumAltitude,
+                onSetMinimumSpeed: viewModel.setTacticalMinimumSpeed,
+                onSetMaximumSpeed: viewModel.setTacticalMaximumSpeed,
+                onSaveDraft: viewModel.saveTacticalMissionDraft,
+                onPrepareMission: viewModel.prepareMission,
+                onStartMission: viewModel.startMissionExecution,
+                onPauseMission: viewModel.pauseMissionExecution,
+                onResumeMission: viewModel.resumeMissionExecution,
+                onAbortMission: viewModel.abortMissionExecution,
+                onCancel: viewModel.cancelMissionPlanningChanges,
+                onExit: viewModel.exitMissionMap
+            )
+            .zIndex(5)
+        }
+    }
+
+    @ViewBuilder
+    private func controllerHubOverlay(
+        for viewModel: DroneSimulationViewModel
+    ) -> some View {
+        ControllerInteractionSurface(
+            bridge: viewModel.controllerUIBridge,
+            surfaceID: "controller-hub-overlay",
+            secondaryAction: {
+                viewModel.setControllerHubVisible(false)
+            }
+        ) {
+            ControllerHubOverlay(
+                viewModel: viewModel,
+                settingsStore: viewModel.controllerSettingsStore,
+                onClose: {
+                    viewModel.setControllerHubVisible(false)
+                }
+            )
+        }
     }
 
     private func parametersVisibilityBinding(for viewModel: DroneSimulationViewModel) -> Binding<Bool> {
@@ -1056,34 +1156,66 @@ struct ContentView: View {
 
     @ViewBuilder
     private func projectNameSheet(mode: NameDialogMode) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let sheetContent = VStack(alignment: .leading, spacing: 14) {
             Text(LocalizedStringKey(mode.titleKey))
                 .font(.headline)
 
             TextField(String(localized: "project.name"), text: $nameDraft)
                 .textFieldStyle(.roundedBorder)
+                .controllerTextInputTarget(
+                    id: "project.name.input",
+                    title: String(localized: "project.name"),
+                    placeholder: String(localized: "project.name"),
+                    currentText: { nameDraft },
+                    onCommit: { nameDraft = $0 }
+                )
 
             HStack {
                 Spacer()
                 Button("common.cancel") {
                     nameDialogMode = nil
                 }
-                Button(LocalizedStringKey(mode.actionKey)) {
-                    switch mode {
-                    case .create:
-                        appShell.createProject(named: nameDraft)
-                    case .saveAs:
-                        appShell.saveActiveProjectAs(name: nameDraft)
-                    case .duplicate:
-                        appShell.duplicateActiveProject(name: nameDraft)
-                    }
+                .controllerButtonTarget(id: "project.name.cancel") {
                     nameDialogMode = nil
                 }
+
+                Button(LocalizedStringKey(mode.actionKey)) {
+                    submitProjectNameDialog(mode)
+                }
                 .buttonStyle(.borderedProminent)
+                .controllerButtonTarget(id: "project.name.confirm") {
+                    submitProjectNameDialog(mode)
+                }
             }
         }
         .padding(16)
         .frame(width: 420)
+
+        if let controllerBridge = appShell.activeSimulation?.controllerUIBridge {
+            ControllerInteractionSurface(
+                bridge: controllerBridge,
+                surfaceID: "project-name-sheet",
+                secondaryAction: {
+                    nameDialogMode = nil
+                }
+            ) {
+                sheetContent
+            }
+        } else {
+            sheetContent
+        }
+    }
+
+    private func submitProjectNameDialog(_ mode: NameDialogMode) {
+        switch mode {
+        case .create:
+            appShell.createProject(named: nameDraft)
+        case .saveAs:
+            appShell.saveActiveProjectAs(name: nameDraft)
+        case .duplicate:
+            appShell.duplicateActiveProject(name: nameDraft)
+        }
+        nameDialogMode = nil
     }
 
     private func formattedDate(_ date: Date) -> String {

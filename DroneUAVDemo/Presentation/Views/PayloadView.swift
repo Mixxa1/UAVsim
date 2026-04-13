@@ -99,6 +99,7 @@ struct PayloadView: View {
                 }
                 .buttonStyle(.plain)
                 .help(String(localized: "payload.toolbar.close"))
+                .controllerButtonTarget(id: "payload.close", action: onClose)
             }
         }
         .padding(.horizontal, 14)
@@ -273,6 +274,9 @@ struct PayloadView: View {
                         .background(tileFill(for: type))
                     }
                     .buttonStyle(.plain)
+                    .controllerButtonTarget(id: "payload.type.\(type.id)") {
+                        onTypeChange(type)
+                    }
                 }
             }
         }
@@ -299,6 +303,19 @@ struct PayloadView: View {
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .controllerTextInputTarget(
+                        id: "payload.mass.input",
+                        title: String(localized: "payload.mass"),
+                        currentText: {
+                            Self.massFormatter.string(from: NSNumber(value: configuration.payloadMass)) ?? ""
+                        },
+                        onCommit: { text in
+                            guard let parsed = Self.massFormatter.controllerDouble(from: text) else {
+                                return
+                            }
+                            onMassChange(parsed)
+                        }
+                    )
 
                     Text("kg")
                         .font(.caption.weight(.semibold))
@@ -346,6 +363,12 @@ struct PayloadView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(valueFieldBackground(isFocused: isCustomNameFieldFocused))
+            .controllerTextInputTarget(
+                id: "payload.customName.input",
+                title: String(localized: "payload.custom_name"),
+                currentText: { configuration.customName },
+                onCommit: onCustomNameChange
+            )
         }
         .padding(14)
         .background(chromePanel(accent: Color.cyan.opacity(0.28)))
@@ -645,6 +668,7 @@ struct PayloadView: View {
                 )
         }
         .buttonStyle(.plain)
+        .controllerButtonTarget(id: "payload.mass.\(symbol)", action: action)
     }
 
     private func actionButton(
@@ -670,6 +694,7 @@ struct PayloadView: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .controllerButtonTarget(id: "payload.action.\(title)", action: action)
     }
 
     private func adjustMass(by delta: Double) {

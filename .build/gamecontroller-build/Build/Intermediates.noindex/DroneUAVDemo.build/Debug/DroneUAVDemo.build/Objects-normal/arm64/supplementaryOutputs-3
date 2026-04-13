@@ -1,0 +1,107 @@
+{
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/AppLanguage.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AppLanguage.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AppLanguage.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AppLanguage.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AppLanguage.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AppLanguage.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Domain/DroneFleetModel.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetModel.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetModel.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetModel.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetModel.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetModel.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Input/InputSourceKind.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputSourceKind.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputSourceKind.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputSourceKind.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputSourceKind.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputSourceKind.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Input/KeyboardInputProvider.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Input/KeyboardInputService.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Input/RemoteInputProvider.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/RemoteInputProvider.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/RemoteInputProvider.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/RemoteInputProvider.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/RemoteInputProvider.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/RemoteInputProvider.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Input/ResolvedControlState.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ResolvedControlState.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ResolvedControlState.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ResolvedControlState.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ResolvedControlState.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ResolvedControlState.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/DroneSceneViewRepresentable.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSceneViewRepresentable.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSceneViewRepresentable.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSceneViewRepresentable.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSceneViewRepresentable.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneSceneViewRepresentable.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentObjectFactory.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentObjectFactory.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentObjectFactory.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentObjectFactory.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentObjectFactory.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralMaterials.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralMaterials.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralMaterials.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralMaterials.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralMaterials.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralVisualFactory.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralVisualFactory.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralVisualFactory.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralVisualFactory.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/EnvironmentProceduralVisualFactory.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Scene/ScenePopulationService.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ScenePopulationService.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ScenePopulationService.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ScenePopulationService.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ScenePopulationService.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ScenePopulationService.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Services/TelemetryExportService.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TelemetryExportService.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AutoPathPlannerService.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AutoPathPlannerService.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AutoPathPlannerService.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AutoPathPlannerService.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/AutoPathPlannerService.swiftdeps"
+  },
+  "/Users/misha/Documents/New project/DroneUAVDemo/Simulation/DroneFleetManager.swift" : {
+    "const-values" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetManager.swiftconstvalues",
+    "dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetManager.d",
+    "diagnostics" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetManager.dia",
+    "object" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetManager.o",
+    "swift-dependencies" : "/Users/misha/Documents/New project/.build/gamecontroller-build/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneFleetManager.swiftdeps"
+  }
+}

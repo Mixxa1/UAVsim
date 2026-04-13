@@ -1,0 +1,608 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/ControlPanelView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "panel.telemetry",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 474
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.title",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 64
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.workflow_hint",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 66
+        }
+      },
+      {
+        "comment": "",
+        "key": "language.section",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "language.section",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "ui.toggle_telemetry_hud",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 86
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.throttle",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 134
+        }
+      },
+      {
+        "comment": "",
+        "key": "control_mode.title",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 102
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.reset",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 112
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.takeoff",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 113
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.land",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 114
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.hover",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 118
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.auto_path",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 119
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.return_home",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 120
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.stop_animation",
+        "location": {
+          "startingColumn": 82,
+          "startingLine": 127
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.start_animation",
+        "location": {
+          "startingColumn": 128,
+          "startingLine": 127
+        }
+      },
+      {
+        "comment": "",
+        "key": "command.emergency_stop",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 124
+        }
+      },
+      {
+        "comment": "",
+        "key": "section.flight",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 143
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.distance",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 202
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fov",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 210
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.camera_mode",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 168
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.payload.auto_switch",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 177
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.preset",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 182
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.reset_to_preset",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 192
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.sensitivity",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 223
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.smoothing",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 224
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.zoom_sensitivity",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 225
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.free_speed",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 226
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_yaw_limit",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 237
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_pitch_limit",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 238
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_near_clip",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 239
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_stabilization",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 240
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_mount_x",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 242
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_mount_y",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 243
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_mount_z",
+        "location": {
+          "startingColumn": 71,
+          "startingLine": 244
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.sensitivity_profile",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.invert_x",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 228
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.invert_y",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 232
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.fpv_hide_obstructing",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 246
+        }
+      },
+      {
+        "comment": "",
+        "key": "camera.advanced",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 253
+        }
+      },
+      {
+        "comment": "",
+        "key": "section.camera",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 259
+        }
+      },
+      {
+        "comment": "",
+        "key": "weather.intensity",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 278
+        }
+      },
+      {
+        "comment": "",
+        "key": "weather.wind_direction",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 279
+        }
+      },
+      {
+        "comment": "",
+        "key": "weather.wind_speed",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 280
+        }
+      },
+      {
+        "comment": "",
+        "key": "weather.gusts",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 281
+        }
+      },
+      {
+        "comment": "",
+        "key": "terrain.density",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 306
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.weather",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 269
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.terrain",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 285
+        }
+      },
+      {
+        "comment": "",
+        "key": "terrain.scale",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "environment.boundary_barrier_visible",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 315
+        }
+      },
+      {
+        "comment": "",
+        "key": "section.environment",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 322
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.mode",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 332
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.collision_debug",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 341
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.last_collision_source",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 344
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.active_objects",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 351
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 353
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.active_physics",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 356
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 358
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.active_particles",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 361
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 363
+        }
+      },
+      {
+        "comment": "",
+        "key": "section.diagnostics",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 369
+        }
+      },
+      {
+        "comment": "",
+        "key": "section.advanced",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 385
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.fleet",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 393
+        }
+      },
+      {
+        "comment": "",
+        "key": "fleet.separation",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 410
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.fleet_mode",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 396
+        }
+      },
+      {
+        "comment": "",
+        "key": "fleet.formation",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 401
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.damage",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 416
+        }
+      },
+      {
+        "comment": "",
+        "key": "damage.reset",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 420
+        }
+      },
+      {
+        "comment": "",
+        "key": "damage.clear_selection",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 424
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 441
+        }
+      },
+      {
+        "comment": "",
+        "key": "damage.hide",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 444
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.warnings",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 456
+        }
+      },
+      {
+        "comment": "",
+        "key": "warnings.none",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 460
+        }
+      },
+      {
+        "comment": "",
+        "key": "• %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 465
+        }
+      },
+      {
+        "comment": "",
+        "key": "telemetry.export",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 478
+        }
+      }
+    ]
+  },
+  "version": 1
+}

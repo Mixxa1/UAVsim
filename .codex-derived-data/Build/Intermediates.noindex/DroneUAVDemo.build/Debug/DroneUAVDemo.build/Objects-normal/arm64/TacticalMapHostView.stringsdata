@@ -1,0 +1,24 @@
+{
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/TacticalMapHostView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "tactical.map.title",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 174
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.subtitle",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 177
+        }
+      }
+    ]
+  },
+  "version": 1
+}

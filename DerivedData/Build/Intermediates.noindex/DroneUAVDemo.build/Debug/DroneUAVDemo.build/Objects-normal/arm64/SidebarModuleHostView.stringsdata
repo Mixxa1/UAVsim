@@ -1,5 +1,5 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift",
   "tables": {
     "Localizable": [
       {
@@ -7,7 +7,7 @@
         "key": "",
         "location": {
           "startingColumn": 27,
-          "startingLine": 379
+          "startingLine": 383
         }
       }
     ]

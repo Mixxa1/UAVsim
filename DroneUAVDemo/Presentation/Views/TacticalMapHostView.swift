@@ -125,7 +125,11 @@ private struct MissionSidebar: View {
     let onAbortMission: () -> Void
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
+        ControllerScrollableRegion(
+            id: "tactical.mission.sidebar.scroll",
+            showsIndicators: false,
+            isPrimary: true
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 MissionStatusPanel(snapshot: missionStatus)
                 MissionTimelineView(
@@ -227,5 +231,6 @@ private struct TacticalMapHeader: View {
                 )
         }
         .buttonStyle(.plain)
+        .controllerButtonTarget(id: "tactical.header.\(titleKey)", action: action)
     }
 }

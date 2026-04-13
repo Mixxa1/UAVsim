@@ -312,10 +312,10 @@ struct KeyBindingProfile {
     }
 }
 
-enum KeyboardAction: Equatable {
+enum InputAction: Equatable, Hashable {
     case requestHover
     case requestReset
-    case releasePayload
+    case dropPayload
     case armAircraft
     case disarmAircraft
     case selectFreeCamera
@@ -325,6 +325,7 @@ enum KeyboardAction: Equatable {
     case selectTopCamera
     case selectPayloadCamera
     case toggleFPV
+    case toggleTopView
     case toggleMissionMap
     case togglePayloadPanel
     case toggleTerrainMap
@@ -338,6 +339,19 @@ enum KeyboardAction: Equatable {
     case zoomInCamera
     case zoomOutCamera
     case resetCameraOrientation
+    case returnHome
+    case pauseMission
+    case resumeMission
+    case toggleControllerCursor
+    case openControllerHub
+    case uiSectionPrevious
+    case uiSectionNext
+    case uiPrimary
+    case uiSecondary
+    case uiFocusUp
+    case uiFocusDown
+    case uiFocusLeft
+    case uiFocusRight
 }
 
 protocol KeyboardInputProviding {
@@ -348,7 +362,7 @@ protocol KeyboardInputProviding {
     func currentYawInput() -> KeyboardYawInput
     func currentLookInput() -> KeyboardLookInput
     func currentInputSnapshot() -> KeyboardInputSnapshot
-    func consumeActions() -> [KeyboardAction]
+    func consumeActions() -> [InputAction]
     func setInputProcessingMode(_ mode: InputProcessingMode)
     func currentBindingProfile() -> KeyBindingProfile
     func currentBindingConflicts() -> [String]
@@ -368,7 +382,7 @@ final class KeyboardInputService: KeyboardInputProviding {
 
     private var activeContinuousCommands: Set<KeyboardCommand> = []
     private var activeContinuousByKey: [UInt16: Set<KeyboardCommand>] = [:]
-    private var pendingActions: [KeyboardAction] = []
+    private var pendingActions: [InputAction] = []
 
     private var processingMode: InputProcessingMode = .flight
     private var profile: KeyBindingProfile
@@ -510,7 +524,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         )
     }
 
-    func consumeActions() -> [KeyboardAction] {
+    func consumeActions() -> [InputAction] {
         defer {
             pendingActions.removeAll(keepingCapacity: true)
         }
@@ -665,7 +679,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         case .resetDrone:
             enqueueAction(.requestReset)
         case .releasePayload:
-            enqueueAction(.releasePayload)
+            enqueueAction(.dropPayload)
         case .cameraModeFree:
             enqueueAction(.selectFreeCamera)
         case .cameraModeChase:
@@ -706,7 +720,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
     }
 
-    private func directAction(for event: NSEvent) -> KeyboardAction? {
+    private func directAction(for event: NSEvent) -> InputAction? {
         if matchesCompassOverlayToggle(event) {
             return .toggleCompassOverlay
         }
@@ -788,7 +802,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
     }
 
-    private func enqueueAction(_ action: KeyboardAction) {
+    private func enqueueAction(_ action: InputAction) {
         guard !pendingActions.contains(action) else {
             return
         }

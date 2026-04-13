@@ -38,6 +38,7 @@ struct PayloadToolbarEntry: View {
         }
         .buttonStyle(.plain)
         .help(String(localized: isPresented ? "payload.toolbar.close" : "payload.toolbar.open"))
+        .controllerButtonTarget(id: "toolbar.payload", action: action)
     }
 
     private var mountTint: Color {

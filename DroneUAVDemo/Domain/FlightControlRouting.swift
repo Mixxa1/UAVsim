@@ -28,20 +28,31 @@ enum FlightControlAuthority: String, Equatable {
 }
 
 struct FlightInputState {
-    let keyboard: KeyboardInputSnapshot
+    let controlState: ResolvedControlState
     let payloadViewActive: Bool
     let mapOverlayActive: Bool
 
     var manualAxisInput: KeyboardAxisInput {
-        keyboard.axisInput
+        KeyboardAxisInput(
+            forward: Float(controlState.pitch),
+            strafe: Float(controlState.roll),
+            vertical: Float(controlState.throttle),
+            speedBoost: controlState.boostMode
+        )
     }
 
     var manualYawInput: KeyboardYawInput {
-        keyboard.yawInput
+        KeyboardYawInput(
+            intent: Float(controlState.yaw),
+            speedBoost: controlState.boostMode
+        )
     }
 
     var manualInputActive: Bool {
-        keyboard.manualFlightInputActive
+        abs(controlState.pitch) > 0.001 ||
+        abs(controlState.roll) > 0.001 ||
+        abs(controlState.throttle) > 0.001 ||
+        abs(controlState.yaw) > 0.001
     }
 }
 

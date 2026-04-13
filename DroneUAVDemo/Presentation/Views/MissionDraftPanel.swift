@@ -48,6 +48,15 @@ private struct ConstraintEditorField: View {
                     }
                 }
                 .onSubmit(commitOrRevert)
+                .controllerTextInputTarget(
+                    id: "\(titleKey).constraint",
+                    title: NSLocalizedString(titleKey, comment: ""),
+                    currentText: { draftText },
+                    onCommit: { text in
+                        draftText = text
+                        commitOrRevert()
+                    }
+                )
             Text(LocalizedStringKey(unitKey))
                 .foregroundStyle(GroundControlPalette.textSecondary)
         }
@@ -438,6 +447,7 @@ struct MissionDraftPanel: View {
                 )
         }
         .buttonStyle(.plain)
+        .controllerButtonTarget(id: titleKey, action: action)
     }
 
     private var routeDistanceText: String {

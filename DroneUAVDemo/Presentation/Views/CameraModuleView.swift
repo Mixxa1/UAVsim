@@ -94,6 +94,9 @@ struct CameraModuleView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            .controllerButtonTarget(id: "camera.preset.\(preset.id)") {
+                                viewModel.setCameraPreset(preset)
+                            }
                         }
                     }
 

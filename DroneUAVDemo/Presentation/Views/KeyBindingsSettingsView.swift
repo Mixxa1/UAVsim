@@ -18,6 +18,9 @@ struct KeyBindingsSettingsView: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
+                .controllerButtonTarget(id: "keybind.done") {
+                    dismiss()
+                }
             }
 
             HStack {
@@ -44,11 +47,23 @@ struct KeyBindingsSettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .controllerButtonTarget(id: "keybind.resetDefaults") {
+                    stopRebindingCapture()
+                    viewModel.resetKeyBindingsToDefault()
+                }
             }
 
             Divider()
 
-            ScrollView {
+            controllerSettingsSection
+
+            Divider()
+
+            ControllerScrollableRegion(
+                id: "keybindings.sheet.scroll",
+                showsIndicators: false,
+                isPrimary: true
+            ) {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(viewModel.keyBindingSections) { section in
                         VStack(alignment: .leading, spacing: 6) {
@@ -73,6 +88,9 @@ struct KeyBindingsSettingsView: View {
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
                                     .tint(rebindingCommand == binding.command ? .orange : .accentColor)
+                                    .controllerButtonTarget(id: "keybind.rebind.\(binding.command.titleKey)") {
+                                        beginRebinding(for: binding.command)
+                                    }
                                 }
                             }
                         }
@@ -91,10 +109,99 @@ struct KeyBindingsSettingsView: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 560, minHeight: 560)
+        .frame(minWidth: 600, minHeight: 620)
         .onDisappear {
             stopRebindingCapture()
         }
+    }
+
+    private var controllerSettingsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Game Controller")
+                .font(.headline)
+
+            HStack(spacing: 12) {
+                controllerInfoChip(
+                    title: "Input source",
+                    value: inputSourceTitle(viewModel.activeInputSourceKind)
+                )
+                controllerInfoChip(
+                    title: "Source device",
+                    value: viewModel.activeGameControllerName ?? "None"
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Connected controllers")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if viewModel.connectedGameControllers.isEmpty {
+                    Text("No controller connected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.connectedGameControllers) { controller in
+                        HStack(spacing: 8) {
+                            Text(controller.name)
+                                .font(.caption)
+                            Spacer()
+                            if controller.isActive {
+                                Text("Active")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(Color.accentColor.opacity(0.16), in: Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Right stick X")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    ForEach(GameControllerRightStickHorizontalMode.allCases) { mode in
+                        Button {
+                            viewModel.setGameControllerRightStickHorizontalMode(mode)
+                        } label: {
+                            Text(mode.title)
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(
+                            viewModel.gameControllerRightStickHorizontalMode == mode
+                                ? .accentColor
+                                : .gray.opacity(0.6)
+                        )
+                        .controllerButtonTarget(id: "gamepad.rightStick.\(mode.rawValue)") {
+                            viewModel.setGameControllerRightStickHorizontalMode(mode)
+                        }
+                    }
+                }
+
+                Text("Default profile maps right stick horizontal to keyboard J / L yaw semantics.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func controllerInfoChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.weight(.medium))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func beginRebinding(for command: KeyboardCommand) {
@@ -169,6 +276,21 @@ struct KeyBindingsSettingsView: View {
                 format: NSLocalizedString("keybind.key.code", comment: ""),
                 event.keyCode
             )
+        }
+    }
+
+    private func inputSourceTitle(_ source: InputSourceKind?) -> String {
+        switch source {
+        case .keyboard:
+            return "Keyboard"
+        case .gameController:
+            return "Game controller"
+        case .remote:
+            return "Remote"
+        case .autopilot:
+            return "Autopilot"
+        case nil:
+            return "None"
         }
     }
 }

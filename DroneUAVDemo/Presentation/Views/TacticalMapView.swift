@@ -42,6 +42,13 @@ struct TacticalMapView: View {
                                     onMapTap(planarPoint)
                                 }
                         )
+                        .controllerPointTarget(id: "tactical.map.canvas") { localPoint in
+                            let projection = TerrainMapProjection(snapshot: snapshot, size: geometry.size)
+                            guard let planarPoint = projection.unproject(localPoint) else {
+                                return
+                            }
+                            onMapTap(planarPoint)
+                        }
                 }
             }
             .background(
@@ -89,6 +96,9 @@ struct TacticalMapView: View {
                 )
         }
         .buttonStyle(.plain)
+        .controllerButtonTarget(id: "tactical.map.mode.\(mode.rawValue)") {
+            onSetMode(mode)
+        }
     }
 
     private func metricChip(_ titleKey: String, value: String) -> some View {

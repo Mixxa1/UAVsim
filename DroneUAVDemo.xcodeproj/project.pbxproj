@@ -151,6 +151,27 @@
 		10000000000000000000028E /* MissionDebriefView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000197 /* MissionDebriefView.swift */; };
 		10000000000000000000028F /* MissionExecutionBindingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000198 /* MissionExecutionBindingState.swift */; };
 		100000000000000000000290 /* MissionExecutionBinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000199 /* MissionExecutionBinder.swift */; };
+		100000000000000000000291 /* InputSourceKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000019A /* InputSourceKind.swift */; };
+		100000000000000000000292 /* InputSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000019B /* InputSnapshot.swift */; };
+		100000000000000000000293 /* InputProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000019C /* InputProvider.swift */; };
+		100000000000000000000294 /* ResolvedControlState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000019D /* ResolvedControlState.swift */; };
+		100000000000000000000295 /* InputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000019E /* InputManager.swift */; };
+		100000000000000000000296 /* KeyboardInputProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000019F /* KeyboardInputProvider.swift */; };
+		100000000000000000000297 /* GameControllerInputProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A0 /* GameControllerInputProvider.swift */; };
+		100000000000000000000298 /* RemoteInputProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A1 /* RemoteInputProvider.swift */; };
+		100000000000000000000299 /* AutopilotInputProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A2 /* AutopilotInputProvider.swift */; };
+		10000000000000000000029A /* RemoteControlPacket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A3 /* RemoteControlPacket.swift */; };
+		10000000000000000000029B /* RemoteTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A4 /* RemoteTransport.swift */; };
+		10000000000000000000029C /* MockRemoteTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A5 /* MockRemoteTransport.swift */; };
+		10000000000000000000029D /* RemotePacketDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A6 /* RemotePacketDecoder.swift */; };
+		10000000000000000000029E /* NetworkRemoteHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A7 /* NetworkRemoteHost.swift */; };
+		10000000000000000000029F /* ControllerInteractionMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A8 /* ControllerInteractionMode.swift */; };
+		1000000000000000000002A0 /* ControllerCursorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001A9 /* ControllerCursorState.swift */; };
+		1000000000000000000002A1 /* ControllerCursorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AA /* ControllerCursorOverlay.swift */; };
+		1000000000000000000002A2 /* VirtualKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AB /* VirtualKeyboardView.swift */; };
+		1000000000000000000002A3 /* UIScrollRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AC /* UIScrollRouter.swift */; };
+		1000000000000000000002A4 /* ControllerHubOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AD /* ControllerHubOverlay.swift */; };
+		1000000000000000000002A5 /* ControllerSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AE /* ControllerSettingsStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -300,6 +321,27 @@
 		100000000000000000000197 /* MissionDebriefView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionDebriefView.swift; sourceTree = "<group>"; };
 		100000000000000000000198 /* MissionExecutionBindingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionExecutionBindingState.swift; sourceTree = "<group>"; };
 		100000000000000000000199 /* MissionExecutionBinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionExecutionBinder.swift; sourceTree = "<group>"; };
+		10000000000000000000019A /* InputSourceKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSourceKind.swift; sourceTree = "<group>"; };
+		10000000000000000000019B /* InputSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSnapshot.swift; sourceTree = "<group>"; };
+		10000000000000000000019C /* InputProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputProvider.swift; sourceTree = "<group>"; };
+		10000000000000000000019D /* ResolvedControlState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResolvedControlState.swift; sourceTree = "<group>"; };
+		10000000000000000000019E /* InputManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputManager.swift; sourceTree = "<group>"; };
+		10000000000000000000019F /* KeyboardInputProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputProvider.swift; sourceTree = "<group>"; };
+		1000000000000000000001A0 /* GameControllerInputProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameControllerInputProvider.swift; sourceTree = "<group>"; };
+		1000000000000000000001A1 /* RemoteInputProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteInputProvider.swift; sourceTree = "<group>"; };
+		1000000000000000000001A2 /* AutopilotInputProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutopilotInputProvider.swift; sourceTree = "<group>"; };
+		1000000000000000000001A3 /* RemoteControlPacket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteControlPacket.swift; sourceTree = "<group>"; };
+		1000000000000000000001A4 /* RemoteTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteTransport.swift; sourceTree = "<group>"; };
+		1000000000000000000001A5 /* MockRemoteTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockRemoteTransport.swift; sourceTree = "<group>"; };
+		1000000000000000000001A6 /* RemotePacketDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePacketDecoder.swift; sourceTree = "<group>"; };
+		1000000000000000000001A7 /* NetworkRemoteHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkRemoteHost.swift; sourceTree = "<group>"; };
+		1000000000000000000001A8 /* ControllerInteractionMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerInteractionMode.swift; sourceTree = "<group>"; };
+		1000000000000000000001A9 /* ControllerCursorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerCursorState.swift; sourceTree = "<group>"; };
+		1000000000000000000001AA /* ControllerCursorOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerCursorOverlay.swift; sourceTree = "<group>"; };
+		1000000000000000000001AB /* VirtualKeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualKeyboardView.swift; sourceTree = "<group>"; };
+		1000000000000000000001AC /* UIScrollRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIScrollRouter.swift; sourceTree = "<group>"; };
+		1000000000000000000001AD /* ControllerHubOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerHubOverlay.swift; sourceTree = "<group>"; };
+		1000000000000000000001AE /* ControllerSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerSettingsStore.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -340,6 +382,7 @@
 				100000000000000000000013 /* Scene */,
 				100000000000000000000014 /* Presentation */,
 				100000000000000000000017 /* Input */,
+				100000000000000000000019 /* Remote */,
 				100000000000000000000018 /* Services */,
 				100000000000000000000125 /* Resources */,
 			);
@@ -489,6 +532,10 @@
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
 				100000000000000000000154 /* CompassOverlayView.swift */,
 				100000000000000000000101 /* ContentView.swift */,
+				1000000000000000000001AA /* ControllerCursorOverlay.swift */,
+				1000000000000000000001A9 /* ControllerCursorState.swift */,
+				1000000000000000000001AD /* ControllerHubOverlay.swift */,
+				1000000000000000000001A8 /* ControllerInteractionMode.swift */,
 				10000000000000000000014A /* ControlModule.swift */,
 				100000000000000000000102 /* ControlPanelView.swift */,
 				10000000000000000000014B /* SidebarModuleHostView.swift */,
@@ -516,6 +563,8 @@
 				10000000000000000000014D /* UAVCatalogModuleView.swift */,
 				100000000000000000000138 /* UAVFilterBarView.swift */,
 				100000000000000000000139 /* UAVProfileCardView.swift */,
+				1000000000000000000001AC /* UIScrollRouter.swift */,
+				1000000000000000000001AB /* VirtualKeyboardView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -532,7 +581,17 @@
 		100000000000000000000017 /* Input */ = {
 			isa = PBXGroup;
 			children = (
+				1000000000000000000001A2 /* AutopilotInputProvider.swift */,
+				1000000000000000000001A0 /* GameControllerInputProvider.swift */,
+				1000000000000000000001AE /* ControllerSettingsStore.swift */,
+				10000000000000000000019E /* InputManager.swift */,
+				10000000000000000000019C /* InputProvider.swift */,
+				10000000000000000000019B /* InputSnapshot.swift */,
+				10000000000000000000019A /* InputSourceKind.swift */,
 				10000000000000000000011A /* KeyboardInputService.swift */,
+				10000000000000000000019F /* KeyboardInputProvider.swift */,
+				1000000000000000000001A1 /* RemoteInputProvider.swift */,
+				10000000000000000000019D /* ResolvedControlState.swift */,
 			);
 			path = Input;
 			sourceTree = "<group>";
@@ -543,6 +602,18 @@
 				10000000000000000000011B /* TelemetryExportService.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		100000000000000000000019 /* Remote */ = {
+			isa = PBXGroup;
+			children = (
+				1000000000000000000001A7 /* NetworkRemoteHost.swift */,
+				1000000000000000000001A5 /* MockRemoteTransport.swift */,
+				1000000000000000000001A3 /* RemoteControlPacket.swift */,
+				1000000000000000000001A6 /* RemotePacketDecoder.swift */,
+				1000000000000000000001A4 /* RemoteTransport.swift */,
+			);
+			path = Remote;
 			sourceTree = "<group>";
 		};
 		100000000000000000000125 /* Resources */ = {
@@ -660,7 +731,28 @@
 				100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */,
 				100000000000000000000218 /* CollisionAnalysisService.swift in Sources */,
 				100000000000000000000219 /* DroneSimulationContext.swift in Sources */,
+				100000000000000000000299 /* AutopilotInputProvider.swift in Sources */,
+				100000000000000000000297 /* GameControllerInputProvider.swift in Sources */,
+				100000000000000000000295 /* InputManager.swift in Sources */,
+				100000000000000000000293 /* InputProvider.swift in Sources */,
+				100000000000000000000292 /* InputSnapshot.swift in Sources */,
+				100000000000000000000291 /* InputSourceKind.swift in Sources */,
 				10000000000000000000021A /* KeyboardInputService.swift in Sources */,
+				100000000000000000000296 /* KeyboardInputProvider.swift in Sources */,
+				10000000000000000000029E /* NetworkRemoteHost.swift in Sources */,
+				10000000000000000000029C /* MockRemoteTransport.swift in Sources */,
+				100000000000000000000298 /* RemoteInputProvider.swift in Sources */,
+				10000000000000000000029A /* RemoteControlPacket.swift in Sources */,
+				10000000000000000000029D /* RemotePacketDecoder.swift in Sources */,
+				10000000000000000000029B /* RemoteTransport.swift in Sources */,
+				100000000000000000000294 /* ResolvedControlState.swift in Sources */,
+				10000000000000000000029F /* ControllerInteractionMode.swift in Sources */,
+				1000000000000000000002A0 /* ControllerCursorState.swift in Sources */,
+				1000000000000000000002A1 /* ControllerCursorOverlay.swift in Sources */,
+				1000000000000000000002A2 /* VirtualKeyboardView.swift in Sources */,
+				1000000000000000000002A3 /* UIScrollRouter.swift in Sources */,
+				1000000000000000000002A4 /* ControllerHubOverlay.swift in Sources */,
+				1000000000000000000002A5 /* ControllerSettingsStore.swift in Sources */,
 				10000000000000000000021B /* TelemetryExportService.swift in Sources */,
 				10000000000000000000021C /* EnvironmentObjectFactory.swift in Sources */,
 				100000000000000000000257 /* EnvironmentProceduralMaterials.swift in Sources */,

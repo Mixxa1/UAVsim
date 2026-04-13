@@ -1,0 +1,48 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "signal_loss.lost_title",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 369
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.lost_message",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 372
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.recover",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 375
+        }
+      },
+      {
+        "comment": "",
+        "key": "telemetry.export.select_folder",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 2115
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.export",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 2116
+        }
+      }
+    ]
+  },
+  "version": 1
+}

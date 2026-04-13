@@ -1,0 +1,80 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/MissionDraftPanel.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 26
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.route.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 129
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.constraints.hint",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 212
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.zone.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 277
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.plan.status.ready",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 293
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.status.value.none",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 286
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.zone.radius.value.multiple",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 303
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.zone.radius.value",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 312
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.panel.plan.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 365
+        }
+      }
+    ]
+  },
+  "version": 1
+}

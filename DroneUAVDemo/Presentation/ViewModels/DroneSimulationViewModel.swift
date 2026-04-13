@@ -185,6 +185,17 @@ private enum SignalLossConfiguration {
     static let reentryInset: Float = 8.0
 }
 
+private extension Int {
+    func positiveModulo(_ modulus: Int) -> Int {
+        guard modulus > 0 else {
+            return 0
+        }
+
+        let remainder = self % modulus
+        return remainder >= 0 ? remainder : remainder + modulus
+    }
+}
+
 extension DroneSimulationViewModel {
     struct TerrainMapMissionWaypoint: Identifiable, Equatable {
         let id: UUID
@@ -305,8 +316,18 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isCompassVisible: Bool
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
+    @Published private(set) var controllerInteractionMode: ControllerInteractionMode = .flight
+    @Published private(set) var activeInputSourceKind: InputSourceKind?
+    @Published private(set) var activeGameControllerName: String?
+    @Published private(set) var connectedGameControllers: [GameControllerDeviceSummary] = []
+    @Published private(set) var gameControllerRightStickHorizontalMode: GameControllerRightStickHorizontalMode = .yawLeftRight
+    @Published private(set) var isControllerCursorEnabled: Bool = false
+    @Published private(set) var isControllerHubVisible: Bool = false
+    @Published var controllerHubSection: ControllerHubSection = .connectedDevices
 
     let compassViewModel: CompassViewModel
+    let controllerSettingsStore: ControllerSettingsStore
+    let controllerUIBridge: ControllerUIBridge
 
     var scene: SCNScene {
         sceneController.scene
@@ -388,6 +409,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private let physicsEngine: DronePhysicsEngine
     private let sceneController: DroneSceneController
     private let keyboardInputService: KeyboardInputProviding
+    private let gameControllerInputProvider: GameControllerInputProvider
+    private let remoteInputProvider: RemoteInputProvider
+    private let inputManager: InputManager
     private let collisionService: CollisionAnalysisService
     private let batteryThermalService: BatteryThermalSimulationService
     private let telemetryExporter: TelemetryExporting
@@ -436,6 +460,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var autosaveAccumulator: Float = 0.0
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
+    private var resolvedInputState: ResolvedControlState = .neutral
     private var autoFlightGoal: SIMD3<Float>?
     private var autoFlightGoalIndex: Int = 0
     private var returnHomeStage: ReturnHomeStage = .idle
@@ -456,6 +481,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var missionSafetyState: MissionSafetyState = .idle
     private var activeRouteTargetSource: ActiveRouteTargetSource = .none
     private var missionObservation = MissionObservationAccumulator()
+    private var externalControllerOverlayActive: Bool = false
 
     private enum ActiveRouteTargetSource {
         case none
@@ -524,6 +550,7 @@ final class DroneSimulationViewModel: ObservableObject {
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
         keyboardInputService: KeyboardInputProviding = KeyboardInputService(),
+        controllerSettingsStore: ControllerSettingsStore = ControllerSettingsStore(),
         collisionService: CollisionAnalysisService = CollisionAnalysisService(),
         batteryThermalService: BatteryThermalSimulationService = BatteryThermalSimulationService(),
         telemetryExporter: TelemetryExporting = TelemetryExportService(),
@@ -533,11 +560,29 @@ final class DroneSimulationViewModel: ObservableObject {
         flightControlRouter: FlightControlRouter = FlightControlRouter(),
         autoNavigationController: AutoNavigationController = AutoNavigationController(),
         payloadCameraController: PayloadCameraController = PayloadCameraController(),
+        remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
         initialProjectName: String? = nil
     ) {
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
+        self.controllerSettingsStore = controllerSettingsStore
+        let gameControllerInputProvider = GameControllerInputProvider(
+            settingsStore: controllerSettingsStore
+        )
+        self.controllerUIBridge = ControllerUIBridge(settingsStore: controllerSettingsStore)
+        self.gameControllerInputProvider = gameControllerInputProvider
+        let remoteTransport = NetworkRemoteHost(port: remoteHostPort)
+        let remoteInputProvider = RemoteInputProvider(transport: remoteTransport)
+        self.remoteInputProvider = remoteInputProvider
+        self.inputManager = InputManager(
+            providers: [
+                KeyboardInputProvider(keyboardInputService: keyboardInputService),
+                gameControllerInputProvider,
+                remoteInputProvider,
+                AutopilotInputProvider()
+            ]
+        )
         self.collisionService = collisionService
         self.batteryThermalService = batteryThermalService
         self.telemetryExporter = telemetryExporter
@@ -723,6 +768,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         logAvailableUAVCatalog(models: models)
         refreshKeyBindingDiagnostics()
+        refreshGameControllerPresentation(force: true)
+        syncControllerInteractionMode()
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.start()
         emitLaunchDiagnostics(context: "init")
@@ -736,6 +783,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     // MARK: - Controls
+
+    func injectMockRemotePacket(_ packet: RemoteControlPacket) {
+        remoteInputProvider.ingestRemotePacket(packet)
+    }
 
     func setX(_ value: Double) { updateControlValues({ $0.x = value }, markManual: true) }
     func setY(_ value: Double) { updateControlValues({ $0.y = value }, markManual: true) }
@@ -911,6 +962,7 @@ final class DroneSimulationViewModel: ObservableObject {
             values.pitch = 0.0
         }, markManual: false)
         keyboardInputService.resetTransientState()
+        inputManager.reset()
         resetFlightControlRouting()
 
         if heightAboveSupportSurface(for: state.position) <= 0.08 || physicalState.isGroundRestState {
@@ -959,6 +1011,7 @@ final class DroneSimulationViewModel: ObservableObject {
         activePayloadReleaseID = nil
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.resetTransientState()
+        inputManager.reset()
         resetFlightControlRouting()
         payloadCameraController.clearTracking()
         sceneController.setPayloadCameraFocusReleaseID(nil)
@@ -1054,6 +1107,7 @@ final class DroneSimulationViewModel: ObservableObject {
         clearSignalLossState(restoringInputMode: false)
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.resetTransientState()
+        inputManager.reset()
         resetFlightControlRouting()
         sceneController.resetCameraRuntimeState()
         refreshTerrainMapSnapshot(recordTrail: false)
@@ -1886,10 +1940,104 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func beginKeyBindingCapture() {
         keyboardInputService.setInputProcessingMode(.bindingCapture)
+        inputManager.reset()
     }
 
     func endKeyBindingCapture() {
         keyboardInputService.setInputProcessingMode(.flight)
+        inputManager.reset()
+    }
+
+    func setExternalControllerOverlayActive(_ active: Bool) {
+        guard externalControllerOverlayActive != active else {
+            return
+        }
+
+        externalControllerOverlayActive = active
+        if active, isControllerHubVisible {
+            isControllerHubVisible = false
+        }
+        syncControllerInteractionMode()
+    }
+
+    func toggleControllerCursor() {
+        guard inputManager.isSourceConnected(.gameController) else {
+            return
+        }
+
+        isControllerCursorEnabled.toggle()
+        syncControllerInteractionMode()
+    }
+
+    func setControllerCursorEnabled(_ enabled: Bool) {
+        guard isControllerCursorEnabled != enabled else {
+            return
+        }
+
+        isControllerCursorEnabled = enabled
+        syncControllerInteractionMode()
+    }
+
+    func toggleControllerHub() {
+        guard !externalControllerOverlayActive else {
+            return
+        }
+
+        setControllerHubVisible(!isControllerHubVisible)
+    }
+
+    func setControllerHubVisible(_ visible: Bool) {
+        guard isControllerHubVisible != visible else {
+            return
+        }
+
+        if visible {
+            controllerUIBridge.cancelTextInput()
+        }
+
+        isControllerHubVisible = visible
+        syncControllerInteractionMode()
+    }
+
+    func cycleControllerHubSection(step: Int) {
+        let sections = ControllerHubSection.allCases
+        guard let currentIndex = sections.firstIndex(of: controllerHubSection), !sections.isEmpty else {
+            return
+        }
+
+        let nextIndex = (currentIndex + step).positiveModulo(sections.count)
+        controllerHubSection = sections[nextIndex]
+    }
+
+    func handleControllerUICancel() {
+        if isControllerHubVisible {
+            setControllerHubVisible(false)
+            return
+        }
+
+        if controllerUIBridge.isTextInputPresented {
+            controllerUIBridge.cancelTextInput()
+            return
+        }
+
+        if isMissionMapVisible {
+            exitMissionMap()
+            return
+        }
+
+        if isPayloadPanelVisible {
+            setPayloadPanelVisible(false)
+            return
+        }
+
+        if isParametersPanelVisible {
+            setControlPanelVisible(false)
+        }
+    }
+
+    func setGameControllerRightStickHorizontalMode(_ mode: GameControllerRightStickHorizontalMode) {
+        gameControllerInputProvider.setRightStickHorizontalMode(mode)
+        refreshGameControllerPresentation(force: true)
     }
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
@@ -2281,6 +2429,19 @@ final class DroneSimulationViewModel: ObservableObject {
         let now = CACurrentMediaTime()
         guard let lastTimestamp else {
             self.lastTimestamp = now
+            let resolvedInput = updateInputPipeline(deltaTime: 0.0)
+            let controllerSnapshot = inputManager.snapshot(for: .gameController)
+            syncControllerInteractionMode()
+            processControllerUIInput(
+                using: controllerResolvedControlState(from: controllerSnapshot),
+                deltaTime: 0.0
+            )
+            processInputActions(
+                using: resolvedInput.applyingInteractionMode(
+                    controllerInteractionMode,
+                    controllerSnapshot: controllerSnapshot
+                )
+            )
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
             refreshCompassOverlay()
@@ -2293,8 +2454,19 @@ final class DroneSimulationViewModel: ObservableObject {
         simulationTime += dt
         impactSeverityAccumulator = max(0.0, impactSeverityAccumulator - dt * 3.6)
 
-        processKeyboardActions()
-        applyContinuousCameraLook(deltaTime: dt)
+        let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
+        let controllerSnapshot = inputManager.snapshot(for: .gameController)
+        syncControllerInteractionMode()
+        processControllerUIInput(
+            using: controllerResolvedControlState(from: controllerSnapshot),
+            deltaTime: TimeInterval(dt)
+        )
+        let interactionAwareInput = resolvedInput.applyingInteractionMode(
+            controllerInteractionMode,
+            controllerSnapshot: controllerSnapshot
+        )
+        processInputActions(using: interactionAwareInput)
+        applyContinuousCameraLook(deltaTime: dt, controlState: interactionAwareInput)
 
         guard isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
@@ -2325,7 +2497,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         collisionCooldown = max(0.0, collisionCooldown - dt)
 
-        applyKeyboardControls(deltaTime: dt)
+        applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
         updateAutopilotTargets(deltaTime: dt)
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
 
@@ -2764,9 +2936,11 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func applyKeyboardControls(deltaTime: Float) {
-        let snapshot = keyboardInputService.currentInputSnapshot()
-        let inputState = buildFlightInputState(from: snapshot)
+    private func applyResolvedFlightControls(
+        deltaTime: Float,
+        controlState: ResolvedControlState
+    ) {
+        let inputState = buildFlightInputState(from: controlState)
         let routingContext = buildFlightControlRoutingContext()
         let route = flightControlRouter.route(
             inputState: inputState,
@@ -2877,19 +3051,18 @@ final class DroneSimulationViewModel: ObservableObject {
         }, markManual: false)
     }
 
-    private func processKeyboardActions() {
+    private func processInputActions(using controlState: ResolvedControlState) {
         guard !signalState.isInteractionBlocking else {
-            _ = keyboardInputService.consumeActions()
             return
         }
-        let actions = keyboardInputService.consumeActions()
-        for action in actions {
+
+        for action in controlState.actions {
             switch action {
             case .requestHover:
                 hover()
             case .requestReset:
                 reset()
-            case .releasePayload:
+            case .dropPayload:
                 releasePayload()
             case .armAircraft:
                 arm()
@@ -2909,6 +3082,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 setCameraMode(.payload)
             case .toggleFPV:
                 setCameraMode(cameraConfiguration.mode == .fpv ? .follow : .fpv)
+            case .toggleTopView:
+                setCameraMode(cameraConfiguration.mode == .top ? .follow : .top)
             case .toggleMissionMap:
                 toggleMissionMap()
             case .togglePayloadPanel:
@@ -2935,19 +3110,35 @@ final class DroneSimulationViewModel: ObservableObject {
                 adjustCameraZoom(inward: false)
             case .resetCameraOrientation:
                 syncCameraSystem(resetOrientation: true)
+            case .returnHome:
+                activateReturnHome()
+            case .pauseMission:
+                pauseMissionExecution()
+            case .resumeMission:
+                resumeMissionExecution()
+            case .toggleControllerCursor, .openControllerHub,
+                 .uiSectionPrevious, .uiSectionNext,
+                 .uiPrimary, .uiSecondary,
+                 .uiFocusUp, .uiFocusDown, .uiFocusLeft, .uiFocusRight:
+                break
             }
         }
     }
 
-    private func applyContinuousCameraLook(deltaTime: Float) {
+    private func applyContinuousCameraLook(
+        deltaTime: Float,
+        controlState: ResolvedControlState
+    ) {
         guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             cameraLookVelocity = .zero
             return
         }
 
-        let look = keyboardInputService.currentLookInput()
-        let speedMultiplier: Float = look.speedBoost ? 1.85 : 1.0
-        let targetVelocity = SIMD2<Float>(look.yaw, look.pitch)
+        let speedMultiplier: Float = controlState.boostMode ? 1.85 : 1.0
+        let targetVelocity = SIMD2<Float>(
+            Float(controlState.cameraPan),
+            Float(controlState.cameraTilt)
+        )
             * (92.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
 
         let accelerationBlend = (deltaTime * 12.0).clamped(to: 0.0...1.0)
@@ -2957,7 +3148,7 @@ final class DroneSimulationViewModel: ObservableObject {
             SIMD2<Float>(repeating: accelerationBlend)
         )
 
-        if abs(look.yaw) < 0.001, abs(look.pitch) < 0.001 {
+        if abs(controlState.cameraPan) < 0.001, abs(controlState.cameraTilt) < 0.001 {
             let damping = max(0.0, 1.0 - deltaTime * 9.0)
             cameraLookVelocity *= damping
             if simd_length_squared(cameraLookVelocity) < 0.0001 {
@@ -3671,9 +3862,9 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
-    private func buildFlightInputState(from snapshot: KeyboardInputSnapshot) -> FlightInputState {
+    private func buildFlightInputState(from controlState: ResolvedControlState) -> FlightInputState {
         FlightInputState(
-            keyboard: snapshot,
+            controlState: controlState,
             payloadViewActive: cameraConfiguration.mode == .payload && payloadCameraStatus.isActive,
             mapOverlayActive: isTerrainMapVisible || isMissionMapVisible
         )
@@ -3693,12 +3884,12 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshFlightControlDiagnostics(
-        using snapshot: KeyboardInputSnapshot? = nil,
+        using controlState: ResolvedControlState? = nil,
         authorityOverride: FlightControlAuthority? = nil,
         contextOverride: FlightControlRoutingContext? = nil
     ) {
-        let resolvedSnapshot = snapshot ?? keyboardInputService.currentInputSnapshot()
-        let inputState = buildFlightInputState(from: resolvedSnapshot)
+        let resolvedControlState = controlState ?? resolvedInputState
+        let inputState = buildFlightInputState(from: resolvedControlState)
         let context = contextOverride ?? buildFlightControlRoutingContext()
         let authority = authorityOverride ?? flightControlRouter.currentAuthority
         flightControlDiagnostics = flightControlRouter.diagnostics(
@@ -3722,7 +3913,146 @@ final class DroneSimulationViewModel: ObservableObject {
     private func resetFlightControlRouting() {
         flightControlRouter.reset()
         manualYawIntent = 0.0
+        resolvedInputState = .neutral
         refreshFlightControlDiagnostics(authorityOverride: FlightControlAuthority.none)
+    }
+
+    private func resolveControllerInteractionMode() -> ControllerInteractionMode {
+        if controllerUIBridge.isTextInputPresented {
+            return .textInput
+        }
+
+        if isControllerHubVisible ||
+            externalControllerOverlayActive ||
+            isMissionMapVisible ||
+            isPayloadPanelVisible ||
+            (isParametersPanelVisible && activeControlModule != nil) ||
+            isControllerCursorEnabled {
+            return .uiNavigation
+        }
+
+        return .flight
+    }
+
+    private func syncControllerInteractionMode() {
+        let nextMode = resolveControllerInteractionMode()
+        if controllerInteractionMode != nextMode {
+            controllerInteractionMode = nextMode
+            debugControllerLog("Mode -> \(nextMode.rawValue)")
+        }
+    }
+
+    private func handleControllerSystemActions(
+        using controlState: ResolvedControlState
+    ) {
+        if controlState.toggleControllerCursorTriggered {
+            toggleControllerCursor()
+        }
+
+        if controlState.openControllerHubTriggered {
+            toggleControllerHub()
+        }
+
+        if isControllerHubVisible {
+            if controlState.uiSectionPreviousTriggered {
+                cycleControllerHubSection(step: -1)
+            }
+            if controlState.uiSectionNextTriggered {
+                cycleControllerHubSection(step: 1)
+            }
+        }
+    }
+
+    private func processControllerUIInput(
+        using controlState: ResolvedControlState,
+        deltaTime: TimeInterval
+    ) {
+        handleControllerSystemActions(using: controlState)
+        syncControllerInteractionMode()
+        controllerUIBridge.update(
+            from: controlState,
+            mode: controllerInteractionMode,
+            cursorEnabled: isControllerCursorEnabled,
+            controllerConnected: inputManager.isSourceConnected(.gameController),
+            deltaTime: deltaTime
+        )
+        controllerUIBridge.routeScroll(
+            from: controlState,
+            mode: controllerInteractionMode,
+            deltaTime: deltaTime
+        )
+    }
+
+    private func updateInputPipeline(deltaTime: TimeInterval) -> ResolvedControlState {
+        inputManager.update(deltaTime: deltaTime)
+        resolvedInputState = inputManager.currentState
+        refreshGameControllerPresentation()
+        return resolvedInputState
+    }
+
+    private func controllerResolvedControlState(
+        from snapshot: InputSnapshot?
+    ) -> ResolvedControlState {
+        guard let snapshot, snapshot.isConnected else {
+            return .neutral
+        }
+
+        return ResolvedControlState(
+            yaw: snapshot.yaw,
+            pitch: snapshot.pitch,
+            roll: snapshot.roll,
+            throttle: snapshot.throttle,
+            cameraPan: snapshot.cameraPan,
+            cameraTilt: snapshot.cameraTilt,
+            uiPointerX: snapshot.uiPointerX,
+            uiPointerY: snapshot.uiPointerY,
+            uiScrollX: snapshot.uiScrollX,
+            uiScrollY: snapshot.uiScrollY,
+            precisionMode: snapshot.precisionMode,
+            boostMode: snapshot.boostMode,
+            actions: snapshot.actions,
+            dominantSource: .gameController
+        )
+    }
+
+    private func refreshGameControllerPresentation(force: Bool = false) {
+        let nextSourceKind = resolvedInputState.dominantSource
+        if force || activeInputSourceKind != nextSourceKind {
+            activeInputSourceKind = nextSourceKind
+        }
+
+        let nextActiveControllerName = gameControllerInputProvider.activeControllerName
+        if force || activeGameControllerName != nextActiveControllerName {
+            activeGameControllerName = nextActiveControllerName
+        }
+
+        let nextControllers = gameControllerInputProvider.connectedDeviceSummaries()
+        if force || connectedGameControllers != nextControllers {
+            connectedGameControllers = nextControllers
+        }
+        if nextControllers.isEmpty {
+            if isControllerCursorEnabled {
+                isControllerCursorEnabled = false
+            }
+            if isControllerHubVisible {
+                isControllerHubVisible = false
+            }
+        }
+
+        let nextRightStickMode = gameControllerInputProvider.currentRightStickHorizontalMode
+        if force || gameControllerRightStickHorizontalMode != nextRightStickMode {
+            gameControllerRightStickHorizontalMode = nextRightStickMode
+        }
+
+        if nextControllers.isEmpty {
+            syncControllerInteractionMode()
+        }
+    }
+
+    private func debugControllerLog(_ message: String) {
+        #if DEBUG
+        print("[ControllerInteraction] \(message)")
+        #endif
     }
 
     private func currentAutoNavigationStatus() -> AutoNavigationStatus {
@@ -4093,6 +4423,7 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.setPayloadCameraFocusReleaseID(nil)
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.resetTransientState()
+        inputManager.reset()
         resetFlightControlRouting()
         regenerateEnvironment()
 
@@ -5246,7 +5577,9 @@ final class DroneSimulationViewModel: ObservableObject {
         signalLossSecondAccumulator = 0.0
         cancelTargetMarkerAutoNavigation()
         cameraLookVelocity = .zero
+        controllerUIBridge.cancelTextInput()
         keyboardInputService.setInputProcessingMode(.editing)
+        inputManager.reset()
         resetFlightControlRouting()
         hasUnsavedChanges = true
     }
@@ -5259,6 +5592,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if restoringInputMode && hadBlockingState {
             keyboardInputService.setInputProcessingMode(.flight)
+            inputManager.reset()
         }
         refreshFlightControlDiagnostics()
     }

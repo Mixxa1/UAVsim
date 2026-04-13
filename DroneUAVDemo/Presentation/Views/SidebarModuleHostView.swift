@@ -272,7 +272,11 @@ struct ScrollableModuleSectionView<Content: View>: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
+        ControllerScrollableRegion(
+            id: "sidebar.module.scroll",
+            showsIndicators: true,
+            isPrimary: true
+        ) {
             VStack(alignment: .leading, spacing: 10) {
                 content
             }
@@ -383,6 +387,20 @@ struct ModuleSliderRow: View {
                     .onSubmit {
                         onCommit?()
                     }
+                    .controllerTextInputTarget(
+                        id: "\(titleKey).value",
+                        title: NSLocalizedString(titleKey, comment: ""),
+                        currentText: {
+                            formatter.string(from: NSNumber(value: value.wrappedValue)) ?? ""
+                        },
+                        onCommit: { text in
+                            guard let parsed = formatter.controllerDouble(from: text) else {
+                                return
+                            }
+                            value.wrappedValue = parsed
+                            onCommit?()
+                        }
+                    )
             }
 
             Slider(value: value, in: range, step: step) { editing in
@@ -432,6 +450,7 @@ struct ModuleModeTile: View {
             )
         }
         .buttonStyle(.plain)
+        .controllerButtonTarget(id: titleKey, action: action)
     }
 }
 
@@ -467,5 +486,6 @@ struct OperationalActionButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(prominent ? GroundControlPalette.textPrimary : tint)
+        .controllerButtonTarget(id: "\(titleKey).\(systemImage)", action: action)
     }
 }

@@ -1,5 +1,5 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/ContentView.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/ContentView.swift",
   "tables": {
     "Localizable": [
       {
@@ -7,7 +7,7 @@
         "key": "project.unsaved.title",
         "location": {
           "startingColumn": 18,
-          "startingLine": 627
+          "startingLine": 630
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "battery.depleted.title",
         "location": {
           "startingColumn": 16,
-          "startingLine": 938
+          "startingLine": 985
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "project.unsaved.save",
         "location": {
           "startingColumn": 20,
-          "startingLine": 630
+          "startingLine": 633
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "project.unsaved.save_exit",
         "location": {
           "startingColumn": 20,
-          "startingLine": 633
+          "startingLine": 636
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "project.unsaved.exit_without",
         "location": {
           "startingColumn": 20,
-          "startingLine": 636
+          "startingLine": 639
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "common.cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 639
+          "startingLine": 642
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "common.ok",
         "location": {
           "startingColumn": 46,
-          "startingLine": 649
+          "startingLine": 652
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "project.delete.confirm.title",
         "location": {
           "startingColumn": 29,
-          "startingLine": 654
+          "startingLine": 657
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "project.delete.action",
         "location": {
           "startingColumn": 50,
-          "startingLine": 656
+          "startingLine": 659
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "common.cancel",
         "location": {
           "startingColumn": 47,
-          "startingLine": 659
+          "startingLine": 662
         }
       },
       {
@@ -87,7 +87,7 @@
         "key": "menu.saved_projects",
         "location": {
           "startingColumn": 22,
-          "startingLine": 675
+          "startingLine": 697
         }
       },
       {
@@ -95,7 +95,7 @@
         "key": "menu.search",
         "location": {
           "startingColumn": 49,
-          "startingLine": 680
+          "startingLine": 702
         }
       },
       {
@@ -103,7 +103,7 @@
         "key": "menu.sort",
         "location": {
           "startingColumn": 28,
-          "startingLine": 683
+          "startingLine": 705
         }
       },
       {
@@ -111,7 +111,7 @@
         "key": "menu.title",
         "location": {
           "startingColumn": 26,
-          "startingLine": 721
+          "startingLine": 743
         }
       },
       {
@@ -119,7 +119,7 @@
         "key": "menu.create_project",
         "location": {
           "startingColumn": 34,
-          "startingLine": 733
+          "startingLine": 755
         }
       },
       {
@@ -127,7 +127,7 @@
         "key": "menu.recent_project",
         "location": {
           "startingColumn": 34,
-          "startingLine": 751
+          "startingLine": 773
         }
       },
       {
@@ -135,7 +135,7 @@
         "key": "•",
         "location": {
           "startingColumn": 30,
-          "startingLine": 784
+          "startingLine": 813
         }
       },
       {
@@ -143,7 +143,7 @@
         "key": "toolbar.header.project",
         "location": {
           "startingColumn": 45,
-          "startingLine": 850
+          "startingLine": 879
         }
       },
       {
@@ -151,7 +151,7 @@
         "key": "keybind.open",
         "location": {
           "startingColumn": 45,
-          "startingLine": 858
+          "startingLine": 887
         }
       },
       {
@@ -159,7 +159,7 @@
         "key": "mission.map.open_help",
         "location": {
           "startingColumn": 45,
-          "startingLine": 866
+          "startingLine": 898
         }
       },
       {
@@ -167,7 +167,7 @@
         "key": "panel.hide",
         "location": {
           "startingColumn": 45,
-          "startingLine": 875
+          "startingLine": 910
         }
       },
       {
@@ -175,7 +175,7 @@
         "key": "panel.show",
         "location": {
           "startingColumn": 45,
-          "startingLine": 884
+          "startingLine": 922
         }
       },
       {
@@ -183,7 +183,7 @@
         "key": "panel.modules.on",
         "location": {
           "startingColumn": 67,
-          "startingLine": 810
+          "startingLine": 839
         }
       },
       {
@@ -191,7 +191,7 @@
         "key": "panel.modules.off",
         "location": {
           "startingColumn": 88,
-          "startingLine": 810
+          "startingLine": 839
         }
       },
       {
@@ -199,7 +199,7 @@
         "key": "project.save.action",
         "location": {
           "startingColumn": 32,
-          "startingLine": 818
+          "startingLine": 847
         }
       },
       {
@@ -207,7 +207,7 @@
         "key": "project.save_as.action",
         "location": {
           "startingColumn": 32,
-          "startingLine": 821
+          "startingLine": 850
         }
       },
       {
@@ -215,7 +215,7 @@
         "key": "project.duplicate.action",
         "location": {
           "startingColumn": 32,
-          "startingLine": 825
+          "startingLine": 854
         }
       },
       {
@@ -223,7 +223,7 @@
         "key": "project.open.action",
         "location": {
           "startingColumn": 32,
-          "startingLine": 830
+          "startingLine": 859
         }
       },
       {
@@ -231,7 +231,7 @@
         "key": "window.fullscreen",
         "location": {
           "startingColumn": 32,
-          "startingLine": 833
+          "startingLine": 862
         }
       },
       {
@@ -239,7 +239,7 @@
         "key": "project.delete.action",
         "location": {
           "startingColumn": 32,
-          "startingLine": 836
+          "startingLine": 865
         }
       },
       {
@@ -247,7 +247,7 @@
         "key": "battery.depleted.charge",
         "location": {
           "startingColumn": 20,
-          "startingLine": 942
+          "startingLine": 989
         }
       },
       {
@@ -255,7 +255,7 @@
         "key": "battery.depleted.restart",
         "location": {
           "startingColumn": 20,
-          "startingLine": 945
+          "startingLine": 992
         }
       },
       {
@@ -263,7 +263,7 @@
         "key": "battery.depleted.message",
         "location": {
           "startingColumn": 18,
-          "startingLine": 949
+          "startingLine": 996
         }
       },
       {
@@ -271,7 +271,7 @@
         "key": "common.ok",
         "location": {
           "startingColumn": 46,
-          "startingLine": 958
+          "startingLine": 1005
         }
       },
       {
@@ -279,7 +279,23 @@
         "key": "project.name",
         "location": {
           "startingColumn": 41,
-          "startingLine": 1063
+          "startingLine": 1163
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.name",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 1167
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.name",
+        "location": {
+          "startingColumn": 52,
+          "startingLine": 1168
         }
       },
       {
@@ -287,7 +303,7 @@
         "key": "common.cancel",
         "location": {
           "startingColumn": 24,
-          "startingLine": 1068
+          "startingLine": 1175
         }
       }
     ]

@@ -1,0 +1,80 @@
+{
+  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "diagnostic.collision_debug",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 61
+        }
+      },
+      {
+        "comment": "",
+        "key": "warnings.none",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 91
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.fleet_mode",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 185
+        }
+      },
+      {
+        "comment": "",
+        "key": "fleet.formation",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 192
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 269
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 273
+        }
+      },
+      {
+        "comment": "",
+        "key": "language.section",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 303
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.diagnostics.title",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 398
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.diagnostics.subtitle",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 403
+        }
+      }
+    ]
+  },
+  "version": 1
+}
