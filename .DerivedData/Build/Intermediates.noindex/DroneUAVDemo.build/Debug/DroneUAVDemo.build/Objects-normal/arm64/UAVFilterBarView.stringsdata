@@ -1,5 +1,5 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/UAVFilterBarView.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/UAVFilterBarView.swift",
   "tables": {
     "Localizable": [
       {
@@ -7,7 +7,7 @@
         "key": "uav.catalog.selected_outside_filter",
         "location": {
           "startingColumn": 22,
-          "startingLine": 34
+          "startingLine": 44
         }
       },
       {

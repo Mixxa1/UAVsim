@@ -180,7 +180,7 @@ private struct TerrainMapOverlayView: View {
     }
 
     private var signalRadiusText: String {
-        String(format: "%.0f m", snapshot.signalBoundaryRadius)
+        String(format: "%.0f / %.0f m", snapshot.linkQualityRadius, snapshot.degradedLinkRadius)
     }
 
     private var autoNavigationLabel: String {
@@ -331,7 +331,7 @@ struct TerrainMapCanvas: View {
                 with: .color(mapBackgroundColor.opacity(0.98))
             )
             drawGrid(in: &context, projection: projection)
-            drawSignalBoundary(in: &context, projection: projection)
+            drawOperationalEnvelope(in: &context, projection: projection)
             drawTrail(in: &context, projection: projection)
             if let dropZone {
                 drawDropZone(dropZone, in: &context, projection: projection)
@@ -428,12 +428,29 @@ struct TerrainMapCanvas: View {
         )
     }
 
-    private func drawSignalBoundary(
+    private func drawOperationalEnvelope(
         in context: inout GraphicsContext,
         projection: TerrainMapProjection
     ) {
         let center = projection.project(.zero)
-        let radius = projection.projectedRadius(for: snapshot.signalBoundaryRadius)
+        drawRadius(snapshot.hardWorldBoundsRadius, color: GroundControlPalette.danger.opacity(0.36), style: StrokeStyle(lineWidth: 0.9, dash: [3, 6]), center: center, projection: projection, context: &context)
+        drawRadius(snapshot.degradedLinkRadius, color: GroundControlPalette.warning.opacity(0.52), style: StrokeStyle(lineWidth: 1.0, dash: [5, 4]), center: center, projection: projection, context: &context)
+        drawRadius(snapshot.linkQualityRadius, color: Color(red: 0.37, green: 0.73, blue: 0.96).opacity(0.78), style: StrokeStyle(lineWidth: 1.15, dash: [5, 4]), center: center, projection: projection, context: &context)
+        drawRadius(snapshot.operationalRadius, color: GroundControlPalette.success.opacity(0.54), style: StrokeStyle(lineWidth: 1.0, dash: [2, 4]), center: center, projection: projection, context: &context)
+    }
+
+    private func drawRadius(
+        _ radiusMeters: Float,
+        color: Color,
+        style: StrokeStyle,
+        center: CGPoint,
+        projection: TerrainMapProjection,
+        context: inout GraphicsContext
+    ) {
+        guard radiusMeters > 0.01 else {
+            return
+        }
+        let radius = projection.projectedRadius(for: radiusMeters)
         let rect = CGRect(
             x: center.x - radius,
             y: center.y - radius,
@@ -443,8 +460,8 @@ struct TerrainMapCanvas: View {
 
         context.stroke(
             Path(ellipseIn: rect),
-            with: .color(Color(red: 0.37, green: 0.73, blue: 0.96).opacity(0.78)),
-            style: StrokeStyle(lineWidth: 1.15, dash: [5, 4])
+            with: .color(color),
+            style: style
         )
     }
 

@@ -2,6 +2,35 @@ import Foundation
 import simd
 
 final class MissionDraftBuilder {
+    func setLaunchMode(
+        _ launchMode: LaunchMode,
+        in draft: MissionDraft
+    ) -> MissionDraft {
+        var nextDraft = draft
+        nextDraft.selectedLaunchMode = launchMode
+
+        if launchMode == .standard {
+            return nextDraft
+        }
+
+        guard let requiredType = launchMode.defaultLaunchObjectType else {
+            return nextDraft
+        }
+
+        if let existing = nextDraft.launchObject,
+           existing.type != requiredType {
+            nextDraft.launchObject = MissionLaunchObject(
+                id: existing.id,
+                type: requiredType,
+                position: existing.position,
+                headingDegrees: existing.headingDegrees,
+                transitionHeadingDegrees: existing.transitionHeadingDegrees
+            )
+        }
+
+        return nextDraft
+    }
+
     func addWaypoint(
         at position: SIMD2<Float>,
         to draft: MissionDraft,
@@ -34,6 +63,46 @@ final class MissionDraftBuilder {
     func clearRoute(from draft: MissionDraft) -> MissionDraft {
         var nextDraft = draft
         nextDraft.waypoints = []
+        return nextDraft
+    }
+
+    func upsertLaunchObject(
+        at position: SIMD2<Float>,
+        headingDegrees: Float,
+        type: MissionLaunchObjectType,
+        in draft: MissionDraft,
+        viewport: MapViewportState
+    ) -> MissionDraft {
+        var nextDraft = draft
+        let clampedPosition = viewport.clampedToWorld(position)
+        let heading = normalizedHeadingDegrees(headingDegrees)
+        nextDraft.launchObject = MissionLaunchObject(
+            id: nextDraft.launchObject?.id ?? UUID(),
+            type: type,
+            position: clampedPosition,
+            headingDegrees: heading,
+            transitionHeadingDegrees: nextDraft.launchObject?.transitionHeadingDegrees
+        )
+        nextDraft.selectedLaunchMode = type.launchMode
+        return nextDraft
+    }
+
+    func setLaunchHeading(
+        _ headingDegrees: Float,
+        in draft: MissionDraft
+    ) -> MissionDraft {
+        var nextDraft = draft
+        guard var launchObject = nextDraft.launchObject else {
+            return nextDraft
+        }
+        launchObject.headingDegrees = normalizedHeadingDegrees(headingDegrees)
+        nextDraft.launchObject = launchObject
+        return nextDraft
+    }
+
+    func clearLaunchObject(from draft: MissionDraft) -> MissionDraft {
+        var nextDraft = draft
+        nextDraft.launchObject = nil
         return nextDraft
     }
 
@@ -115,5 +184,13 @@ final class MissionDraftBuilder {
             max(8.0, draft.constraints.minimumZoneRadius),
             draft.constraints.maximumZoneRadius(for: viewport)
         )
+    }
+
+    private func normalizedHeadingDegrees(_ headingDegrees: Float) -> Float {
+        var normalized = headingDegrees.truncatingRemainder(dividingBy: 360.0)
+        if normalized < 0.0 {
+            normalized += 360.0
+        }
+        return normalized
     }
 }

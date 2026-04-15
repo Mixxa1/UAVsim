@@ -160,6 +160,12 @@ final class ControllerUIBridge: ObservableObject {
     func setSurfaceSize(_ size: CGSize, for surfaceID: String) {
         var state = surfaceStates[surfaceID] ?? ControllerSurfaceState()
         state.size = size
+        state.targetFrames = Dictionary(
+            uniqueKeysWithValues: filteredTargetFrames(
+                Array(state.targetFrames.values),
+                in: size
+            ).map { ($0.id, $0) }
+        )
         surfaceStates[surfaceID] = state
 
         if activeSurfaceID == surfaceID {
@@ -169,11 +175,57 @@ final class ControllerUIBridge: ObservableObject {
 
     func updateTargetFrames(_ frames: [ControllerInteractionTargetFrame], for surfaceID: String) {
         var state = surfaceStates[surfaceID] ?? ControllerSurfaceState()
-        state.targetFrames = Dictionary(uniqueKeysWithValues: frames.map { ($0.id, $0) })
+        state.targetFrames = Dictionary(
+            uniqueKeysWithValues: filteredTargetFrames(
+                frames,
+                in: state.size
+            ).map { ($0.id, $0) }
+        )
         surfaceStates[surfaceID] = state
 
         if activeSurfaceID == surfaceID {
             refreshPublishedTargetFrame(resetCursorIfNeeded: false)
+        }
+    }
+
+    func clearSurfaceTargets(_ surfaceID: String) {
+        guard var state = surfaceStates[surfaceID] else {
+            return
+        }
+
+        state.targetFrames = Dictionary(
+            uniqueKeysWithValues: filteredTargetFrames(
+                Array(state.targetFrames.values),
+                in: state.size
+            ).map { ($0.id, $0) }
+        )
+        surfaceStates[surfaceID] = state
+
+        guard activeSurfaceID == surfaceID else {
+            return
+        }
+
+        cursorState.activeTargetID = nil
+        cursorState.hoveredElementID = nil
+        activeTargetFrame = nil
+        refreshPublishedTargetFrame(resetCursorIfNeeded: true)
+    }
+
+    func invalidateSurfaceLayout(_ surfaceID: String, resetCursor: Bool = true) {
+        guard var state = surfaceStates[surfaceID] else {
+            return
+        }
+
+        state.targetFrames = Dictionary(
+            uniqueKeysWithValues: filteredTargetFrames(
+                Array(state.targetFrames.values),
+                in: state.size
+            ).map { ($0.id, $0) }
+        )
+        surfaceStates[surfaceID] = state
+
+        if activeSurfaceID == surfaceID {
+            refreshActiveSurfaceState(resetCursor: resetCursor)
         }
     }
 
@@ -381,10 +433,10 @@ final class ControllerUIBridge: ObservableObject {
         }
 
         cursorState.move(dx: dx, dy: dy)
-        focusNearestTarget(to: cursorState.position)
+        updateHoveredTarget(at: cursorState.position)
     }
 
-    private func focusNearestTarget(to point: CGPoint) {
+    private func updateHoveredTarget(at point: CGPoint) {
         guard let state = surfaceStates[activeSurfaceID ?? ""] else {
             return
         }
@@ -399,15 +451,8 @@ final class ControllerUIBridge: ObservableObject {
             return
         }
 
-        guard let nearest = frames.min(by: {
-            distanceSquared(from: point, to: $0.frame.center) < distanceSquared(from: point, to: $1.frame.center)
-        }) else {
-            return
-        }
-
-        cursorState.activeTargetID = nearest.id
-        cursorState.hoveredElementID = nearest.id
-        activeTargetFrame = nearest.frame
+        cursorState.hoveredElementID = nil
+        activeTargetFrame = state.targetFrames[cursorState.activeTargetID ?? ""]?.frame
     }
 
     private func handleDirectionalActions(_ controlState: ResolvedControlState) {
@@ -471,7 +516,8 @@ final class ControllerUIBridge: ObservableObject {
     }
 
     private func activateCurrentTarget() {
-        guard let currentTargetID = cursorState.activeTargetID,
+        let currentTargetID = cursorState.hoveredElementID ?? cursorState.activeTargetID
+        guard let currentTargetID,
               let targetFrame = surfaceStates[activeSurfaceID ?? ""]?.targetFrames[currentTargetID],
               targetFrame.isEnabled,
               let target = registeredTargets[currentTargetID] else {
@@ -688,10 +734,33 @@ final class ControllerUIBridge: ObservableObject {
         return lhs.frame.minX < rhs.frame.minX
     }
 
-    private func distanceSquared(from lhs: CGPoint, to rhs: CGPoint) -> CGFloat {
-        let dx = lhs.x - rhs.x
-        let dy = lhs.y - rhs.y
-        return dx * dx + dy * dy
+    private func filteredTargetFrames(
+        _ frames: [ControllerInteractionTargetFrame],
+        in size: CGSize
+    ) -> [ControllerInteractionTargetFrame] {
+        let surfaceRect = CGRect(origin: .zero, size: size)
+        guard surfaceRect.isFiniteGeometry else {
+            return []
+        }
+
+        return frames.compactMap { frame in
+            guard frame.frame.isFiniteGeometry else {
+                return nil
+            }
+
+            let clippedFrame = frame.frame.standardized.intersection(surfaceRect)
+            guard clippedFrame.isFiniteGeometry,
+                  clippedFrame.width >= 4.0,
+                  clippedFrame.height >= 4.0 else {
+                return nil
+            }
+
+            return ControllerInteractionTargetFrame(
+                id: frame.id,
+                frame: clippedFrame,
+                isEnabled: frame.isEnabled
+            )
+        }
     }
 
     private func debugLog(_ message: String) {
@@ -874,6 +943,7 @@ struct ControllerInteractionSurface<Content: View>: View {
                     bridge.setSecondaryAction(secondaryAction, for: surfaceID)
                 }
                 .onDisappear {
+                    bridge.clearSurfaceTargets(surfaceID)
                     bridge.deactivateSurface(surfaceID)
                 }
                 .onChange(of: proxy.size) { size in
@@ -916,6 +986,17 @@ extension NumberFormatter {
 }
 
 private extension CGRect {
+    var isFiniteGeometry: Bool {
+        !isNull &&
+        !isInfinite &&
+        origin.x.isFinite &&
+        origin.y.isFinite &&
+        width.isFinite &&
+        height.isFinite &&
+        width > 0.0 &&
+        height > 0.0
+    }
+
     var center: CGPoint {
         CGPoint(x: midX, y: midY)
     }

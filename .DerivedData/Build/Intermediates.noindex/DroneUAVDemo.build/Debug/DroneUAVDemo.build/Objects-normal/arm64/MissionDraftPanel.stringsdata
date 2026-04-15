@@ -1,0 +1,96 @@
+{
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/MissionDraftPanel.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 26
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.route.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 144
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.launch.standard_hint",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 188
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.launch.place_object_hint",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 218
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.constraints.hint",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 285
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.zone.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 350
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.plan.status.ready",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 366
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.status.value.none",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 359
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.zone.radius.value.multiple",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 376
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.zone.radius.value",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 385
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.panel.plan.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 438
+        }
+      }
+    ]
+  },
+  "version": 1
+}

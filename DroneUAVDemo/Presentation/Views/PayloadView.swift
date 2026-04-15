@@ -712,6 +712,8 @@ struct PayloadView: View {
             return "thermometer.medium"
         case .lidarModule:
             return "wave.3.right.circle.fill"
+        case .inertImpactPod:
+            return "capsule.portrait.fill"
         case .rescuePack:
             return "cross.case.fill"
         case .sensorModule:
@@ -733,6 +735,8 @@ struct PayloadView: View {
             return Color(red: 0.99, green: 0.58, blue: 0.28)
         case .lidarModule:
             return Color(red: 0.70, green: 0.78, blue: 0.92)
+        case .inertImpactPod:
+            return Color(red: 0.98, green: 0.66, blue: 0.24)
         case .custom:
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         }
@@ -753,6 +757,14 @@ struct PayloadView: View {
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         case "payload.message.dropped_successfully":
             return Color(red: 0.54, green: 0.82, blue: 0.72)
+        case "payload.message.impact_within_target":
+            return Color(red: 0.48, green: 0.82, blue: 0.56)
+        case "payload.message.impact_near_target":
+            return Color(red: 0.98, green: 0.74, blue: 0.30)
+        case "payload.message.impact_off_target":
+            return Color(red: 0.98, green: 0.50, blue: 0.42)
+        case "payload.message.self_interference_risk":
+            return Color(red: 0.98, green: 0.58, blue: 0.30)
         case "payload.message.removed",
              "payload.message.cleanup_completed":
             return Color(red: 0.96, green: 0.66, blue: 0.22)
@@ -778,6 +790,14 @@ struct PayloadView: View {
                         return Color.blue.opacity(0.16)
                     case "payload.message.dropped_successfully":
                         return Color.teal.opacity(0.16)
+                    case "payload.message.impact_within_target":
+                        return Color.green.opacity(0.18)
+                    case "payload.message.impact_near_target":
+                        return Color.orange.opacity(0.18)
+                    case "payload.message.impact_off_target":
+                        return Color.red.opacity(0.18)
+                    case "payload.message.self_interference_risk":
+                        return Color.orange.opacity(0.20)
                     case "payload.message.removed",
                          "payload.message.cleanup_completed":
                         return Color.orange.opacity(0.16)

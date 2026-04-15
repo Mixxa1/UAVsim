@@ -1,5 +1,5 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/UAVProfileCardView.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/UAVProfileCardView.swift",
   "tables": {
     "Localizable": [
       {
@@ -15,7 +15,7 @@
         "key": "uav.card.empty",
         "location": {
           "startingColumn": 22,
-          "startingLine": 63
+          "startingLine": 68
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "uav.card.armament_note",
         "location": {
           "startingColumn": 34,
-          "startingLine": 47
+          "startingLine": 48
         }
       }
     ]

@@ -1,5 +1,5 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/PayloadView.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/PayloadView.swift",
   "tables": {
     "Localizable": [
       {
@@ -39,7 +39,7 @@
         "key": "payload.status",
         "location": {
           "startingColumn": 22,
-          "startingLine": 133
+          "startingLine": 134
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "common.not_specified",
         "location": {
           "startingColumn": 89,
-          "startingLine": 152
+          "startingLine": 153
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "common.not_specified",
         "location": {
           "startingColumn": 40,
-          "startingLine": 154
+          "startingLine": 155
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "common.not_specified",
         "location": {
           "startingColumn": 38,
-          "startingLine": 718
+          "startingLine": 747
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "payload.mass",
         "location": {
           "startingColumn": 43,
-          "startingLine": 245
+          "startingLine": 246
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "%@: %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 245
+          "startingLine": 246
         }
       },
       {
@@ -87,7 +87,15 @@
         "key": "payload.mass",
         "location": {
           "startingColumn": 43,
-          "startingLine": 290
+          "startingLine": 294
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.mass",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 308
         }
       },
       {
@@ -95,7 +103,7 @@
         "key": "kg",
         "location": {
           "startingColumn": 26,
-          "startingLine": 303
+          "startingLine": 320
         }
       },
       {
@@ -103,7 +111,15 @@
         "key": "payload.custom_name",
         "location": {
           "startingColumn": 35,
-          "startingLine": 336
+          "startingLine": 353
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.custom_name",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 368
         }
       },
       {
@@ -111,7 +127,7 @@
         "key": "payload.data_source",
         "location": {
           "startingColumn": 26,
-          "startingLine": 360
+          "startingLine": 383
         }
       },
       {
@@ -119,7 +135,7 @@
         "key": "payload.data.estimated_hint",
         "location": {
           "startingColumn": 49,
-          "startingLine": 365
+          "startingLine": 388
         }
       },
       {
@@ -127,7 +143,7 @@
         "key": "payload.total_mass",
         "location": {
           "startingColumn": 22,
-          "startingLine": 402
+          "startingLine": 425
         }
       }
     ]

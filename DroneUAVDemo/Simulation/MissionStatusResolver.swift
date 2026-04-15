@@ -6,6 +6,7 @@ final class MissionStatusResolver {
         currentPlan: MissionPlan?,
         executionState: MissionExecutionState,
         safetyState: MissionSafetyState,
+        operationalStatus: MissionOperationalStatus,
         controlAuthority: FlightControlAuthority,
         flightMode: DroneFlightMode
     ) -> MissionStatusSnapshot {
@@ -101,6 +102,7 @@ final class MissionStatusResolver {
             canPause: canPause,
             canResume: canResume,
             canAbort: canAbort,
+            operationalStatus: operationalStatus,
             explanations: explanations
         )
     }

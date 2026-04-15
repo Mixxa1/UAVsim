@@ -1,5 +1,57 @@
 import Foundation
 
+struct MissionOperationalStatus: Equatable {
+    var estimatedRemainingTimeSec: Float
+    var estimatedRemainingRangeM: Float
+    var estimatedSafeReturnRangeM: Float
+    var safeReturnRadiusM: Float
+    var distanceToHomeM: Float
+    var distanceToNearestEdgeM: Float
+    var nearestBoundaryDirection: MapBoundaryDirection
+    var geofenceState: MapGeofenceState
+    var missionDistanceBudgetM: Float
+    var canReachHomeSafely: Bool
+    var canCompleteMissionSafely: Bool
+    var currentLinkQuality: Float
+    var isInWarningLinkZone: Bool
+    var isInCriticalLinkZone: Bool
+    var isLinkLost: Bool
+    var mapScaleSuitability: MapScaleSuitability
+    var recommendedMapScaleMin: MapScale
+    var recommendedMapScaleMax: MapScale
+    var recommendedOperationalMapScale: MapScale
+    var linkQualityRadiusM: Float
+    var degradedLinkRadiusM: Float
+    var lostLinkRadiusM: Float
+    var operationalRadiusM: Float
+
+    static let idle = MissionOperationalStatus(
+        estimatedRemainingTimeSec: 0.0,
+        estimatedRemainingRangeM: 0.0,
+        estimatedSafeReturnRangeM: 0.0,
+        safeReturnRadiusM: 0.0,
+        distanceToHomeM: 0.0,
+        distanceToNearestEdgeM: 0.0,
+        nearestBoundaryDirection: .north,
+        geofenceState: .nominal,
+        missionDistanceBudgetM: 0.0,
+        canReachHomeSafely: false,
+        canCompleteMissionSafely: false,
+        currentLinkQuality: 1.0,
+        isInWarningLinkZone: false,
+        isInCriticalLinkZone: false,
+        isLinkLost: false,
+        mapScaleSuitability: .acceptable,
+        recommendedMapScaleMin: .x16,
+        recommendedMapScaleMax: .x32,
+        recommendedOperationalMapScale: .x32,
+        linkQualityRadiusM: 0.0,
+        degradedLinkRadiusM: 0.0,
+        lostLinkRadiusM: 0.0,
+        operationalRadiusM: 0.0
+    )
+}
+
 struct MissionStatusSnapshot: Equatable {
     var truthStatus: MissionTruthStatus
     var draftStatus: MissionDraftStatus
@@ -24,6 +76,7 @@ struct MissionStatusSnapshot: Equatable {
     var canPause: Bool
     var canResume: Bool
     var canAbort: Bool
+    var operationalStatus: MissionOperationalStatus
     var explanations: [MissionStatusExplanation]
 
     var primaryExplanation: MissionStatusExplanation? {
@@ -62,6 +115,7 @@ struct MissionStatusSnapshot: Equatable {
         canPause: false,
         canResume: false,
         canAbort: false,
+        operationalStatus: .idle,
         explanations: []
     )
 }

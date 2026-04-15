@@ -8,9 +8,12 @@ struct MissionRuntimeConstraintState: Equatable {
     var targetBindingAvailable: Bool
     var batterySafeToStart: Bool
     var batterySafeToContinue: Bool
+    var returnSafe: Bool
+    var missionSafe: Bool
     var collisionSafe: Bool
     var thermalSafe: Bool
     var signalSafe: Bool
+    var mapScaleSuitable: Bool
     var routeHealthy: Bool
     var progressHealthy: Bool
     var adapterHealthy: Bool
@@ -22,9 +25,12 @@ struct MissionRuntimeConstraintState: Equatable {
         hasRuntimeDistance &&
         targetBindingAvailable &&
         batterySafeToStart &&
+        returnSafe &&
+        missionSafe &&
         collisionSafe &&
         thermalSafe &&
         signalSafe &&
+        mapScaleSuitable &&
         routeHealthy &&
         adapterHealthy
     }
@@ -34,9 +40,11 @@ struct MissionRuntimeConstraintState: Equatable {
         hasExecutionContour &&
         hasMissionTarget &&
         batterySafeToContinue &&
+        returnSafe &&
         collisionSafe &&
         thermalSafe &&
         signalSafe &&
+        mapScaleSuitable &&
         routeHealthy &&
         progressHealthy &&
         adapterHealthy
@@ -50,9 +58,12 @@ struct MissionRuntimeConstraintState: Equatable {
         targetBindingAvailable: false,
         batterySafeToStart: false,
         batterySafeToContinue: false,
+        returnSafe: false,
+        missionSafe: false,
         collisionSafe: true,
         thermalSafe: true,
         signalSafe: true,
+        mapScaleSuitable: true,
         routeHealthy: false,
         progressHealthy: true,
         adapterHealthy: true

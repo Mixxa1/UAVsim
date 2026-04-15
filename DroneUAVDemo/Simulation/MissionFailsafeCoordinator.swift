@@ -16,7 +16,9 @@ final class MissionFailsafeCoordinator {
             return .none
         }
 
-        if !safetyState.runtimeConstraints.signalSafe || !safetyState.runtimeConstraints.batterySafeToContinue {
+        if !safetyState.runtimeConstraints.signalSafe ||
+            !safetyState.runtimeConstraints.batterySafeToContinue ||
+            !safetyState.runtimeConstraints.returnSafe {
             return .returnHome
         }
 

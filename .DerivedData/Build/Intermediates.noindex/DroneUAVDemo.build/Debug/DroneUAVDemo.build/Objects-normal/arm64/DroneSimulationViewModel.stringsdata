@@ -1,21 +1,85 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift",
   "tables": {
     "Localizable": [
       {
         "comment": "",
+        "key": "signal_loss.warning_stage_title",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 512
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.warning_stage_detail",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 513
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.critical_stage_title",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 515
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.critical_stage_detail",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 516
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.boundary_stage_title",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 518
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.boundary_stage_detail",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 519
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.impact_title",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 530
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.impact_message",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 531
+        }
+      },
+      {
+        "comment": "",
         "key": "signal_loss.lost_title",
         "location": {
-          "startingColumn": 33,
-          "startingLine": 272
+          "startingColumn": 47,
+          "startingLine": 533
         }
       },
       {
         "comment": "",
         "key": "signal_loss.lost_message",
         "location": {
-          "startingColumn": 33,
-          "startingLine": 275
+          "startingColumn": 49,
+          "startingLine": 534
         }
       },
       {
@@ -23,7 +87,7 @@
         "key": "signal_loss.recover",
         "location": {
           "startingColumn": 33,
-          "startingLine": 278
+          "startingLine": 541
         }
       },
       {
@@ -31,7 +95,7 @@
         "key": "telemetry.export.select_folder",
         "location": {
           "startingColumn": 43,
-          "startingLine": 1245
+          "startingLine": 2497
         }
       },
       {
@@ -39,7 +103,7 @@
         "key": "common.export",
         "location": {
           "startingColumn": 42,
-          "startingLine": 1246
+          "startingLine": 2498
         }
       }
     ]

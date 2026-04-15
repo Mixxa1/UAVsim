@@ -8,21 +8,24 @@ final class MissionRouteFollower {
         var waypointCaptureRadius: Float
         var lineCaptureTolerance: Float
         var maxCrossTrackCorrectionDistance: Float
+        var turnAnticipationDistance: Float
 
         static let multirotor = Configuration(
             lookaheadDistance: 1.2,
             segmentAdvanceDistance: 0.16,
             waypointCaptureRadius: 0.28,
             lineCaptureTolerance: 0.20,
-            maxCrossTrackCorrectionDistance: 2.2
+            maxCrossTrackCorrectionDistance: 2.2,
+            turnAnticipationDistance: 0.0
         )
 
         static let fixedWing = Configuration(
-            lookaheadDistance: 10.0,
-            segmentAdvanceDistance: 4.0,
-            waypointCaptureRadius: 5.2,
-            lineCaptureTolerance: 2.4,
-            maxCrossTrackCorrectionDistance: 12.0
+            lookaheadDistance: 18.0,
+            segmentAdvanceDistance: 8.0,
+            waypointCaptureRadius: 9.5,
+            lineCaptureTolerance: 4.5,
+            maxCrossTrackCorrectionDistance: 18.0,
+            turnAnticipationDistance: 16.0
         )
     }
 
@@ -86,6 +89,16 @@ final class MissionRouteFollower {
         let targetPoint: SIMD3<Float> = {
             if crossTrackError > configuration.lineCaptureTolerance {
                 return projectedPoint
+            }
+            if segmentEndsAtWaypoint,
+               configuration.turnAnticipationDistance > 0.0,
+               distanceToSegmentEnd <= configuration.turnAnticipationDistance {
+                let anticipationDistance = min(configuration.turnAnticipationDistance, segment.lengthMeters * 0.45)
+                return SIMD3<Float>(
+                    segment.end.x - segment.directionXZ.x * anticipationDistance,
+                    segment.end.y,
+                    segment.end.z - segment.directionXZ.y * anticipationDistance
+                )
             }
             if segmentEndsAtWaypoint && distanceToSegmentEnd <= configuration.waypointCaptureRadius {
                 return segment.end
@@ -161,13 +174,18 @@ final class MissionRouteFollower {
             max(configuration.segmentAdvanceDistance, segment.lengthMeters * 0.45)
         )
         let segmentEndsAtWaypoint = route.waypointRoutePointIndices.contains(segment.endPointIndex)
-        guard progress >= 0.995,
+        let progressThreshold: Float = configuration.turnAnticipationDistance > 0.0 ? 0.92 : 0.995
+        guard progress >= progressThreshold,
               distanceToSegmentEnd <= advanceDistance,
               crossTrackError <= configuration.lineCaptureTolerance else {
             return false
         }
 
         if segmentEndsAtWaypoint {
+            if configuration.turnAnticipationDistance > 0.0,
+               distanceToSegmentEnd <= max(configuration.waypointCaptureRadius, configuration.turnAnticipationDistance * 0.78) {
+                return true
+            }
             return waypointDistance <= configuration.waypointCaptureRadius
         }
 

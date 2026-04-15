@@ -90,6 +90,7 @@ private struct ConstraintEditorField: View {
 struct MissionDraftPanel: View {
     let state: TacticalMapState
     let missionPlan: MissionPlan?
+    let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
     let onRemoveLastWaypoint: () -> Void
@@ -100,6 +101,9 @@ struct MissionDraftPanel: View {
     let onSetMaximumAltitude: (Float) -> Void
     let onSetMinimumSpeed: (Float) -> Void
     let onSetMaximumSpeed: (Float) -> Void
+    let onSetLaunchMode: (LaunchMode) -> Void
+    let onSetLaunchHeading: (Float) -> Void
+    let onClearLaunchObject: () -> Void
     let onPrepareMission: () -> Void
     let onStartMission: () -> Void
     let onPauseMission: () -> Void
@@ -109,6 +113,8 @@ struct MissionDraftPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             routeSection
+            sectionDivider
+            launchSection
             sectionDivider
             zoneSection
             sectionDivider
@@ -155,6 +161,64 @@ struct MissionDraftPanel: View {
             sectionTitle("tactical.map.section.zones")
             zoneControl(type: .dropZone)
             zoneControl(type: .noFlyZone)
+        }
+    }
+
+    private var launchSection: some View {
+        let launchMode = state.workingDraft.selectedLaunchMode
+        let launchObject = state.workingDraft.launchObject
+
+        return VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("tactical.map.section.launch")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(supportedLaunchModes) { mode in
+                        modePill(mode)
+                    }
+                }
+            }
+
+            summaryRow(
+                "tactical.map.launch.mode",
+                value: localized(launchMode.titleKey)
+            )
+
+            if launchMode == .standard {
+                Text("tactical.map.launch.standard_hint")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            } else if let launchObject {
+                summaryRow(
+                    "tactical.map.launch.object",
+                    value: localized(launchObject.type.titleKey)
+                )
+                summaryRow(
+                    "tactical.map.launch.position",
+                    value: "\(format(point: launchObject.position)) • \(state.viewport.sectorID(for: launchObject.position))"
+                )
+                summaryRow(
+                    "tactical.map.launch.heading",
+                    value: "\(Int(launchObject.headingDegrees.rounded()))°"
+                )
+
+                Slider(
+                    value: Binding(
+                        get: { Double(launchObject.headingDegrees) },
+                        set: { onSetLaunchHeading(Float($0)) }
+                    ),
+                    in: 0.0...359.0,
+                    step: 1.0
+                )
+                .disabled(draftEditingLocked)
+
+                actionButton("tactical.map.action.clear_launch_object", tint: GroundControlPalette.borderStrong, action: onClearLaunchObject)
+                    .disabled(draftEditingLocked || state.workingDraft.launchObject == nil)
+            } else {
+                Text("tactical.map.launch.place_object_hint")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
         }
     }
 
@@ -463,6 +527,30 @@ struct MissionDraftPanel: View {
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+
+    private func modePill(_ mode: LaunchMode) -> some View {
+        Button {
+            onSetLaunchMode(mode)
+        } label: {
+            Text(LocalizedStringKey(mode.titleKey))
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(state.workingDraft.selectedLaunchMode == mode ? GroundControlPalette.accent.opacity(0.22) : GroundControlPalette.inset)
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(state.workingDraft.selectedLaunchMode == mode ? GroundControlPalette.accent.opacity(0.62) : GroundControlPalette.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .controllerButtonTarget(id: "tactical.launch.mode.\(mode.rawValue)") {
+            onSetLaunchMode(mode)
+        }
     }
 }
 

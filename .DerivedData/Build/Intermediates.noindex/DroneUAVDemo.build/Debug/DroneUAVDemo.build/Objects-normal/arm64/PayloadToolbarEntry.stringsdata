@@ -1,12 +1,12 @@
 {
-  "source": "/Users/misha/Documents/New project/DroneUAVDemo/Presentation/Views/PayloadToolbarEntry.swift",
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/PayloadToolbarEntry.swift",
   "tables": {
     "Localizable": [
       {
         "comment": "",
-        "key": "payload.configure",
+        "key": "module.payload.toolbar_title",
         "location": {
-          "startingColumn": 26,
+          "startingColumn": 22,
           "startingLine": 16
         }
       }

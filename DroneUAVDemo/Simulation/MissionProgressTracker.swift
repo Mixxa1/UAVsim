@@ -15,6 +15,7 @@ final class MissionProgressTracker {
         autoNavigationStatus: AutoNavigationStatus,
         flightMode: DroneFlightMode,
         airframeClass: AirframeClass,
+        fixedWingParameters: FixedWingParameters?,
         adapter: MissionAutopilotAdapter
     ) -> MissionProgressUpdate {
         guard let activeTarget = executionState.activeTarget else {
@@ -31,14 +32,41 @@ final class MissionProgressTracker {
             case .multirotor:
                 return 0.95
             case .fixedWing:
-                return 5.8
+                let wing = fixedWingParameters ?? FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 10.0,
+                    cruiseSpeedMps: 17.0,
+                    climbSpeedMps: 13.0,
+                    stallWarningSpeedMps: 9.0,
+                    waypointAcceptanceRadiusMeters: 9.0,
+                    nominalTurnRateDegPerSec: 9.0,
+                    bankResponseGain: 0.72,
+                    climbResponseGain: 0.64,
+                    descentResponseGain: 0.54,
+                    dragFactor: 1.0,
+                    throttleResponseGain: 0.64,
+                    turnAuthority: 0.64,
+                    maxBankAngleDeg: 38.0
+                )
+                let nominalTurnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
+                let minimumTurnRadius = max(
+                    wing.waypointAcceptanceRadiusMeters * 1.05,
+                    wing.cruiseSpeedMps / nominalTurnRateRad
+                )
+                return max(
+                    wing.waypointAcceptanceRadiusMeters * 1.15,
+                    minimumTurnRadius * 0.48
+                )
             }
         }()
         let hasBoundTarget = adapter.isBound(
             activeTarget: activeTarget,
             currentMarker: currentMarker
         )
-        let autopilotSettled = !autoNavigationStatus.isActive || autoNavigationStatus.phase == .hold || flightMode != .autoPath
+        let autopilotSettled = !autoNavigationStatus.isActive ||
+            autoNavigationStatus.phase == .hold ||
+            (airframeClass == .fixedWing && autoNavigationStatus.phase == .approach) ||
+            flightMode != .autoPath
         let hasReachedActiveTarget = hasBoundTarget &&
             distance <= arrivalRadius &&
             autopilotSettled

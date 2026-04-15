@@ -45,6 +45,7 @@ struct AutoNavigationUpdateInput {
     let currentYawRadians: Float
     let physicalState: DronePhysicalState
     let airframeClass: AirframeClass
+    let fixedWingParameters: FixedWingParameters?
     let deltaTime: Float
     let safeTravelAltitude: Float
 }
@@ -65,6 +66,7 @@ final class AutoNavigationController {
     private var lastCompletionReason: AutoNavigationCompletionReason = .none
     private var lastTurnBiasSign: Float = 1.0
     private var lockedTravelAltitude: Float?
+    private var lastCourseCommandRadians: Float?
 
     func replaceTarget(_ targetMarker: TargetMarkerState) {
         self.targetMarker = targetMarker
@@ -73,6 +75,7 @@ final class AutoNavigationController {
         lastCompletionReason = .none
         lastTurnBiasSign = 1.0
         lockedTravelAltitude = nil
+        lastCourseCommandRadians = nil
     }
 
     func clearTarget() {
@@ -82,6 +85,7 @@ final class AutoNavigationController {
         lastCompletionReason = .cancelled
         lastTurnBiasSign = 1.0
         lockedTravelAltitude = nil
+        lastCourseCommandRadians = nil
     }
 
     func start(safeTravelAltitude: Float) {
@@ -92,6 +96,7 @@ final class AutoNavigationController {
         phase = .takeoff
         lastCompletionReason = .none
         lockedTravelAltitude = safeTravelAltitude
+        lastCourseCommandRadians = nil
     }
 
     func cancel() {
@@ -102,6 +107,7 @@ final class AutoNavigationController {
         phase = .inactive
         lastCompletionReason = .cancelled
         lockedTravelAltitude = nil
+        lastCourseCommandRadians = nil
     }
 
     func consumeCompletionReason() -> AutoNavigationCompletionReason {
@@ -207,46 +213,104 @@ final class AutoNavigationController {
             }
 
         case .fixedWing:
-            let slowdownRadius: Float = 22.0
-            let reachedRadius: Float = 5.6
+            let wing = resolvedFixedWingParameters(input.fixedWingParameters)
+            let currentAirspeed = max(planarSpeed, input.physicalState.isGroundRestState ? 0.0 : wing.minSafeAirspeed * 0.62)
+            let minimumTurnRadius = wing.minimumTurnRadius(
+                airspeed: max(currentAirspeed, wing.cruiseAirspeed * 0.84)
+            )
+            let slowdownRadius = max(
+                wing.waypointAcceptanceRadiusMeters * 3.2,
+                minimumTurnRadius * 1.35,
+                wing.cruiseAirspeed * 1.4
+            )
+            let reachedRadius = max(
+                wing.waypointAcceptanceRadiusMeters,
+                minimumTurnRadius * 0.44
+            )
             let altitudeError = safeTravelAltitude - input.position.y
+            let speedError = max(0.0, wing.minSafeAirspeed - currentAirspeed)
+            let directCourse = atan2(-delta.x, delta.y)
+            var desiredCourse = directCourse
+            var courseError = shortestAngleRadians(directCourse - input.currentYawRadians)
+
+            if abs(courseError) > 0.06 {
+                lastTurnBiasSign = courseError >= 0.0 ? 1.0 : -1.0
+            }
+
+            let turnCaptureDistance = minimumTurnRadius * 1.18
+            let turnCaptureActive = distanceToTarget < turnCaptureDistance && abs(courseError) > 0.58
+            if turnCaptureActive {
+                let tangentBias = min(1.18, max(0.52, minimumTurnRadius / max(distanceToTarget, 0.1) * 0.34))
+                desiredCourse = directCourse - lastTurnBiasSign * tangentBias
+            }
+
+            let courseBlend = (input.deltaTime * (turnCaptureActive ? 2.4 : 1.8)).clamped(to: 0.08...0.30)
+            let previousCourseCommand = lastCourseCommandRadians ?? input.currentYawRadians
+            let commandedCourse = previousCourseCommand +
+                shortestAngleRadians(desiredCourse - previousCourseCommand) * courseBlend
+            lastCourseCommandRadians = commandedCourse
+            courseError = shortestAngleRadians(commandedCourse - input.currentYawRadians)
+
             if distanceToTarget <= reachedRadius,
+               abs(courseError) <= 1.18,
                abs(altitudeError) <= 1.2,
                abs(verticalVelocity) <= 1.4 {
                 isActive = false
                 phase = .hold
                 lastCompletionReason = .reachedTarget
                 lockedTravelAltitude = nil
+                lastCourseCommandRadians = nil
                 return nil
             }
 
-            if abs(localRight) > 0.06 {
-                lastTurnBiasSign = localRight > 0 ? 1.0 : -1.0
-            }
-
-            var courseError = atan2(localRight, localForward)
-            if localForward < -0.16, abs(localRight) < 0.12 {
-                courseError = lastTurnBiasSign * (.pi * 0.88)
-            }
-            let bankIntent = (courseError / (.pi * 0.55)).clamped(to: -1.0...1.0)
+            let maxBankRadians = wing.maxBankAngleDeg * .pi / 180.0
+            let bankIntent = (
+                courseError / max(0.36, maxBankRadians * 1.15)
+            ).clamped(to: -1.0...1.0)
 
             if input.physicalState.isGroundRestState || input.position.y < 1.1 {
                 phase = .takeoff
                 axisIntent = AutoNavigationAxisIntent(
-                    forward: (-0.56 - altitudeError.clamped(to: -1.0...6.0) * 0.03).clamped(to: -0.72 ... -0.42),
-                    strafe: (bankIntent * 0.36 - localVelocityRight * 0.08).clamped(to: -0.48...0.48),
+                    forward: (-0.56 - altitudeError.clamped(to: -1.0...6.0) * 0.024).clamped(to: -0.76 ... -0.38),
+                    strafe: (bankIntent * 0.26 * wing.bankResponseGain - localVelocityRight * 0.06).clamped(to: -0.34...0.34),
                     vertical: 1.0
                 )
                 targetAltitude = safeTravelAltitude
             } else {
-                let slowdownScale = (distanceToTarget / slowdownRadius).clamped(to: 0.28...1.0)
+                let slowdownScale = (distanceToTarget / slowdownRadius).clamped(to: 0.40...1.0)
                 phase = distanceToTarget > slowdownRadius ? .cruise : .approach
-                let pitchIntent = (-altitudeError * 0.16 + verticalVelocity * 0.08).clamped(to: -0.60...0.30)
-                let throttleBase = (0.28 + slowdownScale * 0.22).clamped(to: 0.18...0.50)
+                let closeTurnDemand = turnCaptureActive || (distanceToTarget < minimumTurnRadius * 1.15 && abs(courseError) > 0.92)
+                let turnAuthorityScale = closeTurnDemand ? 1.0 : max(0.58, slowdownScale)
+                let requestedVerticalSpeed = altitudeError >= 0.0
+                    ? min(wing.climbSpeedMps * 0.24, altitudeError * 0.44)
+                    : max(-wing.climbSpeedMps * 0.18, altitudeError * 0.30)
+                var pitchIntent = (
+                    -requestedVerticalSpeed / max(wing.climbAirspeed, 0.1) * (1.9 * wing.climbResponseGain) +
+                    verticalVelocity * (0.07 * wing.descentResponseGain)
+                ).clamped(to: -0.58...0.30)
+                if speedError > 0.02 {
+                    pitchIntent = max(
+                        pitchIntent,
+                        min(0.34, speedError / max(wing.minSafeAirspeed, 0.1) * 0.48)
+                    )
+                }
+                let throttleBase = (
+                    0.44 +
+                    slowdownScale * 0.18 +
+                    speedError * 0.10 +
+                    (closeTurnDemand ? 0.05 : 0.0)
+                ).clamped(to: 0.42...0.88)
                 axisIntent = AutoNavigationAxisIntent(
                     forward: pitchIntent,
-                    strafe: (bankIntent * max(0.42, slowdownScale) - localVelocityRight * 0.10).clamped(to: -1.0...1.0),
-                    vertical: (throttleBase + altitudeError * 0.08 - verticalVelocity * 0.05).clamped(to: -0.20...0.88)
+                    strafe: (
+                        bankIntent * turnAuthorityScale * wing.turnAuthority -
+                        localVelocityRight * 0.08
+                    ).clamped(to: -1.0...1.0),
+                    vertical: (
+                        throttleBase +
+                        altitudeError * 0.04 -
+                        verticalVelocity * 0.03
+                    ).clamped(to: 0.26...0.94)
                 )
                 targetAltitude = safeTravelAltitude
             }
@@ -259,6 +323,40 @@ final class AutoNavigationController {
             distanceToTarget: distanceToTarget,
             bearingDegrees: bearingDegrees
         )
+    }
+}
+
+private extension AutoNavigationController {
+    func resolvedFixedWingParameters(
+        _ fixedWingParameters: FixedWingParameters?
+    ) -> FixedWingParameters {
+        fixedWingParameters ?? FixedWingParameters(
+            family: .conventionalSurvey,
+            minSustainableSpeedMps: 10.0,
+            cruiseSpeedMps: 17.0,
+            climbSpeedMps: 13.0,
+            stallWarningSpeedMps: 9.0,
+            waypointAcceptanceRadiusMeters: 9.0,
+            nominalTurnRateDegPerSec: 9.0,
+            bankResponseGain: 0.72,
+            climbResponseGain: 0.64,
+            descentResponseGain: 0.54,
+            dragFactor: 1.0,
+            throttleResponseGain: 0.64,
+            turnAuthority: 0.64,
+            maxBankAngleDeg: 38.0
+        )
+    }
+
+    func shortestAngleRadians(_ angle: Float) -> Float {
+        var normalized = angle
+        while normalized > .pi {
+            normalized -= (.pi * 2.0)
+        }
+        while normalized < -.pi {
+            normalized += (.pi * 2.0)
+        }
+        return normalized
     }
 }
 

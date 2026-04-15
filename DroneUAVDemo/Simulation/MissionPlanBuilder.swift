@@ -14,11 +14,15 @@ final class MissionPlanBuilder {
 
     func buildPlan(
         from draft: MissionDraft,
-        viewport: MapViewportState
+        viewport: MapViewportState,
+        airframeClass: AirframeClass = .multirotor,
+        fixedWingParameters: FixedWingParameters? = nil
     ) -> MissionPlan {
         let previewRoute = previewBuilder.buildPreview(
             draft: draft,
-            viewport: viewport
+            viewport: viewport,
+            airframeClass: airframeClass,
+            fixedWingParameters: fixedWingParameters
         )
         let validation = validator.validate(
             draft: draft,
@@ -34,8 +38,10 @@ final class MissionPlanBuilder {
         return MissionPlan(
             id: UUID(),
             builtAt: Date(),
-            startPoint: viewport.dockPosition,
+            startPoint: previewRoute?.missionPlanPoints.first ?? viewport.dockPosition,
             routePoints: previewRoute?.points ?? [],
+            launchMode: draft.selectedLaunchMode,
+            launchObject: draft.launchObject,
             waypoints: planWaypoints,
             executionTargets: executionTargets,
             zones: draft.zones,
@@ -50,7 +56,7 @@ final class MissionPlanBuilder {
         previewRoute: MissionPreviewRoute?
     ) -> [MissionTarget] {
         guard let previewRoute,
-              previewRoute.executionPoints.count >= 2,
+              previewRoute.points.count >= 2,
               previewRoute.waypointExecutionPointIndices.count == waypoints.count else {
             return []
         }
@@ -61,7 +67,7 @@ final class MissionPlanBuilder {
             }
         )
 
-        return previewRoute.executionPoints.enumerated().compactMap { routePointIndex, point in
+        return previewRoute.points.enumerated().compactMap { routePointIndex, point in
             guard routePointIndex > 0 else {
                 return nil
             }

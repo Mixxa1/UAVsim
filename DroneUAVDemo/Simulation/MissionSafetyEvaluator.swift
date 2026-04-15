@@ -11,7 +11,8 @@ final class MissionSafetyEvaluator {
         batteryState: BatteryState,
         collisionAnalysis: CollisionAnalysisSnapshot,
         thermalState: ThermalState,
-        signalState: UAVSignalState
+        signalState: UAVSignalState,
+        operationalStatus: MissionOperationalStatus
     ) -> MissionSafetyState {
         let maxTemperature = DamageComponent.allCases
             .map { thermalState.temperature(for: $0) }
@@ -26,10 +27,13 @@ final class MissionSafetyEvaluator {
         let batterySafeToContinue = !batteryState.isDepleted &&
             batteryState.chargePercent >= 12.0 &&
             (batteryState.remainingTimeSec <= 0.0 || batteryState.remainingTimeSec >= 45.0)
+        let returnSafe = operationalStatus.canReachHomeSafely
+        let missionSafe = operationalStatus.canCompleteMissionSafely
         let collisionSafe = collisionAnalysis.emergencyAction != .emergencyStop &&
             collisionAnalysis.riskScore < 0.92
         let thermalSafe = maxTemperature < 86.0
-        let signalSafe = !signalState.isInteractionBlocking
+        let signalSafe = !signalState.isInteractionBlocking && !operationalStatus.isLinkLost
+        let mapScaleSuitable = operationalStatus.mapScaleSuitability != .unsuitable
         let routeHealthy = currentPlan?.status == .validated
         let adapterHealthy = executionState.status != .running || canStartMissionAutopilot
 
@@ -41,9 +45,12 @@ final class MissionSafetyEvaluator {
             targetBindingAvailable: canStartMissionAutopilot,
             batterySafeToStart: batterySafeToStart,
             batterySafeToContinue: batterySafeToContinue,
+            returnSafe: returnSafe,
+            missionSafe: missionSafe,
             collisionSafe: collisionSafe,
             thermalSafe: thermalSafe,
             signalSafe: signalSafe,
+            mapScaleSuitable: mapScaleSuitable,
             routeHealthy: routeHealthy,
             progressHealthy: runtimeMonitor.progressHealthy,
             adapterHealthy: adapterHealthy
@@ -61,12 +68,43 @@ final class MissionSafetyEvaluator {
                 )
             )
         }
+        if !returnSafe || !missionSafe {
+            warnings.append(
+                MissionWarning(
+                    reason: .batteryUnsafe,
+                    severity: returnSafe && !missionSafe ? .warning : .critical,
+                    detailKey: !missionSafe
+                        ? "mission.status.reason.route_exceeds_safe_return"
+                        : "mission.status.reason.battery_unsafe"
+                )
+            )
+        }
         if !signalSafe {
             warnings.append(
                 MissionWarning(
                     reason: .runtimeUnsafe,
                     severity: .critical,
                     detailKey: "mission.status.reason.runtime_unsafe"
+                )
+            )
+        }
+        if operationalStatus.isInCriticalLinkZone {
+            warnings.append(
+                MissionWarning(
+                    reason: .runtimeUnsafe,
+                    severity: .warning,
+                    detailKey: "mission.status.reason.link_degraded"
+                )
+            )
+        }
+        if operationalStatus.mapScaleSuitability == .tight || operationalStatus.mapScaleSuitability == .unsuitable {
+            warnings.append(
+                MissionWarning(
+                    reason: .routeInvalid,
+                    severity: operationalStatus.mapScaleSuitability == .unsuitable ? .critical : .warning,
+                    detailKey: operationalStatus.mapScaleSuitability == .unsuitable
+                        ? "mission.status.reason.map_unsuitable"
+                        : "mission.status.reason.map_tight"
                 )
             )
         }
@@ -149,7 +187,7 @@ final class MissionSafetyEvaluator {
                     return .runtimeStallDetected
                 }
                 if !runtimeConstraints.isSafeToContinue {
-                    if !batterySafeToContinue {
+                    if !batterySafeToContinue || !returnSafe || !missionSafe {
                         return .batteryUnsafe
                     }
                     return .runtimeUnsafe
@@ -160,7 +198,7 @@ final class MissionSafetyEvaluator {
                 if !canStartMissionAutopilot {
                     return .missionStartBlocked
                 }
-                if !batterySafeToStart {
+                if !batterySafeToStart || !returnSafe || !missionSafe {
                     return .batteryUnsafe
                 }
                 if !runtimeConstraints.isSafeToStart {

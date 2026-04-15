@@ -6,6 +6,8 @@ struct MissionPlan: Identifiable, Equatable {
     var builtAt: Date
     var startPoint: SIMD2<Float>
     var routePoints: [SIMD2<Float>]
+    var launchMode: LaunchMode
+    var launchObject: MissionLaunchObject?
     var waypoints: [MissionTarget]
     var executionTargets: [MissionTarget]
     var zones: [MissionZone]

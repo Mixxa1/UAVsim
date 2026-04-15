@@ -286,6 +286,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             family: .rectangular,
             minSustainableSpeedMps: 10.0,
             cruiseSpeedMps: 17.0,
+            climbSpeedMps: 13.0,
+            stallWarningSpeedMps: 9.0,
+            waypointAcceptanceRadiusMeters: 9.0,
+            nominalTurnRateDegPerSec: 9.0,
+            bankResponseGain: 0.72,
+            climbResponseGain: 0.64,
+            descentResponseGain: 0.54,
+            dragFactor: 1.0,
+            throttleResponseGain: 0.64,
             turnAuthority: 0.7,
             maxBankAngleDeg: 42.0
         )
@@ -336,8 +345,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let motorThrottle = approach(
             current: state.motorThrottle,
             target: throttleCommand,
-            increaseRate: (1.6 + baseline.effectiveThrottleAuthority * 0.7).clamped(to: 1.4...2.6),
-            decreaseRate: (2.0 + baseline.effectiveThrottleAuthority * 0.6).clamped(to: 1.8...2.8),
+            increaseRate: (1.6 + baseline.effectiveThrottleAuthority * 0.7 * wing.throttleResponseGain).clamped(to: 1.4...2.8),
+            decreaseRate: (2.0 + baseline.effectiveThrottleAuthority * 0.6 * wing.throttleResponseGain).clamped(to: 1.8...3.0),
             dt: dt
         )
 
@@ -349,13 +358,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             next.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - dt * 10.0))
             next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
         } else if control.controlMode.isRateMode {
-            let rollRateCommand = control.targetOrientation.x.clamped(to: -1.0...1.0) * (2.6 * authority * wing.turnAuthority.clamped(to: 0.5...1.4))
-            let pitchRateCommand = (-control.targetOrientation.y).clamped(to: -1.0...1.0) * (2.1 * authority)
+            let speedRatio = (max(state.forwardAirspeed, wing.minSustainableSpeedMps) / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...1.35)
+            let rollRateCommand = control.targetOrientation.x.clamped(to: -1.0...1.0) * (2.6 * authority * wing.turnAuthority.clamped(to: 0.5...1.4) * wing.bankResponseGain * speedRatio)
+            let pitchRateCommand = (-control.targetOrientation.y).clamped(to: -1.0...1.0) * (2.1 * authority * max(0.78, wing.climbResponseGain))
             let yawRateCommand = desiredFixedWingYawRate(
                 control: control,
                 state: state,
                 authority: authority,
-                turnAuthority: wing.turnAuthority,
+                wing: wing,
+                airspeed: max(state.forwardAirspeed, wing.minSustainableSpeedMps),
                 fallbackHeading: targetYaw
             )
             let rateCommand = SIMD3<Float>(rollRateCommand, pitchRateCommand, yawRateCommand)
@@ -367,19 +378,23 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         } else {
             let targetRoll = control.targetOrientation.x.clamped(to: -maxBank...maxBank)
             let targetPitch = (-control.targetOrientation.y).clamped(to: -maxPitch...maxPitch)
-            next.orientation.x = approach(current: state.orientation.x, target: targetRoll, increaseRate: 2.6 * authority, decreaseRate: 2.8 * authority, dt: dt)
-            next.orientation.y = approach(current: state.orientation.y, target: targetPitch, increaseRate: 2.2 * authority, decreaseRate: 2.4 * authority, dt: dt)
+            next.orientation.x = approach(current: state.orientation.x, target: targetRoll, increaseRate: 2.6 * authority * wing.bankResponseGain, decreaseRate: 2.8 * authority * wing.bankResponseGain, dt: dt)
+            next.orientation.y = approach(current: state.orientation.y, target: targetPitch, increaseRate: 2.2 * authority * max(0.76, wing.climbResponseGain), decreaseRate: 2.4 * authority * max(0.76, wing.descentResponseGain), dt: dt)
             if abs(control.yawIntent) > 0.001 {
                 let yawRate = desiredFixedWingYawRate(
                     control: control,
                     state: state,
                     authority: authority,
-                    turnAuthority: wing.turnAuthority,
+                    wing: wing,
+                    airspeed: max(state.forwardAirspeed, wing.minSustainableSpeedMps),
                     fallbackHeading: targetYaw
                 )
                 next.orientation.z = wrap(state.orientation.z + yawRate * dt)
             } else {
-                next.orientation.z = wrap(approach(current: state.orientation.z, target: targetYaw, increaseRate: 1.8 * authority, decreaseRate: 1.8 * authority, dt: dt))
+                let speedRatio = (state.forwardAirspeed / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.45...1.20)
+                let bankCoupling = sin(state.orientation.x) * wing.nominalTurnRateDegPerSec.degreesToRadians * max(0.45, speedRatio) * wing.turnAuthority
+                let coupledYaw = wrap(state.orientation.z + bankCoupling * dt)
+                next.orientation.z = wrap(approach(current: coupledYaw, target: targetYaw, increaseRate: 1.6 * authority * wing.bankResponseGain, decreaseRate: 1.6 * authority * wing.bankResponseGain, dt: dt))
             }
             next.angularVelocity = SIMD3<Float>(
                 (next.orientation.x - state.orientation.x) / max(0.0001, dt),
@@ -392,7 +407,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             wing.minSustainableSpeedMps * (0.82 + baseline.stallProtectionBias),
             wing.cruiseSpeedMps * baseline.payloadCruisePenaltyMultiplier
         )
-        let speedEnvelope = cruiseTarget * (control.mode == .takeoff ? 1.12 : 1.45)
+        let climbTarget = max(wing.climbSpeedMps, wing.minSustainableSpeedMps)
+        let speedEnvelope = control.mode == .takeoff ? climbTarget * 1.12 : cruiseTarget * 1.45
         let targetForwardSpeed = motorThrottle * min(profile.maxHorizontalSpeedMps, speedEnvelope) * (0.55 + 0.45 * batteryFactor)
         let minimumForwardSpeed = state.position.y > 0.15
             ? wing.minSustainableSpeedMps * (0.90 + baseline.stallProtectionBias * 0.40)
@@ -400,14 +416,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let forwardSpeed = approach(
             current: max(0.0, state.forwardAirspeed),
             target: max(minimumForwardSpeed, targetForwardSpeed),
-            increaseRate: (6.2 + baseline.effectiveThrottleAuthority * 0.8).clamped(to: 5.0...7.2),
-            decreaseRate: (4.8 + baseline.effectiveThrottleAuthority * 0.5).clamped(to: 4.0...5.6),
+            increaseRate: (6.2 + baseline.effectiveThrottleAuthority * 0.8 * wing.throttleResponseGain).clamped(to: 5.0...8.0),
+            decreaseRate: (4.8 + baseline.effectiveThrottleAuthority * 0.5 * wing.dragFactor).clamped(to: 4.0...6.4),
             dt: dt
         )
 
         let q = orientationQuaternion(from: next.orientation)
         var velocity = simd_act(q, SIMD3<Float>(0.0, 0.0, forwardSpeed))
-        velocity += (context.windVector - velocity) * 0.05
+        velocity += (context.windVector - velocity) * (0.05 * wing.dragFactor)
 
         if next.position.y <= 0.0 && motorThrottle < 0.12 {
             velocity.y = 0.0
@@ -477,16 +493,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         control: DroneControlInput,
         state: DroneState,
         authority: Float,
-        turnAuthority: Float,
+        wing: FixedWingParameters,
+        airspeed: Float,
         fallbackHeading: Float
     ) -> Float {
         let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
-        let turnScale = turnAuthority.clamped(to: 0.4...1.4)
+        let turnScale = wing.turnAuthority.clamped(to: 0.4...1.4) * (airspeed / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...1.25)
         if abs(manualIntent) > 0.001 {
-            return manualIntent * 1.10 * authority * turnScale
+            return manualIntent * wing.nominalTurnRateDegPerSec.degreesToRadians * 0.65 * authority * turnScale
         }
 
-        return wrap(fallbackHeading - state.orientation.z) * (2.0 * turnScale)
+        let headingCorrection = wrap(fallbackHeading - state.orientation.z) * (0.52 * turnScale * wing.bankResponseGain)
+        return headingCorrection + sin(state.orientation.x) * wing.nominalTurnRateDegPerSec.degreesToRadians * turnScale
     }
 
     private func emitStartupDiagnosticsIfNeeded(

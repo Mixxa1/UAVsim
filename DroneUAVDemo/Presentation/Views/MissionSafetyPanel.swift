@@ -6,7 +6,14 @@ struct MissionSafetyPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(minimum: 96), spacing: 8),
+                    GridItem(.flexible(minimum: 96), spacing: 8)
+                ],
+                alignment: .leading,
+                spacing: 8
+            ) {
                 safetyMetric(
                     "mission.status.field.truth",
                     value: localized(snapshot.truthStatus.titleKey)
@@ -26,6 +33,14 @@ struct MissionSafetyPanel: View {
                     "mission.status.field.failsafe",
                     value: localized(snapshot.safetyState.failsafeMode.titleKey)
                 )
+                safetyMetric(
+                    "mission.status.field.link",
+                    value: linkZoneText
+                )
+                safetyMetric(
+                    "mission.status.field.safe_return",
+                    value: returnMarginText
+                )
             }
 
             if showsWarningList, !snapshot.safetyState.warnings.isEmpty {
@@ -39,6 +54,26 @@ struct MissionSafetyPanel: View {
                 }
             }
         }
+    }
+
+    private var linkZoneText: String {
+        let operational = snapshot.operationalStatus
+        if operational.isLinkLost {
+            return "LOST"
+        }
+        if operational.isInCriticalLinkZone {
+            return "CRITICAL"
+        }
+        if operational.isInWarningLinkZone {
+            return "WARNING"
+        }
+        return "NORMAL"
+    }
+
+    private var returnMarginText: String {
+        let operational = snapshot.operationalStatus
+        let qualifier = operational.canReachHomeSafely ? "READY" : "LOW"
+        return "\(qualifier) \(String(format: "%.0f m", operational.estimatedSafeReturnRangeM))"
     }
 
     private var authorityStateText: String {

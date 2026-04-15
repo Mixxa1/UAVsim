@@ -1,0 +1,120 @@
+{
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/TacticalMapView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "tactical.map.preview.none",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 132
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.status.value.none",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 139
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.link.lost",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 146
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.link.critical",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 149
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.link.warning",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 152
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.link.nominal",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 154
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.safe_return.ok",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 159
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.safe_return.limit",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 160
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.overlay.boundary",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 439
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.overlay.safe_return",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 476
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.overlay.link",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 488
+        }
+      },
+      {
+        "comment": "",
+        "key": "tactical.map.overlay.no_fly",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 557
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ • %@",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 688
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ • %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 804
+        }
+      }
+    ]
+  },
+  "version": 1
+}

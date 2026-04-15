@@ -23,6 +23,7 @@ final class MissionRuntimeMonitor {
     private let runtimeMismatchConfirmationDelay: TimeInterval
     private var lastObservedTargetID: UUID?
     private var lastObservedDistance: Float?
+    private var closestObservedDistance: Float?
     private var lastProgressAt: Date?
     private var targetMissingObservedAt: Date?
     private var runtimeMismatchObservedAt: Date?
@@ -44,7 +45,10 @@ final class MissionRuntimeMonitor {
         autoNavigationStatus: AutoNavigationStatus,
         currentMarker: TargetMarkerState?,
         missionOwnsTargetSource: Bool,
-        flightMode: DroneFlightMode
+        flightMode: DroneFlightMode,
+        launchState: LaunchState,
+        airframeClass: AirframeClass,
+        fixedWingParameters: FixedWingParameters?
     ) -> MissionRuntimeMonitorReport {
         guard executionState.status == .running,
               let activeTarget = executionState.activeTarget else {
@@ -56,6 +60,7 @@ final class MissionRuntimeMonitor {
         if lastObservedTargetID != activeTarget.id {
             lastObservedTargetID = activeTarget.id
             lastObservedDistance = executionState.distanceToActiveTarget
+            closestObservedDistance = executionState.distanceToActiveTarget
             lastProgressAt = now
             targetMissingObservedAt = nil
             runtimeMismatchObservedAt = nil
@@ -63,7 +68,17 @@ final class MissionRuntimeMonitor {
 
         if let distance = executionState.distanceToActiveTarget {
             let previousDistance = lastObservedDistance ?? distance
-            if previousDistance - distance >= distanceProgressEpsilon {
+            let previousClosest = closestObservedDistance ?? distance
+            let progressEpsilon = effectiveProgressEpsilon(for: airframeClass)
+            if previousDistance - distance >= progressEpsilon || previousClosest - distance >= progressEpsilon {
+                lastProgressAt = now
+            }
+            if distance < previousClosest {
+                closestObservedDistance = distance
+            }
+            if airframeClass == .fixedWing,
+               autoNavigationStatus.phase == .approach,
+               distance <= fixedWingFlyByDistanceWindow(fixedWingParameters: fixedWingParameters) {
                 lastProgressAt = now
             }
             lastObservedDistance = distance
@@ -72,7 +87,9 @@ final class MissionRuntimeMonitor {
         let rawTargetMissing = !missionOwnsTargetSource ||
             currentMarker == nil ||
             !executionState.hasBoundAutopilotTarget
-        let rawRuntimeMismatch = missionOwnsTargetSource &&
+        let launchCorridorActive = flightMode == .takeoff || launchState.blocksRouteCapture
+        let rawRuntimeMismatch = !launchCorridorActive &&
+            missionOwnsTargetSource &&
             currentMarker != nil &&
             executionState.hasBoundAutopilotTarget &&
             (!autoNavigationStatus.isActive || flightMode != .autoPath)
@@ -95,7 +112,24 @@ final class MissionRuntimeMonitor {
                   let lastProgressAt else {
                 return false
             }
-            return now.timeIntervalSince(lastProgressAt) >= stallTimeout
+            if airframeClass == .fixedWing {
+                let flyByDistanceWindow = fixedWingFlyByDistanceWindow(fixedWingParameters: fixedWingParameters)
+                let distanceSlack = fixedWingDistanceSlack(fixedWingParameters: fixedWingParameters)
+                if launchCorridorActive {
+                    return false
+                }
+                if autoNavigationStatus.phase == .approach && distance <= flyByDistanceWindow {
+                    return false
+                }
+                if let closestObservedDistance,
+                   distance <= closestObservedDistance + distanceSlack {
+                    return false
+                }
+            }
+            return now.timeIntervalSince(lastProgressAt) >= effectiveStallTimeout(
+                for: airframeClass,
+                fixedWingParameters: fixedWingParameters
+            )
         }()
 
         var warnings: [MissionWarning] = []
@@ -139,9 +173,83 @@ final class MissionRuntimeMonitor {
     func reset() {
         lastObservedTargetID = nil
         lastObservedDistance = nil
+        closestObservedDistance = nil
         lastProgressAt = nil
         targetMissingObservedAt = nil
         runtimeMismatchObservedAt = nil
+    }
+
+    private func effectiveProgressEpsilon(for airframeClass: AirframeClass) -> Float {
+        switch airframeClass {
+        case .multirotor:
+            return distanceProgressEpsilon
+        case .fixedWing:
+            return max(0.14, distanceProgressEpsilon * 0.55)
+        }
+    }
+
+    private func effectiveStallTimeout(
+        for airframeClass: AirframeClass,
+        fixedWingParameters: FixedWingParameters?
+    ) -> TimeInterval {
+        switch airframeClass {
+        case .multirotor:
+            return stallTimeout
+        case .fixedWing:
+            let wing = resolvedFixedWingParameters(fixedWingParameters)
+            let turnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
+            let baseTurnRadius = max(
+                wing.waypointAcceptanceRadiusMeters * 1.1,
+                wing.cruiseSpeedMps / turnRateRad
+            )
+            let turnTime = Double((baseTurnRadius * .pi) / max(wing.cruiseSpeedMps, 1.0))
+            return max(stallTimeout + 4.0, min(14.0, turnTime + 5.0))
+        }
+    }
+
+    private func fixedWingFlyByDistanceWindow(
+        fixedWingParameters: FixedWingParameters?
+    ) -> Float {
+        let wing = resolvedFixedWingParameters(fixedWingParameters)
+        let turnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
+        let turnRadius = max(
+            wing.waypointAcceptanceRadiusMeters * 1.1,
+            wing.cruiseSpeedMps / turnRateRad
+        )
+        return max(turnRadius * 1.35, wing.waypointAcceptanceRadiusMeters * 2.2)
+    }
+
+    private func fixedWingDistanceSlack(
+        fixedWingParameters: FixedWingParameters?
+    ) -> Float {
+        let wing = resolvedFixedWingParameters(fixedWingParameters)
+        let turnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
+        let turnRadius = max(
+            wing.waypointAcceptanceRadiusMeters * 1.1,
+            wing.cruiseSpeedMps / turnRateRad
+        )
+        return max(turnRadius * 0.55, wing.waypointAcceptanceRadiusMeters * 0.75)
+    }
+
+    private func resolvedFixedWingParameters(
+        _ fixedWingParameters: FixedWingParameters?
+    ) -> FixedWingParameters {
+        fixedWingParameters ?? FixedWingParameters(
+            family: .conventionalSurvey,
+            minSustainableSpeedMps: 10.0,
+            cruiseSpeedMps: 17.0,
+            climbSpeedMps: 13.0,
+            stallWarningSpeedMps: 9.0,
+            waypointAcceptanceRadiusMeters: 9.0,
+            nominalTurnRateDegPerSec: 9.0,
+            bankResponseGain: 0.72,
+            climbResponseGain: 0.64,
+            descentResponseGain: 0.54,
+            dragFactor: 1.0,
+            throttleResponseGain: 0.64,
+            turnAuthority: 0.64,
+            maxBankAngleDeg: 38.0
+        )
     }
 
     private func confirmedState(

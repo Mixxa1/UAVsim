@@ -12,6 +12,25 @@ enum MapScale: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var numericPreset: Float {
+        switch self {
+        case .x4:
+            return 4.0
+        case .x8:
+            return 8.0
+        case .x16:
+            return 16.0
+        case .x32:
+            return 32.0
+        case .x64:
+            return 64.0
+        case .x128:
+            return 128.0
+        case .x256:
+            return 256.0
+        }
+    }
+
     var titleKey: String {
         switch self {
         case .x4:
@@ -32,22 +51,11 @@ enum MapScale: String, CaseIterable, Identifiable {
     }
 
     var worldHalfExtentMeters: Float {
-        switch self {
-        case .x4:
-            return 72.0
-        case .x8:
-            return 104.0
-        case .x16:
-            return 148.0
-        case .x32:
-            return 212.0
-        case .x64:
-            return 280.0
-        case .x128:
-            return 360.0
-        case .x256:
-            return 480.0
-        }
+        sideLengthMeters * 0.5
+    }
+
+    var sideLengthMeters: Float {
+        numericPreset * 100.0
     }
 
     var signalBoundaryCoverage: Float {
@@ -89,20 +97,7 @@ enum MapScale: String, CaseIterable, Identifiable {
     }
 
     static func fromPersistedRawValue(_ rawValue: String) -> MapScale? {
-        if let directMatch = MapScale(rawValue: rawValue) {
-            return directMatch
-        }
-
-        switch rawValue {
-        case "x4", "x8":
-            return .x64
-        case "x16":
-            return .x128
-        case "x32":
-            return .x256
-        default:
-            return nil
-        }
+        MapScale(rawValue: rawValue)
     }
 }
 
@@ -198,19 +193,22 @@ struct TerrainConfiguration {
     var safeSpawnRadius: Float
 
     var worldHalfExtent: Float {
-        mapScale.worldHalfExtentMeters * preset.extentMultiplier
+        mapScale.worldHalfExtentMeters
+    }
+
+    var hardWorldBoundsRadius: Float {
+        let minimumHalfExtent = safeSpawnRadius + 18.0
+        let edgeMargin = max(12.0, min(48.0, worldHalfExtent * 0.05))
+        let maximumHalfExtent = worldHalfExtent - edgeMargin
+        return min(maximumHalfExtent, max(minimumHalfExtent, worldHalfExtent * 0.95))
     }
 
     var signalBoundaryRadius: Float {
-        let minimumRadius = safeSpawnRadius + 12.0
-        let targetRadius = worldHalfExtent * mapScale.signalBoundaryCoverage
-        let edgeMargin = max(12.0, worldHalfExtent * 0.10)
-        let maximumRadius = worldHalfExtent - edgeMargin
-        return min(maximumRadius, max(minimumRadius, targetRadius))
+        hardWorldBoundsRadius
     }
 
     var scenicHalfExtent: Float {
-        max(worldHalfExtent + 110.0, signalBoundaryRadius + 130.0)
+        max(worldHalfExtent * preset.extentMultiplier + 110.0, hardWorldBoundsRadius + 130.0)
     }
 
     var maxFlightAltitude: Float {

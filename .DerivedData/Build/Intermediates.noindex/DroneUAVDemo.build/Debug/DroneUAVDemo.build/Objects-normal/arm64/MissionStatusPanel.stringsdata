@@ -1,0 +1,24 @@
+{
+  "source": "/Users/misha/New project/DroneUAVDemo/Presentation/Views/MissionStatusPanel.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "mission.panel.section.status",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 18
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.status.field.primary_issue",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 44
+        }
+      }
+    ]
+  },
+  "version": 1
+}

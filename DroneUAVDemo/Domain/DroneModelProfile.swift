@@ -25,6 +25,61 @@ enum LaunchMethod: String, CaseIterable {
     case handLaunch
 }
 
+enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
+    case standard
+    case handLaunch
+    case catapult
+    case runway
+    case vtol
+
+    var id: String { rawValue }
+
+    var requiresLaunchObject: Bool {
+        self != .standard
+    }
+
+    var defaultLaunchObjectType: MissionLaunchObjectType? {
+        switch self {
+        case .standard:
+            return nil
+        case .handLaunch:
+            return .handLaunchPoint
+        case .catapult:
+            return .catapultLine
+        case .runway:
+            return .runwayStrip
+        case .vtol:
+            return .vtolStartPoint
+        }
+    }
+
+    var titleKey: String {
+        "tactical.map.launch.mode.\(rawValue)"
+    }
+}
+
+enum LaunchState: String, CaseIterable, Equatable {
+    case idle
+    case prelaunchCheck
+    case aligning
+    case launchCommit
+    case assistedAcceleration
+    case rotation
+    case initialClimb
+    case transitionToFlight
+    case completed
+    case aborted
+
+    var blocksRouteCapture: Bool {
+        switch self {
+        case .idle, .completed, .aborted:
+            return false
+        case .prelaunchCheck, .aligning, .launchCommit, .assistedAcceleration, .rotation, .initialClimb, .transitionToFlight:
+            return true
+        }
+    }
+}
+
 enum LandingMethod: String, CaseIterable {
     case vertical
     case bellyLanding
@@ -103,8 +158,130 @@ struct FixedWingParameters: Hashable {
     let family: FixedWingFamily
     let minSustainableSpeedMps: Float
     let cruiseSpeedMps: Float
+    let climbSpeedMps: Float
+    let stallWarningSpeedMps: Float
+    let waypointAcceptanceRadiusMeters: Float
+    let nominalTurnRateDegPerSec: Float
+    let bankResponseGain: Float
+    let climbResponseGain: Float
+    let descentResponseGain: Float
+    let dragFactor: Float
+    let throttleResponseGain: Float
     let turnAuthority: Float
     let maxBankAngleDeg: Float
+    let supportedLaunchModes: [LaunchMode]
+    let preferredLaunchMode: LaunchMode
+    let minSafeAirspeed: Float
+    let climbAirspeed: Float
+    let cruiseAirspeed: Float
+    let takeoffRotationSpeed: Float
+    let initialClimbPitchDeg: Float
+    let maxInitialBankDeg: Float
+    let handThrowSpeed: Float
+    let catapultExitSpeed: Float
+    let runwayTakeoffDistance: Float
+    let initialClimbTargetAltitude: Float
+
+    init(
+        family: FixedWingFamily,
+        minSustainableSpeedMps: Float,
+        cruiseSpeedMps: Float,
+        climbSpeedMps: Float,
+        stallWarningSpeedMps: Float,
+        waypointAcceptanceRadiusMeters: Float,
+        nominalTurnRateDegPerSec: Float,
+        bankResponseGain: Float,
+        climbResponseGain: Float,
+        descentResponseGain: Float,
+        dragFactor: Float,
+        throttleResponseGain: Float,
+        turnAuthority: Float,
+        maxBankAngleDeg: Float,
+        supportedLaunchModes: [LaunchMode]? = nil,
+        preferredLaunchMode: LaunchMode? = nil,
+        minSafeAirspeed: Float? = nil,
+        climbAirspeed: Float? = nil,
+        cruiseAirspeed: Float? = nil,
+        takeoffRotationSpeed: Float? = nil,
+        initialClimbPitchDeg: Float = 10.0,
+        maxInitialBankDeg: Float? = nil,
+        handThrowSpeed: Float? = nil,
+        catapultExitSpeed: Float? = nil,
+        runwayTakeoffDistance: Float = 45.0,
+        initialClimbTargetAltitude: Float = 18.0
+    ) {
+        self.family = family
+        self.minSustainableSpeedMps = minSustainableSpeedMps
+        self.cruiseSpeedMps = cruiseSpeedMps
+        self.climbSpeedMps = climbSpeedMps
+        self.stallWarningSpeedMps = stallWarningSpeedMps
+        self.waypointAcceptanceRadiusMeters = waypointAcceptanceRadiusMeters
+        self.nominalTurnRateDegPerSec = nominalTurnRateDegPerSec
+        self.bankResponseGain = bankResponseGain
+        self.climbResponseGain = climbResponseGain
+        self.descentResponseGain = descentResponseGain
+        self.dragFactor = dragFactor
+        self.throttleResponseGain = throttleResponseGain
+        self.turnAuthority = turnAuthority
+        self.maxBankAngleDeg = maxBankAngleDeg
+
+        let resolvedSupportedLaunchModes = supportedLaunchModes ?? {
+            switch family {
+            case .tailsitterVTOL, .surveyEVTOL:
+                return [.standard, .vtol]
+            default:
+                return [.standard, .handLaunch]
+            }
+        }()
+        self.supportedLaunchModes = resolvedSupportedLaunchModes
+        self.preferredLaunchMode = preferredLaunchMode ?? resolvedSupportedLaunchModes.first ?? .standard
+        self.minSafeAirspeed = minSafeAirspeed ?? max(minSustainableSpeedMps, stallWarningSpeedMps + 0.8)
+        self.climbAirspeed = climbAirspeed ?? max(climbSpeedMps, minSustainableSpeedMps + 1.2)
+        self.cruiseAirspeed = cruiseAirspeed ?? cruiseSpeedMps
+        self.takeoffRotationSpeed = takeoffRotationSpeed ?? max(self.minSafeAirspeed * 0.94, minSustainableSpeedMps)
+        self.initialClimbPitchDeg = initialClimbPitchDeg
+        self.maxInitialBankDeg = min(maxBankAngleDeg, maxInitialBankDeg ?? max(10.0, maxBankAngleDeg * 0.55))
+        self.handThrowSpeed = handThrowSpeed ?? max(6.0, self.minSafeAirspeed * 0.58)
+        self.catapultExitSpeed = catapultExitSpeed ?? max(self.minSafeAirspeed * 1.08, self.climbAirspeed)
+        self.runwayTakeoffDistance = runwayTakeoffDistance
+        self.initialClimbTargetAltitude = initialClimbTargetAltitude
+    }
+
+    var nominalTurnRateRadPerSec: Float {
+        max(0.05, nominalTurnRateDegPerSec * .pi / 180.0)
+    }
+
+    func minimumTurnRadius(airspeed: Float? = nil) -> Float {
+        let referenceSpeed = max(airspeed ?? cruiseAirspeed, minSafeAirspeed)
+        return max(
+            waypointAcceptanceRadiusMeters * 1.1,
+            referenceSpeed / nominalTurnRateRadPerSec
+        )
+    }
+
+    func guidanceLookaheadDistance(airspeed: Float? = nil) -> Float {
+        let referenceSpeed = max(airspeed ?? cruiseAirspeed, minSafeAirspeed)
+        return max(
+            minimumTurnRadius(airspeed: referenceSpeed) * 1.25,
+            referenceSpeed * 1.15,
+            waypointAcceptanceRadiusMeters * 2.0
+        )
+    }
+
+    func corridorLength(for mode: LaunchMode) -> Float {
+        switch mode {
+        case .standard:
+            return 0.0
+        case .handLaunch:
+            return max(12.0, climbAirspeed * 1.2)
+        case .catapult:
+            return max(18.0, catapultExitSpeed * 1.4)
+        case .runway:
+            return max(24.0, runwayTakeoffDistance)
+        case .vtol:
+            return max(8.0, waypointAcceptanceRadiusMeters * 0.9)
+        }
+    }
 }
 
 struct AbstractDroneParameters: Hashable {
@@ -265,6 +442,14 @@ struct DroneModelProfile: Identifiable, Hashable {
     var maxVerticalSpeedMps: Float {
         max(maxAscentSpeedMps, maxDescentSpeedMps)
     }
+
+    var supportedLaunchModes: [LaunchMode] {
+        fixedWingParameters?.supportedLaunchModes ?? [.standard]
+    }
+
+    var preferredLaunchMode: LaunchMode {
+        fixedWingParameters?.preferredLaunchMode ?? .standard
+    }
 }
 
 struct DroneDimensionsMeters: Hashable {
@@ -310,7 +495,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
         allProfiles.first(where: { $0.id == UAVReferenceCatalog.defaultProfileID }) ?? allProfiles[0]
     }
 
-    private static func runtimeProfile(from uavProfile: UAVProfile) -> DroneModelProfile {
+    static func runtimeProfile(from uavProfile: UAVProfile) -> DroneModelProfile {
         let tuning = runtimeTuning(for: uavProfile)
         let catalogDimensionsUnfolded = uavProfile.dimensions.resolvedUnfoldedMillimeters(fallback: tuning.fallbackDimensions)
         let dimensionsUnfolded = tuning.runtimeSceneDimensionsOverride ?? catalogDimensionsUnfolded
@@ -363,6 +548,10 @@ struct LIPODroneModelRepository: DroneModelRepository {
     }
 
     private static func runtimeTuning(for uavProfile: UAVProfile) -> RuntimeTuning {
+        if let override = runtimeTuningOverride(for: uavProfile) {
+            return override
+        }
+
         switch uavProfile.visualPreset {
         case .abstractCustom:
             return RuntimeTuning(
@@ -528,8 +717,20 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     family: .tailsitterVTOL,
                     minSustainableSpeedMps: 11.8,
                     cruiseSpeedMps: 16.0,
+                    climbSpeedMps: 14.2,
+                    stallWarningSpeedMps: 10.8,
+                    waypointAcceptanceRadiusMeters: 11.0,
+                    nominalTurnRateDegPerSec: 12.5,
+                    bankResponseGain: 0.86,
+                    climbResponseGain: 0.72,
+                    descentResponseGain: 0.62,
+                    dragFactor: 0.98,
+                    throttleResponseGain: 0.68,
                     turnAuthority: 0.68,
-                    maxBankAngleDeg: 40.0
+                    maxBankAngleDeg: 40.0,
+                    preferredLaunchMode: .vtol,
+                    initialClimbPitchDeg: 11.0,
+                    initialClimbTargetAltitude: 16.0
                 ),
                 launchMethod: .vertical,
                 landingMethod: .tailsitterVerticalLanding,
@@ -558,8 +759,20 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     family: .surveyEVTOL,
                     minSustainableSpeedMps: 12.5,
                     cruiseSpeedMps: 17.0,
+                    climbSpeedMps: 15.0,
+                    stallWarningSpeedMps: 11.4,
+                    waypointAcceptanceRadiusMeters: 12.0,
+                    nominalTurnRateDegPerSec: 11.8,
+                    bankResponseGain: 0.82,
+                    climbResponseGain: 0.68,
+                    descentResponseGain: 0.60,
+                    dragFactor: 1.00,
+                    throttleResponseGain: 0.64,
                     turnAuthority: 0.60,
-                    maxBankAngleDeg: 38.0
+                    maxBankAngleDeg: 38.0,
+                    preferredLaunchMode: .vtol,
+                    initialClimbPitchDeg: 10.5,
+                    initialClimbTargetAltitude: 18.0
                 ),
                 launchMethod: .vertical,
                 landingMethod: .vertical,
@@ -685,8 +898,24 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     family: .swept,
                     minSustainableSpeedMps: 44.0,
                     cruiseSpeedMps: 90.0,
+                    climbSpeedMps: 65.0,
+                    stallWarningSpeedMps: 38.0,
+                    waypointAcceptanceRadiusMeters: 28.0,
+                    nominalTurnRateDegPerSec: 7.8,
+                    bankResponseGain: 0.58,
+                    climbResponseGain: 0.48,
+                    descentResponseGain: 0.42,
+                    dragFactor: 1.08,
+                    throttleResponseGain: 0.52,
                     turnAuthority: 0.32,
-                    maxBankAngleDeg: 28.0
+                    maxBankAngleDeg: 28.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    takeoffRotationSpeed: 53.0,
+                    initialClimbPitchDeg: 8.0,
+                    maxInitialBankDeg: 10.0,
+                    runwayTakeoffDistance: 260.0,
+                    initialClimbTargetAltitude: 55.0
                 ),
                 launchMethod: .handLaunch,
                 landingMethod: .bellyLanding,
@@ -716,8 +945,24 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     family: .conventionalSurvey,
                     minSustainableSpeedMps: 30.0,
                     cruiseSpeedMps: 50.0,
+                    climbSpeedMps: 38.0,
+                    stallWarningSpeedMps: 26.0,
+                    waypointAcceptanceRadiusMeters: 18.0,
+                    nominalTurnRateDegPerSec: 9.2,
+                    bankResponseGain: 0.64,
+                    climbResponseGain: 0.54,
+                    descentResponseGain: 0.48,
+                    dragFactor: 1.04,
+                    throttleResponseGain: 0.58,
                     turnAuthority: 0.36,
-                    maxBankAngleDeg: 30.0
+                    maxBankAngleDeg: 30.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    takeoffRotationSpeed: 35.0,
+                    initialClimbPitchDeg: 8.5,
+                    maxInitialBankDeg: 11.0,
+                    runwayTakeoffDistance: 180.0,
+                    initialClimbTargetAltitude: 40.0
                 ),
                 launchMethod: .handLaunch,
                 landingMethod: .bellyLanding,
@@ -746,8 +991,23 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     family: .conventionalSurvey,
                     minSustainableSpeedMps: 22.0,
                     cruiseSpeedMps: 38.0,
+                    climbSpeedMps: 29.0,
+                    stallWarningSpeedMps: 19.0,
+                    waypointAcceptanceRadiusMeters: 15.0,
+                    nominalTurnRateDegPerSec: 10.4,
+                    bankResponseGain: 0.70,
+                    climbResponseGain: 0.60,
+                    descentResponseGain: 0.52,
+                    dragFactor: 1.02,
+                    throttleResponseGain: 0.62,
                     turnAuthority: 0.48,
-                    maxBankAngleDeg: 34.0
+                    maxBankAngleDeg: 34.0,
+                    supportedLaunchModes: [.standard, .catapult],
+                    preferredLaunchMode: .catapult,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 13.0,
+                    catapultExitSpeed: 24.0,
+                    initialClimbTargetAltitude: 24.0
                 ),
                 launchMethod: .handLaunch,
                 landingMethod: .linearBellyLanding,
@@ -776,8 +1036,23 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     family: .conventionalSurvey,
                     minSustainableSpeedMps: 18.0,
                     cruiseSpeedMps: 30.0,
+                    climbSpeedMps: 24.0,
+                    stallWarningSpeedMps: 15.5,
+                    waypointAcceptanceRadiusMeters: 13.0,
+                    nominalTurnRateDegPerSec: 11.0,
+                    bankResponseGain: 0.76,
+                    climbResponseGain: 0.66,
+                    descentResponseGain: 0.56,
+                    dragFactor: 1.00,
+                    throttleResponseGain: 0.64,
                     turnAuthority: 0.56,
-                    maxBankAngleDeg: 36.0
+                    maxBankAngleDeg: 36.0,
+                    supportedLaunchModes: [.standard, .handLaunch],
+                    preferredLaunchMode: .handLaunch,
+                    initialClimbPitchDeg: 11.0,
+                    maxInitialBankDeg: 15.0,
+                    handThrowSpeed: 9.0,
+                    initialClimbTargetAltitude: 18.0
                 ),
                 launchMethod: .handLaunch,
                 landingMethod: .bellyLanding,
@@ -787,6 +1062,289 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 collisionRadiusMeters: 0.28
             )
         }
+    }
+
+    private static func runtimeTuningOverride(
+        for uavProfile: UAVProfile
+    ) -> RuntimeTuning? {
+        switch uavProfile.id {
+        case "sensefly-ebee-tac":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 1.7,
+                fallbackDimensions: DroneDimensionsMM(x: 1160, y: 700, z: 180),
+                maxHorizontalSpeedMps: 30.0,
+                maxAscentSpeedMps: 4.5,
+                maxDescentSpeedMps: 4.0,
+                maxFlightTimeMin: 90.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 82.0,
+                visualClass: .ebeeClass,
+                airframeStyle: .flyingWing,
+                controlResponsiveness: 0.56,
+                cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 5.8, followHeight: 1.7),
+                collisionRadiusMeters: 0.24,
+                fixedWingParameters: FixedWingParameters(
+                    family: .flyingWing,
+                    minSustainableSpeedMps: 13.4,
+                    cruiseSpeedMps: 19.5,
+                    climbSpeedMps: 15.8,
+                    stallWarningSpeedMps: 12.0,
+                    waypointAcceptanceRadiusMeters: 9.0,
+                    nominalTurnRateDegPerSec: 14.0,
+                    bankResponseGain: 0.80,
+                    climbResponseGain: 0.68,
+                    descentResponseGain: 0.58,
+                    dragFactor: 0.97,
+                    throttleResponseGain: 0.66,
+                    turnAuthority: 0.64,
+                    maxBankAngleDeg: 40.0,
+                    supportedLaunchModes: [.standard, .handLaunch],
+                    preferredLaunchMode: .handLaunch,
+                    initialClimbPitchDeg: 11.0,
+                    maxInitialBankDeg: 15.0,
+                    handThrowSpeed: 8.4,
+                    initialClimbTargetAltitude: 16.0
+                )
+            )
+        case "delair-ux11":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 1.6,
+                fallbackDimensions: DroneDimensionsMM(x: 1100, y: 650, z: 170),
+                maxHorizontalSpeedMps: 25.0,
+                maxAscentSpeedMps: 4.2,
+                maxDescentSpeedMps: 4.0,
+                maxFlightTimeMin: 59.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 76.0,
+                visualClass: .delairUX11Class,
+                controlResponsiveness: 0.54,
+                cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 6.0, followHeight: 1.8),
+                collisionRadiusMeters: 0.24,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 12.6,
+                    cruiseSpeedMps: 17.8,
+                    climbSpeedMps: 14.2,
+                    stallWarningSpeedMps: 11.4,
+                    waypointAcceptanceRadiusMeters: 9.0,
+                    nominalTurnRateDegPerSec: 13.0,
+                    bankResponseGain: 0.78,
+                    climbResponseGain: 0.66,
+                    descentResponseGain: 0.56,
+                    dragFactor: 0.99,
+                    throttleResponseGain: 0.64,
+                    turnAuthority: 0.62,
+                    maxBankAngleDeg: 38.0,
+                    supportedLaunchModes: [.standard, .handLaunch],
+                    preferredLaunchMode: .handLaunch,
+                    initialClimbPitchDeg: 10.5,
+                    maxInitialBankDeg: 14.0,
+                    handThrowSpeed: 8.0,
+                    initialClimbTargetAltitude: 15.0
+                )
+            )
+        case "scaneagle":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 22.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3100, y: 1700, z: 430),
+                maxHorizontalSpeedMps: 41.0,
+                maxAscentSpeedMps: 4.4,
+                maxDescentSpeedMps: 4.2,
+                maxFlightTimeMin: 1440.0,
+                maxWindResistanceMps: 16.0,
+                batteryEnergyWh: 2400.0,
+                visualClass: .fixedWingRectangular,
+                controlResponsiveness: 0.40,
+                cameraPreset: DroneCameraPreset(fpvFov: 64.0, followDistance: 7.0, followHeight: 2.1),
+                collisionRadiusMeters: 0.34,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 16.0,
+                    cruiseSpeedMps: 27.0,
+                    climbSpeedMps: 21.0,
+                    stallWarningSpeedMps: 14.2,
+                    waypointAcceptanceRadiusMeters: 11.0,
+                    nominalTurnRateDegPerSec: 11.4,
+                    bankResponseGain: 0.72,
+                    climbResponseGain: 0.62,
+                    descentResponseGain: 0.54,
+                    dragFactor: 1.01,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.56,
+                    maxBankAngleDeg: 36.0,
+                    supportedLaunchModes: [.standard, .catapult],
+                    preferredLaunchMode: .catapult,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 13.0,
+                    catapultExitSpeed: 19.0,
+                    initialClimbTargetAltitude: 20.0
+                )
+            )
+        case "rq-21-integrator":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 61.0,
+                fallbackDimensions: DroneDimensionsMM(x: 4900, y: 2800, z: 620),
+                maxHorizontalSpeedMps: 42.0,
+                maxAscentSpeedMps: 4.8,
+                maxDescentSpeedMps: 4.5,
+                maxFlightTimeMin: 960.0,
+                maxWindResistanceMps: 18.0,
+                batteryEnergyWh: 4200.0,
+                visualClass: .fixedWingRectangular,
+                controlResponsiveness: 0.36,
+                cameraPreset: DroneCameraPreset(fpvFov: 62.0, followDistance: 7.8, followHeight: 2.3),
+                collisionRadiusMeters: 0.40,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 18.5,
+                    cruiseSpeedMps: 29.0,
+                    climbSpeedMps: 23.0,
+                    stallWarningSpeedMps: 16.5,
+                    waypointAcceptanceRadiusMeters: 12.0,
+                    nominalTurnRateDegPerSec: 10.6,
+                    bankResponseGain: 0.70,
+                    climbResponseGain: 0.60,
+                    descentResponseGain: 0.52,
+                    dragFactor: 1.02,
+                    throttleResponseGain: 0.60,
+                    turnAuthority: 0.52,
+                    maxBankAngleDeg: 34.0,
+                    supportedLaunchModes: [.standard, .catapult],
+                    preferredLaunchMode: .catapult,
+                    initialClimbPitchDeg: 9.5,
+                    maxInitialBankDeg: 12.0,
+                    catapultExitSpeed: 22.0,
+                    initialClimbTargetAltitude: 24.0
+                )
+            )
+        case "tekever-ar3-evo":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 25.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3500, y: 2200, z: 520),
+                maxHorizontalSpeedMps: 30.0,
+                maxAscentSpeedMps: 4.8,
+                maxDescentSpeedMps: 5.2,
+                maxFlightTimeMin: 960.0,
+                maxWindResistanceMps: 16.0,
+                batteryEnergyWh: 2600.0,
+                visualClass: .trinityClass,
+                operationalCategory: .fixedWingVTOL,
+                airframeStyle: .surveyEVTOL,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.44,
+                cameraPreset: DroneCameraPreset(fpvFov: 66.0, followDistance: 8.4, followHeight: 2.6),
+                collisionRadiusMeters: 0.38,
+                fixedWingParameters: FixedWingParameters(
+                    family: .surveyEVTOL,
+                    minSustainableSpeedMps: 17.0,
+                    cruiseSpeedMps: 24.0,
+                    climbSpeedMps: 20.0,
+                    stallWarningSpeedMps: 15.4,
+                    waypointAcceptanceRadiusMeters: 12.0,
+                    nominalTurnRateDegPerSec: 11.2,
+                    bankResponseGain: 0.74,
+                    climbResponseGain: 0.64,
+                    descentResponseGain: 0.56,
+                    dragFactor: 1.00,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.58,
+                    maxBankAngleDeg: 36.0,
+                    supportedLaunchModes: [.standard, .catapult, .vtol],
+                    preferredLaunchMode: .vtol,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 13.0,
+                    catapultExitSpeed: 20.5,
+                    initialClimbTargetAltitude: 22.0
+                )
+            )
+        case "uav-factory-penguin-b":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 26.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3400, y: 2290, z: 520),
+                maxHorizontalSpeedMps: 36.0,
+                maxAscentSpeedMps: 4.4,
+                maxDescentSpeedMps: 4.4,
+                maxFlightTimeMin: 1200.0,
+                maxWindResistanceMps: 17.0,
+                batteryEnergyWh: 2400.0,
+                visualClass: .fixedWingRectangular,
+                controlResponsiveness: 0.38,
+                cameraPreset: DroneCameraPreset(fpvFov: 62.0, followDistance: 7.4, followHeight: 2.2),
+                collisionRadiusMeters: 0.36,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 16.8,
+                    cruiseSpeedMps: 27.5,
+                    climbSpeedMps: 21.5,
+                    stallWarningSpeedMps: 15.2,
+                    waypointAcceptanceRadiusMeters: 11.0,
+                    nominalTurnRateDegPerSec: 10.8,
+                    bankResponseGain: 0.72,
+                    climbResponseGain: 0.62,
+                    descentResponseGain: 0.54,
+                    dragFactor: 1.01,
+                    throttleResponseGain: 0.60,
+                    turnAuthority: 0.54,
+                    maxBankAngleDeg: 34.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    takeoffRotationSpeed: 18.4,
+                    initialClimbPitchDeg: 9.0,
+                    maxInitialBankDeg: 11.0,
+                    runwayTakeoffDistance: 85.0,
+                    initialClimbTargetAltitude: 20.0
+                )
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func fixedWingRuntimeTuning(
+        fallbackTakeoffMass: Float,
+        fallbackDimensions: DroneDimensionsMM,
+        runtimeSceneDimensionsOverride: DroneDimensionsMM? = nil,
+        maxHorizontalSpeedMps: Float,
+        maxAscentSpeedMps: Float,
+        maxDescentSpeedMps: Float,
+        maxFlightTimeMin: Float,
+        maxWindResistanceMps: Float,
+        batteryEnergyWh: Float,
+        visualClass: DroneVisualClass,
+        operationalCategory: DroneOperationalCategory = .fixedWing,
+        airframeStyle: AirframeStyle = .conventionalFixedWing,
+        launchMethod: LaunchMethod = .handLaunch,
+        landingMethod: LandingMethod = .bellyLanding,
+        controlResponsiveness: Float,
+        cameraPreset: DroneCameraPreset,
+        collisionRadiusMeters: Float,
+        fixedWingParameters: FixedWingParameters
+    ) -> RuntimeTuning {
+        RuntimeTuning(
+            fallbackTakeoffMass: fallbackTakeoffMass,
+            fallbackDimensions: fallbackDimensions,
+            runtimeSceneDimensionsOverride: runtimeSceneDimensionsOverride,
+            maxHorizontalSpeedMps: maxHorizontalSpeedMps,
+            maxAscentSpeedMps: maxAscentSpeedMps,
+            maxDescentSpeedMps: maxDescentSpeedMps,
+            maxFlightTimeMin: maxFlightTimeMin,
+            maxHoverTimeMin: 0.0,
+            maxWindResistanceMps: maxWindResistanceMps,
+            batteryEnergyWh: batteryEnergyWh,
+            cameraLayoutKey: "drone.camera.fixed_front",
+            visualClass: visualClass,
+            operationalCategory: operationalCategory,
+            airframeClass: .fixedWing,
+            airframeStyle: airframeStyle,
+            fixedWingParameters: fixedWingParameters,
+            launchMethod: launchMethod,
+            landingMethod: landingMethod,
+            controlResponsiveness: controlResponsiveness,
+            hoverThrottle: 0.0,
+            cameraPreset: cameraPreset,
+            collisionRadiusMeters: collisionRadiusMeters
+        )
     }
 
     static func abstractProfile(from parameters: AbstractDroneParameters) -> DroneModelProfile {
@@ -894,5 +1452,551 @@ private struct RuntimeTuning {
         self.hoverThrottle = hoverThrottle
         self.cameraPreset = cameraPreset
         self.collisionRadiusMeters = collisionRadiusMeters
+    }
+}
+
+struct UAVOperationalProfile: Hashable {
+    let nominalFlightTimeSec: Float
+    let nominalCruiseSpeedMps: Float
+    let nominalMaxRangeM: Float
+    let nominalLinkRangeM: Float
+    let batteryReserveFraction: Float
+    let payloadRangePenaltyPerKg: Float
+    let climbConsumptionMultiplier: Float
+    let hoverConsumptionMultiplier: Float
+    let turnConsumptionMultiplier: Float
+    let loiterConsumptionMultiplier: Float
+    let minSafeAirspeedMps: Float
+    let preferredMapScaleMin: MapScale
+    let preferredMapScaleMax: MapScale
+    let estimatedDataQuality: UAVEstimatedDataQuality
+}
+
+enum MapScaleSuitability: String, CaseIterable, Hashable {
+    case optimal
+    case acceptable
+    case tight
+    case unsuitable
+
+    var title: String {
+        rawValue.uppercased()
+    }
+}
+
+struct UAVMapScaleRecommendation: Hashable {
+    let recommendedMapScaleMin: MapScale
+    let recommendedMapScaleMax: MapScale
+    let recommendedOperationalMapScale: MapScale
+    let unsuitableMapScales: [MapScale]
+    let minimumTurnRadiusM: Float
+    let waypointAnticipationDistanceM: Float
+    let currentSuitability: MapScaleSuitability
+}
+
+extension DroneModelProfile {
+    var operationalProfile: UAVOperationalProfile {
+        UAVOperationalProfileResolver.resolve(
+            runtimeProfile: self,
+            uavProfile: resolvedUAVProfile
+        )
+    }
+
+    func mapScaleRecommendation(
+        currentScale: MapScale,
+        payloadMassKg: Float,
+        batteryFraction: Float,
+        weatherPenalty: Float
+    ) -> UAVMapScaleRecommendation {
+        UAVMapScaleRecommendationResolver.resolve(
+            runtimeProfile: self,
+            operationalProfile: operationalProfile,
+            currentScale: currentScale,
+            payloadMassKg: payloadMassKg,
+            batteryFraction: batteryFraction,
+            weatherPenalty: weatherPenalty
+        )
+    }
+}
+
+private enum UAVOperationalProfileResolver {
+    static func resolve(
+        runtimeProfile: DroneModelProfile,
+        uavProfile: UAVProfile?
+    ) -> UAVOperationalProfile {
+        let analog = AnalogCluster(runtimeProfile: runtimeProfile, uavProfile: uavProfile)
+        let quality = resolvedQuality(for: uavProfile)
+
+        let nominalFlightTimeSec = max(
+            360.0,
+            uavProfile?.nominalFlightTimeSec ?? runtimeProfile.maxFlightTimeMin * 60.0
+        )
+        let nominalCruiseSpeedMps = max(
+            2.0,
+            uavProfile?.nominalCruiseSpeedMps ?? defaultCruiseSpeed(
+                runtimeProfile: runtimeProfile
+            )
+        )
+        let nominalMaxRangeM = max(
+            120.0,
+            uavProfile?.nominalMaxRangeM ?? analogRangeEstimate(
+                analog: analog,
+                flightTimeSec: nominalFlightTimeSec,
+                cruiseSpeedMps: nominalCruiseSpeedMps,
+                quality: quality
+            )
+        )
+        let nominalLinkRangeM = max(
+            90.0,
+            uavProfile?.nominalLinkRangeM ?? analogLinkEstimate(
+                analog: analog,
+                nominalMaxRangeM: nominalMaxRangeM,
+                quality: quality
+            )
+        )
+        let batteryReserveFraction = (
+            uavProfile?.batteryReserveFraction ??
+            analogReserveFraction(for: analog)
+        ).clamped(to: 0.18...0.42)
+        let payloadRangePenaltyPerKg = max(
+            0.008,
+            uavProfile?.payloadRangePenaltyPerKg ?? analogPayloadPenalty(
+                analog: analog,
+                runtimeProfile: runtimeProfile,
+                uavProfile: uavProfile
+            )
+        )
+        let climbConsumptionMultiplier = max(
+            1.02,
+            uavProfile?.climbConsumptionMultiplier ?? analogClimbMultiplier(for: analog)
+        )
+        let hoverConsumptionMultiplier = max(
+            1.0,
+            uavProfile?.hoverConsumptionMultiplier ?? analogHoverMultiplier(for: analog)
+        )
+        let turnConsumptionMultiplier = max(
+            1.0,
+            uavProfile?.turnConsumptionMultiplier ?? analogTurnMultiplier(for: analog)
+        )
+        let loiterConsumptionMultiplier = max(
+            1.0,
+            uavProfile?.loiterConsumptionMultiplier ?? analogLoiterMultiplier(for: analog)
+        )
+        let minSafeAirspeedMps = max(
+            0.0,
+            uavProfile?.minSafeAirspeedMps ??
+                runtimeProfile.fixedWingParameters?.minSustainableSpeedMps ??
+                runtimeProfile.fixedWingParameters?.stallWarningSpeedMps ??
+                0.0
+        )
+
+        let baseProfile = UAVOperationalProfile(
+            nominalFlightTimeSec: nominalFlightTimeSec,
+            nominalCruiseSpeedMps: nominalCruiseSpeedMps,
+            nominalMaxRangeM: nominalMaxRangeM,
+            nominalLinkRangeM: nominalLinkRangeM,
+            batteryReserveFraction: batteryReserveFraction,
+            payloadRangePenaltyPerKg: payloadRangePenaltyPerKg,
+            climbConsumptionMultiplier: climbConsumptionMultiplier,
+            hoverConsumptionMultiplier: hoverConsumptionMultiplier,
+            turnConsumptionMultiplier: turnConsumptionMultiplier,
+            loiterConsumptionMultiplier: loiterConsumptionMultiplier,
+            minSafeAirspeedMps: minSafeAirspeedMps,
+            preferredMapScaleMin: .x16,
+            preferredMapScaleMax: .x64,
+            estimatedDataQuality: quality
+        )
+
+        let recommendation = UAVMapScaleRecommendationResolver.resolve(
+            runtimeProfile: runtimeProfile,
+            operationalProfile: baseProfile,
+            currentScale: .x32,
+            payloadMassKg: 0.0,
+            batteryFraction: 1.0,
+            weatherPenalty: 1.0
+        )
+
+        return UAVOperationalProfile(
+            nominalFlightTimeSec: nominalFlightTimeSec,
+            nominalCruiseSpeedMps: nominalCruiseSpeedMps,
+            nominalMaxRangeM: nominalMaxRangeM,
+            nominalLinkRangeM: nominalLinkRangeM,
+            batteryReserveFraction: batteryReserveFraction,
+            payloadRangePenaltyPerKg: payloadRangePenaltyPerKg,
+            climbConsumptionMultiplier: climbConsumptionMultiplier,
+            hoverConsumptionMultiplier: hoverConsumptionMultiplier,
+            turnConsumptionMultiplier: turnConsumptionMultiplier,
+            loiterConsumptionMultiplier: loiterConsumptionMultiplier,
+            minSafeAirspeedMps: minSafeAirspeedMps,
+            preferredMapScaleMin: uavProfile?.preferredMapScaleMin ?? recommendation.recommendedMapScaleMin,
+            preferredMapScaleMax: uavProfile?.preferredMapScaleMax ?? recommendation.recommendedMapScaleMax,
+            estimatedDataQuality: quality
+        )
+    }
+
+    private static func resolvedQuality(for uavProfile: UAVProfile?) -> UAVEstimatedDataQuality {
+        guard let uavProfile else {
+            return .estimated
+        }
+
+        if hasExplicitOperationalFields(uavProfile) {
+            return uavProfile.estimatedDataQuality
+        }
+
+        switch uavProfile.specConfidence {
+        case .verified, .partial:
+            return .derived
+        case .custom:
+            return .estimated
+        }
+    }
+
+    private static func hasExplicitOperationalFields(_ uavProfile: UAVProfile) -> Bool {
+        uavProfile.nominalFlightTimeSec != nil ||
+        uavProfile.nominalCruiseSpeedMps != nil ||
+        uavProfile.nominalMaxRangeM != nil ||
+        uavProfile.nominalLinkRangeM != nil ||
+        uavProfile.batteryReserveFraction != nil ||
+        uavProfile.payloadRangePenaltyPerKg != nil ||
+        uavProfile.climbConsumptionMultiplier != nil ||
+        uavProfile.hoverConsumptionMultiplier != nil ||
+        uavProfile.turnConsumptionMultiplier != nil ||
+        uavProfile.loiterConsumptionMultiplier != nil ||
+        uavProfile.minSafeAirspeedMps != nil ||
+        uavProfile.preferredMapScaleMin != nil ||
+        uavProfile.preferredMapScaleMax != nil
+    }
+
+    private static func defaultCruiseSpeed(
+        runtimeProfile: DroneModelProfile
+    ) -> Float {
+        switch runtimeProfile.airframeClass {
+        case .fixedWing:
+            return runtimeProfile.fixedWingParameters?.cruiseSpeedMps ??
+                max(8.0, runtimeProfile.maxHorizontalSpeedMps * 0.55)
+        case .multirotor:
+            return max(3.0, runtimeProfile.maxHorizontalSpeedMps * 0.56)
+        }
+    }
+
+    private static func analogRangeEstimate(
+        analog: AnalogCluster,
+        flightTimeSec: Float,
+        cruiseSpeedMps: Float,
+        quality: UAVEstimatedDataQuality
+    ) -> Float {
+        let efficiency: Float
+        switch analog.operationalCategory {
+        case .multirotor:
+            efficiency = 0.56
+        case .fixedWing:
+            efficiency = 0.82
+        case .fixedWingVTOL:
+            efficiency = 0.74
+        }
+
+        let missionFactor: Float = analog.missionRole.contains("cargo") ? 0.84 : 1.0
+        let safetyFactor: Float = quality == .estimated ? 0.82 : 0.92
+        return flightTimeSec * cruiseSpeedMps * efficiency * missionFactor * safetyFactor
+    }
+
+    private static func analogLinkEstimate(
+        analog: AnalogCluster,
+        nominalMaxRangeM: Float,
+        quality: UAVEstimatedDataQuality
+    ) -> Float {
+        let linkFactor: Float
+        switch analog.operationalCategory {
+        case .multirotor:
+            linkFactor = analog.massCategory == .nano || analog.massCategory == .micro ? 1.28 : 1.52
+        case .fixedWing:
+            linkFactor = analog.massCategory == .heavy ? 2.10 : 1.82
+        case .fixedWingVTOL:
+            linkFactor = 1.66
+        }
+        let safetyFactor: Float = quality == .estimated ? 0.84 : 0.94
+        return nominalMaxRangeM * linkFactor * safetyFactor
+    }
+
+    private static func analogReserveFraction(for analog: AnalogCluster) -> Float {
+        switch analog.operationalCategory {
+        case .multirotor:
+            return analog.missionRole.contains("cargo") ? 0.32 : 0.28
+        case .fixedWing:
+            return analog.massCategory == .heavy ? 0.34 : 0.30
+        case .fixedWingVTOL:
+            return 0.31
+        }
+    }
+
+    private static func analogPayloadPenalty(
+        analog: AnalogCluster,
+        runtimeProfile: DroneModelProfile,
+        uavProfile: UAVProfile?
+    ) -> Float {
+        if let maxPayloadMass = uavProfile?.maxPayloadMass ?? uavProfile?.estimatedMaxPayloadMass,
+           maxPayloadMass > 0.01 {
+            let nominalPenalty = 0.18 / max(maxPayloadMass, 0.25)
+            switch analog.operationalCategory {
+            case .multirotor:
+                return nominalPenalty.clamped(to: 0.018...0.16)
+            case .fixedWing:
+                return (nominalPenalty * 0.72).clamped(to: 0.010...0.09)
+            case .fixedWingVTOL:
+                return (nominalPenalty * 0.84).clamped(to: 0.012...0.10)
+            }
+        }
+
+        let massPenalty = 0.22 / max(runtimeProfile.takeoffMassKg, 0.35)
+        return massPenalty.clamped(to: 0.010...0.18)
+    }
+
+    private static func analogClimbMultiplier(for analog: AnalogCluster) -> Float {
+        switch analog.operationalCategory {
+        case .multirotor:
+            return 1.18
+        case .fixedWing:
+            return 1.12
+        case .fixedWingVTOL:
+            return 1.16
+        }
+    }
+
+    private static func analogHoverMultiplier(for analog: AnalogCluster) -> Float {
+        switch analog.operationalCategory {
+        case .multirotor:
+            return analog.missionRole.contains("cargo") ? 1.14 : 1.08
+        case .fixedWing:
+            return 1.0
+        case .fixedWingVTOL:
+            return 1.28
+        }
+    }
+
+    private static func analogTurnMultiplier(for analog: AnalogCluster) -> Float {
+        switch analog.operationalCategory {
+        case .multirotor:
+            return 1.04
+        case .fixedWing:
+            return analog.massCategory == .heavy ? 1.10 : 1.08
+        case .fixedWingVTOL:
+            return 1.07
+        }
+    }
+
+    private static func analogLoiterMultiplier(for analog: AnalogCluster) -> Float {
+        switch analog.operationalCategory {
+        case .multirotor:
+            return 1.06
+        case .fixedWing:
+            return 1.04
+        case .fixedWingVTOL:
+            return 1.05
+        }
+    }
+
+    private struct AnalogCluster {
+        let operationalCategory: DroneOperationalCategory
+        let massCategory: UAVMassCategory
+        let missionRole: String
+
+        init(runtimeProfile: DroneModelProfile, uavProfile: UAVProfile?) {
+            self.operationalCategory = runtimeProfile.operationalCategory
+            self.massCategory = uavProfile?.massCategory ?? Self.derivedMassCategory(for: runtimeProfile.takeoffMassKg)
+            self.missionRole = uavProfile?.missionRole?.lowercased() ?? "general"
+        }
+
+        private static func derivedMassCategory(for takeoffMassKg: Float) -> UAVMassCategory {
+            switch takeoffMassKg {
+            case ..<0.25:
+                return .nano
+            case ..<2.5:
+                return .micro
+            case ..<15.0:
+                return .light
+            case ..<120.0:
+                return .medium
+            default:
+                return .heavy
+            }
+        }
+    }
+}
+
+private enum UAVMapScaleRecommendationResolver {
+    static func resolve(
+        runtimeProfile: DroneModelProfile,
+        operationalProfile: UAVOperationalProfile,
+        currentScale: MapScale,
+        payloadMassKg: Float,
+        batteryFraction: Float,
+        weatherPenalty: Float
+    ) -> UAVMapScaleRecommendation {
+        let effectiveBattery = batteryFraction.clamped(to: 0.22...1.0)
+        let payloadFactor = max(
+            0.42,
+            1.0 - payloadMassKg * operationalProfile.payloadRangePenaltyPerKg
+        )
+        let weatherFactor = max(1.0, weatherPenalty)
+        let dynamicOperationalRadius = max(
+            36.0,
+            operationalProfile.nominalMaxRangeM *
+                (1.0 - operationalProfile.batteryReserveFraction) *
+                effectiveBattery *
+                payloadFactor /
+                weatherFactor
+        )
+
+        let minimumTurnRadiusM: Float = {
+            guard runtimeProfile.airframeClass == .fixedWing else {
+                return max(4.0, runtimeProfile.collisionRadius * 7.5)
+            }
+
+            if let wing = runtimeProfile.fixedWingParameters,
+               wing.nominalTurnRateDegPerSec > 0.01 {
+                let omega = wing.nominalTurnRateDegPerSec * .pi / 180.0
+                return max(8.0, wing.cruiseSpeedMps / omega)
+            }
+
+            return max(8.0, operationalProfile.nominalCruiseSpeedMps * 2.2)
+        }()
+
+        let waypointAnticipationDistanceM: Float = {
+            if let wing = runtimeProfile.fixedWingParameters {
+                return max(
+                    wing.waypointAcceptanceRadiusMeters * 1.75,
+                    minimumTurnRadiusM * 0.85,
+                    wing.cruiseSpeedMps * 1.4
+                )
+            }
+            return max(2.0, runtimeProfile.maxHorizontalSpeedMps * 0.38)
+        }()
+
+        let maneuverFloor = max(
+            18.0,
+            runtimeProfile.airframeClass == .fixedWing
+                ? max(minimumTurnRadiusM * 2.2, waypointAnticipationDistanceM * 1.35)
+                : waypointAnticipationDistanceM * 1.05
+        )
+        let maneuverComfort = max(
+            maneuverFloor * 1.28,
+            runtimeProfile.airframeClass == .fixedWing
+                ? minimumTurnRadiusM * 3.1
+                : maneuverFloor * 1.20
+        )
+        let targetHalfExtent = max(
+            maneuverComfort,
+            min(dynamicOperationalRadius * 0.88, dynamicOperationalRadius)
+        )
+        let preferredUpperExtent = max(
+            targetHalfExtent,
+            min(dynamicOperationalRadius * 1.30, targetHalfExtent * 1.45)
+        )
+
+        var recommendedMin: MapScale = operationalProfile.preferredMapScaleMin
+        var recommendedMax: MapScale = operationalProfile.preferredMapScaleMax
+        var recommendedOperational: MapScale = operationalProfile.preferredMapScaleMax
+        var unsuitable: [MapScale] = []
+
+        for scale in MapScale.allCases {
+            let extent = scale.worldHalfExtentMeters
+            let suitability = resolveSuitability(
+                extent: extent,
+                maneuverFloor: maneuverFloor,
+                maneuverComfort: maneuverComfort,
+                targetHalfExtent: targetHalfExtent,
+                preferredUpperExtent: preferredUpperExtent
+            )
+
+            if suitability == .unsuitable {
+                unsuitable.append(scale)
+            }
+
+            if scale == currentScale {
+                recommendedOperational = recommendedOperationalScale(
+                    targetHalfExtent: targetHalfExtent
+                )
+            }
+        }
+
+        if let firstPreferred = MapScale.allCases.first(where: {
+            resolveSuitability(
+                extent: $0.worldHalfExtentMeters,
+                maneuverFloor: maneuverFloor,
+                maneuverComfort: maneuverComfort,
+                targetHalfExtent: targetHalfExtent,
+                preferredUpperExtent: preferredUpperExtent
+            ) != .unsuitable
+        }) {
+            recommendedMin = firstPreferred
+        }
+
+        if let lastPreferred = MapScale.allCases.last(where: {
+            resolveSuitability(
+                extent: $0.worldHalfExtentMeters,
+                maneuverFloor: maneuverFloor,
+                maneuverComfort: maneuverComfort,
+                targetHalfExtent: targetHalfExtent,
+                preferredUpperExtent: preferredUpperExtent
+            ) != .tight
+        }) {
+            let minIndex = MapScale.allCases.firstIndex(of: recommendedMin) ?? 0
+            let lastIndex = MapScale.allCases.firstIndex(of: lastPreferred) ?? minIndex
+            recommendedMax = MapScale.allCases[max(minIndex, lastIndex)]
+        } else {
+            recommendedMax = recommendedOperationalScale(targetHalfExtent: targetHalfExtent)
+        }
+
+        recommendedOperational = recommendedOperationalScale(targetHalfExtent: targetHalfExtent)
+
+        return UAVMapScaleRecommendation(
+            recommendedMapScaleMin: recommendedMin,
+            recommendedMapScaleMax: recommendedMax,
+            recommendedOperationalMapScale: recommendedOperational,
+            unsuitableMapScales: unsuitable,
+            minimumTurnRadiusM: minimumTurnRadiusM,
+            waypointAnticipationDistanceM: waypointAnticipationDistanceM,
+            currentSuitability: resolveSuitability(
+                extent: currentScale.worldHalfExtentMeters,
+                maneuverFloor: maneuverFloor,
+                maneuverComfort: maneuverComfort,
+                targetHalfExtent: targetHalfExtent,
+                preferredUpperExtent: preferredUpperExtent
+            )
+        )
+    }
+
+    private static func recommendedOperationalScale(targetHalfExtent: Float) -> MapScale {
+        MapScale.allCases.min { lhs, rhs in
+            abs(lhs.worldHalfExtentMeters - targetHalfExtent) <
+                abs(rhs.worldHalfExtentMeters - targetHalfExtent)
+        } ?? .x32
+    }
+
+    private static func resolveSuitability(
+        extent: Float,
+        maneuverFloor: Float,
+        maneuverComfort: Float,
+        targetHalfExtent: Float,
+        preferredUpperExtent: Float
+    ) -> MapScaleSuitability {
+        if extent < maneuverFloor {
+            return .unsuitable
+        }
+        if extent < maneuverComfort {
+            return .tight
+        }
+        if extent >= targetHalfExtent * 0.82 && extent <= preferredUpperExtent {
+            return .optimal
+        }
+        if extent >= maneuverComfort {
+            return .acceptable
+        }
+        return .tight
+    }
+}
+
+private extension Float {
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
     }
 }

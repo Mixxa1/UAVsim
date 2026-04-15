@@ -23,8 +23,17 @@ final class MissionDraftValidator {
             )
         }
 
+        if draft.selectedLaunchMode.requiresLaunchObject {
+            if let launchIssue = validateLaunchObject(
+                draft: draft,
+                viewport: viewport
+            ) {
+                issues.append(launchIssue)
+            }
+        }
+
         for waypoint in draft.waypoints {
-            if simd_distance(waypoint.position, .zero) > viewport.signalBoundaryRadius {
+            if !viewport.isWithinWorldBounds(waypoint.position, tolerance: 0.05) {
                 issues.append(
                 MissionDraftIssue(
                     severity: .error,
@@ -110,7 +119,7 @@ final class MissionDraftValidator {
                 )
             }
 
-            if simd_distance(zone.center, .zero) > viewport.signalBoundaryRadius {
+            if !viewport.isWithinWorldBounds(zone.center, tolerance: 0.05) {
                 issues.append(
                     MissionDraftIssue(
                         severity: .error,
@@ -136,12 +145,74 @@ final class MissionDraftValidator {
         }
 
         if let dropZone = draft.dropZone,
-           simd_distance(dropZone.center, .zero) > viewport.signalBoundaryRadius {
+           !viewport.isWithinWorldBounds(dropZone.center, tolerance: 0.05) {
             issues.append(
                 MissionDraftIssue(
                     severity: .error,
                     reason: .zoneInvalid,
                     messageKey: "tactical.map.issue.zone_out_of_bounds"
+                )
+            )
+        }
+
+        if let previewRoute {
+            let routeDistanceWithReturn = previewRoute.totalLengthMeters +
+                missionReturnDistance(previewRoute: previewRoute, viewport: viewport)
+            let furthestMissionRadius = maxMissionRadius(draft: draft, previewRoute: previewRoute, viewport: viewport)
+
+            if routeDistanceWithReturn > viewport.estimatedSafeReturnRangeM + 0.05 {
+                issues.append(
+                    MissionDraftIssue(
+                        severity: .error,
+                        reason: .batteryUnsafe,
+                        messageKey: "tactical.map.issue.route_exceeds_safe_return"
+                    )
+                )
+            } else if routeDistanceWithReturn > viewport.estimatedSafeReturnRangeM * 0.86 {
+                issues.append(
+                    MissionDraftIssue(
+                        severity: .warning,
+                        reason: .batteryUnsafe,
+                        messageKey: "tactical.map.issue.route_margin_tight"
+                    )
+                )
+            }
+
+            if furthestMissionRadius > viewport.operationalRadius + 0.05 {
+                issues.append(
+                    MissionDraftIssue(
+                        severity: .warning,
+                        reason: .routeInvalid,
+                        messageKey: "tactical.map.issue.route_exceeds_operational_radius"
+                    )
+                )
+            }
+
+            if furthestMissionRadius > viewport.degradedLinkRadius + 0.05 {
+                issues.append(
+                    MissionDraftIssue(
+                        severity: .warning,
+                        reason: .runtimeUnsafe,
+                        messageKey: "tactical.map.issue.link_degraded"
+                    )
+                )
+            }
+        }
+
+        if viewport.currentMapSuitability == .tight {
+            issues.append(
+                MissionDraftIssue(
+                    severity: .warning,
+                    reason: .routeInvalid,
+                    messageKey: "tactical.map.issue.map_tight"
+                )
+            )
+        } else if viewport.currentMapSuitability == .unsuitable {
+            issues.append(
+                MissionDraftIssue(
+                    severity: .warning,
+                    reason: .routeInvalid,
+                    messageKey: "tactical.map.issue.map_unsuitable"
                 )
             )
         }
@@ -179,6 +250,102 @@ final class MissionDraftValidator {
             isPreviewAvailable: true,
             canSave: true
         )
+    }
+
+    private func validateLaunchObject(
+        draft: MissionDraft,
+        viewport: MapViewportState
+    ) -> MissionDraftIssue? {
+        guard let launchObject = draft.launchObject else {
+            return MissionDraftIssue(
+                severity: .error,
+                reason: .routeInvalid,
+                messageKey: "tactical.map.issue.launch_object_required"
+            )
+        }
+
+        if !viewport.isWithinWorldBounds(launchObject.position, tolerance: 0.05) {
+            return MissionDraftIssue(
+                severity: .error,
+                reason: .routeInvalid,
+                messageKey: "tactical.map.issue.launch_object_out_of_bounds"
+            )
+        }
+
+        if draft.noFlyZones.contains(where: { $0.contains(launchObject.position, tolerance: 0.05) }) {
+            return MissionDraftIssue(
+                severity: .error,
+                reason: .routeInvalid,
+                messageKey: "tactical.map.issue.launch_object_conflicts_no_fly"
+            )
+        }
+
+        let corridorLength = launchCorridorLength(
+            for: draft.selectedLaunchMode,
+            viewport: viewport
+        )
+        guard corridorLength > 0.05 else {
+            return nil
+        }
+
+        let headingRadians = (launchObject.transitionHeadingDegrees ?? launchObject.headingDegrees) * .pi / 180.0
+        let corridorEnd = launchObject.position + SIMD2<Float>(sin(headingRadians), cos(headingRadians)) * corridorLength
+        guard viewport.isWithinWorldBounds(corridorEnd, tolerance: 0.05) else {
+            return MissionDraftIssue(
+                severity: .error,
+                reason: .routeInvalid,
+                messageKey: "tactical.map.issue.launch_corridor_invalid"
+            )
+        }
+
+        if draft.noFlyZones.contains(where: { zone in
+            segmentIntersectsCircle(
+                from: launchObject.position,
+                to: corridorEnd,
+                center: zone.center,
+                radius: max(0.0, zone.radius - 0.05)
+            )
+        }) {
+            return MissionDraftIssue(
+                severity: .error,
+                reason: .routeInvalid,
+                messageKey: "tactical.map.issue.launch_object_conflicts_no_fly"
+            )
+        }
+
+        if draft.selectedLaunchMode == .runway || draft.selectedLaunchMode == .catapult {
+            let edgeMargin = min(
+                viewport.distanceToNearestMapEdge(for: launchObject.position),
+                viewport.distanceToNearestMapEdge(for: corridorEnd)
+            )
+            if edgeMargin < max(4.0, corridorLength * 0.12) {
+                return MissionDraftIssue(
+                    severity: .error,
+                    reason: .routeInvalid,
+                    messageKey: "tactical.map.issue.launch_space_insufficient"
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private func launchCorridorLength(
+        for launchMode: LaunchMode,
+        viewport: MapViewportState
+    ) -> Float {
+        switch launchMode {
+        case .standard:
+            return 0.0
+        case .handLaunch:
+            return max(12.0, viewport.minimumTurnRadiusM * 0.42)
+        case .catapult:
+            return max(18.0, viewport.minimumTurnRadiusM * 0.72)
+        case .runway:
+            return max(24.0, viewport.minimumTurnRadiusM * 1.15)
+        case .vtol:
+            return max(8.0, viewport.minimumTurnRadiusM * 0.32)
+        }
     }
 
     private func unique(_ issues: [MissionDraftIssue]) -> [MissionDraftIssue] {
@@ -230,5 +397,26 @@ final class MissionDraftValidator {
         let clampedT = min(1.0, max(0.0, t))
         let closestPoint = start + delta * clampedT
         return simd_distance(closestPoint, center) <= radius
+    }
+
+    private func missionReturnDistance(
+        previewRoute: MissionPreviewRoute,
+        viewport: MapViewportState
+    ) -> Float {
+        guard let endPoint = previewRoute.points.last else {
+            return 0.0
+        }
+        return simd_distance(endPoint, viewport.dockPosition)
+    }
+
+    private func maxMissionRadius(
+        draft: MissionDraft,
+        previewRoute: MissionPreviewRoute,
+        viewport: MapViewportState
+    ) -> Float {
+        let previewMax = previewRoute.points.map { simd_distance($0, viewport.dockPosition) }.max() ?? 0.0
+        let waypointMax = draft.waypoints.map { simd_distance($0.position, viewport.dockPosition) }.max() ?? 0.0
+        let zoneMax = draft.zones.map { simd_distance($0.center, viewport.dockPosition) + $0.radius }.max() ?? 0.0
+        return max(previewMax, waypointMax, zoneMax)
     }
 }

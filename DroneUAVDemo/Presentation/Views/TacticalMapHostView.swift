@@ -5,6 +5,8 @@ struct TacticalMapHostView: View {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let state: TacticalMapState
     let missionPlan: MissionPlan?
+    let profileName: String
+    let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
     let missionTimeline: MissionTimeline?
@@ -19,6 +21,9 @@ struct TacticalMapHostView: View {
     let onSetMaximumAltitude: (Float) -> Void
     let onSetMinimumSpeed: (Float) -> Void
     let onSetMaximumSpeed: (Float) -> Void
+    let onSetLaunchMode: (LaunchMode) -> Void
+    let onSetLaunchHeading: (Float) -> Void
+    let onClearLaunchObject: () -> Void
     let onSaveDraft: () -> Void
     let onPrepareMission: () -> Void
     let onStartMission: () -> Void
@@ -64,6 +69,8 @@ struct TacticalMapHostView: View {
                         MissionSidebar(
                             state: state,
                             missionPlan: missionPlan,
+                            profileName: profileName,
+                            supportedLaunchModes: supportedLaunchModes,
                             executionState: executionState,
                             missionStatus: missionStatus,
                             missionTimeline: missionTimeline,
@@ -77,6 +84,9 @@ struct TacticalMapHostView: View {
                             onSetMaximumAltitude: onSetMaximumAltitude,
                             onSetMinimumSpeed: onSetMinimumSpeed,
                             onSetMaximumSpeed: onSetMaximumSpeed,
+                            onSetLaunchMode: onSetLaunchMode,
+                            onSetLaunchHeading: onSetLaunchHeading,
+                            onClearLaunchObject: onClearLaunchObject,
                             onPrepareMission: onPrepareMission,
                             onStartMission: onStartMission,
                             onPauseMission: onPauseMission,
@@ -105,6 +115,8 @@ struct TacticalMapHostView: View {
 private struct MissionSidebar: View {
     let state: TacticalMapState
     let missionPlan: MissionPlan?
+    let profileName: String
+    let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
     let missionTimeline: MissionTimeline?
@@ -118,6 +130,9 @@ private struct MissionSidebar: View {
     let onSetMaximumAltitude: (Float) -> Void
     let onSetMinimumSpeed: (Float) -> Void
     let onSetMaximumSpeed: (Float) -> Void
+    let onSetLaunchMode: (LaunchMode) -> Void
+    let onSetLaunchHeading: (Float) -> Void
+    let onClearLaunchObject: () -> Void
     let onPrepareMission: () -> Void
     let onStartMission: () -> Void
     let onPauseMission: () -> Void
@@ -131,7 +146,12 @@ private struct MissionSidebar: View {
             isPrimary: true
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                MissionStatusPanel(snapshot: missionStatus)
+                MissionStatusPanel(
+                    snapshot: missionStatus,
+                    tacticalState: state,
+                    missionPlan: missionPlan,
+                    profileName: profileName
+                )
                 MissionTimelineView(
                     timeline: missionTimeline,
                     compact: true
@@ -143,6 +163,7 @@ private struct MissionSidebar: View {
                 MissionDraftPanel(
                     state: state,
                     missionPlan: missionPlan,
+                    supportedLaunchModes: supportedLaunchModes,
                     executionState: executionState,
                     missionStatus: missionStatus,
                     onRemoveLastWaypoint: onRemoveLastWaypoint,
@@ -153,6 +174,9 @@ private struct MissionSidebar: View {
                     onSetMaximumAltitude: onSetMaximumAltitude,
                     onSetMinimumSpeed: onSetMinimumSpeed,
                     onSetMaximumSpeed: onSetMaximumSpeed,
+                    onSetLaunchMode: onSetLaunchMode,
+                    onSetLaunchHeading: onSetLaunchHeading,
+                    onClearLaunchObject: onClearLaunchObject,
                     onPrepareMission: onPrepareMission,
                     onStartMission: onStartMission,
                     onPauseMission: onPauseMission,
@@ -173,18 +197,33 @@ private struct TacticalMapHeader: View {
     let onExit: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("tactical.map.title")
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
-                    .foregroundStyle(GroundControlPalette.textPrimary)
-                Text("tactical.map.subtitle")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(GroundControlPalette.textSecondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                headerTitle
+                Spacer(minLength: 8)
+                headerControls
             }
 
-            Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 10) {
+                headerTitle
+                headerControls
+            }
+        }
+    }
 
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("tactical.map.title")
+                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textPrimary)
+            Text("tactical.map.subtitle")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+        }
+    }
+
+    private var headerControls: some View {
+        HStack(spacing: 8) {
             headerBadge(
                 state.isDraftDirty
                     ? "tactical.map.badge.draft_dirty"

@@ -57,7 +57,10 @@ struct MissionConstraints: Equatable {
     func maximumZoneRadius(for viewport: MapViewportState) -> Float {
         max(
             minimumZoneRadius,
-            viewport.signalBoundaryRadius * zoneRadiusFractionOfSignalBoundary
+            min(
+                viewport.hardWorldBoundsRadius * zoneRadiusFractionOfSignalBoundary,
+                viewport.operationalRadius * 0.78
+            )
         )
     }
 

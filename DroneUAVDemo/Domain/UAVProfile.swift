@@ -1,6 +1,12 @@
 import Foundation
 import simd
 
+enum UAVEstimatedDataQuality: String, Hashable {
+    case official
+    case derived
+    case estimated
+}
+
 struct UAVProfile: Identifiable, Hashable {
     let id: String
     let displayName: String
@@ -25,6 +31,20 @@ struct UAVProfile: Identifiable, Hashable {
     let missionRole: String?
     let armamentCapabilityNote: String?
     let flightTuningProfile: UAVFlightTuningProfile
+    let nominalFlightTimeSec: Float?
+    let nominalCruiseSpeedMps: Float?
+    let nominalMaxRangeM: Float?
+    let nominalLinkRangeM: Float?
+    let batteryReserveFraction: Float?
+    let payloadRangePenaltyPerKg: Float?
+    let climbConsumptionMultiplier: Float?
+    let hoverConsumptionMultiplier: Float?
+    let turnConsumptionMultiplier: Float?
+    let loiterConsumptionMultiplier: Float?
+    let minSafeAirspeedMps: Float?
+    let preferredMapScaleMin: MapScale?
+    let preferredMapScaleMax: MapScale?
+    let estimatedDataQuality: UAVEstimatedDataQuality
 
     init(
         id: String,
@@ -49,7 +69,21 @@ struct UAVProfile: Identifiable, Hashable {
         notes: String,
         missionRole: String? = nil,
         armamentCapabilityNote: String? = nil,
-        flightTuningProfile: UAVFlightTuningProfile? = nil
+        flightTuningProfile: UAVFlightTuningProfile? = nil,
+        nominalFlightTimeSec: Float? = nil,
+        nominalCruiseSpeedMps: Float? = nil,
+        nominalMaxRangeM: Float? = nil,
+        nominalLinkRangeM: Float? = nil,
+        batteryReserveFraction: Float? = nil,
+        payloadRangePenaltyPerKg: Float? = nil,
+        climbConsumptionMultiplier: Float? = nil,
+        hoverConsumptionMultiplier: Float? = nil,
+        turnConsumptionMultiplier: Float? = nil,
+        loiterConsumptionMultiplier: Float? = nil,
+        minSafeAirspeedMps: Float? = nil,
+        preferredMapScaleMin: MapScale? = nil,
+        preferredMapScaleMax: MapScale? = nil,
+        estimatedDataQuality: UAVEstimatedDataQuality? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -73,6 +107,29 @@ struct UAVProfile: Identifiable, Hashable {
         self.notes = notes
         self.missionRole = missionRole
         self.armamentCapabilityNote = armamentCapabilityNote
+        self.nominalFlightTimeSec = nominalFlightTimeSec
+        self.nominalCruiseSpeedMps = nominalCruiseSpeedMps
+        self.nominalMaxRangeM = nominalMaxRangeM
+        self.nominalLinkRangeM = nominalLinkRangeM
+        self.batteryReserveFraction = batteryReserveFraction
+        self.payloadRangePenaltyPerKg = payloadRangePenaltyPerKg
+        self.climbConsumptionMultiplier = climbConsumptionMultiplier
+        self.hoverConsumptionMultiplier = hoverConsumptionMultiplier
+        self.turnConsumptionMultiplier = turnConsumptionMultiplier
+        self.loiterConsumptionMultiplier = loiterConsumptionMultiplier
+        self.minSafeAirspeedMps = minSafeAirspeedMps
+        self.preferredMapScaleMin = preferredMapScaleMin
+        self.preferredMapScaleMax = preferredMapScaleMax
+        self.estimatedDataQuality = estimatedDataQuality ?? {
+            switch specConfidence {
+            case .verified:
+                return .derived
+            case .partial:
+                return .derived
+            case .custom:
+                return .estimated
+            }
+        }()
         self.flightTuningProfile = flightTuningProfile ?? UAVFlightTuningProfile.catalogDefault(
             vehicleType: vehicleType,
             specConfidence: specConfidence,

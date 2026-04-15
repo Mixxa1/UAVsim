@@ -19,6 +19,14 @@ private struct DroppedPayloadRuntime {
     var impactTimestamp: CFTimeInterval?
 }
 
+struct PayloadLifecycleEvent {
+    let releaseID: UUID
+    let state: PayloadState
+    let messageKey: String?
+    let impactPosition: SIMD3<Float>?
+    let impactSpeedMps: Float?
+}
+
 private struct SupportSurfaceDescriptor {
     let center: SIMD2<Float>
     let halfExtents: SIMD2<Float>
@@ -77,11 +85,13 @@ final class DroneSceneController {
     private var fpvObstructionHidingActive: Bool = false
     private var fpvPresentationActive: Bool = false
     private var payloadVisualNode: SCNNode?
+    private var activePayloadConfiguration: PayloadConfiguration?
     private let fpvPayloadPresentationNode = SCNNode()
     private var droppedPayloadNodes: [UUID: SCNNode] = [:]
     private var droppedPayloadRuntime: [UUID: DroppedPayloadRuntime] = [:]
-    private var pendingPayloadLifecycleEvents: [(releaseID: UUID, state: PayloadState, messageKey: String?)] = []
+    private var pendingPayloadLifecycleEvents: [PayloadLifecycleEvent] = []
     private var payloadCameraFocusReleaseID: UUID?
+    private var payloadImpactNodes: [UUID: SCNNode] = [:]
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
@@ -302,7 +312,7 @@ final class DroneSceneController {
         payloadMountNode
     }
 
-    func consumePayloadLifecycleEvents() -> [(releaseID: UUID, state: PayloadState, messageKey: String?)] {
+    func consumePayloadLifecycleEvents() -> [PayloadLifecycleEvent] {
         let events = pendingPayloadLifecycleEvents
         pendingPayloadLifecycleEvents.removeAll(keepingCapacity: true)
         return events
@@ -345,6 +355,7 @@ final class DroneSceneController {
         let node = PayloadVisualFactory.build(configuration: configuration)
         payloadMountNode.addChildNode(node)
         payloadVisualNode = node
+        activePayloadConfiguration = configuration
         installFPVPayloadPresentation(from: node)
         applyPayloadFPVPresentation()
     }
@@ -352,6 +363,7 @@ final class DroneSceneController {
     func removePayloadVisual() {
         payloadVisualNode?.removeFromParentNode()
         payloadVisualNode = nil
+        activePayloadConfiguration = nil
         resetFPVPayloadPresentation()
     }
 
@@ -362,10 +374,12 @@ final class DroneSceneController {
         }
 
         let releaseID = UUID()
+        let releasedPayloadType = activePayloadConfiguration?.payloadType
         let worldTransform = attachedPayloadNode.presentation.simdWorldTransform
         attachedPayloadNode.removeAllActions()
         attachedPayloadNode.removeFromParentNode()
         payloadVisualNode = nil
+        activePayloadConfiguration = nil
         resetFPVPayloadPresentation()
 
         scene.rootNode.addChildNode(attachedPayloadNode)
@@ -377,6 +391,7 @@ final class DroneSceneController {
         let dropHeight = max(0.0, startPosition.y - landedY)
         let gravity: Float = 9.8
         let unconstrainedDuration = sqrt(max(0.0001, (2.0 * dropHeight) / gravity))
+        let estimatedImpactSpeed = sqrt(max(0.0, 2.0 * gravity * dropHeight))
         // Keep the payload in continuous visible fall until real impact instead of
         // truncating the action early and forcing a long teleport in landedAction.
         let fallDuration = Double(dropHeight > 0.01 ? unconstrainedDuration.clamped(to: 0.18...8.0) : 0.08)
@@ -392,11 +407,15 @@ final class DroneSceneController {
         )
 
         let startFalling = SCNAction.run { [weak self] _ in
-            self?.pendingPayloadLifecycleEvents.append((
+            self?.pendingPayloadLifecycleEvents.append(
+                PayloadLifecycleEvent(
                 releaseID: releaseID,
                 state: .falling,
-                messageKey: nil
-            ))
+                messageKey: nil,
+                impactPosition: nil,
+                impactSpeedMps: nil
+                )
+            )
         }
 
         let fallAction = SCNAction.customAction(duration: fallDuration) { node, elapsedTime in
@@ -411,6 +430,12 @@ final class DroneSceneController {
                 return
             }
             attachedPayloadNode.simdWorldPosition = SIMD3<Float>(startPosition.x, landedY, startPosition.z)
+            self.spawnPayloadImpactVisual(
+                releaseID: releaseID,
+                position: SIMD3<Float>(startPosition.x, landedY, startPosition.z),
+                payloadType: releasedPayloadType,
+                impactSpeedMps: estimatedImpactSpeed
+            )
             if var runtime = self.droppedPayloadRuntime[releaseID] {
                 runtime.lastSampledPosition = attachedPayloadNode.presentation.simdWorldPosition
                 runtime.verticalSpeed = 0.0
@@ -418,11 +443,15 @@ final class DroneSceneController {
                 runtime.impactTimestamp = CACurrentMediaTime()
                 self.droppedPayloadRuntime[releaseID] = runtime
             }
-            self.pendingPayloadLifecycleEvents.append((
-                releaseID: releaseID,
-                state: .landed,
-                messageKey: "payload.message.dropped_successfully"
-            ))
+            self.pendingPayloadLifecycleEvents.append(
+                PayloadLifecycleEvent(
+                    releaseID: releaseID,
+                    state: .landed,
+                    messageKey: "payload.message.dropped_successfully",
+                    impactPosition: SIMD3<Float>(startPosition.x, landedY, startPosition.z),
+                    impactSpeedMps: estimatedImpactSpeed
+                )
+            )
         }
 
         let cleanupAction = SCNAction.run { [weak self, weak attachedPayloadNode] _ in
@@ -436,11 +465,15 @@ final class DroneSceneController {
             if self.payloadCameraFocusReleaseID == releaseID {
                 self.payloadCameraFocusReleaseID = nil
             }
-            self.pendingPayloadLifecycleEvents.append((
-                releaseID: releaseID,
-                state: .cleanedUp,
-                messageKey: "payload.message.cleanup_completed"
-            ))
+            self.pendingPayloadLifecycleEvents.append(
+                PayloadLifecycleEvent(
+                    releaseID: releaseID,
+                    state: .cleanedUp,
+                    messageKey: "payload.message.cleanup_completed",
+                    impactPosition: nil,
+                    impactSpeedMps: nil
+                )
+            )
         }
 
         attachedPayloadNode.runAction(
@@ -463,8 +496,13 @@ final class DroneSceneController {
             node.removeAllActions()
             node.removeFromParentNode()
         }
+        for node in payloadImpactNodes.values {
+            node.removeAllActions()
+            node.removeFromParentNode()
+        }
         droppedPayloadNodes.removeAll(keepingCapacity: false)
         droppedPayloadRuntime.removeAll(keepingCapacity: false)
+        payloadImpactNodes.removeAll(keepingCapacity: false)
         payloadCameraFocusReleaseID = nil
         payloadDropCameraController.reset()
         pendingPayloadLifecycleEvents.removeAll(keepingCapacity: false)
@@ -1209,6 +1247,137 @@ final class DroneSceneController {
         return (resolvedReleaseID, runtime)
     }
 
+    private func spawnPayloadImpactVisual(
+        releaseID: UUID,
+        position: SIMD3<Float>,
+        payloadType: PayloadType?,
+        impactSpeedMps: Float
+    ) {
+        let impactNode = SCNNode()
+        impactNode.name = "payloadImpactVisual_\(releaseID.uuidString)"
+        impactNode.simdPosition = SIMD3<Float>(
+            position.x,
+            max(Float(groundNode.presentation.position.y) + 0.012, position.y),
+            position.z
+        )
+
+        let markColor: NSColor
+        let plumeColor: NSColor
+        let impactRadius: CGFloat
+
+        if payloadType == .inertImpactPod {
+            markColor = NSColor(calibratedRed: 0.94, green: 0.58, blue: 0.18, alpha: 0.78)
+            plumeColor = NSColor(calibratedRed: 0.92, green: 0.78, blue: 0.54, alpha: 0.26)
+            impactRadius = CGFloat((0.90 + min(1.0, impactSpeedMps / 14.0) * 0.55).clamped(to: 0.90...1.55))
+        } else {
+            markColor = NSColor(calibratedWhite: 0.74, alpha: 0.52)
+            plumeColor = NSColor(calibratedWhite: 0.88, alpha: 0.20)
+            impactRadius = CGFloat((0.42 + min(1.0, impactSpeedMps / 14.0) * 0.30).clamped(to: 0.42...0.82))
+        }
+
+        let coreRadius = max(0.08, impactRadius * 0.42)
+        let falloffRadius = max(coreRadius + 0.08, impactRadius * 0.88)
+
+        let markMaterial = SCNMaterial()
+        markMaterial.diffuse.contents = markColor
+        markMaterial.emission.contents = markColor.withAlphaComponent(0.22)
+        markMaterial.lightingModel = .constant
+        markMaterial.isDoubleSided = true
+        markMaterial.blendMode = .alpha
+        markMaterial.readsFromDepthBuffer = false
+        markMaterial.writesToDepthBuffer = false
+
+        let mark = SCNNode(geometry: SCNCylinder(radius: coreRadius, height: 0.008))
+        mark.geometry?.firstMaterial = markMaterial
+        mark.opacity = 0.0
+        impactNode.addChildNode(mark)
+
+        let falloffMaterial = SCNMaterial()
+        falloffMaterial.diffuse.contents = plumeColor.withAlphaComponent(0.18)
+        falloffMaterial.emission.contents = plumeColor.withAlphaComponent(0.08)
+        falloffMaterial.lightingModel = .constant
+        falloffMaterial.blendMode = .alpha
+        falloffMaterial.readsFromDepthBuffer = false
+        falloffMaterial.writesToDepthBuffer = false
+
+        let falloffDisk = SCNNode(geometry: SCNCylinder(radius: falloffRadius, height: 0.004))
+        falloffDisk.geometry?.firstMaterial = falloffMaterial
+        falloffDisk.opacity = 0.0
+        impactNode.addChildNode(falloffDisk)
+
+        let ringMaterial = SCNMaterial()
+        ringMaterial.diffuse.contents = markColor.withAlphaComponent(0.92)
+        ringMaterial.emission.contents = markColor.withAlphaComponent(0.34)
+        ringMaterial.lightingModel = .constant
+        ringMaterial.blendMode = .alpha
+        ringMaterial.readsFromDepthBuffer = false
+        ringMaterial.writesToDepthBuffer = false
+
+        let ring = SCNNode(geometry: SCNTorus(ringRadius: max(0.06, coreRadius * 0.42), pipeRadius: max(0.010, impactRadius * 0.050)))
+        ring.geometry?.firstMaterial = ringMaterial
+        ring.eulerAngles.x = .pi / 2.0
+        ring.opacity = 0.88
+        impactNode.addChildNode(ring)
+
+        let plumeMaterial = SCNMaterial()
+        plumeMaterial.diffuse.contents = plumeColor
+        plumeMaterial.emission.contents = plumeColor
+        plumeMaterial.lightingModel = .constant
+        plumeMaterial.blendMode = .alpha
+
+        let plume = SCNNode(geometry: SCNSphere(radius: max(0.08, impactRadius * 0.24)))
+        plume.geometry?.firstMaterial = plumeMaterial
+        plume.position = SCNVector3(0.0, Float(impactRadius * 0.18), 0.0)
+        plume.opacity = 0.0
+        impactNode.addChildNode(plume)
+
+        scene.rootNode.addChildNode(impactNode)
+        payloadImpactNodes[releaseID] = impactNode
+
+        mark.runAction(.sequence([
+            .fadeOpacity(to: 0.64, duration: 0.16),
+            .wait(duration: 14.0),
+            .fadeOut(duration: 1.2)
+        ]))
+
+        falloffDisk.runAction(.sequence([
+            .group([
+                .fadeOpacity(to: 0.78, duration: 0.12),
+                .scale(to: 1.10, duration: 0.16)
+            ]),
+            .group([
+                .fadeOut(duration: 0.92),
+                .scale(to: 1.55, duration: 0.92)
+            ])
+        ]))
+
+        ring.runAction(.group([
+            .scale(to: 3.4, duration: 0.56),
+            .fadeOut(duration: 0.56)
+        ]))
+
+        plume.runAction(.sequence([
+            .group([
+                .fadeOpacity(to: 0.72, duration: 0.10),
+                .scale(to: 1.4, duration: 0.18)
+            ]),
+            .group([
+                .moveBy(x: 0.0, y: impactRadius * 0.58, z: 0.0, duration: 0.60),
+                .scale(to: 2.1, duration: 0.60),
+                .fadeOut(duration: 0.60)
+            ])
+        ]))
+
+        impactNode.runAction(.sequence([
+            .wait(duration: 15.4),
+            .run { [weak self] node in
+                node.removeAllActions()
+                node.removeFromParentNode()
+                self?.payloadImpactNodes.removeValue(forKey: releaseID)
+            }
+        ]))
+    }
+
     private func currentPayloadDropCameraTarget() -> PayloadDropCameraTarget? {
         guard let (releaseID, runtime) = resolvedPayloadCameraRuntime() else {
             return nil
@@ -1879,30 +2048,29 @@ final class DroneSceneController {
     private func updateWorldBoundsVisual(for terrain: TerrainConfiguration) {
         worldBoundsNode.childNodes.forEach { $0.removeFromParentNode() }
 
-        let radius = terrain.signalBoundaryRadius
-        let torus = SCNTorus(
-            ringRadius: CGFloat(radius),
-            pipeRadius: CGFloat(max(0.20, min(0.44, radius * 0.0018)))
-        )
-        torus.firstMaterial?.diffuse.contents = NSColor.systemBlue.withAlphaComponent(0.68)
-        torus.firstMaterial?.emission.contents = NSColor.systemCyan.withAlphaComponent(0.28)
-        torus.firstMaterial?.roughness.contents = 0.36
+        let halfExtent = terrain.signalBoundaryRadius
+        let edgeThickness = max(0.28, min(0.74, halfExtent * 0.0032))
+        let warningBandDepth = max(5.0, min(halfExtent * 0.15, 24.0))
 
-        let ringNode = SCNNode(geometry: torus)
-        ringNode.position = SCNVector3(0.0, 0.08, 0.0)
+        let ringNode = SCNNode()
         ringNode.name = "boundary_signal_ring"
 
-        let halo = SCNTube(
-            innerRadius: CGFloat(max(1.0, radius - 1.25)),
-            outerRadius: CGFloat(radius + 1.25),
-            height: 0.024
-        )
-        halo.firstMaterial?.diffuse.contents = NSColor.systemBlue.withAlphaComponent(0.13)
-        halo.firstMaterial?.emission.contents = NSColor.systemBlue.withAlphaComponent(0.08)
-
-        let haloNode = SCNNode(geometry: halo)
-        haloNode.position = SCNVector3(0.0, 0.01, 0.0)
+        let haloNode = SCNNode()
         haloNode.name = "boundary_signal_halo"
+
+        for edge in makeBoundaryEdgeNodes(
+            halfExtent: halfExtent,
+            edgeThickness: edgeThickness
+        ) {
+            ringNode.addChildNode(edge)
+        }
+
+        for band in makeBoundaryWarningBandNodes(
+            halfExtent: halfExtent,
+            bandDepth: warningBandDepth
+        ) {
+            haloNode.addChildNode(band)
+        }
 
         worldBoundsNode.addChildNode(haloNode)
         worldBoundsNode.addChildNode(ringNode)
@@ -1920,17 +2088,14 @@ final class DroneSceneController {
 
         let boundaryRadius = terrain.signalBoundaryRadius
         let boundaryHighlightNode = worldBoundsNode.childNode(withName: "boundary_signal_ring", recursively: false)
-        let segmentCount = max(18, Int((boundaryRadius / 18.0).rounded()))
         let wallY: Float = 0.42
         let wallRadius = max(3.2, min(7.0, boundaryRadius * 0.032))
 
-        for index in 0..<segmentCount {
-            let theta = (Float(index) / Float(segmentCount)) * (.pi * 2.0)
-            let center = SIMD3<Float>(
-                cos(theta) * boundaryRadius,
-                wallY,
-                sin(theta) * boundaryRadius
-            )
+        for center in boundaryObstacleCenters(
+            halfExtent: boundaryRadius,
+            wallY: wallY,
+            obstacleRadius: wallRadius
+        ) {
             entries.append(
                 SupplementalCollisionObstacle(
                     obstacle: CollisionObstacle(
@@ -1947,6 +2112,115 @@ final class DroneSceneController {
         }
 
         return entries
+    }
+
+    private func makeBoundaryEdgeNodes(
+        halfExtent: Float,
+        edgeThickness: Float
+    ) -> [SCNNode] {
+        let material = SCNMaterial()
+        material.diffuse.contents = NSColor.systemBlue.withAlphaComponent(0.72)
+        material.emission.contents = NSColor.systemCyan.withAlphaComponent(0.18)
+        material.roughness.contents = 0.42
+
+        let horizontalGeometry = SCNBox(
+            width: CGFloat(halfExtent * 2.0),
+            height: CGFloat(edgeThickness),
+            length: CGFloat(edgeThickness),
+            chamferRadius: CGFloat(edgeThickness * 0.25)
+        )
+        horizontalGeometry.firstMaterial = material
+
+        let verticalGeometry = SCNBox(
+            width: CGFloat(edgeThickness),
+            height: CGFloat(edgeThickness),
+            length: CGFloat(halfExtent * 2.0),
+            chamferRadius: CGFloat(edgeThickness * 0.25)
+        )
+        verticalGeometry.firstMaterial = material
+
+        let north = SCNNode(geometry: horizontalGeometry)
+        north.position = SCNVector3(0.0, 0.08, halfExtent)
+
+        let south = SCNNode(geometry: horizontalGeometry.copy() as? SCNGeometry)
+        south.position = SCNVector3(0.0, 0.08, -halfExtent)
+
+        let east = SCNNode(geometry: verticalGeometry)
+        east.position = SCNVector3(halfExtent, 0.08, 0.0)
+
+        let west = SCNNode(geometry: verticalGeometry.copy() as? SCNGeometry)
+        west.position = SCNVector3(-halfExtent, 0.08, 0.0)
+
+        return [north, south, east, west]
+    }
+
+    private func makeBoundaryWarningBandNodes(
+        halfExtent: Float,
+        bandDepth: Float
+    ) -> [SCNNode] {
+        let material = SCNMaterial()
+        material.diffuse.contents = NSColor.systemBlue.withAlphaComponent(0.10)
+        material.emission.contents = NSColor.systemBlue.withAlphaComponent(0.05)
+        material.roughness.contents = 0.48
+
+        let innerHalfExtent = max(1.0, halfExtent - bandDepth * 0.5)
+        let horizontalGeometry = SCNBox(
+            width: CGFloat(halfExtent * 2.0),
+            height: 0.02,
+            length: CGFloat(bandDepth),
+            chamferRadius: 0.0
+        )
+        horizontalGeometry.firstMaterial = material
+
+        let verticalGeometry = SCNBox(
+            width: CGFloat(bandDepth),
+            height: 0.02,
+            length: CGFloat(halfExtent * 2.0),
+            chamferRadius: 0.0
+        )
+        verticalGeometry.firstMaterial = material
+
+        let north = SCNNode(geometry: horizontalGeometry)
+        north.position = SCNVector3(0.0, 0.01, innerHalfExtent)
+
+        let south = SCNNode(geometry: horizontalGeometry.copy() as? SCNGeometry)
+        south.position = SCNVector3(0.0, 0.01, -innerHalfExtent)
+
+        let east = SCNNode(geometry: verticalGeometry)
+        east.position = SCNVector3(innerHalfExtent, 0.01, 0.0)
+
+        let west = SCNNode(geometry: verticalGeometry.copy() as? SCNGeometry)
+        west.position = SCNVector3(-innerHalfExtent, 0.01, 0.0)
+
+        return [north, south, east, west]
+    }
+
+    private func boundaryObstacleCenters(
+        halfExtent: Float,
+        wallY: Float,
+        obstacleRadius: Float
+    ) -> [SIMD3<Float>] {
+        let spacing = max(obstacleRadius * 1.55, 10.0)
+        let stepCount = max(3, Int(ceil((halfExtent * 2.0) / spacing)))
+        let effectiveSpacing = (halfExtent * 2.0) / Float(stepCount)
+        let offsetRange = 0...stepCount
+        var centers: [SIMD3<Float>] = []
+
+        for step in offsetRange {
+            let offset = -halfExtent + Float(step) * effectiveSpacing
+            centers.append(SIMD3<Float>(offset, wallY, halfExtent))
+            centers.append(SIMD3<Float>(offset, wallY, -halfExtent))
+        }
+
+        if stepCount > 1 {
+            for step in 1..<stepCount {
+                let offset = -halfExtent + Float(step) * effectiveSpacing
+                centers.append(SIMD3<Float>(halfExtent, wallY, offset))
+                centers.append(SIMD3<Float>(-halfExtent, wallY, offset))
+            }
+        }
+
+        return centers
     }
 
     private func configureDroneCollisionProxy(for profile: DroneModelProfile) {

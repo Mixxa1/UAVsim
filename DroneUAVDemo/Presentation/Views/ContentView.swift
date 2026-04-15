@@ -318,43 +318,44 @@ private struct SignalInterferenceOverlayView: View {
             GeometryReader { geometry in
                 let time = timeline.date.timeIntervalSinceReferenceDate
 
-                ZStack {
-                    Color.black
-                        .opacity(presentation.state.isInteractionBlocking ? 0.74 : 0.10)
+                ZStack(alignment: .topTrailing) {
+                    if presentation.state.isInteractionBlocking {
+                        Color.black
+                            .opacity(0.74)
 
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.04 + presentation.intensity * 0.12),
-                                    Color.black.opacity(0.0),
-                                    Color.white.opacity(0.02 + presentation.intensity * 0.08)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.08 + presentation.intensity * 0.12),
+                                        Color.black.opacity(0.0),
+                                        Color.white.opacity(0.04 + presentation.intensity * 0.08)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
                             )
-                        )
-                        .opacity(0.55 + abs(sin(time * 4.2)) * 0.18)
+                            .opacity(0.55 + abs(sin(time * 4.2)) * 0.18)
+                    }
 
                     SignalInterferenceCanvas(
+                        state: presentation.state,
                         intensity: presentation.intensity,
-                        time: time,
-                        isSignalLost: presentation.state.isInteractionBlocking
+                        time: time
                     )
 
                     VStack(spacing: 24) {
-                        if let countdownText = presentation.countdownText {
-                            Text(countdownText)
-                                .font(.headline.weight(.semibold))
-                                .foregroundStyle(Color.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(Color.black.opacity(0.72), in: Capsule())
-                                .overlay(
-                                    Capsule()
-                                        .stroke(Color.orange.opacity(0.78), lineWidth: 1.2)
+                        HStack {
+                            Spacer()
+
+                            if let warningTitle = presentation.warningTitle {
+                                signalWarningCard(
+                                    title: warningTitle,
+                                    detail: presentation.warningDetail,
+                                    countdownText: presentation.countdownText,
+                                    state: presentation.state
                                 )
-                                .shadow(color: Color.black.opacity(0.34), radius: 18, y: 8)
+                            }
                         }
 
                         Spacer()
@@ -393,8 +394,6 @@ private struct SignalInterferenceOverlayView: View {
                             )
                             .shadow(color: Color.black.opacity(0.38), radius: 22, y: 14)
                         }
-
-                        Spacer()
                     }
                     .padding(.horizontal, 24)
                     .padding(.vertical, 22)
@@ -405,73 +404,169 @@ private struct SignalInterferenceOverlayView: View {
         .ignoresSafeArea()
         .allowsHitTesting(presentation.isInteractionBlocking)
     }
+
+    @ViewBuilder
+    private func signalWarningCard(
+        title: String,
+        detail: String?,
+        countdownText: String?,
+        state: UAVSignalState
+    ) -> some View {
+        let tint: Color = switch state {
+        case .outOfBoundsWarning:
+            Color(red: 0.98, green: 0.73, blue: 0.28)
+        case .signalDegrading:
+            Color(red: 0.96, green: 0.58, blue: 0.22)
+        case .boundaryCountdown:
+            Color(red: 0.98, green: 0.42, blue: 0.28)
+        case .normal, .signalLost, .recoveryPending:
+            GroundControlPalette.warning
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(tint)
+
+                Text(title)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.76))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let countdownText {
+                Text(countdownText)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(tint.opacity(0.18), in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(tint.opacity(0.72), lineWidth: 1.0)
+                    )
+            }
+        }
+        .frame(maxWidth: 320, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tint.opacity(0.54), lineWidth: 1.0)
+        )
+        .shadow(color: Color.black.opacity(0.32), radius: 18, y: 10)
+    }
 }
 
 private struct SignalInterferenceCanvas: View {
+    let state: UAVSignalState
     let intensity: Double
     let time: TimeInterval
-    let isSignalLost: Bool
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
             let clampedIntensity = max(0.0, min(1.0, intensity))
-            let spacing = max(2.0, 7.0 - clampedIntensity * 3.5)
-            let scanAlpha = 0.04 + clampedIntensity * 0.16
+            switch state {
+            case .normal:
+                break
+            case .outOfBoundsWarning, .signalDegrading, .boundaryCountdown:
+                let bandCount = state == .outOfBoundsWarning ? 4 : state == .signalDegrading ? 8 : 11
+                for index in 0..<bandCount {
+                    let seed = time * 5.4 + Double(index) * 17.0
+                    let width = size.width * CGFloat(0.16 + Self.noise(seed + 2.6) * 0.24)
+                    let height = size.height * CGFloat(0.006 + Self.noise(seed + 1.3) * 0.024)
+                    let x = (size.width - width) * CGFloat(Self.noise(seed + 3.8))
+                    let y = (size.height - height) * CGFloat(Self.noise(seed + 0.9))
+                    context.fill(
+                        Path(CGRect(x: x, y: y, width: width, height: height)),
+                        with: .color(Self.paletteColor(seed: seed + 5.0, isSignalLost: false).opacity(0.08 + clampedIntensity * 0.16))
+                    )
+                }
 
-            for y in stride(from: 0.0, through: size.height, by: spacing) {
-                let rect = CGRect(x: 0.0, y: y, width: size.width, height: 1.0)
-                context.fill(
-                    Path(rect),
-                    with: .color(Self.paletteColor(seed: y * 0.17, isSignalLost: isSignalLost).opacity(scanAlpha))
-                )
-            }
+                let blockCount = state == .outOfBoundsWarning ? 18 : state == .signalDegrading ? 34 : 52
+                let timeBucket = floor(time * 9.0)
+                for index in 0..<blockCount {
+                    let seed = timeBucket + Double(index) * 11.3
+                    let width = max(4.0, size.width * CGFloat(0.006 + Self.noise(seed + 1.1) * 0.026))
+                    let height = max(3.0, size.height * CGFloat(0.004 + Self.noise(seed + 2.7) * 0.018))
+                    let x = (size.width - width) * CGFloat(Self.noise(seed + 4.4))
+                    let y = (size.height - height) * CGFloat(Self.noise(seed + 5.9))
+                    context.fill(
+                        Path(CGRect(x: x, y: y, width: width, height: height)),
+                        with: .color(Self.paletteColor(seed: seed + 7.2, isSignalLost: false).opacity((0.04 + clampedIntensity * 0.14) * Self.noise(seed + 8.5)))
+                    )
+                }
 
-            let bandCount = isSignalLost ? 18 : 7
-            for index in 0..<bandCount {
-                let seed = time * 7.1 + Double(index) * 19.37
-                let y = size.height * Self.noise(seed)
-                let height = size.height * CGFloat(0.02 + Self.noise(seed + 1.7) * (isSignalLost ? 0.18 : 0.08))
-                let widthScale = CGFloat(0.62 + Self.noise(seed + 3.3) * 0.38)
-                let xOffset = size.width * CGFloat((Self.noise(seed + 5.1) - 0.5) * clampedIntensity * 0.22)
-                let rect = CGRect(x: xOffset, y: y, width: size.width * widthScale, height: height)
-                let opacity = 0.05 + clampedIntensity * (isSignalLost ? 0.28 : 0.14)
-                context.fill(
-                    Path(rect),
-                    with: .color(Self.paletteColor(seed: seed + 9.4, isSignalLost: isSignalLost).opacity(opacity))
-                )
-            }
+                let sweepCount = state == .outOfBoundsWarning ? 1 : 2
+                for index in 0..<sweepCount {
+                    let seed = time * (0.6 + Double(index) * 0.18)
+                    let width = size.width * CGFloat(0.18 + Self.noise(seed + 1.7) * 0.12)
+                    let x = (size.width - width) * CGFloat(Self.noise(seed + 2.4))
+                    let opacity = (state == .outOfBoundsWarning ? 0.02 : 0.035) + clampedIntensity * 0.05
+                    context.fill(
+                        Path(CGRect(x: x, y: 0.0, width: width, height: size.height)),
+                        with: .color(Self.paletteColor(seed: seed + 3.3, isSignalLost: false).opacity(opacity))
+                    )
+                }
+            case .signalLost, .recoveryPending:
+                let spacing = max(2.0, 7.0 - clampedIntensity * 3.5)
+                let scanAlpha = 0.04 + clampedIntensity * 0.16
 
-            let noiseCount = isSignalLost ? 180 : Int(40 + clampedIntensity * 36.0)
-            let timeBucket = floor(time * (isSignalLost ? 18.0 : 9.0))
-            for index in 0..<noiseCount {
-                let seed = timeBucket + Double(index) * 13.11
-                let x = size.width * Self.noise(seed)
-                let y = size.height * Self.noise(seed + 2.4)
-                let width = max(1.0, size.width * CGFloat(0.002 + Self.noise(seed + 4.2) * 0.012))
-                let height = max(1.0, size.height * CGFloat(0.002 + Self.noise(seed + 6.8) * 0.018))
-                let opacity = (0.03 + clampedIntensity * (isSignalLost ? 0.42 : 0.18)) * Self.noise(seed + 8.5)
-                context.fill(
-                    Path(CGRect(x: x, y: y, width: width, height: height)),
-                    with: .color(Self.paletteColor(seed: seed + 11.0, isSignalLost: isSignalLost).opacity(opacity))
-                )
-            }
+                for y in stride(from: 0.0, through: size.height, by: spacing) {
+                    let rect = CGRect(x: 0.0, y: y, width: size.width, height: 1.0)
+                    context.fill(
+                        Path(rect),
+                        with: .color(Self.paletteColor(seed: y * 0.17, isSignalLost: true).opacity(scanAlpha))
+                    )
+                }
 
-            let flashCount = isSignalLost ? 4 : 2
-            for index in 0..<flashCount {
-                let seed = time * 2.8 + Double(index) * 11.0
-                let x = size.width * Self.noise(seed + 0.7)
-                let width = size.width * CGFloat(0.10 + Self.noise(seed + 1.9) * 0.20)
-                let opacity = (0.04 + clampedIntensity * 0.20) * abs(sin(time * (2.0 + Double(index))))
-                let rect = CGRect(x: x, y: 0.0, width: width, height: size.height)
-                context.fill(
-                    Path(rect),
-                    with: .color(Self.paletteColor(seed: seed + 14.0, isSignalLost: isSignalLost).opacity(opacity))
-                )
-            }
+                for index in 0..<18 {
+                    let seed = time * 7.1 + Double(index) * 19.37
+                    let y = size.height * Self.noise(seed)
+                    let height = size.height * CGFloat(0.03 + Self.noise(seed + 1.7) * 0.16)
+                    let widthScale = CGFloat(0.62 + Self.noise(seed + 3.3) * 0.38)
+                    let xOffset = size.width * CGFloat((Self.noise(seed + 5.1) - 0.5) * clampedIntensity * 0.22)
+                    let rect = CGRect(x: xOffset, y: y, width: size.width * widthScale, height: height)
+                    context.fill(
+                        Path(rect),
+                        with: .color(Self.paletteColor(seed: seed + 9.4, isSignalLost: true).opacity(0.05 + clampedIntensity * 0.28))
+                    )
+                }
 
-            if isSignalLost {
-                let splitCount = 12
-                for index in 0..<splitCount {
+                let timeBucket = floor(time * 18.0)
+                for index in 0..<180 {
+                    let seed = timeBucket + Double(index) * 13.11
+                    let x = size.width * Self.noise(seed)
+                    let y = size.height * Self.noise(seed + 2.4)
+                    let width = max(1.0, size.width * CGFloat(0.002 + Self.noise(seed + 4.2) * 0.012))
+                    let height = max(1.0, size.height * CGFloat(0.002 + Self.noise(seed + 6.8) * 0.018))
+                    let opacity = (0.03 + clampedIntensity * 0.42) * Self.noise(seed + 8.5)
+                    context.fill(
+                        Path(CGRect(x: x, y: y, width: width, height: height)),
+                        with: .color(Self.paletteColor(seed: seed + 11.0, isSignalLost: true).opacity(opacity))
+                    )
+                }
+
+                for index in 0..<4 {
+                    let seed = time * 2.8 + Double(index) * 11.0
+                    let x = size.width * Self.noise(seed + 0.7)
+                    let width = size.width * CGFloat(0.10 + Self.noise(seed + 1.9) * 0.20)
+                    let opacity = (0.04 + clampedIntensity * 0.20) * abs(sin(time * (2.0 + Double(index))))
+                    context.fill(
+                        Path(CGRect(x: x, y: 0.0, width: width, height: size.height)),
+                        with: .color(Self.paletteColor(seed: seed + 14.0, isSignalLost: true).opacity(opacity))
+                    )
+                }
+
+                for index in 0..<12 {
                     let seed = time * 5.3 + Double(index) * 8.7
                     let y = size.height * Self.noise(seed + 0.8)
                     let height = size.height * CGFloat(0.008 + Self.noise(seed + 2.1) * 0.04)
@@ -803,130 +898,7 @@ struct ContentView: View {
         ) {
             ZStack {
                 VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 10) {
-                    Text(viewModel.currentProjectName)
-                        .font(.headline)
-                        .foregroundStyle(GroundControlPalette.textPrimary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                    if viewModel.hasUnsavedChanges {
-                        Text("•")
-                            .foregroundStyle(GroundControlPalette.warning)
-                    }
-
-                    Spacer()
-
-                    if let activeModule = viewModel.activeControlModule {
-                        HStack(spacing: 8) {
-                            Image(systemName: activeModule.iconSystemName)
-                            Text(LocalizedStringKey(activeModule.titleKey))
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(GroundControlPalette.textSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(GroundControlPalette.panelRaised)
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(GroundControlPalette.border, lineWidth: 1)
-                        )
-                    }
-
-                    Toggle(isOn: parametersVisibilityBinding(for: viewModel)) {
-                        Text(viewModel.isParametersPanelVisible ? "panel.modules.on" : "panel.modules.off")
-                            .font(.caption)
-                    }
-                    .toggleStyle(.checkbox)
-                    .foregroundStyle(GroundControlPalette.textSecondary)
-                    .frame(width: 168, alignment: .leading)
-
-                    Menu {
-                        Button("project.save.action") {
-                            appShell.saveActiveProject()
-                        }
-                        Button("project.save_as.action") {
-                            nameDraft = projectDerivedName(from: viewModel.currentProjectName, suffixKey: "project.copy_suffix")
-                            nameDialogMode = .saveAs
-                        }
-                        Button("project.duplicate.action") {
-                            nameDraft = projectDerivedName(from: viewModel.currentProjectName, suffixKey: "project.clone_suffix")
-                            nameDialogMode = .duplicate
-                        }
-                        Divider()
-                        Button("project.open.action") {
-                            appShell.requestReturnToMenu()
-                        }
-                        Button("window.fullscreen") {
-                            toggleFullscreen()
-                        }
-                        Button("project.delete.action", role: .destructive) {
-                            deleteCandidate = ProjectRecordSummary(
-                                id: viewModel.currentProjectID,
-                                name: viewModel.currentProjectName,
-                                createdAt: Date(),
-                                modifiedAt: Date(),
-                                lastOpenedAt: Date(),
-                                lastSavedAt: Date()
-                            )
-                        }
-                    } label: {
-                        headerUtilityButtonLabel(systemImage: "folder.badge.gearshape")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .help(String(localized: "toolbar.header.project"))
-
-                    Button {
-                        showBindingsSettings = true
-                    } label: {
-                        headerUtilityButtonLabel(systemImage: "keyboard")
-                    }
-                    .buttonStyle(.plain)
-                    .help(String(localized: "keybind.open"))
-                    .controllerButtonTarget(id: "header.keybindings") {
-                        showBindingsSettings = true
-                    }
-
-                    Button {
-                        viewModel.toggleMissionMap()
-                    } label: {
-                        headerUtilityButtonLabel(systemImage: "map")
-                    }
-                    .buttonStyle(.plain)
-                    .help(String(localized: "mission.map.open_help"))
-                    .controllerButtonTarget(id: "header.missionMap") {
-                        viewModel.toggleMissionMap()
-                    }
-
-                    Button {
-                        viewModel.setToolPanelVisible(false)
-                    } label: {
-                        headerUtilityButtonLabel(systemImage: "chevron.up")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!viewModel.isToolPanelVisible)
-                    .help(String(localized: "panel.hide"))
-                    .controllerButtonTarget(id: "header.hideTools") {
-                        viewModel.setToolPanelVisible(false)
-                    }
-
-                    Button {
-                        viewModel.setToolPanelVisible(true)
-                    } label: {
-                        headerUtilityButtonLabel(systemImage: "chevron.down")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.isToolPanelVisible)
-                    .help(String(localized: "panel.show"))
-                    .controllerButtonTarget(id: "header.showTools") {
-                        viewModel.setToolPanelVisible(true)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(GroundControlPalette.panel)
+                simulationHeader(viewModel)
 
                 if viewModel.isToolPanelVisible {
                     Divider()
@@ -1023,6 +995,244 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func simulationHeader(_ viewModel: DroneSimulationViewModel) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                simulationHeaderTitle(viewModel)
+                Spacer(minLength: 12)
+                simulationHeaderUtilityRow(viewModel)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                simulationHeaderTitle(viewModel)
+                simulationHeaderUtilityRow(viewModel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, viewModel.connectedGameControllers.isEmpty ? 9 : 11)
+        .background(GroundControlPalette.panel)
+    }
+
+    @ViewBuilder
+    private func simulationHeaderTitle(_ viewModel: DroneSimulationViewModel) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 10) {
+                projectTitleLabel(viewModel)
+                simulationActiveModuleChip(viewModel)
+                simulationControllerModeChip(viewModel)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                projectTitleLabel(viewModel)
+
+                HStack(spacing: 8) {
+                    simulationActiveModuleChip(viewModel)
+                    simulationControllerModeChip(viewModel)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func projectTitleLabel(_ viewModel: DroneSimulationViewModel) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(viewModel.currentProjectName)
+                .font(.headline)
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+            if viewModel.hasUnsavedChanges {
+                Text("•")
+                    .foregroundStyle(GroundControlPalette.warning)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func simulationActiveModuleChip(_ viewModel: DroneSimulationViewModel) -> some View {
+        if let activeModule = viewModel.activeControlModule {
+            HStack(spacing: 8) {
+                Image(systemName: activeModule.iconSystemName)
+                Text(LocalizedStringKey(activeModule.titleKey))
+                    .lineLimit(1)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(GroundControlPalette.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(GroundControlPalette.panelRaised)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func simulationControllerModeChip(_ viewModel: DroneSimulationViewModel) -> some View {
+        if let controllerPresentation = controllerModePresentation(viewModel) {
+            HStack(spacing: 7) {
+                Image(systemName: controllerPresentation.icon)
+                Text(controllerPresentation.label)
+            }
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(GroundControlPalette.accent.opacity(0.16))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(GroundControlPalette.accent.opacity(0.52), lineWidth: 1)
+            )
+        }
+    }
+
+    private func controllerModePresentation(
+        _ viewModel: DroneSimulationViewModel
+    ) -> (icon: String, label: String)? {
+        let controllerCount = viewModel.connectedGameControllers.count
+        guard controllerCount > 0 else {
+            return nil
+        }
+
+        switch viewModel.controllerInteractionMode {
+        case .flight:
+            return (
+                "gamecontroller",
+                controllerCount == 1 ? "1P FLIGHT" : "\(controllerCount)P FLIGHT"
+            )
+        case .uiNavigation:
+            return (
+                "cursorarrow.motionlines",
+                controllerCount == 1 ? "1P UI" : "\(controllerCount)P UI"
+            )
+        case .textInput:
+            return (
+                "keyboard",
+                controllerCount == 1 ? "1P TEXT" : "\(controllerCount)P TEXT"
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func simulationHeaderUtilityRow(_ viewModel: DroneSimulationViewModel) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                parametersToggle(viewModel)
+                simulationHeaderButtons(viewModel)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                parametersToggle(viewModel)
+                simulationHeaderButtons(viewModel)
+            }
+        }
+    }
+
+    private func parametersToggle(_ viewModel: DroneSimulationViewModel) -> some View {
+        Toggle(isOn: parametersVisibilityBinding(for: viewModel)) {
+            Text(viewModel.isParametersPanelVisible ? "panel.modules.on" : "panel.modules.off")
+                .font(.caption)
+        }
+        .toggleStyle(.checkbox)
+        .foregroundStyle(GroundControlPalette.textSecondary)
+        .frame(width: 168, alignment: .leading)
+    }
+
+    private func simulationHeaderButtons(_ viewModel: DroneSimulationViewModel) -> some View {
+        HStack(spacing: 8) {
+            Menu {
+                Button("project.save.action") {
+                    appShell.saveActiveProject()
+                }
+                Button("project.save_as.action") {
+                    nameDraft = projectDerivedName(from: viewModel.currentProjectName, suffixKey: "project.copy_suffix")
+                    nameDialogMode = .saveAs
+                }
+                Button("project.duplicate.action") {
+                    nameDraft = projectDerivedName(from: viewModel.currentProjectName, suffixKey: "project.clone_suffix")
+                    nameDialogMode = .duplicate
+                }
+                Divider()
+                Button("project.open.action") {
+                    appShell.requestReturnToMenu()
+                }
+                Button("window.fullscreen") {
+                    toggleFullscreen()
+                }
+                Button("project.delete.action", role: .destructive) {
+                    deleteCandidate = ProjectRecordSummary(
+                        id: viewModel.currentProjectID,
+                        name: viewModel.currentProjectName,
+                        createdAt: Date(),
+                        modifiedAt: Date(),
+                        lastOpenedAt: Date(),
+                        lastSavedAt: Date()
+                    )
+                }
+            } label: {
+                headerUtilityButtonLabel(systemImage: "folder.badge.gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .help(String(localized: "toolbar.header.project"))
+
+            Button {
+                showBindingsSettings = true
+            } label: {
+                headerUtilityButtonLabel(systemImage: "keyboard")
+            }
+            .buttonStyle(.plain)
+            .help(String(localized: "keybind.open"))
+            .controllerButtonTarget(id: "header.keybindings") {
+                showBindingsSettings = true
+            }
+
+            Button {
+                viewModel.toggleMissionMap()
+            } label: {
+                headerUtilityButtonLabel(systemImage: "map")
+            }
+            .buttonStyle(.plain)
+            .help(String(localized: "mission.map.open_help"))
+            .controllerButtonTarget(id: "header.missionMap") {
+                viewModel.toggleMissionMap()
+            }
+
+            Button {
+                viewModel.setToolPanelVisible(false)
+            } label: {
+                headerUtilityButtonLabel(systemImage: "chevron.up")
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.isToolPanelVisible)
+            .help(String(localized: "panel.hide"))
+            .controllerButtonTarget(id: "header.hideTools") {
+                viewModel.setToolPanelVisible(false)
+            }
+
+            Button {
+                viewModel.setToolPanelVisible(true)
+            } label: {
+                headerUtilityButtonLabel(systemImage: "chevron.down")
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isToolPanelVisible)
+            .help(String(localized: "panel.show"))
+            .controllerButtonTarget(id: "header.showTools") {
+                viewModel.setToolPanelVisible(true)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func payloadOverlay(for viewModel: DroneSimulationViewModel) -> some View {
         ControllerInteractionSurface(
             bridge: viewModel.controllerUIBridge,
@@ -1084,6 +1294,8 @@ struct ContentView: View {
                 snapshot: viewModel.terrainMapSnapshot,
                 state: viewModel.tacticalMapState,
                 missionPlan: viewModel.currentMissionPlan,
+                profileName: viewModel.selectedDroneProfile.uiDisplayName,
+                supportedLaunchModes: viewModel.selectedDroneProfile.supportedLaunchModes,
                 executionState: viewModel.missionExecutionState,
                 missionStatus: viewModel.missionStatusSnapshot,
                 missionTimeline: viewModel.missionTimeline,
@@ -1098,6 +1310,9 @@ struct ContentView: View {
                 onSetMaximumAltitude: viewModel.setTacticalMaximumAltitude,
                 onSetMinimumSpeed: viewModel.setTacticalMinimumSpeed,
                 onSetMaximumSpeed: viewModel.setTacticalMaximumSpeed,
+                onSetLaunchMode: viewModel.setTacticalLaunchMode,
+                onSetLaunchHeading: viewModel.setTacticalLaunchHeading,
+                onClearLaunchObject: viewModel.clearTacticalLaunchObject,
                 onSaveDraft: viewModel.saveTacticalMissionDraft,
                 onPrepareMission: viewModel.prepareMission,
                 onStartMission: viewModel.startMissionExecution,

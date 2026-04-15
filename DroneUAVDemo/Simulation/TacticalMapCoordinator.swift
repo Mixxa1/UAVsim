@@ -18,11 +18,15 @@ final class TacticalMapCoordinator {
         mode: TacticalMapMode,
         viewport: MapViewportState,
         committedDraft: MissionDraft,
-        workingDraft: MissionDraft
+        workingDraft: MissionDraft,
+        airframeClass: AirframeClass,
+        fixedWingParameters: FixedWingParameters?
     ) -> TacticalMapState {
         let previewRoute = previewBuilder.buildPreview(
             draft: workingDraft,
-            viewport: viewport
+            viewport: viewport,
+            airframeClass: airframeClass,
+            fixedWingParameters: fixedWingParameters
         )
         let draftStatus = validator.validate(
             draft: workingDraft,
