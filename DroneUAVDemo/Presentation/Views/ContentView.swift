@@ -681,6 +681,40 @@ private struct SimulationToolstripView: View {
     }
 }
 
+private struct KeyBindingsSheetHost: View {
+    @ObservedObject var simulationViewModel: DroneSimulationViewModel
+    @ObservedObject private var bindingsViewModel: BindingsViewModel
+
+    init(simulationViewModel: DroneSimulationViewModel) {
+        self.simulationViewModel = simulationViewModel
+        _bindingsViewModel = ObservedObject(wrappedValue: simulationViewModel.bindingsViewModel)
+    }
+
+    var body: some View {
+        EmptyView()
+            .sheet(isPresented: Binding(
+                get: { bindingsViewModel.isPresented },
+                set: { simulationViewModel.setBindingsPanelVisible($0) }
+            ), onDismiss: {
+                simulationViewModel.setBindingsPanelVisible(false)
+            }) {
+                ControllerInteractionSurface(
+                    bridge: simulationViewModel.controllerUIBridge,
+                    surfaceID: "keybindings-sheet",
+                    secondaryAction: {
+                        simulationViewModel.setBindingsPanelVisible(false)
+                    }
+                ) {
+                    KeyBindingsSettingsView(
+                        simulationViewModel: simulationViewModel,
+                        bindingsViewModel: bindingsViewModel
+                    )
+                }
+                .frame(width: 760, height: 720)
+            }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var appShell = AppShellViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
@@ -688,7 +722,6 @@ struct ContentView: View {
     @State private var nameDialogMode: NameDialogMode?
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
-    @State private var showBindingsSettings: Bool = false
 
     private var selectedLanguage: AppLanguage {
         AppLanguage(rawValue: appLanguageRawValue) ?? .system
@@ -757,18 +790,15 @@ struct ContentView: View {
                 secondaryButton: .cancel(Text("common.cancel"))
             )
         }
-        .onAppear(perform: syncExternalControllerOverlayState)
         .onChange(of: nameDialogMode) { _ in
             if nameDialogMode != nil {
                 appShell.activeSimulation?.setControllerHubVisible(false)
+                appShell.activeSimulation?.setBindingsPanelVisible(false)
             }
-            syncExternalControllerOverlayState()
-        }
-        .onChange(of: showBindingsSettings) { _ in
-            if showBindingsSettings {
-                appShell.activeSimulation?.setControllerHubVisible(false)
-            }
-            syncExternalControllerOverlayState()
+            let isBindingsVisible = appShell.activeSimulation?.bindingsViewModel.isPresented ?? false
+            appShell.activeSimulation?.setExternalControllerOverlayActive(
+                nameDialogMode != nil || isBindingsVisible
+            )
         }
     }
 
@@ -777,12 +807,6 @@ struct ContentView: View {
         return String(
             format: NSLocalizedString("project.unsaved.message", comment: ""),
             projectName
-        )
-    }
-
-    private func syncExternalControllerOverlayState() {
-        appShell.activeSimulation?.setExternalControllerOverlayActive(
-            nameDialogMode != nil || showBindingsSettings
         )
     }
 
@@ -954,6 +978,7 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(KeyBindingsSheetHost(simulationViewModel: viewModel))
         .alert("battery.depleted.title", isPresented: Binding(
             get: { viewModel.showBatteryDepletedDialog },
             set: { viewModel.showBatteryDepletedDialog = $0 }
@@ -976,21 +1001,6 @@ struct ContentView: View {
                 message: Text(item.message),
                 dismissButton: .default(Text("common.ok"))
             )
-        }
-        .sheet(isPresented: $showBindingsSettings) {
-            if let controllerBridge = appShell.activeSimulation?.controllerUIBridge {
-                ControllerInteractionSurface(
-                    bridge: controllerBridge,
-                    surfaceID: "keybindings-sheet",
-                    secondaryAction: {
-                        showBindingsSettings = false
-                    }
-                ) {
-                    KeyBindingsSettingsView(viewModel: viewModel)
-                }
-            } else {
-                KeyBindingsSettingsView(viewModel: viewModel)
-            }
         }
     }
 
@@ -1185,14 +1195,14 @@ struct ContentView: View {
             .help(String(localized: "toolbar.header.project"))
 
             Button {
-                showBindingsSettings = true
+                viewModel.setBindingsPanelVisible(true)
             } label: {
                 headerUtilityButtonLabel(systemImage: "keyboard")
             }
             .buttonStyle(.plain)
             .help(String(localized: "keybind.open"))
             .controllerButtonTarget(id: "header.keybindings") {
-                showBindingsSettings = true
+                viewModel.setBindingsPanelVisible(true)
             }
 
             Button {
@@ -1298,6 +1308,8 @@ struct ContentView: View {
                 supportedLaunchModes: viewModel.selectedDroneProfile.supportedLaunchModes,
                 executionState: viewModel.missionExecutionState,
                 missionStatus: viewModel.missionStatusSnapshot,
+                fixedWingAssistState: viewModel.fixedWingAssistState,
+                fixedWingAssistWaypoints: viewModel.fixedWingAssistWaypointOptions,
                 missionTimeline: viewModel.missionTimeline,
                 missionDebrief: viewModel.missionDebrief,
                 onSetMode: viewModel.setTacticalMapMode,
@@ -1319,6 +1331,8 @@ struct ContentView: View {
                 onPauseMission: viewModel.pauseMissionExecution,
                 onResumeMission: viewModel.resumeMissionExecution,
                 onAbortMission: viewModel.abortMissionExecution,
+                onSelectFixedWingAssistWaypoint: viewModel.selectFixedWingAssistWaypoint,
+                onActivateFixedWingAssist: viewModel.activateFixedWingAssist,
                 onCancel: viewModel.cancelMissionPlanningChanges,
                 onExit: viewModel.exitMissionMap
             )

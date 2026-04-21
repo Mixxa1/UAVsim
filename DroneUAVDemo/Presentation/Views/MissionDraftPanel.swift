@@ -93,6 +93,8 @@ struct MissionDraftPanel: View {
     let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
+    let fixedWingAssistState: FixedWingAssistState
+    let fixedWingAssistWaypoints: [FixedWingAssistWaypointOption]
     let onRemoveLastWaypoint: () -> Void
     let onClearRoute: () -> Void
     let onClearZones: () -> Void
@@ -109,6 +111,8 @@ struct MissionDraftPanel: View {
     let onPauseMission: () -> Void
     let onResumeMission: () -> Void
     let onAbortMission: () -> Void
+    let onSelectFixedWingAssistWaypoint: (UUID) -> Void
+    let onActivateFixedWingAssist: (FixedWingAssistMode) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -222,7 +226,16 @@ struct MissionDraftPanel: View {
         }
     }
 
+    @ViewBuilder
     private var missionSection: some View {
+        if state.viewport.airframeClass == .fixedWing {
+            fixedWingAssistSection
+        } else {
+            legacyMissionExecutionSection
+        }
+    }
+
+    private var legacyMissionExecutionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("mission.panel.section.execution")
             summaryRow("mission.status.field.plan", value: localized(missionStatus.planStatus.titleKey))
@@ -244,6 +257,62 @@ struct MissionDraftPanel: View {
                         .disabled(!missionStatus.canAbort)
                 }
             }
+        }
+    }
+
+    private var fixedWingAssistSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("mission.panel.section.execution")
+            summaryRow("mission.status.field.plan", value: localized(missionStatus.planStatus.titleKey))
+            summaryRow("fixed_wing.assist.mode", value: localized(fixedWingAssistState.mode.titleKey))
+            summaryRow(
+                "fixed_wing.assist.target",
+                value: selectedAssistWaypoint?.label ?? localized("fixed_wing.assist.waypoint.none")
+            )
+
+            if !fixedWingAssistWaypoints.isEmpty {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(fixedWingAssistWaypoints) { waypoint in
+                        assistWaypointButton(waypoint)
+                    }
+                }
+            } else {
+                Text("fixed_wing.assist.waypoint.none")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    actionButton("mode.manual", tint: GroundControlPalette.borderStrong) {
+                        onActivateFixedWingAssist(.manual)
+                    }
+                    actionButton("mode.fixed_wing_heading_hold", tint: GroundControlPalette.accent) {
+                        onActivateFixedWingAssist(.headingHold)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    actionButton("mode.fixed_wing_altitude_hold", tint: GroundControlPalette.accent) {
+                        onActivateFixedWingAssist(.altitudeHold)
+                    }
+                    actionButton("mode.fixed_wing_waypoint_intercept", tint: GroundControlPalette.success) {
+                        onActivateFixedWingAssist(.waypointIntercept)
+                    }
+                    .disabled(selectedAssistWaypoint == nil)
+                }
+            }
+
+            if fixedWingAssistState.interceptCompleted {
+                Text("fixed_wing.assist.intercept_complete")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.success)
+            }
+
+            Text("fixed_wing.assist.hint")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -442,6 +511,14 @@ struct MissionDraftPanel: View {
         }
     }
 
+    private var selectedAssistWaypoint: FixedWingAssistWaypointOption? {
+        if let selectedID = fixedWingAssistState.selectedWaypointID,
+           let selected = fixedWingAssistWaypoints.first(where: { $0.id == selectedID }) {
+            return selected
+        }
+        return fixedWingAssistWaypoints.first
+    }
+
     private func compactMetric(_ titleKey: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(LocalizedStringKey(titleKey))
@@ -478,6 +555,34 @@ struct MissionDraftPanel: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(GroundControlPalette.border, lineWidth: 1)
         )
+    }
+
+    private func assistWaypointButton(_ waypoint: FixedWingAssistWaypointOption) -> some View {
+        let isSelected = selectedAssistWaypoint?.id == waypoint.id
+
+        return Button {
+            onSelectFixedWingAssistWaypoint(waypoint.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(waypoint.label)
+                    .foregroundStyle(isSelected ? GroundControlPalette.accent : GroundControlPalette.textPrimary)
+                Text(format(point: waypoint.position))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? GroundControlPalette.accent.opacity(0.18) : GroundControlPalette.inset)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? GroundControlPalette.accent.opacity(0.62) : GroundControlPalette.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func constraintField(

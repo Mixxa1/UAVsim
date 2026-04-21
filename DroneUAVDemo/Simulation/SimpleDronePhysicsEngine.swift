@@ -409,9 +409,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let climbTarget = max(wing.climbSpeedMps, wing.minSustainableSpeedMps)
         let speedEnvelope = control.mode == .takeoff ? climbTarget * 1.12 : cruiseTarget * 1.45
-        let targetForwardSpeed = motorThrottle * min(profile.maxHorizontalSpeedMps, speedEnvelope) * (0.55 + 0.45 * batteryFactor)
+        let cappedAirspeed = min(profile.maxHorizontalSpeedMps, wing.maxAirspeed)
+        let climbPenalty = max(0.0, sin(next.orientation.y)) * max(wing.cruiseAirspeed * 0.52, wing.nominalClimbRateMps * 2.4)
+        let diveAssist = max(0.0, -sin(next.orientation.y)) * wing.cruiseAirspeed * 0.18
+        let bankPenalty = abs(sin(next.orientation.x)) * max(wing.cruiseAirspeed * 0.20, wing.minSafeAirspeed * 0.25)
+        let targetForwardSpeed = (
+            motorThrottle * min(cappedAirspeed, speedEnvelope) * (0.55 + 0.45 * batteryFactor) -
+            climbPenalty -
+            bankPenalty +
+            diveAssist
+        ).clamped(to: 0.0...cappedAirspeed)
         let minimumForwardSpeed = state.position.y > 0.15
-            ? wing.minSustainableSpeedMps * (0.90 + baseline.stallProtectionBias * 0.40)
+            ? wing.minSafeAirspeed * (0.90 + baseline.stallProtectionBias * 0.32)
             : 0.0
         let forwardSpeed = approach(
             current: max(0.0, state.forwardAirspeed),
@@ -422,8 +431,23 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
 
         let q = orientationQuaternion(from: next.orientation)
-        var velocity = simd_act(q, SIMD3<Float>(0.0, 0.0, forwardSpeed))
+        var velocity = simd_act(q, SIMD3<Float>(0.0, 0.0, -forwardSpeed))
         velocity += (context.windVector - velocity) * (0.05 * wing.dragFactor)
+
+        let maxClimbRate = min(profile.maxAscentSpeedMps, wing.nominalClimbRateMps * 1.45).clamped(to: 0.8...profile.maxAscentSpeedMps)
+        let maxSinkRate = min(profile.maxDescentSpeedMps, wing.nominalSinkRateMps * 1.55).clamped(to: 0.8...profile.maxDescentSpeedMps)
+        let clampedVerticalSpeed = velocity.y.clamped(to: -maxSinkRate...maxClimbRate)
+        let planarVelocity = SIMD2<Float>(velocity.x, velocity.z)
+        let planarDirection: SIMD2<Float>
+        if simd_length(planarVelocity) > 0.001 {
+            planarDirection = simd_normalize(planarVelocity)
+        } else {
+            planarDirection = SIMD2<Float>(sin(next.orientation.z), -cos(next.orientation.z))
+        }
+        let planarSpeed = sqrt(max(0.0, forwardSpeed * forwardSpeed - clampedVerticalSpeed * clampedVerticalSpeed))
+        velocity.x = planarDirection.x * planarSpeed
+        velocity.z = planarDirection.y * planarSpeed
+        velocity.y = clampedVerticalSpeed
 
         if next.position.y <= 0.0 && motorThrottle < 0.12 {
             velocity.y = 0.0

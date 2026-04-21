@@ -55,6 +55,30 @@ struct TelemetrySnapshot {
     var remainingWaypoints: Int
     var pathLengthMeters: Double
     var pathRemainingDistanceMeters: Double
+    var fixedWingMissionState: String
+    var fixedWingActiveWaypointIndex: Int
+    var fixedWingCrossTrackErrorMeters: Double
+    var fixedWingLegCourseDegrees: Double
+    var fixedWingLegStartX: Double
+    var fixedWingLegStartZ: Double
+    var fixedWingLegEndX: Double
+    var fixedWingLegEndZ: Double
+    var fixedWingWaypointVectorX: Double
+    var fixedWingWaypointVectorZ: Double
+    var fixedWingHeadingDegrees: Double
+    var fixedWingGroundTrackDegrees: Double
+    var fixedWingTargetAirspeed: Double
+    var fixedWingTargetAltitude: Double
+    var fixedWingCommandedRollDegrees: Double
+    var fixedWingCommandedPitchDegrees: Double
+    var fixedWingCommandedThrottle: Double
+    var fixedWingSpeedRecoveryActive: Bool
+    var fixedWingAlongTrackProgress: Double
+    var fixedWingBatteryWarningLevel: String
+    var fixedWingProfileLimitsActive: Bool
+    var fixedWingTransitionReason: String
+    var missionAbortReason: String
+    var modeTransitionReason: String
     var controlAuthority: String
     var manualInputActive: Bool
     var markerGuidanceActive: Bool
@@ -133,6 +157,30 @@ struct TelemetrySnapshot {
         remainingWaypoints: 0,
         pathLengthMeters: 0.0,
         pathRemainingDistanceMeters: 0.0,
+        fixedWingMissionState: FixedWingAutopilotDebugState.MissionState.idle.rawValue,
+        fixedWingActiveWaypointIndex: 0,
+        fixedWingCrossTrackErrorMeters: 0.0,
+        fixedWingLegCourseDegrees: .nan,
+        fixedWingLegStartX: .nan,
+        fixedWingLegStartZ: .nan,
+        fixedWingLegEndX: .nan,
+        fixedWingLegEndZ: .nan,
+        fixedWingWaypointVectorX: .nan,
+        fixedWingWaypointVectorZ: .nan,
+        fixedWingHeadingDegrees: .nan,
+        fixedWingGroundTrackDegrees: .nan,
+        fixedWingTargetAirspeed: .nan,
+        fixedWingTargetAltitude: .nan,
+        fixedWingCommandedRollDegrees: .nan,
+        fixedWingCommandedPitchDegrees: .nan,
+        fixedWingCommandedThrottle: .nan,
+        fixedWingSpeedRecoveryActive: false,
+        fixedWingAlongTrackProgress: .nan,
+        fixedWingBatteryWarningLevel: "nominal",
+        fixedWingProfileLimitsActive: false,
+        fixedWingTransitionReason: "n/a",
+        missionAbortReason: "n/a",
+        modeTransitionReason: "initialization",
         controlAuthority: FlightControlAuthority.none.title,
         manualInputActive: false,
         markerGuidanceActive: false,

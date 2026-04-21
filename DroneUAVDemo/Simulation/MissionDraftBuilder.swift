@@ -24,6 +24,7 @@ final class MissionDraftBuilder {
                 type: requiredType,
                 position: existing.position,
                 headingDegrees: existing.headingDegrees,
+                railAngleDegrees: existing.railAngleDegrees,
                 transitionHeadingDegrees: existing.transitionHeadingDegrees
             )
         }
@@ -81,7 +82,8 @@ final class MissionDraftBuilder {
             type: type,
             position: clampedPosition,
             headingDegrees: heading,
-            transitionHeadingDegrees: nextDraft.launchObject?.transitionHeadingDegrees
+            railAngleDegrees: nextDraft.launchObject?.railAngleDegrees ?? defaultRailAngleDegrees(for: type),
+            transitionHeadingDegrees: nextDraft.launchObject?.transitionHeadingDegrees ?? heading
         )
         nextDraft.selectedLaunchMode = type.launchMode
         return nextDraft
@@ -96,6 +98,9 @@ final class MissionDraftBuilder {
             return nextDraft
         }
         launchObject.headingDegrees = normalizedHeadingDegrees(headingDegrees)
+        if launchObject.transitionHeadingDegrees == nil || launchObject.type == .catapultLine {
+            launchObject.transitionHeadingDegrees = launchObject.headingDegrees
+        }
         nextDraft.launchObject = launchObject
         return nextDraft
     }
@@ -192,5 +197,16 @@ final class MissionDraftBuilder {
             normalized += 360.0
         }
         return normalized
+    }
+
+    private func defaultRailAngleDegrees(for type: MissionLaunchObjectType) -> Float {
+        switch type {
+        case .catapultLine:
+            return 12.0
+        case .runwayStrip:
+            return 3.0
+        case .handLaunchPoint, .vtolStartPoint:
+            return 0.0
+        }
     }
 }

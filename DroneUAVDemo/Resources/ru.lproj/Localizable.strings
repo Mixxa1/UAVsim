@@ -246,6 +246,9 @@
 "hud.drone" = "Дрон";
 
 "mode.manual" = "Ручной";
+"mode.fixed_wing_heading_hold" = "Удержание курса";
+"mode.fixed_wing_altitude_hold" = "Удержание высоты";
+"mode.fixed_wing_waypoint_intercept" = "Перехват точки";
 "mode.auto_path" = "Авто-маршрут";
 "mode.return_home" = "Возврат домой";
 "mode.hover" = "Зависание";
@@ -718,6 +721,20 @@
 "telemetry.waypoint" = "Маршрутная точка";
 "telemetry.waypoint.value" = "индекс %d, осталось %d";
 "telemetry.path_remaining" = "Остаток маршрута";
+"telemetry.fixed_wing_state" = "FW миссия";
+"telemetry.fixed_wing_track" = "FW траектория";
+"telemetry.fixed_wing_track.format" = "курс %.0f° | бок. откл %.1f м";
+"telemetry.fixed_wing_energy" = "FW энергия";
+"telemetry.fixed_wing_energy.format" = "скорость %.1f м/с | высота %.1f м";
+"telemetry.fixed_wing_commands" = "FW команды";
+"telemetry.fixed_wing_commands.format" = "крен %.1f° | тангаж %.1f° | газ %.0f%%";
+"telemetry.fixed_wing_recovery" = "FW восстановление скорости";
+"telemetry.fixed_wing_progress" = "FW прогресс";
+"telemetry.fixed_wing_progress.format" = "продвижение %.2f";
+"telemetry.fixed_wing_battery" = "FW батарея";
+"telemetry.fixed_wing_transition" = "FW переход";
+"telemetry.mode_transition_reason" = "Причина режима";
+"telemetry.mission_abort_reason" = "Причина прерывания";
 
 "panel.modules.on" = "Модули: Вкл";
 "panel.modules.off" = "Модули: Выкл";
@@ -757,6 +774,8 @@
 "module.flight_ops.subtitle" = "Запуск, возврат и управление тягой";
 "module.flight_ops.command_stack" = "Блок команд";
 "module.flight_ops.command_stack.subtitle" = "Основные действия аппарата и автоматические режимы";
+"module.flight_ops.fixed_wing_assist" = "Fixed-Wing Assist";
+"module.flight_ops.fixed_wing_assist.subtitle" = "Отдельные режимы удержания курса, высоты и перехвата одной точки";
 "module.flight_ops.control_law" = "Режим управления";
 "module.flight_ops.control_law.subtitle" = "Переключение законов управления без выхода из сцены";
 "module.flight_ops.active_mode" = "АКТИВЕН";
@@ -1103,6 +1122,11 @@
 "mission.status.field.progress" = "ПРОГРЕСС";
 "mission.status.field.plan" = "ПЛАН";
 "mission.status.field.execution" = "ВЫПОЛНЕНИЕ";
+"fixed_wing.assist.mode" = "ASSIST";
+"fixed_wing.assist.target" = "ЦЕЛЬ";
+"fixed_wing.assist.waypoint.none" = "Точка не выбрана";
+"fixed_wing.assist.hint" = "Только одна активная точка. Без продолжения маршрута, RTH и выполнения миссии.";
+"fixed_wing.assist.intercept_complete" = "ПЕРЕХВАТ ЗАВЕРШЕН";
 "mission.status.field.validated_plan" = "ВАЛИДИРОВАНО";
 "mission.status.field.binding" = "БИНД";
 "mission.status.field.execution_contour" = "CONTOUR";

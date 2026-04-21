@@ -58,6 +58,7 @@ final class DroneSceneController {
     private let worldBoundsNode = SCNNode()
     private let dockStationNode = SCNNode()
     private let missionDropZoneNode = SCNNode()
+    private let launchAssetNode = SCNNode()
 
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
@@ -139,6 +140,7 @@ final class DroneSceneController {
     private var areWorldBoundsVisible: Bool = false
     private(set) var dockSpawnPosition = SIMD3<Float>(0.0, 0.0, 0.0)
     private let dockDeckSurfaceHeight: Float = 0.037
+    private var currentLaunchAsset: LaunchAsset?
 
     init(initialProfile: DroneModelProfile) {
         self.activeProfile = initialProfile
@@ -221,6 +223,10 @@ final class DroneSceneController {
         missionDropZoneNode.isHidden = true
         scene.rootNode.addChildNode(missionDropZoneNode)
 
+        launchAssetNode.name = "launchAssetNode"
+        launchAssetNode.isHidden = true
+        scene.rootNode.addChildNode(launchAssetNode)
+
         nearestContactNode.geometry = SCNSphere(radius: 0.14)
         nearestContactNode.geometry?.firstMaterial?.diffuse.contents = NSColor.systemRed.withAlphaComponent(0.82)
         nearestContactNode.isHidden = true
@@ -262,6 +268,60 @@ final class DroneSceneController {
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
         dockSpawnPosition
+    }
+
+    func currentLaunchSpawnPoint(for asset: LaunchAsset?) -> SIMD3<Float>? {
+        guard let asset else {
+            return nil
+        }
+
+        let supportY = supportSurfaceHeight(
+            at: asset.position,
+            clearanceRadius: 0.28
+        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+
+        switch asset {
+        case .catapult(let catapult):
+            let direction = SIMD3<Float>(
+                sin(catapult.rail.headingRadians),
+                0.0,
+                cos(catapult.rail.headingRadians)
+            )
+            let startOffset = direction * -0.72
+            return SIMD3<Float>(
+                catapult.position.x + startOffset.x,
+                supportY + 0.18,
+                catapult.position.y + startOffset.z
+            )
+        }
+    }
+
+    func setLaunchAsset(_ asset: LaunchAsset?) {
+        currentLaunchAsset = asset
+        launchAssetNode.childNodes.forEach { $0.removeFromParentNode() }
+
+        guard let asset else {
+            launchAssetNode.isHidden = true
+            return
+        }
+
+        launchAssetNode.isHidden = false
+
+        let supportY = supportSurfaceHeight(
+            at: asset.position,
+            clearanceRadius: 0.32
+        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+        launchAssetNode.simdPosition = SIMD3<Float>(asset.position.x, supportY, asset.position.y)
+        launchAssetNode.eulerAngles = SCNVector3(
+            0.0,
+            SCNFloat(asset.headingRadians),
+            0.0
+        )
+
+        switch asset {
+        case .catapult(let catapult):
+            launchAssetNode.addChildNode(makeCatapultNode(for: catapult))
+        }
     }
 
     func setMissionDropZone(_ dropZone: DropZoneState?) {
@@ -306,6 +366,84 @@ final class DroneSceneController {
         ringNode.eulerAngles.x = .pi / 2.0
         ringNode.simdPosition = SIMD3<Float>(0.0, 0.008, 0.0)
         missionDropZoneNode.addChildNode(ringNode)
+    }
+
+    private func makeCatapultNode(for asset: CatapultLaunchAsset) -> SCNNode {
+        let root = SCNNode()
+        let railPitch = SCNFloat(asset.rail.railAngleDegrees.degreesToRadians)
+
+        let frameMaterial = SCNMaterial()
+        frameMaterial.diffuse.contents = NSColor(calibratedRed: 0.58, green: 0.61, blue: 0.65, alpha: 1.0)
+        frameMaterial.roughness.contents = 0.34
+        frameMaterial.metalness.contents = 0.78
+
+        let railMaterial = SCNMaterial()
+        railMaterial.diffuse.contents = NSColor(calibratedRed: 0.24, green: 0.26, blue: 0.30, alpha: 1.0)
+        railMaterial.roughness.contents = 0.46
+        railMaterial.metalness.contents = 0.84
+
+        let carriageMaterial = SCNMaterial()
+        carriageMaterial.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.94)
+        carriageMaterial.emission.contents = NSColor.systemOrange.withAlphaComponent(0.12)
+        carriageMaterial.roughness.contents = 0.42
+
+        let base = SCNNode(
+            geometry: SCNBox(width: 1.55, height: 0.05, length: 0.42, chamferRadius: 0.02)
+        )
+        base.geometry?.materials = [frameMaterial]
+        base.simdPosition = SIMD3<Float>(0.0, 0.03, 0.0)
+        root.addChildNode(base)
+
+        let railLeft = SCNNode(
+            geometry: SCNBox(width: 1.92, height: 0.03, length: 0.05, chamferRadius: 0.01)
+        )
+        railLeft.geometry?.materials = [railMaterial]
+        railLeft.simdPosition = SIMD3<Float>(0.0, 0.24, -0.08)
+        railLeft.eulerAngles.x = railPitch
+        root.addChildNode(railLeft)
+
+        let railRight = SCNNode(
+            geometry: SCNBox(width: 1.92, height: 0.03, length: 0.05, chamferRadius: 0.01)
+        )
+        railRight.geometry?.materials = [railMaterial]
+        railRight.simdPosition = SIMD3<Float>(0.0, 0.24, 0.08)
+        railRight.eulerAngles.x = railPitch
+        root.addChildNode(railRight)
+
+        let carriage = SCNNode(
+            geometry: SCNBox(width: 0.22, height: 0.04, length: 0.22, chamferRadius: 0.01)
+        )
+        carriage.geometry?.materials = [carriageMaterial]
+        carriage.simdPosition = SIMD3<Float>(-0.56, 0.14, 0.0)
+        carriage.eulerAngles.x = railPitch
+        root.addChildNode(carriage)
+
+        let strutOffsets: [SIMD3<Float>] = [
+            SIMD3<Float>(-0.62, 0.10, -0.12),
+            SIMD3<Float>(-0.20, 0.10, 0.12),
+            SIMD3<Float>(0.22, 0.10, -0.12),
+            SIMD3<Float>(0.64, 0.10, 0.12)
+        ]
+
+        for offset in strutOffsets {
+            let strut = SCNNode(
+                geometry: SCNCylinder(radius: 0.018, height: 0.30)
+            )
+            strut.geometry?.materials = [frameMaterial]
+            strut.simdPosition = offset
+            strut.eulerAngles.z = 0.22
+            root.addChildNode(strut)
+        }
+
+        let headingMarker = SCNNode(
+            geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.05, height: 0.18)
+        )
+        headingMarker.geometry?.materials = [carriageMaterial]
+        headingMarker.simdPosition = SIMD3<Float>(0.98, 0.26, 0.0)
+        headingMarker.eulerAngles.z = -SCNFloat.pi / 2.0
+        root.addChildNode(headingMarker)
+
+        return root
     }
 
     func currentPayloadMountNode() -> SCNNode {
@@ -1414,7 +1552,7 @@ final class DroneSceneController {
         case .multirotor:
             return SIMD3<Float>(0.0, 0.0, -1.0)
         case .fixedWing:
-            return SIMD3<Float>(0.0, 0.0, 1.0)
+            return SIMD3<Float>(0.0, 0.0, -1.0)
         }
     }
 

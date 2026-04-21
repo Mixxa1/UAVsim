@@ -24,9 +24,9 @@ final class MissionPreviewBuilder {
             return nil
         }
 
-        var missionPlanPoints = executionRoute.points
-        var executionPoints = executionRoute.points
-        var waypointExecutionPointIndices = executionRoute.waypointPointIndices
+        var missionPlanPoints = executionRoute.missionPlanPoints
+        var executionPoints = executionRoute.executionPoints
+        var waypointExecutionPointIndices = executionRoute.executionWaypointPointIndices
         var isFlyablePreview = false
         var previewStatusKey: String?
 
@@ -34,8 +34,8 @@ final class MissionPreviewBuilder {
             if let flyablePreview = buildFixedWingPreview(
                 draft: draft,
                 viewport: viewport,
-                missionPlanPoints: executionRoute.points,
-                planWaypointPointIndices: executionRoute.waypointPointIndices,
+                missionPlanPoints: executionRoute.missionPlanPoints,
+                planWaypointPointIndices: executionRoute.missionWaypointPointIndices,
                 fixedWingParameters: fixedWingParameters
             ) {
                 missionPlanPoints = flyablePreview.missionPlanPoints
@@ -45,27 +45,6 @@ final class MissionPreviewBuilder {
             } else {
                 previewStatusKey = "tactical.map.preview.unavailable"
             }
-        }
-
-        if draft.constraints.includeReturnHomePreview,
-           let lastOutboundPoint = executionPoints.last,
-           let returnLeg = routedLeg(
-                from: lastOutboundPoint,
-                to: viewport.dockPosition,
-                noFlyZones: draft.noFlyZones,
-                viewport: viewport
-           ) {
-            append(points: returnLeg.dropFirst(), to: &executionPoints)
-        }
-        if draft.constraints.includeReturnHomePreview,
-           let lastPlanPoint = missionPlanPoints.last,
-           let returnLeg = routedLeg(
-                from: lastPlanPoint,
-                to: viewport.dockPosition,
-                noFlyZones: draft.noFlyZones,
-                viewport: viewport
-           ) {
-            append(points: returnLeg.dropFirst(), to: &missionPlanPoints)
         }
 
         guard executionPoints.count >= 2 else {
@@ -120,7 +99,7 @@ final class MissionPreviewBuilder {
         if corridorPoints.count > 1 {
             var prefixedPoints: [SIMD2<Float>] = []
             append(points: corridorPoints, to: &prefixedPoints)
-            append(points: missionPlanPoints.dropFirst(), to: &prefixedPoints)
+            append(points: missionPlanPoints, to: &prefixedPoints)
             flyableInputPoints = prefixedPoints
         }
 
@@ -267,17 +246,22 @@ final class MissionPreviewBuilder {
     private func buildExecutionRoute(
         draft: MissionDraft,
         viewport: MapViewportState
-    ) -> (points: [SIMD2<Float>], waypointPointIndices: [Int])? {
+    ) -> (
+        executionPoints: [SIMD2<Float>],
+        executionWaypointPointIndices: [Int],
+        missionPlanPoints: [SIMD2<Float>],
+        missionWaypointPointIndices: [Int]
+    )? {
         let routeStart = resolvedRouteStartPoint(
             draft: draft,
             viewport: viewport
         )
-        var routePoints: [SIMD2<Float>] = [routeStart]
-        var waypointPointIndices: [Int] = []
+        var executionPoints: [SIMD2<Float>] = [routeStart]
+        var executionWaypointPointIndices: [Int] = []
 
         for waypoint in draft.waypoints {
             guard let leg = routedLeg(
-                from: routePoints[routePoints.count - 1],
+                from: executionPoints[executionPoints.count - 1],
                 to: waypoint.position,
                 noFlyZones: draft.noFlyZones,
                 viewport: viewport
@@ -285,16 +269,30 @@ final class MissionPreviewBuilder {
                 return nil
             }
 
-            append(points: leg.dropFirst(), to: &routePoints)
-            waypointPointIndices.append(routePoints.count - 1)
+            append(points: leg.dropFirst(), to: &executionPoints)
+            executionWaypointPointIndices.append(executionPoints.count - 1)
         }
 
-        guard routePoints.count >= 2,
-              waypointPointIndices.count == draft.waypoints.count else {
+        guard executionPoints.count >= 2,
+              executionWaypointPointIndices.count == draft.waypoints.count else {
             return nil
         }
 
-        return (routePoints, waypointPointIndices)
+        // Visible mission geometry excludes the hidden route start so map
+        // rendering and validation operate only on user-defined mission legs.
+        let missionPlanPoints = Array(executionPoints.dropFirst())
+        let missionWaypointPointIndices = executionWaypointPointIndices.map { $0 - 1 }
+        guard missionWaypointPointIndices.count == draft.waypoints.count,
+              missionWaypointPointIndices.allSatisfy({ $0 >= 0 && $0 < missionPlanPoints.count }) else {
+            return nil
+        }
+
+        return (
+            executionPoints,
+            executionWaypointPointIndices,
+            missionPlanPoints,
+            missionWaypointPointIndices
+        )
     }
 
     private func resolvedRouteStartPoint(

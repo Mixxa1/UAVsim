@@ -34,6 +34,18 @@ struct TelemetryPanelView: View {
             row(titleKey: "telemetry.path_status", value: localizedPathStatus(telemetry.pathStatus))
             row(titleKey: "telemetry.waypoint", value: String(format: localized("telemetry.waypoint.value"), telemetry.currentWaypointIndex, telemetry.remainingWaypoints))
             row(titleKey: "telemetry.path_remaining", value: String(format: "%.2f / %.2f m", telemetry.pathRemainingDistanceMeters, telemetry.pathLengthMeters))
+            if telemetry.fixedWingDiagnosticsVisible {
+                row(titleKey: "telemetry.fixed_wing_state", value: telemetry.fixedWingMissionState)
+                row(titleKey: "telemetry.fixed_wing_track", value: String(format: localized("telemetry.fixed_wing_track.format"), telemetry.fixedWingLegCourseDegrees, telemetry.fixedWingCrossTrackErrorMeters))
+                row(titleKey: "telemetry.fixed_wing_energy", value: String(format: localized("telemetry.fixed_wing_energy.format"), telemetry.fixedWingTargetAirspeed, telemetry.fixedWingTargetAltitude))
+                row(titleKey: "telemetry.fixed_wing_commands", value: String(format: localized("telemetry.fixed_wing_commands.format"), telemetry.fixedWingCommandedRollDegrees, telemetry.fixedWingCommandedPitchDegrees, telemetry.fixedWingCommandedThrottle * 100.0))
+                row(titleKey: "telemetry.fixed_wing_recovery", value: toggleLabel(telemetry.fixedWingSpeedRecoveryActive))
+                row(titleKey: "telemetry.fixed_wing_progress", value: String(format: localized("telemetry.fixed_wing_progress.format"), telemetry.fixedWingAlongTrackProgress))
+                row(titleKey: "telemetry.fixed_wing_battery", value: telemetry.fixedWingBatteryWarningLevel)
+                row(titleKey: "telemetry.fixed_wing_transition", value: telemetry.fixedWingTransitionReason)
+            }
+            row(titleKey: "telemetry.mode_transition_reason", value: telemetry.modeTransitionReason)
+            row(titleKey: "telemetry.mission_abort_reason", value: telemetry.missionAbortReason)
             row(titleKey: "telemetry.control_authority", value: telemetry.controlAuthority)
             row(titleKey: "telemetry.input_flags", value: inputFlagsLine)
             row(titleKey: "telemetry.state_flags", value: stateFlagsLine)
@@ -167,4 +179,12 @@ struct TelemetryPanelView: View {
 
 private func localized(_ key: String) -> String {
     NSLocalizedString(key, comment: "")
+}
+
+private extension TelemetrySnapshot {
+    var fixedWingDiagnosticsVisible: Bool {
+        fixedWingMissionState != FixedWingAutopilotDebugState.MissionState.idle.rawValue
+            || fixedWingCommandedThrottle.isFinite
+            || fixedWingTargetAirspeed.isFinite
+    }
 }

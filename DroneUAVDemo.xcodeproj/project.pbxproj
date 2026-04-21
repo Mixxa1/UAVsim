@@ -172,6 +172,17 @@
 		1000000000000000000002A3 /* UIScrollRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AC /* UIScrollRouter.swift */; };
 		1000000000000000000002A4 /* ControllerHubOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AD /* ControllerHubOverlay.swift */; };
 		1000000000000000000002A5 /* ControllerSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AE /* ControllerSettingsStore.swift */; };
+		1000000000000000000002AF /* AirframeArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A6 /* AirframeArchitecture.swift */; };
+		1000000000000000000002B0 /* MissionLeg.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A7 /* MissionLeg.swift */; };
+		1000000000000000000002B1 /* MulticopterRouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A8 /* MulticopterRouteBuilder.swift */; };
+		1000000000000000000002B2 /* FixedWingRouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A9 /* FixedWingRouteBuilder.swift */; };
+		1000000000000000000002B3 /* MulticopterAutopilotController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AA /* MulticopterAutopilotController.swift */; };
+		1000000000000000000002B4 /* FixedWingAutopilotController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AB /* FixedWingAutopilotController.swift */; };
+		1000000000000000000002B5 /* InputBindingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AC /* InputBindingsStore.swift */; };
+		1000000000000000000002B6 /* InputCaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AD /* InputCaptureCoordinator.swift */; };
+		1000000000000000000002B7 /* BindingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AE /* BindingsViewModel.swift */; };
+		1000000000000000000002BA /* FixedWingAssistMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002B8 /* FixedWingAssistMode.swift */; };
+		1000000000000000000002BB /* FixedWingAssistController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002B9 /* FixedWingAssistController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -342,6 +353,17 @@
 		1000000000000000000001AC /* UIScrollRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIScrollRouter.swift; sourceTree = "<group>"; };
 		1000000000000000000001AD /* ControllerHubOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerHubOverlay.swift; sourceTree = "<group>"; };
 		1000000000000000000001AE /* ControllerSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerSettingsStore.swift; sourceTree = "<group>"; };
+		1000000000000000000002A6 /* AirframeArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirframeArchitecture.swift; sourceTree = "<group>"; };
+		1000000000000000000002A7 /* MissionLeg.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionLeg.swift; sourceTree = "<group>"; };
+		1000000000000000000002A8 /* MulticopterRouteBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MulticopterRouteBuilder.swift; sourceTree = "<group>"; };
+		1000000000000000000002A9 /* FixedWingRouteBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingRouteBuilder.swift; sourceTree = "<group>"; };
+		1000000000000000000002AA /* MulticopterAutopilotController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MulticopterAutopilotController.swift; sourceTree = "<group>"; };
+		1000000000000000000002AB /* FixedWingAutopilotController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAutopilotController.swift; sourceTree = "<group>"; };
+		1000000000000000000002AC /* InputBindingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBindingsStore.swift; sourceTree = "<group>"; };
+		1000000000000000000002AD /* InputCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputCaptureCoordinator.swift; sourceTree = "<group>"; };
+		1000000000000000000002AE /* BindingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BindingsViewModel.swift; sourceTree = "<group>"; };
+		1000000000000000000002B8 /* FixedWingAssistMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAssistMode.swift; sourceTree = "<group>"; };
+		1000000000000000000002B9 /* FixedWingAssistController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAssistController.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -393,6 +415,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000121 /* AppLanguage.swift */,
+				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
 				100000000000000000000113 /* CameraConfiguration.swift */,
 				100000000000000000000116 /* CollisionAnalysis.swift */,
@@ -401,6 +424,7 @@
 				100000000000000000000109 /* DroneControlValues.swift */,
 				10000000000000000000011E /* DroneFleetModel.swift */,
 				100000000000000000000106 /* DroneFlightMode.swift */,
+				1000000000000000000002B8 /* FixedWingAssistMode.swift */,
 				100000000000000000000110 /* DroneModelProfile.swift */,
 				10000000000000000000013D /* PayloadConfiguration.swift */,
 				10000000000000000000013F /* PayloadCapabilityCheck.swift */,
@@ -417,6 +441,7 @@
 				100000000000000000000165 /* MissionDraftStatus.swift */,
 				100000000000000000000173 /* MissionFailureReason.swift */,
 				10000000000000000000018F /* MissionDebrief.swift */,
+				1000000000000000000002A7 /* MissionLeg.swift */,
 				100000000000000000000179 /* MissionPlan.swift */,
 				100000000000000000000175 /* MissionPlanStatus.swift */,
 				100000000000000000000158 /* MissionPlanningState.swift */,
@@ -471,6 +496,9 @@
 				10000000000000000000011F /* DroneFleetManager.swift */,
 				10000000000000000000010B /* DronePhysicsEngine.swift */,
 				100000000000000000000119 /* DroneSimulationContext.swift */,
+				1000000000000000000002B9 /* FixedWingAssistController.swift */,
+				1000000000000000000002AB /* FixedWingAutopilotController.swift */,
+				1000000000000000000002A9 /* FixedWingRouteBuilder.swift */,
 				100000000000000000000149 /* FlightBaselineResolver.swift */,
 				10000000000000000000016B /* MissionDraftBuilder.swift */,
 				10000000000000000000016C /* MissionDraftValidator.swift */,
@@ -491,6 +519,8 @@
 				100000000000000000000188 /* MissionSafetyEvaluator.swift */,
 				100000000000000000000180 /* MissionStatusResolver.swift */,
 				100000000000000000000190 /* MissionTimelineBuilder.swift */,
+				1000000000000000000002AA /* MulticopterAutopilotController.swift */,
+				1000000000000000000002A8 /* MulticopterRouteBuilder.swift */,
 				100000000000000000000141 /* PayloadController.swift */,
 				10000000000000000000010C /* SimpleDronePhysicsEngine.swift */,
 				10000000000000000000016E /* TacticalMapCoordinator.swift */,
@@ -573,6 +603,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000153 /* CompassViewModel.swift */,
+				1000000000000000000002AE /* BindingsViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
 			);
 			path = ViewModels;
@@ -584,6 +615,8 @@
 				1000000000000000000001A2 /* AutopilotInputProvider.swift */,
 				1000000000000000000001A0 /* GameControllerInputProvider.swift */,
 				1000000000000000000001AE /* ControllerSettingsStore.swift */,
+				1000000000000000000002AD /* InputCaptureCoordinator.swift */,
+				1000000000000000000002AC /* InputBindingsStore.swift */,
 				10000000000000000000019E /* InputManager.swift */,
 				10000000000000000000019C /* InputProvider.swift */,
 				10000000000000000000019B /* InputSnapshot.swift */,
@@ -714,6 +747,7 @@
 				100000000000000000000207 /* DroneState.swift in Sources */,
 				100000000000000000000208 /* DroneControlInput.swift in Sources */,
 				100000000000000000000209 /* DroneControlValues.swift in Sources */,
+				1000000000000000000002BA /* FixedWingAssistMode.swift in Sources */,
 				10000000000000000000020A /* TelemetrySnapshot.swift in Sources */,
 				10000000000000000000024E /* TargetMarkerState.swift in Sources */,
 				10000000000000000000020B /* DronePhysicsEngine.swift in Sources */,
@@ -737,6 +771,8 @@
 				100000000000000000000293 /* InputProvider.swift in Sources */,
 				100000000000000000000292 /* InputSnapshot.swift in Sources */,
 				100000000000000000000291 /* InputSourceKind.swift in Sources */,
+				1000000000000000000002B6 /* InputCaptureCoordinator.swift in Sources */,
+				1000000000000000000002B5 /* InputBindingsStore.swift in Sources */,
 				10000000000000000000021A /* KeyboardInputService.swift in Sources */,
 				100000000000000000000296 /* KeyboardInputProvider.swift in Sources */,
 				10000000000000000000029E /* NetworkRemoteHost.swift in Sources */,
@@ -765,6 +801,7 @@
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
 				10000000000000000000024F /* AutoNavigationController.swift in Sources */,
 				100000000000000000000223 /* AbstractModelEditorView.swift in Sources */,
+				1000000000000000000002B7 /* BindingsViewModel.swift in Sources */,
 				100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */,
 				100000000000000000000251 /* CompassOverlayView.swift in Sources */,
 				100000000000000000000250 /* CompassViewModel.swift in Sources */,
@@ -772,12 +809,14 @@
 				100000000000000000000253 /* FlightControlRouting.swift in Sources */,
 				100000000000000000000254 /* PayloadDropCameraController.swift in Sources */,
 				100000000000000000000259 /* MapViewportState.swift in Sources */,
+				1000000000000000000002AF /* AirframeArchitecture.swift in Sources */,
 				10000000000000000000025A /* MissionConstraints.swift in Sources */,
 				10000000000000000000025B /* MissionDraft.swift in Sources */,
 				10000000000000000000025C /* MissionDraftStatus.swift in Sources */,
 				10000000000000000000026A /* MissionFailureReason.swift in Sources */,
 				100000000000000000000286 /* MissionDebrief.swift in Sources */,
 				100000000000000000000283 /* MissionEvent.swift in Sources */,
+				1000000000000000000002B0 /* MissionLeg.swift in Sources */,
 				100000000000000000000285 /* MissionOutcome.swift in Sources */,
 				100000000000000000000270 /* MissionPlan.swift in Sources */,
 				10000000000000000000026C /* MissionPlanStatus.swift in Sources */,
@@ -848,11 +887,16 @@
 				100000000000000000000288 /* MissionEventRecorder.swift in Sources */,
 				100000000000000000000272 /* MissionPlanBuilder.swift in Sources */,
 				100000000000000000000273 /* MissionPlanValidator.swift in Sources */,
+				1000000000000000000002BB /* FixedWingAssistController.swift in Sources */,
+				1000000000000000000002B4 /* FixedWingAutopilotController.swift in Sources */,
+				1000000000000000000002B2 /* FixedWingRouteBuilder.swift in Sources */,
 				10000000000000000000028B /* MissionPersistenceAdapter.swift in Sources */,
 				100000000000000000000275 /* MissionProgressTracker.swift in Sources */,
 				100000000000000000000264 /* MissionPreviewBuilder.swift in Sources */,
 				10000000000000000000027D /* MissionAuthorityGuard.swift in Sources */,
 				100000000000000000000280 /* MissionFailsafeCoordinator.swift in Sources */,
+				1000000000000000000002B3 /* MulticopterAutopilotController.swift in Sources */,
+				1000000000000000000002B1 /* MulticopterRouteBuilder.swift in Sources */,
 				10000000000000000000027E /* MissionRuntimeMonitor.swift in Sources */,
 				10000000000000000000027F /* MissionSafetyEvaluator.swift in Sources */,
 				100000000000000000000277 /* MissionStatusResolver.swift in Sources */,

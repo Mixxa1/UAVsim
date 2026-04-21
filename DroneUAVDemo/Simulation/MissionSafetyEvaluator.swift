@@ -1,5 +1,162 @@
 import Foundation
 
+enum FixedWingMissionBatteryLevel: String, Equatable {
+    case nominal
+    case advisory
+    case caution
+    case critical
+}
+
+struct FixedWingMissionArbiterDecision: Equatable {
+    var batteryLevel: FixedWingMissionBatteryLevel
+    var conserveEnergy: Bool
+    var shouldOverrideMission: Bool
+    var prefersReturnHome: Bool
+    var abortReason: MissionAbortReason?
+    var diagnosticReason: String?
+
+    static let nominal = FixedWingMissionArbiterDecision(
+        batteryLevel: .nominal,
+        conserveEnergy: false,
+        shouldOverrideMission: false,
+        prefersReturnHome: false,
+        abortReason: nil,
+        diagnosticReason: nil
+    )
+}
+
+final class FixedWingMissionStateArbiter {
+    private var previousLevel: FixedWingMissionBatteryLevel = .nominal
+
+    func reset() {
+        previousLevel = .nominal
+    }
+
+    func evaluate(
+        batteryState: BatteryState,
+        operationalStatus: MissionOperationalStatus,
+        wing: FixedWingParameters
+    ) -> FixedWingMissionArbiterDecision {
+        let rawLevel = rawBatteryLevel(
+            batteryState: batteryState,
+            operationalStatus: operationalStatus,
+            wing: wing
+        )
+        let batteryLevel = applyHysteresis(
+            rawLevel: rawLevel,
+            batteryState: batteryState,
+            operationalStatus: operationalStatus,
+            wing: wing
+        )
+        previousLevel = batteryLevel
+
+        switch batteryLevel {
+        case .nominal:
+            return .nominal
+        case .advisory:
+            return FixedWingMissionArbiterDecision(
+                batteryLevel: .advisory,
+                conserveEnergy: false,
+                shouldOverrideMission: false,
+                prefersReturnHome: false,
+                abortReason: nil,
+                diagnosticReason: "battery_advisory_margin"
+            )
+        case .caution:
+            return FixedWingMissionArbiterDecision(
+                batteryLevel: .caution,
+                conserveEnergy: true,
+                shouldOverrideMission: false,
+                prefersReturnHome: false,
+                abortReason: nil,
+                diagnosticReason: "battery_caution_margin"
+            )
+        case .critical:
+            let canReturnSafely = operationalStatus.canReachHomeSafely
+            return FixedWingMissionArbiterDecision(
+                batteryLevel: .critical,
+                conserveEnergy: true,
+                shouldOverrideMission: true,
+                prefersReturnHome: canReturnSafely,
+                abortReason: .batteryUnsafe,
+                diagnosticReason: canReturnSafely
+                    ? "battery_critical_return_home"
+                    : "battery_critical_abort"
+            )
+        }
+    }
+
+    private func rawBatteryLevel(
+        batteryState: BatteryState,
+        operationalStatus: MissionOperationalStatus,
+        wing: FixedWingParameters
+    ) -> FixedWingMissionBatteryLevel {
+        let cruiseSpeed = max(wing.cruiseAirspeed, 1.0)
+        let returnMargin = operationalStatus.estimatedSafeReturnRangeM - operationalStatus.distanceToHomeM
+        let missionMargin = operationalStatus.estimatedSafeReturnRangeM - operationalStatus.missionDistanceBudgetM
+        let advisoryRangeMargin = max(wing.waypointAcceptanceRadiusMeters * 5.0, cruiseSpeed * 75.0)
+        let cautionRangeMargin = max(wing.waypointAcceptanceRadiusMeters * 3.5, cruiseSpeed * 45.0)
+        let criticalRangeMargin = max(wing.waypointAcceptanceRadiusMeters * 2.0, cruiseSpeed * 20.0)
+
+        if batteryState.isDepleted ||
+            batteryState.chargePercent <= 8.0 ||
+            (batteryState.remainingTimeSec > 0.0 && batteryState.remainingTimeSec < 35.0) ||
+            !operationalStatus.canReachHomeSafely ||
+            returnMargin <= -criticalRangeMargin {
+            return .critical
+        }
+
+        if batteryState.chargePercent <= 16.0 ||
+            (batteryState.remainingTimeSec > 0.0 && batteryState.remainingTimeSec < 75.0) ||
+            !operationalStatus.canCompleteMissionSafely ||
+            missionMargin <= cautionRangeMargin {
+            return .caution
+        }
+
+        if batteryState.chargePercent <= 28.0 ||
+            (batteryState.remainingTimeSec > 0.0 && batteryState.remainingTimeSec < 150.0) ||
+            missionMargin <= advisoryRangeMargin ||
+            returnMargin <= advisoryRangeMargin {
+            return .advisory
+        }
+
+        return .nominal
+    }
+
+    private func applyHysteresis(
+        rawLevel: FixedWingMissionBatteryLevel,
+        batteryState: BatteryState,
+        operationalStatus: MissionOperationalStatus,
+        wing: FixedWingParameters
+    ) -> FixedWingMissionBatteryLevel {
+        let cruiseSpeed = max(wing.cruiseAirspeed, 1.0)
+        let missionMargin = operationalStatus.estimatedSafeReturnRangeM - operationalStatus.missionDistanceBudgetM
+        let cautionRecoveryMargin = max(wing.waypointAcceptanceRadiusMeters * 4.0, cruiseSpeed * 55.0)
+        let advisoryRecoveryMargin = max(wing.waypointAcceptanceRadiusMeters * 5.5, cruiseSpeed * 90.0)
+
+        switch previousLevel {
+        case .critical:
+            let canRecover = batteryState.chargePercent >= 12.0 &&
+                (batteryState.remainingTimeSec <= 0.0 || batteryState.remainingTimeSec >= 60.0) &&
+                operationalStatus.canReachHomeSafely
+            return canRecover ? rawLevel : .critical
+        case .caution:
+            let canRecover = batteryState.chargePercent >= 22.0 &&
+                missionMargin >= cautionRecoveryMargin
+            if rawLevel == .nominal || rawLevel == .advisory {
+                return canRecover ? rawLevel : .caution
+            }
+            return rawLevel
+        case .advisory:
+            let canRecover = batteryState.chargePercent >= 32.0 &&
+                missionMargin >= advisoryRecoveryMargin
+            return rawLevel == .nominal && !canRecover ? .advisory : rawLevel
+        case .nominal:
+            return rawLevel
+        }
+    }
+}
+
 final class MissionSafetyEvaluator {
     func evaluate(
         draftStatus: MissionDraftStatus,

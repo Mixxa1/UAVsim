@@ -19,6 +19,8 @@ struct MissionMapOverlayView: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
     let onExit: () -> Void
+    @State private var committedZoomFactor: CGFloat = 1.0
+    @GestureState private var gestureZoomFactor: CGFloat = 1.0
 
     private var routeInstructionKey: String {
         switch mode {
@@ -130,7 +132,8 @@ struct MissionMapOverlayView: View {
                         snapshot: snapshot,
                         routeTargetPosition: draftPlan.routeTarget?.position,
                         dropZone: draftPlan.dropZone,
-                        highlightDropZone: isInDropZone
+                        highlightDropZone: isInDropZone,
+                        zoomFactor: effectiveZoomFactor
                     )
 
                     Color.clear
@@ -138,7 +141,11 @@ struct MissionMapOverlayView: View {
                         .gesture(
                             DragGesture(minimumDistance: 0.0, coordinateSpace: .local)
                                 .onEnded { value in
-                                    let projection = TerrainMapProjection(snapshot: snapshot, size: geometry.size)
+                                    let projection = TerrainMapProjection(
+                                        snapshot: snapshot,
+                                        size: geometry.size,
+                                        zoomFactor: effectiveZoomFactor
+                                    )
                                     guard let planarPoint = projection.unproject(value.location) else {
                                         return
                                     }
@@ -151,6 +158,7 @@ struct MissionMapOverlayView: View {
                                 }
                         )
                 }
+                .simultaneousGesture(magnificationGesture)
             }
             .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
@@ -372,5 +380,19 @@ struct MissionMapOverlayView: View {
         default:
             return GroundControlPalette.border
         }
+    }
+
+    private var effectiveZoomFactor: CGFloat {
+        min(6.0, max(1.0, committedZoomFactor * gestureZoomFactor))
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .updating($gestureZoomFactor) { value, gestureState, _ in
+                gestureState = value
+            }
+            .onEnded { value in
+                committedZoomFactor = min(6.0, max(1.0, committedZoomFactor * value))
+            }
     }
 }

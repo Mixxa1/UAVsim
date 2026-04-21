@@ -7,8 +7,7 @@ final class MissionFailsafeCoordinator {
         airframeClass: AirframeClass,
         flightMode: DroneFlightMode
     ) -> MissionFailsafeMode {
-        if flightMode == .returnHome,
-           executionState.abortReason == .returnHomeTriggered {
+        if flightMode == .returnHome {
             return .returnHome
         }
 
@@ -16,10 +15,40 @@ final class MissionFailsafeCoordinator {
             return .none
         }
 
-        if !safetyState.runtimeConstraints.signalSafe ||
-            !safetyState.runtimeConstraints.batterySafeToContinue ||
-            !safetyState.runtimeConstraints.returnSafe {
-            return .returnHome
+        let runtime = safetyState.runtimeConstraints
+        let batteryCritical = !runtime.batterySafeToContinue
+        let signalCritical = !runtime.signalSafe
+        let canReturnSafely = runtime.returnSafe
+
+        // Strict invariant: automatic RTH must only be triggered by explicit
+        // fail-safe conditions (signal/battery), never by generic mission noise.
+        if batteryCritical || signalCritical {
+            return canReturnSafely ? .returnHome : .abortMission
+        }
+
+        if airframeClass == .fixedWing {
+            switch safetyState.blockReason {
+            case .routeInvalid:
+                return .abortMission
+            case .batteryUnsafe:
+                return canReturnSafely ? .returnHome : .abortMission
+            case .noControlAuthority:
+                return .abortMission
+            case .runtimeUnsafe:
+                if !runtime.collisionSafe || !runtime.thermalSafe {
+                    return .abortMission
+                }
+                return .none
+            case .executionContourMissing,
+                 .executionBindingFailed,
+                 .runtimeDistanceUnavailable,
+                 .noMissionTarget,
+                 .runtimeStallDetected,
+                 .missionStartBlocked,
+                 .noValidatedPlan,
+                 .none:
+                return .none
+            }
         }
 
         switch safetyState.blockReason {
@@ -33,12 +62,15 @@ final class MissionFailsafeCoordinator {
              .runtimeStallDetected:
             return .pauseMission
         case .batteryUnsafe:
-            return .returnHome
+            return canReturnSafely ? .returnHome : .abortMission
         case .runtimeUnsafe:
             if !safetyState.runtimeConstraints.collisionSafe && airframeClass == .multirotor {
                 return .hold
             }
-            return .returnHome
+            if airframeClass == .fixedWing {
+                return .pauseMission
+            }
+            return canReturnSafely ? .returnHome : .pauseMission
         case .missionStartBlocked, .noValidatedPlan, .none:
             break
         }

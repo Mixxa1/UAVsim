@@ -16,7 +16,20 @@ struct MissionPreviewRoute: Equatable {
         executionPoints
     }
 
+    var visibleExecutionPoints: [SIMD2<Float>] {
+        guard executionPoints.count > 1,
+              let firstWaypointIndex = waypointExecutionPointIndices.first,
+              let lastWaypointIndex = waypointExecutionPointIndices.last,
+              firstWaypointIndex >= 0,
+              lastWaypointIndex < executionPoints.count,
+              firstWaypointIndex < lastWaypointIndex else {
+            return missionPlanPoints
+        }
+
+        return Array(executionPoints[firstWaypointIndex...lastWaypointIndex])
+    }
+
     var segmentCount: Int {
-        max(0, points.count - 1)
+        max(0, waypointExecutionPointIndices.count - 1)
     }
 }

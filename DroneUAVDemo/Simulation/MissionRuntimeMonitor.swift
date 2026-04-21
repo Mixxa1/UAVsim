@@ -48,7 +48,8 @@ final class MissionRuntimeMonitor {
         flightMode: DroneFlightMode,
         launchState: LaunchState,
         airframeClass: AirframeClass,
-        fixedWingParameters: FixedWingParameters?
+        fixedWingParameters: FixedWingParameters?,
+        fixedWingDebugState: FixedWingAutopilotDebugState?
     ) -> MissionRuntimeMonitorReport {
         guard executionState.status == .running,
               let activeTarget = executionState.activeTarget else {
@@ -57,16 +58,26 @@ final class MissionRuntimeMonitor {
         }
 
         let now = Date()
+        let fixedWingRouteActive = airframeClass == .fixedWing &&
+            isFixedWingRouteActive(debugState: fixedWingDebugState)
+        let observedDistance: Float? = {
+            guard airframeClass == .fixedWing,
+                  fixedWingRouteActive,
+                  let fixedWingDebugState else {
+                return executionState.distanceToActiveTarget
+            }
+            return max(0.0, fixedWingDebugState.remainingDistance)
+        }()
         if lastObservedTargetID != activeTarget.id {
             lastObservedTargetID = activeTarget.id
-            lastObservedDistance = executionState.distanceToActiveTarget
-            closestObservedDistance = executionState.distanceToActiveTarget
+            lastObservedDistance = observedDistance
+            closestObservedDistance = observedDistance
             lastProgressAt = now
             targetMissingObservedAt = nil
             runtimeMismatchObservedAt = nil
         }
 
-        if let distance = executionState.distanceToActiveTarget {
+        if let distance = observedDistance {
             let previousDistance = lastObservedDistance ?? distance
             let previousClosest = closestObservedDistance ?? distance
             let progressEpsilon = effectiveProgressEpsilon(for: airframeClass)
@@ -83,16 +94,32 @@ final class MissionRuntimeMonitor {
             }
             lastObservedDistance = distance
         }
+        if airframeClass == .fixedWing,
+           let fixedWingDebugState,
+           fixedWingDebugState.currentWaypointIndex > activeTarget.index {
+            lastProgressAt = now
+        }
 
-        let rawTargetMissing = !missionOwnsTargetSource ||
-            currentMarker == nil ||
-            !executionState.hasBoundAutopilotTarget
+        let rawTargetMissing: Bool = {
+            if airframeClass == .fixedWing {
+                return !missionOwnsTargetSource || !fixedWingRouteActive
+            }
+            return !missionOwnsTargetSource ||
+                currentMarker == nil ||
+                !executionState.hasBoundAutopilotTarget
+        }()
         let launchCorridorActive = flightMode == .takeoff || launchState.blocksRouteCapture
-        let rawRuntimeMismatch = !launchCorridorActive &&
-            missionOwnsTargetSource &&
-            currentMarker != nil &&
-            executionState.hasBoundAutopilotTarget &&
-            (!autoNavigationStatus.isActive || flightMode != .autoPath)
+        let rawRuntimeMismatch: Bool = {
+            guard !launchCorridorActive, missionOwnsTargetSource else {
+                return false
+            }
+            if airframeClass == .fixedWing {
+                return !fixedWingRouteActive || flightMode != .autoPath
+            }
+            return currentMarker != nil &&
+                executionState.hasBoundAutopilotTarget &&
+                (!autoNavigationStatus.isActive || flightMode != .autoPath)
+        }()
         let isTargetMissing = confirmedState(
             isDetected: rawTargetMissing,
             observedAt: &targetMissingObservedAt,
@@ -107,7 +134,7 @@ final class MissionRuntimeMonitor {
         )
         let isStalled: Bool = {
             guard !isTargetMissing,
-                  let distance = executionState.distanceToActiveTarget,
+                  let distance = observedDistance,
                   distance > 1.4,
                   let lastProgressAt else {
                 return false
@@ -119,6 +146,11 @@ final class MissionRuntimeMonitor {
                     return false
                 }
                 if autoNavigationStatus.phase == .approach && distance <= flyByDistanceWindow {
+                    return false
+                }
+                if let fixedWingDebugState,
+                   fixedWingDebugState.missionState == .loitering ||
+                    fixedWingDebugState.missionState == .completed {
                     return false
                 }
                 if let closestObservedDistance,
@@ -250,6 +282,27 @@ final class MissionRuntimeMonitor {
             turnAuthority: 0.64,
             maxBankAngleDeg: 38.0
         )
+    }
+
+    private func isFixedWingRouteActive(
+        debugState: FixedWingAutopilotDebugState?
+    ) -> Bool {
+        guard let debugState else {
+            return false
+        }
+        switch debugState.missionState {
+        case .idle, .failed:
+            return false
+        case .aligningToLaunch,
+             .climbout,
+             .capturingLeg,
+             .trackingLeg,
+             .flyByTurn,
+             .loitering,
+             .completed,
+             .recoveringSpeed:
+            return true
+        }
     }
 
     private func confirmedState(

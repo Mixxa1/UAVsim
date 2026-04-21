@@ -115,9 +115,22 @@ struct ControlPanelView: View {
                     }
 
                     HStack(spacing: 8) {
-                        Button("command.hover") { viewModel.hover() }
-                        Button("command.auto_path") { viewModel.activateAutoPath() }
-                        Button("command.return_home") { viewModel.activateReturnHome() }
+                        if viewModel.isFixedWingAssistEnabled {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 8) {
+                                    assistButton(.manual)
+                                    assistButton(.headingHold)
+                                }
+                                HStack(spacing: 8) {
+                                    assistButton(.altitudeHold)
+                                    assistButton(.waypointIntercept)
+                                }
+                            }
+                        } else {
+                            Button("command.hover") { viewModel.hover() }
+                            Button("command.auto_path") { viewModel.activateAutoPath() }
+                            Button("command.return_home") { viewModel.activateReturnHome() }
+                        }
                     }
 
                     HStack(spacing: 8) {
@@ -159,6 +172,25 @@ struct ControlPanelView: View {
                 showAbstractEditor = true
             }
         )
+    }
+
+    @ViewBuilder
+    private func assistButton(_ mode: FixedWingAssistMode) -> some View {
+        Button(LocalizedStringKey(mode.titleKey)) {
+            viewModel.activateFixedWingAssist(mode)
+        }
+        .disabled(isAssistButtonDisabled(mode))
+    }
+
+    private func isAssistButtonDisabled(_ mode: FixedWingAssistMode) -> Bool {
+        switch mode {
+        case .manual:
+            return false
+        case .waypointIntercept:
+            return !viewModel.canActivateFixedWingWaypointIntercept
+        case .headingHold, .altitudeHold:
+            return !viewModel.isArmed || viewModel.mode == .emergencyStop
+        }
     }
 
     private var cameraSection: some View {

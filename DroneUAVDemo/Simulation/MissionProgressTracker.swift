@@ -16,6 +16,7 @@ final class MissionProgressTracker {
         flightMode: DroneFlightMode,
         airframeClass: AirframeClass,
         fixedWingParameters: FixedWingParameters?,
+        fixedWingDebugState: FixedWingAutopilotDebugState?,
         adapter: MissionAutopilotAdapter
     ) -> MissionProgressUpdate {
         guard let activeTarget = executionState.activeTarget else {
@@ -59,22 +60,89 @@ final class MissionProgressTracker {
                 )
             }
         }()
-        let hasBoundTarget = adapter.isBound(
-            activeTarget: activeTarget,
-            currentMarker: currentMarker
-        )
+        let fixedWingRouteActive = airframeClass == .fixedWing &&
+            fixedWingRouteActive(debugState: fixedWingDebugState)
+        let hasBoundTarget: Bool = {
+            if fixedWingRouteActive {
+                return true
+            }
+            return adapter.isBound(
+                activeTarget: activeTarget,
+                currentMarker: currentMarker
+            )
+        }()
         let autopilotSettled = !autoNavigationStatus.isActive ||
             autoNavigationStatus.phase == .hold ||
             (airframeClass == .fixedWing && autoNavigationStatus.phase == .approach) ||
             flightMode != .autoPath
-        let hasReachedActiveTarget = hasBoundTarget &&
-            distance <= arrivalRadius &&
-            autopilotSettled
+        let hasReachedActiveTarget: Bool = {
+            guard hasBoundTarget else {
+                return false
+            }
+            if airframeClass == .fixedWing,
+               let fixedWingDebugState {
+                let controllerWaypointIndex = fixedWingDebugState.currentWaypointIndex
+                if controllerWaypointIndex > activeTarget.index {
+                    return true
+                }
+
+                let finalStateReached = fixedWingDebugState.missionState == .loitering ||
+                    fixedWingDebugState.missionState == .completed
+                return controllerWaypointIndex >= activeTarget.index &&
+                    finalStateReached &&
+                    distance <= fixedWingArrivalRadius(for: fixedWingParameters)
+            }
+
+            return distance <= arrivalRadius && autopilotSettled
+        }()
 
         return MissionProgressUpdate(
             distanceToActiveTarget: distance,
             hasReachedActiveTarget: hasReachedActiveTarget,
             hasBoundTarget: hasBoundTarget
         )
+    }
+
+    private func fixedWingRouteActive(
+        debugState: FixedWingAutopilotDebugState?
+    ) -> Bool {
+        guard let debugState else {
+            return false
+        }
+        switch debugState.missionState {
+        case .idle, .failed:
+            return false
+        case .aligningToLaunch,
+             .climbout,
+             .capturingLeg,
+             .trackingLeg,
+             .flyByTurn,
+             .loitering,
+             .completed,
+             .recoveringSpeed:
+            return true
+        }
+    }
+
+    private func fixedWingArrivalRadius(
+        for fixedWingParameters: FixedWingParameters?
+    ) -> Float {
+        let wing = fixedWingParameters ?? FixedWingParameters(
+            family: .conventionalSurvey,
+            minSustainableSpeedMps: 10.0,
+            cruiseSpeedMps: 17.0,
+            climbSpeedMps: 13.0,
+            stallWarningSpeedMps: 9.0,
+            waypointAcceptanceRadiusMeters: 9.0,
+            nominalTurnRateDegPerSec: 9.0,
+            bankResponseGain: 0.72,
+            climbResponseGain: 0.64,
+            descentResponseGain: 0.54,
+            dragFactor: 1.0,
+            throttleResponseGain: 0.64,
+            turnAuthority: 0.64,
+            maxBankAngleDeg: 38.0
+        )
+        return max(wing.waypointAcceptanceRadiusMeters * 1.15, 10.0)
     }
 }

@@ -13,12 +13,16 @@ final class MissionAuthorityGuard {
         executionState: MissionExecutionState,
         controlAuthority: FlightControlAuthority,
         missionOwnsTargetSource: Bool,
+        airframeClass: AirframeClass,
+        fixedWingDebugState: FixedWingAutopilotDebugState?,
         currentMarker: TargetMarkerState?,
         adapter: MissionAutopilotAdapter
     ) -> MissionControlAuthorityState {
         let now = Date()
         let requiresMissionAuthority = executionState.status == .running
-        let hasBoundMissionTarget = adapter.isBound(
+        let fixedWingRouteActive = airframeClass == .fixedWing &&
+            isFixedWingMissionRouteActive(debugState: fixedWingDebugState)
+        let hasBoundMissionTarget = fixedWingRouteActive || adapter.isBound(
             activeTarget: executionState.activeTarget,
             currentMarker: currentMarker
         )
@@ -43,6 +47,9 @@ final class MissionAuthorityGuard {
             if executionState.activeTarget == nil || !missionOwnsTargetSource || !hasBoundMissionTarget {
                 return .noMissionTarget
             }
+            if fixedWingRouteActive {
+                return nil
+            }
             if controlAuthority != .markerGuidance {
                 return .noControlAuthority
             }
@@ -61,7 +68,7 @@ final class MissionAuthorityGuard {
                 : .transientLost
 
             return MissionControlAuthorityState(
-                expectedAuthority: .markerGuidance,
+                expectedAuthority: fixedWingRouteActive ? .none : .markerGuidance,
                 actualAuthority: controlAuthority,
                 sourceOwnsTarget: missionOwnsTargetSource,
                 hasBoundMissionTarget: hasBoundMissionTarget,
@@ -85,7 +92,7 @@ final class MissionAuthorityGuard {
         resetPendingLoss()
 
         return MissionControlAuthorityState(
-            expectedAuthority: .markerGuidance,
+            expectedAuthority: fixedWingRouteActive ? .none : .markerGuidance,
             actualAuthority: controlAuthority,
             sourceOwnsTarget: missionOwnsTargetSource,
             hasBoundMissionTarget: hasBoundMissionTarget,
@@ -96,6 +103,30 @@ final class MissionAuthorityGuard {
             didRecoverTransientLoss: didRecoverTransientLoss,
             failureReason: nil
         )
+    }
+
+    private func isFixedWingMissionRouteActive(
+        debugState: FixedWingAutopilotDebugState?
+    ) -> Bool {
+        guard let debugState,
+              let routeIdentifier = debugState.routeIdentifier,
+              routeIdentifier.hasPrefix("mission:") else {
+            return false
+        }
+
+        switch debugState.missionState {
+        case .idle, .failed:
+            return false
+        case .aligningToLaunch,
+             .climbout,
+             .capturingLeg,
+             .trackingLeg,
+             .flyByTurn,
+             .loitering,
+             .completed,
+             .recoveringSpeed:
+            return true
+        }
     }
 
     private func resetPendingLoss() {

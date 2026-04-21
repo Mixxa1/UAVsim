@@ -174,6 +174,15 @@ struct FixedWingParameters: Hashable {
     let minSafeAirspeed: Float
     let climbAirspeed: Float
     let cruiseAirspeed: Float
+    let maxAirspeed: Float
+    let nominalClimbRateMps: Float
+    let nominalSinkRateMps: Float
+    let loiterRadiusMeters: Float
+    let maxPitchUpDeg: Float
+    let maxPitchDownDeg: Float
+    let minThrottle: Float
+    let maxThrottle: Float
+    let speedRecoveryPitchCeilingDeg: Float
     let takeoffRotationSpeed: Float
     let initialClimbPitchDeg: Float
     let maxInitialBankDeg: Float
@@ -202,6 +211,15 @@ struct FixedWingParameters: Hashable {
         minSafeAirspeed: Float? = nil,
         climbAirspeed: Float? = nil,
         cruiseAirspeed: Float? = nil,
+        maxAirspeed: Float? = nil,
+        nominalClimbRateMps: Float? = nil,
+        nominalSinkRateMps: Float? = nil,
+        loiterRadiusMeters: Float? = nil,
+        maxPitchUpDeg: Float? = nil,
+        maxPitchDownDeg: Float? = nil,
+        minThrottle: Float? = nil,
+        maxThrottle: Float? = nil,
+        speedRecoveryPitchCeilingDeg: Float? = nil,
         takeoffRotationSpeed: Float? = nil,
         initialClimbPitchDeg: Float = 10.0,
         maxInitialBankDeg: Float? = nil,
@@ -233,12 +251,33 @@ struct FixedWingParameters: Hashable {
                 return [.standard, .handLaunch]
             }
         }()
+        let resolvedMinSafeAirspeed = minSafeAirspeed ?? max(minSustainableSpeedMps, stallWarningSpeedMps + 0.8)
+        let resolvedClimbAirspeed = climbAirspeed ?? max(climbSpeedMps, minSustainableSpeedMps + 1.2)
+        let resolvedCruiseAirspeed = cruiseAirspeed ?? cruiseSpeedMps
+        let resolvedMaxAirspeed = maxAirspeed ?? max(resolvedCruiseAirspeed * 1.35, resolvedClimbAirspeed * 1.18)
+        let resolvedNominalClimbRate = nominalClimbRateMps ?? max(1.2, min(climbSpeedMps * 0.24, resolvedCruiseAirspeed * 0.30))
+        let resolvedNominalSinkRate = nominalSinkRateMps ?? max(1.0, min(resolvedCruiseAirspeed * 0.22, resolvedNominalClimbRate * 1.15))
+        let resolvedTurnRadius = max(
+            waypointAcceptanceRadiusMeters * 1.1,
+            max(resolvedCruiseAirspeed, resolvedMinSafeAirspeed) / max(0.05, nominalTurnRateDegPerSec * .pi / 180.0)
+        )
+        let resolvedMaxPitchUpDeg = maxPitchUpDeg ?? max(10.0, min(18.0, initialClimbPitchDeg + 4.0))
+
         self.supportedLaunchModes = resolvedSupportedLaunchModes
         self.preferredLaunchMode = preferredLaunchMode ?? resolvedSupportedLaunchModes.first ?? .standard
-        self.minSafeAirspeed = minSafeAirspeed ?? max(minSustainableSpeedMps, stallWarningSpeedMps + 0.8)
-        self.climbAirspeed = climbAirspeed ?? max(climbSpeedMps, minSustainableSpeedMps + 1.2)
-        self.cruiseAirspeed = cruiseAirspeed ?? cruiseSpeedMps
-        self.takeoffRotationSpeed = takeoffRotationSpeed ?? max(self.minSafeAirspeed * 0.94, minSustainableSpeedMps)
+        self.minSafeAirspeed = resolvedMinSafeAirspeed
+        self.climbAirspeed = resolvedClimbAirspeed
+        self.cruiseAirspeed = resolvedCruiseAirspeed
+        self.maxAirspeed = resolvedMaxAirspeed
+        self.nominalClimbRateMps = resolvedNominalClimbRate
+        self.nominalSinkRateMps = resolvedNominalSinkRate
+        self.loiterRadiusMeters = loiterRadiusMeters ?? max(waypointAcceptanceRadiusMeters * 1.4, resolvedTurnRadius)
+        self.maxPitchUpDeg = resolvedMaxPitchUpDeg
+        self.maxPitchDownDeg = maxPitchDownDeg ?? max(8.0, min(14.0, resolvedMaxPitchUpDeg * 0.8))
+        self.minThrottle = minThrottle ?? 0.36
+        self.maxThrottle = maxThrottle ?? 1.0
+        self.speedRecoveryPitchCeilingDeg = speedRecoveryPitchCeilingDeg ?? max(1.5, min(4.0, initialClimbPitchDeg * 0.25))
+        self.takeoffRotationSpeed = takeoffRotationSpeed ?? max(resolvedMinSafeAirspeed * 0.94, minSustainableSpeedMps)
         self.initialClimbPitchDeg = initialClimbPitchDeg
         self.maxInitialBankDeg = min(maxBankAngleDeg, maxInitialBankDeg ?? max(10.0, maxBankAngleDeg * 0.55))
         self.handThrowSpeed = handThrowSpeed ?? max(6.0, self.minSafeAirspeed * 0.58)

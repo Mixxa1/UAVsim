@@ -246,6 +246,9 @@
 "hud.drone" = "Drone";
 
 "mode.manual" = "Manual";
+"mode.fixed_wing_heading_hold" = "Heading Hold";
+"mode.fixed_wing_altitude_hold" = "Altitude Hold";
+"mode.fixed_wing_waypoint_intercept" = "Waypoint Intercept";
 "mode.auto_path" = "Auto Path";
 "mode.return_home" = "Return Home";
 "mode.hover" = "Hover";
@@ -723,6 +726,20 @@
 "telemetry.waypoint" = "Waypoint";
 "telemetry.waypoint.value" = "idx %d, left %d";
 "telemetry.path_remaining" = "Path remaining";
+"telemetry.fixed_wing_state" = "FW mission";
+"telemetry.fixed_wing_track" = "FW track";
+"telemetry.fixed_wing_track.format" = "course %.0f° | xtrack %.1f m";
+"telemetry.fixed_wing_energy" = "FW energy";
+"telemetry.fixed_wing_energy.format" = "airspeed %.1f m/s | alt %.1f m";
+"telemetry.fixed_wing_commands" = "FW commands";
+"telemetry.fixed_wing_commands.format" = "roll %.1f° | pitch %.1f° | thr %.0f%%";
+"telemetry.fixed_wing_recovery" = "FW speed recovery";
+"telemetry.fixed_wing_progress" = "FW leg progress";
+"telemetry.fixed_wing_progress.format" = "along-track %.2f";
+"telemetry.fixed_wing_battery" = "FW battery tier";
+"telemetry.fixed_wing_transition" = "FW transition";
+"telemetry.mode_transition_reason" = "Mode reason";
+"telemetry.mission_abort_reason" = "Mission abort";
 
 "panel.modules.on" = "Modules: On";
 "panel.modules.off" = "Modules: Off";
@@ -762,6 +779,8 @@
 "module.flight_ops.subtitle" = "Launch, recovery and thrust control";
 "module.flight_ops.command_stack" = "Command Stack";
 "module.flight_ops.command_stack.subtitle" = "Primary airframe actions and automatic routines";
+"module.flight_ops.fixed_wing_assist" = "Fixed-Wing Assist";
+"module.flight_ops.fixed_wing_assist.subtitle" = "Independent heading, altitude and single-waypoint intercept holds";
 "module.flight_ops.control_law" = "Flight Control";
 "module.flight_ops.control_law.subtitle" = "Switch between control laws without leaving the scene";
 "module.flight_ops.active_mode" = "ACTIVE";
@@ -1108,6 +1127,11 @@
 "mission.status.field.progress" = "PROGRESS";
 "mission.status.field.plan" = "PLAN";
 "mission.status.field.execution" = "EXEC";
+"fixed_wing.assist.mode" = "ASSIST";
+"fixed_wing.assist.target" = "TARGET";
+"fixed_wing.assist.waypoint.none" = "No waypoint selected";
+"fixed_wing.assist.hint" = "Single waypoint only. No route continuation, RTH or mission execution.";
+"fixed_wing.assist.intercept_complete" = "INTERCEPT COMPLETE";
 "mission.status.field.validated_plan" = "VALIDATED";
 "mission.status.field.binding" = "BINDING";
 "mission.status.field.execution_contour" = "CONTOUR";

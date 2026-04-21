@@ -3,13 +3,19 @@ import Foundation
 final class MissionPlanBuilder {
     private let previewBuilder: MissionPreviewBuilder
     private let validator: MissionPlanValidator
+    private let multicopterRouteBuilder: MulticopterRouteBuilder
+    private let fixedWingRouteBuilder: FixedWingRouteBuilder
 
     init(
         previewBuilder: MissionPreviewBuilder = MissionPreviewBuilder(),
-        validator: MissionPlanValidator = MissionPlanValidator()
+        validator: MissionPlanValidator = MissionPlanValidator(),
+        multicopterRouteBuilder: MulticopterRouteBuilder = MulticopterRouteBuilder(),
+        fixedWingRouteBuilder: FixedWingRouteBuilder = FixedWingRouteBuilder()
     ) {
         self.previewBuilder = previewBuilder
         self.validator = validator
+        self.multicopterRouteBuilder = multicopterRouteBuilder
+        self.fixedWingRouteBuilder = fixedWingRouteBuilder
     }
 
     func buildPlan(
@@ -29,19 +35,29 @@ final class MissionPlanBuilder {
             previewRoute: previewRoute,
             viewport: viewport
         )
+        let routeBuild = buildRoute(
+            from: previewRoute,
+            airframeClass: airframeClass
+        )
         let planWaypoints = draft.waypoints.map(MissionTarget.init)
         let executionTargets = buildExecutionTargets(
             waypoints: draft.waypoints,
-            previewRoute: previewRoute
+            previewRoute: previewRoute,
+            airframeClass: airframeClass
         )
 
         return MissionPlan(
             id: UUID(),
             builtAt: Date(),
-            startPoint: previewRoute?.missionPlanPoints.first ?? viewport.dockPosition,
-            routePoints: previewRoute?.points ?? [],
+            airframeKind: UAVAirframeKind(airframeClass),
+            startPoint: routeBuild?.routePoints.first ?? previewRoute?.points.first ?? viewport.dockPosition,
+            routePoints: routeBuild?.routePoints ?? previewRoute?.points ?? [],
+            missionPoints: routeBuild?.missionPoints ?? previewRoute?.missionPlanPoints ?? [],
+            routeKind: routeBuild?.routeKind ?? (airframeClass == .fixedWing ? .fixedWingFlyable : .multicopterPolyline),
+            legs: routeBuild?.legs ?? [],
             launchMode: draft.selectedLaunchMode,
             launchObject: draft.launchObject,
+            launchAsset: draft.launchObject?.launchAsset,
             waypoints: planWaypoints,
             executionTargets: executionTargets,
             zones: draft.zones,
@@ -51,10 +67,31 @@ final class MissionPlanBuilder {
         )
     }
 
+    private func buildRoute(
+        from previewRoute: MissionPreviewRoute?,
+        airframeClass: AirframeClass
+    ) -> MissionPlanRouteBuildResult? {
+        guard let previewRoute else {
+            return nil
+        }
+
+        switch airframeClass {
+        case .multirotor:
+            return multicopterRouteBuilder.build(from: previewRoute)
+        case .fixedWing:
+            return fixedWingRouteBuilder.build(from: previewRoute)
+        }
+    }
+
     private func buildExecutionTargets(
         waypoints: [MissionWaypoint],
-        previewRoute: MissionPreviewRoute?
+        previewRoute: MissionPreviewRoute?,
+        airframeClass: AirframeClass
     ) -> [MissionTarget] {
+        if airframeClass == .fixedWing {
+            return waypoints.map(MissionTarget.init)
+        }
+
         guard let previewRoute,
               previewRoute.points.count >= 2,
               previewRoute.waypointExecutionPointIndices.count == waypoints.count else {

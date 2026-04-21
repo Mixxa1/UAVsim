@@ -43,7 +43,7 @@ struct MissionConstraints: Equatable {
         minimumWaypointSpacing: 2.0,
         minimumZoneRadius: 4.0,
         zoneRadiusFractionOfSignalBoundary: 0.55,
-        includeReturnHomePreview: true,
+        includeReturnHomePreview: false,
         altitude: MissionAltitudeConstraints(
             minimumMeters: 0.0,
             maximumMeters: 80.0

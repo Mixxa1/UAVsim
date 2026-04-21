@@ -79,6 +79,9 @@ enum DroneModelBuilder {
                 rawModel = buildTrinityClass(profile: profile)
             }
         }
+        if profile.airframeClass == .fixedWing {
+            rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
+        }
         return wrapVisualModel(rawModel, for: profile)
     }
 

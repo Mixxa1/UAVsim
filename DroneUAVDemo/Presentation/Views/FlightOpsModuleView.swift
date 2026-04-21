@@ -45,31 +45,54 @@ struct FlightOpsModuleView: View {
                     }
 
                     OperationalActionButton(
-                        titleKey: "command.hover",
-                        systemImage: "pause.circle.fill"
-                    ) {
-                        viewModel.hover()
-                    }
-
-                    OperationalActionButton(
                         titleKey: "command.land",
                         systemImage: "arrow.down.circle.fill"
                     ) {
                         viewModel.land()
                     }
 
-                    OperationalActionButton(
-                        titleKey: "command.auto_path",
-                        systemImage: "point.topleft.down.curvedto.point.bottomright.up"
-                    ) {
-                        viewModel.activateAutoPath()
-                    }
+                    if !viewModel.isFixedWingAssistEnabled {
+                        OperationalActionButton(
+                            titleKey: "command.hover",
+                            systemImage: "pause.circle.fill"
+                        ) {
+                            viewModel.hover()
+                        }
 
-                    OperationalActionButton(
-                        titleKey: "command.return_home",
-                        systemImage: "house.fill"
-                    ) {
-                        viewModel.activateReturnHome()
+                        OperationalActionButton(
+                            titleKey: "command.auto_path",
+                            systemImage: "point.topleft.down.curvedto.point.bottomright.up"
+                        ) {
+                            viewModel.activateAutoPath()
+                        }
+
+                        OperationalActionButton(
+                            titleKey: "command.return_home",
+                            systemImage: "house.fill"
+                        ) {
+                            viewModel.activateReturnHome()
+                        }
+                    }
+                }
+            }
+
+            if viewModel.isFixedWingAssistEnabled {
+                ModuleSection(
+                    titleKey: "module.flight_ops.fixed_wing_assist",
+                    subtitleKey: "module.flight_ops.fixed_wing_assist.subtitle"
+                ) {
+                    LazyVGrid(columns: actionColumns, spacing: 8) {
+                        ForEach(FixedWingAssistMode.allCases) { assistMode in
+                            ModuleModeTile(
+                                titleKey: assistMode.titleKey,
+                                subtitle: fixedWingAssistSubtitle(for: assistMode),
+                                iconSystemName: fixedWingAssistIcon(for: assistMode),
+                                isActive: viewModel.mode == .manual && viewModel.fixedWingAssistState.mode == assistMode
+                            ) {
+                                viewModel.activateFixedWingAssist(assistMode)
+                            }
+                            .disabled(isFixedWingAssistDisabled(assistMode))
+                        }
                     }
                 }
             }
@@ -181,6 +204,46 @@ struct FlightOpsModuleView: View {
             return "arrow.trianglehead.2.clockwise.rotate.90"
         case .hoverAssist:
             return "dot.radiowaves.up.forward"
+        }
+    }
+
+    private func fixedWingAssistIcon(for mode: FixedWingAssistMode) -> String {
+        switch mode {
+        case .manual:
+            return "hand.raised.fill"
+        case .headingHold:
+            return "location.north.line.fill"
+        case .altitudeHold:
+            return "arrow.up.and.down.circle.fill"
+        case .waypointIntercept:
+            return "dot.scope"
+        }
+    }
+
+    private func fixedWingAssistSubtitle(for mode: FixedWingAssistMode) -> String? {
+        switch mode {
+        case .manual:
+            return nil
+        case .headingHold:
+            return viewModel.fixedWingAssistState.mode == .headingHold ? localized("module.flight_ops.active_mode") : nil
+        case .altitudeHold:
+            return viewModel.fixedWingAssistState.mode == .altitudeHold ? localized("module.flight_ops.active_mode") : nil
+        case .waypointIntercept:
+            if let label = viewModel.selectedFixedWingAssistWaypointLabel {
+                return label
+            }
+            return localized("fixed_wing.assist.waypoint.none")
+        }
+    }
+
+    private func isFixedWingAssistDisabled(_ mode: FixedWingAssistMode) -> Bool {
+        switch mode {
+        case .manual:
+            return false
+        case .waypointIntercept:
+            return !viewModel.canActivateFixedWingWaypointIntercept
+        case .headingHold, .altitudeHold:
+            return !viewModel.isArmed || viewModel.mode == .emergencyStop
         }
     }
 

@@ -9,6 +9,8 @@ struct TacticalMapHostView: View {
     let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
+    let fixedWingAssistState: FixedWingAssistState
+    let fixedWingAssistWaypoints: [FixedWingAssistWaypointOption]
     let missionTimeline: MissionTimeline?
     let missionDebrief: MissionDebrief?
     let onSetMode: (TacticalMapMode) -> Void
@@ -30,6 +32,8 @@ struct TacticalMapHostView: View {
     let onPauseMission: () -> Void
     let onResumeMission: () -> Void
     let onAbortMission: () -> Void
+    let onSelectFixedWingAssistWaypoint: (UUID) -> Void
+    let onActivateFixedWingAssist: (FixedWingAssistMode) -> Void
     let onCancel: () -> Void
     let onExit: () -> Void
 
@@ -73,6 +77,8 @@ struct TacticalMapHostView: View {
                             supportedLaunchModes: supportedLaunchModes,
                             executionState: executionState,
                             missionStatus: missionStatus,
+                            fixedWingAssistState: fixedWingAssistState,
+                            fixedWingAssistWaypoints: fixedWingAssistWaypoints,
                             missionTimeline: missionTimeline,
                             missionDebrief: missionDebrief,
                             compact: compact,
@@ -91,7 +97,9 @@ struct TacticalMapHostView: View {
                             onStartMission: onStartMission,
                             onPauseMission: onPauseMission,
                             onResumeMission: onResumeMission,
-                            onAbortMission: onAbortMission
+                            onAbortMission: onAbortMission,
+                            onSelectFixedWingAssistWaypoint: onSelectFixedWingAssistWaypoint,
+                            onActivateFixedWingAssist: onActivateFixedWingAssist
                         )
                     }
                 }
@@ -119,6 +127,8 @@ private struct MissionSidebar: View {
     let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
+    let fixedWingAssistState: FixedWingAssistState
+    let fixedWingAssistWaypoints: [FixedWingAssistWaypointOption]
     let missionTimeline: MissionTimeline?
     let missionDebrief: MissionDebrief?
     let compact: Bool
@@ -138,6 +148,8 @@ private struct MissionSidebar: View {
     let onPauseMission: () -> Void
     let onResumeMission: () -> Void
     let onAbortMission: () -> Void
+    let onSelectFixedWingAssistWaypoint: (UUID) -> Void
+    let onActivateFixedWingAssist: (FixedWingAssistMode) -> Void
 
     var body: some View {
         ControllerScrollableRegion(
@@ -166,6 +178,8 @@ private struct MissionSidebar: View {
                     supportedLaunchModes: supportedLaunchModes,
                     executionState: executionState,
                     missionStatus: missionStatus,
+                    fixedWingAssistState: fixedWingAssistState,
+                    fixedWingAssistWaypoints: fixedWingAssistWaypoints,
                     onRemoveLastWaypoint: onRemoveLastWaypoint,
                     onClearRoute: onClearRoute,
                     onClearZones: onClearZones,
@@ -181,7 +195,9 @@ private struct MissionSidebar: View {
                     onStartMission: onStartMission,
                     onPauseMission: onPauseMission,
                     onResumeMission: onResumeMission,
-                    onAbortMission: onAbortMission
+                    onAbortMission: onAbortMission,
+                    onSelectFixedWingAssistWaypoint: onSelectFixedWingAssistWaypoint,
+                    onActivateFixedWingAssist: onActivateFixedWingAssist
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -321,15 +321,21 @@ struct TerrainMapCanvas: View {
     let routeTargetPosition: SIMD2<Float>?
     let dropZone: DropZoneState?
     let highlightDropZone: Bool
+    var zoomFactor: CGFloat = 1.0
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
-            let projection = TerrainMapProjection(snapshot: snapshot, size: size)
+            let projection = TerrainMapProjection(
+                snapshot: snapshot,
+                size: size,
+                zoomFactor: zoomFactor
+            )
 
             context.fill(
                 Path(projection.mapRect),
                 with: .color(mapBackgroundColor.opacity(0.98))
             )
+            context.clip(to: Path(projection.mapRect))
             drawGrid(in: &context, projection: projection)
             drawOperationalEnvelope(in: &context, projection: projection)
             drawTrail(in: &context, projection: projection)
@@ -338,6 +344,8 @@ struct TerrainMapCanvas: View {
             }
             drawNoFlyZones(in: &context, projection: projection)
             drawMissionRoute(in: &context, projection: projection)
+            drawActiveLeg(in: &context, projection: projection)
+            drawPredictedPath(in: &context, projection: projection)
             drawMissionWaypoints(in: &context, projection: projection)
 
             if let targetMarkerPosition = routeTargetPosition ?? snapshot.targetMarkerPosition {
@@ -513,6 +521,9 @@ struct TerrainMapCanvas: View {
                 if waypoint.isCompleted {
                     return GroundControlPalette.success
                 }
+                if waypoint.isAssistSelected {
+                    return GroundControlPalette.warning
+                }
                 if waypoint.isActive {
                     return GroundControlPalette.warning
                 }
@@ -526,7 +537,14 @@ struct TerrainMapCanvas: View {
                 lineWidth: 0.8
             )
 
-            if waypoint.isActive {
+            if waypoint.isAssistSelected {
+                let outerRingRect = rect.insetBy(dx: -4.5, dy: -4.5)
+                context.stroke(
+                    Path(ellipseIn: outerRingRect),
+                    with: .color(GroundControlPalette.warning.opacity(0.94)),
+                    lineWidth: 1.2
+                )
+            } else if waypoint.isActive {
                 let ringRect = rect.insetBy(dx: -3.5, dy: -3.5)
                 context.stroke(
                     Path(ellipseIn: ringRect),
@@ -543,6 +561,48 @@ struct TerrainMapCanvas: View {
                 anchor: .center
             )
         }
+    }
+
+    private func drawActiveLeg(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard snapshot.activeLegPoints.count > 1 else {
+            return
+        }
+
+        var path = Path()
+        path.move(to: projection.project(snapshot.activeLegPoints[0]))
+        for point in snapshot.activeLegPoints.dropFirst() {
+            path.addLine(to: projection.project(point))
+        }
+
+        context.stroke(
+            path,
+            with: .color(GroundControlPalette.warning.opacity(0.92)),
+            style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round)
+        )
+    }
+
+    private func drawPredictedPath(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard snapshot.predictedPathPoints.count > 1 else {
+            return
+        }
+
+        var path = Path()
+        path.move(to: projection.project(snapshot.predictedPathPoints[0]))
+        for point in snapshot.predictedPathPoints.dropFirst() {
+            path.addLine(to: projection.project(point))
+        }
+
+        context.stroke(
+            path,
+            with: .color(GroundControlPalette.borderStrong.opacity(0.86)),
+            style: StrokeStyle(lineWidth: 1.25, lineCap: .round, lineJoin: .round, dash: [4.0, 3.0])
+        )
     }
 
     private func drawNoFlyZones(
@@ -693,16 +753,17 @@ struct TerrainMapCanvas: View {
         projection: TerrainMapProjection
     ) {
         let center = projection.project(snapshot.dronePosition)
-        let heading = CGFloat(snapshot.droneYawRadians)
-        let forward = CGVector(dx: sin(heading), dy: cos(heading))
-        let right = CGVector(dx: -forward.dy, dy: forward.dx)
+        let forward = projection.headingVector(forYawRadians: snapshot.droneYawRadians)
+        // Keep the marker orientation consistent for every airframe.
+        let markerForward = CGVector(dx: -forward.dx, dy: -forward.dy)
+        let right = CGVector(dx: -markerForward.dy, dy: markerForward.dx)
 
         func point(_ origin: CGPoint, offset: CGVector, scale: CGFloat) -> CGPoint {
             CGPoint(x: origin.x + offset.dx * scale, y: origin.y + offset.dy * scale)
         }
 
-        let nose = point(center, offset: forward, scale: 10)
-        let tail = point(center, offset: forward, scale: -5.5)
+        let nose = point(center, offset: markerForward, scale: 10)
+        let tail = point(center, offset: markerForward, scale: -5.5)
         let left = point(tail, offset: right, scale: 4.8)
         let rightPoint = point(tail, offset: right, scale: -4.8)
 
@@ -724,6 +785,20 @@ struct TerrainMapCanvas: View {
 struct TerrainMapProjection {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let size: CGSize
+    let zoomFactor: CGFloat
+    // Mirror the operator-facing map horizontally so the scene reads
+    // left-to-right the same way as in the reference screenshots.
+    private let transform = TerrainMapTransform.mirroredHorizontally
+
+    init(
+        snapshot: DroneSimulationViewModel.TerrainMapSnapshot,
+        size: CGSize,
+        zoomFactor: CGFloat = 1.0
+    ) {
+        self.snapshot = snapshot
+        self.size = size
+        self.zoomFactor = min(6.0, max(1.0, zoomFactor))
+    }
 
     var outerRect: CGRect {
         CGRect(origin: .zero, size: size).insetBy(dx: 10, dy: 10)
@@ -740,12 +815,9 @@ struct TerrainMapProjection {
     }
 
     func project(_ point: SIMD2<Float>) -> CGPoint {
-        let extent = max(1.0, snapshot.worldHalfExtent)
+        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
         let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
-        return CGPoint(
-            x: mapRect.midX + CGFloat(point.x) * scale,
-            y: mapRect.midY - CGFloat(point.y) * scale
-        )
+        return transform.project(point, mapRect: mapRect, scale: scale)
     }
 
     func unproject(_ point: CGPoint) -> SIMD2<Float>? {
@@ -753,20 +825,17 @@ struct TerrainMapProjection {
             return nil
         }
 
-        let extent = max(1.0, snapshot.worldHalfExtent)
+        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
         let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
         guard scale > 0.0001 else {
             return nil
         }
 
-        return SIMD2<Float>(
-            Float((point.x - mapRect.midX) / scale),
-            Float((mapRect.midY - point.y) / scale)
-        )
+        return transform.unproject(point, mapRect: mapRect, scale: scale)
     }
 
     func projectedSize(for footprint: SIMD2<Float>) -> CGSize {
-        let extent = max(1.0, snapshot.worldHalfExtent)
+        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
         let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
         return CGSize(
             width: max(3.0, CGFloat(footprint.x) * scale),
@@ -775,9 +844,68 @@ struct TerrainMapProjection {
     }
 
     func projectedRadius(for radius: Float) -> CGFloat {
-        let extent = max(1.0, snapshot.worldHalfExtent)
+        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
         let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
         return max(6.0, CGFloat(radius) * scale)
+    }
+
+    func headingVector(forYawRadians yawRadians: Float) -> CGVector {
+        transform.headingVector(
+            yawRadians: yawRadians,
+            projection: self
+        )
+    }
+}
+
+private struct TerrainMapTransform {
+    var xAxisSign: CGFloat
+    var yAxisSign: CGFloat
+
+    static let defaultNorthUp = TerrainMapTransform(xAxisSign: 1.0, yAxisSign: -1.0)
+    static let rotated180 = TerrainMapTransform(xAxisSign: -1.0, yAxisSign: 1.0)
+    static let mirroredHorizontally = TerrainMapTransform(xAxisSign: 1.0, yAxisSign: 1.0)
+
+    func project(
+        _ point: SIMD2<Float>,
+        mapRect: CGRect,
+        scale: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: mapRect.midX + CGFloat(point.x) * scale * xAxisSign,
+            y: mapRect.midY + CGFloat(point.y) * scale * yAxisSign
+        )
+    }
+
+    func unproject(
+        _ point: CGPoint,
+        mapRect: CGRect,
+        scale: CGFloat
+    ) -> SIMD2<Float> {
+        SIMD2<Float>(
+            Float((point.x - mapRect.midX) / (scale * xAxisSign)),
+            Float((point.y - mapRect.midY) / (scale * yAxisSign))
+        )
+    }
+
+    func headingVector(
+        yawRadians: Float,
+        projection: TerrainMapProjection
+    ) -> CGVector {
+        let origin = projection.project(SIMD2<Float>(repeating: 0.0))
+        let forwardWorld = SIMD2<Float>(
+            sin(yawRadians),
+            cos(yawRadians)
+        )
+        let tip = projection.project(forwardWorld)
+        let delta = CGVector(
+            dx: tip.x - origin.x,
+            dy: tip.y - origin.y
+        )
+        let length = sqrt(delta.dx * delta.dx + delta.dy * delta.dy)
+        guard length > 0.0001 else {
+            return CGVector(dx: 0.0, dy: -1.0)
+        }
+        return CGVector(dx: delta.dx / length, dy: delta.dy / length)
     }
 }
 

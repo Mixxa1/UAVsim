@@ -50,6 +50,7 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
     var type: MissionLaunchObjectType
     var position: SIMD2<Float>
     var headingDegrees: Float
+    var railAngleDegrees: Float
     var transitionHeadingDegrees: Float?
 
     init(
@@ -57,12 +58,14 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
         type: MissionLaunchObjectType,
         position: SIMD2<Float>,
         headingDegrees: Float = 0.0,
+        railAngleDegrees: Float = 12.0,
         transitionHeadingDegrees: Float? = nil
     ) {
         self.id = id
         self.type = type
         self.position = position
         self.headingDegrees = headingDegrees
+        self.railAngleDegrees = railAngleDegrees
         self.transitionHeadingDegrees = transitionHeadingDegrees
     }
 
@@ -72,6 +75,33 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
 
     var transitionHeadingRadians: Float? {
         transitionHeadingDegrees.map { $0 * .pi / 180.0 }
+    }
+
+    var launchDirectionDegrees: Float {
+        transitionHeadingDegrees ?? headingDegrees
+    }
+
+    var launchDirectionRadians: Float {
+        launchDirectionDegrees * .pi / 180.0
+    }
+
+    var launchAsset: LaunchAsset? {
+        switch type {
+        case .catapultLine:
+            return .catapult(
+                CatapultLaunchAsset(
+                    id: id,
+                    position: position,
+                    rail: LaunchRailConfiguration(
+                        headingDegrees: headingDegrees,
+                        railAngleDegrees: railAngleDegrees,
+                        launchDirectionDegrees: launchDirectionDegrees
+                    )
+                )
+            )
+        case .handLaunchPoint, .runwayStrip, .vtolStartPoint:
+            return nil
+        }
     }
 }
 

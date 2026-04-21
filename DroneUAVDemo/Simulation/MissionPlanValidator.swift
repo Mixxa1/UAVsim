@@ -56,9 +56,9 @@ final class MissionPlanValidator {
             )
         }
 
-        if let previewRoute {
-            for pair in zip(previewRoute.points, previewRoute.points.dropFirst()) {
-                if simd_distance(pair.0, pair.1) < 0.25 {
+        if draft.waypoints.count > 1 {
+            for pair in zip(draft.waypoints, draft.waypoints.dropFirst()) {
+                if simd_distance(pair.0.position, pair.1.position) < 0.25 {
                     explanations.append(
                         MissionStatusExplanation(
                             reason: .routeInvalid,

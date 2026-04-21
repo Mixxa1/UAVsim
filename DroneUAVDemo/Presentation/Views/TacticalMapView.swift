@@ -8,6 +8,8 @@ struct TacticalMapView: View {
     let executionState: MissionExecutionState
     let onSetMode: (TacticalMapMode) -> Void
     let onMapTap: (SIMD2<Float>) -> Void
+    @State private var committedZoomFactor: CGFloat = 1.0
+    @GestureState private var gestureZoomFactor: CGFloat = 1.0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -19,7 +21,8 @@ struct TacticalMapView: View {
                         snapshot: snapshot,
                         state: state,
                         missionPlan: missionPlan,
-                        executionState: executionState
+                        executionState: executionState,
+                        zoomFactor: effectiveZoomFactor
                     )
 
                     TacticalMapLegendView(snapshot: snapshot, state: state)
@@ -31,7 +34,11 @@ struct TacticalMapView: View {
                         .gesture(
                             DragGesture(minimumDistance: 0.0, coordinateSpace: .local)
                                 .onEnded { value in
-                                    let projection = TerrainMapProjection(snapshot: snapshot, size: geometry.size)
+                                    let projection = TerrainMapProjection(
+                                        snapshot: snapshot,
+                                        size: geometry.size,
+                                        zoomFactor: effectiveZoomFactor
+                                    )
                                     guard let planarPoint = projection.unproject(value.location) else {
                                         return
                                     }
@@ -39,13 +46,18 @@ struct TacticalMapView: View {
                                 }
                         )
                         .controllerPointTarget(id: "tactical.map.canvas") { localPoint in
-                            let projection = TerrainMapProjection(snapshot: snapshot, size: geometry.size)
+                            let projection = TerrainMapProjection(
+                                snapshot: snapshot,
+                                size: geometry.size,
+                                zoomFactor: effectiveZoomFactor
+                            )
                             guard let planarPoint = projection.unproject(localPoint) else {
                                 return
                             }
                             onMapTap(planarPoint)
                         }
                 }
+                .simultaneousGesture(magnificationGesture)
             }
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -246,6 +258,20 @@ struct TacticalMapView: View {
             return GroundControlPalette.danger
         }
     }
+
+    private var effectiveZoomFactor: CGFloat {
+        min(6.0, max(1.0, committedZoomFactor * gestureZoomFactor))
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .updating($gestureZoomFactor) { value, gestureState, _ in
+                gestureState = value
+            }
+            .onEnded { value in
+                committedZoomFactor = min(6.0, max(1.0, committedZoomFactor * value))
+            }
+    }
 }
 
 private struct TacticalMapLegendView: View {
@@ -311,18 +337,26 @@ private struct TacticalMapCanvas: View {
     let state: TacticalMapState
     let missionPlan: MissionPlan?
     let executionState: MissionExecutionState
+    let zoomFactor: CGFloat
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
-            let projection = TerrainMapProjection(snapshot: snapshot, size: size)
+            let projection = TerrainMapProjection(
+                snapshot: snapshot,
+                size: size,
+                zoomFactor: zoomFactor
+            )
 
             context.fill(Path(projection.mapRect), with: .color(backgroundColor.opacity(0.98)))
+            context.clip(to: Path(projection.mapRect))
             drawGrid(in: &context, projection: projection)
             drawGeofence(in: &context, projection: projection)
             drawServiceOverlays(in: &context, projection: projection)
             drawZones(in: &context, projection: projection)
             drawMissionGeometry(in: &context, projection: projection)
             drawPreviewRoute(in: &context, projection: projection)
+            drawActiveLeg(in: &context, projection: projection)
+            drawPredictedPath(in: &context, projection: projection)
             drawPayloadImpact(in: &context, projection: projection)
             drawObjects(in: &context, projection: projection)
             drawLaunchObject(in: &context, projection: projection)
@@ -375,24 +409,21 @@ private struct TacticalMapCanvas: View {
             lineWidth: 0.7
         )
 
-        let cellWidth = projection.mapRect.width / CGFloat(divisions)
-        let cellHeight = projection.mapRect.height / CGFloat(divisions)
+        let sectorStep = state.viewport.boundaryHalfExtent * 2.0 / Float(divisions)
         for row in 0..<divisions {
             for column in 0..<divisions {
-                let localX = (-state.viewport.boundaryHalfExtent) + (Float(column) + 0.5) * (state.viewport.boundaryHalfExtent * 2.0 / Float(divisions))
-                let localY = state.viewport.boundaryHalfExtent - (Float(row) + 0.5) * (state.viewport.boundaryHalfExtent * 2.0 / Float(divisions))
-                let sectorID = state.viewport.sectorID(
-                    for: state.viewport.dockPosition + SIMD2<Float>(localX, localY),
-                    divisions: divisions
+                let labelLocalPosition = SIMD2<Float>(
+                    (-state.viewport.boundaryHalfExtent) + (Float(column) + 0.18) * sectorStep,
+                    state.viewport.boundaryHalfExtent - (Float(row) + 0.18) * sectorStep
                 )
+                let worldPosition = state.viewport.dockPosition + labelLocalPosition
+                let screenPosition = projection.project(worldPosition)
+                let sectorID = state.viewport.sectorID(for: worldPosition, divisions: divisions)
                 context.draw(
                     Text(sectorID)
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundColor(GroundControlPalette.textSecondary.opacity(0.34)),
-                    at: CGPoint(
-                        x: projection.mapRect.minX + cellWidth * (CGFloat(column) + 0.18),
-                        y: projection.mapRect.minY + cellHeight * (CGFloat(row) + 0.18)
-                    ),
+                    at: screenPosition,
                     anchor: .topLeading
                 )
             }
@@ -570,13 +601,13 @@ private struct TacticalMapCanvas: View {
     ) {
         guard state.draftStatus.isPreviewAvailable,
               let previewRoute = state.previewRoute,
-              previewRoute.points.count > 1 else {
+              previewRoute.missionPlanPoints.count > 1 else {
             return
         }
 
         var path = Path()
-        path.move(to: projection.project(previewRoute.points[0]))
-        for point in previewRoute.points.dropFirst() {
+        path.move(to: projection.project(previewRoute.missionPlanPoints[0]))
+        for point in previewRoute.missionPlanPoints.dropFirst() {
             path.addLine(to: projection.project(point))
         }
 
@@ -593,17 +624,18 @@ private struct TacticalMapCanvas: View {
     ) {
         guard state.mode == .waypoint,
               let previewRoute = state.previewRoute,
-              previewRoute.missionPlanPoints.count > 1 else {
+              previewRoute.visibleExecutionPoints.count > 1 else {
             return
         }
 
-        guard previewRoute.isFlyablePreview else {
+        guard previewRoute.isFlyablePreview,
+              previewRoute.visibleExecutionPoints != previewRoute.missionPlanPoints else {
             return
         }
 
         var path = Path()
-        path.move(to: projection.project(previewRoute.missionPlanPoints[0]))
-        for point in previewRoute.missionPlanPoints.dropFirst() {
+        path.move(to: projection.project(previewRoute.visibleExecutionPoints[0]))
+        for point in previewRoute.visibleExecutionPoints.dropFirst() {
             path.addLine(to: projection.project(point))
         }
 
@@ -611,6 +643,48 @@ private struct TacticalMapCanvas: View {
             path,
             with: .color(GroundControlPalette.borderStrong.opacity(0.58)),
             style: StrokeStyle(lineWidth: 1.0, lineCap: .round, lineJoin: .round, dash: [4.0, 4.0])
+        )
+    }
+
+    private func drawActiveLeg(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard snapshot.activeLegPoints.count > 1 else {
+            return
+        }
+
+        var path = Path()
+        path.move(to: projection.project(snapshot.activeLegPoints[0]))
+        for point in snapshot.activeLegPoints.dropFirst() {
+            path.addLine(to: projection.project(point))
+        }
+
+        context.stroke(
+            path,
+            with: .color(GroundControlPalette.warning.opacity(0.94)),
+            style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round)
+        )
+    }
+
+    private func drawPredictedPath(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard snapshot.predictedPathPoints.count > 1 else {
+            return
+        }
+
+        var path = Path()
+        path.move(to: projection.project(snapshot.predictedPathPoints[0]))
+        for point in snapshot.predictedPathPoints.dropFirst() {
+            path.addLine(to: projection.project(point))
+        }
+
+        context.stroke(
+            path,
+            with: .color(GroundControlPalette.borderStrong.opacity(0.84)),
+            style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round, dash: [4.0, 3.0])
         )
     }
 
@@ -773,26 +847,32 @@ private struct TacticalMapCanvas: View {
         in context: inout GraphicsContext,
         projection: TerrainMapProjection
     ) {
-        for waypoint in state.workingDraft.waypoints {
+        for waypoint in snapshot.missionWaypoints {
             let center = projection.project(waypoint.position)
             let rect = CGRect(x: center.x - 6.5, y: center.y - 6.5, width: 13, height: 13)
-            let isCompleted = executionState.waypointProgress.contains {
-                $0.target.waypointID == waypoint.id && $0.state == .completed
-            }
-            let isActive = executionState.activeTarget?.waypointID == waypoint.id
             let tint: Color = {
-                if isCompleted {
+                if waypoint.isCompleted {
                     return GroundControlPalette.success
                 }
-                if isActive {
+                if waypoint.isAssistSelected {
                     return GroundControlPalette.warning
+                }
+                if waypoint.isActive {
+                    return GroundControlPalette.accent
                 }
                 return GroundControlPalette.accent
             }()
 
             context.fill(Path(ellipseIn: rect), with: .color(tint.opacity(0.94)))
             context.stroke(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.42)), lineWidth: 0.8)
-            if isActive {
+            if waypoint.isAssistSelected {
+                let outerRingRect = rect.insetBy(dx: -5.0, dy: -5.0)
+                context.stroke(
+                    Path(ellipseIn: outerRingRect),
+                    with: .color(GroundControlPalette.warning.opacity(0.94)),
+                    lineWidth: 1.4
+                )
+            } else if waypoint.isActive {
                 let ringRect = rect.insetBy(dx: -4.0, dy: -4.0)
                 context.stroke(
                     Path(ellipseIn: ringRect),
@@ -815,16 +895,17 @@ private struct TacticalMapCanvas: View {
         projection: TerrainMapProjection
     ) {
         let center = projection.project(snapshot.dronePosition)
-        let heading = CGFloat(snapshot.droneYawRadians)
-        let forward = CGVector(dx: sin(heading), dy: cos(heading))
-        let right = CGVector(dx: -forward.dy, dy: forward.dx)
+        let forward = projection.headingVector(forYawRadians: snapshot.droneYawRadians)
+        // Keep the marker orientation consistent for every airframe.
+        let markerForward = CGVector(dx: -forward.dx, dy: -forward.dy)
+        let right = CGVector(dx: -markerForward.dy, dy: markerForward.dx)
 
         func point(_ origin: CGPoint, offset: CGVector, scale: CGFloat) -> CGPoint {
             CGPoint(x: origin.x + offset.dx * scale, y: origin.y + offset.dy * scale)
         }
 
-        let nose = point(center, offset: forward, scale: 10)
-        let tail = point(center, offset: forward, scale: -5.5)
+        let nose = point(center, offset: markerForward, scale: 10)
+        let tail = point(center, offset: markerForward, scale: -5.5)
         let left = point(tail, offset: right, scale: 4.8)
         let rightPoint = point(tail, offset: right, scale: -4.8)
 
