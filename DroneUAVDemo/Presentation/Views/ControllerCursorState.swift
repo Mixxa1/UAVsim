@@ -946,7 +946,7 @@ struct ControllerInteractionSurface<Content: View>: View {
                     bridge.clearSurfaceTargets(surfaceID)
                     bridge.deactivateSurface(surfaceID)
                 }
-                .onChange(of: proxy.size) { size in
+                .onChange(of: proxy.size) { _, size in
                     bridge.setSurfaceSize(size, for: surfaceID)
                 }
                 .onPreferenceChange(ControllerInteractionTargetPreferenceKey.self) { frames in

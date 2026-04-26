@@ -790,7 +790,7 @@ struct ContentView: View {
                 secondaryButton: .cancel(Text("common.cancel"))
             )
         }
-        .onChange(of: nameDialogMode) { _ in
+        .onChange(of: nameDialogMode) { _, _ in
             if nameDialogMode != nil {
                 appShell.activeSimulation?.setControllerHubVisible(false)
                 appShell.activeSimulation?.setBindingsPanelVisible(false)
@@ -1332,6 +1332,7 @@ struct ContentView: View {
                 onResumeMission: viewModel.resumeMissionExecution,
                 onAbortMission: viewModel.abortMissionExecution,
                 onSelectFixedWingAssistWaypoint: viewModel.selectFixedWingAssistWaypoint,
+                onSetFixedWingAutoAdvanceEnabled: viewModel.setFixedWingAutoAdvanceEnabled,
                 onActivateFixedWingAssist: viewModel.activateFixedWingAssist,
                 onCancel: viewModel.cancelMissionPlanningChanges,
                 onExit: viewModel.exitMissionMap

@@ -33,6 +33,7 @@ struct TacticalMapHostView: View {
     let onResumeMission: () -> Void
     let onAbortMission: () -> Void
     let onSelectFixedWingAssistWaypoint: (UUID) -> Void
+    let onSetFixedWingAutoAdvanceEnabled: (Bool) -> Void
     let onActivateFixedWingAssist: (FixedWingAssistMode) -> Void
     let onCancel: () -> Void
     let onExit: () -> Void
@@ -99,6 +100,7 @@ struct TacticalMapHostView: View {
                             onResumeMission: onResumeMission,
                             onAbortMission: onAbortMission,
                             onSelectFixedWingAssistWaypoint: onSelectFixedWingAssistWaypoint,
+                            onSetFixedWingAutoAdvanceEnabled: onSetFixedWingAutoAdvanceEnabled,
                             onActivateFixedWingAssist: onActivateFixedWingAssist
                         )
                     }
@@ -149,6 +151,7 @@ private struct MissionSidebar: View {
     let onResumeMission: () -> Void
     let onAbortMission: () -> Void
     let onSelectFixedWingAssistWaypoint: (UUID) -> Void
+    let onSetFixedWingAutoAdvanceEnabled: (Bool) -> Void
     let onActivateFixedWingAssist: (FixedWingAssistMode) -> Void
 
     var body: some View {
@@ -197,6 +200,7 @@ private struct MissionSidebar: View {
                     onResumeMission: onResumeMission,
                     onAbortMission: onAbortMission,
                     onSelectFixedWingAssistWaypoint: onSelectFixedWingAssistWaypoint,
+                    onSetFixedWingAutoAdvanceEnabled: onSetFixedWingAutoAdvanceEnabled,
                     onActivateFixedWingAssist: onActivateFixedWingAssist
                 )
             }

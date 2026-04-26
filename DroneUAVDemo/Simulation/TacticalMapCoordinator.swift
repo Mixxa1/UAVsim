@@ -2,8 +2,20 @@ import Foundation
 import simd
 
 final class TacticalMapCoordinator {
+    private struct BuildKey: Equatable {
+        let isVisible: Bool
+        let mode: TacticalMapMode
+        let viewport: MapViewportState
+        let committedDraft: MissionDraft
+        let workingDraft: MissionDraft
+        let airframeClass: AirframeClass
+        let fixedWingParameters: FixedWingParameters?
+    }
+
     private let previewBuilder: MissionPreviewBuilder
     private let validator: MissionDraftValidator
+    private var cachedBuildKey: BuildKey?
+    private var cachedBuildState: TacticalMapState?
 
     init(
         previewBuilder: MissionPreviewBuilder = MissionPreviewBuilder(),
@@ -22,6 +34,20 @@ final class TacticalMapCoordinator {
         airframeClass: AirframeClass,
         fixedWingParameters: FixedWingParameters?
     ) -> TacticalMapState {
+        let key = BuildKey(
+            isVisible: isVisible,
+            mode: mode,
+            viewport: viewport,
+            committedDraft: committedDraft,
+            workingDraft: workingDraft,
+            airframeClass: airframeClass,
+            fixedWingParameters: fixedWingParameters
+        )
+        if cachedBuildKey == key,
+           let cachedBuildState {
+            return cachedBuildState
+        }
+
         let previewRoute = previewBuilder.buildPreview(
             draft: workingDraft,
             viewport: viewport,
@@ -35,7 +61,7 @@ final class TacticalMapCoordinator {
         )
         let isDraftDirty = committedDraft != workingDraft
 
-        return TacticalMapState(
+        let nextState = TacticalMapState(
             isVisible: isVisible,
             mode: mode,
             viewport: viewport,
@@ -45,5 +71,8 @@ final class TacticalMapCoordinator {
             draftStatus: draftStatus,
             isDraftDirty: isDraftDirty
         )
+        cachedBuildKey = key
+        cachedBuildState = nextState
+        return nextState
     }
 }

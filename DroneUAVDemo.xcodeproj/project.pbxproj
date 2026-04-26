@@ -183,6 +183,8 @@
 		1000000000000000000002B7 /* BindingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AE /* BindingsViewModel.swift */; };
 		1000000000000000000002BA /* FixedWingAssistMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002B8 /* FixedWingAssistMode.swift */; };
 		1000000000000000000002BB /* FixedWingAssistController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002B9 /* FixedWingAssistController.swift */; };
+		1000000000000000000002BD /* MissionGuidanceTargetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */; };
+		1000000000000000000002BF /* FixedWingFlyablePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002BE /* FixedWingFlyablePath.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -364,6 +366,8 @@
 		1000000000000000000002AE /* BindingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BindingsViewModel.swift; sourceTree = "<group>"; };
 		1000000000000000000002B8 /* FixedWingAssistMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAssistMode.swift; sourceTree = "<group>"; };
 		1000000000000000000002B9 /* FixedWingAssistController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAssistController.swift; sourceTree = "<group>"; };
+		1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionGuidanceTargetResolver.swift; sourceTree = "<group>"; };
+		1000000000000000000002BE /* FixedWingFlyablePath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingFlyablePath.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -510,6 +514,8 @@
 				10000000000000000000017E /* MissionProgressTracker.swift */,
 				10000000000000000000016D /* MissionPreviewBuilder.swift */,
 				100000000000000000000186 /* MissionAuthorityGuard.swift */,
+				1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */,
+				1000000000000000000002BE /* FixedWingFlyablePath.swift */,
 				100000000000000000000193 /* MissionDebriefService.swift */,
 				100000000000000000000192 /* MissionEventMapper.swift */,
 				100000000000000000000191 /* MissionEventRecorder.swift */,
@@ -894,6 +900,8 @@
 				100000000000000000000275 /* MissionProgressTracker.swift in Sources */,
 				100000000000000000000264 /* MissionPreviewBuilder.swift in Sources */,
 				10000000000000000000027D /* MissionAuthorityGuard.swift in Sources */,
+				1000000000000000000002BD /* MissionGuidanceTargetResolver.swift in Sources */,
+				1000000000000000000002BF /* FixedWingFlyablePath.swift in Sources */,
 				100000000000000000000280 /* MissionFailsafeCoordinator.swift in Sources */,
 				1000000000000000000002B3 /* MulticopterAutopilotController.swift in Sources */,
 				1000000000000000000002B1 /* MulticopterRouteBuilder.swift in Sources */,
@@ -932,7 +940,7 @@
 		10000000000000000000000B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -940,7 +948,7 @@
 		10000000000000000000000C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				SDKROOT = macosx;
 			};
 			name = Release;

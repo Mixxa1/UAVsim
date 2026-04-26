@@ -18,19 +18,19 @@
 
 Если нужно быстро понять проект, читайте в таком порядке:
 
-1. [DroneUAVDemoApp.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)  
+1. [DroneUAVDemoApp.swift](/Users/misha/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
    Точка входа приложения.
-2. [ContentView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)  
+2. [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
    Верхнеуровневый shell приложения, стартовый экран и рабочее окно симуляции.
-3. [DroneSimulationViewModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)  
+3. [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
    Главный orchestrator: состояние, цикл симуляции, связь UI со сценой и сервисами.
-4. [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)  
+4. [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
    Управляет `SceneKit`-сценой, камерой, визуальной моделью дрона, окружением и debug-слоями.
-5. [SimpleDronePhysicsEngine.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)  
+5. [SimpleDronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
    Основная baseline-физика полёта.
-6. [ScenePopulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)  
+6. [ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
    Генерирует окружение по типу местности.
-7. [TelemetryExportService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)  
+7. [TelemetryExportService.swift](/Users/misha/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
    Экспорт телеметрии и хранение проектов.
 
 ---
@@ -39,24 +39,55 @@
 
 Проект разбит на несколько слоёв:
 
-- `Presentation`  
+- `Presentation`
   SwiftUI-интерфейс, модульная левая панель, overlay-панели, shell приложения.
-- `ViewModel`  
+- `ViewModel`
   Главный runtime state и orchestration.
-- `Scene`  
+- `Scene`
   Построение и обновление `SceneKit`-сцены.
-- `Simulation`  
+- `Simulation`
   Физика полёта, анализ коллизий, автопланирование, батарея/тепло, флот, payload-логика.
-- `Domain`  
+- `Domain`
   Чистые модели данных и конфигурации.
-- `Services`  
+- `Services`
   Работа с проектами, autosave, внутренним storage и экспортом телеметрии.
-- `Input`  
-  Клавиатурный ввод и бинды.
-- `Resources`  
+- `Input`
+  Единый input-pipeline: клавиатура, game controller, remote-control, будущий autopilot-provider, бинды и dominant-source arbitration.
+- `Resources`
   Локализация, `Assets.xcassets` и системные ресурсы приложения.
-- `Scene`  
-  Процедурная среда, материалы окружения и генераторы `SceneKit`.
+- `Remote`
+  TCP-транспорт внешнего управления, декодирование remote-пакетов и адаптация к shared input state.
+
+---
+
+## Технические составляющие
+
+### Платформа и runtime
+
+- Язык и UI: `Swift`, `SwiftUI`, `Combine`-совместимые `ObservableObject` view model-и.
+- 3D-слой: `SceneKit` (`SCNScene`, `SCNView`, `SCNNode`, procedural geometry/materials).
+- Системные API: `Foundation`, `Network` для TCP remote-control, `GameController` для аппаратных контроллеров.
+- Target: macOS-приложение в `DroneUAVDemo.xcodeproj`.
+
+### Runtime data flow
+
+1. `ContentView` открывает или создаёт проект и поднимает `DroneSimulationViewModel`.
+2. `DroneSimulationViewModel` на каждом тике собирает input, routing authority, mission state, collision/weather/payload context.
+3. Автопилот/ручной ввод превращаются в `DroneControlInput`.
+4. `SimpleDronePhysicsEngine` обновляет `DroneState`.
+5. `DroneSceneController` синхронизирует `SceneKit`-ноды, камеры, environment visuals, debug layers и payload visuals.
+6. `MissionStatusResolver`, telemetry/export/storage-сервисы публикуют состояние обратно в UI.
+
+### Основные подсистемы
+
+- Flight dynamics: `SimpleDronePhysicsEngine`, `DroneSimulationContext`, `FlightBaselineResolver`.
+- Guidance/autopilot: `AutoNavigationController`, `MulticopterAutopilotController`, `FixedWingAutopilotController`, `FixedWingAssistController`.
+- Mission planning/execution: `MissionDraftBuilder`, `MissionPreviewBuilder`, `MissionPlanBuilder`, `MissionExecutionBinder`, `MissionExecutionCoordinator`, `MissionProgressTracker`, `MissionRuntimeMonitor`, `MissionSafetyEvaluator`.
+- Route generation: `AutoPathPlannerService`, `MulticopterRouteBuilder`, `FixedWingRouteBuilder`.
+- Control authority: `FlightControlRouter`, `ControlAuthorityManager`, `MissionAuthorityGuard`.
+- Scene/environment: `DroneSceneController`, `ScenePopulationService`, `EnvironmentObjectFactory`, `EnvironmentProceduralVisualFactory`.
+- Input: `InputManager`, `KeyboardInputProvider`, `GameControllerInputProvider`, `RemoteInputProvider`, `AutopilotInputProvider`.
+- Storage/export: `ProjectStorageService`, `TelemetryExportService`.
 
 Упрощённая схема потока:
 
@@ -85,7 +116,7 @@ flowchart LR
 
 ### 1. Точка входа
 
-[DroneUAVDemoApp.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
+[DroneUAVDemoApp.swift](/Users/misha/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
 
 - создаёт `WindowGroup`;
 - показывает `ContentView`;
@@ -94,7 +125,7 @@ flowchart LR
 
 ### 2. Shell приложения
 
-[ContentView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
+[ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
 
 Файл выполняет сразу две роли:
 
@@ -122,7 +153,7 @@ flowchart LR
 
 ### DroneSimulationViewModel
 
-[DroneSimulationViewModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
+[DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
 
 Это главный координационный объект проекта. Он:
 
@@ -188,12 +219,22 @@ flowchart LR
 
 - `SimpleDronePhysicsEngine`
 - `KeyboardInputService`
+- `GameControllerInputProvider`
+- `RemoteInputProvider`
+- `InputManager`
 - `CollisionAnalysisService`
 - `BatteryThermalSimulationService`
 - `TelemetryExportService`
 - `ProjectStorageService`
 - `DroneFleetManager`
 - `AutoPathPlannerService`
+- `FlightControlRouter`
+- `AutoNavigationController`
+- `MulticopterAutopilotController`
+- `FixedWingAutopilotController`
+- `FixedWingAssistController`
+- `PayloadCameraController`
+- mission-сервисы: `MissionDraftBuilder`, `MissionPreviewBuilder`, `MissionPlanBuilder`, `MissionExecutionBinder`, `MissionExecutionCoordinator`, `MissionAutopilotAdapter`, `MissionProgressTracker`, `MissionAuthorityGuard`, `MissionRuntimeMonitor`, `MissionSafetyEvaluator`, `MissionFailsafeCoordinator`, `MissionStatusResolver`, `MissionEventRecorder`, `MissionDebriefService`
 - `DroneSceneController`
 
 То есть `ViewModel` — это место, где сходятся все крупные подсистемы проекта.
@@ -239,9 +280,9 @@ flowchart LR
 
 ### Ключевые файлы
 
-- [DroneUAVDemoApp.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)  
+- [DroneUAVDemoApp.swift](/Users/misha/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
   entry point macOS-приложения.
-- [PROJECT_STRUCTURE_RU.md](/Users/misha/Documents/New%20project/DroneUAVDemo/PROJECT_STRUCTURE_RU.md)  
+- [PROJECT_STRUCTURE_RU.md](/Users/misha/New%20project/DroneUAVDemo/PROJECT_STRUCTURE_RU.md)
   этот документ.
 
 ---
@@ -252,7 +293,7 @@ flowchart LR
 
 ### `/Presentation/ViewModels`
 
-- [DroneSimulationViewModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)  
+- [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
   единый runtime-viewmodel приложения. Главное место, где соединяются UI, физика, сцена, диагностика, payload, автопилот и хранение проекта.
 
 ### `/Presentation/Views`
@@ -261,54 +302,54 @@ flowchart LR
 
 #### Каркас и компоновка
 
-- [ContentView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)  
+- [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
   shell приложения: стартовый экран, toolbar, панель модулей, viewport, payload overlay.
-- [SceneViewportView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift)  
+- [SceneViewportView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift)
   центральная область со сценой и telemetry HUD.
-- [DroneSceneViewRepresentable.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/DroneSceneViewRepresentable.swift)  
+- [DroneSceneViewRepresentable.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/DroneSceneViewRepresentable.swift)
   мост SwiftUI -> `SCNView`; управляет камерой, mouse-look и free-camera control.
-- [SidebarModuleHostView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift)  
+- [SidebarModuleHostView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift)
   host левой панели: показывает только активный модуль.
-- [ControlModule.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ControlModule.swift)  
+- [ControlModule.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ControlModule.swift)
   enum модулей: `flightOps`, `uavCatalog`, `camera`, `scenario`, `diagnostics`.
 
 #### Модульные панели
 
-- [FlightOpsModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/FlightOpsModuleView.swift)  
+- [FlightOpsModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/FlightOpsModuleView.swift)
   действия полёта: arm/disarm, takeoff, hover, land, return home, auto path, throttle, control law.
-- [UAVCatalogModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift)  
+- [UAVCatalogModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift)
   выбор платформы, фильтры, открытие редактора abstract-модели.
-- [CameraModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift)  
+- [CameraModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift)
   режимы камеры, presets, optics и advanced controls.
-- [ScenarioModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ScenarioModuleView.swift)  
+- [ScenarioModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ScenarioModuleView.swift)
   погода, ветер, карта, плотность окружения, boundary visibility.
-- [DiagnosticsModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift)  
+- [DiagnosticsModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift)
   диагностика: overview, telemetry, fleet, service.
-- [PayloadView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift)  
+- [PayloadView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift)
   отдельный overlay-модуль payload system.
 
 #### Вспомогательные панели и элементы
 
-- [CompactTelemetryHUDView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/CompactTelemetryHUDView.swift)  
+- [CompactTelemetryHUDView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/CompactTelemetryHUDView.swift)
   компактный HUD поверх сцены.
-- [TelemetryPanelView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/TelemetryPanelView.swift)  
+- [TelemetryPanelView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/TelemetryPanelView.swift)
   развернутый telemetry block внутри diagnostics.
-- [PayloadToolbarEntry.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/PayloadToolbarEntry.swift)  
+- [PayloadToolbarEntry.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadToolbarEntry.swift)
   кнопка payload в верхнем toolstrip.
-- [KeyBindingsSettingsView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift)  
+- [KeyBindingsSettingsView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift)
   настройки биндов.
-- [AbstractModelEditorView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/AbstractModelEditorView.swift)  
+- [AbstractModelEditorView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/AbstractModelEditorView.swift)
   редактор кастомной абстрактной модели БЛА.
-- [UAVCatalogView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift)  
+- [UAVCatalogView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift)
   список БЛА внутри каталога.
-- [UAVFilterBarView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVFilterBarView.swift)  
+- [UAVFilterBarView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVFilterBarView.swift)
   фильтры каталога.
-- [UAVProfileCardView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVProfileCardView.swift)  
+- [UAVProfileCardView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVProfileCardView.swift)
   карточка профиля БЛА.
 
 #### Legacy / compatibility
 
-- [ControlPanelView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ControlPanelView.swift)  
+- [ControlPanelView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ControlPanelView.swift)
   старая длинная панель управления. Сейчас архитектурно важнее toolbar-driven modules, но файл может оставаться как legacy-reference/compatibility code.
 
 ---
@@ -320,50 +361,50 @@ flowchart LR
 ### Что здесь лежит
 
 - профили БЛА:
-  - [DroneModelProfile.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift)
-  - [UAVProfile.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVProfile.swift)
-  - [UAVReferenceCatalog.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
-  - [UAVCatalog.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVCatalog.swift)
+  - [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift)
+  - [UAVProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVProfile.swift)
+  - [UAVReferenceCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
+  - [UAVCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVCatalog.swift)
 - управление и состояние полёта:
-  - [DroneState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneState.swift)
-  - [DroneControlInput.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneControlInput.swift)
-  - [DroneControlValues.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneControlValues.swift)
-  - [DroneFlightMode.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneFlightMode.swift)
+  - [DroneState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneState.swift)
+  - [DroneControlInput.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneControlInput.swift)
+  - [DroneControlValues.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneControlValues.swift)
+  - [DroneFlightMode.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneFlightMode.swift)
 - камера:
-  - [CameraConfiguration.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift)
+  - [CameraConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift)
 - окружение:
-  - [WeatherModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/WeatherModel.swift)
-  - [TerrainModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/TerrainModel.swift)
+  - [WeatherModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/WeatherModel.swift)
+  - [TerrainModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TerrainModel.swift)
 - телеметрия и диагностика:
-  - [TelemetrySnapshot.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/TelemetrySnapshot.swift)
-  - [CollisionAnalysis.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/CollisionAnalysis.swift)
-  - [DamageThermalModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DamageThermalModel.swift)
-  - [BatteryState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/BatteryState.swift)
+  - [TelemetrySnapshot.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TelemetrySnapshot.swift)
+  - [CollisionAnalysis.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/CollisionAnalysis.swift)
+  - [DamageThermalModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DamageThermalModel.swift)
+  - [BatteryState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/BatteryState.swift)
 - fleet / formation:
-  - [DroneFleetModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneFleetModel.swift)
+  - [DroneFleetModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneFleetModel.swift)
 - payload:
-  - [PayloadConfiguration.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadConfiguration.swift)
-  - [PayloadType.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadType.swift)
-  - [PayloadState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadState.swift)
-  - [PayloadMountState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadMountState.swift)
-  - [PayloadCapabilityCheck.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadCapabilityCheck.swift)
-  - [PayloadDataQualitySource.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadDataQualitySource.swift)
-  - [PayloadVisualPreset.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadVisualPreset.swift)
-  - [VehicleMassModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/VehicleMassModel.swift)
+  - [PayloadConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadConfiguration.swift)
+  - [PayloadType.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadType.swift)
+  - [PayloadState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadState.swift)
+  - [PayloadMountState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadMountState.swift)
+  - [PayloadCapabilityCheck.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadCapabilityCheck.swift)
+  - [PayloadDataQualitySource.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadDataQualitySource.swift)
+  - [PayloadVisualPreset.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadVisualPreset.swift)
+  - [VehicleMassModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/VehicleMassModel.swift)
 - фильтры и UI-facing состояния каталога:
-  - [UAVFilterState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
-  - [UAVSelectionState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVSelectionState.swift)
-  - [UAVVehicleType.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVVehicleType.swift)
-  - [UAVMassCategory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVMassCategory.swift)
+  - [UAVFilterState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
+  - [UAVSelectionState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVSelectionState.swift)
+  - [UAVVehicleType.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVVehicleType.swift)
+  - [UAVMassCategory.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVMassCategory.swift)
 
 ### На что обратить внимание
 
-- [DroneModelProfile.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift) — один из самых важных domain-файлов:
+- [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift) — один из самых важных domain-файлов:
   - описывает `DroneModelProfile`;
   - содержит `AbstractDroneParameters`;
   - хранит `LIPODroneModelRepository`, который отдаёт baseline-набор профилей.
-- [TerrainModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/TerrainModel.swift) — задаёт `TerrainPreset`, `MapScale`, `TerrainConfiguration`, `EnvironmentObjectKind`.
-- [WeatherModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/WeatherModel.swift) — описывает пресеты погоды и превращает их в runtime-факторы, влияющие на физику и риск.
+- [TerrainModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TerrainModel.swift) — задаёт `TerrainPreset`, `MapScale`, `TerrainConfiguration`, `EnvironmentObjectKind`.
+- [WeatherModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/WeatherModel.swift) — описывает пресеты погоды и превращает их в runtime-факторы, влияющие на физику и риск.
 
 ---
 
@@ -373,7 +414,7 @@ flowchart LR
 
 ### Основные файлы
 
-- [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)  
+- [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
   главный контроллер сцены. Отвечает за:
   - корневую `SCNScene`;
   - камеры;
@@ -387,10 +428,10 @@ flowchart LR
   - dropped payload visuals;
   - обновление сцены на каждом кадре.
 
-- [SceneFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/SceneFactory.swift)  
+- [SceneFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/SceneFactory.swift)
   создаёт базовую пустую сцену: ground plane, lights, grid, axes, camera.
 
-- [DroneModelBuilder.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneModelBuilder.swift)  
+- [DroneModelBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneModelBuilder.swift)
   собирает визуальную модель БЛА и отдаёт связанный набор anchor-нод:
   - `visualRootNode`
   - `cameraAnchorNode`
@@ -399,25 +440,25 @@ flowchart LR
   - `payloadMountNode`
   - `propellerNodes`
 
-- [UAVVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/UAVVisualFactory.swift)  
+- [UAVVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/UAVVisualFactory.swift)
   фабрика визуальных вариантов БЛА.
 
-- [FPVCameraAnchor.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/FPVCameraAnchor.swift)  
+- [FPVCameraAnchor.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/FPVCameraAnchor.swift)
   конфигурация FPV-привязки.
 
-- [PayloadVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)  
+- [PayloadVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
   визуальные модели payload.
 
-- [ScenePopulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)  
+- [ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
   генерирует объекты окружения по preset местности.
 
-- [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)  
+- [EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
   совместимый фасад фабрики окружения; делегирует procedural-построение среды.
 
-- [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)  
+- [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
   создаёт procedural-геометрию деревьев, зданий, крыш, тротуаров, дорог и дальнего пояса.
 
-- [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)  
+- [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
   задаёт procedural-материалы земли, коры, листвы, фасадов, обычных окон и кровли без загрузки из внешней папки `Assets`.
 
 ### Что происходит в сцене
@@ -439,10 +480,10 @@ flowchart LR
 
 ### Основные файлы
 
-- [DronePhysicsEngine.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/DronePhysicsEngine.swift)  
+- [DronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/DronePhysicsEngine.swift)
   протокол движка физики.
 
-- [SimpleDronePhysicsEngine.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)  
+- [SimpleDronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
   baseline-физика полёта:
   - step с фиксированным substep;
   - multirotor/fixed-wing ветки;
@@ -450,7 +491,7 @@ flowchart LR
   - rate control;
   - ground rest behavior.
 
-- [DroneSimulationContext.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/DroneSimulationContext.swift)  
+- [DroneSimulationContext.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/DroneSimulationContext.swift)
   входной контекст для физики:
   - профиль;
   - активный `UAVProfile`;
@@ -460,36 +501,126 @@ flowchart LR
   - wind vector;
   - mass model.
 
-- [CollisionAnalysisService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift)  
+- [CollisionAnalysisService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift)
   считает риск столкновения и ближайшее препятствие.
 
-- [AutoPathPlannerService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift)  
+- [AutoPathPlannerService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift)
   планировщик маршрута:
   - строит навигационную сетку;
   - помечает blocked/penalty зоны;
   - выдаёт waypoints;
   - умеет invalidate и replan.
 
-- [BatteryThermalSimulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/BatteryThermalSimulationService.swift)  
+- [BatteryThermalSimulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/BatteryThermalSimulationService.swift)
   расчёт разряда батареи и thermal state.
 
-- [DroneFleetManager.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/DroneFleetManager.swift)  
+- [DroneFleetManager.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/DroneFleetManager.swift)
   логика ведомых БЛА, их формаций и междроновых рисков.
 
-- [PayloadController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/PayloadController.swift)  
+- [PayloadController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/PayloadController.swift)
   payload capability check и mass model с учётом полезной нагрузки.
 
-- [FlightBaselineResolver.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/FlightBaselineResolver.swift)  
+- [FlightBaselineResolver.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FlightBaselineResolver.swift)
   резолвит baseline-параметры полёта из runtime profile и active UAV profile.
+
+- [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift)
+  фазовый контроллер навигации к marker target:
+  - `takeoff / cruise / approach / hold`;
+  - разные ветки для `multirotor` и `fixedWing`;
+  - выдаёт `AutoNavigationDirective` с axis intent, target altitude, distance/bearing.
+
+- [MulticopterAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterAutopilotController.swift)
+  низкоуровневый контроллер автопилота для мультикоптеров:
+  - переводит цель в roll/pitch/yaw/throttle;
+  - удерживает высоту через hover throttle и vertical compensation;
+  - ограничивает углы и throttle безопасными диапазонами.
+
+- [FixedWingAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAutopilotController.swift)
+  основной контроллер автопилота самолётных БЛА:
+  - ведёт fixed-wing route follower;
+  - считает cross-track / along-track progress;
+  - выполняет fly-by turns, route capture, final loiter;
+  - управляет launch phases для catapult/hand/runway/vtol-like сценариев;
+  - разделяет lateral guidance и energy/airspeed/altitude control;
+  - публикует `FixedWingAutopilotDebugState`.
+
+- [FixedWingAssistController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAssistController.swift)
+  assisted-control слой для самолётного режима:
+  - heading hold;
+  - altitude hold;
+  - waypoint intercept;
+  - диагностика геометрии перехвата и fallback при потере цели.
+
+- [MissionAutopilotAdapter.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift)
+  адаптер между mission execution и marker/autopilot pipeline:
+  - bind active mission target к `TargetMarkerState`;
+  - расчёт travel altitude с учётом `MissionConstraints`;
+  - speed envelope для mission-speed constraints;
+  - проверка, что текущий marker действительно принадлежит активной цели миссии.
+
+- [MulticopterRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterRouteBuilder.swift)
+  строит polyline-маршрут и `MissionLeg` для коптерных миссий.
+
+- [FixedWingRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingRouteBuilder.swift)
+  строит fixed-wing flyable route с sampled leg segments и return-home leg.
+
+- [MissionPlanBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionPlanBuilder.swift)
+  собирает `MissionPlan` из draft/preview/validation и выбирает route builder по типу аппарата.
+
+- [MissionExecutionBinder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionBinder.swift), [MissionExecutionCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionProgressTracker.swift)
+  runtime execution-механика миссии: bind цели, start/pause/resume/abort, прогресс waypoint-ов и определение достижения active target.
+
+- [MissionAuthorityGuard.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAuthorityGuard.swift), [MissionRuntimeMonitor.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionRuntimeMonitor.swift), [MissionSafetyEvaluator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionSafetyEvaluator.swift), [MissionFailsafeCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionFailsafeCoordinator.swift)
+  safety-контур миссии: контроль authority, target ownership, stall/mismatch detection, runtime constraints, battery/return feasibility и failsafe transitions.
 
 ### Когда менять этот слой
 
 - изменить поведение полёта -> `SimpleDronePhysicsEngine`
 - изменить collision risk / avoidance -> `CollisionAnalysisService`
 - изменить авто-маршрут -> `AutoPathPlannerService`
+- изменить автопилот коптера -> `MulticopterAutopilotController`, `AutoNavigationController`
+- изменить автопилот самолётного БЛА -> `FixedWingAutopilotController`, `FixedWingAssistController`, `FixedWingRouteBuilder`
+- изменить привязку миссии к автопилоту -> `MissionAutopilotAdapter`, `MissionExecutionBinder`, `MissionProgressTracker`, `MissionAuthorityGuard`
 - изменить батарею/нагрев -> `BatteryThermalSimulationService`
 - изменить логику payload mass -> `PayloadController`
 - изменить wingmen/fleet -> `DroneFleetManager`
+
+---
+
+## Где находится логика автопилота
+
+### Коптерные БЛА
+
+- [MulticopterAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterAutopilotController.swift)
+  основная логика коптерного автопилота: roll/pitch/yaw/throttle-команда к цели.
+- [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift)
+  фазы marker navigation для коптеров: набор высоты, cruise, approach, hold.
+- [MulticopterRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterRouteBuilder.swift)
+  построение коптерного mission route как polyline.
+- [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
+  orchestration: `updateAutopilotTargets(...)`, `updateTargetMarkerAutoNavigation(...)`, `applyAutopilotTrackingControl(...)`, `applyAutopilotCommand(...)`.
+
+### Самолётные БЛА
+
+- [FixedWingAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAutopilotController.swift)
+  основная логика самолётного автопилота: route follower, lateral guidance, energy control, fly-by turns, launch phases, loiter/completion.
+- [FixedWingAssistController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAssistController.swift)
+  assisted-control режимы самолётного БЛА: heading hold, altitude hold, waypoint intercept.
+- [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift)
+  fixed-wing ветка marker navigation: курс, bank intent, pitch/throttle intent, радиусы подхода с учётом minimum turn radius.
+- [FixedWingRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingRouteBuilder.swift)
+  сборка fixed-wing mission legs из preview route.
+- [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
+  orchestration: `applyFixedWingMarkerGuidance(...)`, `applyAutopilotTrackingControl(...)`, `currentFixedWingRouteTrackingContext(...)`, `updateFixedWingLaunchSequence(...)`.
+
+### Общие связующие файлы
+
+- [MissionAutopilotAdapter.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift)
+  связывает mission targets с marker/autopilot pipeline.
+- [FlightControlRouting.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/FlightControlRouting.swift)
+  выбирает authority между manual, marker guidance, failsafe и blocked.
+- [AutopilotInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/AutopilotInputProvider.swift)
+  placeholder для будущей подачи autopilot directives через общий `InputManager`; сейчас возвращает neutral snapshot.
 
 ---
 
@@ -497,7 +628,7 @@ flowchart LR
 
 Инфраструктурные сервисы хранения и экспорта.
 
-### [TelemetryExportService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
+### [TelemetryExportService.swift](/Users/misha/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
 
 Файл шире, чем подсказывает имя. В нём лежат:
 
@@ -532,7 +663,19 @@ flowchart LR
 
 ## `/DroneUAVDemo/Input`
 
-### [KeyboardInputService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift)
+Input-слой собирает управление из нескольких источников и отдаёт `ResolvedControlState` в `DroneSimulationViewModel`.
+
+### [InputManager.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputManager.swift)
+
+Центральный агрегатор input-пайплайна:
+
+- обновляет включённые `InputProvider`;
+- выбирает dominant source по activity score;
+- применяет deadzone и smoothing для flight/camera axes;
+- объединяет action-команды из подключённых источников;
+- хранит последний snapshot по каждому `InputSourceKind`.
+
+### [KeyboardInputService.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift)
 
 Сервис клавиатуры. Здесь живут:
 
@@ -556,6 +699,38 @@ flowchart LR
 - разделить UI-команды и flight-команды;
 - диагностировать конфликты биндов.
 
+### Остальные input-файлы
+
+- [KeyboardInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputProvider.swift)
+  адаптирует `KeyboardInputService` к общему `InputProvider`.
+- [GameControllerInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/GameControllerInputProvider.swift)
+  читает аппаратный game controller и мапит стики/кнопки в flight, camera и UI actions.
+- [RemoteInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/RemoteInputProvider.swift)
+  принимает `RemoteControlPacket` из remote-транспорта и превращает его в `InputSnapshot`.
+- [AutopilotInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/AutopilotInputProvider.swift)
+  зарезервирован для будущей интеграции autopilot directives в общий input pipeline.
+- [ResolvedControlState.swift](/Users/misha/New%20project/DroneUAVDemo/Input/ResolvedControlState.swift), [InputSnapshot.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputSnapshot.swift), [InputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputProvider.swift), [InputSourceKind.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputSourceKind.swift)
+  общие типы input-пайплайна.
+- [InputBindingsStore.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputBindingsStore.swift), [ControllerSettingsStore.swift](/Users/misha/New%20project/DroneUAVDemo/Input/ControllerSettingsStore.swift), [InputCaptureCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputCaptureCoordinator.swift)
+  persistence и UI-настройка биндов.
+
+---
+
+## `/DroneUAVDemo/Remote`
+
+Remote-слой нужен для внешнего управления симуляцией через TCP.
+
+- [RemoteTransport.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/RemoteTransport.swift)
+  протокол транспорта с `packetHandler` и `disconnectHandler`.
+- [NetworkRemoteHost.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/NetworkRemoteHost.swift)
+  TCP listener на `Network.framework`, по умолчанию порт `7777`; принимает поток, декодирует пакеты и передаёт их в handler.
+- [RemotePacketDecoder.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/RemotePacketDecoder.swift)
+  буферизует входящие bytes и выделяет `RemoteControlPacket`.
+- [RemoteControlPacket.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/RemoteControlPacket.swift)
+  wire-format remote-control пакета.
+- [MockRemoteTransport.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/MockRemoteTransport.swift)
+  тестовый/локальный транспорт без сетевого listener.
+
 ---
 
 ## `/DroneUAVDemo/Resources`
@@ -564,11 +739,11 @@ flowchart LR
 
 ### Подкаталоги
 
-- [Resources/en.lproj/Localizable.strings](/Users/misha/Documents/New%20project/DroneUAVDemo/Resources/en.lproj/Localizable.strings)  
+- [Resources/en.lproj/Localizable.strings](/Users/misha/New%20project/DroneUAVDemo/Resources/en.lproj/Localizable.strings)
   английская локализация.
-- [Resources/ru.lproj/Localizable.strings](/Users/misha/Documents/New%20project/DroneUAVDemo/Resources/ru.lproj/Localizable.strings)  
+- [Resources/ru.lproj/Localizable.strings](/Users/misha/New%20project/DroneUAVDemo/Resources/ru.lproj/Localizable.strings)
   русская локализация.
-- [Resources/Assets.xcassets](/Users/misha/Documents/New%20project/DroneUAVDemo/Resources/Assets.xcassets/Contents.json)  
+- [Resources/Assets.xcassets](/Users/misha/New%20project/DroneUAVDemo/Resources/Assets.xcassets/Contents.json)
   app icons и другие системные ассеты Xcode.
 
 ---
@@ -579,9 +754,9 @@ flowchart LR
 
 Актуальный pipeline окружения теперь строится через:
 
-- [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
-- [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
-- [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
+- [EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
+- [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
+- [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
 
 ---
 
@@ -591,7 +766,7 @@ flowchart LR
 
 ### Верхняя панель
 
-`SimulationToolstripView` в [ContentView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift) показывает кнопки модулей:
+`SimulationToolstripView` в [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift) показывает кнопки модулей:
 
 - `Полет`
 - `БЛА`
@@ -604,7 +779,7 @@ flowchart LR
 
 ### Левая панель
 
-[SidebarModuleHostView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift)
+[SidebarModuleHostView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift)
 
 Показывает только активный модуль:
 
@@ -618,7 +793,7 @@ flowchart LR
 
 ### Центральная область
 
-[SceneViewportView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift)
+[SceneViewportView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift)
 
 Содержит:
 
@@ -657,10 +832,10 @@ flowchart LR
 
 ### Где править каталог
 
-- runtime flight/visual profile -> [DroneModelProfile.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift)
-- reference UAV data -> [UAVReferenceCatalog.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
-- фильтрация и selection state -> [UAVCatalog.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVCatalog.swift), [UAVFilterState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
-- UI каталога -> [UAVCatalogModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift)
+- runtime flight/visual profile -> [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift)
+- reference UAV data -> [UAVReferenceCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
+- фильтрация и selection state -> [UAVCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVCatalog.swift), [UAVFilterState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
+- UI каталога -> [UAVCatalogModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift)
 
 ---
 
@@ -668,7 +843,7 @@ flowchart LR
 
 ### Генерация
 
-[ScenePopulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
+[ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
 
 По `TerrainConfiguration` генерирует descriptor-ы для:
 
@@ -689,12 +864,12 @@ flowchart LR
 
 ### Визуализация
 
-[EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
+[EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
 
 Это совместимый входной слой. Фактическую procedural-визуализацию выполняют:
 
-- [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
-- [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
+- [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
+- [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
 
 Через них создаются:
 
@@ -719,15 +894,15 @@ flowchart LR
 
 ### Данные
 
-- [PayloadConfiguration.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadConfiguration.swift)
-- [PayloadType.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadType.swift)
-- [PayloadState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadState.swift)
-- [PayloadCapabilityCheck.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/PayloadCapabilityCheck.swift)
-- [VehicleMassModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/VehicleMassModel.swift)
+- [PayloadConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadConfiguration.swift)
+- [PayloadType.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadType.swift)
+- [PayloadState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadState.swift)
+- [PayloadCapabilityCheck.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadCapabilityCheck.swift)
+- [VehicleMassModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/VehicleMassModel.swift)
 
 ### Логика
 
-[PayloadController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/PayloadController.swift)
+[PayloadController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/PayloadController.swift)
 
 Здесь считается:
 
@@ -737,11 +912,11 @@ flowchart LR
 
 ### Визуал
 
-[PayloadVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
+[PayloadVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
 
 ### UI
 
-[PayloadView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift)
+[PayloadView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift)
 
 ---
 
@@ -765,7 +940,7 @@ flowchart LR
 
 ### UI-диагностика
 
-[DiagnosticsModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift)
+[DiagnosticsModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift)
 
 Разбита на панели:
 
@@ -780,32 +955,44 @@ flowchart LR
 
 ### Если нужно поменять…
 
-- логику взлёта/посадки/управления  
-  -> [DroneSimulationViewModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift), [SimpleDronePhysicsEngine.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
+- логику взлёта/посадки/управления
+  -> [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift), [SimpleDronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
 
-- параметры и модели БЛА  
-  -> [DroneModelProfile.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift), [UAVReferenceCatalog.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
+- параметры и модели БЛА
+  -> [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift), [UAVReferenceCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
 
-- каталог БЛА и фильтры  
-  -> [UAVCatalogModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift), [UAVFilterState.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
+- каталог БЛА и фильтры
+  -> [UAVCatalogModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift), [UAVFilterState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
 
-- поведение камеры  
-  -> [CameraConfiguration.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift), [CameraModuleView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift), [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
+- поведение камеры
+  -> [CameraConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift), [CameraModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift), [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
 
-- генерацию мира  
-  -> [TerrainModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Domain/TerrainModel.swift), [ScenePopulationService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift), [EnvironmentObjectFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift), [EnvironmentProceduralVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift), [EnvironmentProceduralMaterials.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
+- генерацию мира
+  -> [TerrainModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TerrainModel.swift), [ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift), [EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift), [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift), [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
 
-- collision risk / obstacle avoidance / pathfinding  
-  -> [CollisionAnalysisService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift), [AutoPathPlannerService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift), [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
+- collision risk / obstacle avoidance / pathfinding
+  -> [CollisionAnalysisService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift), [AutoPathPlannerService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift), [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
 
-- payload  
-  -> [PayloadController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Simulation/PayloadController.swift), [PayloadView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift), [PayloadVisualFactory.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
+- коптерный автопилот
+  -> [MulticopterAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterAutopilotController.swift), [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift), [MulticopterRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterRouteBuilder.swift)
 
-- telemetry export / save-load  
-  -> [TelemetryExportService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
+- самолётный автопилот
+  -> [FixedWingAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAutopilotController.swift), [FixedWingAssistController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAssistController.swift), [FixedWingRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingRouteBuilder.swift), [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
 
-- keybindings  
-  -> [KeyboardInputService.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift), [KeyBindingsSettingsView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift)
+- mission execution и привязку миссии к автопилоту
+  -> [MissionAutopilotAdapter.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift), [MissionExecutionBinder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionBinder.swift), [MissionExecutionCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionProgressTracker.swift), [MissionAuthorityGuard.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAuthorityGuard.swift)
+
+- input pipeline / remote-control
+  -> [InputManager.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputManager.swift), [KeyboardInputService.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift), [GameControllerInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/GameControllerInputProvider.swift), [RemoteInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/RemoteInputProvider.swift), [NetworkRemoteHost.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/NetworkRemoteHost.swift)
+
+- payload
+  -> [PayloadController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/PayloadController.swift), [PayloadView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift), [PayloadVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
+
+- telemetry export / save-load
+  -> [TelemetryExportService.swift](/Users/misha/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
+
+- keybindings
+  -> [KeyboardInputService.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift), [KeyBindingsSettingsView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift)
 
 ---
 
@@ -837,25 +1024,25 @@ flowchart LR
 
 ## Краткое резюме по слоям
 
-- `DroneUAVDemoApp.swift`  
+- `DroneUAVDemoApp.swift`
   запускает окно.
-- `ContentView.swift`  
+- `ContentView.swift`
   shell приложения, стартовый экран и рабочая компоновка.
-- `DroneSimulationViewModel.swift`  
+- `DroneSimulationViewModel.swift`
   главный runtime state и orchestration.
-- `Scene/*`  
+- `Scene/*`
   вся `SceneKit`-сцена, дрон, камеры, окружение, payload visual.
-- `Simulation/*`  
-  физика, collision analysis, автопуть, батарея/тепло, fleet, payload math.
-- `Domain/*`  
+- `Simulation/*`
+  физика, collision analysis, автопуть, автопилоты, mission execution, батарея/тепло, fleet, payload math.
+- `Domain/*`
   чистые модели данных.
-- `Services/*`  
+- `Services/*`
   сохранения, autosave, export.
-- `Input/*`  
-  клавиатурный ввод.
-- `Resources/*`  
+- `Input/*`
+  общий input-pipeline, клавиатура, game controller, remote input, бинды.
+- `Remote/*`
+  TCP remote-control transport и packet decoder.
+- `Resources/*`
   локализация и системные ресурсы приложения.
-- `Scene/*`  
-  procedural-среда, материалы окружения и генераторы окружения без внешней folder-resource папки `Assets`.
 
-Если нужен один файл, с которого начинать чтение проекта, это [DroneSimulationViewModel.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift). Если нужен один файл, с которого начинать чтение UI, это [ContentView.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift). Если нужен один файл, чтобы понять сцену, это [DroneSceneController.swift](/Users/misha/Documents/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift).
+Если нужен один файл, с которого начинать чтение проекта, это [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift). Если нужен один файл, с которого начинать чтение UI, это [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift). Если нужен один файл, чтобы понять сцену, это [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift).

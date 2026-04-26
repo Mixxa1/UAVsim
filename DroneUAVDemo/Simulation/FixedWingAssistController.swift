@@ -21,6 +21,19 @@ struct FixedWingAssistInterceptDebugContext {
     let currentLegEnd: SIMD2<Float>?
 }
 
+struct FixedWingAssistGeometryAssessment {
+    let feasibilityState: FixedWingAssistInterceptFeasibilityState
+    let distanceToWaypoint: Float
+    let headingErrorRadians: Float
+    let availableTurnInDistance: Float
+    let estimatedTurnRadius: Float
+    let targetBearing: Float
+    let limitedHeading: Float
+    let turnCommand: Float
+    let commandedBankDegrees: Float
+    let commandedTurnDirection: FixedWingAssistTurnDirection
+}
+
 final class FixedWingAssistController {
     private struct TerminalCaptureTracker {
         var waypointID: UUID?
@@ -56,7 +69,7 @@ final class FixedWingAssistController {
         static let altitudePitchDamping: Float = 1.95
         static let altitudeThrottleGain: Float = 0.012
         static let altitudeThrottleDamping: Float = 0.040
-        static let interceptLeadLimitDeg: Float = 42.0
+        static let interceptLeadLimitDeg: Float = 58.0
         static let headingBankFraction: Float = 0.72
         static let maxAssistBankDeg: Float = 30.0
         static let maxAltitudePitchDeg: Float = 10.0
@@ -66,13 +79,14 @@ final class FixedWingAssistController {
         static let acceptancePlaneHysteresisMeters: Float = 0.10
         static let nearPassRadiusMultiplier: Float = 1.35
         static let nearPassOpeningDistanceMeters: Float = 0.15
+        static let tightTurnLeadLimitDeg: Float = 52.0
+        static let poorGeometryLeadLimitDeg: Float = 64.0
     }
 
     private var turnOverrideWasActive = false
     private var altitudeOverrideWasActive = false
     private var terminalCaptureTracker: TerminalCaptureTracker?
     private var lastInterceptDebugTimestamp = Date.distantPast
-
     func reset() {
         turnOverrideWasActive = false
         altitudeOverrideWasActive = false
@@ -88,40 +102,40 @@ final class FixedWingAssistController {
     ) -> FixedWingAssistState {
         reset()
 
+        var nextState = currentState
+        nextState.mode = mode
+        nextState.selectedWaypointID = selectedWaypointID ?? currentState.selectedWaypointID
+        nextState.targetHeadingRadians = nil
+        nextState.targetAltitudeMeters = nil
+        nextState.interceptCompleted = false
+        nextState.captureCompletedReason = nil
+        nextState.autoAdvanceSuppressed = false
+        nextState.autoAdvanceSuppressedReason = nil
+        nextState.commandedTurnDirection = .none
+        nextState.activeGuidanceTargetType = "none"
+        nextState.activeGuidanceMode = "none"
+        nextState.usingObsoleteFixedWingMode = false
+
         switch mode {
         case .manual:
-            return FixedWingAssistState(
-                mode: .manual,
-                selectedWaypointID: selectedWaypointID ?? currentState.selectedWaypointID,
-                targetHeadingRadians: nil,
-                targetAltitudeMeters: nil,
-                interceptCompleted: false
-            )
+            nextState.interceptState = .manual
         case .headingHold:
-            return FixedWingAssistState(
-                mode: .headingHold,
-                selectedWaypointID: selectedWaypointID ?? currentState.selectedWaypointID,
-                targetHeadingRadians: aircraftState.orientation.z,
-                targetAltitudeMeters: max(0.0, aircraftState.position.y),
-                interceptCompleted: false
-            )
+            nextState.interceptState = .headingHold
+            nextState.targetHeadingRadians = aircraftState.orientation.z
+            nextState.targetAltitudeMeters = max(0.0, aircraftState.position.y)
         case .altitudeHold:
-            return FixedWingAssistState(
-                mode: .altitudeHold,
-                selectedWaypointID: selectedWaypointID ?? currentState.selectedWaypointID,
-                targetHeadingRadians: aircraftState.orientation.z,
-                targetAltitudeMeters: max(0.0, aircraftState.position.y),
-                interceptCompleted: false
-            )
+            nextState.interceptState = .altitudeHold
+            nextState.targetHeadingRadians = aircraftState.orientation.z
+            nextState.targetAltitudeMeters = max(0.0, aircraftState.position.y)
         case .waypointIntercept:
-            return FixedWingAssistState(
-                mode: .waypointIntercept,
-                selectedWaypointID: selectedWaypointID ?? currentState.selectedWaypointID,
-                targetHeadingRadians: aircraftState.orientation.z,
-                targetAltitudeMeters: max(0.0, aircraftState.position.y),
-                interceptCompleted: false
-            )
+            nextState.interceptState = .singlePointIntercept
+            nextState.targetHeadingRadians = aircraftState.orientation.z
+            nextState.targetAltitudeMeters = max(0.0, aircraftState.position.y)
+            nextState.activeGuidanceTargetType = "singlePointIntercept"
+            nextState.activeGuidanceMode = "singlePointIntercept"
         }
+
+        return nextState
     }
 
     func update(
@@ -131,6 +145,7 @@ final class FixedWingAssistController {
         baseline: ResolvedFlightBaseline,
         currentControls: DroneControlValues,
         interceptTarget: SIMD2<Float>?,
+        captureTarget: SIMD2<Float>?,
         interceptDebugContext: FixedWingAssistInterceptDebugContext,
         turnOverrideActive: Bool,
         altitudeOverrideActive: Bool
@@ -183,6 +198,14 @@ final class FixedWingAssistController {
             break
         case .headingHold:
             terminalCaptureTracker = nil
+            applyGeometryDiagnostics(
+                evaluateInterceptGeometry(
+                    aircraftState: aircraftState,
+                    wing: wing,
+                    interceptTarget: interceptTarget
+                ),
+                to: &nextState
+            )
             yawTargetRadians = nextState.targetHeadingRadians ?? aircraftState.orientation.z
             rollTargetDegrees = headingRollTarget(
                 currentHeading: aircraftState.orientation.z,
@@ -191,13 +214,16 @@ final class FixedWingAssistController {
             )
         case .altitudeHold:
             terminalCaptureTracker = nil
+            applyGeometryDiagnostics(
+                evaluateInterceptGeometry(
+                    aircraftState: aircraftState,
+                    wing: wing,
+                    interceptTarget: interceptTarget
+                ),
+                to: &nextState
+            )
             nextState.targetHeadingRadians = aircraftState.orientation.z
             yawTargetRadians = aircraftState.orientation.z
-            rollTargetDegrees = smoothed(
-                current: Float(currentControls.roll),
-                target: 0.0,
-                blend: Tuning.neutralBlend
-            )
             let altitudeTargets = altitudeTargetsForHold(
                 aircraftState: aircraftState,
                 targetAltitude: nextState.targetAltitudeMeters ?? aircraftState.position.y,
@@ -220,69 +246,37 @@ final class FixedWingAssistController {
                 )
                 transitionReason = "fixed_wing_assist_intercept_target_lost"
                 yawTargetRadians = nextState.targetHeadingRadians ?? aircraftState.orientation.z
-                rollTargetDegrees = 0.0
+                applyGeometryDiagnostics(nil, to: &nextState)
                 break
             }
 
+            guard let geometryAssessment = evaluateInterceptGeometry(
+                aircraftState: aircraftState,
+                wing: wing,
+                interceptTarget: interceptTarget
+            ) else {
+                applyGeometryDiagnostics(nil, to: &nextState)
+                break
+            }
+            applyGeometryDiagnostics(geometryAssessment, to: &nextState)
+
+            let capturePoint = captureTarget ?? interceptTarget
             let currentHeading = aircraftState.orientation.z
-            let targetBearing = bearingToTarget(
-                from: planarPosition,
-                to: interceptTarget,
-                fallback: currentHeading
-            )
-            let headingError = shortestAngleRadians(targetBearing - currentHeading)
-            let turnCommand = limitedTurnCommand(for: headingError)
-            let limitedHeading = limitedInterceptHeading(
-                currentHeading: currentHeading,
-                targetBearing: targetBearing
-            )
             let currentAirspeed = max(aircraftState.forwardAirspeed, wing.minSustainableSpeedMps)
             let captureRadius = max(
                 wing.waypointAcceptanceRadiusMeters,
                 wing.minimumTurnRadius(airspeed: currentAirspeed) * 0.35
             )
-            let maxBankDegrees = min(Float(wing.maxBankAngleDeg) * 0.76, Tuning.maxAssistBankDeg)
-            let bankCommand = bankCommandDegrees(
-                forHeadingError: turnCommand,
-                maxBankDegrees: maxBankDegrees
-            )
             let captureAssessment = assessTerminalCapture(
                 waypointID: nextState.selectedWaypointID,
-                targetPosition: interceptTarget,
+                targetPosition: capturePoint,
                 currentPosition: planarPosition,
                 currentHeading: currentHeading,
                 captureRadius: captureRadius,
                 wing: wing
             )
 
-            emitInterceptDebugIfNeeded(
-                currentWorldPosition: aircraftState.position,
-                targetWorldPosition: SIMD3<Float>(
-                    interceptTarget.x,
-                    nextState.targetAltitudeMeters ?? aircraftState.position.y,
-                    interceptTarget.y
-                ),
-                selectedWaypointID: interceptDebugContext.selectedWaypointID,
-                guidanceTargetType: interceptDebugContext.guidanceTargetType,
-                guidanceTargetPoint: interceptDebugContext.guidanceTargetPoint ?? interceptTarget,
-                currentLegStart: interceptDebugContext.currentLegStart,
-                currentLegEnd: interceptDebugContext.currentLegEnd,
-                currentHeading: currentHeading,
-                targetBearing: targetBearing,
-                headingError: headingError,
-                distanceToSelectedWaypoint: captureAssessment.distanceToWaypoint,
-                captureRadius: captureAssessment.captureRadius,
-                enteredCaptureRadius: captureAssessment.enteredCaptureRadius,
-                crossedAcceptancePlane: captureAssessment.crossedAcceptancePlane,
-                bearingToSelectedWaypoint: targetBearing,
-                bearingUsedByGuidance: targetBearing,
-                turnCommand: turnCommand,
-                bankCommand: bankCommand,
-                interceptCompletedReason: captureAssessment.interceptCompletedReason,
-                activeTargetSource: interceptDebugContext.activeTargetSource,
-                activeRouteIncludesHome: interceptDebugContext.activeRouteIncludesHome,
-                segmentCountAfterValidation: interceptDebugContext.segmentCountAfterValidation
-            )
+            nextState.distanceToActiveWaypointMeters = captureAssessment.distanceToWaypoint
 
             if let completedReason = captureAssessment.completedReason {
                 terminalCaptureTracker = nil
@@ -293,42 +287,44 @@ final class FixedWingAssistController {
                     currentState: nextState
                 )
                 nextState.interceptCompleted = true
-                transitionReason = "fixed_wing_assist_intercept_complete_\(completedReason)"
-                yawTargetRadians = nextState.targetHeadingRadians ?? aircraftState.orientation.z
-                rollTargetDegrees = 0.0
+                nextState.captureCompletedReason = completedReason
+                nextState.interceptState = .terminalCapture
+                nextState.activeGuidanceMode = "terminalCapture"
+                nextState.activeGuidanceTargetType = "terminalCapture"
+                nextState.distanceToActiveWaypointMeters = captureAssessment.distanceToWaypoint
+                transitionReason = "fixed_wing_assist_terminal_capture_\(completedReason)"
+
                 emitInterceptDebugIfNeeded(
+                    context: interceptDebugContext,
                     currentWorldPosition: aircraftState.position,
                     targetWorldPosition: SIMD3<Float>(
-                        interceptTarget.x,
+                        capturePoint.x,
                         nextState.targetAltitudeMeters ?? aircraftState.position.y,
-                        interceptTarget.y
+                        capturePoint.y
                     ),
-                    selectedWaypointID: interceptDebugContext.selectedWaypointID,
-                    guidanceTargetType: interceptDebugContext.guidanceTargetType,
-                    guidanceTargetPoint: interceptDebugContext.guidanceTargetPoint ?? interceptTarget,
-                    currentLegStart: interceptDebugContext.currentLegStart,
-                    currentLegEnd: interceptDebugContext.currentLegEnd,
                     currentHeading: currentHeading,
-                    targetBearing: targetBearing,
-                    headingError: headingError,
-                    distanceToSelectedWaypoint: captureAssessment.distanceToWaypoint,
+                    geometry: geometryAssessment,
+                    guidanceMode: "terminalCapture",
+                    distanceToWaypoint: captureAssessment.distanceToWaypoint,
                     captureRadius: captureAssessment.captureRadius,
-                    enteredCaptureRadius: captureAssessment.enteredCaptureRadius,
-                    crossedAcceptancePlane: captureAssessment.crossedAcceptancePlane,
-                    bearingToSelectedWaypoint: targetBearing,
-                    bearingUsedByGuidance: targetBearing,
-                    turnCommand: turnCommand,
-                    bankCommand: bankCommand,
                     interceptCompletedReason: completedReason,
-                    activeTargetSource: interceptDebugContext.activeTargetSource,
-                    activeRouteIncludesHome: interceptDebugContext.activeRouteIncludesHome,
-                    segmentCountAfterValidation: interceptDebugContext.segmentCountAfterValidation,
+                    stateTransitionReason: transitionReason,
                     force: true
                 )
             } else {
-                nextState.targetHeadingRadians = limitedHeading
-                yawTargetRadians = limitedHeading
-                rollTargetDegrees = bankCommand
+                let guidanceMode = resolvedGuidanceMode(from: interceptDebugContext.guidanceTargetType)
+                nextState.interceptCompleted = false
+                nextState.interceptState = guidanceMode.interceptState
+                nextState.activeGuidanceMode = guidanceMode.rawValue
+                nextState.activeGuidanceTargetType = guidanceMode.rawValue
+                nextState.targetHeadingRadians = geometryAssessment.limitedHeading
+                nextState.headingErrorDegrees = geometryAssessment.turnCommand.radiansToDegrees
+                nextState.commandedBankDegrees = geometryAssessment.commandedBankDegrees
+                nextState.filteredBankCommandDegrees = geometryAssessment.commandedBankDegrees
+                nextState.commandedTurnDirection = geometryAssessment.commandedTurnDirection
+
+                yawTargetRadians = geometryAssessment.limitedHeading
+                rollTargetDegrees = geometryAssessment.commandedBankDegrees
 
                 let altitudeTargets = altitudeTargetsForHold(
                     aircraftState: aircraftState,
@@ -340,9 +336,28 @@ final class FixedWingAssistController {
                 )
                 pitchTargetDegrees = altitudeTargets.pitchDegrees
                 throttleTarget = altitudeTargets.throttle
-                nextState.interceptCompleted = false
+
+                emitInterceptDebugIfNeeded(
+                    context: interceptDebugContext,
+                    currentWorldPosition: aircraftState.position,
+                    targetWorldPosition: SIMD3<Float>(
+                        interceptTarget.x,
+                        nextState.targetAltitudeMeters ?? aircraftState.position.y,
+                        interceptTarget.y
+                    ),
+                    currentHeading: currentHeading,
+                    geometry: geometryAssessment,
+                    guidanceMode: guidanceMode.rawValue,
+                    distanceToWaypoint: captureAssessment.distanceToWaypoint,
+                    captureRadius: captureAssessment.captureRadius,
+                    interceptCompletedReason: captureAssessment.interceptCompletedReason,
+                    stateTransitionReason: transitionReason
+                )
             }
         }
+
+        nextState.stateTransitionReason = transitionReason ?? nextState.stateTransitionReason
+        nextState.usingObsoleteFixedWingMode = false
 
         return FixedWingAssistOutput(
             state: nextState,
@@ -354,12 +369,99 @@ final class FixedWingAssistController {
         )
     }
 
+    func evaluateInterceptGeometry(
+        aircraftState: DroneState,
+        wing: FixedWingParameters,
+        interceptTarget: SIMD2<Float>?
+    ) -> FixedWingAssistGeometryAssessment? {
+        guard let interceptTarget else {
+            return nil
+        }
+
+        let planarPosition = SIMD2<Float>(aircraftState.position.x, aircraftState.position.z)
+        let currentHeading = aircraftState.orientation.z
+        let targetBearing = bearingToTarget(
+            from: planarPosition,
+            to: interceptTarget,
+            fallback: currentHeading
+        )
+        let headingError = shortestAngleRadians(targetBearing - currentHeading)
+        let distanceToWaypoint = simd_distance(planarPosition, interceptTarget)
+        let currentAirspeed = max(aircraftState.forwardAirspeed, wing.minSustainableSpeedMps)
+        let normalBankLimitDegrees = min(Float(wing.maxBankAngleDeg) * 0.76, Tuning.maxAssistBankDeg)
+        let normalTurnRadius = effectiveTurnRadius(
+            airspeed: currentAirspeed,
+            bankLimitDegrees: normalBankLimitDegrees,
+            wing: wing
+        )
+        let forwardUnit = SIMD2<Float>(sin(currentHeading), -cos(currentHeading))
+        let deltaToTarget = interceptTarget - planarPosition
+        let availableTurnInDistance = max(0.0, simd_dot(deltaToTarget, forwardUnit))
+        let headingErrorDegrees = abs(headingError.radiansToDegrees)
+        let feasibilityState = assessFeasibilityState(
+            headingErrorDegrees: headingErrorDegrees,
+            distanceToWaypoint: distanceToWaypoint,
+            availableTurnInDistance: availableTurnInDistance,
+            estimatedTurnRadius: normalTurnRadius
+        )
+
+        let headingLeadLimitDegrees: Float
+        let bankLimitDegrees: Float
+        switch feasibilityState {
+        case .feasible:
+            headingLeadLimitDegrees = Tuning.interceptLeadLimitDeg
+            bankLimitDegrees = normalBankLimitDegrees
+        case .tightTurn:
+            headingLeadLimitDegrees = Tuning.tightTurnLeadLimitDeg
+            bankLimitDegrees = normalBankLimitDegrees
+        case .poorGeometry:
+            headingLeadLimitDegrees = Tuning.poorGeometryLeadLimitDeg
+            bankLimitDegrees = normalBankLimitDegrees
+        }
+
+        let turnCommand = headingError.clamped(
+            to: -headingLeadLimitDegrees.degreesToRadians...headingLeadLimitDegrees.degreesToRadians
+        )
+        let commandedBankDegrees = bankCommandDegrees(
+            forHeadingError: turnCommand,
+            maxBankDegrees: max(6.0, bankLimitDegrees)
+        )
+
+        return FixedWingAssistGeometryAssessment(
+            feasibilityState: feasibilityState,
+            distanceToWaypoint: distanceToWaypoint,
+            headingErrorRadians: headingError,
+            availableTurnInDistance: availableTurnInDistance,
+            estimatedTurnRadius: effectiveTurnRadius(
+                airspeed: currentAirspeed,
+                bankLimitDegrees: max(6.0, bankLimitDegrees),
+                wing: wing
+            ),
+            targetBearing: targetBearing,
+            limitedHeading: limitedInterceptHeading(
+                currentHeading: currentHeading,
+                targetBearing: targetBearing,
+                leadLimitDegrees: headingLeadLimitDegrees
+            ),
+            turnCommand: turnCommand,
+            commandedBankDegrees: commandedBankDegrees,
+            commandedTurnDirection: turnDirection(forBankDegrees: commandedBankDegrees)
+        )
+    }
+
+    private func resolvedGuidanceMode(from rawValue: String) -> FixedWingGuidanceMode {
+        FixedWingGuidanceMode(rawValue: rawValue) ?? .singlePointIntercept
+    }
+
     private func limitedInterceptHeading(
         currentHeading: Float,
-        targetBearing: Float
+        targetBearing: Float,
+        leadLimitDegrees: Float = Tuning.interceptLeadLimitDeg
     ) -> Float {
         let headingError = shortestAngleRadians(targetBearing - currentHeading)
-        let limitedError = limitedTurnCommand(for: headingError)
+        let limitedError = headingError.clamped(
+            to: -leadLimitDegrees.degreesToRadians...leadLimitDegrees.degreesToRadians
+        )
         return wrap(currentHeading + limitedError)
     }
 
@@ -372,10 +474,25 @@ final class FixedWingAssistController {
         return bankCommandDegrees(forHeadingError: headingError, maxBankDegrees: maxBankDegrees)
     }
 
-    private func limitedTurnCommand(for headingError: Float) -> Float {
-        headingError.clamped(
-            to: -Tuning.interceptLeadLimitDeg.degreesToRadians...Tuning.interceptLeadLimitDeg.degreesToRadians
-        )
+    private func assessFeasibilityState(
+        headingErrorDegrees: Float,
+        distanceToWaypoint: Float,
+        availableTurnInDistance: Float,
+        estimatedTurnRadius: Float
+    ) -> FixedWingAssistInterceptFeasibilityState {
+        if headingErrorDegrees >= 120.0 ||
+            (headingErrorDegrees >= 100.0 && availableTurnInDistance < estimatedTurnRadius * 0.45) ||
+            (headingErrorDegrees >= 90.0 && distanceToWaypoint < estimatedTurnRadius * 1.05) {
+            return .poorGeometry
+        }
+
+        if headingErrorDegrees >= 60.0 ||
+            (headingErrorDegrees >= 45.0 && availableTurnInDistance < estimatedTurnRadius) ||
+            (headingErrorDegrees >= 70.0 && distanceToWaypoint < estimatedTurnRadius * 1.60) {
+            return .tightTurn
+        }
+
+        return .feasible
     }
 
     private func bankCommandDegrees(
@@ -384,6 +501,58 @@ final class FixedWingAssistController {
     ) -> Float {
         let targetRoll = headingError.radiansToDegrees * Tuning.headingBankGain
         return targetRoll.clamped(to: -maxBankDegrees...maxBankDegrees)
+    }
+
+    private func applyGeometryDiagnostics(
+        _ assessment: FixedWingAssistGeometryAssessment?,
+        to state: inout FixedWingAssistState
+    ) {
+        guard let assessment else {
+            state.interceptFeasibilityState = nil
+            state.headingErrorDegrees = nil
+            state.rawHeadingErrorDegrees = nil
+            state.estimatedTurnRadiusMeters = nil
+            state.commandedBankDegrees = nil
+            state.filteredBankCommandDegrees = nil
+            state.commandedTurnDirection = .none
+            state.usingObsoleteFixedWingMode = false
+            return
+        }
+
+        state.interceptFeasibilityState = assessment.feasibilityState
+        state.distanceToActiveWaypointMeters = assessment.distanceToWaypoint
+        state.headingErrorDegrees = assessment.headingErrorRadians.radiansToDegrees
+        state.rawHeadingErrorDegrees = assessment.headingErrorRadians.radiansToDegrees
+        state.estimatedTurnRadiusMeters = assessment.estimatedTurnRadius
+        state.commandedBankDegrees = assessment.commandedBankDegrees
+        state.filteredBankCommandDegrees = assessment.commandedBankDegrees
+        state.commandedTurnDirection = assessment.commandedTurnDirection
+        state.usingObsoleteFixedWingMode = false
+    }
+
+    private func effectiveTurnRadius(
+        airspeed: Float,
+        bankLimitDegrees: Float,
+        wing: FixedWingParameters
+    ) -> Float {
+        let referenceSpeed = max(airspeed, wing.minSafeAirspeed)
+        let bankRadians = max(6.0, bankLimitDegrees).degreesToRadians
+        let gravity: Float = 9.81
+        let kinematicRadius = referenceSpeed * referenceSpeed / max(0.4, gravity * tan(bankRadians))
+        return max(
+            wing.waypointAcceptanceRadiusMeters * 1.1,
+            kinematicRadius / max(0.65, wing.turnAuthority)
+        )
+    }
+
+    private func turnDirection(forBankDegrees bankDegrees: Float) -> FixedWingAssistTurnDirection {
+        if bankDegrees > 0.25 {
+            return .right
+        }
+        if bankDegrees < -0.25 {
+            return .left
+        }
+        return .none
     }
 
     private func bearingToTarget(
@@ -396,9 +565,6 @@ final class FixedWingAssistController {
             return fallback
         }
 
-        // Fixed-wing yaw 0 points along world -Z and positive yaw produces a
-        // right turn. The X term must therefore be negated to keep
-        // targetBearing - currentHeading aligned with the roll/turn convention.
         return wrap(atan2(-delta.x, -delta.y))
     }
 
@@ -510,28 +676,16 @@ final class FixedWingAssistController {
     }
 
     private func emitInterceptDebugIfNeeded(
+        context: FixedWingAssistInterceptDebugContext,
         currentWorldPosition: SIMD3<Float>,
         targetWorldPosition: SIMD3<Float>,
-        selectedWaypointID: UUID?,
-        guidanceTargetType: String,
-        guidanceTargetPoint: SIMD2<Float>,
-        currentLegStart: SIMD2<Float>?,
-        currentLegEnd: SIMD2<Float>?,
         currentHeading: Float,
-        targetBearing: Float,
-        headingError: Float,
-        distanceToSelectedWaypoint: Float,
+        geometry: FixedWingAssistGeometryAssessment,
+        guidanceMode: String,
+        distanceToWaypoint: Float,
         captureRadius: Float,
-        enteredCaptureRadius: Bool,
-        crossedAcceptancePlane: Bool,
-        bearingToSelectedWaypoint: Float,
-        bearingUsedByGuidance: Float,
-        turnCommand: Float,
-        bankCommand: Float,
         interceptCompletedReason: String,
-        activeTargetSource: String,
-        activeRouteIncludesHome: Bool,
-        segmentCountAfterValidation: Int,
+        stateTransitionReason: String?,
         force: Bool = false
     ) {
         let now = Date()
@@ -542,12 +696,13 @@ final class FixedWingAssistController {
         lastInterceptDebugTimestamp = now
         print(
             String(
-                format: "[FixedWingIntercept] selectedWaypointID=%@ guidanceTargetType=%@ guidanceTargetPoint=%@ currentLegStart=%@ currentLegEnd=%@ currentWorldPos=(%.2f, %.2f, %.2f) targetWorldPos=(%.2f, %.2f, %.2f) currentHeadingDeg=%.2f targetBearingDeg=%.2f bearingToSelectedWaypoint=%.2f bearingUsedByGuidance=%.2f headingErrorDeg=%.2f distanceToWaypoint=%.2f captureRadius=%.2f enteredCaptureRadius=%@ crossedAcceptancePlane=%@ turnCommand=%.2f bankCommand=%.2f interceptCompletedReason=%@ activeTargetSource=%@ activeRouteIncludesHome=%@ segmentCountAfterValidation=%d",
-                formatWaypointIdentifier(selectedWaypointID),
-                guidanceTargetType,
-                formatPlanarPoint(guidanceTargetPoint),
-                formatPlanarPoint(currentLegStart),
-                formatPlanarPoint(currentLegEnd),
+                format: "[FixedWingAssist] selectedWaypointID=%@ guidanceMode=%@ guidanceTargetType=%@ guidanceTargetPoint=%@ currentLegStart=%@ currentLegEnd=%@ currentWorldPos=(%.2f, %.2f, %.2f) targetWorldPos=(%.2f, %.2f, %.2f) currentHeadingDeg=%.2f targetBearingDeg=%.2f headingErrorDeg=%.2f distanceToWaypoint=%.2f availableTurnInDistance=%.2f estimatedTurnRadius=%.2f feasibilityState=%@ captureRadius=%.2f interceptCompletedReason=%@ transitionReason=%@ activeTargetSource=%@ activeRouteIncludesHome=%@ segmentCountAfterValidation=%d usingObsoleteFixedWingMode=false",
+                formatWaypointIdentifier(context.selectedWaypointID),
+                guidanceMode,
+                context.guidanceTargetType,
+                formatPlanarPoint(context.guidanceTargetPoint),
+                formatPlanarPoint(context.currentLegStart),
+                formatPlanarPoint(context.currentLegEnd),
                 currentWorldPosition.x,
                 currentWorldPosition.y,
                 currentWorldPosition.z,
@@ -555,20 +710,18 @@ final class FixedWingAssistController {
                 targetWorldPosition.y,
                 targetWorldPosition.z,
                 bodyHeadingDegrees(fromYawRadians: currentHeading),
-                bodyHeadingDegrees(fromYawRadians: targetBearing),
-                bodyHeadingDegrees(fromYawRadians: bearingToSelectedWaypoint),
-                bodyHeadingDegrees(fromYawRadians: bearingUsedByGuidance),
-                headingError.radiansToDegrees,
-                distanceToSelectedWaypoint,
+                bodyHeadingDegrees(fromYawRadians: geometry.targetBearing),
+                geometry.headingErrorRadians.radiansToDegrees,
+                distanceToWaypoint,
+                geometry.availableTurnInDistance,
+                geometry.estimatedTurnRadius,
+                geometry.feasibilityState.rawValue,
                 captureRadius,
-                enteredCaptureRadius ? "true" : "false",
-                crossedAcceptancePlane ? "true" : "false",
-                turnCommand.radiansToDegrees,
-                bankCommand,
                 interceptCompletedReason,
-                activeTargetSource,
-                activeRouteIncludesHome ? "true" : "false",
-                segmentCountAfterValidation
+                stateTransitionReason ?? "nil",
+                context.activeTargetSource,
+                context.activeRouteIncludesHome ? "true" : "false",
+                context.segmentCountAfterValidation
             )
         )
     }
@@ -640,6 +793,32 @@ final class FixedWingAssistController {
 
     private func shortestAngleRadians(_ value: Float) -> Float {
         wrap(value)
+    }
+}
+
+private enum FixedWingGuidanceMode: String {
+    case singlePointIntercept
+    case inboundLegTrack
+    case flyByTurnTransition
+    case outboundLegTrack
+    case terminalCapture
+    case routeComplete
+
+    var interceptState: FixedWingAssistInterceptState {
+        switch self {
+        case .singlePointIntercept:
+            return .singlePointIntercept
+        case .inboundLegTrack:
+            return .inboundLegTrack
+        case .flyByTurnTransition:
+            return .flyByTurnTransition
+        case .outboundLegTrack:
+            return .outboundLegTrack
+        case .terminalCapture:
+            return .terminalCapture
+        case .routeComplete:
+            return .routeComplete
+        }
     }
 }
 

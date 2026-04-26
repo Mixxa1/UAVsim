@@ -23,7 +23,14 @@ struct MissionAutopilotControlEnvelope: Equatable {
 
 final class MissionAutopilotAdapter {
     func bind(target: MissionTarget, startNavigation: Bool) -> MissionAutopilotCommand {
-        MissionAutopilotCommand(
+        // Reject non-finite mission targets at the bind boundary so the
+        // marker pipeline never receives NaN/infinity. Without this guard a
+        // malformed plan would silently propagate into the autopilot and
+        // make the multicopter chase a garbage vector.
+        guard isFiniteVector2(target.position) else {
+            return .clear
+        }
+        return MissionAutopilotCommand(
             targetMarker: TargetMarkerState(position: target.position),
             startNavigation: startNavigation
         )
@@ -85,6 +92,10 @@ final class MissionAutopilotAdapter {
         guard let activeTarget, let currentMarker else {
             return false
         }
-        return simd_distance(activeTarget.position, currentMarker.position) <= 0.001
+        guard isFiniteVector2(activeTarget.position),
+              isFiniteVector2(currentMarker.position) else {
+            return false
+        }
+        return safeDistance(activeTarget.position, currentMarker.position) <= 0.001
     }
 }

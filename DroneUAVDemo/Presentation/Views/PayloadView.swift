@@ -678,23 +678,34 @@ struct PayloadView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(LocalizedStringKey(title))
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .tracking(0.5)
-                .foregroundStyle(isDisabled ? Color.white.opacity(0.32) : Color.white.opacity(0.96))
-                .frame(maxWidth: .infinity, minHeight: 72)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(isDisabled ? Color.white.opacity(0.06) : tint.opacity(0.92))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(isDisabled ? Color.white.opacity(0.04) : tint.opacity(0.96), lineWidth: 1.0)
-                        )
-                )
+            actionButtonLabel(title: title, isDisabled: isDisabled)
+                .background(actionButtonBackground(tint: tint, isDisabled: isDisabled))
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .controllerButtonTarget(id: "payload.action.\(title)", action: action)
+    }
+
+    private func actionButtonLabel(title: String, isDisabled: Bool) -> some View {
+        let foreground = isDisabled ? Color.white.opacity(0.32) : Color.white.opacity(0.96)
+
+        return Text(LocalizedStringKey(title))
+            .font(.system(size: 17, weight: .bold, design: .rounded))
+            .tracking(0.5)
+            .foregroundStyle(foreground)
+            .frame(maxWidth: .infinity, minHeight: 72)
+    }
+
+    private func actionButtonBackground(tint: Color, isDisabled: Bool) -> some View {
+        let fill = isDisabled ? Color.white.opacity(0.06) : tint.opacity(0.92)
+        let stroke = isDisabled ? Color.white.opacity(0.04) : tint.opacity(0.96)
+
+        return RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(fill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(stroke, lineWidth: 1.0)
+            )
     }
 
     private func adjustMass(by delta: Double) {

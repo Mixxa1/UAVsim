@@ -29,20 +29,20 @@ private struct ConstraintEditorField: View {
                 .disabled(disabled)
                 .focused($isFocused)
                 .onAppear(perform: syncFromValue)
-                .onChange(of: value.wrappedValue) { _ in
+                .onChange(of: value.wrappedValue) { _, _ in
                     guard !isFocused else {
                         return
                     }
                     syncFromValue()
                 }
-                .onChange(of: draftText) { newValue in
+                .onChange(of: draftText) { _, newValue in
                     guard isFocused,
                           let parsedValue = parse(newValue) else {
                         return
                     }
                     value.wrappedValue = parsedValue
                 }
-                .onChange(of: isFocused) { focused in
+                .onChange(of: isFocused) { _, focused in
                     if !focused {
                         commitOrRevert()
                     }
@@ -112,6 +112,7 @@ struct MissionDraftPanel: View {
     let onResumeMission: () -> Void
     let onAbortMission: () -> Void
     let onSelectFixedWingAssistWaypoint: (UUID) -> Void
+    let onSetFixedWingAutoAdvanceEnabled: (Bool) -> Void
     let onActivateFixedWingAssist: (FixedWingAssistMode) -> Void
 
     var body: some View {
@@ -265,10 +266,39 @@ struct MissionDraftPanel: View {
             sectionTitle("mission.panel.section.execution")
             summaryRow("mission.status.field.plan", value: localized(missionStatus.planStatus.titleKey))
             summaryRow("fixed_wing.assist.mode", value: localized(fixedWingAssistState.mode.titleKey))
+            summaryRow("fixed_wing.assist.status", value: localized(fixedWingAssistState.interceptState.titleKey))
             summaryRow(
-                "fixed_wing.assist.target",
-                value: selectedAssistWaypoint?.label ?? localized("fixed_wing.assist.waypoint.none")
+                "fixed_wing.assist.feasibility",
+                value: fixedWingAssistState.interceptFeasibilityState.map { localized($0.titleKey) } ?? localized("common.na")
             )
+            summaryRow("fixed_wing.assist.active_waypoint", value: selectedAssistWaypoint?.label ?? localized("fixed_wing.assist.waypoint.none"))
+            summaryRow("fixed_wing.assist.waypoint_mode", value: localized(fixedWingAssistState.waypointMode.titleKey))
+            Toggle(
+                "fixed_wing.assist.auto_advance",
+                isOn: Binding(
+                    get: { fixedWingAssistState.autoAdvanceEnabled },
+                    set: onSetFixedWingAutoAdvanceEnabled
+                )
+            )
+            .toggleStyle(.switch)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(GroundControlPalette.textPrimary)
+
+            HStack(spacing: 8) {
+                actionButton("fixed_wing.assist.action.previous", tint: GroundControlPalette.borderStrong) {
+                    if let previousWaypoint = adjacentAssistWaypoint(step: -1) {
+                        onSelectFixedWingAssistWaypoint(previousWaypoint.id)
+                    }
+                }
+                .disabled(adjacentAssistWaypoint(step: -1) == nil)
+
+                actionButton("fixed_wing.assist.action.next", tint: GroundControlPalette.borderStrong) {
+                    if let nextWaypoint = adjacentAssistWaypoint(step: 1) {
+                        onSelectFixedWingAssistWaypoint(nextWaypoint.id)
+                    }
+                }
+                .disabled(adjacentAssistWaypoint(step: 1) == nil)
+            }
 
             if !fixedWingAssistWaypoints.isEmpty {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
@@ -296,18 +326,257 @@ struct MissionDraftPanel: View {
                     actionButton("mode.fixed_wing_altitude_hold", tint: GroundControlPalette.accent) {
                         onActivateFixedWingAssist(.altitudeHold)
                     }
-                    actionButton("mode.fixed_wing_waypoint_intercept", tint: GroundControlPalette.success) {
+                    actionButton("fixed_wing.assist.action.intercept_selected", tint: GroundControlPalette.success) {
                         onActivateFixedWingAssist(.waypointIntercept)
                     }
                     .disabled(selectedAssistWaypoint == nil)
                 }
             }
 
-            if fixedWingAssistState.interceptCompleted {
-                Text("fixed_wing.assist.intercept_complete")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(GroundControlPalette.success)
+            if let autoAdvanceStatusKey,
+                      fixedWingAssistState.autoAdvanceSuppressed {
+                Text(LocalizedStringKey(autoAdvanceStatusKey))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if fixedWingAssistState.interceptFeasibilityState == .poorGeometry {
+                Text("fixed_wing.assist.feasibility.warning")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                debugField(
+                    "fixed_wing.assist.debug.active_index",
+                    value: fixedWingAssistState.activeWaypointIndex.map(String.init) ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.auto_advance_enabled",
+                    value: fixedWingAssistState.autoAdvanceEnabled ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.next_index",
+                    value: fixedWingAssistState.nextWaypointIndex.map(String.init) ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.has_prev_waypoint",
+                    value: fixedWingAssistState.hasPrevWaypoint ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.has_next_waypoint",
+                    value: fixedWingAssistState.hasNextWaypoint ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.is_penultimate_waypoint",
+                    value: fixedWingAssistState.isPenultimateWaypoint ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.is_final_waypoint",
+                    value: fixedWingAssistState.isFinalWaypoint ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.flyby_center_waypoint_index",
+                    value: fixedWingAssistState.flyByCenterWaypointIndex.map(String.init) ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.active_triple_indices",
+                    value: fixedWingAssistState.activeTripleIndices ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.active_id",
+                    value: fixedWingAssistState.activeWaypointID?.uuidString ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.captured_ids",
+                    value: fixedWingAssistState.capturedWaypointIDs.isEmpty
+                        ? localized("common.na")
+                        : fixedWingAssistState.capturedWaypointIDs.map(\.uuidString).joined(separator: ", ")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.intercept_state",
+                    value: fixedWingAssistState.interceptState.rawValue
+                )
+                debugField(
+                    "fixed_wing.assist.debug.capture_completed_reason",
+                    value: fixedWingAssistState.captureCompletedReason ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.feasibility",
+                    value: fixedWingAssistState.interceptFeasibilityState?.rawValue ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.distance",
+                    value: fixedWingAssistState.distanceToActiveWaypointMeters.map { String(format: "%.1f m", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.heading_error",
+                    value: fixedWingAssistState.headingErrorDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.raw_heading_error",
+                    value: fixedWingAssistState.rawHeadingErrorDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.turn_radius",
+                    value: fixedWingAssistState.estimatedTurnRadiusMeters.map { String(format: "%.1f m", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.commanded_bank",
+                    value: fixedWingAssistState.commandedBankDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.filtered_bank",
+                    value: fixedWingAssistState.filteredBankCommandDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.turn_direction",
+                    value: fixedWingAssistState.commandedTurnDirection.rawValue
+                )
+                debugField(
+                    "fixed_wing.assist.debug.transition_reason",
+                    value: fixedWingAssistState.stateTransitionReason ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.auto_advance_suppressed",
+                    value: fixedWingAssistState.autoAdvanceSuppressed ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.auto_advance_suppressed_reason",
+                    value: fixedWingAssistState.autoAdvanceSuppressedReason ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.heading_error_to_next_waypoint",
+                    value: fixedWingAssistState.headingErrorToNextWaypointDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.next_waypoint_in_forward_sector",
+                    value: fixedWingAssistState.nextWaypointInForwardSector ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.enough_turn_in_distance",
+                    value: fixedWingAssistState.enoughTurnInDistance ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.collision_risk_to_next_waypoint",
+                    value: fixedWingAssistState.collisionRiskToNextWaypoint.map { String(format: "%.2f", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.obstacle_in_turn_corridor",
+                    value: fixedWingAssistState.obstacleInTurnCorridor ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.blocked_path_to_next_waypoint",
+                    value: fixedWingAssistState.blockedPathToNextWaypoint ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.lateral_guidance_suppressed_for_poor_geometry",
+                    value: fixedWingAssistState.lateralGuidanceSuppressedForPoorGeometry ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.current_leg_start",
+                    value: fixedWingAssistState.currentLegStart.map(format(point:)) ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.current_leg_middle",
+                    value: fixedWingAssistState.currentLegMiddle.map(format(point:)) ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.current_leg_end",
+                    value: fixedWingAssistState.currentLegEnd.map(format(point:)) ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.inbound_course_deg",
+                    value: fixedWingAssistState.inboundCourseDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.outbound_course_deg",
+                    value: fixedWingAssistState.outboundCourseDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.course_change_deg",
+                    value: fixedWingAssistState.courseChangeDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.lead_distance",
+                    value: fixedWingAssistState.leadDistanceMeters.map { String(format: "%.1f m", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.flyby_transition_active",
+                    value: fixedWingAssistState.flyByTransitionActive ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.turn_transition_active",
+                    value: fixedWingAssistState.turnTransitionActive ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.flyby_transition_feasible",
+                    value: fixedWingAssistState.flyByTransitionFeasible ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.active_guidance_mode",
+                    value: fixedWingAssistState.activeGuidanceMode
+                )
+                debugField(
+                    "fixed_wing.assist.debug.preview_uses_cached_flyby_plan",
+                    value: fixedWingAssistState.previewUsesCachedFlyByPlan ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.controller_uses_cached_flyby_plan",
+                    value: fixedWingAssistState.controllerUsesCachedFlyByPlan ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.guidance_direct_to_waypoint_suppressed",
+                    value: fixedWingAssistState.guidanceDirectToWaypointSuppressed ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.terminal_capture_allowed",
+                    value: fixedWingAssistState.terminalCaptureAllowed ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.guidance_type",
+                    value: fixedWingAssistState.activeGuidanceTargetType
+                )
+                debugField(
+                    "fixed_wing.assist.debug.using_obsolete_fixed_wing_mode",
+                    value: fixedWingAssistState.usingObsoleteFixedWingMode ? "true" : "false"
+                )
+                debugField(
+                    "fixed_wing.assist.debug.flyby_plan_recompute_count",
+                    value: String(fixedWingAssistState.flyByPlanRecomputeCount)
+                )
+                debugField(
+                    "fixed_wing.assist.debug.full_route_rebuild_count",
+                    value: String(fixedWingAssistState.fullRouteRebuildCount)
+                )
+                debugField(
+                    "fixed_wing.assist.debug.overlay_rebuild_count",
+                    value: String(fixedWingAssistState.overlayRebuildCount)
+                )
+                debugField(
+                    "fixed_wing.assist.debug.guidance_recompute_count",
+                    value: String(fixedWingAssistState.guidanceRecomputeCount)
+                )
+                debugField(
+                    "fixed_wing.assist.debug.frame_time",
+                    value: fixedWingAssistState.frameTimeMs.map { String(format: "%.2f ms", $0) } ?? localized("common.na")
+                )
+                debugField(
+                    "fixed_wing.assist.debug.heavy_map_rebuild_count",
+                    value: String(fixedWingAssistState.heavyMapRebuildCount)
+                )
+                debugField(
+                    "fixed_wing.assist.debug.frame_time_during_transition",
+                    value: fixedWingAssistState.frameTimeDuringTransitionMs.map { String(format: "%.2f ms", $0) } ?? localized("common.na")
+                )
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
+            )
 
             Text("fixed_wing.assist.hint")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -516,7 +785,42 @@ struct MissionDraftPanel: View {
            let selected = fixedWingAssistWaypoints.first(where: { $0.id == selectedID }) {
             return selected
         }
+        if let activeWaypointIndex = fixedWingAssistState.activeWaypointIndex,
+           fixedWingAssistWaypoints.indices.contains(activeWaypointIndex) {
+            return fixedWingAssistWaypoints[activeWaypointIndex]
+        }
         return fixedWingAssistWaypoints.first
+    }
+
+    private var selectedAssistWaypointIndex: Int? {
+        guard let selectedID = selectedAssistWaypoint?.id else {
+            return nil
+        }
+        return fixedWingAssistWaypoints.firstIndex(where: { $0.id == selectedID })
+    }
+
+    private var autoAdvanceStatusKey: String? {
+        guard fixedWingAssistState.autoAdvanceSuppressed else {
+            return nil
+        }
+
+        switch fixedWingAssistState.autoAdvanceSuppressedReason {
+        case "poor_geometry_next_waypoint":
+            return "fixed_wing.assist.auto_advance.status.paused_poor_geometry"
+        case "turn_transition_segment_too_short",
+             "turn_transition_angle_too_sharp",
+             "turn_transition_insufficient_radius",
+             "fly_by_transition_not_feasible":
+            return "fixed_wing.assist.auto_advance.status.paused_poor_geometry"
+        case "obstacle_in_turn_corridor",
+             "blocked_turn_corridor",
+             "obstacle_ahead",
+             "blocked_path_to_next_waypoint",
+             "collision_risk_to_next_waypoint":
+            return "fixed_wing.assist.auto_advance.status.paused_obstacle_ahead"
+        default:
+            return nil
+        }
     }
 
     private func compactMetric(_ titleKey: String, value: String) -> some View {
@@ -559,13 +863,32 @@ struct MissionDraftPanel: View {
 
     private func assistWaypointButton(_ waypoint: FixedWingAssistWaypointOption) -> some View {
         let isSelected = selectedAssistWaypoint?.id == waypoint.id
+        let isCaptured = fixedWingAssistState.capturedWaypointIDs.contains(waypoint.id)
+        let tint: Color = {
+            if isSelected {
+                return GroundControlPalette.warning
+            }
+            if isCaptured {
+                return GroundControlPalette.success
+            }
+            return GroundControlPalette.border
+        }()
+        let fillColor: Color = {
+            if isSelected {
+                return GroundControlPalette.warning.opacity(0.18)
+            }
+            if isCaptured {
+                return GroundControlPalette.success.opacity(0.12)
+            }
+            return GroundControlPalette.inset
+        }()
 
         return Button {
             onSelectFixedWingAssistWaypoint(waypoint.id)
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(waypoint.label)
-                    .foregroundStyle(isSelected ? GroundControlPalette.accent : GroundControlPalette.textPrimary)
+                    .foregroundStyle(isSelected ? GroundControlPalette.warning : (isCaptured ? GroundControlPalette.success : GroundControlPalette.textPrimary))
                 Text(format(point: waypoint.position))
                     .foregroundStyle(GroundControlPalette.textSecondary)
             }
@@ -575,14 +898,37 @@ struct MissionDraftPanel: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? GroundControlPalette.accent.opacity(0.18) : GroundControlPalette.inset)
+                    .fill(fillColor)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? GroundControlPalette.accent.opacity(0.62) : GroundControlPalette.border, lineWidth: 1)
+                    .stroke(tint.opacity(isSelected ? 0.92 : 0.72), lineWidth: isSelected ? 1.4 : 1.0)
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func debugField(_ titleKey: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(LocalizedStringKey(titleKey))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            Text(value)
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .textSelection(.enabled)
+        }
+        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func adjacentAssistWaypoint(step: Int) -> FixedWingAssistWaypointOption? {
+        guard let currentIndex = selectedAssistWaypointIndex else {
+            return fixedWingAssistWaypoints.first
+        }
+        let nextIndex = currentIndex + step
+        guard fixedWingAssistWaypoints.indices.contains(nextIndex) else {
+            return nil
+        }
+        return fixedWingAssistWaypoints[nextIndex]
     }
 
     private func constraintField(

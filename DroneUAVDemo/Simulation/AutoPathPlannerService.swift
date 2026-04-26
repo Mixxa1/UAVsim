@@ -32,6 +32,16 @@ struct NavigationPathSnapshot {
     )
 }
 
+struct NavigationDirectPathAssessment {
+    var blocked: Bool
+    var maxPenalty: Float
+
+    static let unavailable = NavigationDirectPathAssessment(
+        blocked: true,
+        maxPenalty: 1.0
+    )
+}
+
 final class AutoPathPlannerService {
     private struct GridSignature: Equatable {
         let terrain: TerrainPreset
@@ -378,6 +388,33 @@ final class AutoPathPlannerService {
             start: startPoint,
             goal: goalPoint,
             reason: statusReason
+        )
+    }
+
+    func assessDirectPath(
+        from start: SIMD3<Float>,
+        to goal: SIMD3<Float>,
+        terrain: TerrainConfiguration,
+        obstacles: [CollisionObstacle],
+        droneRadius: Float
+    ) -> NavigationDirectPathAssessment {
+        guard ensureGrid(terrain: terrain, obstacles: obstacles, droneRadius: droneRadius),
+              let grid,
+              let startCell = grid.nearestFreeCell(to: start),
+              let goalCell = grid.nearestFreeCell(to: goal) else {
+            return .unavailable
+        }
+
+        let hasLineOfSight = grid.hasLineOfSight(startCell, goalCell)
+        let maxPenalty = maxPenaltyAlongDirectPath(
+            from: startCell,
+            to: goalCell,
+            grid: grid
+        )
+
+        return NavigationDirectPathAssessment(
+            blocked: !hasLineOfSight,
+            maxPenalty: maxPenalty
         )
     }
 
@@ -743,6 +780,38 @@ final class AutoPathPlannerService {
         let clamped = t.clamped(to: 0.0...1.0)
         let projection = a + ab * clamped
         return simd_distance(p, projection)
+    }
+
+    private func maxPenaltyAlongDirectPath(
+        from start: NavigationGrid.Cell,
+        to end: NavigationGrid.Cell,
+        grid: NavigationGrid
+    ) -> Float {
+        let startWorld = grid.worldXZ(for: start)
+        let endWorld = grid.worldXZ(for: end)
+        let direction = endWorld - startWorld
+        let distance = simd_length(direction)
+        if distance < 0.0001 {
+            return max(grid.penaltyAt(start), grid.penaltyAt(end))
+        }
+
+        let step = max(grid.cellSize * 0.5, 0.4)
+        let steps = max(1, Int(ceil(distance / step)))
+        var maxPenalty: Float = 0.0
+
+        for index in 0...steps {
+            let t = Float(index) / Float(steps)
+            let sample = startWorld + direction * t
+            guard let cell = grid.cell(forWorldXZ: sample) else {
+                return 1.0
+            }
+            if grid.isBlocked(cell) {
+                return 1.0
+            }
+            maxPenalty = max(maxPenalty, grid.penaltyAt(cell))
+        }
+
+        return maxPenalty
     }
 
     private func heuristic(from: NavigationGrid.Cell, to: NavigationGrid.Cell) -> Float {

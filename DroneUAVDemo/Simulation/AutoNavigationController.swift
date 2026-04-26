@@ -64,7 +64,6 @@ final class AutoNavigationController {
     private(set) var phase: AutoNavigationPhase = .inactive
 
     private var lastCompletionReason: AutoNavigationCompletionReason = .none
-    private var lastTurnBiasSign: Float = 1.0
     private var lockedTravelAltitude: Float?
     private var lastCourseCommandRadians: Float?
 
@@ -73,7 +72,6 @@ final class AutoNavigationController {
         isActive = false
         phase = .inactive
         lastCompletionReason = .none
-        lastTurnBiasSign = 1.0
         lockedTravelAltitude = nil
         lastCourseCommandRadians = nil
     }
@@ -83,7 +81,6 @@ final class AutoNavigationController {
         isActive = false
         phase = .inactive
         lastCompletionReason = .cancelled
-        lastTurnBiasSign = 1.0
         lockedTravelAltitude = nil
         lastCourseCommandRadians = nil
     }
@@ -135,6 +132,16 @@ final class AutoNavigationController {
             return nil
         }
 
+        // Reject non-finite inputs early so the rest of the controller does
+        // not emit NaN axis intents. Such values can arrive from a malformed
+        // marker, a recovering physics tick, or out-of-bounds projections.
+        guard isFiniteVector3(input.position),
+              isFiniteVector3(input.velocity),
+              input.currentYawRadians.isFinite,
+              isFiniteVector2(targetMarker.position) else {
+            return nil
+        }
+
         let planarPosition = SIMD2<Float>(input.position.x, input.position.z)
         let planarVelocity = SIMD2<Float>(input.velocity.x, input.velocity.z)
         let delta = targetMarker.position - planarPosition
@@ -143,7 +150,7 @@ final class AutoNavigationController {
         let safeTravelAltitude = lockedTravelAltitude ?? input.safeTravelAltitude
         let targetWorldPosition = targetMarker.worldPosition(altitude: safeTravelAltitude)
 
-        guard distanceToTarget > 0.0001 else {
+        guard distanceToTarget.isFinite, distanceToTarget > 0.0001 else {
             return nil
         }
 
@@ -229,25 +236,15 @@ final class AutoNavigationController {
             )
             let altitudeError = safeTravelAltitude - input.position.y
             let speedError = max(0.0, wing.minSafeAirspeed - currentAirspeed)
-            let directCourse = atan2(-delta.x, delta.y)
-            var desiredCourse = directCourse
+            let directCourse = atan2(-delta.x, -delta.y)
             var courseError = shortestAngleRadians(directCourse - input.currentYawRadians)
-
-            if abs(courseError) > 0.06 {
-                lastTurnBiasSign = courseError >= 0.0 ? 1.0 : -1.0
-            }
-
             let turnCaptureDistance = minimumTurnRadius * 1.18
             let turnCaptureActive = distanceToTarget < turnCaptureDistance && abs(courseError) > 0.58
-            if turnCaptureActive {
-                let tangentBias = min(1.18, max(0.52, minimumTurnRadius / max(distanceToTarget, 0.1) * 0.34))
-                desiredCourse = directCourse - lastTurnBiasSign * tangentBias
-            }
 
             let courseBlend = (input.deltaTime * (turnCaptureActive ? 2.4 : 1.8)).clamped(to: 0.08...0.30)
             let previousCourseCommand = lastCourseCommandRadians ?? input.currentYawRadians
             let commandedCourse = previousCourseCommand +
-                shortestAngleRadians(desiredCourse - previousCourseCommand) * courseBlend
+                shortestAngleRadians(directCourse - previousCourseCommand) * courseBlend
             lastCourseCommandRadians = commandedCourse
             courseError = shortestAngleRadians(commandedCourse - input.currentYawRadians)
 

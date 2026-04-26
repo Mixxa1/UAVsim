@@ -1,6 +1,8 @@
 import Foundation
 import simd
 
+let fixedWingRuntimeRouteStartIdentifier = "fixed-wing-runtime-route-start"
+
 enum FixedWingAutopilotPhase: String, Equatable {
     case idle
     case aligningToLeg
@@ -34,6 +36,26 @@ struct FixedWingRouteTrackingContext: Equatable {
     var minimumWaypointIndex: Int?
     var preferredLoiterCenter: SIMD3<Float>?
     var preferredLoiterRadius: Float?
+    /// Optional explicit flyable route (line + arc primitives). When provided,
+    /// the autopilot follows the primitives directly instead of reconstructing
+    /// fly-by turns from raw polyline waypoints.
+    var flyableRoute: FixedWingFlyableRoute?
+
+    init(
+        routeIdentifier: String,
+        waypoints: [FixedWingRouteWaypoint],
+        minimumWaypointIndex: Int? = nil,
+        preferredLoiterCenter: SIMD3<Float>? = nil,
+        preferredLoiterRadius: Float? = nil,
+        flyableRoute: FixedWingFlyableRoute? = nil
+    ) {
+        self.routeIdentifier = routeIdentifier
+        self.waypoints = waypoints
+        self.minimumWaypointIndex = minimumWaypointIndex
+        self.preferredLoiterCenter = preferredLoiterCenter
+        self.preferredLoiterRadius = preferredLoiterRadius
+        self.flyableRoute = flyableRoute
+    }
 }
 
 struct FixedWingGuidanceOutput: Equatable {
@@ -146,6 +168,14 @@ final class FixedWingAutopilotController {
         var shouldBlendTurn: Bool
         var isFinalSegment: Bool
         var isCompleted: Bool
+        /// Course (radians) precomputed by the primitive path follower. When
+        /// non-nil, the lateral controller uses this directly instead of
+        /// reconstructing a fly-by course from the leg geometry.
+        var precomputedDesiredCourse: Float?
+        /// Index of the current path primitive when primitive guidance is
+        /// active. `nil` for legacy polyline-driven mission references.
+        var primitivePathIndex: Int?
+        var primitivePathType: FixedWingPrimitiveFollowProgress.PrimitiveType?
     }
 
     private struct LateralCommand {
@@ -208,11 +238,25 @@ final class FixedWingAutopilotController {
             )
 
             if routeIdentifier != routeTracking.routeIdentifier {
+                let previousRouteIdentifier = routeIdentifier
                 routeIdentifier = routeTracking.routeIdentifier
-                loiterElapsed = 0.0
-                loiterClockwise = true
+                // Preserve loiter state and segment index across in-mission key
+                // changes (e.g. waypoint advancement re-stamps the route key).
+                // Resetting in that case wipes the segment we were already
+                // tracking and produces a visible heading snap on the turn.
+                let isInMissionRouteRefresh = sameMissionRoute(
+                    previousRouteIdentifier,
+                    routeTracking.routeIdentifier
+                )
+                if !isInMissionRouteRefresh {
+                    loiterElapsed = 0.0
+                    loiterClockwise = true
+                }
                 if routeTracking.routeIdentifier.hasPrefix("mission:") {
-                    activeSegmentIndex = minimumSegmentIndex
+                    activeSegmentIndex = max(activeSegmentIndex, minimumSegmentIndex)
+                    if !isInMissionRouteRefresh {
+                        activeSegmentIndex = minimumSegmentIndex
+                    }
                 } else {
                     activeSegmentIndex = bestCaptureSegmentIndex(
                         for: state.position,
@@ -276,6 +320,7 @@ final class FixedWingAutopilotController {
                 position: state.position,
                 waypoints: sanitizedWaypoints
             )
+            let usesSampledRouteGeometry = hasSampledRouteGeometry(sanitizedWaypoints)
             let isFinalSegment = activeSegmentIndex >= finalSegmentIndex
             let turnLeadDistance = computeTurnLeadDistance(
                 segmentIndex: activeSegmentIndex,
@@ -283,7 +328,7 @@ final class FixedWingAutopilotController {
                 wing: wing,
                 airspeed: airspeed
             )
-            let flyByTurnActive = shouldBeginFlyByTurn(
+            let flyByTurnActive = !usesSampledRouteGeometry && shouldBeginFlyByTurn(
                 projection: projection,
                 segmentIndex: activeSegmentIndex,
                 finalSegmentIndex: finalSegmentIndex,
@@ -360,6 +405,17 @@ final class FixedWingAutopilotController {
             )
         }
 
+        private func sameMissionRoute(_ lhs: String?, _ rhs: String?) -> Bool {
+            guard let lhs, let rhs,
+                  lhs.hasPrefix("mission:"),
+                  rhs.hasPrefix("mission:") else {
+                return false
+            }
+            let lhsBase = lhs.split(separator: ":", maxSplits: 2).prefix(2).joined(separator: ":")
+            let rhsBase = rhs.split(separator: ":", maxSplits: 2).prefix(2).joined(separator: ":")
+            return lhsBase == rhsBase
+        }
+
         private func sanitize(
             _ waypoints: [FixedWingRouteWaypoint]
         ) -> [FixedWingRouteWaypoint] {
@@ -386,6 +442,22 @@ final class FixedWingAutopilotController {
             }
 
             return output
+        }
+
+        private func hasSampledRouteGeometry(
+            _ waypoints: [FixedWingRouteWaypoint]
+        ) -> Bool {
+            guard waypoints.count > 3 else {
+                return false
+            }
+
+            for index in 1..<(waypoints.count - 1) {
+                if waypoints[index].missionWaypointIndex == nil &&
+                    waypoints[index].waypointIdentifier == nil {
+                    return true
+                }
+            }
+            return false
         }
 
         private func minimumActiveSegmentIndex(
@@ -550,14 +622,22 @@ final class FixedWingAutopilotController {
                 return wing.waypointAcceptanceRadiusMeters
             }
 
-            let radius = wing.minimumTurnRadius(airspeed: airspeed)
+            let radius = guidanceTurnRadius(
+                wing: wing,
+                airspeed: airspeed
+            )
             let geometricLead = radius * tan(min(.pi * 0.45, turnAngle * 0.5))
+            let waypointLeadLimit = max(
+                wing.waypointAcceptanceRadiusMeters * 2.05,
+                min(inboundLength, outboundLength) * 0.22
+            )
             let boundedLead = min(
                 geometricLead,
-                inboundLength * 0.45,
-                outboundLength * 0.45
+                inboundLength * 0.36,
+                outboundLength * 0.36,
+                waypointLeadLimit
             )
-            return max(wing.waypointAcceptanceRadiusMeters, boundedLead)
+            return max(wing.waypointAcceptanceRadiusMeters * 0.85, boundedLead)
         }
 
         private func shouldAdvance(
@@ -581,6 +661,7 @@ final class FixedWingAutopilotController {
                 return false
             }
 
+            let isRuntimeEntrySegment = waypoints[segmentIndex].waypointIdentifier == fixedWingRuntimeRouteStartIdentifier
             let switchCaptureRadius = waypointSwitchCaptureRadius(
                 turnLeadDistance: turnLeadDistance,
                 airspeed: airspeed,
@@ -591,6 +672,22 @@ final class FixedWingAutopilotController {
                 airspeed: airspeed,
                 wing: wing
             )
+            if isRuntimeEntrySegment {
+                let requiredCaptureRadius = max(
+                    wing.waypointAcceptanceRadiusMeters * 0.82,
+                    min(switchCaptureRadius, wing.waypointAcceptanceRadiusMeters * 1.05)
+                )
+                if distanceToWaypoint <= requiredCaptureRadius,
+                   projection.alongTrackProgress >= 0.68 {
+                    return true
+                }
+                if projection.alongTrackDistance >= legLength + switchCaptureRadius * 0.45,
+                   distanceToWaypoint <= switchCaptureRadius * 1.12 {
+                    return true
+                }
+                return false
+            }
+
             if projection.alongTrackDistance >= legLength + max(
                 wing.waypointAcceptanceRadiusMeters * 0.20,
                 switchCaptureRadius * 0.25
@@ -652,7 +749,7 @@ final class FixedWingAutopilotController {
                 SIMD2<Float>(position.x, position.z),
                 SIMD2<Float>(waypoint.x, waypoint.z)
             )
-            let minimumTurnRadius = wing.minimumTurnRadius(airspeed: airspeed)
+            let minimumTurnRadius = guidanceTurnRadius(wing: wing, airspeed: airspeed)
             let nextLegCorridor = max(
                 wing.waypointAcceptanceRadiusMeters * 1.15,
                 min(
@@ -684,7 +781,7 @@ final class FixedWingAutopilotController {
             airspeed: Float,
             wing: FixedWingParameters
         ) -> Float {
-            let minimumTurnRadius = wing.minimumTurnRadius(airspeed: airspeed)
+            let minimumTurnRadius = guidanceTurnRadius(wing: wing, airspeed: airspeed)
             return max(
                 wing.waypointAcceptanceRadiusMeters,
                 min(
@@ -699,7 +796,7 @@ final class FixedWingAutopilotController {
             airspeed: Float,
             wing: FixedWingParameters
         ) -> Float {
-            let minimumTurnRadius = wing.minimumTurnRadius(airspeed: airspeed)
+            let minimumTurnRadius = guidanceTurnRadius(wing: wing, airspeed: airspeed)
             return max(
                 wing.waypointAcceptanceRadiusMeters * 1.10,
                 min(
@@ -729,7 +826,7 @@ final class FixedWingAutopilotController {
                 SIMD2<Float>(position.x, position.z),
                 SIMD2<Float>(legEnd.x, legEnd.z)
             )
-            let minimumTurnRadius = wing.minimumTurnRadius(airspeed: airspeed)
+            let minimumTurnRadius = guidanceTurnRadius(wing: wing, airspeed: airspeed)
             let waypointWindow = max(
                 turnLeadDistance * 1.18,
                 max(
@@ -818,9 +915,40 @@ final class FixedWingAutopilotController {
                 waypoints[segmentIndex + 1].position
             )
         }
+
+        private func guidanceTurnRadius(
+            wing: FixedWingParameters,
+            airspeed: Float
+        ) -> Float {
+            let bankDegrees = min(
+                wing.maxBankAngleDeg,
+                max(8.0, wing.maxBankAngleDeg * 0.92)
+            )
+            let bankRadians = bankDegrees.degreesToRadians
+            let speed = max(airspeed, wing.minSafeAirspeed)
+            let bankLimitedRadius = speed * speed / max(0.1, 9.81 * tan(bankRadians))
+            return max(
+                wing.waypointAcceptanceRadiusMeters * 1.05,
+                min(wing.minimumTurnRadius(airspeed: airspeed), bankLimitedRadius)
+            )
+        }
     }
 
     private final class FixedWingLateralGuidanceController {
+        private struct FlyByTurnGeometry {
+            var center: SIMD2<Float>
+            var radius: Float
+            var exitPoint: SIMD2<Float>
+            var outboundDirection: SIMD2<Float>
+            var outboundLength: Float
+            var startAngle: Float
+            var sweepAngle: Float
+
+            var arcLength: Float {
+                max(0.001, abs(sweepAngle) * radius)
+            }
+        }
+
         func command(
             state: DroneState,
             mission: MissionReference,
@@ -833,26 +961,36 @@ final class FixedWingAutopilotController {
             let currentCourse = measuredCourse(state: state, fallback: mission.currentCourse)
 
             let desiredCourse: Float
-            switch mission.completionMode {
-            case .hold:
-                desiredCourse = mission.currentCourse
-            case .loiter(let center, let radius, let clockwise):
-                if mission.missionState == .loitering || mission.isCompleted {
-                    desiredCourse = orbitCourse(
-                        position: state.position,
-                        center: center,
-                        radius: radius,
-                        clockwise: clockwise
-                    )
-                } else if let launchHeading {
-                    desiredCourse = launchHeading
-                } else {
-                    desiredCourse = desiredTrackForLeg(
-                        position: state.position,
-                        mission: mission,
-                        lookahead: lookahead,
-                        wing: wing
-                    )
+            // Primitive guidance overlay short-circuits the legacy fly-by
+            // reconstruction: the lookahead course is already computed against
+            // the explicit line/arc primitive of the flyable route.
+            if let primitiveCourse = mission.precomputedDesiredCourse,
+               primitiveCourse.isFinite,
+               !(mission.missionState == .loitering || mission.isCompleted),
+               launchHeading == nil {
+                desiredCourse = primitiveCourse
+            } else {
+                switch mission.completionMode {
+                case .hold:
+                    desiredCourse = mission.currentCourse
+                case .loiter(let center, let radius, let clockwise):
+                    if mission.missionState == .loitering || mission.isCompleted {
+                        desiredCourse = orbitCourse(
+                            position: state.position,
+                            center: center,
+                            radius: radius,
+                            clockwise: clockwise
+                        )
+                    } else if let launchHeading {
+                        desiredCourse = launchHeading
+                    } else {
+                        desiredCourse = desiredTrackForLeg(
+                            position: state.position,
+                            mission: mission,
+                            lookahead: lookahead,
+                            wing: wing
+                        )
+                    }
                 }
             }
 
@@ -897,34 +1035,217 @@ final class FixedWingAutopilotController {
             )
             if mission.shouldBlendTurn,
                let nextLegEnd = mission.nextLegEnd {
-                let outboundDirection = SIMD2<Float>(
-                    nextLegEnd.x - mission.legEnd.x,
-                    nextLegEnd.z - mission.legEnd.z
-                )
-                let outboundLength = max(0.001, simd_length(outboundDirection))
-                let outboundCourse = courseRadians(from: outboundDirection / outboundLength)
-                let turnBlend = smootherstep(
-                    ((mission.alongTrackDistance - max(0.0, mission.legLength - mission.turnLeadDistance)) / max(0.1, mission.turnLeadDistance))
-                        .fwClamped(to: 0.0...1.0)
-                )
-                let outboundAimDistance = min(
-                    outboundLength * 0.42,
-                    max(
-                        wing.waypointAcceptanceRadiusMeters * 1.2,
-                        mission.turnLeadDistance * (0.58 + 0.42 * turnBlend)
-                    )
-                )
-                let outboundStart = SIMD2<Float>(mission.legEnd.x, mission.legEnd.z)
-                let outboundAimPoint = outboundStart + (outboundDirection / outboundLength) * outboundAimDistance
-                let turnAimPoint = inboundAimPoint + (outboundAimPoint - inboundAimPoint) * turnBlend
-                return courseToPoint(
-                    from: currentPosition,
-                    to: turnAimPoint,
-                    fallback: inboundCourse + shortestAngleRadians(outboundCourse - inboundCourse) * turnBlend
-                )
+                let outboundEnd = SIMD2<Float>(nextLegEnd.x, nextLegEnd.z)
+                if let flyByCourse = flyByTurnCourse(
+                    position: currentPosition,
+                    mission: mission,
+                    outboundEnd: outboundEnd,
+                    lookahead: lookahead,
+                    wing: wing
+                ) {
+                    return flyByCourse
+                }
             }
 
             return inboundCourse
+        }
+
+        private func flyByTurnCourse(
+            position: SIMD2<Float>,
+            mission: MissionReference,
+            outboundEnd: SIMD2<Float>,
+            lookahead: Float,
+            wing: FixedWingParameters
+        ) -> Float? {
+            guard let geometry = flyByTurnGeometry(
+                mission: mission,
+                outboundEnd: outboundEnd,
+                wing: wing
+            ) else {
+                return nil
+            }
+
+            let entryDistance = max(0.0, mission.legLength - mission.turnLeadDistance)
+            let legTurnProgress = ((mission.alongTrackDistance - entryDistance) / max(mission.turnLeadDistance, 0.1))
+                .fwClamped(to: 0.0...1.0)
+            let angularProgress = arcProgress(
+                position: position,
+                center: geometry.center,
+                startAngle: geometry.startAngle,
+                sweepAngle: geometry.sweepAngle
+            )
+            let radialError = abs(simd_distance(position, geometry.center) - geometry.radius)
+            let canUseAngularProgress = legTurnProgress > 0.05 &&
+                radialError <= max(geometry.radius * 0.5, wing.waypointAcceptanceRadiusMeters * 1.5)
+            let turnProgress = (
+                canUseAngularProgress
+                    ? max(smootherstep(legTurnProgress), angularProgress)
+                    : smootherstep(legTurnProgress)
+            ).fwClamped(to: 0.0...1.0)
+
+            let turnLookahead = max(
+                wing.waypointAcceptanceRadiusMeters * 0.85,
+                min(lookahead * 0.72, geometry.arcLength * 0.62)
+            )
+            let progressAdvance = turnLookahead / geometry.arcLength
+            let desiredProgress = turnProgress + progressAdvance
+
+            let aimPoint: SIMD2<Float>
+            let fallbackCourse: Float
+            if desiredProgress <= 1.0 {
+                let sampleAngle = geometry.startAngle + geometry.sweepAngle * desiredProgress
+                aimPoint = SIMD2<Float>(
+                    geometry.center.x + cos(sampleAngle) * geometry.radius,
+                    geometry.center.y + sin(sampleAngle) * geometry.radius
+                )
+                fallbackCourse = courseRadians(
+                    from: arcTangentDirection(
+                        angle: sampleAngle,
+                        sweepAngle: geometry.sweepAngle
+                    )
+                )
+            } else {
+                let overshootDistance = (desiredProgress - 1.0) * geometry.arcLength
+                let outboundAimDistance = min(
+                    max(overshootDistance, lookahead * 0.35),
+                    max(0.0, geometry.outboundLength - mission.turnLeadDistance)
+                )
+                aimPoint = geometry.exitPoint + geometry.outboundDirection * outboundAimDistance
+                fallbackCourse = courseRadians(from: geometry.outboundDirection)
+            }
+
+            return courseToPoint(
+                from: position,
+                to: aimPoint,
+                fallback: fallbackCourse
+            )
+        }
+
+        private func flyByTurnGeometry(
+            mission: MissionReference,
+            outboundEnd: SIMD2<Float>,
+            wing: FixedWingParameters
+        ) -> FlyByTurnGeometry? {
+            let waypoint = SIMD2<Float>(mission.legEnd.x, mission.legEnd.z)
+            let outboundDelta = outboundEnd - waypoint
+            let outboundLength = simd_length(outboundDelta)
+            guard outboundLength > 0.001 else {
+                return nil
+            }
+
+            let inboundDirection = mission.legDirectionXZ
+            let outboundDirection = outboundDelta / outboundLength
+            let inboundCourse = courseRadians(from: inboundDirection)
+            let outboundCourse = courseRadians(from: outboundDirection)
+            let turnAngle = abs(shortestAngleRadians(outboundCourse - inboundCourse))
+            let turnSign = inboundDirection.x * outboundDirection.y - inboundDirection.y * outboundDirection.x
+            let tangentFactor = tan(min(.pi * 0.45, turnAngle * 0.5))
+            guard turnAngle > 0.06,
+                  abs(turnSign) > 0.001,
+                  tangentFactor.isFinite,
+                  tangentFactor > 0.05 else {
+                return nil
+            }
+
+            let leadDistance = min(
+                mission.turnLeadDistance,
+                mission.legLength * 0.48,
+                outboundLength * 0.48
+            )
+            guard leadDistance > max(wing.waypointAcceptanceRadiusMeters * 0.25, 0.5) else {
+                return nil
+            }
+
+            let radius = leadDistance / tangentFactor
+            guard radius.isFinite,
+                  radius > max(0.5, wing.waypointAcceptanceRadiusMeters * 0.2) else {
+                return nil
+            }
+            let entryPoint = waypoint - inboundDirection * leadDistance
+            let exitPoint = waypoint + outboundDirection * leadDistance
+            let rightNormal = SIMD2<Float>(-inboundDirection.y, inboundDirection.x)
+            let center = turnSign > 0.0
+                ? entryPoint + rightNormal * radius
+                : entryPoint - rightNormal * radius
+            let startAngle = atan2(entryPoint.y - center.y, entryPoint.x - center.x)
+            let endAngle = atan2(exitPoint.y - center.y, exitPoint.x - center.x)
+            let sweepAngle = arcSweep(
+                startAngle: startAngle,
+                endAngle: endAngle,
+                turnSign: turnSign
+            )
+
+            guard abs(sweepAngle) > 0.04,
+                  abs(sweepAngle) <= .pi * 1.6,
+                  sweepAngle.isFinite else {
+                return nil
+            }
+
+            return FlyByTurnGeometry(
+                center: center,
+                radius: radius,
+                exitPoint: exitPoint,
+                outboundDirection: outboundDirection,
+                outboundLength: outboundLength,
+                startAngle: startAngle,
+                sweepAngle: sweepAngle
+            )
+        }
+
+        private func arcProgress(
+            position: SIMD2<Float>,
+            center: SIMD2<Float>,
+            startAngle: Float,
+            sweepAngle: Float
+        ) -> Float {
+            let radial = position - center
+            guard simd_length_squared(radial) > 0.0001 else {
+                return 0.0
+            }
+
+            let currentAngle = atan2(radial.y, radial.x)
+            var delta = currentAngle - startAngle
+            if sweepAngle > 0.0 {
+                while delta < 0.0 {
+                    delta += .pi * 2.0
+                }
+                while delta > .pi * 2.0 {
+                    delta -= .pi * 2.0
+                }
+            } else {
+                while delta > 0.0 {
+                    delta -= .pi * 2.0
+                }
+                while delta < -.pi * 2.0 {
+                    delta += .pi * 2.0
+                }
+            }
+
+            return (delta / sweepAngle).fwClamped(to: 0.0...1.0)
+        }
+
+        private func arcTangentDirection(
+            angle: Float,
+            sweepAngle: Float
+        ) -> SIMD2<Float> {
+            if sweepAngle >= 0.0 {
+                return simd_normalize(SIMD2<Float>(-sin(angle), cos(angle)))
+            }
+            return simd_normalize(SIMD2<Float>(sin(angle), -cos(angle)))
+        }
+
+        private func arcSweep(
+            startAngle: Float,
+            endAngle: Float,
+            turnSign: Float
+        ) -> Float {
+            var delta = shortestAngleRadians(endAngle - startAngle)
+            if turnSign > 0.0, delta < 0.0 {
+                delta += .pi * 2.0
+            } else if turnSign < 0.0, delta > 0.0 {
+                delta -= .pi * 2.0
+            }
+            return delta
         }
 
         private func measuredCourse(
@@ -933,7 +1254,7 @@ final class FixedWingAutopilotController {
         ) -> Float {
             let planarVelocity = SIMD2<Float>(state.velocity.x, state.velocity.z)
             if simd_length(planarVelocity) > 0.2 {
-                return atan2(-planarVelocity.x, planarVelocity.y)
+                return courseRadians(from: simd_normalize(planarVelocity))
             }
             return fallback
         }
@@ -1089,6 +1410,7 @@ final class FixedWingAutopilotController {
     }
 
     private let missionFollower = FixedWingMissionFollower()
+    private let primitiveFollower = FixedWingPrimitivePathFollower()
     private let lateralGuidanceController = FixedWingLateralGuidanceController()
     private let energyController = FixedWingEnergyController()
 
@@ -1114,6 +1436,7 @@ final class FixedWingAutopilotController {
         commandedThrottle = 0.0
         commandedCourseRadians = nil
         missionFollower.reset()
+        primitiveFollower.reset()
         energyController.reset()
     }
 
@@ -1149,7 +1472,7 @@ final class FixedWingAutopilotController {
             airspeed: airspeed
         )
 
-        guard let mission = missionFollower.update(
+        guard var mission = missionFollower.update(
             state: context.state,
             routeTracking: tracking,
             wing: wing,
@@ -1160,6 +1483,30 @@ final class FixedWingAutopilotController {
         ) else {
             setPhase(.failed, reason: "missing_route")
             return fallbackOutput(for: context, wing: wing)
+        }
+
+        // Primitive guidance overlay: when the route tracking context carries
+        // an explicit flyable route (line + arc primitives), the airplane is
+        // steered along those primitives via lookahead. The legacy mission
+        // reference (legStart/legEnd, etc.) is preserved for energy control,
+        // debug state and authority handshake.
+        if !isLaunchProtected(launchPhase),
+           let flyableRoute = tracking.flyableRoute {
+            let planarPos = SIMD2<Float>(context.state.position.x, context.state.position.z)
+            if let progress = primitiveFollower.update(
+                position: planarPos,
+                route: flyableRoute,
+                wing: wing,
+                airspeed: max(airspeed, wing.minSafeAirspeed),
+                minimumWaypointIndex: tracking.minimumWaypointIndex
+            ) {
+                mission = applyPrimitiveOverlay(
+                    base: mission,
+                    progress: progress,
+                    targetAltitude: mission.desiredAltitude,
+                    wing: wing
+                )
+            }
         }
 
         let launchHeading = resolvedLaunchHeading(launchAsset: launchAsset, launchPhase: launchPhase)
@@ -1203,10 +1550,22 @@ final class FixedWingAutopilotController {
         commandedRollDeg = filteredRollDeg
         commandedPitchDeg = filteredPitchDeg
         commandedThrottle = filteredThrottle
-        commandedCourseRadians = blendAngle(
+        let blendedCourse = blendAngle(
             current: commandedCourseRadians ?? context.state.orientation.z,
             target: lateral.desiredCourse,
             blend: (context.deltaTime * 1.8).fwClamped(to: 0.08...0.28)
+        )
+        // Absolute step limit on the commanded course tied to a generous
+        // multiple of the wing's nominal turn rate. This prevents the
+        // autopilot from issuing a catastrophic heading snap when a route
+        // refresh produces a large desiredCourse delta — the airplane will
+        // still bank decisively, but won't spin its nose at impossible rates.
+        let nominalTurnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
+        let courseStepLimit = nominalTurnRateRad * max(0.0, context.deltaTime) * 2.4
+        commandedCourseRadians = limitedCourseStep(
+            from: commandedCourseRadians ?? context.state.orientation.z,
+            to: blendedCourse,
+            maxStep: courseStepLimit
         )
 
         let resolvedPhase = resolveAutopilotPhase(
@@ -1403,6 +1762,64 @@ final class FixedWingAutopilotController {
         }
     }
 
+    private func applyPrimitiveOverlay(
+        base: MissionReference,
+        progress: FixedWingPrimitiveFollowProgress,
+        targetAltitude: Float,
+        wing: FixedWingParameters
+    ) -> MissionReference {
+        var overlay = base
+        overlay.precomputedDesiredCourse = progress.desiredCourse
+        overlay.primitivePathIndex = progress.primitiveIndex
+        overlay.primitivePathType = progress.primitiveType
+        overlay.crossTrackError = progress.crossTrackError
+        overlay.alongTrackDistance = progress.alongPrimitiveDistance
+        overlay.alongTrackProgress = progress.primitiveLength > 0.001
+            ? (progress.alongPrimitiveDistance / progress.primitiveLength).fwClamped(to: 0.0...1.0)
+            : 0.0
+        overlay.remainingDistance = progress.totalRemainingDistance
+        overlay.shouldBlendTurn = progress.primitiveType == .arc
+        overlay.legLength = max(0.001, progress.primitiveLength)
+        // The "leg" used by the legacy energy/debug path becomes the local
+        // tangent at the airplane's projected position on the primitive.
+        // Keeping legStart at the current planar position and legEnd in the
+        // direction of the primitive's local course gives the energy
+        // controller a stable hand-off without affecting altitude tracking.
+        let courseDir = SIMD2<Float>(
+            -sin(progress.primitiveCourseAtPosition),
+            -cos(progress.primitiveCourseAtPosition)
+        )
+        let basePos = SIMD3<Float>(
+            base.legStart.x,
+            targetAltitude,
+            base.legStart.z
+        )
+        let pseudoEnd = SIMD3<Float>(
+            basePos.x + courseDir.x * max(1.0, progress.primitiveLength),
+            targetAltitude,
+            basePos.z + courseDir.y * max(1.0, progress.primitiveLength)
+        )
+        overlay.legDirectionXZ = courseDir
+        overlay.legEnd = pseudoEnd
+        overlay.currentCourse = progress.primitiveCourseAtPosition
+        // Active waypoint accounting for mission auto-advance.
+        overlay.activeWaypointIndex = progress.activeAnchorMissionIndex ?? base.activeWaypointIndex
+        overlay.activeWaypointPosition = SIMD3<Float>(
+            progress.activeAnchorPosition.x,
+            targetAltitude,
+            progress.activeAnchorPosition.y
+        )
+        overlay.isFinalSegment = progress.isOnFinalPrimitive
+        // Approximate turn-lead distance from the wing parameters; the
+        // primitive follower already anticipates turns geometrically so this
+        // value is used purely for downstream debug telemetry.
+        overlay.turnLeadDistance = max(
+            wing.waypointAcceptanceRadiusMeters,
+            wing.minimumTurnRadius() * 0.5
+        )
+        return overlay
+    }
+
     private func resolvedLaunchHeading(
         launchAsset: LaunchAsset?,
         launchPhase: FixedWingLaunchPhase?
@@ -1437,7 +1854,7 @@ final class FixedWingAutopilotController {
         guard simd_length(planarVelocity) > 0.2 else {
             return fallback
         }
-        return atan2(-planarVelocity.x, planarVelocity.y).radiansToDegrees
+        return courseRadians(from: simd_normalize(planarVelocity)).radiansToDegrees
     }
 
     private func resolveAutopilotPhase(
@@ -1557,10 +1974,26 @@ final class FixedWingAutopilotController {
     ) -> Float {
         current + shortestAngleRadians(target - current) * blend.fwClamped(to: 0.0...1.0)
     }
+
+    private func limitedCourseStep(
+        from current: Float,
+        to target: Float,
+        maxStep: Float
+    ) -> Float {
+        guard current.isFinite, target.isFinite else {
+            return target.isFinite ? target : current
+        }
+        let delta = shortestAngleRadians(target - current)
+        if !maxStep.isFinite || maxStep <= 0.0 {
+            return current + delta
+        }
+        let limited = delta.fwClamped(to: -maxStep...maxStep)
+        return current + limited
+    }
 }
 
 private func courseRadians(from direction: SIMD2<Float>) -> Float {
-    atan2(-direction.x, direction.y)
+    atan2(-direction.x, -direction.y)
 }
 
 private func courseToPoint(
