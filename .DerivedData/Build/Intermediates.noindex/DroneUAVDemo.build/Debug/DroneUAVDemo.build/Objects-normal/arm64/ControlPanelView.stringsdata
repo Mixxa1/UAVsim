@@ -7,7 +7,7 @@
         "key": "panel.telemetry",
         "location": {
           "startingColumn": 37,
-          "startingLine": 474
+          "startingLine": 506
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "panel.throttle",
         "location": {
           "startingColumn": 50,
-          "startingLine": 134
+          "startingLine": 147
         }
       },
       {
@@ -94,24 +94,24 @@
         "comment": "",
         "key": "command.hover",
         "location": {
-          "startingColumn": 32,
-          "startingLine": 118
+          "startingColumn": 36,
+          "startingLine": 130
         }
       },
       {
         "comment": "",
         "key": "command.auto_path",
         "location": {
-          "startingColumn": 32,
-          "startingLine": 119
+          "startingColumn": 36,
+          "startingLine": 131
         }
       },
       {
         "comment": "",
         "key": "command.return_home",
         "location": {
-          "startingColumn": 32,
-          "startingLine": 120
+          "startingColumn": 36,
+          "startingLine": 132
         }
       },
       {
@@ -119,7 +119,7 @@
         "key": "command.stop_animation",
         "location": {
           "startingColumn": 82,
-          "startingLine": 127
+          "startingLine": 140
         }
       },
       {
@@ -127,7 +127,7 @@
         "key": "command.start_animation",
         "location": {
           "startingColumn": 128,
-          "startingLine": 127
+          "startingLine": 140
         }
       },
       {
@@ -135,7 +135,7 @@
         "key": "command.emergency_stop",
         "location": {
           "startingColumn": 32,
-          "startingLine": 124
+          "startingLine": 137
         }
       },
       {
@@ -143,7 +143,7 @@
         "key": "section.flight",
         "location": {
           "startingColumn": 22,
-          "startingLine": 143
+          "startingLine": 156
         }
       },
       {
@@ -151,7 +151,7 @@
         "key": "camera.distance",
         "location": {
           "startingColumn": 54,
-          "startingLine": 202
+          "startingLine": 234
         }
       },
       {
@@ -159,7 +159,7 @@
         "key": "camera.fov",
         "location": {
           "startingColumn": 63,
-          "startingLine": 210
+          "startingLine": 242
         }
       },
       {
@@ -167,7 +167,7 @@
         "key": "panel.camera_mode",
         "location": {
           "startingColumn": 28,
-          "startingLine": 168
+          "startingLine": 200
         }
       },
       {
@@ -175,7 +175,7 @@
         "key": "camera.payload.auto_switch",
         "location": {
           "startingColumn": 28,
-          "startingLine": 177
+          "startingLine": 209
         }
       },
       {
@@ -183,7 +183,7 @@
         "key": "camera.preset",
         "location": {
           "startingColumn": 28,
-          "startingLine": 182
+          "startingLine": 214
         }
       },
       {
@@ -191,7 +191,7 @@
         "key": "camera.reset_to_preset",
         "location": {
           "startingColumn": 32,
-          "startingLine": 192
+          "startingLine": 224
         }
       },
       {
@@ -199,7 +199,7 @@
         "key": "camera.sensitivity",
         "location": {
           "startingColumn": 71,
-          "startingLine": 223
+          "startingLine": 255
         }
       },
       {
@@ -207,7 +207,7 @@
         "key": "camera.smoothing",
         "location": {
           "startingColumn": 71,
-          "startingLine": 224
+          "startingLine": 256
         }
       },
       {
@@ -215,7 +215,7 @@
         "key": "camera.zoom_sensitivity",
         "location": {
           "startingColumn": 71,
-          "startingLine": 225
+          "startingLine": 257
         }
       },
       {
@@ -223,7 +223,7 @@
         "key": "camera.free_speed",
         "location": {
           "startingColumn": 71,
-          "startingLine": 226
+          "startingLine": 258
         }
       },
       {
@@ -231,7 +231,7 @@
         "key": "camera.fpv_yaw_limit",
         "location": {
           "startingColumn": 71,
-          "startingLine": 237
+          "startingLine": 269
         }
       },
       {
@@ -239,7 +239,7 @@
         "key": "camera.fpv_pitch_limit",
         "location": {
           "startingColumn": 71,
-          "startingLine": 238
+          "startingLine": 270
         }
       },
       {
@@ -247,7 +247,7 @@
         "key": "camera.fpv_near_clip",
         "location": {
           "startingColumn": 71,
-          "startingLine": 239
+          "startingLine": 271
         }
       },
       {
@@ -255,7 +255,7 @@
         "key": "camera.fpv_stabilization",
         "location": {
           "startingColumn": 71,
-          "startingLine": 240
+          "startingLine": 272
         }
       },
       {
@@ -263,7 +263,7 @@
         "key": "camera.fpv_mount_x",
         "location": {
           "startingColumn": 71,
-          "startingLine": 242
+          "startingLine": 274
         }
       },
       {
@@ -271,7 +271,7 @@
         "key": "camera.fpv_mount_y",
         "location": {
           "startingColumn": 71,
-          "startingLine": 243
+          "startingLine": 275
         }
       },
       {
@@ -279,7 +279,7 @@
         "key": "camera.fpv_mount_z",
         "location": {
           "startingColumn": 71,
-          "startingLine": 244
+          "startingLine": 276
         }
       },
       {
@@ -287,7 +287,7 @@
         "key": "camera.sensitivity_profile",
         "location": {
           "startingColumn": 36,
-          "startingLine": 214
+          "startingLine": 246
         }
       },
       {
@@ -295,7 +295,7 @@
         "key": "camera.invert_x",
         "location": {
           "startingColumn": 36,
-          "startingLine": 228
+          "startingLine": 260
         }
       },
       {
@@ -303,7 +303,7 @@
         "key": "camera.invert_y",
         "location": {
           "startingColumn": 36,
-          "startingLine": 232
+          "startingLine": 264
         }
       },
       {
@@ -311,7 +311,7 @@
         "key": "camera.fpv_hide_obstructing",
         "location": {
           "startingColumn": 36,
-          "startingLine": 246
+          "startingLine": 278
         }
       },
       {
@@ -319,7 +319,7 @@
         "key": "camera.advanced",
         "location": {
           "startingColumn": 30,
-          "startingLine": 253
+          "startingLine": 285
         }
       },
       {
@@ -327,7 +327,7 @@
         "key": "section.camera",
         "location": {
           "startingColumn": 22,
-          "startingLine": 259
+          "startingLine": 291
         }
       },
       {
@@ -335,7 +335,7 @@
         "key": "weather.intensity",
         "location": {
           "startingColumn": 63,
-          "startingLine": 278
+          "startingLine": 310
         }
       },
       {
@@ -343,7 +343,7 @@
         "key": "weather.wind_direction",
         "location": {
           "startingColumn": 63,
-          "startingLine": 279
+          "startingLine": 311
         }
       },
       {
@@ -351,7 +351,7 @@
         "key": "weather.wind_speed",
         "location": {
           "startingColumn": 63,
-          "startingLine": 280
+          "startingLine": 312
         }
       },
       {
@@ -359,7 +359,7 @@
         "key": "weather.gusts",
         "location": {
           "startingColumn": 63,
-          "startingLine": 281
+          "startingLine": 313
         }
       },
       {
@@ -367,7 +367,7 @@
         "key": "terrain.density",
         "location": {
           "startingColumn": 50,
-          "startingLine": 306
+          "startingLine": 338
         }
       },
       {
@@ -375,7 +375,7 @@
         "key": "panel.weather",
         "location": {
           "startingColumn": 28,
-          "startingLine": 269
+          "startingLine": 301
         }
       },
       {
@@ -383,7 +383,7 @@
         "key": "panel.terrain",
         "location": {
           "startingColumn": 28,
-          "startingLine": 285
+          "startingLine": 317
         }
       },
       {
@@ -391,7 +391,7 @@
         "key": "terrain.scale",
         "location": {
           "startingColumn": 28,
-          "startingLine": 295
+          "startingLine": 327
         }
       },
       {
@@ -399,7 +399,7 @@
         "key": "environment.boundary_barrier_visible",
         "location": {
           "startingColumn": 28,
-          "startingLine": 315
+          "startingLine": 347
         }
       },
       {
@@ -407,7 +407,7 @@
         "key": "section.environment",
         "location": {
           "startingColumn": 22,
-          "startingLine": 322
+          "startingLine": 354
         }
       },
       {
@@ -415,7 +415,7 @@
         "key": "diagnostic.mode",
         "location": {
           "startingColumn": 28,
-          "startingLine": 332
+          "startingLine": 364
         }
       },
       {
@@ -423,7 +423,7 @@
         "key": "diagnostic.collision_debug",
         "location": {
           "startingColumn": 28,
-          "startingLine": 341
+          "startingLine": 373
         }
       },
       {
@@ -431,7 +431,7 @@
         "key": "diagnostic.last_collision_source",
         "location": {
           "startingColumn": 30,
-          "startingLine": 344
+          "startingLine": 376
         }
       },
       {
@@ -439,7 +439,7 @@
         "key": "diagnostic.active_objects",
         "location": {
           "startingColumn": 30,
-          "startingLine": 351
+          "startingLine": 383
         }
       },
       {
@@ -447,7 +447,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 353
+          "startingLine": 385
         }
       },
       {
@@ -455,7 +455,7 @@
         "key": "diagnostic.active_physics",
         "location": {
           "startingColumn": 30,
-          "startingLine": 356
+          "startingLine": 388
         }
       },
       {
@@ -463,7 +463,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 358
+          "startingLine": 390
         }
       },
       {
@@ -471,7 +471,7 @@
         "key": "diagnostic.active_particles",
         "location": {
           "startingColumn": 30,
-          "startingLine": 361
+          "startingLine": 393
         }
       },
       {
@@ -479,7 +479,7 @@
         "key": "%lld",
         "location": {
           "startingColumn": 30,
-          "startingLine": 363
+          "startingLine": 395
         }
       },
       {
@@ -487,7 +487,7 @@
         "key": "section.diagnostics",
         "location": {
           "startingColumn": 22,
-          "startingLine": 369
+          "startingLine": 401
         }
       },
       {
@@ -495,7 +495,7 @@
         "key": "section.advanced",
         "location": {
           "startingColumn": 22,
-          "startingLine": 385
+          "startingLine": 417
         }
       },
       {
@@ -503,7 +503,7 @@
         "key": "panel.fleet",
         "location": {
           "startingColumn": 18,
-          "startingLine": 393
+          "startingLine": 425
         }
       },
       {
@@ -511,7 +511,7 @@
         "key": "fleet.separation",
         "location": {
           "startingColumn": 55,
-          "startingLine": 410
+          "startingLine": 442
         }
       },
       {
@@ -519,7 +519,7 @@
         "key": "diagnostic.fleet_mode",
         "location": {
           "startingColumn": 20,
-          "startingLine": 396
+          "startingLine": 428
         }
       },
       {
@@ -527,7 +527,7 @@
         "key": "fleet.formation",
         "location": {
           "startingColumn": 20,
-          "startingLine": 401
+          "startingLine": 433
         }
       },
       {
@@ -535,7 +535,7 @@
         "key": "panel.damage",
         "location": {
           "startingColumn": 18,
-          "startingLine": 416
+          "startingLine": 448
         }
       },
       {
@@ -543,7 +543,7 @@
         "key": "damage.reset",
         "location": {
           "startingColumn": 24,
-          "startingLine": 420
+          "startingLine": 452
         }
       },
       {
@@ -551,7 +551,7 @@
         "key": "damage.clear_selection",
         "location": {
           "startingColumn": 24,
-          "startingLine": 424
+          "startingLine": 456
         }
       },
       {
@@ -559,7 +559,7 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 26,
-          "startingLine": 441
+          "startingLine": 473
         }
       },
       {
@@ -567,7 +567,7 @@
         "key": "damage.hide",
         "location": {
           "startingColumn": 28,
-          "startingLine": 444
+          "startingLine": 476
         }
       },
       {
@@ -575,7 +575,7 @@
         "key": "panel.warnings",
         "location": {
           "startingColumn": 18,
-          "startingLine": 456
+          "startingLine": 488
         }
       },
       {
@@ -583,7 +583,7 @@
         "key": "warnings.none",
         "location": {
           "startingColumn": 22,
-          "startingLine": 460
+          "startingLine": 492
         }
       },
       {
@@ -591,7 +591,7 @@
         "key": "• %@",
         "location": {
           "startingColumn": 26,
-          "startingLine": 465
+          "startingLine": 497
         }
       },
       {
@@ -599,7 +599,7 @@
         "key": "telemetry.export",
         "location": {
           "startingColumn": 24,
-          "startingLine": 478
+          "startingLine": 510
         }
       }
     ]

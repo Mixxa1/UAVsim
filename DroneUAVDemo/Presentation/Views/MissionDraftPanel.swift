@@ -346,228 +346,45 @@ struct MissionDraftPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // Diagnostics relevant to the new carrot-pursuit autopilot.
+            // The previous fly-by/intercept-feasibility/path-cache fields are
+            // not produced by the new pipeline and have been removed.
             VStack(alignment: .leading, spacing: 6) {
                 debugField(
                     "fixed_wing.assist.debug.active_index",
                     value: fixedWingAssistState.activeWaypointIndex.map(String.init) ?? localized("common.na")
                 )
                 debugField(
-                    "fixed_wing.assist.debug.auto_advance_enabled",
-                    value: fixedWingAssistState.autoAdvanceEnabled ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.next_index",
-                    value: fixedWingAssistState.nextWaypointIndex.map(String.init) ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.has_prev_waypoint",
-                    value: fixedWingAssistState.hasPrevWaypoint ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.has_next_waypoint",
-                    value: fixedWingAssistState.hasNextWaypoint ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.is_penultimate_waypoint",
-                    value: fixedWingAssistState.isPenultimateWaypoint ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.is_final_waypoint",
-                    value: fixedWingAssistState.isFinalWaypoint ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.flyby_center_waypoint_index",
-                    value: fixedWingAssistState.flyByCenterWaypointIndex.map(String.init) ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.active_triple_indices",
-                    value: fixedWingAssistState.activeTripleIndices ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.active_id",
-                    value: fixedWingAssistState.activeWaypointID?.uuidString ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.captured_ids",
-                    value: fixedWingAssistState.capturedWaypointIDs.isEmpty
-                        ? localized("common.na")
-                        : fixedWingAssistState.capturedWaypointIDs.map(\.uuidString).joined(separator: ", ")
-                )
-                debugField(
                     "fixed_wing.assist.debug.intercept_state",
                     value: fixedWingAssistState.interceptState.rawValue
                 )
                 debugField(
-                    "fixed_wing.assist.debug.capture_completed_reason",
-                    value: fixedWingAssistState.captureCompletedReason ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.feasibility",
-                    value: fixedWingAssistState.interceptFeasibilityState?.rawValue ?? localized("common.na")
-                )
-                debugField(
                     "fixed_wing.assist.debug.distance",
-                    value: fixedWingAssistState.distanceToActiveWaypointMeters.map { String(format: "%.1f m", $0) } ?? localized("common.na")
+                    value: fixedWingAssistState.distanceToActiveWaypointMeters
+                        .map { String(format: "%.1f m", $0) } ?? localized("common.na")
                 )
                 debugField(
                     "fixed_wing.assist.debug.heading_error",
-                    value: fixedWingAssistState.headingErrorDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.raw_heading_error",
-                    value: fixedWingAssistState.rawHeadingErrorDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.turn_radius",
-                    value: fixedWingAssistState.estimatedTurnRadiusMeters.map { String(format: "%.1f m", $0) } ?? localized("common.na")
+                    value: fixedWingAssistState.headingErrorDegrees
+                        .map { String(format: "%.1f deg", $0) } ?? localized("common.na")
                 )
                 debugField(
                     "fixed_wing.assist.debug.commanded_bank",
-                    value: fixedWingAssistState.commandedBankDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.filtered_bank",
-                    value: fixedWingAssistState.filteredBankCommandDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
+                    value: fixedWingAssistState.commandedBankDegrees
+                        .map { String(format: "%.1f deg", $0) } ?? localized("common.na")
                 )
                 debugField(
                     "fixed_wing.assist.debug.turn_direction",
                     value: fixedWingAssistState.commandedTurnDirection.rawValue
                 )
                 debugField(
+                    "fixed_wing.assist.debug.turn_radius",
+                    value: fixedWingAssistState.estimatedTurnRadiusMeters
+                        .map { String(format: "%.1f m", $0) } ?? localized("common.na")
+                )
+                debugField(
                     "fixed_wing.assist.debug.transition_reason",
                     value: fixedWingAssistState.stateTransitionReason ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.auto_advance_suppressed",
-                    value: fixedWingAssistState.autoAdvanceSuppressed ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.auto_advance_suppressed_reason",
-                    value: fixedWingAssistState.autoAdvanceSuppressedReason ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.heading_error_to_next_waypoint",
-                    value: fixedWingAssistState.headingErrorToNextWaypointDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.next_waypoint_in_forward_sector",
-                    value: fixedWingAssistState.nextWaypointInForwardSector ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.enough_turn_in_distance",
-                    value: fixedWingAssistState.enoughTurnInDistance ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.collision_risk_to_next_waypoint",
-                    value: fixedWingAssistState.collisionRiskToNextWaypoint.map { String(format: "%.2f", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.obstacle_in_turn_corridor",
-                    value: fixedWingAssistState.obstacleInTurnCorridor ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.blocked_path_to_next_waypoint",
-                    value: fixedWingAssistState.blockedPathToNextWaypoint ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.lateral_guidance_suppressed_for_poor_geometry",
-                    value: fixedWingAssistState.lateralGuidanceSuppressedForPoorGeometry ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.current_leg_start",
-                    value: fixedWingAssistState.currentLegStart.map(format(point:)) ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.current_leg_middle",
-                    value: fixedWingAssistState.currentLegMiddle.map(format(point:)) ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.current_leg_end",
-                    value: fixedWingAssistState.currentLegEnd.map(format(point:)) ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.inbound_course_deg",
-                    value: fixedWingAssistState.inboundCourseDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.outbound_course_deg",
-                    value: fixedWingAssistState.outboundCourseDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.course_change_deg",
-                    value: fixedWingAssistState.courseChangeDegrees.map { String(format: "%.1f deg", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.lead_distance",
-                    value: fixedWingAssistState.leadDistanceMeters.map { String(format: "%.1f m", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.flyby_transition_active",
-                    value: fixedWingAssistState.flyByTransitionActive ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.turn_transition_active",
-                    value: fixedWingAssistState.turnTransitionActive ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.flyby_transition_feasible",
-                    value: fixedWingAssistState.flyByTransitionFeasible ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.active_guidance_mode",
-                    value: fixedWingAssistState.activeGuidanceMode
-                )
-                debugField(
-                    "fixed_wing.assist.debug.preview_uses_cached_flyby_plan",
-                    value: fixedWingAssistState.previewUsesCachedFlyByPlan ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.controller_uses_cached_flyby_plan",
-                    value: fixedWingAssistState.controllerUsesCachedFlyByPlan ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.guidance_direct_to_waypoint_suppressed",
-                    value: fixedWingAssistState.guidanceDirectToWaypointSuppressed ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.terminal_capture_allowed",
-                    value: fixedWingAssistState.terminalCaptureAllowed ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.guidance_type",
-                    value: fixedWingAssistState.activeGuidanceTargetType
-                )
-                debugField(
-                    "fixed_wing.assist.debug.using_obsolete_fixed_wing_mode",
-                    value: fixedWingAssistState.usingObsoleteFixedWingMode ? "true" : "false"
-                )
-                debugField(
-                    "fixed_wing.assist.debug.flyby_plan_recompute_count",
-                    value: String(fixedWingAssistState.flyByPlanRecomputeCount)
-                )
-                debugField(
-                    "fixed_wing.assist.debug.full_route_rebuild_count",
-                    value: String(fixedWingAssistState.fullRouteRebuildCount)
-                )
-                debugField(
-                    "fixed_wing.assist.debug.overlay_rebuild_count",
-                    value: String(fixedWingAssistState.overlayRebuildCount)
-                )
-                debugField(
-                    "fixed_wing.assist.debug.guidance_recompute_count",
-                    value: String(fixedWingAssistState.guidanceRecomputeCount)
-                )
-                debugField(
-                    "fixed_wing.assist.debug.frame_time",
-                    value: fixedWingAssistState.frameTimeMs.map { String(format: "%.2f ms", $0) } ?? localized("common.na")
-                )
-                debugField(
-                    "fixed_wing.assist.debug.heavy_map_rebuild_count",
-                    value: String(fixedWingAssistState.heavyMapRebuildCount)
-                )
-                debugField(
-                    "fixed_wing.assist.debug.frame_time_during_transition",
-                    value: fixedWingAssistState.frameTimeDuringTransitionMs.map { String(format: "%.2f ms", $0) } ?? localized("common.na")
                 )
             }
             .padding(.horizontal, 9)

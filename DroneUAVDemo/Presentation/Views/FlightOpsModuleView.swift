@@ -216,7 +216,7 @@ struct FlightOpsModuleView: View {
         case .altitudeHold:
             return "arrow.up.and.down.circle.fill"
         case .waypointIntercept:
-            return "dot.scope"
+            return "airplane.circle.fill"
         }
     }
 

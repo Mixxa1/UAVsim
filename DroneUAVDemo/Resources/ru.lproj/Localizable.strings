@@ -248,7 +248,7 @@
 "mode.manual" = "Ручной";
 "mode.fixed_wing_heading_hold" = "Удержание курса";
 "mode.fixed_wing_altitude_hold" = "Удержание высоты";
-"mode.fixed_wing_waypoint_intercept" = "Перехват точки";
+"mode.fixed_wing_waypoint_intercept" = "Автопилот по точкам";
 "mode.auto_path" = "Авто-маршрут";
 "mode.return_home" = "Возврат домой";
 "mode.hover" = "Зависание";
@@ -774,8 +774,8 @@
 "module.flight_ops.subtitle" = "Запуск, возврат и управление тягой";
 "module.flight_ops.command_stack" = "Блок команд";
 "module.flight_ops.command_stack.subtitle" = "Основные действия аппарата и автоматические режимы";
-"module.flight_ops.fixed_wing_assist" = "Fixed-Wing Assist";
-"module.flight_ops.fixed_wing_assist.subtitle" = "Отдельные режимы удержания курса, высоты и перехвата одной точки";
+"module.flight_ops.fixed_wing_assist" = "Автопилот самолёта";
+"module.flight_ops.fixed_wing_assist.subtitle" = "Плавный пролёт по точкам по схеме carrot-pursuit, плюс ручные удержания курса и высоты";
 "module.flight_ops.control_law" = "Режим управления";
 "module.flight_ops.control_law.subtitle" = "Переключение законов управления без выхода из сцены";
 "module.flight_ops.active_mode" = "АКТИВЕН";
@@ -1147,8 +1147,8 @@
 "fixed_wing.assist.feasibility.feasible" = "Выполнима";
 "fixed_wing.assist.feasibility.tight_turn" = "Тесный поворот";
 "fixed_wing.assist.feasibility.poor_geometry" = "Плохая геометрия";
-"fixed_wing.assist.feasibility.warning" = "Изгиб маршрута не подходит для безопасного fly-by. Assist приостанавливает автопереход вместо позднего point-snap маневра.";
-"fixed_wing.assist.hint" = "Ручной выбор waypoint остается явным. В режиме Fly-by fixed-wing assist переходит между leg'ами по заранее рассчитанной геометрии поворота, а не через поздний point-switch в точке.";
+"fixed_wing.assist.feasibility.warning" = "Угол поворота вблизи точки превышает безопасный крен. Автопилот плавно срежет угол, чтобы не сорваться в скольжение.";
+"fixed_wing.assist.hint" = "Автопилот плавно ведёт самолёт по точкам через виртуальную «точку прицеливания» (carrot pursuit). Чем угловатее маршрут, тем шире будут радиусы поворота.";
 "fixed_wing.assist.debug.active_index" = "activeWaypointIndex";
 "fixed_wing.assist.debug.auto_advance_enabled" = "autoAdvanceEnabled";
 "fixed_wing.assist.debug.next_index" = "nextWaypointIndex";

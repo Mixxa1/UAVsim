@@ -1,0 +1,30 @@
+{
+  "/Users/misha/New project/DroneUAVDemo/Domain/UAVCatalog.swift" : {
+    "const-values" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.swiftconstvalues",
+    "dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.d",
+    "diagnostics" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.dia",
+    "object" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.o",
+    "swift-dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVCatalog.swiftdeps"
+  },
+  "/Users/misha/New project/DroneUAVDemo/Domain/UAVFilterState.swift" : {
+    "const-values" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFilterState.swiftconstvalues",
+    "dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFilterState.d",
+    "diagnostics" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFilterState.dia",
+    "object" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFilterState.o",
+    "swift-dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVFilterState.swiftdeps"
+  },
+  "/Users/misha/New project/DroneUAVDemo/Domain/UAVSelectionState.swift" : {
+    "const-values" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVSelectionState.swiftconstvalues",
+    "dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVSelectionState.d",
+    "diagnostics" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVSelectionState.dia",
+    "object" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVSelectionState.o",
+    "swift-dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVSelectionState.swiftdeps"
+  },
+  "/Users/misha/New project/DroneUAVDemo/Scene/UAVVisualFactory.swift" : {
+    "const-values" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVVisualFactory.swiftconstvalues",
+    "dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVVisualFactory.d",
+    "diagnostics" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVVisualFactory.dia",
+    "object" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVVisualFactory.o",
+    "swift-dependencies" : "/Users/misha/New project/.DerivedData/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/UAVVisualFactory.swiftdeps"
+  }
+}

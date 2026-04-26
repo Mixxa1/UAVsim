@@ -8402,7 +8402,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let geometryAssessment = fixedWingAssistController.evaluateInterceptGeometry(
             aircraftState: state,
             wing: wing,
-            interceptTarget: activeWaypoint.position
+            target: activeWaypoint.position
         )
         if fixedWingAssistState.mode == .waypointIntercept {
             applyFixedWingAssistFlyBySnapshot(
@@ -9239,7 +9239,7 @@ final class DroneSimulationViewModel: ObservableObject {
     ) -> LaunchState {
         switch output.launchPhase {
         case .onRail:
-            return output.phase == .aligningToLeg ? .aligning : .prelaunchCheck
+            return output.phase == .launchClimb ? .aligning : .prelaunchCheck
         case .launchImpulse:
             return .assistedAcceleration
         case .railRelease:
@@ -10039,8 +10039,7 @@ final class DroneSimulationViewModel: ObservableObject {
             .map { waypoint in
                 FixedWingFlyableRouteBuilder.WaypointInput(
                     position: SIMD2<Float>(waypoint.position.x, waypoint.position.z),
-                    missionWaypointIndex: waypoint.missionWaypointIndex,
-                    waypointIdentifier: waypoint.waypointIdentifier
+                    missionWaypointIndex: waypoint.missionWaypointIndex
                 )
             }
         guard !inputs.isEmpty else { return nil }

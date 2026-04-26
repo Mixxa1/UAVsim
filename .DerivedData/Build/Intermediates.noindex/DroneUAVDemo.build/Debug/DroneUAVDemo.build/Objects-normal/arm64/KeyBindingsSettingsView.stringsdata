@@ -4,58 +4,42 @@
     "Localizable": [
       {
         "comment": "",
+        "key": "⚠︎ %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 52
+        }
+      },
+      {
+        "comment": "",
         "key": "keybind.section.title",
         "location": {
           "startingColumn": 22,
-          "startingLine": 14
+          "startingLine": 74
         }
       },
       {
         "comment": "",
         "key": "common.done",
         "location": {
-          "startingColumn": 24,
-          "startingLine": 17
+          "startingColumn": 16,
+          "startingLine": 206
         }
       },
       {
         "comment": "",
-        "key": "keybind.capture.idle",
+        "key": "keybind.section.title",
         "location": {
-          "startingColumn": 26,
-          "startingLine": 37
+          "startingColumn": 22,
+          "startingLine": 82
         }
       },
       {
         "comment": "",
         "key": "keybind.reset_defaults",
         "location": {
-          "startingColumn": 24,
-          "startingLine": 44
-        }
-      },
-      {
-        "comment": "",
-        "key": "keybind.capturing",
-        "location": {
-          "startingColumn": 100,
-          "startingLine": 85
-        }
-      },
-      {
-        "comment": "",
-        "key": "keybind.rebind",
-        "location": {
-          "startingColumn": 141,
-          "startingLine": 85
-        }
-      },
-      {
-        "comment": "",
-        "key": "⚠︎ %@",
-        "location": {
-          "startingColumn": 34,
-          "startingLine": 102
+          "startingColumn": 16,
+          "startingLine": 237
         }
       },
       {
@@ -63,7 +47,7 @@
         "key": "Game Controller",
         "location": {
           "startingColumn": 18,
-          "startingLine": 120
+          "startingLine": 112
         }
       },
       {
@@ -71,7 +55,7 @@
         "key": "Connected controllers",
         "location": {
           "startingColumn": 22,
-          "startingLine": 135
+          "startingLine": 140
         }
       },
       {
@@ -79,7 +63,7 @@
         "key": "No controller connected",
         "location": {
           "startingColumn": 26,
-          "startingLine": 140
+          "startingLine": 145
         }
       },
       {
@@ -87,7 +71,7 @@
         "key": "Active",
         "location": {
           "startingColumn": 38,
-          "startingLine": 150
+          "startingLine": 155
         }
       },
       {
@@ -95,7 +79,7 @@
         "key": "Right stick X",
         "location": {
           "startingColumn": 22,
-          "startingLine": 162
+          "startingLine": 167
         }
       },
       {
@@ -103,7 +87,31 @@
         "key": "Default profile maps right stick horizontal to keyboard J / L yaw semantics.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 187
+          "startingLine": 185
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.capture.idle",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 227
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.capturing",
+        "location": {
+          "startingColumn": 88,
+          "startingLine": 311
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.rebind",
+        "location": {
+          "startingColumn": 129,
+          "startingLine": 311
         }
       },
       {
@@ -111,7 +119,7 @@
         "key": "keybind.key.space",
         "location": {
           "startingColumn": 38,
-          "startingLine": 266
+          "startingLine": 380
         }
       }
     ]

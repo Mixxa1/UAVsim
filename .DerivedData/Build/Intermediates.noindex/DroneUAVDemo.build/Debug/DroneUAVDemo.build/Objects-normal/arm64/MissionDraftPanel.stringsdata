@@ -15,7 +15,7 @@
         "key": "tactical.map.route.empty",
         "location": {
           "startingColumn": 22,
-          "startingLine": 144
+          "startingLine": 149
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "tactical.map.launch.standard_hint",
         "location": {
           "startingColumn": 22,
-          "startingLine": 188
+          "startingLine": 193
         }
       },
       {
@@ -31,7 +31,39 @@
         "key": "tactical.map.launch.place_object_hint",
         "location": {
           "startingColumn": 22,
-          "startingLine": 218
+          "startingLine": 223
+        }
+      },
+      {
+        "comment": "",
+        "key": "fixed_wing.assist.waypoint.none",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 310
+        }
+      },
+      {
+        "comment": "",
+        "key": "fixed_wing.assist.feasibility.warning",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 343
+        }
+      },
+      {
+        "comment": "",
+        "key": "fixed_wing.assist.hint",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 398
+        }
+      },
+      {
+        "comment": "",
+        "key": "fixed_wing.assist.auto_advance",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 277
         }
       },
       {
@@ -39,7 +71,7 @@
         "key": "mission.constraints.hint",
         "location": {
           "startingColumn": 18,
-          "startingLine": 285
+          "startingLine": 440
         }
       },
       {
@@ -47,7 +79,7 @@
         "key": "tactical.map.zone.empty",
         "location": {
           "startingColumn": 22,
-          "startingLine": 350
+          "startingLine": 505
         }
       },
       {
@@ -55,7 +87,7 @@
         "key": "mission.plan.status.ready",
         "location": {
           "startingColumn": 34,
-          "startingLine": 366
+          "startingLine": 521
         }
       },
       {
@@ -63,7 +95,7 @@
         "key": "mission.status.value.none",
         "location": {
           "startingColumn": 38,
-          "startingLine": 359
+          "startingLine": 514
         }
       },
       {
@@ -71,7 +103,7 @@
         "key": "tactical.map.zone.radius.value.multiple",
         "location": {
           "startingColumn": 43,
-          "startingLine": 376
+          "startingLine": 531
         }
       },
       {
@@ -79,7 +111,7 @@
         "key": "tactical.map.zone.radius.value",
         "location": {
           "startingColumn": 39,
-          "startingLine": 385
+          "startingLine": 540
         }
       },
       {
@@ -87,7 +119,7 @@
         "key": "mission.panel.plan.empty",
         "location": {
           "startingColumn": 22,
-          "startingLine": 438
+          "startingLine": 593
         }
       }
     ]

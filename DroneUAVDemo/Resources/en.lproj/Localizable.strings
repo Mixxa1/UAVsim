@@ -248,7 +248,7 @@
 "mode.manual" = "Manual";
 "mode.fixed_wing_heading_hold" = "Heading Hold";
 "mode.fixed_wing_altitude_hold" = "Altitude Hold";
-"mode.fixed_wing_waypoint_intercept" = "Waypoint Intercept";
+"mode.fixed_wing_waypoint_intercept" = "Waypoint Autopilot";
 "mode.auto_path" = "Auto Path";
 "mode.return_home" = "Return Home";
 "mode.hover" = "Hover";
@@ -779,8 +779,8 @@
 "module.flight_ops.subtitle" = "Launch, recovery and thrust control";
 "module.flight_ops.command_stack" = "Command Stack";
 "module.flight_ops.command_stack.subtitle" = "Primary airframe actions and automatic routines";
-"module.flight_ops.fixed_wing_assist" = "Fixed-Wing Assist";
-"module.flight_ops.fixed_wing_assist.subtitle" = "Independent heading, altitude and single-waypoint intercept holds";
+"module.flight_ops.fixed_wing_assist" = "Fixed-Wing Autopilot";
+"module.flight_ops.fixed_wing_assist.subtitle" = "Smooth waypoint following with carrot-pursuit guidance, plus manual heading and altitude holds";
 "module.flight_ops.control_law" = "Flight Control";
 "module.flight_ops.control_law.subtitle" = "Switch between control laws without leaving the scene";
 "module.flight_ops.active_mode" = "ACTIVE";
@@ -1152,8 +1152,8 @@
 "fixed_wing.assist.feasibility.feasible" = "Feasible";
 "fixed_wing.assist.feasibility.tight_turn" = "Tight turn";
 "fixed_wing.assist.feasibility.poor_geometry" = "Poor geometry";
-"fixed_wing.assist.feasibility.warning" = "Selected waypoint bend is not feasible for a safe fly-by. Assist pauses auto-advance instead of forcing a late point snap.";
-"fixed_wing.assist.hint" = "Manual waypoint selection stays explicit. In Fly-by mode, fixed-wing assist transitions between legs through planned turn geometry instead of late point switching.";
+"fixed_wing.assist.feasibility.warning" = "The bend at this waypoint exceeds a safe bank angle. The autopilot will gently round the corner instead of forcing a sharp slip turn.";
+"fixed_wing.assist.hint" = "The autopilot tracks waypoints through a moving aim point (carrot pursuit). Sharper polylines simply produce wider turn radii instead of jerks.";
 "fixed_wing.assist.debug.active_index" = "activeWaypointIndex";
 "fixed_wing.assist.debug.auto_advance_enabled" = "autoAdvanceEnabled";
 "fixed_wing.assist.debug.next_index" = "nextWaypointIndex";

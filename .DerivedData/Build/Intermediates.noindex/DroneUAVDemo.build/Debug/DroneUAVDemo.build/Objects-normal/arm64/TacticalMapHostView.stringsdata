@@ -7,7 +7,7 @@
         "key": "tactical.map.title",
         "location": {
           "startingColumn": 18,
-          "startingLine": 216
+          "startingLine": 236
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "tactical.map.subtitle",
         "location": {
           "startingColumn": 18,
-          "startingLine": 219
+          "startingLine": 239
         }
       }
     ]

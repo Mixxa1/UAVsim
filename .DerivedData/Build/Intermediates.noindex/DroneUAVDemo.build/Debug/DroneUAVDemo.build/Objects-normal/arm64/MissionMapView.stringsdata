@@ -7,7 +7,7 @@
         "key": "mission.map.title",
         "location": {
           "startingColumn": 26,
-          "startingLine": 76
+          "startingLine": 78
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "mission.map.subtitle",
         "location": {
           "startingColumn": 26,
-          "startingLine": 79
+          "startingLine": 81
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "mission.map.no_route_target",
         "location": {
           "startingColumn": 38,
-          "startingLine": 270
+          "startingLine": 278
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "mission.map.no_drop_zone_value",
         "location": {
           "startingColumn": 38,
-          "startingLine": 281
+          "startingLine": 289
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "mission.map.section.zone_radius",
         "location": {
           "startingColumn": 26,
-          "startingLine": 182
+          "startingLine": 190
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "mission.map.section.payload_delivery",
         "location": {
           "startingColumn": 22,
-          "startingLine": 211
+          "startingLine": 219
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "mission.map.payload_ready",
         "location": {
           "startingColumn": 45,
-          "startingLine": 229
+          "startingLine": 237
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "mission.map.payload_unavailable",
         "location": {
           "startingColumn": 45,
-          "startingLine": 230
+          "startingLine": 238
         }
       },
       {
@@ -71,7 +71,7 @@
         "key": "mission.map.auto_release",
         "location": {
           "startingColumn": 26,
-          "startingLine": 221
+          "startingLine": 229
         }
       },
       {
@@ -79,7 +79,7 @@
         "key": "mission.map.footer_hint",
         "location": {
           "startingColumn": 18,
-          "startingLine": 252
+          "startingLine": 260
         }
       }
     ]
