@@ -47,8 +47,9 @@ struct FixedWingAssistGeometryAssessment {
 ///   the current heading after a manual override decays).
 /// - **altitudeHold** — keep `targetAltitudeMeters` via pitch + small
 ///   throttle assist.
-/// - **waypointIntercept** — fly toward the active waypoint planar position
-///   and capture it when within the acceptance radius.
+/// - **waypointIntercept** — fly along the active inbound route line through
+///   the waypoint and capture it only when the flown segment intersects the
+///   acceptance circle or the aircraft is already inside that circle.
 ///
 /// All commands pass through a final clamp so we can never command an
 /// unflyable bank or pitch.
@@ -62,7 +63,6 @@ final class FixedWingAssistController {
         static let pitchUpClampDeg: Float = 9.0
         static let pitchDownClampDeg: Float = 7.0
         static let interceptCaptureMultiplier: Float = 1.1
-        static let interceptOpeningMultiplier: Float = 1.6
         static let courseFilterTau: Float = 0.22
         static let bankFilterTau: Float = 0.30
         static let pitchFilterTau: Float = 0.45
@@ -72,9 +72,9 @@ final class FixedWingAssistController {
     private struct InterceptTracker {
         var waypointID: UUID
         var targetPosition: SIMD2<Float>
-        var closestDistance: Float
-        var lastDistance: Float
-        var openingCounter: Int
+        var legStartPosition: SIMD2<Float>
+        var previousAircraftPlanar: SIMD2<Float>
+        var hasPreviousAircraftPlanar: Bool
     }
 
     private var filteredBankDeg: Float = 0.0
@@ -154,8 +154,16 @@ final class FixedWingAssistController {
         }
 
         var nextState = assistState
-        nextState.activeGuidanceTargetType = assistState.mode.rawValue
-        nextState.activeGuidanceMode = assistState.mode.rawValue
+        let routeCompleted = assistState.mode == .waypointIntercept &&
+            assistState.interceptCompleted &&
+            assistState.interceptState == .routeComplete
+        if routeCompleted {
+            nextState.activeGuidanceTargetType = "routeComplete"
+            nextState.activeGuidanceMode = "routeComplete"
+        } else {
+            nextState.activeGuidanceTargetType = assistState.mode.rawValue
+            nextState.activeGuidanceMode = assistState.mode.rawValue
+        }
         nextState.usingObsoleteFixedWingMode = false
         // These transient diagnostic signals from the legacy fly-by stack are
         // no longer produced; clear them so the UI does not display stale data.
@@ -170,6 +178,10 @@ final class FixedWingAssistController {
         let targetHeadingRad: Float = {
             switch assistState.mode {
             case .waypointIntercept:
+                if assistState.interceptCompleted,
+                   assistState.interceptState == .routeComplete {
+                    return assistState.targetHeadingRadians ?? aircraftState.orientation.z
+                }
                 if let interceptTarget {
                     let direction = interceptTarget - aircraftPlanar
                     if simd_length(direction) > 0.5 {
@@ -251,43 +263,55 @@ final class FixedWingAssistController {
         )
 
         if assistState.mode == .waypointIntercept,
+           !assistState.interceptCompleted,
            let target = captureTarget ?? interceptTarget,
            let waypointID = assistState.selectedWaypointID {
             let distance = simd_length(target - aircraftPlanar)
-            let captureRadius = max(wing.waypointAcceptanceRadiusMeters, 5.0) * Tuning.interceptCaptureMultiplier
-            let openingRadius = captureRadius * Tuning.interceptOpeningMultiplier
+            let baseAcceptance = max(wing.waypointAcceptanceRadiusMeters, 5.0) * Tuning.interceptCaptureMultiplier
+            let captureRadius = max(
+                baseAcceptance * 1.45,
+                min(
+                    wing.minimumTurnRadius(airspeed: max(aircraftState.forwardAirspeed, wing.cruiseAirspeed * 0.72)) * 0.50,
+                    baseAcceptance * 5.0
+                )
+            )
+            let legStart = interceptDebugContext.currentLegStart ?? tracker?.legStartPosition ?? aircraftPlanar
 
             nextState.distanceToActiveWaypointMeters = distance
             nextState.interceptFeasibilityState = .feasible
 
-            if tracker?.waypointID != waypointID {
+            if tracker?.waypointID != waypointID ||
+                simd_distance(tracker?.targetPosition ?? target, target) > 0.05 {
                 tracker = InterceptTracker(
                     waypointID: waypointID,
                     targetPosition: target,
-                    closestDistance: distance,
-                    lastDistance: distance,
-                    openingCounter: 0
+                    legStartPosition: legStart,
+                    previousAircraftPlanar: aircraftPlanar,
+                    hasPreviousAircraftPlanar: false
                 )
             }
+            let previousAircraftPlanar = tracker?.previousAircraftPlanar ?? aircraftPlanar
+            let hadPreviousAircraftPlanar = tracker?.hasPreviousAircraftPlanar ?? false
+            let crossedCaptureCircle = hadPreviousAircraftPlanar && motionSegmentIntersectsCircle(
+                from: previousAircraftPlanar,
+                to: aircraftPlanar,
+                center: target,
+                radius: captureRadius
+            )
             if var t = tracker {
-                t.closestDistance = min(t.closestDistance, distance)
-                if distance > t.lastDistance + 0.05 {
-                    t.openingCounter += 1
-                } else {
-                    t.openingCounter = max(0, t.openingCounter - 1)
-                }
-                t.lastDistance = distance
+                t.previousAircraftPlanar = aircraftPlanar
+                t.hasPreviousAircraftPlanar = true
                 tracker = t
             }
 
             let entered = distance <= captureRadius
-            let opening = (tracker?.openingCounter ?? 0) >= 4 && distance > openingRadius
-            if entered || opening {
+            if entered || crossedCaptureCircle {
                 nextState.interceptCompleted = true
                 nextState.interceptState = .terminalCapture
-                nextState.captureCompletedReason = entered ? "entered_capture_radius" : "opening_geometry"
+                nextState.captureCompletedReason = entered ? "entered_capture_circle" : "crossed_capture_circle"
                 nextState.activeGuidanceTargetType = "terminalCapture"
                 nextState.activeGuidanceMode = "terminalCapture"
+                nextState.targetHeadingRadians = aircraftState.orientation.z
                 tracker = nil
             }
         }
@@ -376,6 +400,30 @@ final class FixedWingAssistController {
         if a > .pi { a -= 2.0 * .pi }
         if a < -.pi { a += 2.0 * .pi }
         return a
+    }
+
+    private func motionSegmentIntersectsCircle(
+        from start: SIMD2<Float>,
+        to end: SIMD2<Float>,
+        center: SIMD2<Float>,
+        radius: Float
+    ) -> Bool {
+        guard start.x.isFinite, start.y.isFinite,
+              end.x.isFinite, end.y.isFinite,
+              center.x.isFinite, center.y.isFinite,
+              radius.isFinite, radius > 0.0 else {
+            return false
+        }
+
+        let delta = end - start
+        let lengthSquared = simd_length_squared(delta)
+        guard lengthSquared > 0.000001 else {
+            return simd_distance(end, center) <= radius
+        }
+
+        let t = (simd_dot(center - start, delta) / lengthSquared).clamped(to: 0.0...1.0)
+        let closest = start + delta * t
+        return simd_distance(closest, center) <= radius
     }
 }
 

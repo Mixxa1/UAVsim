@@ -74,6 +74,39 @@ final class MissionPreviewBuilder {
         )
     }
 
+    func routePathAvoidingNoFly(
+        points: [SIMD2<Float>],
+        zones: [MissionZone],
+        viewport: MapViewportState
+    ) -> [SIMD2<Float>]? {
+        guard points.count >= 2 else {
+            return points
+        }
+
+        let noFlyZones = zones.filter { $0.type == .noFlyZone && $0.radius > 0.0 }
+        guard !noFlyZones.isEmpty else {
+            return compacted(points.map { viewport.clampedToWorld($0) })
+        }
+
+        var output: [SIMD2<Float>] = [viewport.clampedToWorld(points[0])]
+        output.reserveCapacity(points.count + noFlyZones.count * 2)
+
+        for point in points.dropFirst() {
+            guard let leg = routedLeg(
+                from: output[output.count - 1],
+                to: point,
+                noFlyZones: noFlyZones,
+                viewport: viewport
+            ) else {
+                return nil
+            }
+            append(points: leg.dropFirst(), to: &output)
+        }
+
+        let compactedOutput = compacted(output)
+        return pathStaysOutsideNoFly(compactedOutput, zones: noFlyZones) ? compactedOutput : nil
+    }
+
     private func buildFixedWingPreview(
         draft: MissionDraft,
         viewport: MapViewportState,

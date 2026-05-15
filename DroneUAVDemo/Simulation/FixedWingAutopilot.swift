@@ -4,21 +4,19 @@ import simd
 /// Stable, "behaves-like-a-real-airplane" waypoint follower.
 ///
 /// Design rationale (replaces the previous multi-controller fly-by stack):
-/// - **Carrot pursuit** for lateral guidance: pick a virtual aim point a fixed
-///   look-ahead distance ahead of the aircraft along the planned path. The
-///   bank command is a proportional response to the heading error toward that
-///   aim point, low-pass filtered and bank-limited. The aim point glides over
-///   waypoint corners, which produces smooth, continuous turns regardless of
-///   waypoint geometry.
+/// - **Carrot pursuit** for lateral guidance: pick a virtual aim point ahead
+///   on the active inbound leg. Before the active waypoint is captured, the
+///   aim point stays on the inbound leg extended through the waypoint, so the
+///   aircraft is guided through the capture sphere without switching to the
+///   next segment early or turning back toward a fixed point.
 /// - **Decoupled energy management**: pitch tracks altitude error (with
 ///   vertical-velocity damping); throttle tracks speed error. Stall protection
 ///   pitches the nose down whenever airspeed drops below a safe floor.
-/// - **Robust waypoint advance**: a waypoint is "passed" when the aircraft
-///   crosses its perpendicular acceptance plane (projection along the inbound
-///   leg has exceeded the waypoint), or when planar distance falls inside
-///   acceptance radius. Both criteria are evaluated each tick - whichever
-///   triggers first advances the index. This prevents the autopilot from
-///   getting stuck circling a waypoint it already overshot.
+/// - **Robust waypoint advance**: a waypoint is "passed" only when the
+///   aircraft enters the waypoint capture circle or the flown segment between
+///   simulation ticks intersects that circle. The follower should shape the
+///   trajectory through the circle instead of skipping a waypoint just because
+///   it crossed an abstract finish plane.
 /// - **NaN-safe** throughout: any non-finite input produces a hold command.
 struct FixedWingAutopilotInput {
     var aircraftPosition: SIMD3<Float>      // world (x, y, z)
@@ -40,7 +38,8 @@ struct FixedWingAutopilotPlan {
     /// This guarantees forward progress even if the route is rebuilt mid-flight.
     var minimumWaypointIndex: Int
     /// When true, the autopilot loops back to the first waypoint after the
-    /// last one is captured. When false, it loiters at the last waypoint.
+    /// last one is captured. When false, it keeps flying outbound on the
+    /// final leg course after route completion.
     var loopAfterFinalWaypoint: Bool
 }
 
@@ -96,9 +95,6 @@ final class FixedWingAutopilot {
         static let throttleAltitudeAssistGain: Float = 0.018
         static let throttleFilterTau: Float = 0.55
         static let throttleHoverSpan: ClosedRange<Float> = 0.32...0.95
-        // Waypoint capture
-        static let acceptancePlaneSlop: Float = 0.92       // require projection to pass 92% of segment
-        static let crossTrackBleedFactor: Float = 0.8      // tighten radius if drone is far off track
         // Stall protection
         static let stallSpeedSafetyFactor: Float = 1.05
         static let stallPitchDownDeg: Float = 12.0
@@ -117,6 +113,8 @@ final class FixedWingAutopilot {
         var legAnchor: SIMD2<Float> = .zero
         var hasLegAnchor: Bool = false
         var hasCompletedRoute: Bool = false
+        var previousAircraftPlanar: SIMD2<Float> = .zero
+        var hasPreviousAircraftPlanar: Bool = false
     }
 
     private var state = InternalState()
@@ -158,6 +156,7 @@ final class FixedWingAutopilot {
             state.hasCompletedRoute = false
             state.hasLegAnchor = false
             state.hasCourseSeed = false
+            state.hasPreviousAircraftPlanar = false
         }
 
         // Honour minimum index from outside (forward-progress guarantee).
@@ -177,6 +176,10 @@ final class FixedWingAutopilot {
         }
 
         let aircraftPlanar = SIMD2<Float>(input.aircraftPosition.x, input.aircraftPosition.z)
+        if !state.hasPreviousAircraftPlanar {
+            state.previousAircraftPlanar = aircraftPlanar
+            state.hasPreviousAircraftPlanar = true
+        }
         let cruiseAirspeed = max(
             wing.minSafeAirspeed * 1.05,
             cruiseAirspeedOverride ?? wing.cruiseAirspeed
@@ -188,23 +191,17 @@ final class FixedWingAutopilot {
         var advanceGuard = 0
         while advanceGuard < plan.waypoints.count {
             let active = plan.waypoints[state.activeWaypointIndex]
-            let segmentStart = legStart(for: state.activeWaypointIndex, plan: plan, fallback: aircraftPlanar)
-            let segment = active.position - segmentStart
-            let segmentLength = simd_length(segment)
-            let toAircraft = aircraftPlanar - segmentStart
-            let projection: Float
-            if segmentLength > 0.001 {
-                projection = simd_dot(toAircraft, segment) / segmentLength
-            } else {
-                projection = 0.0
-            }
             let acceptance = max(active.acceptanceRadius, wing.waypointAcceptanceRadiusMeters)
             let distanceToWaypoint = simd_length(aircraftPlanar - active.position)
-
-            let crossedPlane = segmentLength > 0.5 && projection >= segmentLength * Tuning.acceptancePlaneSlop
+            let crossedCaptureVolume = motionSegmentIntersectsCircle(
+                from: state.previousAircraftPlanar,
+                to: aircraftPlanar,
+                center: active.position,
+                radius: acceptance
+            )
             let insideAcceptance = distanceToWaypoint <= acceptance
 
-            if crossedPlane || insideAcceptance {
+            if crossedCaptureVolume || insideAcceptance {
                 let isLast = state.activeWaypointIndex >= plan.waypoints.count - 1
                 if isLast {
                     if plan.loopAfterFinalWaypoint {
@@ -253,7 +250,6 @@ final class FixedWingAutopilot {
 
         let toAircraft = aircraftPlanar - legStartPlanar
         let alongTrack = simd_dot(toAircraft, legDirection)
-        let projectedOnLeg = legStartPlanar + legDirection * alongTrack
         let crossTrack = simd_dot(SIMD2<Float>(-legDirection.y, legDirection.x), toAircraft)
         let alongTrackProgress = legLength > 0.01 ? max(0.0, min(1.0, alongTrack / legLength)) : 0.0
 
@@ -271,16 +267,24 @@ final class FixedWingAutopilot {
             minimumTurnRadius * Tuning.lookaheadTurnRadiusFactor
         )
 
-        let aimPointPlanar = computeAimPoint(
-            plan: plan,
-            startIndex: activeIndex,
-            legStart: legStartPlanar,
-            projectedOnLeg: projectedOnLeg,
-            legDirection: legDirection,
-            alongTrack: alongTrack,
-            legLength: legLength,
-            lookaheadDistance: lookaheadDistance
-        )
+        let holdsFinalCourse = state.hasCompletedRoute && !plan.loopAfterFinalWaypoint
+        let aimPointPlanar: SIMD2<Float>
+        if holdsFinalCourse {
+            aimPointPlanar = aircraftPlanar + legDirection * max(
+                lookaheadDistance,
+                cruiseAirspeed * 4.0,
+                activeWaypoint.acceptanceRadius * 3.0
+            )
+        } else {
+            aimPointPlanar = computeCaptureAimPoint(
+                activeWaypoint: activeWaypoint,
+                legStart: legStartPlanar,
+                legDirection: legDirection,
+                alongTrack: alongTrack,
+                legLength: legLength,
+                lookaheadDistance: lookaheadDistance
+            )
+        }
 
         // Lateral guidance — bank from heading error to the carrot.
         let aimVector = aimPointPlanar - aircraftPlanar
@@ -369,13 +373,26 @@ final class FixedWingAutopilot {
         let pitchDeg = state.filteredPitchRad.radiansToDegrees
         let yawDeg = wrapAngle(desiredCourse).radiansToDegrees
         let aimWorld = SIMD3<Float>(aimPointPlanar.x, targetAltitude, aimPointPlanar.y)
-        let positionTarget = SIMD3<Float>(activeWaypoint.position.x, targetAltitude, activeWaypoint.position.y)
+        let positionTarget = holdsFinalCourse
+            ? aimWorld
+            : SIMD3<Float>(activeWaypoint.position.x, targetAltitude, activeWaypoint.position.y)
 
-        let remainingDistance = remainingPathLength(
-            plan: plan,
-            startIndex: activeIndex,
-            aircraft: aircraftPlanar
-        )
+        let remainingDistance = holdsFinalCourse
+            ? 0.0
+            : remainingPathLength(
+                plan: plan,
+                startIndex: activeIndex,
+                aircraft: aircraftPlanar
+            )
+        let legStartWorld = holdsFinalCourse
+            ? SIMD3<Float>(aircraftPlanar.x, targetAltitude, aircraftPlanar.y)
+            : SIMD3<Float>(legStartPlanar.x, targetAltitude, legStartPlanar.y)
+        let legEndWorld = holdsFinalCourse
+            ? aimWorld
+            : SIMD3<Float>(legEndPlanar.x, targetAltitude, legEndPlanar.y)
+
+        state.previousAircraftPlanar = aircraftPlanar
+        state.hasPreviousAircraftPlanar = true
 
         return FixedWingAutopilotResult(
             rollDegrees: bankDeg,
@@ -395,8 +412,8 @@ final class FixedWingAutopilot {
             targetAltitudeMeters: targetAltitude,
             targetAirspeedMpsActive: targetSpeed,
             aimPointWorld: aimWorld,
-            legStartWorld: SIMD3<Float>(legStartPlanar.x, targetAltitude, legStartPlanar.y),
-            legEndWorld: SIMD3<Float>(legEndPlanar.x, targetAltitude, legEndPlanar.y),
+            legStartWorld: legStartWorld,
+            legEndWorld: legEndWorld,
             alongTrackProgress: alongTrackProgress,
             remainingPathLengthMeters: remainingDistance,
             stallProtectionActive: stallProtectionActive,
@@ -409,88 +426,29 @@ final class FixedWingAutopilot {
 
     // MARK: - Internals
 
-    private func legStart(
-        for index: Int,
-        plan: FixedWingAutopilotPlan,
-        fallback: SIMD2<Float>
-    ) -> SIMD2<Float> {
-        if index <= 0 {
-            return fallback
-        }
-        return plan.waypoints[index - 1].position
-    }
-
-    private func computeAimPoint(
-        plan: FixedWingAutopilotPlan,
-        startIndex: Int,
+    private func computeCaptureAimPoint(
+        activeWaypoint: FixedWingAutopilotWaypoint,
         legStart: SIMD2<Float>,
-        projectedOnLeg: SIMD2<Float>,
         legDirection: SIMD2<Float>,
         alongTrack: Float,
         legLength: Float,
         lookaheadDistance: Float
     ) -> SIMD2<Float> {
-        // Walk the path from the projected point until we accumulate
-        // `lookaheadDistance` meters. The aim point glides over corners
-        // because we never stop at a waypoint — we always continue into the
-        // next segment.
-        var remaining = lookaheadDistance
-        var cursor = projectedOnLeg
-        var cursorAlong = max(0.0, alongTrack)
-        var currentEnd = plan.waypoints[startIndex].position
-        var currentDirection = legDirection
-        var currentLengthRemaining = max(0.0, legLength - cursorAlong)
-
-        var index = startIndex
-        var iterationGuard = 0
-        while remaining > 0.0 && iterationGuard < plan.waypoints.count + 2 {
-            iterationGuard += 1
-            if currentLengthRemaining >= remaining {
-                return cursor + currentDirection * remaining
-            }
-            // Step to end of this segment, then advance to the next leg.
-            cursor = currentEnd
-            remaining -= currentLengthRemaining
-
-            let nextIndex = index + 1
-            if nextIndex >= plan.waypoints.count {
-                if plan.loopAfterFinalWaypoint, !plan.waypoints.isEmpty {
-                    let wrappedStart = plan.waypoints[plan.waypoints.count - 1].position
-                    let wrappedEnd = plan.waypoints[0].position
-                    let wrappedVector = wrappedEnd - wrappedStart
-                    let wrappedLength = simd_length(wrappedVector)
-                    if wrappedLength < 0.001 {
-                        return cursor + currentDirection * remaining
-                    }
-                    currentDirection = wrappedVector / wrappedLength
-                    currentEnd = wrappedEnd
-                    currentLengthRemaining = wrappedLength
-                    index = 0
-                    cursorAlong = 0.0
-                    continue
-                }
-                // Final waypoint — extrapolate along the inbound direction so
-                // the carrot still leads, even past the last point.
-                return cursor + currentDirection * remaining
-            }
-
-            let segStart = currentEnd
-            let segEnd = plan.waypoints[nextIndex].position
-            let segVector = segEnd - segStart
-            let segLength = simd_length(segVector)
-            if segLength < 0.001 {
-                index = nextIndex
-                continue
-            }
-            currentDirection = segVector / segLength
-            currentEnd = segEnd
-            currentLengthRemaining = segLength
-            cursor = segStart
-            cursorAlong = 0.0
-            index = nextIndex
+        guard legLength > 0.001 else {
+            return activeWaypoint.position
         }
 
-        return cursor + currentDirection * max(0.0, remaining)
+        let captureExitLead = max(
+            activeWaypoint.acceptanceRadius * 1.75,
+            lookaheadDistance,
+            4.0
+        )
+        let throughCaptureDistance = legLength + captureExitLead
+        let desiredAlongTrack = max(
+            throughCaptureDistance,
+            max(0.0, alongTrack + lookaheadDistance)
+        )
+        return legStart + legDirection * desiredAlongTrack
     }
 
     private func remainingPathLength(
@@ -520,9 +478,33 @@ final class FixedWingAutopilot {
         return raw.clamped(to: 0.02...1.0)
     }
 
+    private func motionSegmentIntersectsCircle(
+        from start: SIMD2<Float>,
+        to end: SIMD2<Float>,
+        center: SIMD2<Float>,
+        radius: Float
+    ) -> Bool {
+        guard start.x.isFinite, start.y.isFinite,
+              end.x.isFinite, end.y.isFinite,
+              center.x.isFinite, center.y.isFinite,
+              radius.isFinite, radius > 0.0 else {
+            return false
+        }
+
+        let delta = end - start
+        let lengthSquared = simd_length_squared(delta)
+        guard lengthSquared > 0.000001 else {
+            return simd_distance(end, center) <= radius
+        }
+
+        let t = (simd_dot(center - start, delta) / lengthSquared).clamped(to: 0.0...1.0)
+        let closestPoint = start + delta * t
+        return simd_distance(closestPoint, center) <= radius
+    }
+
     private func forwardDirection(yaw: Float) -> SIMD2<Float> {
-        // Matches the SimpleDronePhysicsEngine planar-direction fallback.
-        SIMD2<Float>(sinf(yaw), -cosf(yaw))
+        // Matches SimpleDronePhysicsEngine's yaw quaternion applied to body -Z.
+        SIMD2<Float>(-sinf(yaw), -cosf(yaw))
     }
 
     /// Compass-style course (radians) that matches MulticopterAutopilotController

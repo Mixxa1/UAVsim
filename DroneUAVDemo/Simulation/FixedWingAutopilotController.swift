@@ -389,6 +389,14 @@ final class FixedWingAutopilotController {
         defaultAltitude: Float,
         wing: FixedWingParameters
     ) -> FixedWingAutopilotPlan {
+        let baseAcceptanceRadius = max(wing.waypointAcceptanceRadiusMeters, 4.0)
+        let turnAwareAcceptanceRadius = max(
+            baseAcceptanceRadius * 1.45,
+            min(
+                wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed) * 0.85,
+                baseAcceptanceRadius * 8.0
+            )
+        )
         let waypoints: [FixedWingAutopilotWaypoint] = tracking.waypoints
             .filter { isFinite($0.position) }
             .map { wp in
@@ -397,26 +405,15 @@ final class FixedWingAutopilotController {
                     altitude: wp.position.y.isFinite && wp.position.y > 0.05
                         ? wp.position.y
                         : max(defaultAltitude, 1.0),
-                    acceptanceRadius: max(wing.waypointAcceptanceRadiusMeters, 4.0)
+                    acceptanceRadius: turnAwareAcceptanceRadius
                 )
             }
-        // The synthetic "start" waypoint is just an anchor for the leg
-        // geometry; if it sits exactly on top of the next waypoint, drop it
-        // to avoid a zero-length first leg.
-        let pruned: [FixedWingAutopilotWaypoint] = {
-            guard waypoints.count >= 2 else { return waypoints }
-            if simd_length(waypoints[0].position - waypoints[1].position) < 0.5 {
-                return Array(waypoints.dropFirst())
-            }
-            return waypoints
-        }()
         let minimumIndex = max(0, tracking.minimumWaypointIndex ?? 0)
-        let loop = tracking.preferredLoiterCenter == nil && pruned.count > 1
         return FixedWingAutopilotPlan(
             routeIdentifier: tracking.routeIdentifier,
-            waypoints: pruned,
-            minimumWaypointIndex: min(max(0, minimumIndex - 1), max(0, pruned.count - 1)),
-            loopAfterFinalWaypoint: loop
+            waypoints: waypoints,
+            minimumWaypointIndex: min(max(0, minimumIndex - 1), max(0, waypoints.count - 1)),
+            loopAfterFinalWaypoint: false
         )
     }
 
@@ -441,7 +438,7 @@ final class FixedWingAutopilotController {
             routeIdentifier: routeId,
             waypoints: [start, end],
             minimumWaypointIndex: 1,
-            preferredLoiterCenter: nil,
+            preferredLoiterCenter: target,
             preferredLoiterRadius: nil,
             flyableRoute: nil
         )
@@ -511,7 +508,16 @@ final class FixedWingAutopilotController {
         guard tracking.waypoints.indices.contains(autopilotIndex) else {
             return autopilotIndex
         }
-        return tracking.waypoints[autopilotIndex].missionWaypointIndex ?? autopilotIndex
+        if let missionIndex = tracking.waypoints[autopilotIndex].missionWaypointIndex {
+            return missionIndex
+        }
+        if let nextMissionIndex = tracking.waypoints[autopilotIndex...].compactMap(\.missionWaypointIndex).first {
+            return nextMissionIndex
+        }
+        if let previousMissionIndex = tracking.waypoints[...autopilotIndex].compactMap(\.missionWaypointIndex).last {
+            return previousMissionIndex
+        }
+        return autopilotIndex
     }
 
     private func isFinite(_ v: SIMD3<Float>) -> Bool {

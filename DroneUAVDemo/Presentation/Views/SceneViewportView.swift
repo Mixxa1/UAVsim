@@ -516,7 +516,6 @@ struct TerrainMapCanvas: View {
     ) {
         for waypoint in snapshot.missionWaypoints {
             let center = projection.project(waypoint.position)
-            let rect = CGRect(x: center.x - 6.0, y: center.y - 6.0, width: 12.0, height: 12.0)
             let tint: Color = {
                 if waypoint.isCompleted {
                     return GroundControlPalette.success
@@ -529,7 +528,21 @@ struct TerrainMapCanvas: View {
                 }
                 return GroundControlPalette.accent
             }()
+            let acceptanceRadius = projection.projectedRadius(for: waypoint.acceptanceRadius)
+            let acceptanceRect = CGRect(
+                x: center.x - acceptanceRadius,
+                y: center.y - acceptanceRadius,
+                width: acceptanceRadius * 2.0,
+                height: acceptanceRadius * 2.0
+            )
+            context.fill(Path(ellipseIn: acceptanceRect), with: .color(tint.opacity(waypoint.isActive || waypoint.isAssistSelected ? 0.11 : 0.07)))
+            context.stroke(
+                Path(ellipseIn: acceptanceRect),
+                with: .color(tint.opacity(waypoint.isActive || waypoint.isAssistSelected ? 0.9 : 0.58)),
+                style: StrokeStyle(lineWidth: waypoint.isActive || waypoint.isAssistSelected ? 1.7 : 1.15, dash: [5.0, 3.0])
+            )
 
+            let rect = CGRect(x: center.x - 6.0, y: center.y - 6.0, width: 12.0, height: 12.0)
             context.fill(Path(ellipseIn: rect), with: .color(tint.opacity(0.92)))
             context.stroke(
                 Path(ellipseIn: rect),

@@ -528,6 +528,8 @@ final class AutoPathPlannerService {
     private func obstacleInflation(for source: String, droneRadius: Float) -> Float {
         let base: Float
         switch source {
+        case let value where value.contains("no_fly"):
+            base = 2.2
         case let value where value.contains("building"):
             base = 1.4
         case let value where value.contains("tree"):

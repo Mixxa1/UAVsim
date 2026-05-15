@@ -360,7 +360,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         } else if control.controlMode.isRateMode {
             let speedRatio = (max(state.forwardAirspeed, wing.minSustainableSpeedMps) / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...1.35)
             let rollRateCommand = control.targetOrientation.x.clamped(to: -1.0...1.0) * (2.6 * authority * wing.turnAuthority.clamped(to: 0.5...1.4) * wing.bankResponseGain * speedRatio)
-            let pitchRateCommand = (-control.targetOrientation.y).clamped(to: -1.0...1.0) * (2.1 * authority * max(0.78, wing.climbResponseGain))
+            let pitchRateCommand = control.targetOrientation.y.clamped(to: -1.0...1.0) * (2.1 * authority * max(0.78, wing.climbResponseGain))
             let yawRateCommand = desiredFixedWingYawRate(
                 control: control,
                 state: state,
@@ -377,7 +377,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
         } else {
             let targetRoll = control.targetOrientation.x.clamped(to: -maxBank...maxBank)
-            let targetPitch = (-control.targetOrientation.y).clamped(to: -maxPitch...maxPitch)
+            let targetPitch = control.targetOrientation.y.clamped(to: -maxPitch...maxPitch)
             next.orientation.x = approach(current: state.orientation.x, target: targetRoll, increaseRate: 2.6 * authority * wing.bankResponseGain, decreaseRate: 2.8 * authority * wing.bankResponseGain, dt: dt)
             next.orientation.y = approach(current: state.orientation.y, target: targetPitch, increaseRate: 2.2 * authority * max(0.76, wing.climbResponseGain), decreaseRate: 2.4 * authority * max(0.76, wing.descentResponseGain), dt: dt)
             if abs(control.yawIntent) > 0.001 {
@@ -442,7 +442,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         if simd_length(planarVelocity) > 0.001 {
             planarDirection = simd_normalize(planarVelocity)
         } else {
-            planarDirection = SIMD2<Float>(sin(next.orientation.z), -cos(next.orientation.z))
+            planarDirection = SIMD2<Float>(-sin(next.orientation.z), -cos(next.orientation.z))
         }
         let planarSpeed = sqrt(max(0.0, forwardSpeed * forwardSpeed - clampedVerticalSpeed * clampedVerticalSpeed))
         velocity.x = planarDirection.x * planarSpeed

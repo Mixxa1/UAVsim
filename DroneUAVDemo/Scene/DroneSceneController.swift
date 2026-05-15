@@ -27,6 +27,15 @@ struct PayloadLifecycleEvent {
     let impactSpeedMps: Float?
 }
 
+struct MissionWaypointCaptureZoneVisual: Equatable {
+    let id: UUID
+    let label: String
+    let center: SIMD3<Float>
+    let radius: Float
+    let isActive: Bool
+    let isCompleted: Bool
+}
+
 private struct SupportSurfaceDescriptor {
     let center: SIMD2<Float>
     let halfExtents: SIMD2<Float>
@@ -58,6 +67,7 @@ final class DroneSceneController {
     private let worldBoundsNode = SCNNode()
     private let dockStationNode = SCNNode()
     private let missionDropZoneNode = SCNNode()
+    private let missionWaypointCaptureNode = SCNNode()
     private let launchAssetNode = SCNNode()
 
     private let weatherNode = SCNNode()
@@ -223,6 +233,10 @@ final class DroneSceneController {
         missionDropZoneNode.isHidden = true
         scene.rootNode.addChildNode(missionDropZoneNode)
 
+        missionWaypointCaptureNode.name = "missionWaypointCaptureNode"
+        missionWaypointCaptureNode.isHidden = true
+        scene.rootNode.addChildNode(missionWaypointCaptureNode)
+
         launchAssetNode.name = "launchAssetNode"
         launchAssetNode.isHidden = true
         scene.rootNode.addChildNode(launchAssetNode)
@@ -366,6 +380,92 @@ final class DroneSceneController {
         ringNode.eulerAngles.x = .pi / 2.0
         ringNode.simdPosition = SIMD3<Float>(0.0, 0.008, 0.0)
         missionDropZoneNode.addChildNode(ringNode)
+    }
+
+    func setMissionWaypointCaptureZones(_ zones: [MissionWaypointCaptureZoneVisual]) {
+        missionWaypointCaptureNode.childNodes.forEach { node in
+            node.removeFromParentNode()
+        }
+
+        guard !zones.isEmpty else {
+            missionWaypointCaptureNode.isHidden = true
+            return
+        }
+
+        let groundY = max(Float(groundNode.presentation.position.y), 0.0)
+        missionWaypointCaptureNode.isHidden = false
+
+        for zone in zones {
+            let radius = max(0.6, zone.radius)
+            let altitude = max(groundY + 0.35, zone.center.y)
+            let root = SCNNode()
+            root.name = "mission_capture_\(zone.id.uuidString)"
+            root.simdPosition = SIMD3<Float>(zone.center.x, groundY + 0.018, zone.center.z)
+
+            let color: NSColor = {
+                if zone.isCompleted {
+                    return NSColor.systemGreen
+                }
+                if zone.isActive {
+                    return NSColor.systemOrange
+                }
+                return NSColor.systemCyan
+            }()
+
+            let ring = SCNTorus(
+                ringRadius: CGFloat(radius),
+                pipeRadius: CGFloat(max(0.035, min(0.13, radius * 0.018)))
+            )
+            let ringMaterial = SCNMaterial()
+            ringMaterial.diffuse.contents = color.withAlphaComponent(zone.isActive ? 0.92 : 0.58)
+            ringMaterial.emission.contents = color.withAlphaComponent(zone.isActive ? 0.42 : 0.20)
+            ringMaterial.lightingModel = .constant
+            ring.materials = [ringMaterial]
+
+            let ringNode = SCNNode(geometry: ring)
+            ringNode.eulerAngles.x = .pi / 2.0
+            ringNode.simdPosition = SIMD3<Float>(0.0, 0.012, 0.0)
+            root.addChildNode(ringNode)
+
+            let sphere = SCNSphere(radius: CGFloat(radius))
+            sphere.segmentCount = 36
+            let sphereMaterial = SCNMaterial()
+            sphereMaterial.diffuse.contents = color.withAlphaComponent(zone.isActive ? 0.36 : 0.22)
+            sphereMaterial.emission.contents = color.withAlphaComponent(zone.isActive ? 0.16 : 0.08)
+            sphereMaterial.lightingModel = .constant
+            sphereMaterial.fillMode = .lines
+            sphereMaterial.isDoubleSided = true
+            sphereMaterial.readsFromDepthBuffer = false
+            sphere.materials = [sphereMaterial]
+
+            let sphereNode = SCNNode(geometry: sphere)
+            sphereNode.name = "mission_capture_sphere"
+            sphereNode.simdPosition = SIMD3<Float>(0.0, altitude - groundY, 0.0)
+            root.addChildNode(sphereNode)
+
+            let centerMarker = SCNNode(geometry: SCNSphere(radius: CGFloat(max(0.16, min(0.34, radius * 0.04)))))
+            centerMarker.geometry?.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.95)
+            centerMarker.geometry?.firstMaterial?.emission.contents = color.withAlphaComponent(0.38)
+            centerMarker.geometry?.firstMaterial?.lightingModel = .constant
+            centerMarker.simdPosition = sphereNode.simdPosition
+            root.addChildNode(centerMarker)
+
+            let stemHeight = max(0.0, altitude - groundY)
+            if stemHeight > 0.35 {
+                let stem = SCNCylinder(radius: CGFloat(max(0.018, min(0.055, radius * 0.006))), height: CGFloat(stemHeight))
+                let stemMaterial = SCNMaterial()
+                stemMaterial.diffuse.contents = color.withAlphaComponent(zone.isActive ? 0.62 : 0.34)
+                stemMaterial.emission.contents = color.withAlphaComponent(zone.isActive ? 0.22 : 0.10)
+                stemMaterial.lightingModel = .constant
+                stem.materials = [stemMaterial]
+
+                let stemNode = SCNNode(geometry: stem)
+                stemNode.simdPosition = SIMD3<Float>(0.0, stemHeight * 0.5, 0.0)
+                root.addChildNode(stemNode)
+            }
+
+            missionWaypointCaptureNode.addChildNode(root)
+        }
     }
 
     private func makeCatapultNode(for asset: CatapultLaunchAsset) -> SCNNode {

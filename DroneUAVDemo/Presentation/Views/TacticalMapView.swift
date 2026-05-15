@@ -849,7 +849,6 @@ private struct TacticalMapCanvas: View {
     ) {
         for waypoint in snapshot.missionWaypoints {
             let center = projection.project(waypoint.position)
-            let rect = CGRect(x: center.x - 6.5, y: center.y - 6.5, width: 13, height: 13)
             let tint: Color = {
                 if waypoint.isCompleted {
                     return GroundControlPalette.success
@@ -862,7 +861,21 @@ private struct TacticalMapCanvas: View {
                 }
                 return GroundControlPalette.accent
             }()
+            let acceptanceRadius = projection.projectedRadius(for: waypoint.acceptanceRadius)
+            let acceptanceRect = CGRect(
+                x: center.x - acceptanceRadius,
+                y: center.y - acceptanceRadius,
+                width: acceptanceRadius * 2.0,
+                height: acceptanceRadius * 2.0
+            )
+            context.fill(Path(ellipseIn: acceptanceRect), with: .color(tint.opacity(waypoint.isActive || waypoint.isAssistSelected ? 0.12 : 0.075)))
+            context.stroke(
+                Path(ellipseIn: acceptanceRect),
+                with: .color(tint.opacity(waypoint.isActive || waypoint.isAssistSelected ? 0.92 : 0.62)),
+                style: StrokeStyle(lineWidth: waypoint.isActive || waypoint.isAssistSelected ? 1.8 : 1.25, dash: [5.0, 3.0])
+            )
 
+            let rect = CGRect(x: center.x - 6.5, y: center.y - 6.5, width: 13, height: 13)
             context.fill(Path(ellipseIn: rect), with: .color(tint.opacity(0.94)))
             context.stroke(Path(ellipseIn: rect), with: .color(Color.white.opacity(0.42)), lineWidth: 0.8)
             if waypoint.isAssistSelected {

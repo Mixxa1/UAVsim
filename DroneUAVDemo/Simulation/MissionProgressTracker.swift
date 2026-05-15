@@ -88,8 +88,11 @@ final class MissionProgressTracker {
 
                 let finalStateReached = fixedWingDebugState.missionState == .loitering ||
                     fixedWingDebugState.missionState == .completed
+                if controllerWaypointIndex >= activeTarget.index && finalStateReached {
+                    return true
+                }
+
                 return controllerWaypointIndex >= activeTarget.index &&
-                    finalStateReached &&
                     distance <= fixedWingArrivalRadius(for: fixedWingParameters)
             }
 
