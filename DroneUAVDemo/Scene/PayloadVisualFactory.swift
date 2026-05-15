@@ -69,20 +69,6 @@ enum PayloadVisualFactory {
             let cap = cylinderNode(radius: 0.036 * sizeScale, height: 0.010 * sizeScale, material: accentMaterial)
             cap.position = SCNVector3(0.0, -0.010 * sizeScale, 0.0)
             standardPresentation.addChildNode(cap)
-        case .inertImpactPod:
-            let body = cylinderNode(radius: 0.026 * sizeScale, height: 0.120 * sizeScale, material: shellMaterial)
-            body.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
-            body.position = SCNVector3(0.0, -0.040 * sizeScale, 0.0)
-            standardPresentation.addChildNode(body)
-
-            let nose = sphereNode(radius: 0.023 * sizeScale, material: accentMaterial)
-            nose.position = SCNVector3(0.0, -0.040 * sizeScale, 0.060 * sizeScale)
-            standardPresentation.addChildNode(nose)
-
-            let tailBand = cylinderNode(radius: 0.030 * sizeScale, height: 0.014 * sizeScale, material: darkMaterial)
-            tailBand.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
-            tailBand.position = SCNVector3(0.0, -0.040 * sizeScale, -0.036 * sizeScale)
-            standardPresentation.addChildNode(tailBand)
         case .rescuePack:
             let pack = boxNode(size: SIMD3<Float>(0.11, 0.07, 0.09) * sizeScale, chamfer: 0.010 * sizeScale, material: shellMaterial)
             pack.position = SCNVector3(0.0, -0.040 * sizeScale, 0.0)

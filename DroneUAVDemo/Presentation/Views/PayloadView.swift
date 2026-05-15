@@ -723,8 +723,6 @@ struct PayloadView: View {
             return "thermometer.medium"
         case .lidarModule:
             return "wave.3.right.circle.fill"
-        case .inertImpactPod:
-            return "capsule.portrait.fill"
         case .rescuePack:
             return "cross.case.fill"
         case .sensorModule:
@@ -746,8 +744,6 @@ struct PayloadView: View {
             return Color(red: 0.99, green: 0.58, blue: 0.28)
         case .lidarModule:
             return Color(red: 0.70, green: 0.78, blue: 0.92)
-        case .inertImpactPod:
-            return Color(red: 0.98, green: 0.66, blue: 0.24)
         case .custom:
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         }

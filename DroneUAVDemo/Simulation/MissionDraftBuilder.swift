@@ -7,28 +7,8 @@ final class MissionDraftBuilder {
         in draft: MissionDraft
     ) -> MissionDraft {
         var nextDraft = draft
-        nextDraft.selectedLaunchMode = launchMode
-
-        if launchMode == .standard {
-            return nextDraft
-        }
-
-        guard let requiredType = launchMode.defaultLaunchObjectType else {
-            return nextDraft
-        }
-
-        if let existing = nextDraft.launchObject,
-           existing.type != requiredType {
-            nextDraft.launchObject = MissionLaunchObject(
-                id: existing.id,
-                type: requiredType,
-                position: existing.position,
-                headingDegrees: existing.headingDegrees,
-                railAngleDegrees: existing.railAngleDegrees,
-                transitionHeadingDegrees: existing.transitionHeadingDegrees
-            )
-        }
-
+        nextDraft.selectedLaunchMode = .standard
+        nextDraft.launchObject = nil
         return nextDraft
     }
 
@@ -75,17 +55,8 @@ final class MissionDraftBuilder {
         viewport: MapViewportState
     ) -> MissionDraft {
         var nextDraft = draft
-        let clampedPosition = viewport.clampedToWorld(position)
-        let heading = normalizedHeadingDegrees(headingDegrees)
-        nextDraft.launchObject = MissionLaunchObject(
-            id: nextDraft.launchObject?.id ?? UUID(),
-            type: type,
-            position: clampedPosition,
-            headingDegrees: heading,
-            railAngleDegrees: nextDraft.launchObject?.railAngleDegrees ?? defaultRailAngleDegrees(for: type),
-            transitionHeadingDegrees: nextDraft.launchObject?.transitionHeadingDegrees ?? heading
-        )
-        nextDraft.selectedLaunchMode = type.launchMode
+        nextDraft.selectedLaunchMode = .standard
+        nextDraft.launchObject = nil
         return nextDraft
     }
 

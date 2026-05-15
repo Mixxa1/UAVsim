@@ -270,7 +270,7 @@ private struct PayloadProximityEffectModel {
         let verticalSeparation = max(0.0, dronePosition.y)
         let relativeSpeed = simd_length(droneVelocity) + impact.measuredImpactSpeedMps * 0.32
         let massFactor = max(0.4, payload.payloadMass / max(0.2, payload.payloadType.defaultMass))
-        let typeFactor: Float = payload.payloadType == .inertImpactPod ? 1.25 : 0.92
+        let typeFactor: Float = 0.92
         let distanceFactor = (1.0 - distance / max(0.35, impact.falloffRadius * 1.55)).clamped(to: 0.0...1.0)
         let altitudeFactor = (1.0 - verticalSeparation / 4.2).clamped(to: 0.0...1.0)
         let speedFactor = (relativeSpeed / 16.0).clamped(to: 0.2...1.55)
@@ -452,6 +452,8 @@ extension DroneSimulationViewModel {
 
 @MainActor
 final class DroneSimulationViewModel: ObservableObject {
+    private static let simulationTickInterval: TimeInterval = 1.0 / 60.0
+
     @Published private(set) var controlValues: DroneControlValues
     @Published private(set) var telemetry: TelemetrySnapshot
     @Published private(set) var mode: DroneFlightMode
@@ -735,6 +737,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var flightControlDiagnostics: FlightControlDiagnostics = .zero
     private var cachedDiagnostics: SimulationDiagnostics = .zero
     private var pendingTerrainRegenerationTask: Task<Void, Never>?
+    private var pendingTerrainRegenerationRequiresReset = false
     private var signalLossSecondAccumulator: Float = 0.0
     private var fleetInterDroneRisk: Float = 0.0
     private var fleetNearestInterDroneDistance: Float = .infinity
@@ -764,6 +767,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fixedWingRouteTrackingContextCacheValue: FixedWingRouteTrackingContext?
     private var fixedWingFlyablePathCacheKey: String?
     private var fixedWingFlyablePathCacheRoute: FixedWingFlyableRoute?
+    private var fixedWingSafeRouteCacheKey: FixedWingSafeRouteCacheKey?
+    private var fixedWingSafeRouteCacheRoute: FixedWingSafeRoute?
+    private var fixedWingSafeRouteCacheStoresNil: Bool = false
     private var simulationTickCounter: UInt64 = 0
     private var lastTargetMarkerRejectionReason: MissionGuidanceRejectionReason?
     private var terrainMapStaticOverlayCacheKey: TerrainMapStaticOverlayKey?
@@ -871,6 +877,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let missionPlanSignature: Int
         let previewRouteID: UUID?
         let workingDraft: MissionDraft
+        let obstacleSignature: Int
         let airframeClass: AirframeClass
     }
 
@@ -883,9 +890,19 @@ final class DroneSimulationViewModel: ObservableObject {
         let guidanceDirectToWaypointSuppressed: Bool
     }
 
-    private struct FixedWingNoFlySafeRoute {
+    private struct FixedWingSafeRoute {
         let points: [SIMD2<Float>]
         let wasRerouted: Bool
+    }
+
+    private struct FixedWingSafeRouteCacheKey: Equatable {
+        let routeSignature: Int
+        let noFlyZoneSignature: Int
+        let obstacleSignature: Int
+        let terrainSignature: Int
+        let viewportSignature: Int
+        let targetAltitudeBucket: Int
+        let profileID: String
     }
 
     private struct FixedWingWaypointClassification {
@@ -1862,20 +1879,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        if tacticalMapMode == .launchObject {
-            let launchType = workingTacticalMissionDraft.effectiveLaunchObjectType ??
-                workingTacticalMissionDraft.selectedLaunchMode.defaultLaunchObjectType ??
-                .handLaunchPoint
-            let currentHeading = workingTacticalMissionDraft.launchObject?.headingDegrees ??
-                finiteVector(state.orientation, fallback: lastFiniteState.orientation).z.radiansToDegrees
-            workingTacticalMissionDraft = missionDraftBuilder.upsertLaunchObject(
-                at: planarPosition,
-                headingDegrees: currentHeading,
-                type: launchType,
-                in: workingTacticalMissionDraft,
-                viewport: viewport
-            )
-        } else if let zoneType = tacticalMapMode.zoneType {
+        if let zoneType = tacticalMapMode.zoneType {
             workingTacticalMissionDraft = missionDraftBuilder.upsertZone(
                 type: zoneType,
                 center: planarPosition,
@@ -1901,10 +1905,8 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let supportedModes = selectedDroneProfile.supportedLaunchModes
-        let effectiveMode = supportedModes.contains(launchMode) ? launchMode : .standard
         workingTacticalMissionDraft = missionDraftBuilder.setLaunchMode(
-            effectiveMode,
+            .standard,
             in: workingTacticalMissionDraft
         )
         invalidatePreparedMissionIfNeeded()
@@ -2432,9 +2434,13 @@ final class DroneSimulationViewModel: ObservableObject {
         resetPayloadForProfileSwitch()
         resetCameraConfigurationForSelectedProfile()
         normalizeMissionLaunchConfigurationForSelectedProfile()
+        let didChangeTerrain = normalizeTerrainForSelectedDroneProfile()
 
         batteryState = .full
         reset()
+        if didChangeTerrain {
+            regenerateEnvironment()
+        }
     }
 
     func applyAbstractParameters(_ parameters: AbstractDroneParameters) {
@@ -2789,22 +2795,33 @@ final class DroneSimulationViewModel: ObservableObject {
     func setWindGusts(_ value: Double) { weather.gusts = Float(value) }
 
     func setTerrainPreset(_ preset: TerrainPreset) {
-        cancelPendingTerrainDensityRegeneration()
-        terrain.preset = preset
-        terrain.density = preset.defaultDensity
+        let compatiblePreset = preset.compatiblePreset(for: selectedDroneProfile.airframeClass)
+        terrain.preset = compatiblePreset
+        terrain.density = compatiblePreset.defaultDensity
         terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: terrain.mapScale)
-        regenerateEnvironment()
+        scheduleTerrainRegeneration(resetAfter: false)
+    }
+
+    @discardableResult
+    private func normalizeTerrainForSelectedDroneProfile() -> Bool {
+        let compatiblePreset = terrain.preset.compatiblePreset(for: selectedDroneProfile.airframeClass)
+        guard compatiblePreset != terrain.preset else {
+            return false
+        }
+
+        terrain.preset = compatiblePreset
+        terrain.density = compatiblePreset.defaultDensity
+        terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: terrain.mapScale)
+        return true
     }
 
     func setTerrainMapScale(_ scale: MapScale) {
         guard terrain.mapScale != scale else {
             return
         }
-        cancelPendingTerrainDensityRegeneration()
         terrain.mapScale = scale
         terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: scale)
-        regenerateEnvironment()
-        reset()
+        scheduleTerrainRegeneration(resetAfter: true)
     }
 
     func setTerrainDensity(_ value: Double) {
@@ -2814,14 +2831,13 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         terrain.density = clampedValue
         if !isTerrainDensitySliderEditing {
-            scheduleTerrainDensityRegeneration()
+            scheduleTerrainRegeneration(resetAfter: false, delayNanoseconds: 180_000_000)
         }
     }
 
     func setTerrainSeed(_ value: UInt64) {
-        cancelPendingTerrainDensityRegeneration()
         terrain.seed = value
-        regenerateEnvironment()
+        scheduleTerrainRegeneration(resetAfter: false)
     }
 
     func commitTerrainDensityChange() {
@@ -3051,10 +3067,15 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshTerrainMapSnapshot(recordTrail: false)
     }
 
-    private func scheduleTerrainDensityRegeneration() {
+    private func scheduleTerrainRegeneration(
+        resetAfter: Bool,
+        delayNanoseconds: UInt64 = 90_000_000
+    ) {
+        let requiresReset = pendingTerrainRegenerationRequiresReset || resetAfter
         cancelPendingTerrainDensityRegeneration()
+        pendingTerrainRegenerationRequiresReset = requiresReset
         pendingTerrainRegenerationTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 180_000_000)
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
             guard !Task.isCancelled, let self else {
                 return
             }
@@ -3065,16 +3086,22 @@ final class DroneSimulationViewModel: ObservableObject {
     private func cancelPendingTerrainDensityRegeneration() {
         pendingTerrainRegenerationTask?.cancel()
         pendingTerrainRegenerationTask = nil
+        pendingTerrainRegenerationRequiresReset = false
     }
 
     private func commitPendingTerrainDensityRegeneration() {
+        let requiresReset = pendingTerrainRegenerationRequiresReset
         pendingTerrainRegenerationTask = nil
+        pendingTerrainRegenerationRequiresReset = false
         regenerateEnvironment()
+        if requiresReset {
+            reset()
+        }
     }
 
     private func startSimulationLoop() {
         simulationTimer?.invalidate()
-        simulationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 45.0, repeats: true) { [weak self] _ in
+        simulationTimer = Timer(timeInterval: Self.simulationTickInterval, repeats: true) { [weak self] _ in
             guard let self else {
                 return
             }
@@ -3082,6 +3109,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 self.tick()
             }
         }
+        simulationTimer?.tolerance = Self.simulationTickInterval * 0.08
 
         if let simulationTimer {
             RunLoop.main.add(simulationTimer, forMode: .common)
@@ -3228,26 +3256,31 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         )
 
+        collisionAnalysis = postPhysicsCollisionAnalysis
+        var needsCollisionAnalysisRefresh = false
         if postPhysicsCollisionAnalysis.nearestObstacleDistance <= -0.02 {
-            collisionAnalysis = postPhysicsCollisionAnalysis
             if simd_length(state.velocity) > 0.45, collisionCooldown <= 0.0 {
                 handleObstacleCollision(using: postPhysicsCollisionAnalysis)
                 collisionCooldown = collisionCooldownDuration(for: postPhysicsCollisionAnalysis.nearestObstacleSource)
                 enforceRuntimeSafetyAndBounds(context: "tick.collision_damage")
+                needsCollisionAnalysisRefresh = true
             } else if resolveObstaclePenetration(using: postPhysicsCollisionAnalysis) {
                 enforceRuntimeSafetyAndBounds(context: "tick.collision_resolve")
+                needsCollisionAnalysisRefresh = true
             }
         }
 
-        collisionAnalysis = collisionService.analyze(
-            input: CollisionAnalysisInput(
-                dronePosition: state.position,
-                droneVelocity: state.velocity,
-                droneRadius: selectedDroneProfile.collisionRadius,
-                obstacles: sceneController.environmentObstacles,
-                weather: weather
+        if needsCollisionAnalysisRefresh {
+            collisionAnalysis = collisionService.analyze(
+                input: CollisionAnalysisInput(
+                    dronePosition: state.position,
+                    droneVelocity: state.velocity,
+                    droneRadius: selectedDroneProfile.collisionRadius,
+                    obstacles: sceneController.environmentObstacles,
+                    weather: weather
+                )
             )
-        )
+        }
 
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         applyGroundedSafetyIfNeeded(deltaTime: dt)
@@ -5575,6 +5608,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 : 0.0,
             recommendedSafeSpawnRadius(for: terrain.mapScale)
         )
+        normalizeTerrainForSelectedDroneProfile()
         isBoundaryBarrierVisible = snapshot.terrain.showsBoundaryBarrier ?? false
 
         if let cameraMode = CameraMode.fromStoredRaw(snapshot.camera.modeRaw) {
@@ -5816,15 +5850,8 @@ final class DroneSimulationViewModel: ObservableObject {
         let footprintScale = max(0.65, min(1.45, configuration.payloadMass / max(configuration.payloadType.defaultMass, 0.25)))
         let speedScale = max(0.55, min(1.55, impactSpeedMps / 11.0))
 
-        let baseFalloffRadius: Float
-        let baseCoreRadius: Float
-        if configuration.payloadType == .inertImpactPod {
-            baseFalloffRadius = 1.9 * footprintScale + 0.65 * speedScale
-            baseCoreRadius = 0.82 * footprintScale + 0.22 * speedScale
-        } else {
-            baseFalloffRadius = 0.95 * footprintScale + 0.32 * speedScale
-            baseCoreRadius = 0.42 * footprintScale + 0.14 * speedScale
-        }
+        let baseFalloffRadius: Float = 0.95 * footprintScale + 0.32 * speedScale
+        let baseCoreRadius: Float = 0.42 * footprintScale + 0.14 * speedScale
 
         let falloffRadius = baseFalloffRadius.clamped(to: 0.9...4.6)
         let coreRadius = min(falloffRadius * 0.62, baseCoreRadius.clamped(to: 0.28...2.2))
@@ -6704,6 +6731,7 @@ final class DroneSimulationViewModel: ObservableObject {
             missionPlanSignature: fixedWingMissionPlanSignature(currentMissionPlan),
             previewRouteID: tacticalMapState.previewRoute?.id,
             workingDraft: sourceDraft,
+            obstacleSignature: fixedWingObstacleSignature(),
             airframeClass: selectedDroneProfile.airframeClass
         )
     }
@@ -6774,49 +6802,129 @@ final class DroneSimulationViewModel: ObservableObject {
         return plan
     }
 
-    private func noFlySafeFixedWingRoute(
+    private func safeFixedWingRoute(
         from routePoints: [SIMD2<Float>],
         zones: [MissionZone],
         viewport: MapViewportState,
         targetAltitude: Float
-    ) -> FixedWingNoFlySafeRoute? {
+    ) -> FixedWingSafeRoute? {
+        let cacheKey = makeFixedWingSafeRouteCacheKey(
+            routePoints: routePoints,
+            zones: zones,
+            viewport: viewport,
+            targetAltitude: targetAltitude
+        )
+        if fixedWingSafeRouteCacheKey == cacheKey {
+            return fixedWingSafeRouteCacheStoresNil ? nil : fixedWingSafeRouteCacheRoute
+        }
+
+        let route = buildSafeFixedWingRoute(
+            from: routePoints,
+            zones: zones,
+            viewport: viewport,
+            targetAltitude: targetAltitude
+        )
+        fixedWingSafeRouteCacheKey = cacheKey
+        fixedWingSafeRouteCacheRoute = route
+        fixedWingSafeRouteCacheStoresNil = route == nil
+        return route
+    }
+
+    private func buildSafeFixedWingRoute(
+        from routePoints: [SIMD2<Float>],
+        zones: [MissionZone],
+        viewport: MapViewportState,
+        targetAltitude: Float
+    ) -> FixedWingSafeRoute? {
         let compactedOriginal = compactedPlanarPath(routePoints)
         guard compactedOriginal.count >= 2 else {
             return nil
         }
 
+        var candidateRoute = compactedOriginal
+        var wasRerouted = false
         let noFlyZones = zones.filter { $0.type == .noFlyZone && $0.radius > 0.0 }
-        guard !noFlyZones.isEmpty else {
-            return FixedWingNoFlySafeRoute(points: compactedOriginal, wasRerouted: false)
-        }
         let protectedNoFlyZones = fixedWingProtectedNoFlyZones(noFlyZones)
 
-        guard planarPathIntersectsNoFly(compactedOriginal, zones: protectedNoFlyZones) else {
-            return FixedWingNoFlySafeRoute(points: compactedOriginal, wasRerouted: false)
+        if !protectedNoFlyZones.isEmpty,
+           planarPathIntersectsNoFly(compactedOriginal, zones: protectedNoFlyZones) {
+            if let rerouted = missionPreviewBuilder.routePathAvoidingNoFly(
+                points: compactedOriginal,
+                zones: protectedNoFlyZones,
+                viewport: viewport
+            ) {
+                candidateRoute = compactedPlanarPath(rerouted)
+                wasRerouted = !samePlanarRoute(compactedOriginal, candidateRoute)
+            } else if let gridReroute = gridSafeFixedWingRoute(
+                from: compactedOriginal,
+                protectedNoFlyZones: protectedNoFlyZones,
+                viewport: viewport,
+                targetAltitude: targetAltitude
+            ) {
+                candidateRoute = gridReroute
+                wasRerouted = true
+            } else {
+                return nil
+            }
         }
 
-        if let rerouted = missionPreviewBuilder.routePathAvoidingNoFly(
-            points: compactedOriginal,
-            zones: protectedNoFlyZones,
-            viewport: viewport
-        ) {
-            let compactedReroute = compactedPlanarPath(rerouted)
-            return FixedWingNoFlySafeRoute(
-                points: compactedReroute,
-                wasRerouted: !samePlanarRoute(compactedOriginal, compactedReroute)
-            )
+        let obstacles = navigationObstacles(including: protectedNoFlyZones)
+        guard fixedWingPathNeedsObstacleReroute(
+            candidateRoute,
+            obstacles: obstacles,
+            targetAltitude: targetAltitude
+        ) else {
+            return FixedWingSafeRoute(points: candidateRoute, wasRerouted: wasRerouted)
         }
 
-        if let gridReroute = gridNoFlySafeFixedWingRoute(
-            from: compactedOriginal,
-            noFlyZones: protectedNoFlyZones,
+        if let gridReroute = gridSafeFixedWingRoute(
+            from: candidateRoute,
+            protectedNoFlyZones: protectedNoFlyZones,
             viewport: viewport,
             targetAltitude: targetAltitude
         ) {
-            return FixedWingNoFlySafeRoute(points: gridReroute, wasRerouted: true)
+            return FixedWingSafeRoute(points: gridReroute, wasRerouted: true)
         }
 
         return nil
+    }
+
+    private func makeFixedWingSafeRouteCacheKey(
+        routePoints: [SIMD2<Float>],
+        zones: [MissionZone],
+        viewport: MapViewportState,
+        targetAltitude: Float
+    ) -> FixedWingSafeRouteCacheKey {
+        FixedWingSafeRouteCacheKey(
+            routeSignature: fixedWingPlanarRouteSignature(routePoints),
+            noFlyZoneSignature: fixedWingNoFlyZoneSignature(zones),
+            obstacleSignature: fixedWingObstacleSignature(),
+            terrainSignature: fixedWingTerrainSignature(),
+            viewportSignature: fixedWingViewportSignature(viewport),
+            targetAltitudeBucket: Int((targetAltitude * 2.0).rounded()),
+            profileID: selectedDroneProfile.id
+        )
+    }
+
+    private func fixedWingPlanarRouteSignature(_ routePoints: [SIMD2<Float>]) -> Int {
+        var hasher = Hasher()
+        let compacted = compactedPlanarPath(routePoints)
+        hasher.combine(compacted.count)
+        for point in compacted {
+            hasher.combine(Int((point.x * 2.0).rounded()))
+            hasher.combine(Int((point.y * 2.0).rounded()))
+        }
+        return hasher.finalize()
+    }
+
+    private func fixedWingViewportSignature(_ viewport: MapViewportState) -> Int {
+        var hasher = Hasher()
+        hasher.combine(viewport.mapScale.rawValue)
+        hasher.combine(Int((viewport.worldHalfExtent * 2.0).rounded()))
+        hasher.combine(Int((viewport.hardWorldBoundsRadius * 2.0).rounded()))
+        hasher.combine(Int((viewport.minimumTurnRadiusM * 2.0).rounded()))
+        hasher.combine(Int((viewport.waypointAnticipationDistanceM * 2.0).rounded()))
+        return hasher.finalize()
     }
 
     private func fixedWingProtectedNoFlyZones(_ zones: [MissionZone]) -> [MissionZone] {
@@ -6879,9 +6987,62 @@ final class DroneSimulationViewModel: ObservableObject {
         return simd_distance(closest, center) <= radius
     }
 
-    private func gridNoFlySafeFixedWingRoute(
+    private func fixedWingPathNeedsObstacleReroute(
+        _ points: [SIMD2<Float>],
+        obstacles: [CollisionObstacle],
+        targetAltitude: Float
+    ) -> Bool {
+        guard points.count >= 2, !obstacles.isEmpty else {
+            return false
+        }
+
+        for obstacle in obstacles {
+            let protectedRadius = fixedWingProtectedObstacleRadius(obstacle)
+            for point in points where simd_distance(point, obstacle.planarCenter) <= protectedRadius {
+                return true
+            }
+
+            for pair in zip(points, points.dropFirst()) {
+                let segmentDistance = planarDistanceToSegment(
+                    point: obstacle.planarCenter,
+                    segmentStart: pair.0,
+                    segmentEnd: pair.1
+                )
+                if segmentDistance <= protectedRadius {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    private func fixedWingProtectedObstacleRadius(_ obstacle: CollisionObstacle) -> Float {
+        let base: Float
+        switch obstacle.source {
+        case let value where value.contains("no_fly"):
+            base = 2.2
+        case let value where value.contains("building"):
+            base = 1.4
+        case let value where value.contains("tree"):
+            base = 1.1
+        case let value where value.contains("pole"):
+            base = 1.2
+        case let value where value.contains("barrier"):
+            base = 1.6
+        case let value where value.contains("dock"):
+            base = 0.9
+        case let value where value.contains("terrain"):
+            base = 0.8
+        default:
+            base = 1.0
+        }
+        return obstacle.radius + base + selectedDroneProfile.collisionRadius * 0.6
+    }
+
+    private func gridSafeFixedWingRoute(
         from points: [SIMD2<Float>],
-        noFlyZones: [MissionZone],
+        protectedNoFlyZones noFlyZones: [MissionZone],
         viewport: MapViewportState,
         targetAltitude: Float
     ) -> [SIMD2<Float>]? {
@@ -6909,9 +7070,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 terrain: terrain,
                 obstacles: obstacles,
                 droneRadius: droneRadius,
-                modeTag: "fixed_wing_mission_no_fly_segment",
+                modeTag: "fixed_wing_mission_obstacle_segment",
                 forceRecompute: true,
-                reason: "mission_no_fly_reroute"
+                reason: "mission_obstacle_reroute"
             )
 
             let snapshot = planner.snapshot(currentPosition: start)
@@ -6936,12 +7097,22 @@ final class DroneSimulationViewModel: ObservableObject {
             zones: noFlyZones,
             viewport: viewport
         ) {
-            return cleanedOutput
+            return fixedWingPathNeedsObstacleReroute(
+                cleanedOutput,
+                obstacles: obstacles,
+                targetAltitude: targetAltitude
+            ) ? nil : cleanedOutput
         }
 
-        return planarPathIntersectsNoFly(compactedOutput, zones: noFlyZones)
-            ? nil
-            : compactedOutput
+        if planarPathIntersectsNoFly(compactedOutput, zones: noFlyZones) ||
+            fixedWingPathNeedsObstacleReroute(
+                compactedOutput,
+                obstacles: obstacles,
+                targetAltitude: targetAltitude
+            ) {
+            return nil
+        }
+        return compactedOutput
     }
 
     private func samePlanarRoute(_ lhs: [SIMD2<Float>], _ rhs: [SIMD2<Float>]) -> Bool {
@@ -6962,7 +7133,7 @@ final class DroneSimulationViewModel: ObservableObject {
     ) -> FixedWingFlyByRoutePlan? {
         if let currentMissionPlan,
            !currentMissionPlan.routePoints.isEmpty {
-            guard let safeRoute = noFlySafeFixedWingRoute(
+            guard let safeRoute = safeFixedWingRoute(
                 from: currentMissionPlan.routePoints,
                 zones: currentMissionPlan.zones,
                 viewport: currentTacticalMapViewport(),
@@ -7009,7 +7180,7 @@ final class DroneSimulationViewModel: ObservableObject {
             ? tacticalMapState.workingDraft
             : tacticalMapState.committedDraft
         if let previewRoute = tacticalMapState.previewRoute {
-            guard let safeRoute = noFlySafeFixedWingRoute(
+            guard let safeRoute = safeFixedWingRoute(
                 from: previewRoute.points,
                 zones: sourceDraft.zones,
                 viewport: currentTacticalMapViewport(),
@@ -7055,7 +7226,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let previewTargets = sourceDraft.waypoints.map(MissionTarget.init)
-        guard let safeRoute = noFlySafeFixedWingRoute(
+        guard let safeRoute = safeFixedWingRoute(
             from: previewTargets.map(\.position),
             zones: sourceDraft.zones,
             viewport: currentTacticalMapViewport(),
@@ -7569,13 +7740,13 @@ final class DroneSimulationViewModel: ObservableObject {
                 directGuidanceMode = "directCaptureLine"
             }
         }
-        if let noFlyGuidanceSnapshot = fixedWingAssistNoFlyGuidanceSnapshot(
+        if let protectedGuidanceSnapshot = fixedWingAssistProtectedGuidanceSnapshot(
             plan: plan,
             currentPosition: currentPosition,
             captureRadius: captureRadius,
             targetAltitude: max(0.0, state.position.y)
         ) {
-            return noFlyGuidanceSnapshot
+            return protectedGuidanceSnapshot
         }
         let directSnapshot = FixedWingAssistFlyByGuidanceSnapshot(
             guidanceTarget: directGuidanceTarget,
@@ -7655,26 +7826,27 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
-    private func fixedWingAssistNoFlyGuidanceSnapshot(
+    private func fixedWingAssistProtectedGuidanceSnapshot(
         plan: FixedWingFlyByTransitionPlan,
         currentPosition: SIMD2<Float>,
         captureRadius: Float,
         targetAltitude: Float
     ) -> FixedWingAssistFlyByGuidanceSnapshot? {
         let noFlyZones = activeNoFlyZonesForNavigation()
-        guard !noFlyZones.isEmpty else {
+        let protectedNoFlyZones = fixedWingProtectedNoFlyZones(noFlyZones)
+        let directPath = [currentPosition, plan.selectedWaypoint.position]
+        let obstacles = navigationObstacles(including: protectedNoFlyZones)
+        let pathBlocked = planarPathIntersectsNoFly(directPath, zones: protectedNoFlyZones) ||
+            fixedWingPathNeedsObstacleReroute(
+                directPath,
+                obstacles: obstacles,
+                targetAltitude: targetAltitude
+            )
+        guard pathBlocked else {
             return nil
         }
 
-        let protectedZones = fixedWingProtectedNoFlyZones(noFlyZones)
-        guard planarPathIntersectsNoFly(
-            [currentPosition, plan.selectedWaypoint.position],
-            zones: protectedZones
-        ) else {
-            return nil
-        }
-
-        guard let safeRoute = noFlySafeFixedWingRoute(
+        guard let safeRoute = safeFixedWingRoute(
             from: [currentPosition, plan.selectedWaypoint.position],
             zones: noFlyZones,
             viewport: currentTacticalMapViewport(),
@@ -7682,10 +7854,10 @@ final class DroneSimulationViewModel: ObservableObject {
         ),
               safeRoute.wasRerouted,
               safeRoute.points.count >= 2 else {
-            return fixedWingAssistBlockedNoFlyGuidanceSnapshot(
+            return fixedWingAssistBlockedProtectedGuidanceSnapshot(
                 plan: plan,
                 currentPosition: currentPosition,
-                noFlyZones: protectedZones
+                obstacles: obstacles
             )
         }
 
@@ -7725,7 +7897,7 @@ final class DroneSimulationViewModel: ObservableObject {
         return FixedWingAssistFlyByGuidanceSnapshot(
             guidanceTarget: guidanceTarget,
             captureTarget: plan.selectedWaypoint.position,
-            guidanceMode: "noFlyRouteTrack",
+            guidanceMode: "protectedRouteTrack",
             currentLegStart: segmentStart,
             currentLegMiddle: segmentEnd,
             currentLegEnd: nextLegEnd,
@@ -7750,16 +7922,16 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
-    private func fixedWingAssistBlockedNoFlyGuidanceSnapshot(
+    private func fixedWingAssistBlockedProtectedGuidanceSnapshot(
         plan: FixedWingFlyByTransitionPlan,
         currentPosition: SIMD2<Float>,
-        noFlyZones: [MissionZone]
+        obstacles: [CollisionObstacle]
     ) -> FixedWingAssistFlyByGuidanceSnapshot {
         let fallbackDirection: SIMD2<Float> = {
-            if let nearestZone = noFlyZones.min(by: {
-                simd_distance(currentPosition, $0.center) < simd_distance(currentPosition, $1.center)
+            if let nearestObstacle = obstacles.min(by: {
+                simd_distance(currentPosition, $0.planarCenter) < simd_distance(currentPosition, $1.planarCenter)
             }) {
-                let away = currentPosition - nearestZone.center
+                let away = currentPosition - nearestObstacle.planarCenter
                 let awayLength = simd_length(away)
                 if awayLength > 0.001 {
                     return away / awayLength
@@ -7778,7 +7950,7 @@ final class DroneSimulationViewModel: ObservableObject {
         return FixedWingAssistFlyByGuidanceSnapshot(
             guidanceTarget: guidanceTarget,
             captureTarget: plan.selectedWaypoint.position,
-            guidanceMode: "noFlyBlocked",
+            guidanceMode: "protectedRouteBlocked",
             currentLegStart: currentPosition,
             currentLegMiddle: guidanceTarget,
             currentLegEnd: nil,
@@ -7799,7 +7971,7 @@ final class DroneSimulationViewModel: ObservableObject {
             shouldPauseForPoorGeometry: false,
             shouldPauseForObstacle: true,
             shouldHandoffToNext: false,
-            suppressedReason: "no_fly_route_blocked"
+            suppressedReason: "protected_route_blocked"
         )
     }
 
@@ -8687,6 +8859,9 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingFlyByRoutePlanCache = nil
         fixedWingFlyablePathCacheKey = nil
         fixedWingFlyablePathCacheRoute = nil
+        fixedWingSafeRouteCacheKey = nil
+        fixedWingSafeRouteCacheRoute = nil
+        fixedWingSafeRouteCacheStoresNil = false
         invalidateFixedWingRouteTrackingContextCache()
     }
 
@@ -8828,7 +9003,7 @@ final class DroneSimulationViewModel: ObservableObject {
         targetMissionWaypointIndex: Int?
     ) -> FixedWingRouteTrackingContext {
         let activeNoFlyZones = activeNoFlyZonesForNavigation()
-        let routeSeed = "\(prefix):nofly:\(fixedWingNoFlyZoneSignature(activeNoFlyZones))"
+        let routeSeed = "\(prefix):nofly:\(fixedWingNoFlyZoneSignature(activeNoFlyZones)):obstacles:\(fixedWingObstacleSignature())"
         let routeStart = fixedWingRuntimeRouteStart(
             routeKey: routeSeed,
             targetAltitude: targetAltitude
@@ -8837,14 +9012,14 @@ final class DroneSimulationViewModel: ObservableObject {
         let targetPlanar = SIMD2<Float>(target.x, target.z)
         let routePoints: [SIMD2<Float>]
 
-        if let safeRoute = noFlySafeFixedWingRoute(
+        if let safeRoute = safeFixedWingRoute(
             from: [startPlanar, targetPlanar],
             zones: activeNoFlyZones,
             viewport: currentTacticalMapViewport(),
             targetAltitude: targetAltitude
         ) {
             routePoints = safeRoute.points
-        } else if activeNoFlyZones.contains(where: { $0.type == .noFlyZone && $0.radius > 0.0 }) {
+        } else if !navigationObstacles(including: activeNoFlyZones).isEmpty {
             return FixedWingRouteTrackingContext(
                 routeIdentifier: "\(routeSeed):blocked",
                 waypoints: [],
@@ -8934,6 +9109,25 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
             }
             if currentMissionPlan.zones.contains(where: { $0.type == .noFlyZone && $0.radius > 0.0 }) {
+                return FixedWingRouteTrackingContext(
+                    routeIdentifier: missionRouteKey,
+                    waypoints: [],
+                    minimumWaypointIndex: minimumWaypointIndex,
+                    preferredLoiterCenter: nil,
+                    preferredLoiterRadius: nil,
+                    flyableRoute: nil
+                )
+            }
+            let directMissionRoute = compactedPlanarPath(
+                currentMissionPlan.routePoints.isEmpty
+                    ? [currentMissionPlan.startPoint] + currentMissionPlan.executionTargets.map(\.position)
+                    : currentMissionPlan.routePoints
+            )
+            if fixedWingPathNeedsObstacleReroute(
+                directMissionRoute,
+                obstacles: navigationObstacles(including: []),
+                targetAltitude: targetAltitude
+            ) {
                 return FixedWingRouteTrackingContext(
                     routeIdentifier: missionRouteKey,
                     waypoints: [],
@@ -9094,6 +9288,17 @@ final class DroneSimulationViewModel: ObservableObject {
             return []
         }
 
+        let fallbackRoutePoints = compactedPlanarPath(
+            [plan.startPoint] + plan.executionTargets.map(\.position)
+        )
+        if fixedWingPathNeedsObstacleReroute(
+            fallbackRoutePoints,
+            obstacles: navigationObstacles(including: []),
+            targetAltitude: targetAltitude
+        ) {
+            return []
+        }
+
         var fallbackWaypoints: [FixedWingRouteWaypoint] = [
             FixedWingRouteWaypoint(
                 position: SIMD3<Float>(plan.startPoint.x, targetAltitude, plan.startPoint.y),
@@ -9127,37 +9332,15 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func activeLaunchMode() -> LaunchMode {
-        if let currentMissionPlan,
-           missionExecutionState.status == .running ||
-            missionExecutionState.status == .ready ||
-            missionExecutionState.status == .paused {
-            return currentMissionPlan.launchMode
-        }
-        return isMissionMapVisible
-            ? workingTacticalMissionDraft.selectedLaunchMode
-            : committedTacticalMissionDraft.selectedLaunchMode
+        .standard
     }
 
     private func activeLaunchObject() -> MissionLaunchObject? {
-        if let currentMissionPlan,
-           missionExecutionState.status == .running ||
-            missionExecutionState.status == .ready ||
-            missionExecutionState.status == .paused {
-            return currentMissionPlan.launchObject
-        }
-        return isMissionMapVisible
-            ? workingTacticalMissionDraft.launchObject
-            : committedTacticalMissionDraft.launchObject
+        nil
     }
 
     private func activeLaunchAsset() -> LaunchAsset? {
-        if let currentMissionPlan,
-           missionExecutionState.status == .running ||
-            missionExecutionState.status == .ready ||
-            missionExecutionState.status == .paused {
-            return currentMissionPlan.launchAsset
-        }
-        return activeLaunchObject()?.launchAsset
+        nil
     }
 
     private func activeFixedWingParameters() -> FixedWingParameters {
@@ -9998,7 +10181,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if selectedDroneProfile.airframeClass == .fixedWing,
            fixedWingAssistState.mode == .waypointIntercept,
            let assistTarget {
-            return fixedWingAssistNoFlyOverlayRoute(to: assistTarget)
+            return fixedWingAssistSafeOverlayRoute(to: assistTarget)
         }
 
         if selectedDroneProfile.airframeClass == .fixedWing,
@@ -10052,7 +10235,7 @@ final class DroneSimulationViewModel: ObservableObject {
             guard let activeWaypoint = activeFixedWingAssistWaypoint() else {
                 return nil
             }
-            return fixedWingAssistNoFlyOverlayRoute(to: activeWaypoint.position)
+            return fixedWingAssistSafeOverlayRoute(to: activeWaypoint.position)
         }
 
         if fixedWingMissionRouteHealthy(debugState: fixedWingAutopilotDebugState) {
@@ -10065,29 +10248,37 @@ final class DroneSimulationViewModel: ObservableObject {
         return nil
     }
 
-    private func fixedWingAssistNoFlyOverlayRoute(to target: SIMD2<Float>) -> [SIMD2<Float>] {
+    private func fixedWingAssistSafeOverlayRoute(to target: SIMD2<Float>) -> [SIMD2<Float>] {
         let currentPosition = currentPlanarPosition()
         let noFlyZones = activeNoFlyZonesForNavigation()
-        guard !noFlyZones.isEmpty,
-              planarPathIntersectsNoFly(
-                [currentPosition, target],
-                zones: fixedWingProtectedNoFlyZones(noFlyZones)
-              ),
-              let safeRoute = noFlySafeFixedWingRoute(
-                from: [currentPosition, target],
-                zones: noFlyZones,
-                viewport: currentTacticalMapViewport(),
-                targetAltitude: max(0.0, state.position.y)
-              ),
-              safeRoute.wasRerouted,
-              safeRoute.points.count > 1 else {
-            return compactedPlanarPath([
-                currentPosition,
-                target
-            ])
+        let targetAltitude = max(0.0, state.position.y)
+        if let safeRoute = safeFixedWingRoute(
+            from: [currentPosition, target],
+            zones: noFlyZones,
+            viewport: currentTacticalMapViewport(),
+            targetAltitude: targetAltitude
+        ),
+           safeRoute.wasRerouted,
+           safeRoute.points.count > 1 {
+            return safeRoute.points
         }
 
-        return safeRoute.points
+        let protectedNoFlyZones = fixedWingProtectedNoFlyZones(noFlyZones)
+        let directPath = [currentPosition, target]
+        let pathBlocked = planarPathIntersectsNoFly(directPath, zones: protectedNoFlyZones) ||
+            fixedWingPathNeedsObstacleReroute(
+                directPath,
+                obstacles: navigationObstacles(including: protectedNoFlyZones),
+                targetAltitude: targetAltitude
+            )
+        guard !pathBlocked else {
+            return [currentPosition]
+        }
+
+        return compactedPlanarPath([
+            currentPosition,
+            target
+        ])
     }
 
     private func compactedPlanarPath(_ points: [SIMD2<Float>]) -> [SIMD2<Float>] {
@@ -10110,19 +10301,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshSceneLaunchAsset() {
-        let launchObject: MissionLaunchObject? = {
-            if let currentMissionPlan,
-               missionExecutionState.status == .ready ||
-                missionExecutionState.status == .running ||
-                missionExecutionState.status == .paused {
-                return currentMissionPlan.launchObject
-            }
-            return isMissionMapVisible
-                ? workingTacticalMissionDraft.launchObject
-                : committedTacticalMissionDraft.launchObject
-        }()
-
-        sceneController.setLaunchAsset(launchObject?.launchAsset)
+        sceneController.setLaunchAsset(nil)
     }
 
     private func resetTerrainMapTrail() {

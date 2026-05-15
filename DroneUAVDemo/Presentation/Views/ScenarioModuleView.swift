@@ -120,7 +120,7 @@ struct ScenarioModuleView: View {
                         get: { viewModel.terrain.preset },
                         set: { viewModel.setTerrainPreset($0) }
                     )) {
-                        ForEach(TerrainPreset.allCases) { preset in
+                        ForEach(TerrainPreset.available(for: viewModel.selectedDroneProfile.airframeClass)) { preset in
                             Text(LocalizedStringKey(preset.titleKey)).tag(preset)
                         }
                     }

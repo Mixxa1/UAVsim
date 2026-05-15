@@ -110,6 +110,27 @@ enum TerrainPreset: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var isFixedWingCompatible: Bool {
+        switch self {
+        case .cargoYard, .city:
+            return false
+        case .gridDemo, .field, .forest:
+            return true
+        }
+    }
+
+    func isAvailable(for airframeClass: AirframeClass) -> Bool {
+        airframeClass != .fixedWing || isFixedWingCompatible
+    }
+
+    func compatiblePreset(for airframeClass: AirframeClass) -> TerrainPreset {
+        isAvailable(for: airframeClass) ? self : .field
+    }
+
+    static func available(for airframeClass: AirframeClass) -> [TerrainPreset] {
+        allCases.filter { $0.isAvailable(for: airframeClass) }
+    }
+
     var title: String {
         NSLocalizedString(titleKey, comment: "")
     }

@@ -9,35 +9,63 @@ struct TacticalMapView: View {
     let onSetMode: (TacticalMapMode) -> Void
     let onMapTap: (SIMD2<Float>) -> Void
     @State private var committedZoomFactor: CGFloat = 1.0
+    @State private var committedPanOffset: CGSize = .zero
+    @State private var isLegendPresented = false
     @GestureState private var gestureZoomFactor: CGFloat = 1.0
+    @GestureState private var gesturePanOffset: CGSize = .zero
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
 
             GeometryReader { geometry in
-                ZStack(alignment: .topLeading) {
+                let panOffset = clampedPanOffset(
+                    in: geometry.size,
+                    offset: CGSize(
+                        width: committedPanOffset.width + gesturePanOffset.width,
+                        height: committedPanOffset.height + gesturePanOffset.height
+                    )
+                )
+
+                ZStack(alignment: .topTrailing) {
                     TacticalMapCanvas(
                         snapshot: snapshot,
                         state: state,
                         missionPlan: missionPlan,
                         executionState: executionState,
-                        zoomFactor: effectiveZoomFactor
+                        zoomFactor: effectiveZoomFactor,
+                        panOffset: panOffset
                     )
-
-                    TacticalMapLegendView(snapshot: snapshot, state: state)
-                        .padding(12)
-                        .allowsHitTesting(false)
 
                     Color.clear
                         .contentShape(Rectangle())
                         .gesture(
                             DragGesture(minimumDistance: 0.0, coordinateSpace: .local)
+                                .updating($gesturePanOffset) { value, gestureState, _ in
+                                    guard Self.dragDistance(value.translation) >= 4.0 else {
+                                        gestureState = .zero
+                                        return
+                                    }
+                                    gestureState = value.translation
+                                }
                                 .onEnded { value in
+                                    if Self.dragDistance(value.translation) >= 4.0 {
+                                        committedPanOffset = clampedPanOffset(
+                                            in: geometry.size,
+                                            offset: CGSize(
+                                                width: committedPanOffset.width + value.translation.width,
+                                                height: committedPanOffset.height + value.translation.height
+                                            )
+                                        )
+                                        return
+                                    }
+
                                     let projection = TerrainMapProjection(
                                         snapshot: snapshot,
                                         size: geometry.size,
-                                        zoomFactor: effectiveZoomFactor
+                                        zoomFactor: effectiveZoomFactor,
+                                        panOffset: panOffset,
+                                        fillsAvailableSpace: true
                                     )
                                     guard let planarPoint = projection.unproject(value.location) else {
                                         return
@@ -49,13 +77,19 @@ struct TacticalMapView: View {
                             let projection = TerrainMapProjection(
                                 snapshot: snapshot,
                                 size: geometry.size,
-                                zoomFactor: effectiveZoomFactor
+                                zoomFactor: effectiveZoomFactor,
+                                panOffset: panOffset,
+                                fillsAvailableSpace: true
                             )
                             guard let planarPoint = projection.unproject(localPoint) else {
                                 return
                             }
                             onMapTap(planarPoint)
                         }
+
+                    mapOverlayControls()
+                        .padding(12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
                 .simultaneousGesture(magnificationGesture)
             }
@@ -89,7 +123,7 @@ struct TacticalMapView: View {
 
     private var modeSelector: some View {
         HStack(spacing: 8) {
-            ForEach(TacticalMapMode.allCases) { mode in
+            ForEach(TacticalMapMode.planningModes) { mode in
                 modeButton(mode)
             }
         }
@@ -120,7 +154,6 @@ struct TacticalMapView: View {
             HStack(spacing: 10) {
                 metricChip("tactical.map.metric.span", value: scaleDescriptor)
                 metricChip("tactical.map.metric.route_distance", value: routeDistanceText)
-                metricChip("tactical.map.launch.mode", value: launchModeText)
                 if let previewStatusText {
                     metricChip("tactical.map.metric.preview", value: previewStatusText)
                 }
@@ -186,12 +219,70 @@ struct TacticalMapView: View {
         NSLocalizedString(state.mode.titleKey, comment: "")
     }
 
-    private var launchModeText: String {
-        NSLocalizedString(state.workingDraft.selectedLaunchMode.titleKey, comment: "")
-    }
-
     private var previewStatusText: String? {
         state.previewRoute?.previewStatusKey.map { NSLocalizedString($0, comment: "") }
+    }
+
+    @ViewBuilder
+    private func mapOverlayControls() -> some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            HStack(spacing: 8) {
+                mapIconButton(
+                    systemName: "scope",
+                    accessibilityKey: "tactical.map.pan.center",
+                    controllerID: "tactical.map.pan.center.quick"
+                ) {
+                    committedPanOffset = .zero
+                }
+                mapIconButton(
+                    systemName: isLegendPresented ? "list.bullet.rectangle.fill" : "list.bullet.rectangle",
+                    accessibilityKey: "tactical.map.legend.toggle"
+                ) {
+                    isLegendPresented.toggle()
+                }
+            }
+
+            if isLegendPresented {
+                TacticalMapLegendView(snapshot: snapshot, state: state)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private func mapIconButton(
+        systemName: String,
+        accessibilityKey: String,
+        controllerID: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .frame(width: 28, height: 28)
+                .background(GroundControlPalette.inset.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(GroundControlPalette.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(NSLocalizedString(accessibilityKey, comment: ""))
+        .accessibilityLabel(Text(LocalizedStringKey(accessibilityKey)))
+        .controllerButtonTarget(id: controllerID ?? accessibilityKey, action: action)
+    }
+
+    private func clampedPanOffset(in size: CGSize, offset: CGSize) -> CGSize {
+        let zoomAllowance = max(0.0, effectiveZoomFactor - 1.0)
+        let cropCompensationX = max(0.0, size.height - size.width) * 0.5
+        let cropCompensationY = max(0.0, size.width - size.height) * 0.5
+        let horizontalLimit = cropCompensationX + max(0.0, size.width * zoomAllowance * 0.44)
+        let verticalLimit = cropCompensationY + max(0.0, size.height * zoomAllowance * 0.44)
+
+        return CGSize(
+            width: min(horizontalLimit, max(-horizontalLimit, offset.width)),
+            height: min(verticalLimit, max(-verticalLimit, offset.height))
+        )
     }
 
     private func modeButton(_ mode: TacticalMapMode) -> some View {
@@ -263,6 +354,10 @@ struct TacticalMapView: View {
         min(6.0, max(1.0, committedZoomFactor * gestureZoomFactor))
     }
 
+    private static func dragDistance(_ translation: CGSize) -> CGFloat {
+        sqrt(translation.width * translation.width + translation.height * translation.height)
+    }
+
     private var magnificationGesture: some Gesture {
         MagnificationGesture()
             .updating($gestureZoomFactor) { value, gestureState, _ in
@@ -292,15 +387,7 @@ private struct TacticalMapLegendView: View {
                 } else {
                     legendRow(color: GroundControlPalette.accent, key: "tactical.map.legend.route")
                 }
-                if state.workingDraft.selectedLaunchMode.requiresLaunchObject,
-                   state.workingDraft.launchObject != nil {
-                    legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.launch_corridor")
-                }
                 legendRow(color: GroundControlPalette.success, key: "tactical.map.legend.safe_return")
-            case .launchObject:
-                if state.workingDraft.selectedLaunchMode.requiresLaunchObject {
-                    legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.launch_corridor")
-                }
             case .dropZone:
                 legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.drop_zone")
             case .noFlyZone:
@@ -338,13 +425,16 @@ private struct TacticalMapCanvas: View {
     let missionPlan: MissionPlan?
     let executionState: MissionExecutionState
     let zoomFactor: CGFloat
+    let panOffset: CGSize
 
     var body: some View {
         Canvas(rendersAsynchronously: true) { context, size in
             let projection = TerrainMapProjection(
                 snapshot: snapshot,
                 size: size,
-                zoomFactor: zoomFactor
+                zoomFactor: zoomFactor,
+                panOffset: panOffset,
+                fillsAvailableSpace: true
             )
 
             context.fill(Path(projection.mapRect), with: .color(backgroundColor.opacity(0.98)))
@@ -359,7 +449,6 @@ private struct TacticalMapCanvas: View {
             drawPredictedPath(in: &context, projection: projection)
             drawPayloadImpact(in: &context, projection: projection)
             drawObjects(in: &context, projection: projection)
-            drawLaunchObject(in: &context, projection: projection)
             drawDock(in: &context, projection: projection)
             drawWaypoints(in: &context, projection: projection)
             drawDrone(in: &context, projection: projection)
@@ -533,12 +622,12 @@ private struct TacticalMapCanvas: View {
         guard radiusMeters > 0.01 else {
             return
         }
-        let radius = projection.projectedRadius(for: radiusMeters)
+        let radius = projection.projectedRadiusSize(for: radiusMeters)
         let rect = CGRect(
-            x: center.x - radius,
-            y: center.y - radius,
-            width: radius * 2.0,
-            height: radius * 2.0
+            x: center.x - radius.width,
+            y: center.y - radius.height,
+            width: radius.width * 2.0,
+            height: radius.height * 2.0
         )
         context.stroke(Path(ellipseIn: rect), with: .color(color), style: style)
         if let label {
@@ -558,12 +647,12 @@ private struct TacticalMapCanvas: View {
     ) {
         for zone in state.workingDraft.zones {
             let center = projection.project(zone.center)
-            let radius = projection.projectedRadius(for: zone.radius)
+            let radius = projection.projectedRadiusSize(for: zone.radius)
             let rect = CGRect(
-                x: center.x - radius,
-                y: center.y - radius,
-                width: radius * 2.0,
-                height: radius * 2.0
+                x: center.x - radius.width,
+                y: center.y - radius.height,
+                width: radius.width * 2.0,
+                height: radius.height * 2.0
             )
 
             switch zone.type {
@@ -718,55 +807,6 @@ private struct TacticalMapCanvas: View {
         }
     }
 
-    private func drawLaunchObject(
-        in context: inout GraphicsContext,
-        projection: TerrainMapProjection
-    ) {
-        guard state.workingDraft.selectedLaunchMode.requiresLaunchObject,
-              let launchObject = state.workingDraft.launchObject else {
-            return
-        }
-
-        let center = projection.project(launchObject.position)
-        let sectorID = state.viewport.sectorID(for: launchObject.position)
-        let corridorLength = launchCorridorLength(for: state.workingDraft.selectedLaunchMode)
-        let headingRadians = (launchObject.transitionHeadingDegrees ?? launchObject.headingDegrees).degreesToRadians
-        let corridorEnd = launchObject.position + SIMD2<Float>(sin(headingRadians), cos(headingRadians)) * corridorLength
-
-        if corridorLength > 0.05 {
-            var corridorPath = Path()
-            corridorPath.move(to: center)
-            corridorPath.addLine(to: projection.project(corridorEnd))
-            context.stroke(
-                corridorPath,
-                with: .color(GroundControlPalette.warning.opacity(0.88)),
-                style: StrokeStyle(lineWidth: 2.0, lineCap: .round, dash: [6.0, 3.0])
-            )
-        }
-
-        switch launchObject.type {
-        case .handLaunchPoint, .vtolStartPoint:
-            context.fill(
-                Path(ellipseIn: CGRect(x: center.x - 7.0, y: center.y - 7.0, width: 14.0, height: 14.0)),
-                with: .color(GroundControlPalette.warning.opacity(0.90))
-            )
-        case .catapultLine:
-            let rect = CGRect(x: center.x - 10.0, y: center.y - 3.0, width: 20.0, height: 6.0)
-            context.fill(Path(roundedRect: rect, cornerRadius: 3.0), with: .color(GroundControlPalette.warning.opacity(0.90)))
-        case .runwayStrip:
-            let rect = CGRect(x: center.x - 14.0, y: center.y - 4.0, width: 28.0, height: 8.0)
-            context.fill(Path(roundedRect: rect, cornerRadius: 2.0), with: .color(GroundControlPalette.warning.opacity(0.74)))
-        }
-
-        context.draw(
-            Text("\(NSLocalizedString(launchObject.type.titleKey, comment: "")) • \(sectorID)")
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .foregroundColor(GroundControlPalette.warning),
-            at: CGPoint(x: center.x, y: center.y - 16.0),
-            anchor: .center
-        )
-    }
-
     private func drawPayloadImpact(
         in context: inout GraphicsContext,
         projection: TerrainMapProjection
@@ -776,19 +816,19 @@ private struct TacticalMapCanvas: View {
         }
 
         let center = projection.project(impact.position)
-        let falloffRadius = projection.projectedRadius(for: impact.falloffRadius)
-        let coreRadius = projection.projectedRadius(for: impact.coreRadius)
+        let falloffRadius = projection.projectedRadiusSize(for: impact.falloffRadius)
+        let coreRadius = projection.projectedRadiusSize(for: impact.coreRadius)
         let falloffRect = CGRect(
-            x: center.x - falloffRadius,
-            y: center.y - falloffRadius,
-            width: falloffRadius * 2.0,
-            height: falloffRadius * 2.0
+            x: center.x - falloffRadius.width,
+            y: center.y - falloffRadius.height,
+            width: falloffRadius.width * 2.0,
+            height: falloffRadius.height * 2.0
         )
         let coreRect = CGRect(
-            x: center.x - coreRadius,
-            y: center.y - coreRadius,
-            width: coreRadius * 2.0,
-            height: coreRadius * 2.0
+            x: center.x - coreRadius.width,
+            y: center.y - coreRadius.height,
+            width: coreRadius.width * 2.0,
+            height: coreRadius.height * 2.0
         )
         let tint: Color = switch impact.outcome {
         case .generic:
@@ -861,12 +901,12 @@ private struct TacticalMapCanvas: View {
                 }
                 return GroundControlPalette.accent
             }()
-            let acceptanceRadius = projection.projectedRadius(for: waypoint.acceptanceRadius)
+            let acceptanceRadius = projection.projectedRadiusSize(for: waypoint.acceptanceRadius)
             let acceptanceRect = CGRect(
-                x: center.x - acceptanceRadius,
-                y: center.y - acceptanceRadius,
-                width: acceptanceRadius * 2.0,
-                height: acceptanceRadius * 2.0
+                x: center.x - acceptanceRadius.width,
+                y: center.y - acceptanceRadius.height,
+                width: acceptanceRadius.width * 2.0,
+                height: acceptanceRadius.height * 2.0
             )
             context.fill(Path(ellipseIn: acceptanceRect), with: .color(tint.opacity(waypoint.isActive || waypoint.isAssistSelected ? 0.12 : 0.075)))
             context.stroke(
@@ -944,28 +984,5 @@ private extension TerrainMapProjection {
             width: abs(bottomRight.x - topLeft.x),
             height: abs(bottomRight.y - topLeft.y)
         )
-    }
-}
-
-private extension TacticalMapCanvas {
-    func launchCorridorLength(for launchMode: LaunchMode) -> Float {
-        switch launchMode {
-        case .standard:
-            return 0.0
-        case .handLaunch:
-            return max(12.0, state.viewport.minimumTurnRadiusM * 0.42)
-        case .catapult:
-            return max(18.0, state.viewport.minimumTurnRadiusM * 0.72)
-        case .runway:
-            return max(24.0, state.viewport.minimumTurnRadiusM * 1.15)
-        case .vtol:
-            return max(8.0, state.viewport.minimumTurnRadiusM * 0.32)
-        }
-    }
-}
-
-private extension Float {
-    var degreesToRadians: Float {
-        self * .pi / 180.0
     }
 }

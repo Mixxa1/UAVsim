@@ -36,13 +36,21 @@ struct MissionWaypointCaptureZoneVisual: Equatable {
     let isCompleted: Bool
 }
 
-private struct SupportSurfaceDescriptor {
-    let center: SIMD2<Float>
-    let halfExtents: SIMD2<Float>
-    let yawRadians: Float
-    let topY: Float
-    let source: String
-}
+    private struct SupportSurfaceDescriptor {
+        let center: SIMD2<Float>
+        let halfExtents: SIMD2<Float>
+        let yawRadians: Float
+        let topY: Float
+        let source: String
+    }
+
+    private struct ObstacleProxySpec {
+        let localCenterY: Float
+        let analysisRadius: Float
+        let source: String
+        let baseY: Float
+        let topY: Float
+    }
 
 final class DroneSceneController {
     let scene: SCNScene
@@ -826,12 +834,7 @@ final class DroneSceneController {
 
     func sceneDiagnostics() -> (activeObjectCount: Int, activePhysicsBodyCount: Int, activeParticleCount: Int) {
         let objects = obstacleMap.count + wingmanVisuals.count + 1
-        var bodyCount = 0
-        scene.rootNode.enumerateChildNodes { node, _ in
-            if node.physicsBody != nil {
-                bodyCount += 1
-            }
-        }
+        let bodyCount = droneCollisionProxyNode.physicsBody == nil ? 0 : 1
         let particleCount = Int((rainSystem?.birthRate ?? 0) + (snowSystem?.birthRate ?? 0))
         return (objects, bodyCount, particleCount)
     }
@@ -1488,7 +1491,7 @@ final class DroneSceneController {
     private func spawnPayloadImpactVisual(
         releaseID: UUID,
         position: SIMD3<Float>,
-        payloadType: PayloadType?,
+        payloadType _: PayloadType?,
         impactSpeedMps: Float
     ) {
         let impactNode = SCNNode()
@@ -1499,19 +1502,9 @@ final class DroneSceneController {
             position.z
         )
 
-        let markColor: NSColor
-        let plumeColor: NSColor
-        let impactRadius: CGFloat
-
-        if payloadType == .inertImpactPod {
-            markColor = NSColor(calibratedRed: 0.94, green: 0.58, blue: 0.18, alpha: 0.78)
-            plumeColor = NSColor(calibratedRed: 0.92, green: 0.78, blue: 0.54, alpha: 0.26)
-            impactRadius = CGFloat((0.90 + min(1.0, impactSpeedMps / 14.0) * 0.55).clamped(to: 0.90...1.55))
-        } else {
-            markColor = NSColor(calibratedWhite: 0.74, alpha: 0.52)
-            plumeColor = NSColor(calibratedWhite: 0.88, alpha: 0.20)
-            impactRadius = CGFloat((0.42 + min(1.0, impactSpeedMps / 14.0) * 0.30).clamped(to: 0.42...0.82))
-        }
+        let markColor = NSColor(calibratedWhite: 0.74, alpha: 0.52)
+        let plumeColor = NSColor(calibratedWhite: 0.88, alpha: 0.20)
+        let impactRadius = CGFloat((0.42 + min(1.0, impactSpeedMps / 14.0) * 0.30).clamped(to: 0.42...0.82))
 
         let coreRadius = max(0.08, impactRadius * 0.42)
         let falloffRadius = max(coreRadius + 0.08, impactRadius * 0.88)
@@ -2439,7 +2432,8 @@ final class DroneSceneController {
         obstacleRadius: Float
     ) -> [SIMD3<Float>] {
         let spacing = max(obstacleRadius * 1.55, 10.0)
-        let stepCount = max(3, Int(ceil((halfExtent * 2.0) / spacing)))
+        let rawStepCount = max(3, Int(ceil((halfExtent * 2.0) / spacing)))
+        let stepCount = min(rawStepCount, 72)
         let effectiveSpacing = (halfExtent * 2.0) / Float(stepCount)
         let offsetRange = 0...stepCount
         var centers: [SIMD3<Float>] = []
@@ -2499,23 +2493,7 @@ final class DroneSceneController {
 
     private func configureObstacleCollisionProxy(for node: SCNNode, descriptor: EnvironmentObjectDescriptor) -> CollisionObstacle {
         let proxy = obstacleProxySpec(for: descriptor)
-        let proxyNode = SCNNode(geometry: proxy.geometry)
-        proxyNode.position = SCNVector3(0.0, proxy.localCenterY, 0.0)
-        let shape = SCNPhysicsShape(
-            node: proxyNode,
-            options: [
-                SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.boundingBox
-            ]
-        )
-
-        let body = SCNPhysicsBody(type: .static, shape: shape)
-        body.isAffectedByGravity = false
-        body.restitution = 0.0
-        body.friction = 0.88
-        body.categoryBitMask = PhysicsCategory.environment
-        body.collisionBitMask = PhysicsCategory.drone
-        body.contactTestBitMask = PhysicsCategory.drone
-        node.physicsBody = body
+        node.physicsBody = nil
 
         return CollisionObstacle(
             id: descriptor.id,
@@ -2527,20 +2505,14 @@ final class DroneSceneController {
         )
     }
 
-    private func obstacleProxySpec(for descriptor: EnvironmentObjectDescriptor) -> (geometry: SCNGeometry, localCenterY: Float, analysisRadius: Float, source: String, baseY: Float, topY: Float) {
+    private func obstacleProxySpec(for descriptor: EnvironmentObjectDescriptor) -> ObstacleProxySpec {
         switch descriptor.kind {
         case .tree:
             let canopyWidth = max(2.4, descriptor.size.x * 1.18)
             let canopyDepth = max(2.4, descriptor.size.z * 1.18)
             let canopyHeight = max(3.0, descriptor.size.y * 0.42)
             let canopyBaseY = max(2.2, descriptor.size.y * 0.42)
-            return (
-                geometry: SCNBox(
-                    width: CGFloat(canopyWidth),
-                    height: CGFloat(canopyHeight),
-                    length: CGFloat(canopyDepth),
-                    chamferRadius: CGFloat(min(canopyWidth, canopyDepth) * 0.18)
-                ),
+            return ObstacleProxySpec(
                 localCenterY: canopyBaseY + canopyHeight * 0.5,
                 analysisRadius: max(canopyWidth, canopyDepth) * 0.46,
                 source: "tree.canopy",
@@ -2552,8 +2524,7 @@ final class DroneSceneController {
             let width = max(4.0, descriptor.size.x)
             let depth = max(4.0, descriptor.size.z)
             let height = max(6.0, descriptor.size.y)
-            return (
-                geometry: SCNBox(width: CGFloat(width), height: CGFloat(height), length: CGFloat(depth), chamferRadius: 0.0),
+            return ObstacleProxySpec(
                 localCenterY: height * 0.5,
                 analysisRadius: max(width, depth) * 0.5,
                 source: "building.box",
@@ -2565,8 +2536,7 @@ final class DroneSceneController {
             let width = max(0.8, descriptor.size.x)
             let depth = max(0.8, descriptor.size.z)
             let height = max(0.8, descriptor.size.y)
-            return (
-                geometry: SCNBox(width: CGFloat(width), height: CGFloat(height), length: CGFloat(depth), chamferRadius: 0.0),
+            return ObstacleProxySpec(
                 localCenterY: height * 0.5,
                 analysisRadius: max(width, depth) * 0.5,
                 source: "crate.box",
@@ -2577,8 +2547,7 @@ final class DroneSceneController {
         case .pole:
             let capRadius = max(0.16, descriptor.size.x * 0.22)
             let height = max(4.0, descriptor.size.y)
-            return (
-                geometry: SCNCapsule(capRadius: CGFloat(capRadius), height: CGFloat(height)),
+            return ObstacleProxySpec(
                 localCenterY: height * 0.5,
                 analysisRadius: max(0.22, capRadius * 1.12),
                 source: "pole.capsule",
@@ -2588,8 +2557,7 @@ final class DroneSceneController {
 
         case .rock:
             let radius = max(0.45, max(descriptor.size.x, descriptor.size.z) * 0.42)
-            return (
-                geometry: SCNSphere(radius: CGFloat(radius)),
+            return ObstacleProxySpec(
                 localCenterY: max(0.24, descriptor.size.y * 0.45),
                 analysisRadius: radius,
                 source: "rock.sphere",
@@ -2600,8 +2568,7 @@ final class DroneSceneController {
         case .marker:
             let radius = max(0.30, descriptor.size.x * 0.45)
             let height = max(0.8, descriptor.size.y)
-            return (
-                geometry: SCNCone(topRadius: 0.01, bottomRadius: CGFloat(radius), height: CGFloat(height)),
+            return ObstacleProxySpec(
                 localCenterY: height * 0.5,
                 analysisRadius: max(radius, height * 0.20),
                 source: "marker.cone",
@@ -2613,8 +2580,7 @@ final class DroneSceneController {
             let width = max(4.0, descriptor.size.x)
             let depth = max(4.0, descriptor.size.z)
             let height = max(2.0, descriptor.size.y)
-            return (
-                geometry: SCNBox(width: CGFloat(width), height: CGFloat(height), length: CGFloat(depth), chamferRadius: 0.0),
+            return ObstacleProxySpec(
                 localCenterY: height * 0.5,
                 analysisRadius: max(width, depth) * 0.5,
                 source: "belt.box",

@@ -17,7 +17,7 @@ final class ScenePopulationService {
         var generator = SeededRandomGenerator(seed: terrain.seed)
         let density = terrain.density.clamped(to: 0.0...1.0)
         let extent = terrain.worldHalfExtent
-        let areaScale = terrain.areaScaleFactor.clamped(to: 0.25...5.0)
+        let areaScale = terrain.areaScaleFactor.clamped(to: 0.25...2.2)
 
         var collidableDescriptors: [EnvironmentObjectDescriptor] = []
 
@@ -63,6 +63,8 @@ final class ScenePopulationService {
             )
         }
 
+        collidableDescriptors = cappedCollidableDescriptors(collidableDescriptors, for: terrain)
+
         let beltDescriptors = generateBoundaryBelt(
             terrain: terrain,
             generator: &generator
@@ -70,6 +72,7 @@ final class ScenePopulationService {
         let allDescriptors = collidableDescriptors + beltDescriptors
 
         var nodesByID: [UUID: SCNNode] = [:]
+        nodesByID.reserveCapacity(allDescriptors.count)
         for descriptor in allDescriptors {
             let node = EnvironmentObjectFactory.makeNode(for: descriptor)
             nodesByID[descriptor.id] = node
@@ -107,6 +110,43 @@ final class ScenePopulationService {
         }
 
         return descriptors
+    }
+
+    private func cappedCollidableDescriptors(
+        _ descriptors: [EnvironmentObjectDescriptor],
+        for terrain: TerrainConfiguration
+    ) -> [EnvironmentObjectDescriptor] {
+        let limit = maxCollidableObjectCount(for: terrain)
+        guard descriptors.count > limit else {
+            return descriptors
+        }
+
+        let stride = Double(descriptors.count) / Double(limit)
+        return (0..<limit).map { index in
+            descriptors[min(descriptors.count - 1, Int((Double(index) * stride).rounded(.down)))]
+        }
+    }
+
+    private func maxCollidableObjectCount(for terrain: TerrainConfiguration) -> Int {
+        let densityFactor = Double(terrain.density.clamped(to: 0.0...1.0))
+        let scaleFactor = min(Double(terrain.areaScaleFactor), 2.2)
+        let multiplier = 0.72 + densityFactor * 0.24 + scaleFactor * 0.06
+
+        let baseLimit: Double
+        switch terrain.preset {
+        case .gridDemo:
+            baseLimit = 340
+        case .field:
+            baseLimit = 420
+        case .forest:
+            baseLimit = 720
+        case .cargoYard:
+            baseLimit = 560
+        case .city:
+            baseLimit = 620
+        }
+
+        return max(180, Int((baseLimit * multiplier).rounded()))
     }
 
     private func generateField(
@@ -279,7 +319,7 @@ final class ScenePopulationService {
         var descriptors: [EnvironmentObjectDescriptor] = []
         var occupied: [(SIMD2<Float>, Float)] = []
         let coverageScale = max(1.0, extent / 96.0)
-        let featureScale = min(5.2, max(1.05, areaScale * 0.82 + coverageScale * 0.84))
+        let featureScale = min(1.85, max(1.05, areaScale * 0.62 + min(coverageScale, 2.5) * 0.24))
 
         var clearings: [(center: SIMD2<Float>, radius: Float)] = [
             (SIMD2<Float>(repeating: 0.0), safeSpawn + 16.0)
@@ -293,7 +333,7 @@ final class ScenePopulationService {
             ))
         }
 
-        let clusterCount = max(10, Int((10.0 + density * 7.0) * featureScale))
+        let clusterCount = min(28, max(10, Int((10.0 + density * 7.0) * featureScale)))
         for _ in 0..<clusterCount {
             let center = randomPosition(extent: extent * 0.84, safeSpawn: safeSpawn + 14.0, generator: &generator)
             if isInsideClearing(center, clearings: clearings) {
@@ -301,7 +341,7 @@ final class ScenePopulationService {
             }
 
             let radius = Float.random(in: 14.0...30.0, using: &generator)
-            let count = max(18, Int(Float.random(in: 20.0...42.0, using: &generator) * max(0.70, density) * 1.15))
+            let count = max(10, Int(Float.random(in: 12.0...24.0, using: &generator) * max(0.70, density) * 1.05))
             appendCluster(
                 count: count,
                 center: center,
@@ -360,7 +400,7 @@ final class ScenePopulationService {
             }
         }
 
-        let fillCount = max(150, Int(280.0 * max(0.55, density) * featureScale))
+        let fillCount = min(420, max(120, Int(190.0 * max(0.55, density) * featureScale)))
         appendScatter(
             count: fillCount,
             extent: extent * 0.88,
@@ -381,7 +421,7 @@ final class ScenePopulationService {
             return .rock
         }
 
-        let decorativeForestCount = max(220, Int(380.0 * featureScale))
+        let decorativeForestCount = min(520, max(160, Int(220.0 * featureScale)))
         appendScatter(
             count: decorativeForestCount,
             extent: extent * 0.94,
@@ -414,21 +454,25 @@ final class ScenePopulationService {
         var descriptors: [EnvironmentObjectDescriptor] = []
         var occupied: [(SIMD2<Float>, Float)] = []
 
-        let coverageScale = max(1.0, extent / 96.0)
-        let yardScale = max(1.0, areaScale * 0.64 + coverageScale * 0.46)
+        let coverageScale = min(max(1.0, extent / 96.0), 2.8)
+        let yardScale = max(1.0, areaScale * 0.64 + coverageScale * 0.32)
         let padPitchX: Float = 19.0 + min(yardScale, 5.0) * 2.9
         let padPitchZ: Float = 16.0 + min(yardScale, 5.0) * 2.4
         let spawnExclusionRadius = safeSpawn + max(padPitchX, padPitchZ) * 1.75
-        let columnCount = max(4, Int((extent * 2.0) / padPitchX))
-        let rowCount = max(4, Int((extent * 2.0) / padPitchZ))
-        let centerOffsetX = Float(columnCount - 1) * padPitchX * 0.5
-        let centerOffsetZ = Float(rowCount - 1) * padPitchZ * 0.5
+        let columnCount = min(18, max(4, Int((extent * 2.0) / padPitchX)))
+        let rowCount = min(18, max(4, Int((extent * 2.0) / padPitchZ)))
+        let layoutWidth = extent * 1.72
+        let layoutDepth = extent * 1.72
+        let effectivePadPitchX = columnCount > 1 ? layoutWidth / Float(columnCount - 1) : padPitchX
+        let effectivePadPitchZ = rowCount > 1 ? layoutDepth / Float(rowCount - 1) : padPitchZ
+        let centerOffsetX = Float(columnCount - 1) * effectivePadPitchX * 0.5
+        let centerOffsetZ = Float(rowCount - 1) * effectivePadPitchZ * 0.5
 
         for ix in 0..<columnCount {
             for iz in 0..<rowCount {
                 let center = SIMD2<Float>(
-                    Float(ix) * padPitchX - centerOffsetX,
-                    Float(iz) * padPitchZ - centerOffsetZ
+                    Float(ix) * effectivePadPitchX - centerOffsetX,
+                    Float(iz) * effectivePadPitchZ - centerOffsetZ
                 )
 
                 let mainAisleX = ix % 4 == 0
@@ -529,20 +573,22 @@ final class ScenePopulationService {
         var descriptors: [EnvironmentObjectDescriptor] = []
         var occupied: [(SIMD2<Float>, Float)] = []
 
-        let coverageScale = max(1.0, extent / 96.0)
-        let urbanScale = max(1.0, areaScale * 0.82 + coverageScale * 0.48)
+        let coverageScale = min(max(1.0, extent / 96.0), 2.8)
+        let urbanScale = max(1.0, areaScale * 0.72 + coverageScale * 0.28)
         let blockPitch: Float = 38.0 + min(urbanScale, 5.0) * 3.6
         let roadWidth: Float = 10.0 + min(urbanScale, 4.2) * 1.4
         let blockSpan = max(22.0, blockPitch - roadWidth)
         let halfBlock = blockSpan * 0.5
-        let blockCount = max(2, Int((extent * 2.0) / blockPitch))
-        let centerOffset = Float(blockCount - 1) * blockPitch * 0.5
+        let blockCount = min(14, max(2, Int((extent * 2.0) / blockPitch)))
+        let layoutWidth = extent * 1.72
+        let effectiveBlockPitch = blockCount > 1 ? layoutWidth / Float(blockCount - 1) : blockPitch
+        let centerOffset = Float(blockCount - 1) * effectiveBlockPitch * 0.5
 
         for ix in 0..<blockCount {
             for iz in 0..<blockCount {
                 let center = SIMD2<Float>(
-                    Float(ix) * blockPitch - centerOffset,
-                    Float(iz) * blockPitch - centerOffset
+                    Float(ix) * effectiveBlockPitch - centerOffset,
+                    Float(iz) * effectiveBlockPitch - centerOffset
                 )
 
                 if simd_length(center) < safeSpawn + blockPitch * 0.78 {

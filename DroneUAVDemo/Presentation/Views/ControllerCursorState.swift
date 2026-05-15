@@ -160,11 +160,9 @@ final class ControllerUIBridge: ObservableObject {
     func setSurfaceSize(_ size: CGSize, for surfaceID: String) {
         var state = surfaceStates[surfaceID] ?? ControllerSurfaceState()
         state.size = size
-        state.targetFrames = Dictionary(
-            uniqueKeysWithValues: filteredTargetFrames(
-                Array(state.targetFrames.values),
-                in: size
-            ).map { ($0.id, $0) }
+        state.targetFrames = targetFrameMap(
+            from: Array(state.targetFrames.values),
+            in: size
         )
         surfaceStates[surfaceID] = state
 
@@ -175,11 +173,9 @@ final class ControllerUIBridge: ObservableObject {
 
     func updateTargetFrames(_ frames: [ControllerInteractionTargetFrame], for surfaceID: String) {
         var state = surfaceStates[surfaceID] ?? ControllerSurfaceState()
-        state.targetFrames = Dictionary(
-            uniqueKeysWithValues: filteredTargetFrames(
-                frames,
-                in: state.size
-            ).map { ($0.id, $0) }
+        state.targetFrames = targetFrameMap(
+            from: frames,
+            in: state.size
         )
         surfaceStates[surfaceID] = state
 
@@ -193,11 +189,9 @@ final class ControllerUIBridge: ObservableObject {
             return
         }
 
-        state.targetFrames = Dictionary(
-            uniqueKeysWithValues: filteredTargetFrames(
-                Array(state.targetFrames.values),
-                in: state.size
-            ).map { ($0.id, $0) }
+        state.targetFrames = targetFrameMap(
+            from: Array(state.targetFrames.values),
+            in: state.size
         )
         surfaceStates[surfaceID] = state
 
@@ -216,11 +210,9 @@ final class ControllerUIBridge: ObservableObject {
             return
         }
 
-        state.targetFrames = Dictionary(
-            uniqueKeysWithValues: filteredTargetFrames(
-                Array(state.targetFrames.values),
-                in: state.size
-            ).map { ($0.id, $0) }
+        state.targetFrames = targetFrameMap(
+            from: Array(state.targetFrames.values),
+            in: state.size
         )
         surfaceStates[surfaceID] = state
 
@@ -262,6 +254,17 @@ final class ControllerUIBridge: ObservableObject {
 
     func unregisterTarget(id: String) {
         registeredTargets[id] = nil
+    }
+
+    private func targetFrameMap(
+        from frames: [ControllerInteractionTargetFrame],
+        in size: CGSize
+    ) -> [String: ControllerInteractionTargetFrame] {
+        var output: [String: ControllerInteractionTargetFrame] = [:]
+        for frame in filteredTargetFrames(frames, in: size) {
+            output[frame.id] = frame
+        }
+        return output
     }
 
     func update(

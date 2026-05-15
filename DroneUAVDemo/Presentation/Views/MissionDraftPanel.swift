@@ -119,8 +119,6 @@ struct MissionDraftPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             routeSection
             sectionDivider
-            launchSection
-            sectionDivider
             zoneSection
             sectionDivider
             constraintsSection

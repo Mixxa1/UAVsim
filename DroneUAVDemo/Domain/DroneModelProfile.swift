@@ -35,22 +35,11 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 
     var requiresLaunchObject: Bool {
-        self != .standard
+        false
     }
 
     var defaultLaunchObjectType: MissionLaunchObjectType? {
-        switch self {
-        case .standard:
-            return nil
-        case .handLaunch:
-            return .handLaunchPoint
-        case .catapult:
-            return .catapultLine
-        case .runway:
-            return .runwayStrip
-        case .vtol:
-            return .vtolStartPoint
-        }
+        nil
     }
 
     var titleKey: String {
@@ -243,14 +232,6 @@ struct FixedWingParameters: Hashable {
         self.turnAuthority = turnAuthority
         self.maxBankAngleDeg = maxBankAngleDeg
 
-        let resolvedSupportedLaunchModes = supportedLaunchModes ?? {
-            switch family {
-            case .tailsitterVTOL, .surveyEVTOL:
-                return [.standard, .vtol]
-            default:
-                return [.standard, .handLaunch]
-            }
-        }()
         let resolvedMinSafeAirspeed = minSafeAirspeed ?? max(minSustainableSpeedMps, stallWarningSpeedMps + 0.8)
         let resolvedClimbAirspeed = climbAirspeed ?? max(climbSpeedMps, minSustainableSpeedMps + 1.2)
         let resolvedCruiseAirspeed = cruiseAirspeed ?? cruiseSpeedMps
@@ -263,8 +244,8 @@ struct FixedWingParameters: Hashable {
         )
         let resolvedMaxPitchUpDeg = maxPitchUpDeg ?? max(10.0, min(18.0, initialClimbPitchDeg + 4.0))
 
-        self.supportedLaunchModes = resolvedSupportedLaunchModes
-        self.preferredLaunchMode = preferredLaunchMode ?? resolvedSupportedLaunchModes.first ?? .standard
+        self.supportedLaunchModes = [.standard]
+        self.preferredLaunchMode = .standard
         self.minSafeAirspeed = resolvedMinSafeAirspeed
         self.climbAirspeed = resolvedClimbAirspeed
         self.cruiseAirspeed = resolvedCruiseAirspeed
@@ -483,11 +464,11 @@ struct DroneModelProfile: Identifiable, Hashable {
     }
 
     var supportedLaunchModes: [LaunchMode] {
-        fixedWingParameters?.supportedLaunchModes ?? [.standard]
+        [.standard]
     }
 
     var preferredLaunchMode: LaunchMode {
-        fixedWingParameters?.preferredLaunchMode ?? .standard
+        .standard
     }
 }
 

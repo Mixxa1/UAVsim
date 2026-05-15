@@ -57,33 +57,42 @@ struct CollisionAnalysisInput {
 }
 
 final class CollisionAnalysisService {
+    private let broadPhaseDistance: Float = 26.0
+    private let maxCandidateCount = 48
+
     func analyze(input: CollisionAnalysisInput) -> CollisionAnalysisSnapshot {
         guard !input.obstacles.isEmpty else {
             return .safe
         }
 
-        let broadPhaseDistance: Float = 26.0
         let broadPhaseDistanceSq = broadPhaseDistance * broadPhaseDistance
         let dronePlanar = SIMD2<Float>(input.dronePosition.x, input.dronePosition.z)
-        let candidates = input.obstacles
-            .compactMap { obstacle -> (CollisionObstacle, Float)? in
-                let planarDelta = obstacle.planarCenter - dronePlanar
-                let planarDistanceSq = simd_length_squared(planarDelta)
-                let planarDistance = sqrt(planarDistanceSq)
-                let verticalGap = obstacle.verticalGap(
-                    toDroneCenterY: input.dronePosition.y,
-                    droneRadius: input.droneRadius
-                )
-                let planarGap = max(0.0, planarDistance - broadPhaseDistance)
-                let combinedGapSq = planarGap * planarGap + verticalGap * verticalGap
-                if combinedGapSq <= broadPhaseDistanceSq {
-                    return (obstacle, combinedGapSq)
-                }
-                return nil
+        var candidates: [(obstacle: CollisionObstacle, combinedGapSq: Float)] = []
+        candidates.reserveCapacity(maxCandidateCount)
+
+        for obstacle in input.obstacles {
+            let planarDelta = obstacle.planarCenter - dronePlanar
+            let planarDistanceSq = simd_length_squared(planarDelta)
+            let verticalGap = obstacle.verticalGap(
+                toDroneCenterY: input.dronePosition.y,
+                droneRadius: input.droneRadius
+            )
+            let planarGap: Float
+            if planarDistanceSq <= broadPhaseDistanceSq {
+                planarGap = 0.0
+            } else {
+                planarGap = sqrt(planarDistanceSq) - broadPhaseDistance
             }
-            .sorted { $0.1 < $1.1 }
-            .prefix(48)
-            .map(\.0)
+            let combinedGapSq = planarGap * planarGap + verticalGap * verticalGap
+            guard combinedGapSq <= broadPhaseDistanceSq else {
+                continue
+            }
+            insertCandidate(
+                (obstacle, combinedGapSq),
+                into: &candidates,
+                limit: maxCandidateCount
+            )
+        }
 
         guard !candidates.isEmpty else {
             return .safe
@@ -95,7 +104,8 @@ final class CollisionAnalysisService {
         var timeToCollision: Float?
         var maxRisk: Float = 0.0
 
-        for obstacle in candidates {
+        for candidate in candidates {
+            let obstacle = candidate.obstacle
             let planarDelta = obstacle.planarCenter - dronePlanar
             let planarDistance = simd_length(planarDelta)
             let horizontalClearance = planarDistance - (input.droneRadius + obstacle.radius)
@@ -190,6 +200,32 @@ final class CollisionAnalysisService {
             timeToCollision: timeToCollision,
             emergencyAction: emergencyAction
         )
+    }
+
+    private func insertCandidate(
+        _ candidate: (obstacle: CollisionObstacle, combinedGapSq: Float),
+        into candidates: inout [(obstacle: CollisionObstacle, combinedGapSq: Float)],
+        limit: Int
+    ) {
+        if candidates.isEmpty {
+            candidates.append(candidate)
+            return
+        }
+
+        var insertionIndex = candidates.count
+        while insertionIndex > 0,
+              candidate.combinedGapSq < candidates[insertionIndex - 1].combinedGapSq {
+            insertionIndex -= 1
+        }
+
+        if insertionIndex >= limit {
+            return
+        }
+
+        candidates.insert(candidate, at: insertionIndex)
+        if candidates.count > limit {
+            candidates.removeLast()
+        }
     }
 }
 

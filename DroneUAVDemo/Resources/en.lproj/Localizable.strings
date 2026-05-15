@@ -387,7 +387,6 @@
 "payload.type.camera_gimbal" = "Camera Gimbal";
 "payload.type.thermal_camera" = "Thermal Camera";
 "payload.type.lidar_module" = "LiDAR Module";
-"payload.type.inert_impact_pod" = "Inert Impact Pod";
 "payload.type.rescue_pack" = "Rescue Pack";
 "payload.type.sensor_module" = "Sensor Module";
 "payload.type.radio_relay" = "Radio Relay";
@@ -1378,3 +1377,5 @@
 "mission.outcome.failed" = "FAILED";
 "mission.outcome.returned_home" = "RTH";
 "mission.outcome.safety_terminated" = "SAFETY";
+"tactical.map.legend.toggle" = "Map legend";
+"tactical.map.pan.center" = "Center map";

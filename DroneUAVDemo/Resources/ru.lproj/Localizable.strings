@@ -384,7 +384,6 @@
 "payload.type.camera_gimbal" = "Камера";
 "payload.type.thermal_camera" = "Тепловизор";
 "payload.type.lidar_module" = "Лидар";
-"payload.type.inert_impact_pod" = "Инертный ударный контейнер";
 "payload.type.rescue_pack" = "Комплект первой помощи";
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";
@@ -1373,3 +1372,5 @@
 "mission.outcome.failed" = "СБОЙ";
 "mission.outcome.returned_home" = "ВОЗВРАТ";
 "mission.outcome.safety_terminated" = "SAFETY";
+"tactical.map.legend.toggle" = "Легенда карты";
+"tactical.map.pan.center" = "Центрировать карту";

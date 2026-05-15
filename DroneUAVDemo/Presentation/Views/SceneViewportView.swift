@@ -799,6 +799,8 @@ struct TerrainMapProjection {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let size: CGSize
     let zoomFactor: CGFloat
+    let panOffset: CGSize
+    let fillsAvailableSpace: Bool
     // Mirror the operator-facing map horizontally so the scene reads
     // left-to-right the same way as in the reference screenshots.
     private let transform = TerrainMapTransform.mirroredHorizontally
@@ -806,11 +808,15 @@ struct TerrainMapProjection {
     init(
         snapshot: DroneSimulationViewModel.TerrainMapSnapshot,
         size: CGSize,
-        zoomFactor: CGFloat = 1.0
+        zoomFactor: CGFloat = 1.0,
+        panOffset: CGSize = .zero,
+        fillsAvailableSpace: Bool = false
     ) {
         self.snapshot = snapshot
         self.size = size
         self.zoomFactor = min(6.0, max(1.0, zoomFactor))
+        self.panOffset = panOffset
+        self.fillsAvailableSpace = fillsAvailableSpace
     }
 
     var outerRect: CGRect {
@@ -818,6 +824,10 @@ struct TerrainMapProjection {
     }
 
     var mapRect: CGRect {
+        guard !fillsAvailableSpace else {
+            return outerRect
+        }
+
         let side = min(outerRect.width, outerRect.height)
         return CGRect(
             x: outerRect.midX - side * 0.5,
@@ -828,9 +838,10 @@ struct TerrainMapProjection {
     }
 
     func project(_ point: SIMD2<Float>) -> CGPoint {
-        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
-        let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
-        return transform.project(point, mapRect: mapRect, scale: scale)
+        CGPoint(
+            x: projectionCenter.x + CGFloat(point.x) * xScale * transform.xAxisSign,
+            y: projectionCenter.y + CGFloat(point.y) * yScale * transform.yAxisSign
+        )
     }
 
     func unproject(_ point: CGPoint) -> SIMD2<Float>? {
@@ -838,28 +849,32 @@ struct TerrainMapProjection {
             return nil
         }
 
-        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
-        let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
-        guard scale > 0.0001 else {
+        guard xScale > 0.0001, yScale > 0.0001 else {
             return nil
         }
 
-        return transform.unproject(point, mapRect: mapRect, scale: scale)
+        return SIMD2<Float>(
+            Float((point.x - projectionCenter.x) / (xScale * transform.xAxisSign)),
+            Float((point.y - projectionCenter.y) / (yScale * transform.yAxisSign))
+        )
     }
 
     func projectedSize(for footprint: SIMD2<Float>) -> CGSize {
-        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
-        let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
         return CGSize(
-            width: max(3.0, CGFloat(footprint.x) * scale),
-            height: max(3.0, CGFloat(footprint.y) * scale)
+            width: max(3.0, CGFloat(footprint.x) * xScale),
+            height: max(3.0, CGFloat(footprint.y) * yScale)
         )
     }
 
     func projectedRadius(for radius: Float) -> CGFloat {
-        let extent = max(1.0, snapshot.worldHalfExtent / Float(zoomFactor))
-        let scale = min(mapRect.width, mapRect.height) / CGFloat(extent * 2.0)
-        return max(6.0, CGFloat(radius) * scale)
+        max(6.0, CGFloat(radius) * min(xScale, yScale))
+    }
+
+    func projectedRadiusSize(for radius: Float) -> CGSize {
+        CGSize(
+            width: max(6.0, CGFloat(radius) * xScale),
+            height: max(6.0, CGFloat(radius) * yScale)
+        )
     }
 
     func headingVector(forYawRadians yawRadians: Float) -> CGVector {
@@ -867,6 +882,32 @@ struct TerrainMapProjection {
             yawRadians: yawRadians,
             projection: self
         )
+    }
+
+    private var projectionCenter: CGPoint {
+        CGPoint(
+            x: mapRect.midX + panOffset.width,
+            y: mapRect.midY + panOffset.height
+        )
+    }
+
+    private var projectedExtent: CGFloat {
+        CGFloat(max(1.0, snapshot.worldHalfExtent / Float(zoomFactor)))
+    }
+
+    private var xScale: CGFloat {
+        projectionScale
+    }
+
+    private var yScale: CGFloat {
+        projectionScale
+    }
+
+    private var projectionScale: CGFloat {
+        let fillDimension = fillsAvailableSpace
+            ? max(mapRect.width, mapRect.height)
+            : min(mapRect.width, mapRect.height)
+        return fillDimension / max(1.0, projectedExtent * 2.0)
     }
 }
 

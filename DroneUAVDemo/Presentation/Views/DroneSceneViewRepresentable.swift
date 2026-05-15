@@ -93,6 +93,8 @@ private final class FocusableSCNView: SCNView {
 }
 
 struct DroneSceneViewRepresentable: NSViewRepresentable {
+    private static let targetFramesPerSecond = 60
+
     let scene: SCNScene
     let pointOfView: SCNNode
     let cameraMode: CameraMode
@@ -109,7 +111,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         let view = FocusableSCNView()
         view.scene = scene
         view.antialiasingMode = .multisampling2X
-        view.preferredFramesPerSecond = 45
+        view.preferredFramesPerSecond = Self.targetFramesPerSecond
         view.rendersContinuously = false
         view.backgroundColor = .black
         view.isPlaying = true

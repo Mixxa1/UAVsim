@@ -51,7 +51,7 @@ enum EnvironmentProceduralVisualFactory {
         let bark = EnvironmentProceduralMaterials.barkMaterial(variant: Int(rng.next() % 3))
         let leaf = EnvironmentProceduralMaterials.leafMaterial(variant: Int(rng.next() % 3), biome: descriptor.biome)
 
-        let trunk = SCNNode(geometry: SCNCylinder(radius: CGFloat(trunkRadius), height: CGFloat(trunkHeight)))
+        let trunk = SCNNode(geometry: lowPolyCylinder(radius: trunkRadius, height: trunkHeight))
         trunk.position = SCNVector3(0, trunkHeight * 0.5, 0)
         trunk.geometry?.materials = [bark]
         parent.addChildNode(trunk)
@@ -91,7 +91,11 @@ enum EnvironmentProceduralVisualFactory {
                 (0.30, 0.94, 1.04)
             ]
             for tier in tiers {
-                let node = SCNNode(geometry: SCNCone(topRadius: 0.02, bottomRadius: CGFloat(crownScale * tier.0), height: CGFloat(crownScale * tier.1)))
+                let node = SCNNode(geometry: lowPolyCone(
+                    topRadius: 0.02,
+                    bottomRadius: crownScale * tier.0,
+                    height: crownScale * tier.1
+                ))
                 node.position = SCNVector3(0, trunkHeight + crownScale * tier.2, 0)
                 node.geometry?.materials = [leaf]
                 parent.addChildNode(node)
@@ -189,7 +193,7 @@ enum EnvironmentProceduralVisualFactory {
         scale: SIMD3<Float>,
         material: SCNMaterial
     ) -> SCNNode {
-        let node = SCNNode(geometry: SCNSphere(radius: CGFloat(radius)))
+        let node = SCNNode(geometry: lowPolySphere(radius: radius))
         node.position = SCNVector3(position.x, position.y, position.z)
         node.scale = SCNVector3(scale.x, scale.y, scale.z)
         node.geometry?.materials = [material]
@@ -212,9 +216,9 @@ enum EnvironmentProceduralVisualFactory {
 
         for index in 0..<count {
             let yaw = (Float(index) / Float(count)) * (.pi * 2.0) + (rng.nextFloat() - 0.5) * 0.34
-            let branch = SCNNode(geometry: SCNCylinder(
-                radius: CGFloat(max(0.06, branchRadius * (0.90 + rng.nextFloat() * 0.18))),
-                height: CGFloat(branchLength * (0.88 + rng.nextFloat() * 0.18))
+            let branch = SCNNode(geometry: lowPolyCylinder(
+                radius: max(0.06, branchRadius * (0.90 + rng.nextFloat() * 0.18)),
+                height: branchLength * (0.88 + rng.nextFloat() * 0.18)
             ))
             branch.geometry?.materials = [bark]
             branch.position = SCNVector3(
@@ -315,7 +319,7 @@ enum EnvironmentProceduralVisualFactory {
     }
 
     private static func makePoleNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
-        let geometry = SCNCylinder(radius: CGFloat(descriptor.size.x * 0.28), height: CGFloat(descriptor.size.y))
+        let geometry = lowPolyCylinder(radius: descriptor.size.x * 0.28, height: descriptor.size.y)
         geometry.materials = [EnvironmentProceduralMaterials.utilityPoleMaterial]
 
         let node = SCNNode(geometry: geometry)
@@ -344,7 +348,7 @@ enum EnvironmentProceduralVisualFactory {
         root.name = "obstacle_rock_\(descriptor.id.uuidString)"
         root.position = SCNVector3(descriptor.position.x, descriptor.position.y, descriptor.position.z)
 
-        let geometry = SCNSphere(radius: CGFloat(descriptor.size.x * 0.46))
+        let geometry = lowPolySphere(radius: descriptor.size.x * 0.46)
         geometry.materials = [EnvironmentProceduralMaterials.rockMaterial]
 
         let node = SCNNode(geometry: geometry)
@@ -356,7 +360,7 @@ enum EnvironmentProceduralVisualFactory {
     }
 
     private static func makeMarkerNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
-        let geometry = SCNCone(topRadius: 0.0, bottomRadius: CGFloat(descriptor.size.x * 0.55), height: CGFloat(descriptor.size.y))
+        let geometry = lowPolyCone(topRadius: 0.0, bottomRadius: descriptor.size.x * 0.55, height: descriptor.size.y)
         geometry.materials = [EnvironmentProceduralMaterials.markerMaterial]
 
         let node = SCNNode(geometry: geometry)
@@ -376,10 +380,10 @@ enum EnvironmentProceduralVisualFactory {
         switch descriptor.biome {
         case .forest:
             for index in 0..<3 {
-                let cone = SCNNode(geometry: SCNCone(
+                let cone = SCNNode(geometry: lowPolyCone(
                     topRadius: 0.02,
-                    bottomRadius: CGFloat(descriptor.size.x * (0.34 + Float(index) * 0.10)),
-                    height: CGFloat(descriptor.size.y * (0.36 + Float(index) * 0.18))
+                    bottomRadius: descriptor.size.x * (0.34 + Float(index) * 0.10),
+                    height: descriptor.size.y * (0.36 + Float(index) * 0.18)
                 ))
                 cone.position = SCNVector3(
                     Float(index - 1) * descriptor.size.x * 0.18,
@@ -432,7 +436,7 @@ enum EnvironmentProceduralVisualFactory {
             }
 
         case .field, .gridDemo:
-            let mound = SCNNode(geometry: SCNSphere(radius: CGFloat(descriptor.size.x * 0.40)))
+            let mound = SCNNode(geometry: lowPolySphere(radius: descriptor.size.x * 0.40))
             mound.scale = SCNVector3(1.6, 0.42, 1.0)
             mound.position = SCNVector3(0, descriptor.size.y * 0.18, 0)
             mound.geometry?.materials = [EnvironmentProceduralMaterials.farFieldMaterial]
@@ -440,6 +444,30 @@ enum EnvironmentProceduralVisualFactory {
         }
 
         return root
+    }
+
+    private static func lowPolySphere(radius: Float) -> SCNSphere {
+        let geometry = SCNSphere(radius: CGFloat(radius))
+        geometry.segmentCount = 8
+        return geometry
+    }
+
+    private static func lowPolyCylinder(radius: Float, height: Float) -> SCNCylinder {
+        let geometry = SCNCylinder(radius: CGFloat(radius), height: CGFloat(height))
+        geometry.radialSegmentCount = 8
+        geometry.heightSegmentCount = 1
+        return geometry
+    }
+
+    private static func lowPolyCone(topRadius: Float, bottomRadius: Float, height: Float) -> SCNCone {
+        let geometry = SCNCone(
+            topRadius: CGFloat(topRadius),
+            bottomRadius: CGFloat(bottomRadius),
+            height: CGFloat(height)
+        )
+        geometry.radialSegmentCount = 8
+        geometry.heightSegmentCount = 1
+        return geometry
     }
 
     private static func descriptorSeed(_ descriptor: EnvironmentObjectDescriptor) -> UInt64 {
