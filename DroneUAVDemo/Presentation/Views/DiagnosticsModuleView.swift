@@ -145,6 +145,8 @@ struct DiagnosticsModuleView: View {
                     MissionDebriefView(debrief: viewModel.missionDebrief)
                 }
             }
+
+            BlackBoxReplaySection(viewModel: viewModel)
         }
     }
 
@@ -320,6 +322,104 @@ struct DiagnosticsModuleView: View {
             return GroundControlPalette.warning
         }
         return GroundControlPalette.success
+    }
+}
+
+private struct BlackBoxReplaySection: View {
+    @ObservedObject var viewModel: DroneSimulationViewModel
+
+    var body: some View {
+        ModuleSection(
+            titleKey: "module.diagnostics.blackbox",
+            subtitleKey: "module.diagnostics.blackbox.subtitle"
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(viewModel.isMissionReplayRecording
+                              ? GroundControlPalette.danger
+                              : GroundControlPalette.textSecondary)
+                        .frame(width: 8, height: 8)
+                    Text(viewModel.isMissionReplayRecording ? "Recording: ON" : "Recording: OFF")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(viewModel.isMissionReplayRecording
+                                         ? GroundControlPalette.danger
+                                         : GroundControlPalette.textSecondary)
+                    Spacer()
+                    Text("Session source: ARM → DISARM")
+                        .font(.caption2)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+
+                if let report = viewModel.lastMissionReport {
+                    BlackBoxReportView(report: report)
+                } else {
+                    Text("No black box replay recorded yet.")
+                        .font(.caption)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+            }
+        }
+    }
+}
+
+private struct BlackBoxReportView: View {
+    let report: MissionReport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ModuleMetricGrid {
+                ModuleMetricCell(
+                    labelKey: "blackbox.duration",
+                    value: String(format: "%.1f s", report.summary.durationSeconds)
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.frames",
+                    value: "\(report.summary.frameCount)"
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.events",
+                    value: "\(report.summary.eventCount)"
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.warnings",
+                    value: "\(report.summary.warningCount)"
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.max_speed",
+                    value: String(format: "%.1f m/s", report.summary.maxSpeedMetersPerSecond)
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.avg_speed",
+                    value: String(format: "%.1f m/s", report.summary.averageSpeedMetersPerSecond)
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.max_alt",
+                    value: String(format: "%.1f m", report.summary.maxAltitudeMeters)
+                )
+                ModuleMetricCell(
+                    labelKey: "blackbox.battery_used",
+                    value: report.summary.batteryUsedPercent.map { String(format: "%.1f %%", $0) } ?? "n/a"
+                )
+            }
+
+            ScrollView(.vertical, showsIndicators: true) {
+                Text(report.textSummary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+            .frame(maxHeight: 200)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(GroundControlPalette.inset)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
+            )
+        }
     }
 }
 

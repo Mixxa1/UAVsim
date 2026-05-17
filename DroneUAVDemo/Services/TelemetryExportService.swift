@@ -24,6 +24,10 @@ struct InternalStorePaths {
     static func index(fileManager: FileManager) -> URL {
         root(fileManager: fileManager).appendingPathComponent("Index", isDirectory: true)
     }
+
+    static func replays(fileManager: FileManager) -> URL {
+        root(fileManager: fileManager).appendingPathComponent("Replays", isDirectory: true)
+    }
 }
 
 struct ProjectRecordSummary: Identifiable, Codable, Hashable {

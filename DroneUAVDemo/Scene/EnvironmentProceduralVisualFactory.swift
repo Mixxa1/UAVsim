@@ -3,7 +3,14 @@ import SceneKit
 import simd
 
 enum EnvironmentProceduralVisualFactory {
-    static func makeNode(for descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+    static func makeNode(
+        for descriptor: EnvironmentObjectDescriptor,
+        quality: EnvironmentVisualQuality = .detailed
+    ) -> SCNNode {
+        if quality == .simplified {
+            return makeSimplifiedNode(descriptor: descriptor)
+        }
+
         switch descriptor.kind {
         case .tree:
             return makeTreeNode(descriptor: descriptor)
@@ -20,6 +27,216 @@ enum EnvironmentProceduralVisualFactory {
         case .distantBelt:
             return makeDistantMaskNode(descriptor: descriptor)
         }
+    }
+
+    private static func makeSimplifiedNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+        switch descriptor.kind {
+        case .tree:
+            return makeSimplifiedTreeNode(descriptor: descriptor)
+        case .building:
+            return makeSimplifiedBuildingNode(descriptor: descriptor)
+        case .pole:
+            return makeSimplifiedPoleNode(descriptor: descriptor)
+        case .crate:
+            return makeSimplifiedBoxNode(
+                descriptor: descriptor,
+                color: NSColor(calibratedRed: 0.42, green: 0.30, blue: 0.20, alpha: 1.0),
+                namePrefix: "fast_crate"
+            )
+        case .rock:
+            return makeSimplifiedBoxNode(
+                descriptor: descriptor,
+                color: NSColor(calibratedRed: 0.38, green: 0.40, blue: 0.42, alpha: 1.0),
+                namePrefix: "fast_rock"
+            )
+        case .marker:
+            return makeSimplifiedMarkerNode(descriptor: descriptor)
+        case .distantBelt:
+            let node = makeDistantMaskNode(descriptor: descriptor)
+            configureLightweightEnvironmentNode(node)
+            return node
+        }
+    }
+
+    private static func makeSimplifiedTreeNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+        let root = SCNNode()
+        root.name = "fast_tree_\(descriptor.id.uuidString)"
+        root.position = SCNVector3(descriptor.position.x, descriptor.position.y, descriptor.position.z)
+        root.eulerAngles = SCNVector3(0, descriptor.yawRadians, 0)
+
+        let height = descriptor.size.y.clamped(to: 8.0...28.0)
+        let width = descriptor.size.x.clamped(to: 3.0...11.0)
+        let trunkHeight = max(2.2, height * 0.48)
+        let trunkWidth = max(0.32, width * 0.16)
+        let crownWidth = max(2.2, width * 0.92)
+        let crownHeight = max(2.4, height * 0.38)
+
+        let trunk = SCNNode(geometry: SCNBox(
+            width: CGFloat(trunkWidth),
+            height: CGFloat(trunkHeight),
+            length: CGFloat(trunkWidth),
+            chamferRadius: 0.0
+        ))
+        trunk.position = SCNVector3(0, trunkHeight * 0.5, 0)
+        trunk.geometry?.materials = [simplifiedMaterial(
+            key: "fastTreeTrunk",
+            color: NSColor(calibratedRed: 0.42, green: 0.27, blue: 0.13, alpha: 1.0)
+        )]
+        root.addChildNode(trunk)
+
+        let crownColor: NSColor
+        switch descriptor.biome {
+        case .forest:
+            crownColor = NSColor(calibratedRed: 0.13, green: 0.40, blue: 0.16, alpha: 1.0)
+        case .field:
+            crownColor = NSColor(calibratedRed: 0.28, green: 0.52, blue: 0.20, alpha: 1.0)
+        case .city, .cargoYard:
+            crownColor = NSColor(calibratedRed: 0.23, green: 0.42, blue: 0.20, alpha: 1.0)
+        case .gridDemo:
+            crownColor = NSColor(calibratedRed: 0.24, green: 0.50, blue: 0.24, alpha: 1.0)
+        }
+
+        let crown = SCNNode(geometry: SCNBox(
+            width: CGFloat(crownWidth),
+            height: CGFloat(crownHeight),
+            length: CGFloat(crownWidth),
+            chamferRadius: 0.0
+        ))
+        crown.position = SCNVector3(0, trunkHeight + crownHeight * 0.48, 0)
+        crown.geometry?.materials = [simplifiedMaterial(key: "fastTreeLeaf-\(descriptor.biome.rawValue)", color: crownColor)]
+        root.addChildNode(crown)
+
+        configureLightweightEnvironmentNode(root)
+        return root
+    }
+
+    private static func makeSimplifiedBuildingNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+        let width = max(6.0, descriptor.size.x)
+        let depth = max(6.0, descriptor.size.z)
+        let height = max(8.0, descriptor.size.y)
+
+        let root = SCNNode()
+        root.name = "fast_building_\(descriptor.id.uuidString)"
+        root.position = SCNVector3(descriptor.position.x, descriptor.position.y, descriptor.position.z)
+        root.eulerAngles = SCNVector3(0, descriptor.yawRadians, 0)
+
+        let body = SCNNode(geometry: SCNBox(
+            width: CGFloat(width),
+            height: CGFloat(height),
+            length: CGFloat(depth),
+            chamferRadius: 0.0
+        ))
+        body.position = SCNVector3(0, height * 0.5, 0)
+        body.geometry?.materials = [simplifiedMaterial(
+            key: "fastBuilding-\(descriptor.biome.rawValue)",
+            color: descriptor.biome == .city
+                ? NSColor(calibratedRed: 0.32, green: 0.35, blue: 0.39, alpha: 1.0)
+                : NSColor(calibratedRed: 0.40, green: 0.38, blue: 0.32, alpha: 1.0)
+        )]
+        root.addChildNode(body)
+
+        let roofHeight = max(0.4, min(1.4, height * 0.05))
+        let roof = SCNNode(geometry: SCNBox(
+            width: CGFloat(width * 1.02),
+            height: CGFloat(roofHeight),
+            length: CGFloat(depth * 1.02),
+            chamferRadius: 0.0
+        ))
+        roof.position = SCNVector3(0, height + roofHeight * 0.5, 0)
+        roof.geometry?.materials = [simplifiedMaterial(
+            key: "fastRoof",
+            color: NSColor(calibratedRed: 0.20, green: 0.22, blue: 0.25, alpha: 1.0)
+        )]
+        root.addChildNode(roof)
+
+        configureLightweightEnvironmentNode(root)
+        return root
+    }
+
+    private static func makeSimplifiedPoleNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+        let width = max(0.18, descriptor.size.x * 0.24)
+        let height = max(2.0, descriptor.size.y)
+        let node = SCNNode(geometry: SCNBox(
+            width: CGFloat(width),
+            height: CGFloat(height),
+            length: CGFloat(width),
+            chamferRadius: 0.0
+        ))
+        node.name = "fast_pole_\(descriptor.id.uuidString)"
+        node.position = SCNVector3(descriptor.position.x, descriptor.position.y + height * 0.5, descriptor.position.z)
+        node.eulerAngles = SCNVector3(0, descriptor.yawRadians, 0)
+        node.geometry?.materials = [simplifiedMaterial(
+            key: "fastPole",
+            color: NSColor(calibratedRed: 0.58, green: 0.58, blue: 0.62, alpha: 1.0)
+        )]
+        configureLightweightEnvironmentNode(node)
+        return node
+    }
+
+    private static func makeSimplifiedMarkerNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+        let node = SCNNode(geometry: SCNPyramid(
+            width: CGFloat(max(0.7, descriptor.size.x)),
+            height: CGFloat(max(1.2, descriptor.size.y)),
+            length: CGFloat(max(0.7, descriptor.size.z))
+        ))
+        node.name = "fast_marker_\(descriptor.id.uuidString)"
+        node.position = SCNVector3(descriptor.position.x, descriptor.position.y + descriptor.size.y * 0.5, descriptor.position.z)
+        node.eulerAngles = SCNVector3(0, descriptor.yawRadians, 0)
+        node.geometry?.materials = [simplifiedMaterial(
+            key: "fastMarker",
+            color: NSColor.systemOrange
+        )]
+        configureLightweightEnvironmentNode(node)
+        return node
+    }
+
+    private static func makeSimplifiedBoxNode(
+        descriptor: EnvironmentObjectDescriptor,
+        color: NSColor,
+        namePrefix: String
+    ) -> SCNNode {
+        let node = SCNNode(geometry: SCNBox(
+            width: CGFloat(max(0.6, descriptor.size.x)),
+            height: CGFloat(max(0.6, descriptor.size.y)),
+            length: CGFloat(max(0.6, descriptor.size.z)),
+            chamferRadius: 0.0
+        ))
+        node.name = "\(namePrefix)_\(descriptor.id.uuidString)"
+        node.position = SCNVector3(
+            descriptor.position.x,
+            descriptor.position.y + max(0.6, descriptor.size.y) * 0.5,
+            descriptor.position.z
+        )
+        node.eulerAngles = SCNVector3(0, descriptor.yawRadians, 0)
+        node.geometry?.materials = [simplifiedMaterial(key: namePrefix, color: color)]
+        configureLightweightEnvironmentNode(node)
+        return node
+    }
+
+    private static func configureLightweightEnvironmentNode(_ node: SCNNode) {
+        node.castsShadow = false
+        node.geometry?.materials.forEach { material in
+            material.lightingModel = .constant
+            material.writesToDepthBuffer = true
+        }
+        node.enumerateChildNodes { child, _ in
+            child.castsShadow = false
+            child.geometry?.materials.forEach { material in
+                material.lightingModel = .constant
+                material.writesToDepthBuffer = true
+            }
+        }
+    }
+
+    private static func simplifiedMaterial(key: String, color: NSColor) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = color
+        material.ambient.contents = color
+        material.emission.contents = color.withAlphaComponent(0.12)
+        material.isDoubleSided = true
+        material.writesToDepthBuffer = true
+        return material
     }
 
     static func roofHeight(for buildingHeight: Float) -> Float {

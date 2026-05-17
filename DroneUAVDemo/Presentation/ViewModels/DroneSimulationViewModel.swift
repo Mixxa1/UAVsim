@@ -537,6 +537,9 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isControllerCursorEnabled: Bool = false
     @Published private(set) var isControllerHubVisible: Bool = false
     @Published var controllerHubSection: ControllerHubSection = .connectedDevices
+    @Published private(set) var isMissionReplayRecording: Bool = false
+    @Published private(set) var lastMissionReplaySession: MissionReplaySession?
+    @Published private(set) var lastMissionReport: MissionReport?
 
     let bindingsViewModel: BindingsViewModel
     let compassViewModel: CompassViewModel
@@ -694,6 +697,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private let missionEventMapper = MissionEventMapper()
     private let missionPersistenceAdapter = MissionPersistenceAdapter()
     private let payloadProximityEffectModel = PayloadProximityEffectModel()
+    private let missionReplayRecorder = MissionReplayRecorder()
+    private let missionReportBuilder = MissionReportBuilder()
+    let replayLibraryViewModel = ReplayLibraryViewModel()
 
     private var state: DroneState
     private var lastFiniteState: DroneState
@@ -703,6 +709,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private var telemetrySamplingAccumulator: Float = 0.0
     private var hudPublishAccumulator: Float = 0.0
     private var diagnosticsSamplingAccumulator: Float = 0.0
+    private var previousReplayArmedState: Bool = false
+    private var previousReplayAutopilotActive: Bool = false
+    private var previousReplayWarningMessages: Set<String> = []
     private var groundContactAccumulator: Float = 0.0
     private var stableGroundAccumulator: Float = 0.0
     private var airborneAccumulator: Float = 0.0
@@ -3201,6 +3210,7 @@ final class DroneSimulationViewModel: ObservableObject {
         decayFixedWingAssistOverrideTimers(deltaTime: dt)
 
         applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
+        updateMissionReplayLifecycle()
         updateAutopilotTargets(deltaTime: dt)
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
 
@@ -3424,6 +3434,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         refreshMissionStatus()
+        recordMissionReplayFrameIfNeeded()
+        recordMissionReplayWarningsIfNeeded()
 
         autosaveAccumulator += dt
         if autosaveAccumulator >= 6.0 {
@@ -11829,6 +11841,111 @@ private extension DroneFlightMode {
         case .manual, .hover, .emergencyStop, .takeoff, .landing:
             return false
         }
+    }
+}
+
+// MARK: - Mission Replay Recording
+
+private extension DroneSimulationViewModel {
+
+    func missionReplayTimestamp() -> TimeInterval {
+        guard let startedAt = missionReplayRecorder.currentSessionStartedAt else { return 0 }
+        return Date().timeIntervalSince(startedAt)
+    }
+
+    func updateMissionReplayLifecycle() {
+        let currentArmedState = isArmed
+
+        if !previousReplayArmedState && currentArmedState {
+            missionReplayRecorder.startSession(timestamp: 0, context: makeMissionReplayContextSnapshot())
+            isMissionReplayRecording = true
+            previousReplayWarningMessages = []
+            recordMissionReplayEvent(.armed, message: "UAV armed")
+        } else if previousReplayArmedState && !currentArmedState {
+            recordMissionReplayEvent(.disarmed, message: "UAV disarmed")
+            let ts = missionReplayTimestamp()
+            missionReplayRecorder.stopSession(timestamp: ts)
+            lastMissionReplaySession = missionReplayRecorder.lastCompletedSession
+            if let session = missionReplayRecorder.lastCompletedSession {
+                let report = missionReportBuilder.buildReport(from: session)
+                lastMissionReport = report
+                replayLibraryViewModel.saveAndEnforce(session: session, report: report)
+            }
+            isMissionReplayRecording = false
+        }
+        previousReplayArmedState = currentArmedState
+
+        let currentAutopilotActive = missionExecutionState.status == .running || autoNavigationController.isActive
+        if !previousReplayAutopilotActive && currentAutopilotActive {
+            recordMissionReplayEvent(.autopilotEnabled, message: "Autopilot enabled: \(mode.rawValue)")
+        } else if previousReplayAutopilotActive && !currentAutopilotActive {
+            recordMissionReplayEvent(.autopilotDisabled, message: "Autopilot disabled: \(mode.rawValue)")
+        }
+        previousReplayAutopilotActive = currentAutopilotActive
+    }
+
+    func recordMissionReplayFrameIfNeeded() {
+        guard missionReplayRecorder.isRecording else { return }
+        let isAutopilotActive = missionExecutionState.status == .running || autoNavigationController.isActive
+        let autopilotDescription: String? = isAutopilotActive ? mode.rawValue : nil
+        let frame = MissionReplayFrame(
+            id: UUID(),
+            timestamp: missionReplayTimestamp(),
+            position: CodableVector3D(state.position),
+            velocity: CodableVector3D(state.velocity),
+            attitude: MissionAttitudeSnapshot(
+                rollRadians: Double(state.orientation.x),
+                pitchRadians: Double(state.orientation.y),
+                yawRadians: Double(state.orientation.z)
+            ),
+            flightModeDescription: mode.rawValue,
+            autopilotDescription: autopilotDescription,
+            activeWaypointIndex: missionExecutionState.activeWaypointIndex,
+            batteryPercent: Double(batteryState.chargePercent),
+            payloadStatusDescription: payloadStatusMessageKey,
+            warningCount: warnings.count
+        )
+        missionReplayRecorder.recordFrame(frame)
+    }
+
+    func recordMissionReplayWarningsIfNeeded() {
+        guard missionReplayRecorder.isRecording else { return }
+        let current = Set(warnings)
+        let newWarnings = current.subtracting(previousReplayWarningMessages)
+        for warning in newWarnings {
+            recordMissionReplayEvent(.warning, message: warning)
+        }
+        previousReplayWarningMessages = current
+    }
+
+    func recordMissionReplayEvent(_ type: MissionReplayEventType, message: String) {
+        guard missionReplayRecorder.isRecording else { return }
+        let event = MissionReplayEvent(
+            id: UUID(),
+            timestamp: missionReplayTimestamp(),
+            type: type,
+            message: message,
+            position: CodableVector3D(state.position)
+        )
+        missionReplayRecorder.recordEvent(event)
+    }
+
+    func makeMissionReplayContextSnapshot() -> MissionReplayContextSnapshot {
+        MissionReplayContextSnapshot(
+            projectName: currentProjectName,
+            selectedDroneProfileID: selectedDroneProfile.id,
+            selectedDroneProfileName: selectedDroneProfile.displayName,
+            selectedUAVProfileID: activeUAVProfile?.id,
+            selectedUAVProfileName: activeUAVProfile?.displayName,
+            terrainPresetRawValue: terrain.preset.rawValue,
+            mapScaleRawValue: terrain.mapScale.rawValue,
+            terrainSeed: terrain.seed,
+            weatherPresetRawValue: weather.preset.rawValue,
+            payloadTypeRawValue: payloadMountState == .occupied ? payloadDraftConfiguration.payloadType.rawValue : nil,
+            payloadResolvedName: payloadMountState == .occupied ? payloadDraftConfiguration.resolvedName : nil,
+            hasPayloadAttachedAtStart: payloadMountState == .occupied,
+            recordedAtAppVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        )
     }
 }
 

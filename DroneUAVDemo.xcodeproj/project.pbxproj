@@ -186,6 +186,36 @@
 		1000000000000000000002BD /* MissionGuidanceTargetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */; };
 		1000000000000000000002BF /* FixedWingFlyablePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002BE /* FixedWingFlyablePath.swift */; };
 		1000000000000000000002C1 /* FixedWingAutopilot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C0 /* FixedWingAutopilot.swift */; };
+		1000000000000000000002C9 /* CodableVector3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C2 /* CodableVector3D.swift */; };
+		1000000000000000000002E5 /* MissionReplayContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */; };
+		1000000000000000000002CA /* MissionReplayFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C3 /* MissionReplayFrame.swift */; };
+		1000000000000000000002CB /* MissionReplayEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C4 /* MissionReplayEvent.swift */; };
+		1000000000000000000002CC /* MissionReplaySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C5 /* MissionReplaySession.swift */; };
+		1000000000000000000002CD /* MissionReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C6 /* MissionReport.swift */; };
+		1000000000000000000002CE /* MissionReplayRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C7 /* MissionReplayRecorder.swift */; };
+		1000000000000000000002CF /* MissionReportBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C8 /* MissionReportBuilder.swift */; };
+		1000000000000000000002D5 /* MissionReplayRetentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002D0 /* MissionReplayRetentionPolicy.swift */; };
+		1000000000000000000002DB /* MissionReplayRecordSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DA /* MissionReplayRecordSummary.swift */; };
+		1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DC /* MissionReplayPlayer.swift */; };
+		1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DE /* MissionReplaySceneController.swift */; };
+		1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */; };
+		1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E2 /* ReplayCameraMode.swift */; };
+		1000000000000000000002E9 /* ReplayTrimRange.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E8 /* ReplayTrimRange.swift */; };
+		1000000000000000000002EB /* ReplayComparisonResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002EA /* ReplayComparisonResult.swift */; };
+		1000000000000000000002ED /* ReplayVideoExportSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002EC /* ReplayVideoExportSettings.swift */; };
+		1000000000000000000002F9 /* ReplayVideoExportMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002F8 /* ReplayVideoExportMode.swift */; };
+		1000000000000000000002FB /* ReplayExportResolutionPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002FA /* ReplayExportResolutionPreset.swift */; };
+		1000000000000000000002FD /* ReplayExportBitratePreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002FC /* ReplayExportBitratePreset.swift */; };
+		1000000000000000000002EF /* ReplayTelemetrySeriesBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002EE /* ReplayTelemetrySeriesBuilder.swift */; };
+		1000000000000000000002F1 /* ReplayComparisonBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002F0 /* ReplayComparisonBuilder.swift */; };
+		1000000000000000000002F3 /* ReplayTrimmer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002F2 /* ReplayTrimmer.swift */; };
+		1000000000000000000002F5 /* ReplayVideoExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002F4 /* ReplayVideoExportService.swift */; };
+		1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002F6 /* ReplayTimelineEditorView.swift */; };
+		1000000000000000000002D6 /* MissionReplayStorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002D1 /* MissionReplayStorageService.swift */; };
+		1000000000000000000002D7 /* MissionReplaySettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002D2 /* MissionReplaySettingsStore.swift */; };
+		1000000000000000000002D8 /* ReplayLibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002D3 /* ReplayLibraryViewModel.swift */; };
+		1000000000000000000002D9 /* ReplayCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002D4 /* ReplayCenterView.swift */; };
+		1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E6 /* FullscreenReplayViewerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -370,6 +400,36 @@
 		1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionGuidanceTargetResolver.swift; sourceTree = "<group>"; };
 		1000000000000000000002BE /* FixedWingFlyablePath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingFlyablePath.swift; sourceTree = "<group>"; };
 		1000000000000000000002C0 /* FixedWingAutopilot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAutopilot.swift; sourceTree = "<group>"; };
+		1000000000000000000002C2 /* CodableVector3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodableVector3D.swift; sourceTree = "<group>"; };
+		1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayContextSnapshot.swift; sourceTree = "<group>"; };
+		1000000000000000000002C3 /* MissionReplayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayFrame.swift; sourceTree = "<group>"; };
+		1000000000000000000002C4 /* MissionReplayEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayEvent.swift; sourceTree = "<group>"; };
+		1000000000000000000002C5 /* MissionReplaySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySession.swift; sourceTree = "<group>"; };
+		1000000000000000000002C6 /* MissionReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReport.swift; sourceTree = "<group>"; };
+		1000000000000000000002C7 /* MissionReplayRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayRecorder.swift; sourceTree = "<group>"; };
+		1000000000000000000002C8 /* MissionReportBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReportBuilder.swift; sourceTree = "<group>"; };
+		1000000000000000000002D0 /* MissionReplayRetentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayRetentionPolicy.swift; sourceTree = "<group>"; };
+		1000000000000000000002DA /* MissionReplayRecordSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayRecordSummary.swift; sourceTree = "<group>"; };
+		1000000000000000000002DC /* MissionReplayPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayPlayer.swift; sourceTree = "<group>"; };
+		1000000000000000000002DE /* MissionReplaySceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneController.swift; sourceTree = "<group>"; };
+		1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneViewRepresentable.swift; sourceTree = "<group>"; };
+		1000000000000000000002E2 /* ReplayCameraMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCameraMode.swift; sourceTree = "<group>"; };
+		1000000000000000000002E8 /* ReplayTrimRange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayTrimRange.swift; sourceTree = "<group>"; };
+		1000000000000000000002EA /* ReplayComparisonResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayComparisonResult.swift; sourceTree = "<group>"; };
+		1000000000000000000002EC /* ReplayVideoExportSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayVideoExportSettings.swift; sourceTree = "<group>"; };
+		1000000000000000000002F8 /* ReplayVideoExportMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayVideoExportMode.swift; sourceTree = "<group>"; };
+		1000000000000000000002FA /* ReplayExportResolutionPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayExportResolutionPreset.swift; sourceTree = "<group>"; };
+		1000000000000000000002FC /* ReplayExportBitratePreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayExportBitratePreset.swift; sourceTree = "<group>"; };
+		1000000000000000000002EE /* ReplayTelemetrySeriesBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayTelemetrySeriesBuilder.swift; sourceTree = "<group>"; };
+		1000000000000000000002F0 /* ReplayComparisonBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayComparisonBuilder.swift; sourceTree = "<group>"; };
+		1000000000000000000002F2 /* ReplayTrimmer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayTrimmer.swift; sourceTree = "<group>"; };
+		1000000000000000000002F4 /* ReplayVideoExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayVideoExportService.swift; sourceTree = "<group>"; };
+		1000000000000000000002F6 /* ReplayTimelineEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayTimelineEditorView.swift; sourceTree = "<group>"; };
+		1000000000000000000002D1 /* MissionReplayStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayStorageService.swift; sourceTree = "<group>"; };
+		1000000000000000000002D2 /* MissionReplaySettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySettingsStore.swift; sourceTree = "<group>"; };
+		1000000000000000000002D3 /* ReplayLibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayLibraryViewModel.swift; sourceTree = "<group>"; };
+		1000000000000000000002D4 /* ReplayCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCenterView.swift; sourceTree = "<group>"; };
+		1000000000000000000002E6 /* FullscreenReplayViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenReplayViewerView.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -488,6 +548,21 @@
 				100000000000000000000112 /* TerrainModel.swift */,
 				100000000000000000000151 /* TargetMarkerState.swift */,
 				100000000000000000000111 /* WeatherModel.swift */,
+				1000000000000000000002C2 /* CodableVector3D.swift */,
+				1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */,
+				1000000000000000000002C3 /* MissionReplayFrame.swift */,
+				1000000000000000000002C4 /* MissionReplayEvent.swift */,
+				1000000000000000000002C5 /* MissionReplaySession.swift */,
+				1000000000000000000002C6 /* MissionReport.swift */,
+				1000000000000000000002D0 /* MissionReplayRetentionPolicy.swift */,
+				1000000000000000000002DA /* MissionReplayRecordSummary.swift */,
+				1000000000000000000002E2 /* ReplayCameraMode.swift */,
+				1000000000000000000002E8 /* ReplayTrimRange.swift */,
+				1000000000000000000002EA /* ReplayComparisonResult.swift */,
+				1000000000000000000002EC /* ReplayVideoExportSettings.swift */,
+				1000000000000000000002F8 /* ReplayVideoExportMode.swift */,
+				1000000000000000000002FA /* ReplayExportResolutionPreset.swift */,
+				1000000000000000000002FC /* ReplayExportBitratePreset.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -533,6 +608,12 @@
 				100000000000000000000141 /* PayloadController.swift */,
 				10000000000000000000010C /* SimpleDronePhysicsEngine.swift */,
 				10000000000000000000016E /* TacticalMapCoordinator.swift */,
+				1000000000000000000002C7 /* MissionReplayRecorder.swift */,
+				1000000000000000000002C8 /* MissionReportBuilder.swift */,
+				1000000000000000000002DC /* MissionReplayPlayer.swift */,
+				1000000000000000000002EE /* ReplayTelemetrySeriesBuilder.swift */,
+				1000000000000000000002F0 /* ReplayComparisonBuilder.swift */,
+				1000000000000000000002F2 /* ReplayTrimmer.swift */,
 			);
 			path = Simulation;
 			sourceTree = "<group>";
@@ -551,6 +632,7 @@
 				10000000000000000000010D /* SceneFactory.swift */,
 				10000000000000000000011D /* ScenePopulationService.swift */,
 				100000000000000000000134 /* UAVVisualFactory.swift */,
+				1000000000000000000002DE /* MissionReplaySceneController.swift */,
 			);
 			path = Scene;
 			sourceTree = "<group>";
@@ -604,6 +686,10 @@
 				100000000000000000000139 /* UAVProfileCardView.swift */,
 				1000000000000000000001AC /* UIScrollRouter.swift */,
 				1000000000000000000001AB /* VirtualKeyboardView.swift */,
+				1000000000000000000002D4 /* ReplayCenterView.swift */,
+				1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */,
+				1000000000000000000002E6 /* FullscreenReplayViewerView.swift */,
+				1000000000000000000002F6 /* ReplayTimelineEditorView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -614,6 +700,7 @@
 				100000000000000000000153 /* CompassViewModel.swift */,
 				1000000000000000000002AE /* BindingsViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
+				1000000000000000000002D3 /* ReplayLibraryViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -642,6 +729,9 @@
 			isa = PBXGroup;
 			children = (
 				10000000000000000000011B /* TelemetryExportService.swift */,
+				1000000000000000000002D1 /* MissionReplayStorageService.swift */,
+				1000000000000000000002D2 /* MissionReplaySettingsStore.swift */,
+				1000000000000000000002F4 /* ReplayVideoExportService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -923,6 +1013,36 @@
 				10000000000000000000028D /* MissionTimelineView.swift in Sources */,
 				100000000000000000000268 /* TacticalMapHostView.swift in Sources */,
 				100000000000000000000269 /* TacticalMapView.swift in Sources */,
+				1000000000000000000002C9 /* CodableVector3D.swift in Sources */,
+				1000000000000000000002E5 /* MissionReplayContextSnapshot.swift in Sources */,
+				1000000000000000000002CA /* MissionReplayFrame.swift in Sources */,
+				1000000000000000000002CB /* MissionReplayEvent.swift in Sources */,
+				1000000000000000000002CC /* MissionReplaySession.swift in Sources */,
+				1000000000000000000002CD /* MissionReport.swift in Sources */,
+				1000000000000000000002CE /* MissionReplayRecorder.swift in Sources */,
+				1000000000000000000002CF /* MissionReportBuilder.swift in Sources */,
+				1000000000000000000002D5 /* MissionReplayRetentionPolicy.swift in Sources */,
+				1000000000000000000002D6 /* MissionReplayStorageService.swift in Sources */,
+				1000000000000000000002D7 /* MissionReplaySettingsStore.swift in Sources */,
+				1000000000000000000002D8 /* ReplayLibraryViewModel.swift in Sources */,
+				1000000000000000000002D9 /* ReplayCenterView.swift in Sources */,
+				1000000000000000000002DB /* MissionReplayRecordSummary.swift in Sources */,
+				1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */,
+				1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */,
+				1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */,
+				1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */,
+				1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */,
+				1000000000000000000002E9 /* ReplayTrimRange.swift in Sources */,
+				1000000000000000000002EB /* ReplayComparisonResult.swift in Sources */,
+				1000000000000000000002ED /* ReplayVideoExportSettings.swift in Sources */,
+				1000000000000000000002F9 /* ReplayVideoExportMode.swift in Sources */,
+				1000000000000000000002FB /* ReplayExportResolutionPreset.swift in Sources */,
+				1000000000000000000002FD /* ReplayExportBitratePreset.swift in Sources */,
+				1000000000000000000002EF /* ReplayTelemetrySeriesBuilder.swift in Sources */,
+				1000000000000000000002F1 /* ReplayComparisonBuilder.swift in Sources */,
+				1000000000000000000002F3 /* ReplayTrimmer.swift in Sources */,
+				1000000000000000000002F5 /* ReplayVideoExportService.swift in Sources */,
+				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

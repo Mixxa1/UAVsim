@@ -66,6 +66,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
 
     private let projectStorage: ProjectStorageManaging
     private weak var window: NSWindow?
+    private weak var forwardedWindowDelegate: (any NSWindowDelegate)?
     private var pendingExitAction: PendingExitAction?
     private var allowWindowClose = false
 
@@ -97,7 +98,13 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     }
 
     func bind(window: NSWindow) {
-        guard self.window !== window else { return }
+        if self.window !== window {
+            self.window = window
+            forwardedWindowDelegate = isSelfDelegate(window.delegate) ? nil : window.delegate
+        } else if !isSelfDelegate(window.delegate) {
+            forwardedWindowDelegate = window.delegate
+        }
+
         self.window = window
         window.delegate = self
     }
@@ -262,16 +269,68 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if allowWindowClose {
             allowWindowClose = false
-            return true
+            return forwardedWindowShouldClose(sender)
         }
 
         guard let vm = activeSimulation, vm.hasUnsavedChanges else {
-            return true
+            return forwardedWindowShouldClose(sender)
         }
 
         pendingExitAction = .closeWindow
         showUnsavedPrompt = true
         return false
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        forwardedWindowDelegate?.windowWillEnterFullScreen?(notification)
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        if let window = notification.object as? NSWindow {
+            WindowFullscreenController.markTransitionFinished(for: window)
+        }
+        forwardedWindowDelegate?.windowDidEnterFullScreen?(notification)
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        forwardedWindowDelegate?.windowWillExitFullScreen?(notification)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if let window = notification.object as? NSWindow {
+            WindowFullscreenController.markTransitionFinished(for: window)
+        }
+        forwardedWindowDelegate?.windowDidExitFullScreen?(notification)
+    }
+
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        WindowFullscreenController.markTransitionFinished(for: window)
+        forwardedWindowDelegate?.windowDidFailToEnterFullScreen?(window)
+    }
+
+    func windowDidFailToExitFullScreen(_ window: NSWindow) {
+        WindowFullscreenController.markTransitionFinished(for: window)
+        forwardedWindowDelegate?.windowDidFailToExitFullScreen?(window)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        forwardedWindowDelegate?.windowWillClose?(notification)
+    }
+
+    func toggleFullscreen() {
+        WindowFullscreenController.toggle(preferredWindow: window)
+    }
+
+    private func isSelfDelegate(_ delegate: (any NSWindowDelegate)?) -> Bool {
+        guard let delegate else { return false }
+        return delegate as AnyObject === self
+    }
+
+    private func forwardedWindowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let delegate = forwardedWindowDelegate, !isSelfDelegate(delegate) else {
+            return true
+        }
+        return delegate.windowShouldClose?(sender) ?? true
     }
 }
 
@@ -722,6 +781,8 @@ struct ContentView: View {
     @State private var nameDialogMode: NameDialogMode?
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
+    @State private var isReplayCenterPresented: Bool = false
+    @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
 
     private var selectedLanguage: AppLanguage {
         AppLanguage(rawValue: appLanguageRawValue) ?? .system
@@ -904,6 +965,30 @@ struct ContentView: View {
                         .padding(.vertical, 10)
                         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                     }
+
+                    Button {
+                        startScreenReplayLibrary.refresh()
+                        isReplayCenterPresented = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "archivebox")
+                                .font(.system(size: 15, weight: .semibold))
+                            Text("Black Box Records")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .sheet(isPresented: $isReplayCenterPresented) {
+                        ReplayCenterView(viewModel: startScreenReplayLibrary)
+                    }
                 }
                 .frame(maxWidth: 760)
                 .padding(.horizontal, 20)
@@ -1000,6 +1085,12 @@ struct ContentView: View {
                 title: Text(LocalizedStringKey(item.titleKey)),
                 message: Text(item.message),
                 dismissButton: .default(Text("common.ok"))
+            )
+        }
+        .sheet(isPresented: $isReplayCenterPresented) {
+            ReplayCenterView(
+                viewModel: viewModel.replayLibraryViewModel,
+                availableDroneProfiles: viewModel.availableDroneProfiles
             )
         }
     }
@@ -1193,6 +1284,23 @@ struct ContentView: View {
             }
             .menuStyle(.borderlessButton)
             .help(String(localized: "toolbar.header.project"))
+
+            Button {
+                viewModel.replayLibraryViewModel.refresh()
+                isReplayCenterPresented = true
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    headerUtilityButtonLabel(systemImage: "archivebox")
+                    if viewModel.isMissionReplayRecording {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                            .offset(x: 3, y: -3)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Black Box Records")
 
             Button {
                 viewModel.setBindingsPanelVisible(true)
@@ -1499,6 +1607,6 @@ struct ContentView: View {
     }
 
     private func toggleFullscreen() {
-        NSApp.keyWindow?.toggleFullScreen(nil)
+        appShell.toggleFullscreen()
     }
 }

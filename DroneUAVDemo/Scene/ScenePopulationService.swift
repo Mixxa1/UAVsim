@@ -11,7 +11,10 @@ final class ScenePopulationService {
     }
 
     @discardableResult
-    func populate(with terrain: TerrainConfiguration) -> ([EnvironmentObjectDescriptor], [UUID: SCNNode]) {
+    func populate(
+        with terrain: TerrainConfiguration,
+        visualQuality: EnvironmentVisualQuality = .detailed
+    ) -> ([EnvironmentObjectDescriptor], [UUID: SCNNode]) {
         containerNode.childNodes.forEach { $0.removeFromParentNode() }
 
         var generator = SeededRandomGenerator(seed: terrain.seed)
@@ -74,7 +77,7 @@ final class ScenePopulationService {
         var nodesByID: [UUID: SCNNode] = [:]
         nodesByID.reserveCapacity(allDescriptors.count)
         for descriptor in allDescriptors {
-            let node = EnvironmentObjectFactory.makeNode(for: descriptor)
+            let node = EnvironmentObjectFactory.makeNode(for: descriptor, quality: visualQuality)
             nodesByID[descriptor.id] = node
             containerNode.addChildNode(node)
         }
