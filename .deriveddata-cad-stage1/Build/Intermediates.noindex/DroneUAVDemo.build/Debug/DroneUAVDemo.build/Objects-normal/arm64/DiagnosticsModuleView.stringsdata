@@ -1,0 +1,112 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "diagnostic.collision_debug",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 61
+        }
+      },
+      {
+        "comment": "",
+        "key": "warnings.none",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 91
+        }
+      },
+      {
+        "comment": "",
+        "key": "diagnostic.fleet_mode",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 187
+        }
+      },
+      {
+        "comment": "",
+        "key": "fleet.formation",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 194
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 271
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 275
+        }
+      },
+      {
+        "comment": "",
+        "key": "language.section",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 305
+        }
+      },
+      {
+        "comment": "",
+        "key": "No black box replay recorded yet.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 357
+        }
+      },
+      {
+        "comment": "",
+        "key": "Session source: ARM → DISARM",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 349
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recording: ON",
+        "location": {
+          "startingColumn": 63,
+          "startingLine": 343
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recording: OFF",
+        "location": {
+          "startingColumn": 81,
+          "startingLine": 343
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.diagnostics.title",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 498
+        }
+      },
+      {
+        "comment": "",
+        "key": "module.diagnostics.subtitle",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 503
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -774,6 +774,11 @@ private struct KeyBindingsSheetHost: View {
     }
 }
 
+private enum AppWorkspaceMode {
+    case simulation
+    case designWorkshop
+}
+
 struct ContentView: View {
     @StateObject private var appShell = AppShellViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
@@ -783,6 +788,8 @@ struct ContentView: View {
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
+    @State private var workspaceMode: AppWorkspaceMode = .simulation
+    @StateObject private var cadWorkshopViewModel = CADWorkshopViewModel()
 
     private var selectedLanguage: AppLanguage {
         AppLanguage(rawValue: appLanguageRawValue) ?? .system
@@ -798,8 +805,14 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let viewModel = appShell.activeSimulation {
-                SimulationViewModelObserver(viewModel: viewModel) { observedViewModel in
-                    simulationWorkspace(observedViewModel)
+                if workspaceMode == .designWorkshop {
+                    DesignWorkshopWorkspaceView(viewModel: cadWorkshopViewModel) {
+                        workspaceMode = .simulation
+                    }
+                } else {
+                    SimulationViewModelObserver(viewModel: viewModel) { observedViewModel in
+                        simulationWorkspace(observedViewModel)
+                    }
                 }
             } else {
                 startScreen
@@ -860,6 +873,12 @@ struct ContentView: View {
             appShell.activeSimulation?.setExternalControllerOverlayActive(
                 nameDialogMode != nil || isBindingsVisible
             )
+        }
+        .onChange(of: appShell.activeSimulation == nil) { _, isNil in
+            if isNil {
+                workspaceMode = .simulation
+                cadWorkshopViewModel.resetDocument()
+            }
         }
     }
 
@@ -973,7 +992,7 @@ struct ContentView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "archivebox")
                                 .font(.system(size: 15, weight: .semibold))
-                            Text("Black Box Records")
+                            Text("Самописец")
                                 .font(.subheadline.weight(.semibold))
                         }
                         .foregroundStyle(.white.opacity(0.88))
@@ -986,8 +1005,10 @@ struct ContentView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .sheet(isPresented: $isReplayCenterPresented) {
-                        ReplayCenterView(viewModel: startScreenReplayLibrary)
+                    .onChange(of: isReplayCenterPresented) { _, new in
+                        guard new else { return }
+                        isReplayCenterPresented = false
+                        ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
                     }
                 }
                 .frame(maxWidth: 760)
@@ -1087,8 +1108,10 @@ struct ContentView: View {
                 dismissButton: .default(Text("common.ok"))
             )
         }
-        .sheet(isPresented: $isReplayCenterPresented) {
-            ReplayCenterView(
+        .onChange(of: isReplayCenterPresented) { _, new in
+            guard new else { return }
+            isReplayCenterPresented = false
+            ReplayCenterWindowHost.open(
                 viewModel: viewModel.replayLibraryViewModel,
                 availableDroneProfiles: viewModel.availableDroneProfiles
             )
@@ -1300,7 +1323,7 @@ struct ContentView: View {
                 }
             }
             .buttonStyle(.plain)
-            .help("Black Box Records")
+            .help("Бортовой самописец")
 
             Button {
                 viewModel.setBindingsPanelVisible(true)
@@ -1347,6 +1370,14 @@ struct ContentView: View {
             .controllerButtonTarget(id: "header.showTools") {
                 viewModel.setToolPanelVisible(true)
             }
+
+            Button {
+                workspaceMode = .designWorkshop
+            } label: {
+                headerUtilityButtonLabel(systemImage: "wrench.and.screwdriver")
+            }
+            .buttonStyle(.plain)
+            .help(String(localized: "cad.workspace.open"))
         }
     }
 

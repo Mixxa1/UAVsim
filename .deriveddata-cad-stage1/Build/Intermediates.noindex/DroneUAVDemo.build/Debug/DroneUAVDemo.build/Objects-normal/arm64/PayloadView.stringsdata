@@ -1,0 +1,152 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/PayloadView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "payload.toolbar.close",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 101
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.section",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 70
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.console.subtitle",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 83
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.not_specified",
+        "location": {
+          "startingColumn": 82,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.status",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 134
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.not_specified",
+        "location": {
+          "startingColumn": 89,
+          "startingLine": 153
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.not_specified",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 155
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.not_specified",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 754
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.mass",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 246
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@: %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 246
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.mass",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 294
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.mass",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 308
+        }
+      },
+      {
+        "comment": "",
+        "key": "kg",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 320
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.custom_name",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 353
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.custom_name",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 368
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.data_source",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 383
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.data.estimated_hint",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 388
+        }
+      },
+      {
+        "comment": "",
+        "key": "payload.total_mass",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 425
+        }
+      }
+    ]
+  },
+  "version": 1
+}

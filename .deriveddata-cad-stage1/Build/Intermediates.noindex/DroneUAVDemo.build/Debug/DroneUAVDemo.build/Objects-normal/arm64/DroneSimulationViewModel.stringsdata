@@ -1,0 +1,112 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "signal_loss.warning_stage_title",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 617
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.warning_stage_detail",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 618
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.critical_stage_title",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 620
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.critical_stage_detail",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 621
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.boundary_stage_title",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 623
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.boundary_stage_detail",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 624
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.impact_title",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 635
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.impact_message",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 636
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.lost_title",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 638
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.lost_message",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 639
+        }
+      },
+      {
+        "comment": "",
+        "key": "signal_loss.recover",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 646
+        }
+      },
+      {
+        "comment": "",
+        "key": "telemetry.export.select_folder",
+        "location": {
+          "startingColumn": 43,
+          "startingLine": 2936
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.export",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 2937
+        }
+      }
+    ]
+  },
+  "version": 1
+}

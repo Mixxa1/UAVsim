@@ -14,19 +14,19 @@ enum ReplayCameraMode: String, CaseIterable, Identifiable, Codable, Equatable {
     var displayName: String {
         switch self {
         case .freeObserver:
-            return "Free Observer"
+            return "Свободный наблюдатель"
         case .chase:
-            return "Chase"
+            return "Преследование"
         case .orbit:
-            return "Orbit"
+            return "Орбита"
         case .topDown:
-            return "Top-Down"
+            return "Вид сверху"
         case .fpvApproximation:
-            return "FPV Approx"
+            return "От первого лица"
         case .payloadFollow:
-            return "Payload"
+            return "За грузом"
         case .cinematicEvent:
-            return "Cinematic Event"
+            return "Событие"
         }
     }
 }

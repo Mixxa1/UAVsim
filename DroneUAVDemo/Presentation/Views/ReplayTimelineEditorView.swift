@@ -12,7 +12,7 @@ struct ReplayTimelineEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("Timeline")
+                Text("Шкала времени")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
@@ -125,7 +125,7 @@ struct ReplayTimelineEditorView: View {
                     .frame(width: 1, height: height - 12)
             )
             .offset(x: x)
-            .help(isStart ? "Trim start" : "Trim end")
+            .help(isStart ? "Начало обрезки" : "Конец обрезки")
     }
 
     private func x(for time: TimeInterval, width: CGFloat, duration: TimeInterval) -> CGFloat {

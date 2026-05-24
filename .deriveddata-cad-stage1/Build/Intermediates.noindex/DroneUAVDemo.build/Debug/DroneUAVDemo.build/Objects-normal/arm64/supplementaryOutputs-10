@@ -1,0 +1,72 @@
+{
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/CAD/DesignDocument.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DesignDocument.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DesignDocument.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DesignDocument.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DesignDocument.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DesignDocument.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/ReplayExportBitratePreset.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayExportBitratePreset.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayExportBitratePreset.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayExportBitratePreset.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayExportBitratePreset.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayExportBitratePreset.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/ReplayTrimRange.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimRange.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimRange.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimRange.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimRange.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimRange.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/CADWorkshopModuleView.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CADWorkshopModuleView.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CADWorkshopModuleView.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CADWorkshopModuleView.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CADWorkshopModuleView.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CADWorkshopModuleView.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/FullscreenReplayViewerView.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/FullscreenReplayViewerView.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/FullscreenReplayViewerView.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/FullscreenReplayViewerView.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/FullscreenReplayViewerView.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/FullscreenReplayViewerView.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/ReplayTimelineEditorView.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTimelineEditorView.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTimelineEditorView.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTimelineEditorView.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTimelineEditorView.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTimelineEditorView.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Services/ReplayVideoExportService.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayVideoExportService.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayVideoExportService.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayVideoExportService.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayVideoExportService.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayVideoExportService.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Simulation/ReplayComparisonBuilder.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayComparisonBuilder.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayComparisonBuilder.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayComparisonBuilder.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayComparisonBuilder.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayComparisonBuilder.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Simulation/ReplayTelemetrySeriesBuilder.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTelemetrySeriesBuilder.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTelemetrySeriesBuilder.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTelemetrySeriesBuilder.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTelemetrySeriesBuilder.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTelemetrySeriesBuilder.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Simulation/ReplayTrimmer.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimmer.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimmer.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimmer.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimmer.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/ReplayTrimmer.swiftdeps"
+  }
+}

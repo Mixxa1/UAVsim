@@ -109,40 +109,40 @@ struct KeyBindingsSettingsView: View {
 
     private var controllerSettingsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Game Controller")
+            Text("Игровой контроллер")
                 .font(.headline)
 
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     controllerInfoChip(
-                        title: "Input source",
+                        title: "Источник ввода",
                         value: inputSourceTitle(simulationViewModel.activeInputSourceKind)
                     )
                     controllerInfoChip(
-                        title: "Source device",
-                        value: simulationViewModel.activeGameControllerName ?? "None"
+                        title: "Устройство",
+                        value: simulationViewModel.activeGameControllerName ?? "Нет"
                     )
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     controllerInfoChip(
-                        title: "Input source",
+                        title: "Источник ввода",
                         value: inputSourceTitle(simulationViewModel.activeInputSourceKind)
                     )
                     controllerInfoChip(
-                        title: "Source device",
-                        value: simulationViewModel.activeGameControllerName ?? "None"
+                        title: "Устройство",
+                        value: simulationViewModel.activeGameControllerName ?? "Нет"
                     )
                 }
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Connected controllers")
+                Text("Подключённые контроллеры")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
                 if simulationViewModel.connectedGameControllers.isEmpty {
-                    Text("No controller connected")
+                    Text("Контроллер не подключён")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -152,7 +152,7 @@ struct KeyBindingsSettingsView: View {
                                 .font(.caption)
                             Spacer()
                             if controller.isActive {
-                                Text("Active")
+                                Text("Активен")
                                     .font(.caption2.weight(.semibold))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 3)
@@ -164,7 +164,7 @@ struct KeyBindingsSettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Right stick X")
+                Text("Правый стик X")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
@@ -182,7 +182,7 @@ struct KeyBindingsSettingsView: View {
                     }
                 }
 
-                Text("Default profile maps right stick horizontal to keyboard J / L yaw semantics.")
+                Text("По умолчанию горизонтальная ось правого стика соответствует рысканию (клавиши J / L на клавиатуре).")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -396,15 +396,15 @@ struct KeyBindingsSettingsView: View {
     private func inputSourceTitle(_ source: InputSourceKind?) -> String {
         switch source {
         case .keyboard:
-            return "Keyboard"
+            return "Клавиатура"
         case .gameController:
-            return "Game controller"
+            return "Геймпад"
         case .remote:
-            return "Remote"
+            return "Пульт ДУ"
         case .autopilot:
-            return "Autopilot"
+            return "Автопилот"
         case nil:
-            return "None"
+            return "Нет"
         }
     }
 }

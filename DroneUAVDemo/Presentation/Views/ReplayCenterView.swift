@@ -1,19 +1,61 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import simd
 
 // Keeps the SceneKit scene alive across SwiftUI body re-evaluations.
 private final class ReplaySceneHolder: ObservableObject {
     let controller = MissionReplaySceneController()
 }
 
+// MARK: - WASD keyboard state
+
+private final class WASDMonitor: ObservableObject {
+    var pressedKeys: Set<UInt16> = []
+    var shiftActive = false
+    private var monitor: Any?
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+            guard let self else { return event }
+            // Fullscreen replay viewer handles its own keyboard via FullscreenReplayWindow.sendEvent — don't touch it
+            if event.window is FullscreenReplayWindow { return event }
+            switch event.type {
+            case .keyDown:
+                let kc = event.keyCode
+                if [13, 1, 0, 2, 12, 14].contains(Int(kc)) {
+                    self.pressedKeys.insert(kc)
+                    self.shiftActive = event.modifierFlags.contains(.shift)
+                    return nil
+                }
+            case .keyUp:
+                self.pressedKeys.remove(event.keyCode)
+                self.shiftActive = event.modifierFlags.contains(.shift)
+            case .flagsChanged:
+                self.shiftActive = event.modifierFlags.contains(.shift)
+            default:
+                break
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        pressedKeys = []
+    }
+}
+
 struct ReplayCenterView: View {
     @ObservedObject var viewModel: ReplayLibraryViewModel
     var availableDroneProfiles: [DroneModelProfile] = []
+    var onDismiss: (() -> Void)? = nil
 
     @StateObject private var replayPlayer = MissionReplayPlayer()
     @StateObject private var sceneHolder = ReplaySceneHolder()
     @StateObject private var videoExportService = ReplayVideoExportService()
+    @StateObject private var wasdMonitor = WASDMonitor()
     @Environment(\.dismiss) private var dismiss
     @State private var deleteCandidate: MissionReplayRecordSummary?
     @State private var cameraMode: ReplayCameraMode = .freeObserver
@@ -38,7 +80,13 @@ struct ReplayCenterView: View {
         }
         .frame(minWidth: 1020, minHeight: 660)
         .background(GroundControlPalette.shell)
-        .onAppear { viewModel.refresh() }
+        .onAppear {
+            viewModel.refresh()
+            wasdMonitor.start()
+        }
+        .onDisappear {
+            wasdMonitor.stop()
+        }
         .onChange(of: viewModel.selectedSummaryID) { _, newID in
             replayPlayer.unload()
             cameraMode = .freeObserver
@@ -99,12 +147,28 @@ struct ReplayCenterView: View {
             if replayPlayer.isPlaying {
                 sceneHolder.controller.update(frame: replayPlayer.currentFrame)
             }
+            if cameraMode == .freeObserver {
+                let keys = wasdMonitor.pressedKeys
+                guard !keys.isEmpty else { return }
+                let speed: Float = wasdMonitor.shiftActive ? 48.0 : 16.0
+                var delta = SIMD3<Float>.zero
+                if keys.contains(13) { delta.z -= 1 }  // W
+                if keys.contains(1)  { delta.z += 1 }  // S
+                if keys.contains(0)  { delta.x -= 1 }  // A
+                if keys.contains(2)  { delta.x += 1 }  // D
+                if keys.contains(12) { delta.y -= 1 }  // Q
+                if keys.contains(14) { delta.y += 1 }  // E
+                let len = simd_length(delta)
+                if len > 0.001 {
+                    sceneHolder.controller.moveCamera(localDelta: (delta / len) * speed / 60.0)
+                }
+            }
         }
         .alert(item: $deleteCandidate) { candidate in
             Alert(
-                title: Text("Delete Replay?"),
-                message: Text("\"\(candidate.title)\" will be permanently deleted."),
-                primaryButton: .destructive(Text("Delete")) {
+                title: Text("Удалить запись?"),
+                message: Text("\"\(candidate.title)\" будет безвозвратно удалена."),
+                primaryButton: .destructive(Text("Удалить")) {
                     replayPlayer.unload()
                     viewModel.delete(id: candidate.id)
                 },
@@ -142,10 +206,10 @@ struct ReplayCenterView: View {
         HStack {
             Image(systemName: "archivebox.fill")
                 .foregroundStyle(GroundControlPalette.accent)
-            Text("Black Box Records")
+            Text("Бортовой самописец")
                 .font(.headline)
             Spacer()
-            Button { dismiss() } label: {
+            Button { if let onDismiss { onDismiss() } else { dismiss() } } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
@@ -163,10 +227,10 @@ struct ReplayCenterView: View {
             Image(systemName: "archivebox")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(GroundControlPalette.textSecondary)
-            Text("No recordings yet")
+            Text("Нет записей")
                 .font(.subheadline)
                 .foregroundStyle(GroundControlPalette.textSecondary)
-            Text("Records are saved automatically after each ARM \u{2192} DISARM cycle.")
+            Text("Записи сохраняются автоматически после каждого цикла ВООРУЖИТЬ \u{2192} РАЗОРУЖИТЬ.")
                 .font(.caption)
                 .foregroundStyle(GroundControlPalette.textSecondary.opacity(0.7))
                 .multilineTextAlignment(.center)
@@ -216,13 +280,13 @@ struct ReplayCenterView: View {
 
     private var retentionFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Toggle("Auto-delete old records", isOn: $viewModel.retentionPolicy.isAutoDeleteEnabled)
+            Toggle("Авто-удаление старых записей", isOn: $viewModel.retentionPolicy.isAutoDeleteEnabled)
                 .font(.caption)
                 .toggleStyle(.checkbox)
                 .foregroundStyle(GroundControlPalette.textSecondary)
             if viewModel.retentionPolicy.isAutoDeleteEnabled {
                 HStack(spacing: 8) {
-                    Text("Keep last")
+                    Text("Хранить последние")
                         .font(.caption)
                         .foregroundStyle(GroundControlPalette.textSecondary)
                     Stepper(value: $viewModel.retentionPolicy.maxStoredReplayCount, in: 1...100) {
@@ -257,7 +321,7 @@ struct ReplayCenterView: View {
             Image(systemName: "doc.text.magnifyingglass")
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(GroundControlPalette.textSecondary.opacity(0.5))
-            Text("Select a record to view its report")
+            Text("Выберите запись для просмотра отчёта")
                 .font(.subheadline)
                 .foregroundStyle(GroundControlPalette.textSecondary)
         }
@@ -330,7 +394,7 @@ struct ReplayCenterView: View {
                 Image(systemName: "cube.transparent")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(GroundControlPalette.accent)
-                Text("Visual Reconstruction")
+                Text("Визуальная реконструкция")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
@@ -352,10 +416,10 @@ struct ReplayCenterView: View {
             }
 
             HStack(spacing: 14) {
-                reconstructionCell("UAV", reconstructionStatus.uavDisplayName)
-                reconstructionCell("Terrain", reconstructionStatus.terrainDisplayName)
-                reconstructionCell("Weather", reconstructionStatus.weatherDisplayName)
-                reconstructionCell("Payload", reconstructionStatus.payloadDisplayName)
+                reconstructionCell("БЛА", reconstructionStatus.uavDisplayName)
+                reconstructionCell("Местность", reconstructionStatus.terrainDisplayName)
+                reconstructionCell("Погода", reconstructionStatus.weatherDisplayName)
+                reconstructionCell("Груз", reconstructionStatus.payloadDisplayName)
                 Spacer()
             }
         }
@@ -448,7 +512,7 @@ struct ReplayCenterView: View {
                         selectedEvent: selectedReplayEvent
                     )
                 } label: {
-                    Label("Open Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right")
+                    Label("На весь экран", systemImage: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(GroundControlPalette.accent)
                         .padding(.horizontal, 9)
@@ -465,11 +529,11 @@ struct ReplayCenterView: View {
                 .buttonStyle(.plain)
                 .disabled(fullscreenSession == nil)
                 .opacity(fullscreenSession != nil ? 1.0 : 0.38)
-                .help("Open replay in fullscreen viewer")
+                .help("Открыть воспроизведение во весь экран")
             }
 
             HStack(spacing: 10) {
-                Text("Camera")
+                Text("Камера")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                     .frame(width: 64, alignment: .leading)
@@ -489,7 +553,7 @@ struct ReplayCenterView: View {
                 if cameraMode == .topDown {
                     Divider().frame(height: 18)
 
-                    Text("Height \(Int(topDownHeight)) m")
+                    Text("Высота \(Int(topDownHeight)) м")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                         .frame(width: 92, alignment: .leading)
@@ -549,18 +613,18 @@ struct ReplayCenterView: View {
                 HStack(spacing: 16) {
                     frameCell("T", String(format: "%.1fs", frame.timestamp))
                     frameCell("X", String(format: "%.1f", frame.position.x))
-                    frameCell("Y", String(format: "%.1f m", frame.position.y))
+                    frameCell("Y", String(format: "%.1f м", frame.position.y))
                     frameCell("Z", String(format: "%.1f", frame.position.z))
-                    frameCell("Spd", String(format: "%.1f m/s", speed))
-                    frameCell("Mode", frame.flightModeDescription)
-                    frameCell("AP", frame.autopilotDescription ?? "n/a")
-                    frameCell("Bat", frame.batteryPercent.map { String(format: "%.1f%%", $0) } ?? "n/a")
-                    frameCell("Warn", "\(frame.warningCount)",
+                    frameCell("Ск", String(format: "%.1f м/с", speed))
+                    frameCell("Режим", frame.flightModeDescription)
+                    frameCell("АП", frame.autopilotDescription ?? "н/д")
+                    frameCell("Бат", frame.batteryPercent.map { String(format: "%.1f%%", $0) } ?? "н/д")
+                    frameCell("Пред", "\(frame.warningCount)",
                               tint: frame.warningCount > 0 ? GroundControlPalette.warning : nil)
                     Spacer()
                 }
             } else {
-                Text(replayPlayer.isLoaded ? "No frame data" : "No session loaded")
+                Text(replayPlayer.isLoaded ? "Нет данных кадра" : "Сессия не загружена")
                     .font(.caption2)
                     .foregroundStyle(GroundControlPalette.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -585,7 +649,7 @@ struct ReplayCenterView: View {
     private func reportScrollView(_ report: MissionReport) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Mission Report")
+                Text("Отчёт о миссии")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(GroundControlPalette.textPrimary)
 
@@ -621,15 +685,15 @@ struct ReplayCenterView: View {
             columns: Array(repeating: GridItem(.flexible()), count: 4),
             spacing: 8
         ) {
-            metricCell("Duration", formatDuration(s.durationSeconds), "clock")
-            metricCell("Frames", "\(s.frameCount)", "square.stack")
-            metricCell("Events", "\(s.eventCount)", "bolt")
-            metricCell("Warnings", "\(s.warningCount)", "exclamationmark.triangle",
+            metricCell("Длительность", formatDuration(s.durationSeconds), "clock")
+            metricCell("Кадры", "\(s.frameCount)", "square.stack")
+            metricCell("События", "\(s.eventCount)", "bolt")
+            metricCell("Предупреждения", "\(s.warningCount)", "exclamationmark.triangle",
                        tint: s.warningCount > 0 ? GroundControlPalette.warning : nil)
-            metricCell("Max Speed", String(format: "%.1f m/s", s.maxSpeedMetersPerSecond), "speedometer")
-            metricCell("Avg Speed", String(format: "%.1f m/s", s.averageSpeedMetersPerSecond), "gauge")
-            metricCell("Max Alt", String(format: "%.1f m", s.maxAltitudeMeters), "arrow.up")
-            metricCell("Battery Used", s.batteryUsedPercent.map { String(format: "%.1f%%", $0) } ?? "n/a", "battery.75")
+            metricCell("Макс. скорость", String(format: "%.1f м/с", s.maxSpeedMetersPerSecond), "speedometer")
+            metricCell("Ср. скорость", String(format: "%.1f м/с", s.averageSpeedMetersPerSecond), "gauge")
+            metricCell("Макс. высота", String(format: "%.1f м", s.maxAltitudeMeters), "arrow.up")
+            metricCell("Заряд батареи", s.batteryUsedPercent.map { String(format: "%.1f%%", $0) } ?? "н/д", "battery.75")
         }
     }
 
@@ -658,18 +722,18 @@ struct ReplayCenterView: View {
     private var trimPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Trim")
+                Text("Обрезка")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
-                Button("Preview") {
+                Button("Просмотр") {
                     replayPlayer.seek(to: trimRange.startTime)
                     sceneHolder.controller.update(frame: replayPlayer.currentFrame)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(GroundControlPalette.accent)
 
-                Button("Reset") {
+                Button("Сброс") {
                     trimRange = ReplayTrimRange(startTime: 0, endTime: replayPlayer.duration)
                 }
                 .buttonStyle(.plain)
@@ -677,10 +741,10 @@ struct ReplayCenterView: View {
             }
 
             HStack(spacing: 18) {
-                frameCell("Start", fmtTime(trimRange.startTime))
-                frameCell("End", fmtTime(trimRange.endTime))
-                frameCell("Selected", fmtTime(trimRange.duration))
-                Text("Original replay is preserved. Trim is used for graphs and export.")
+                frameCell("Начало", fmtTime(trimRange.startTime))
+                frameCell("Конец", fmtTime(trimRange.endTime))
+                frameCell("Выбрано", fmtTime(trimRange.duration))
+                Text("Оригинальная запись сохраняется. Обрезка применяется к графикам и экспорту.")
                     .font(.caption2)
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
@@ -694,15 +758,15 @@ struct ReplayCenterView: View {
     private func telemetryPanel(events: [MissionReplayEvent]) -> some View {
         let graphEvents = normalizedEventsForTrim(events)
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Telemetry")
+            Text("Телеметрия")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(GroundControlPalette.textSecondary)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                telemetryGraph(title: "Altitude", events: graphEvents)
-                telemetryGraph(title: "Speed", events: graphEvents)
-                telemetryGraph(title: "Battery", events: graphEvents)
-                let attitude = telemetrySeries.filter { ["Roll", "Pitch", "Yaw"].contains($0.title) }
+                telemetryGraph(title: "Высота", events: graphEvents)
+                telemetryGraph(title: "Скорость", events: graphEvents)
+                telemetryGraph(title: "Батарея", events: graphEvents)
+                let attitude = telemetrySeries.filter { ["Крен", "Тангаж", "Рыскание"].contains($0.title) }
                 ReplayTelemetryGraphView(
                     series: attitude,
                     events: graphEvents,
@@ -724,12 +788,12 @@ struct ReplayCenterView: View {
     private var exportPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Video Export")
+                Text("Экспорт видео")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
                 if videoExportService.isExporting {
-                    Button("Cancel") { videoExportService.cancel() }
+                    Button("Отмена") { videoExportService.cancel() }
                         .buttonStyle(.plain)
                         .foregroundStyle(.red)
                 }
@@ -737,7 +801,7 @@ struct ReplayCenterView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 12) {
-                    exportControl("Mode", width: 150) {
+                    exportControl("Режим", width: 150) {
                         Picker("", selection: Binding(
                             get: { exportSettings.exportMode },
                             set: { applyExportMode($0) }
@@ -748,7 +812,7 @@ struct ReplayCenterView: View {
                         }
                     }
 
-                    exportControl("Format", width: 120) {
+                    exportControl("Формат", width: 120) {
                         Picker("", selection: Binding(
                             get: { exportSettings.format },
                             set: { exportSettings.format = $0 }
@@ -759,7 +823,7 @@ struct ReplayCenterView: View {
                         }
                     }
 
-                    exportControl("Resolution", width: 130) {
+                    exportControl("Разрешение", width: 130) {
                         Picker("", selection: resolutionPresetBinding) {
                             ForEach(availableResolutionPresets) { preset in
                                 Text(preset.displayName).tag(preset)
@@ -782,7 +846,7 @@ struct ReplayCenterView: View {
                         }
                     }
 
-                    exportControl("Bitrate", width: 140) {
+                    exportControl("Битрейт", width: 140) {
                         Picker("", selection: bitratePresetBinding) {
                             ForEach(ReplayExportBitratePreset.allCases) { preset in
                                 Text(preset.displayName).tag(preset)
@@ -794,7 +858,7 @@ struct ReplayCenterView: View {
                 }
 
                 HStack(alignment: .top, spacing: 12) {
-                    exportControl("Camera", width: 260) {
+                    exportControl("Камера", width: 260) {
                         Picker("", selection: $exportCameraMode) {
                             ForEach(availableCameraModes) { mode in
                                 Text(mode.displayName).tag(mode)
@@ -803,7 +867,7 @@ struct ReplayCenterView: View {
                     }
 
                     if exportSettings.bitratePreset == .custom {
-                        exportControl("Custom bitrate", width: 210) {
+                        exportControl("Свой битрейт", width: 210) {
                             Stepper(
                                 "\(String(format: "%.1f", customBitrateMbpsBinding.wrappedValue)) Mbps",
                                 value: customBitrateMbpsBinding,
@@ -822,7 +886,7 @@ struct ReplayCenterView: View {
                 .foregroundStyle(exportSettings.exportMode == .quality ? .orange : GroundControlPalette.textSecondary)
 
             if exportSettings.exportMode == .fast && exportSettings.resolutionPreset == .p1080 {
-                Text("Fast 1080p is available, but 720p is the cooler default.")
+                Text("1080p (Быстрый) доступен, однако 720p — более экономичный вариант.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
@@ -837,25 +901,25 @@ struct ReplayCenterView: View {
 
             HStack(spacing: 14) {
                 if exportSettings.exportMode == .quality {
-                    Toggle("Include overlay", isOn: Binding(
+                    Toggle("Наложение", isOn: Binding(
                         get: { exportSettings.includeOverlay },
                         set: { exportSettings.includeOverlay = $0 }
                     ))
                     .toggleStyle(.checkbox)
 
-                    Toggle("Path trail", isOn: Binding(
+                    Toggle("Трек пути", isOn: Binding(
                         get: { exportSettings.includePathTrail },
                         set: { exportSettings.includePathTrail = $0 }
                     ))
                     .toggleStyle(.checkbox)
 
-                    Toggle("Event markers", isOn: Binding(
+                    Toggle("Метки событий", isOn: Binding(
                         get: { exportSettings.includeEventMarkers },
                         set: { exportSettings.includeEventMarkers = $0 }
                     ))
                     .toggleStyle(.checkbox)
                 } else {
-                    Text("Fast disables overlay, path and event details for lower heat.")
+                    Text("Быстрый режим отключает наложения, трек пути и метки событий для снижения нагрузки.")
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
 
@@ -864,13 +928,13 @@ struct ReplayCenterView: View {
             .font(.caption)
 
             HStack(spacing: 14) {
-                Toggle("Use trim range", isOn: $exportUsesTrimRange)
+                Toggle("Использовать обрезку", isOn: $exportUsesTrimRange)
                     .toggleStyle(.checkbox)
 
                 Button {
                     startVideoExport()
                 } label: {
-                    Label("Export Video", systemImage: "square.and.arrow.down")
+                    Label("Экспортировать видео", systemImage: "square.and.arrow.down")
                 }
                 .disabled(videoExportService.isExporting || fullscreenSession == nil)
 
@@ -884,16 +948,16 @@ struct ReplayCenterView: View {
             .font(.caption)
 
             HStack(spacing: 12) {
-                Text("Resolved bitrate: \(String(format: "%.1f", resolvedExportBitrateMbps)) Mbps")
+                Text("Фактический битрейт: \(String(format: "%.1f", resolvedExportBitrateMbps)) Мбит/с")
                 if let estimatedExportSizeMB {
-                    Text("Estimated size: ~\(String(format: "%.1f", estimatedExportSizeMB)) MB")
+                    Text("Оценочный размер: ~\(String(format: "%.1f", estimatedExportSizeMB)) МБ")
                 }
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(GroundControlPalette.textSecondary)
 
             if let url = lastExportURL {
-                Text("Output: \(url.path)")
+                Text("Файл: \(url.path)")
                     .font(.caption2.monospaced())
                     .foregroundStyle(GroundControlPalette.textSecondary)
                     .lineLimit(1)
@@ -930,22 +994,22 @@ struct ReplayCenterView: View {
     private var comparisonPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Compare Replays")
+                Text("Сравнение записей")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
-                Picker("Second", selection: Binding(
+                Picker("Вторая", selection: Binding(
                     get: { comparisonReplayID },
                     set: { comparisonReplayID = $0 }
                 )) {
-                    Text("Select replay").tag(Optional<UUID>.none)
+                    Text("Выберите запись").tag(Optional<UUID>.none)
                     ForEach(viewModel.summaries.filter { $0.id != viewModel.selectedSummaryID }) { summary in
                         Text(summary.title).tag(Optional(summary.id))
                     }
                 }
                 .frame(width: 260)
 
-                Button("Compare") {
+                Button("Сравнить") {
                     runComparison()
                 }
                 .disabled(comparisonReplayID == nil || fullscreenSession == nil)
@@ -984,7 +1048,7 @@ struct ReplayCenterView: View {
 
     private func eventListSection(_ events: [MissionReplayEvent]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Events (\(events.count))")
+            Text("События (\(events.count))")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(GroundControlPalette.textSecondary)
                 .padding(.bottom, 2)
@@ -1015,7 +1079,7 @@ struct ReplayCenterView: View {
 
             Spacer(minLength: 4)
 
-            Button("Jump") {
+            Button("Перейти") {
                 jumpToEvent(event)
             }
             .font(.system(size: 10, weight: .medium))
@@ -1287,7 +1351,7 @@ struct ReplayCenterView: View {
     }
 
     private func formatMetric(_ value: Double?, unit: String) -> String {
-        guard let value else { return "n/a" }
+        guard let value else { return "н/д" }
         if unit.isEmpty { return String(format: "%.0f", value) }
         return String(format: "%.1f %@", value, unit)
     }

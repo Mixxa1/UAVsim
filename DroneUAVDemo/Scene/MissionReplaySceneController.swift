@@ -6,9 +6,9 @@ import simd
 
 struct ReplayReconstructionStatus {
     enum Quality: String {
-        case full     = "Full"
-        case partial  = "Partial"
-        case fallback = "Fallback"
+        case full     = "Полный"
+        case partial  = "Частичный"
+        case fallback = "Резервный"
     }
 
     var uavDisplayName: String

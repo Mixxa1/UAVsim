@@ -1,0 +1,24 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/MissionEventFilterBar.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "mission.timeline.filter.severity",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 107
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.timeline.filter.category",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 138
+        }
+      }
+    ]
+  },
+  "version": 1
+}

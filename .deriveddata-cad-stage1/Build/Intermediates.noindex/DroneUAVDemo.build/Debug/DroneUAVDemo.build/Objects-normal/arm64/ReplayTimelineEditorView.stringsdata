@@ -1,0 +1,40 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/ReplayTimelineEditorView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Timeline",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 15
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ - %@  (%@)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 19
+        }
+      },
+      {
+        "comment": "",
+        "key": "Trim start",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 128
+        }
+      },
+      {
+        "comment": "",
+        "key": "Trim end",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 128
+        }
+      }
+    ]
+  },
+  "version": 1
+}

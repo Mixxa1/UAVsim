@@ -1,0 +1,64 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/CADWorkshopModuleView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "cad.assets.empty",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 27
+        }
+      },
+      {
+        "comment": "",
+        "key": "cad.section.create",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 52
+        }
+      },
+      {
+        "comment": "",
+        "key": "cad.action.clear_all",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 61
+        }
+      },
+      {
+        "comment": "",
+        "key": "cad.action.duplicate",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 153
+        }
+      },
+      {
+        "comment": "",
+        "key": "cad.action.delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 155
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 257
+        }
+      },
+      {
+        "comment": "",
+        "key": "cad.selection.empty",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 508
+        }
+      }
+    ]
+  },
+  "version": 1
+}

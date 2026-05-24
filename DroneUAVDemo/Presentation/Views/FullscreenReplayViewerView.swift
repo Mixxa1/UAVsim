@@ -213,7 +213,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         parent.addSubview(bar)
         topBar = bar
 
-        let title = NSTextField(labelWithString: "Black Box Replay")
+        let title = NSTextField(labelWithString: "Бортовой самописец")
         title.font = .systemFont(ofSize: 13, weight: .bold)
         title.textColor = .white
         title.frame = NSRect(x: 16, y: 30, width: 260, height: 18)
@@ -227,7 +227,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(subtitle)
         subtitleLabel = subtitle
 
-        let cameraLabel = NSTextField(labelWithString: "Camera: \(sceneController.cameraMode.displayName)")
+        let cameraLabel = NSTextField(labelWithString: "Камера: \(sceneController.cameraMode.displayName)")
         cameraLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         cameraLabel.textColor = NSColor.white.withAlphaComponent(0.72)
         cameraLabel.frame = NSRect(
@@ -489,9 +489,9 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         }
         qualityBadge?.stringValue = "● " + q.rawValue.uppercased()
         qualityBadge?.textColor   = color
-        cameraModeLabel?.stringValue = "Camera: \(sceneController.cameraMode.displayName)"
+        cameraModeLabel?.stringValue = "Камера: \(sceneController.cameraMode.displayName)"
         selectCameraPopupMode(sceneController.cameraMode)
-        topDownHeightLabel?.stringValue = "Top height: \(Int(sceneController.topDownHeight)) m"
+        topDownHeightLabel?.stringValue = "Высота: \(Int(sceneController.topDownHeight)) м"
         topDownHeightSlider?.doubleValue = Double(sceneController.topDownHeight)
         let isTopDown = sceneController.cameraMode == .topDown
         topDownHeightLabel?.isHidden = !isTopDown

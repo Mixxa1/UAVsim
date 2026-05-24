@@ -1,0 +1,448 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/ReplayCenterView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Delete Replay?",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 105
+        }
+      },
+      {
+        "comment": "",
+        "key": "\"%@\" will be permanently deleted.",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 106
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 107
+        }
+      },
+      {
+        "comment": "",
+        "key": "Black Box Records",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 145
+        }
+      },
+      {
+        "comment": "",
+        "key": "No recordings yet",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 166
+        }
+      },
+      {
+        "comment": "",
+        "key": "Records are saved automatically after each ARM → DISARM cycle.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 169
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld fr",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 189
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-delete old records",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 219
+        }
+      },
+      {
+        "comment": "",
+        "key": "Keep last",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 225
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 229
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select a record to view its report",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 260
+        }
+      },
+      {
+        "comment": "",
+        "key": "Visual Reconstruction",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 333
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ / %@",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 434
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open replay in fullscreen viewer",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 468
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open Fullscreen",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 451
+        }
+      },
+      {
+        "comment": "",
+        "key": "Camera",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 472
+        }
+      },
+      {
+        "comment": "",
+        "key": "Height %lld m",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 492
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 477
+        }
+      },
+      {
+        "comment": "",
+        "key": "No frame data",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 563
+        }
+      },
+      {
+        "comment": "",
+        "key": "No session loaded",
+        "location": {
+          "startingColumn": 64,
+          "startingLine": 563
+        }
+      },
+      {
+        "comment": "",
+        "key": "Mission Report",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 588
+        }
+      },
+      {
+        "comment": "",
+        "key": "Trim",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 661
+        }
+      },
+      {
+        "comment": "",
+        "key": "Preview",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 665
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reset",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 672
+        }
+      },
+      {
+        "comment": "",
+        "key": "Original replay is preserved. Trim is used for graphs and export.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 683
+        }
+      },
+      {
+        "comment": "",
+        "key": "Telemetry",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 697
+        }
+      },
+      {
+        "comment": "",
+        "key": "Fast 1080p is available, but 720p is the cooler default.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 825
+        }
+      },
+      {
+        "comment": "",
+        "key": "Output: %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 896
+        }
+      },
+      {
+        "comment": "",
+        "key": "Video Export",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 727
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 732
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 741
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 752
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 763
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 771
+        }
+      },
+      {
+        "comment": "",
+        "key": "24",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 778
+        }
+      },
+      {
+        "comment": "",
+        "key": "30",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 780
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 786
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 798
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ Mbps",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 808
+        }
+      },
+      {
+        "comment": "",
+        "key": "Fast disables overlay, path and event details for lower heat.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 858
+        }
+      },
+      {
+        "comment": "",
+        "key": "Include overlay",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 840
+        }
+      },
+      {
+        "comment": "",
+        "key": "Path trail",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 846
+        }
+      },
+      {
+        "comment": "",
+        "key": "Event markers",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 852
+        }
+      },
+      {
+        "comment": "",
+        "key": "Use trim range",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 867
+        }
+      },
+      {
+        "comment": "",
+        "key": "Export Video",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 873
+        }
+      },
+      {
+        "comment": "",
+        "key": "Resolved bitrate: %@ Mbps",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 887
+        }
+      },
+      {
+        "comment": "",
+        "key": "Estimated size: ~%@ MB",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 889
+        }
+      },
+      {
+        "comment": "",
+        "key": "Compare Replays",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 933
+        }
+      },
+      {
+        "comment": "",
+        "key": "Second",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 937
+        }
+      },
+      {
+        "comment": "",
+        "key": "Compare",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 948
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select replay",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 941
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ → %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 965
+        }
+      },
+      {
+        "comment": "",
+        "key": "Δ %@",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 968
+        }
+      },
+      {
+        "comment": "",
+        "key": "Events (%lld)",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 987
+        }
+      },
+      {
+        "comment": "",
+        "key": "Jump",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1018
+        }
+      }
+    ]
+  },
+  "version": 1
+}

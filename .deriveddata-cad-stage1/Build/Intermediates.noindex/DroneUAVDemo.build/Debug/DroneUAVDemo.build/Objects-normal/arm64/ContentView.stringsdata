@@ -1,0 +1,336 @@
+{
+  "source": "/Users/misha/UAVsim/DroneUAVDemo/Presentation/Views/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "project.unsaved.title",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 832
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.title",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 1086
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.save",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 835
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.save_exit",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 838
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.unsaved.exit_without",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 841
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 844
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.ok",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 854
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.delete.confirm.title",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 859
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.delete.action",
+        "location": {
+          "startingColumn": 50,
+          "startingLine": 861
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.cancel",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 864
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.saved_projects",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 896
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.search",
+        "location": {
+          "startingColumn": 49,
+          "startingLine": 901
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.sort",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 904
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.title",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 942
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.create_project",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 954
+        }
+      },
+      {
+        "comment": "",
+        "key": "menu.recent_project",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 972
+        }
+      },
+      {
+        "comment": "",
+        "key": "Black Box Records",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 995
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.charge",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1090
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.restart",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1093
+        }
+      },
+      {
+        "comment": "",
+        "key": "battery.depleted.message",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1097
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.ok",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 1106
+        }
+      },
+      {
+        "comment": "",
+        "key": "•",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1167
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.modules.on",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 1262
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.modules.off",
+        "location": {
+          "startingColumn": 76,
+          "startingLine": 1262
+        }
+      },
+      {
+        "comment": "",
+        "key": "toolbar.header.project",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 1305
+        }
+      },
+      {
+        "comment": "",
+        "key": "keybind.open",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 1330
+        }
+      },
+      {
+        "comment": "",
+        "key": "mission.map.open_help",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 1341
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.hide",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 1353
+        }
+      },
+      {
+        "comment": "",
+        "key": "panel.show",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 1365
+        }
+      },
+      {
+        "comment": "",
+        "key": "cad.workspace.open",
+        "location": {
+          "startingColumn": 37,
+          "startingLine": 1376
+        }
+      },
+      {
+        "comment": "",
+        "key": "Black Box Records",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 1322
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.save.action",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1273
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.save_as.action",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1276
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.duplicate.action",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1280
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.open.action",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1285
+        }
+      },
+      {
+        "comment": "",
+        "key": "window.fullscreen",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1288
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.delete.action",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1291
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.name",
+        "location": {
+          "startingColumn": 41,
+          "startingLine": 1528
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.name",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 1532
+        }
+      },
+      {
+        "comment": "",
+        "key": "project.name",
+        "location": {
+          "startingColumn": 52,
+          "startingLine": 1533
+        }
+      },
+      {
+        "comment": "",
+        "key": "common.cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1540
+        }
+      }
+    ]
+  },
+  "version": 1
+}

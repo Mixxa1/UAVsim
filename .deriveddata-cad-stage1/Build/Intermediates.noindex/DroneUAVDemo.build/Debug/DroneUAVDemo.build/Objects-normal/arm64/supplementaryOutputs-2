@@ -1,0 +1,79 @@
+{
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/CameraConfiguration.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CameraConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CameraConfiguration.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CameraConfiguration.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CameraConfiguration.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CameraConfiguration.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/DamageThermalModel.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DamageThermalModel.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DamageThermalModel.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DamageThermalModel.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DamageThermalModel.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DamageThermalModel.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/DroneModelProfile.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelProfile.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelProfile.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelProfile.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelProfile.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/DroneModelProfile.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/TerrainModel.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TerrainModel.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TerrainModel.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TerrainModel.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TerrainModel.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/TerrainModel.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Domain/WeatherModel.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/WeatherModel.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/WeatherModel.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/WeatherModel.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/WeatherModel.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/WeatherModel.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Input/GameControllerInputProvider.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GameControllerInputProvider.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GameControllerInputProvider.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GameControllerInputProvider.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GameControllerInputProvider.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/GameControllerInputProvider.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Input/InputManager.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputManager.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputManager.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputManager.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputManager.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/InputManager.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Input/KeyboardInputProvider.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputProvider.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Input/KeyboardInputService.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/KeyboardInputService.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Simulation/BatteryThermalSimulationService.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/BatteryThermalSimulationService.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/BatteryThermalSimulationService.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/BatteryThermalSimulationService.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/BatteryThermalSimulationService.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/BatteryThermalSimulationService.swiftdeps"
+  },
+  "/Users/misha/UAVsim/DroneUAVDemo/Simulation/CollisionAnalysisService.swift" : {
+    "const-values" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.swiftconstvalues",
+    "dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.d",
+    "diagnostics" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.dia",
+    "object" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.o",
+    "swift-dependencies" : "/Users/misha/UAVsim/.deriveddata-cad-stage1/Build/Intermediates.noindex/DroneUAVDemo.build/Debug/DroneUAVDemo.build/Objects-normal/arm64/CollisionAnalysisService.swiftdeps"
+  }
+}
