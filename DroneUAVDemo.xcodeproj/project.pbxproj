@@ -233,6 +233,7 @@
 		10000000000000000000031B /* DesignAssemblyLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000031A /* DesignAssemblyLink.swift */; };
 		10000000000000000000031D /* DesignSketchProfileGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000031C /* DesignSketchProfileGraph.swift */; };
 		10000000000000000000031F /* CADFeatureTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000031E /* CADFeatureTypes.swift */; };
+		10000000000000000000033C /* CADSolidBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000033D /* CADSolidBackend.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -459,6 +460,7 @@
 		10000000000000000000031A /* DesignAssemblyLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignAssemblyLink.swift; sourceTree = "<group>"; };
 		10000000000000000000031C /* DesignSketchProfileGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSketchProfileGraph.swift; sourceTree = "<group>"; };
 		10000000000000000000031E /* CADFeatureTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADFeatureTypes.swift; sourceTree = "<group>"; };
+		10000000000000000000033D /* CADSolidBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADSolidBackend.swift; sourceTree = "<group>"; };
 		100000000000000000000305 /* DesignPreviewSceneBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignPreviewSceneBuilder.swift; sourceTree = "<group>"; };
 		100000000000000000000306 /* DesignAssetNodeFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignAssetNodeFactory.swift; sourceTree = "<group>"; };
 		100000000000000000000307 /* DesignPreviewSceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignPreviewSceneViewRepresentable.swift; sourceTree = "<group>"; };
@@ -840,6 +842,7 @@
 				10000000000000000000031A /* DesignAssemblyLink.swift */,
 				10000000000000000000031C /* DesignSketchProfileGraph.swift */,
 				10000000000000000000031E /* CADFeatureTypes.swift */,
+				10000000000000000000033D /* CADSolidBackend.swift */,
 			);
 			path = CAD;
 			sourceTree = "<group>";
@@ -1120,6 +1123,7 @@
 				10000000000000000000031B /* DesignAssemblyLink.swift in Sources */,
 				10000000000000000000031D /* DesignSketchProfileGraph.swift in Sources */,
 				10000000000000000000031F /* CADFeatureTypes.swift in Sources */,
+				10000000000000000000033C /* CADSolidBackend.swift in Sources */,
 				100000000000000000000311 /* DesignPreviewSceneBuilder.swift in Sources */,
 				100000000000000000000312 /* DesignAssetNodeFactory.swift in Sources */,
 				100000000000000000000313 /* DesignPreviewSceneViewRepresentable.swift in Sources */,

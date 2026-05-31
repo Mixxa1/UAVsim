@@ -4,6 +4,9 @@ import simd
 
 struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
     typealias NSViewType = CADCanvasView
+    private static let cadTransientRootNodeName = "cadTransientRootNode"
+    private static let cutPreviewNodeName = "CutToolPreviewNode"
+    private static let extrudePreviewNodeName = "feature_preview"
 
     let document: DesignDocument
     let viewportState: DesignViewportState
@@ -112,6 +115,8 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         var isSketchMoveMode: Bool = false
         // Base positions of preview entity nodes, captured at drag start.
         var previewNodeBasePositions: [String: simd_float3] = [:]
+        var featurePreviewNodeRebuildCount: Int = 0
+        var assetGeometryRebuildCount: Int = 0
 
         // Callbacks
         var onMouseMoved: ((CADSnapResult) -> Void)?
@@ -1316,7 +1321,7 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         let scene = DesignPreviewSceneBuilder.buildScene()
         view.scene = scene
         DesignPreviewSceneBuilder.addCamera(to: view)
-        populateScene(view: view, scene: scene)
+        populateScene(view: view, scene: scene, coordinator: context.coordinator)
         DesignPreviewSceneBuilder.applyViewportState(
             viewportState,
             to: view,
@@ -1344,11 +1349,11 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         syncCoordinator(context.coordinator)
 
         if scene.rootNode.childNode(withName: "assets_container", recursively: false) == nil {
-            populateScene(view: nsView, scene: scene)
+            populateScene(view: nsView, scene: scene, coordinator: context.coordinator)
             context.coordinator.lastDocument = document
         }
 
-        let didAssetStateChange = context.coordinator.lastDocument != document
+        let didCommittedAssetStateChange = context.coordinator.lastDocument != document
             || context.coordinator.lastViewportState?.selectedAssetID != viewportState.selectedAssetID
             || context.coordinator.lastViewportState?.selectedAttachmentPointID != viewportState.selectedAttachmentPointID
             || context.coordinator.lastViewportState?.selectedSketchLineID != viewportState.selectedSketchLineID
@@ -1356,14 +1361,18 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
             || context.coordinator.lastViewportState?.selectedSketchEntityIDs != viewportState.selectedSketchEntityIDs
             || context.coordinator.lastViewportState?.selectedFaceID != viewportState.selectedFaceID
             || context.coordinator.lastViewportState?.hoveredWorkPlaneID != viewportState.hoveredWorkPlaneID
-            || context.coordinator.lastViewportState?.featurePreviewParams != viewportState.featurePreviewParams
+
+        let didFeaturePreviewChange = context.coordinator.lastViewportState?.featurePreviewParams != viewportState.featurePreviewParams
             || context.coordinator.lastViewportState?.featurePreviewIsCut != viewportState.featurePreviewIsCut
 
-        if didAssetStateChange {
-            repopulateScene(view: nsView, scene: scene)
+        if didCommittedAssetStateChange {
+            repopulateScene(view: nsView, scene: scene, coordinator: context.coordinator)
             context.coordinator.lastDocument = document
             // Full rebuild: base positions are stale, clear them.
             context.coordinator.previewNodeBasePositions = [:]
+        } else if didFeaturePreviewChange,
+                  let container = scene.rootNode.childNode(withName: "assets_container", recursively: false) {
+            updateFeaturePreviewNode(in: container, coordinator: context.coordinator)
         }
 
         // Move preview: directly translate entity nodes without full rebuild.
@@ -1371,7 +1380,7 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         let currPreviewDelta = viewportState.movePreviewDelta
         let prevPreviewIDs = context.coordinator.lastViewportState?.movePreviewEntityIDs ?? []
         let currPreviewIDs = viewportState.movePreviewEntityIDs
-        if !didAssetStateChange, (prevPreviewDelta != currPreviewDelta || prevPreviewIDs != currPreviewIDs) {
+        if !didCommittedAssetStateChange, (prevPreviewDelta != currPreviewDelta || prevPreviewIDs != currPreviewIDs) {
             applyMovePreview(
                 entityIDs: currPreviewIDs,
                 delta: currPreviewDelta,
@@ -1392,7 +1401,7 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
                 animated: false
             )
             context.coordinator.lastViewportState = viewportState
-        } else if didAssetStateChange {
+        } else if didCommittedAssetStateChange {
             DesignPreviewSceneBuilder.applyCanvasOptions(viewportState.canvasOptions, to: nsView)
         }
 
@@ -1507,22 +1516,33 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         c.lastCameraCommandID = cameraCommand?.id
     }
 
-    private func populateScene(view: CADCanvasView, scene: SCNScene) {
+    private func populateScene(view: CADCanvasView, scene: SCNScene, coordinator: Coordinator?) {
         let container = SCNNode()
         container.name = "assets_container"
         scene.rootNode.addChildNode(container)
-        rebuildAssets(in: container)
+        rebuildAssets(in: container, coordinator: coordinator)
     }
 
-    private func repopulateScene(view: CADCanvasView, scene: SCNScene) {
+    private func repopulateScene(view: CADCanvasView, scene: SCNScene, coordinator: Coordinator?) {
         scene.rootNode.childNode(withName: "assets_container", recursively: false)?.removeFromParentNode()
         let container = SCNNode()
         container.name = "assets_container"
         scene.rootNode.addChildNode(container)
-        rebuildAssets(in: container)
+        rebuildAssets(in: container, coordinator: coordinator)
     }
 
-    private func rebuildAssets(in container: SCNNode) {
+    private func rebuildAssets(in container: SCNNode, coordinator: Coordinator?) {
+        if let coordinator {
+            coordinator.assetGeometryRebuildCount += 1
+            print(
+                "CAD Cut v2 Scene Counters: " +
+                "previewNodeRebuildCount=\(coordinator.featurePreviewNodeRebuildCount) " +
+                "assetGeometryRebuildCount=\(coordinator.assetGeometryRebuildCount) " +
+                "removedPreviewNodeCount=0 " +
+                "previewVisible=\(viewportState.featurePreviewParams != nil)"
+            )
+        }
+        _ = clearAllTransientCADNodes(in: container)
         for asset in document.assets {
             let node = DesignAssetNodeFactory.makeNode(
                 for: asset,
@@ -1554,14 +1574,65 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
             DesignAssetNodeFactory.applyHighlight(node, selected: asset.id == viewportState.selectedAssetID)
         }
 
-        // Feature preview ghost
+        updateFeaturePreviewNode(in: container, coordinator: nil)
+    }
+
+    private func updateFeaturePreviewNode(in container: SCNNode, coordinator: Coordinator?) {
+        let removedPreviewNodeCount = clearAllTransientCADNodes(in: container)
+
         if let previewParams = viewportState.featurePreviewParams {
+            let root = cadTransientRootNode(in: container, createIfNeeded: true)
             let previewNode = DesignAssetNodeFactory.makeFeaturePreviewNode(
                 params: previewParams,
                 isCut: viewportState.featurePreviewIsCut
             )
-            container.addChildNode(previewNode)
+            root.addChildNode(previewNode)
         }
+
+        if let coordinator {
+            coordinator.featurePreviewNodeRebuildCount += 1
+            print(
+                "CAD Cut v2 Scene Counters: " +
+                "previewNodeRebuildCount=\(coordinator.featurePreviewNodeRebuildCount) " +
+                "assetGeometryRebuildCount=\(coordinator.assetGeometryRebuildCount) " +
+                "removedPreviewNodeCount=\(removedPreviewNodeCount) " +
+                "previewVisible=\(viewportState.featurePreviewParams != nil)"
+            )
+        }
+    }
+
+    @discardableResult
+    private func clearAllTransientCADNodes(in container: SCNNode) -> Int {
+        var removedCount = 0
+        if let transientRoot = container.childNode(
+            withName: Self.cadTransientRootNodeName,
+            recursively: false
+        ) {
+            removedCount += transientRoot.childNodes.count
+            transientRoot.removeFromParentNode()
+        }
+        for name in [Self.cutPreviewNodeName, Self.extrudePreviewNodeName] {
+            if let legacyNode = container.childNode(withName: name, recursively: false) {
+                legacyNode.removeFromParentNode()
+                removedCount += 1
+            }
+        }
+        return removedCount
+    }
+
+    private func cadTransientRootNode(in container: SCNNode, createIfNeeded: Bool) -> SCNNode {
+        if let existing = container.childNode(
+            withName: Self.cadTransientRootNodeName,
+            recursively: false
+        ) {
+            return existing
+        }
+        let root = SCNNode()
+        root.name = Self.cadTransientRootNodeName
+        if createIfNeeded {
+            container.addChildNode(root)
+        }
+        return root
     }
 
     private func hoveredFaceID(from workPlaneID: String?) -> UUID? {

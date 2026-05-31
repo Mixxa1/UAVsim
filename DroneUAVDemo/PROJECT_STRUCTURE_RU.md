@@ -2,15 +2,17 @@
 
 ## Назначение проекта
 
-`DroneUAVDemo` — macOS-приложение на `Swift + SwiftUI + SceneKit` для симуляции БЛА. В проекте совмещены:
+`DroneUAVDemo` — macOS-приложение на `Swift`, `SwiftUI` и `SceneKit` для симуляции БЛА. В одном target собраны:
 
-- интерактивная 3D-сцена;
-- упрощённая физика полёта;
-- каталог БЛА и выбор активного профиля;
-- модули управления полётом, камерой, сценарием, диагностикой и полезной нагрузкой;
-- телеметрия, диагностика, экспорт и сохранение проектов.
+- интерактивная 3D-сцена с окружением, камерами и полезной нагрузкой;
+- baseline-физика полёта для мультикоптеров и самолётных БЛА;
+- каталог БЛА, фильтры, настройка профиля и payload capability;
+- mission planning, execution, safety/failsafe, debrief и replay;
+- CAD/design workshop для сборки и просмотра конструктивных элементов;
+- input-pipeline для клавиатуры, game controller, remote-control и будущего autopilot-provider;
+- сохранение проектов, телеметрии, replay-сессий и экспорт видео replay.
 
-Документ нужен как практическая карта кодовой базы: что лежит в какой директории, за что отвечает каждый слой и где искать нужную логику.
+Документ служит практической картой кодовой базы: где искать нужный слой, через какие файлы проходит runtime-поток и какие компоненты менять для типовых задач.
 
 ---
 
@@ -18,1031 +20,580 @@
 
 Если нужно быстро понять проект, читайте в таком порядке:
 
-1. [DroneUAVDemoApp.swift](/Users/misha/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
-   Точка входа приложения.
-2. [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
-   Верхнеуровневый shell приложения, стартовый экран и рабочее окно симуляции.
-3. [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
-   Главный orchestrator: состояние, цикл симуляции, связь UI со сценой и сервисами.
-4. [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
-   Управляет `SceneKit`-сценой, камерой, визуальной моделью дрона, окружением и debug-слоями.
-5. [SimpleDronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
+1. [DroneUAVDemoApp.swift](DroneUAVDemoApp.swift)
+   Точка входа macOS-приложения, `WindowGroup`, fullscreen command.
+2. [ContentView.swift](Presentation/Views/ContentView.swift)
+   Верхнеуровневый shell: стартовый экран, рабочая симуляция, replay center и CAD workspace.
+3. [DroneSimulationViewModel.swift](Presentation/ViewModels/DroneSimulationViewModel.swift)
+   Главный runtime-orchestrator: состояние, цикл симуляции, UI-команды, сцена, физика, миссии, input и storage.
+4. [DroneSceneController.swift](Scene/DroneSceneController.swift)
+   Управляет `SceneKit`-сценой, камерами, окружением, визуалом БЛА, payload и debug-слоями.
+5. [SimpleDronePhysicsEngine.swift](Simulation/SimpleDronePhysicsEngine.swift)
    Основная baseline-физика полёта.
-6. [ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
-   Генерирует окружение по типу местности.
-7. [TelemetryExportService.swift](/Users/misha/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
-   Экспорт телеметрии и хранение проектов.
+6. [MissionPlanBuilder.swift](Simulation/MissionPlanBuilder.swift), [MissionExecutionCoordinator.swift](Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](Simulation/MissionProgressTracker.swift)
+   Планирование и выполнение миссий.
+7. [CADWorkshopViewModel.swift](Presentation/ViewModels/CADWorkshopViewModel.swift)
+   Orchestration CAD/design workshop: документ, инструменты эскиза, extrude/cut, selection и preview state.
+8. [ReplayCenterView.swift](Presentation/Views/ReplayCenterView.swift)
+   Просмотр replay, timeline, события, сравнение, trim и экспорт видео.
 
 ---
 
 ## Общая архитектура
 
-Проект разбит на несколько слоёв:
+Проект разбит на слои:
 
 - `Presentation`
-  SwiftUI-интерфейс, модульная левая панель, overlay-панели, shell приложения.
-- `ViewModel`
-  Главный runtime state и orchestration.
+  SwiftUI-интерфейс, стартовый экран, toolstrip, модульная боковая панель, CAD workspace, replay UI и overlay-компоненты.
+- `Presentation/ViewModels`
+  Runtime state и orchestration для симуляции, CAD, replay library, биндов и compass.
 - `Scene`
-  Построение и обновление `SceneKit`-сцены.
+  Построение и обновление `SceneKit`-сцены симуляции, replay-сцены и CAD preview.
 - `Simulation`
-  Физика полёта, анализ коллизий, автопланирование, батарея/тепло, флот, payload-логика.
+  Физика, автопилоты, маршруты, миссии, safety/failsafe, replay recorder/player, telemetry series и tactical map coordination.
 - `Domain`
-  Чистые модели данных и конфигурации.
+  Чистые модели данных: БЛА, миссии, payload, replay, карта, телеметрия, routing authority, CAD domain.
 - `Services`
-  Работа с проектами, autosave, внутренним storage и экспортом телеметрии.
+  Project storage, telemetry export, replay storage/settings и video export.
 - `Input`
-  Единый input-pipeline: клавиатура, game controller, remote-control, будущий autopilot-provider, бинды и dominant-source arbitration.
-- `Resources`
-  Локализация, `Assets.xcassets` и системные ресурсы приложения.
+  Единый input-pipeline: keyboard, controller, remote, autopilot placeholder, бинды и настройки контроллера.
 - `Remote`
-  TCP-транспорт внешнего управления, декодирование remote-пакетов и адаптация к shared input state.
+  TCP remote-control transport, packet decoder и mock-транспорт.
+- `Resources`
+  Локализация и `Assets.xcassets`.
 
 ---
 
-## Технические составляющие
+## Runtime data flow
 
-### Платформа и runtime
+1. `DroneUAVDemoApp` открывает `ContentView`.
+2. `ContentView` показывает стартовый экран, CAD workspace или рабочую симуляцию.
+3. `DroneSimulationViewModel` создаёт runtime-сервисы, input providers, scene controller и mission/replay pipeline.
+4. На каждом тике `ViewModel` собирает input, mission/autopilot authority, payload, weather, collision и battery context.
+5. `SimpleDronePhysicsEngine` обновляет `DroneState`.
+6. `DroneSceneController` синхронизирует `SCNNode`-дерево, камеры, окружение, payload lifecycle и debug visuals.
+7. Mission/replay/telemetry-сервисы записывают события, кадры, отчёты и экспортируемые данные.
+8. SwiftUI-панели получают опубликованное состояние через `@Published` поля `ViewModel`.
 
-- Язык и UI: `Swift`, `SwiftUI`, `Combine`-совместимые `ObservableObject` view model-и.
-- 3D-слой: `SceneKit` (`SCNScene`, `SCNView`, `SCNNode`, procedural geometry/materials).
-- Системные API: `Foundation`, `Network` для TCP remote-control, `GameController` для аппаратных контроллеров.
-- Target: macOS-приложение в `DroneUAVDemo.xcodeproj`.
-
-### Runtime data flow
-
-1. `ContentView` открывает или создаёт проект и поднимает `DroneSimulationViewModel`.
-2. `DroneSimulationViewModel` на каждом тике собирает input, routing authority, mission state, collision/weather/payload context.
-3. Автопилот/ручной ввод превращаются в `DroneControlInput`.
-4. `SimpleDronePhysicsEngine` обновляет `DroneState`.
-5. `DroneSceneController` синхронизирует `SceneKit`-ноды, камеры, environment visuals, debug layers и payload visuals.
-6. `MissionStatusResolver`, telemetry/export/storage-сервисы публикуют состояние обратно в UI.
-
-### Основные подсистемы
-
-- Flight dynamics: `SimpleDronePhysicsEngine`, `DroneSimulationContext`, `FlightBaselineResolver`.
-- Guidance/autopilot: `AutoNavigationController`, `MulticopterAutopilotController`, `FixedWingAutopilotController`, `FixedWingAssistController`.
-- Mission planning/execution: `MissionDraftBuilder`, `MissionPreviewBuilder`, `MissionPlanBuilder`, `MissionExecutionBinder`, `MissionExecutionCoordinator`, `MissionProgressTracker`, `MissionRuntimeMonitor`, `MissionSafetyEvaluator`.
-- Route generation: `AutoPathPlannerService`, `MulticopterRouteBuilder`, `FixedWingRouteBuilder`.
-- Control authority: `FlightControlRouter`, `ControlAuthorityManager`, `MissionAuthorityGuard`.
-- Scene/environment: `DroneSceneController`, `ScenePopulationService`, `EnvironmentObjectFactory`, `EnvironmentProceduralVisualFactory`.
-- Input: `InputManager`, `KeyboardInputProvider`, `GameControllerInputProvider`, `RemoteInputProvider`, `AutopilotInputProvider`.
-- Storage/export: `ProjectStorageService`, `TelemetryExportService`.
-
-Упрощённая схема потока:
+Упрощённая схема:
 
 ```mermaid
 flowchart LR
     A["DroneUAVDemoApp"] --> B["ContentView"]
     B --> C["DroneSimulationViewModel"]
-    C --> D["DroneSceneController"]
-    C --> E["SimpleDronePhysicsEngine"]
-    C --> F["CollisionAnalysisService"]
-    C --> G["BatteryThermalSimulationService"]
-    C --> H["AutoPathPlannerService"]
-    C --> I["DroneFleetManager"]
-    C --> J["TelemetryExportService / ProjectStorageService"]
-    D --> K["SceneFactory"]
-    D --> L["DroneModelBuilder"]
-    D --> M["ScenePopulationService"]
-    M --> N["EnvironmentObjectFactory"]
-    N --> O["EnvironmentProceduralVisualFactory"]
-    O --> P["EnvironmentProceduralMaterials"]
+    C --> D["InputManager"]
+    D --> E["Keyboard / Controller / Remote"]
+    C --> F["Mission + Autopilot pipeline"]
+    C --> G["SimpleDronePhysicsEngine"]
+    C --> H["Collision / Battery / Fleet / Payload"]
+    C --> I["DroneSceneController"]
+    I --> J["SceneKit scene"]
+    C --> K["Telemetry + Project storage"]
+    C --> L["MissionReplayRecorder"]
+    L --> M["MissionReplayStorageService"]
 ```
 
 ---
 
-## Как запускается приложение
+## Корень проекта
 
-### 1. Точка входа
+### `/DroneUAVDemo`
 
-[DroneUAVDemoApp.swift](/Users/misha/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
+- [DroneUAVDemoApp.swift](DroneUAVDemoApp.swift)
+  Entry point приложения, размер окна, fullscreen-команда.
+- [PROJECT_STRUCTURE_RU.md](PROJECT_STRUCTURE_RU.md)
+  Этот документ.
 
-- создаёт `WindowGroup`;
-- показывает `ContentView`;
-- задаёт стартовый размер окна;
-- добавляет команду fullscreen.
-
-### 2. Shell приложения
-
-[ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
-
-Файл выполняет сразу две роли:
-
-- стартовый экран со списком проектов;
-- рабочее окно симуляции после открытия/создания проекта.
-
-Внутри него есть `AppShellViewModel`, который отвечает за:
-
-- список сохранённых проектов;
-- открытие/создание/дублирование/удаление проекта;
-- показ активной симуляции;
-- обработку сценария выхода с несохранёнными изменениями.
-
-Когда проект открыт, `ContentView` строит рабочую компоновку:
-
-- верхняя строка состояния проекта;
-- toolbar-модули (`Flight Ops`, `UAV Catalog`, `Camera`, `Scenario`, `Diagnostics`, `Payload`);
-- левая модульная панель;
-- центральный viewport со сценой;
-- overlay для payload и сигналов потери связи.
+В соседнем [DroneUAVDemo.xcodeproj](../DroneUAVDemo.xcodeproj/project.pbxproj) лежит Xcode project target.
 
 ---
 
-## Главный runtime-узел
+## Presentation
 
-### DroneSimulationViewModel
+### `/Presentation/ViewModels`
 
-[DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
+- [DroneSimulationViewModel.swift](Presentation/ViewModels/DroneSimulationViewModel.swift)
+  Главный runtime-viewmodel симуляции. Здесь сходятся UI, физика, сцена, input, миссии, payload, replay recorder, storage и diagnostics.
+- [CADWorkshopViewModel.swift](Presentation/ViewModels/CADWorkshopViewModel.swift)
+  Состояние design workshop: document model, selection, sketch tools, constraints, snaps, extrude/cut preview и commit.
+- [ReplayLibraryViewModel.swift](Presentation/ViewModels/ReplayLibraryViewModel.swift)
+  Список replay-записей, retention policy, загрузка и удаление replay.
+- [BindingsViewModel.swift](Presentation/ViewModels/BindingsViewModel.swift)
+  UI-состояние для настройки key bindings.
+- [CompassViewModel.swift](Presentation/ViewModels/CompassViewModel.swift)
+  Подготовка данных для compass overlay.
 
-Это главный координационный объект проекта. Он:
+### `/Presentation/Views`
 
-- хранит всё текущее состояние симуляции;
-- владеет сценой через `DroneSceneController`;
-- создаёт и использует все runtime-сервисы;
-- запускает таймер симуляции;
-- связывает UI-команды с физикой и сценой;
-- публикует телеметрию, предупреждения и диагностику для SwiftUI.
+#### Shell и рабочие области
 
-### Что именно хранит `ViewModel`
+- [ContentView.swift](Presentation/Views/ContentView.swift)
+  Главный shell. Содержит стартовый экран проектов, запуск replay center, переключение в CAD workspace и рабочую симуляцию.
+- [SceneViewportView.swift](Presentation/Views/SceneViewportView.swift)
+  Центральный viewport симуляции с `DroneSceneViewRepresentable`, HUD, tactical map и overlays.
+- [DroneSceneViewRepresentable.swift](Presentation/Views/DroneSceneViewRepresentable.swift)
+  Мост SwiftUI -> `SCNView`; подключает `DroneSceneController`, camera control и render delegate.
+- [SidebarModuleHostView.swift](Presentation/Views/SidebarModuleHostView.swift)
+  Host левой панели, отображает активный control module.
+- [ControlModule.swift](Presentation/Views/ControlModule.swift)
+  Enum модулей боковой панели: `flightOps`, `uavCatalog`, `camera`, `scenario`, `diagnostics`.
 
-Основные группы состояния:
+#### Модули симуляции
 
-- управление:
-  - `controlValues`
-  - `mode`
-  - `flightControlMode`
-  - `isArmed`
-  - `physicalState`
-- проект:
-  - `currentProjectID`
-  - `currentProjectName`
-  - `hasUnsavedChanges`
-- каталог БЛА:
-  - `availableDroneProfiles`
-  - `selectedDroneProfile`
-  - `activeUAVProfile`
-  - `uavCatalogFilterState`
-  - `abstractParameters`
-- окружение и камера:
-  - `weather`
-  - `terrain`
-  - `cameraConfiguration`
-  - `selectedCameraPreset`
-- эксплуатация:
-  - `payloadState`
-  - `payloadMountState`
-  - `payloadDraftConfiguration`
-  - `vehicleMassModel`
-  - `payloadCapabilityCheck`
-- runtime-сигналы:
-  - `telemetry`
-  - `warnings`
-  - `diagnostics`
-  - `collisionAnalysis`
-  - `batteryState`
-  - `damageState`
-  - `thermalState`
-  - `fleetStatus`
-- UI-состояние:
-  - `isToolPanelVisible`
-  - `isParametersPanelVisible`
-  - `activeControlModule`
-  - `isPayloadPanelVisible`
-  - `collisionDebugEnabled`
-  - `diagnosticMode`
-  - `isCompactTelemetryHUDEnabled`
+- [FlightOpsModuleView.swift](Presentation/Views/FlightOpsModuleView.swift)
+  Arm/disarm, takeoff/land/return, режимы управления, автопуть и fixed-wing controls.
+- [UAVCatalogModuleView.swift](Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](Presentation/Views/UAVCatalogView.swift), [UAVFilterBarView.swift](Presentation/Views/UAVFilterBarView.swift), [UAVProfileCardView.swift](Presentation/Views/UAVProfileCardView.swift)
+  Каталог БЛА, фильтры, карточки и выбор активного профиля.
+- [CameraModuleView.swift](Presentation/Views/CameraModuleView.swift)
+  Пресеты камеры, optics, follow/free camera и advanced controls.
+- [ScenarioModuleView.swift](Presentation/Views/ScenarioModuleView.swift)
+  Погода, ветер, terrain/map настройки и visibility/debug параметры сценария.
+- [DiagnosticsModuleView.swift](Presentation/Views/DiagnosticsModuleView.swift), [TelemetryPanelView.swift](Presentation/Views/TelemetryPanelView.swift)
+  Runtime-диагностика, телеметрия, fleet/service panels.
+- [PayloadView.swift](Presentation/Views/PayloadView.swift), [PayloadToolbarEntry.swift](Presentation/Views/PayloadToolbarEntry.swift)
+  Payload configuration, mount state, payload camera и toolbar entry.
 
-### Какие сервисы создаёт `ViewModel`
+#### Mission UI
 
-В конструкторе `DroneSimulationViewModel` подключаются:
+- [MissionDraftPanel.swift](Presentation/Views/MissionDraftPanel.swift)
+  Создание draft-миссии, waypoints, constraints и launch settings.
+- [MissionMapView.swift](Presentation/Views/MissionMapView.swift), [TacticalMapView.swift](Presentation/Views/TacticalMapView.swift), [TacticalMapHostView.swift](Presentation/Views/TacticalMapHostView.swift)
+  Планирование и отображение карты/маршрутов.
+- [MissionTimelineView.swift](Presentation/Views/MissionTimelineView.swift), [MissionStatusPanel.swift](Presentation/Views/MissionStatusPanel.swift), [MissionSafetyPanel.swift](Presentation/Views/MissionSafetyPanel.swift)
+  Progress, status и safety state миссии.
+- [MissionDebriefView.swift](Presentation/Views/MissionDebriefView.swift), [MissionFailureView.swift](Presentation/Views/MissionFailureView.swift), [MissionEventFilterBar.swift](Presentation/Views/MissionEventFilterBar.swift)
+  Итоги миссии, failure state и фильтрация событий.
 
-- `SimpleDronePhysicsEngine`
-- `KeyboardInputService`
-- `GameControllerInputProvider`
-- `RemoteInputProvider`
-- `InputManager`
-- `CollisionAnalysisService`
-- `BatteryThermalSimulationService`
-- `TelemetryExportService`
-- `ProjectStorageService`
-- `DroneFleetManager`
-- `AutoPathPlannerService`
-- `FlightControlRouter`
-- `AutoNavigationController`
-- `MulticopterAutopilotController`
-- `FixedWingAutopilotController`
-- `FixedWingAssistController`
-- `PayloadCameraController`
-- mission-сервисы: `MissionDraftBuilder`, `MissionPreviewBuilder`, `MissionPlanBuilder`, `MissionExecutionBinder`, `MissionExecutionCoordinator`, `MissionAutopilotAdapter`, `MissionProgressTracker`, `MissionAuthorityGuard`, `MissionRuntimeMonitor`, `MissionSafetyEvaluator`, `MissionFailsafeCoordinator`, `MissionStatusResolver`, `MissionEventRecorder`, `MissionDebriefService`
-- `DroneSceneController`
+#### Replay UI
 
-То есть `ViewModel` — это место, где сходятся все крупные подсистемы проекта.
+- [ReplayCenterView.swift](Presentation/Views/ReplayCenterView.swift)
+  Библиотека replay, playback, timeline, события, trim, сравнение и video export settings.
+- [ReplayCenterWindowHost.swift](Presentation/Views/ReplayCenterWindowHost.swift)
+  Открытие replay center в отдельном окне.
+- [MissionReplaySceneViewRepresentable.swift](Presentation/Views/MissionReplaySceneViewRepresentable.swift)
+  SwiftUI-мост для replay-сцены.
+- [ReplayTimelineEditorView.swift](Presentation/Views/ReplayTimelineEditorView.swift)
+  Timeline/trim UI и telemetry graphs.
+- [FullscreenReplayViewerView.swift](Presentation/Views/FullscreenReplayViewerView.swift)
+  Полноэкранный просмотр replay.
+
+#### CAD/design workshop UI
+
+- [CADWorkshopModuleView.swift](Presentation/Views/CADWorkshopModuleView.swift)
+  Входной модуль design workshop.
+- [DesignWorkshopWorkspaceView.swift](Presentation/Views/DesignWorkshopWorkspaceView.swift)
+  Основная CAD workspace-компоновка: browser, properties, tool controls и viewport.
+
+#### Input и overlays
+
+- [KeyBindingsSettingsView.swift](Presentation/Views/KeyBindingsSettingsView.swift)
+  Настройка клавиатурных биндов.
+- [ControllerHubOverlay.swift](Presentation/Views/ControllerHubOverlay.swift), [ControllerCursorOverlay.swift](Presentation/Views/ControllerCursorOverlay.swift), [VirtualKeyboardView.swift](Presentation/Views/VirtualKeyboardView.swift)
+  Game-controller UI, курсор и виртуальная клавиатура.
+- [CompactTelemetryHUDView.swift](Presentation/Views/CompactTelemetryHUDView.swift), [CompassOverlayView.swift](Presentation/Views/CompassOverlayView.swift)
+  HUD-компоненты поверх сцены.
+- [ControlPanelView.swift](Presentation/Views/ControlPanelView.swift)
+  Legacy/compatibility панель. Основная актуальная навигация идёт через `ControlModule` и `SidebarModuleHostView`.
+
+---
+
+## Domain
+
+### `/Domain`
+
+Чистые модели предметной области без прямого управления SwiftUI-сценой.
+
+#### БЛА и каталог
+
+- [DroneModelProfile.swift](Domain/DroneModelProfile.swift)
+  Runtime flight/visual profile, `AbstractDroneParameters`, repository baseline-профилей.
+- [UAVProfile.swift](Domain/UAVProfile.swift), [UAVReferenceCatalog.swift](Domain/UAVReferenceCatalog.swift), [UAVCatalog.swift](Domain/UAVCatalog.swift)
+  Reference-профили, каталог и entries.
+- [UAVVehicleType.swift](Domain/UAVVehicleType.swift), [UAVMassCategory.swift](Domain/UAVMassCategory.swift), [UAVDimensions.swift](Domain/UAVDimensions.swift), [UAVFlightTuningProfile.swift](Domain/UAVFlightTuningProfile.swift)
+  Типы, размеры, масса и tuning.
+- [UAVFilterState.swift](Domain/UAVFilterState.swift), [UAVSelectionState.swift](Domain/UAVSelectionState.swift)
+  Состояние фильтрации и выбора.
+
+#### Полёт, управление и authority
+
+- [DroneState.swift](Domain/DroneState.swift), [DroneControlInput.swift](Domain/DroneControlInput.swift), [DroneControlValues.swift](Domain/DroneControlValues.swift), [DroneFlightMode.swift](Domain/DroneFlightMode.swift)
+  Runtime state, control input и режимы полёта.
+- [FlightControlRouting.swift](Domain/FlightControlRouting.swift), [MissionControlAuthorityState.swift](Domain/MissionControlAuthorityState.swift)
+  Authority routing между manual, marker guidance, mission, failsafe и blocked states.
+- [BatteryState.swift](Domain/BatteryState.swift), [DamageThermalModel.swift](Domain/DamageThermalModel.swift), [CollisionAnalysis.swift](Domain/CollisionAnalysis.swift), [TelemetrySnapshot.swift](Domain/TelemetrySnapshot.swift)
+  Батарея, damage/thermal, collision snapshot и телеметрия.
+
+#### Окружение и карта
+
+- [WeatherModel.swift](Domain/WeatherModel.swift), [TerrainModel.swift](Domain/TerrainModel.swift)
+  Погода, ветер, terrain presets и environment object kinds.
+- [MapViewportState.swift](Domain/MapViewportState.swift), [TacticalMapMode.swift](Domain/TacticalMapMode.swift), [TacticalMapState.swift](Domain/TacticalMapState.swift)
+  Tactical map viewport/modes/state.
+- [TargetMarkerState.swift](Domain/TargetMarkerState.swift)
+  Marker target для навигации.
+
+#### Payload
+
+- [PayloadConfiguration.swift](Domain/PayloadConfiguration.swift), [PayloadType.swift](Domain/PayloadType.swift), [PayloadState.swift](Domain/PayloadState.swift)
+  Конфигурация и runtime-состояние полезной нагрузки.
+- [PayloadMountState.swift](Domain/PayloadMountState.swift), [PayloadCapabilityCheck.swift](Domain/PayloadCapabilityCheck.swift), [PayloadDataQualitySource.swift](Domain/PayloadDataQualitySource.swift), [PayloadVisualPreset.swift](Domain/PayloadVisualPreset.swift)
+  Mount/capability/data quality/visual preset.
+- [VehicleMassModel.swift](Domain/VehicleMassModel.swift), [PayloadCameraController.swift](Domain/PayloadCameraController.swift)
+  Итоговая масса и lifecycle payload camera.
+
+#### Mission domain
+
+- [MissionDraft.swift](Domain/MissionDraft.swift), [MissionDraftStatus.swift](Domain/MissionDraftStatus.swift), [MissionPlanningState.swift](Domain/MissionPlanningState.swift)
+  Draft-миссия, validation status и planning UI state.
+- [MissionPlan.swift](Domain/MissionPlan.swift), [MissionLeg.swift](Domain/MissionLeg.swift), [MissionWaypoint.swift](Domain/MissionWaypoint.swift), [MissionPreviewRoute.swift](Domain/MissionPreviewRoute.swift), [MissionTarget.swift](Domain/MissionTarget.swift)
+  План, legs, waypoints, preview route и targets.
+- [MissionExecutionState.swift](Domain/MissionExecutionState.swift), [MissionExecutionBindingState.swift](Domain/MissionExecutionBindingState.swift), [MissionWaypointProgress.swift](Domain/MissionWaypointProgress.swift)
+  Runtime execution и progress.
+- [MissionSafetyState.swift](Domain/MissionSafetyState.swift), [MissionRuntimeConstraintState.swift](Domain/MissionRuntimeConstraintState.swift), [MissionConstraints.swift](Domain/MissionConstraints.swift), [MissionZone.swift](Domain/MissionZone.swift)
+  Safety, constraints и зоны.
+- [MissionEvent.swift](Domain/MissionEvent.swift), [MissionWarning.swift](Domain/MissionWarning.swift), [MissionStatusSnapshot.swift](Domain/MissionStatusSnapshot.swift), [MissionStatusExplanation.swift](Domain/MissionStatusExplanation.swift)
+  События, предупреждения и объяснения статусов.
+- [MissionDebrief.swift](Domain/MissionDebrief.swift), [MissionReport.swift](Domain/MissionReport.swift), [MissionOutcome.swift](Domain/MissionOutcome.swift), [MissionFailureReason.swift](Domain/MissionFailureReason.swift), [MissionTruthStatus.swift](Domain/MissionTruthStatus.swift)
+  Итоги, отчёты и результат миссии.
+
+#### Replay domain
+
+- [MissionReplaySession.swift](Domain/MissionReplaySession.swift), [MissionReplayFrame.swift](Domain/MissionReplayFrame.swift), [MissionReplayEvent.swift](Domain/MissionReplayEvent.swift), [MissionReplayRecordSummary.swift](Domain/MissionReplayRecordSummary.swift)
+  Replay session, frames, events и summary.
+- [MissionReplayContextSnapshot.swift](Domain/MissionReplayContextSnapshot.swift), [MissionReplayRetentionPolicy.swift](Domain/MissionReplayRetentionPolicy.swift)
+  Контекст записи и retention.
+- [ReplayCameraMode.swift](Domain/ReplayCameraMode.swift), [ReplayTrimRange.swift](Domain/ReplayTrimRange.swift), [ReplayComparisonResult.swift](Domain/ReplayComparisonResult.swift)
+  Камеры replay, trim и сравнение.
+- [ReplayVideoExportSettings.swift](Domain/ReplayVideoExportSettings.swift), [ReplayVideoExportMode.swift](Domain/ReplayVideoExportMode.swift), [ReplayExportResolutionPreset.swift](Domain/ReplayExportResolutionPreset.swift), [ReplayExportBitratePreset.swift](Domain/ReplayExportBitratePreset.swift)
+  Настройки экспорта видео.
+
+### `/Domain/CAD`
+
+CAD/design domain не зависит от `SceneKit` напрямую.
+
+- [DesignDocument.swift](Domain/CAD/DesignDocument.swift)
+  CAD-документ, units, assets и selected asset.
+- [DesignAsset.swift](Domain/CAD/DesignAsset.swift), [DesignAssetKind.swift](Domain/CAD/DesignAssetKind.swift)
+  Активы: wing, frame plate, beam, tube, bracket, payload box, sketch2D, extruded solid.
+- [AttachmentPoint.swift](Domain/CAD/AttachmentPoint.swift), [DesignTransform.swift](Domain/CAD/DesignTransform.swift), [DesignAssemblyLink.swift](Domain/CAD/DesignAssemblyLink.swift)
+  Координаты, attachment points, transforms и связи сборки.
+- [DesignMaterial.swift](Domain/CAD/DesignMaterial.swift), [DesignMassProperties.swift](Domain/CAD/DesignMassProperties.swift)
+  Материалы и mass properties.
+- [DesignSketchProfileGraph.swift](Domain/CAD/DesignSketchProfileGraph.swift)
+  Поиск/описание профилей эскиза.
+- [CADFeatureTypes.swift](Domain/CAD/CADFeatureTypes.swift)
+  Типы feature operation, extrude/cut records, mesh snapshot/diagnostics и preview state.
+- [CADSolidBackend.swift](Domain/CAD/CADSolidBackend.swift)
+  Solid backend foundation: volume operations, validation, bounds, mesh cache и evaluation report.
+
+---
+
+## Scene
+
+### `/Scene`
+
+- [DroneSceneController.swift](Scene/DroneSceneController.swift)
+  Главный контроллер сцены симуляции: root scene, камеры, drone node, world bounds, environment, collision/path debug, payload lifecycle, support surfaces и mission visuals.
+- [SceneFactory.swift](Scene/SceneFactory.swift)
+  Базовая `SCNScene`: ground, lights, grid, axes, camera.
+- [DroneModelBuilder.swift](Scene/DroneModelBuilder.swift), [UAVVisualFactory.swift](Scene/UAVVisualFactory.swift), [FPVCameraAnchor.swift](Scene/FPVCameraAnchor.swift)
+  Сборка визуальной модели БЛА, anchors и visual presets.
+- [PayloadVisualFactory.swift](Scene/PayloadVisualFactory.swift), [PayloadDropCameraController.swift](Scene/PayloadDropCameraController.swift)
+  Визуал payload и camera target для сброса.
+- [ScenePopulationService.swift](Scene/ScenePopulationService.swift)
+  Генерация descriptor-ов окружения по terrain preset.
+- [EnvironmentObjectFactory.swift](Scene/EnvironmentObjectFactory.swift), [EnvironmentProceduralVisualFactory.swift](Scene/EnvironmentProceduralVisualFactory.swift), [EnvironmentProceduralMaterials.swift](Scene/EnvironmentProceduralMaterials.swift)
+  Procedural geometry/materials окружения: здания, крыши, дороги, деревья, объекты и distant belt.
+- [MissionReplaySceneController.swift](Scene/MissionReplaySceneController.swift)
+  Отдельная сцена для replay reconstruction и video export.
+
+### `/Scene/CAD`
+
+- [DesignPreviewSceneBuilder.swift](Scene/CAD/DesignPreviewSceneBuilder.swift)
+  CAD preview scene, camera presets, snap candidates, grids, reference planes и viewport state.
+- [DesignPreviewSceneViewRepresentable.swift](Scene/CAD/DesignPreviewSceneViewRepresentable.swift)
+  SwiftUI -> `SCNView` мост для CAD canvas и mouse interaction.
+- [DesignAssetNodeFactory.swift](Scene/CAD/DesignAssetNodeFactory.swift)
+  Создание `SCNNode`/geometry для CAD assets, sketches, extruded solids, faces, attachment markers и kernel mesh.
+
+---
+
+## Simulation
+
+### Физика, окружение и runtime
+
+- [DronePhysicsEngine.swift](Simulation/DronePhysicsEngine.swift)
+  Протокол физического движка.
+- [SimpleDronePhysicsEngine.swift](Simulation/SimpleDronePhysicsEngine.swift)
+  Baseline-физика: substeps, multirotor/fixed-wing ветки, thrust, drag, wind, rate control и ground rest behavior.
+- [DroneSimulationContext.swift](Simulation/DroneSimulationContext.swift), [FlightBaselineResolver.swift](Simulation/FlightBaselineResolver.swift)
+  Входной контекст физики и резолв flight baseline.
+- [CollisionAnalysisService.swift](Simulation/CollisionAnalysisService.swift), [AutoPathPlannerService.swift](Simulation/AutoPathPlannerService.swift)
+  Collision risk, nearest obstacle, pathfinding и replan.
+- [BatteryThermalSimulationService.swift](Simulation/BatteryThermalSimulationService.swift)
+  Расчёт разряда, нагрева и degradation.
+- [DroneFleetManager.swift](Simulation/DroneFleetManager.swift)
+  Wingmen/fleet state и inter-drone risk.
+- [PayloadController.swift](Simulation/PayloadController.swift)
+  Payload defaults, capability check и итоговая mass model.
+- [TacticalMapCoordinator.swift](Simulation/TacticalMapCoordinator.swift)
+  Синхронизация tactical map state с mission/runtime context.
+
+### Autopilot и routes
+
+- [AutoNavigationController.swift](Simulation/AutoNavigationController.swift)
+  Marker navigation phases: takeoff/cruise/approach/hold и fixed-wing/multirotor directives.
+- [MulticopterAutopilotController.swift](Simulation/MulticopterAutopilotController.swift)
+  Низкоуровневые команды коптера к target position/yaw/throttle.
+- [FixedWingAutopilot.swift](Simulation/FixedWingAutopilot.swift), [FixedWingAutopilotController.swift](Simulation/FixedWingAutopilotController.swift)
+  Fixed-wing route follower, launch phases, lateral guidance и energy/airspeed/altitude control.
+- [FixedWingAssistController.swift](Simulation/FixedWingAssistController.swift)
+  Assisted-control для fixed-wing: heading/altitude hold, intercept geometry и fallback.
+- [FixedWingFlyablePath.swift](Simulation/FixedWingFlyablePath.swift)
+  Построение flyable route primitives.
+- [MulticopterRouteBuilder.swift](Simulation/MulticopterRouteBuilder.swift), [FixedWingRouteBuilder.swift](Simulation/FixedWingRouteBuilder.swift)
+  Сборка mission route под тип аппарата.
+
+### Mission planning, execution и safety
+
+- [MissionDraftBuilder.swift](Simulation/MissionDraftBuilder.swift), [MissionDraftValidator.swift](Simulation/MissionDraftValidator.swift)
+  Создание и проверка draft-миссии.
+- [MissionPreviewBuilder.swift](Simulation/MissionPreviewBuilder.swift), [MissionPlanBuilder.swift](Simulation/MissionPlanBuilder.swift), [MissionPlanValidator.swift](Simulation/MissionPlanValidator.swift)
+  Preview route, план миссии и validation.
+- [MissionExecutionBinder.swift](Simulation/MissionExecutionBinder.swift), [MissionExecutionCoordinator.swift](Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](Simulation/MissionProgressTracker.swift)
+  Bind active target, start/pause/resume/abort и progress tracking.
+- [MissionAutopilotAdapter.swift](Simulation/MissionAutopilotAdapter.swift), [MissionGuidanceTargetResolver.swift](Simulation/MissionGuidanceTargetResolver.swift)
+  Связь mission target с marker/autopilot pipeline.
+- [MissionAuthorityGuard.swift](Simulation/MissionAuthorityGuard.swift), [MissionRuntimeMonitor.swift](Simulation/MissionRuntimeMonitor.swift), [MissionSafetyEvaluator.swift](Simulation/MissionSafetyEvaluator.swift), [MissionFailsafeCoordinator.swift](Simulation/MissionFailsafeCoordinator.swift)
+  Authority, runtime constraints, battery feasibility, no-fly/safety и failsafe transitions.
+- [MissionStatusResolver.swift](Simulation/MissionStatusResolver.swift), [MissionEventRecorder.swift](Simulation/MissionEventRecorder.swift), [MissionEventMapper.swift](Simulation/MissionEventMapper.swift)
+  Status explanation, event recording и маппинг событий.
+- [MissionDebriefService.swift](Simulation/MissionDebriefService.swift), [MissionReportBuilder.swift](Simulation/MissionReportBuilder.swift), [MissionTimelineBuilder.swift](Simulation/MissionTimelineBuilder.swift)
+  Итоги миссии, report и timeline.
+- [MissionPersistenceAdapter.swift](Simulation/MissionPersistenceAdapter.swift)
+  Преобразование mission state для project persistence.
+
+### Replay runtime
+
+- [MissionReplayRecorder.swift](Simulation/MissionReplayRecorder.swift)
+  Запись кадров и событий миссии.
+- [MissionReplayPlayer.swift](Simulation/MissionReplayPlayer.swift)
+  Playback state, speed, seek и selected session.
+- [ReplayTelemetrySeriesBuilder.swift](Simulation/ReplayTelemetrySeriesBuilder.swift)
+  Данные для графиков replay telemetry.
+- [ReplayComparisonBuilder.swift](Simulation/ReplayComparisonBuilder.swift)
+  Сравнение replay/report метрик.
+- [ReplayTrimmer.swift](Simulation/ReplayTrimmer.swift)
+  Trim replay-сессии.
+
+---
+
+## Services
+
+### `/Services`
+
+- [TelemetryExportService.swift](Services/TelemetryExportService.swift)
+  Файл содержит сразу несколько инфраструктурных типов:
+  `InternalStorePaths`, `ProjectRecordSummary`, `ProjectSnapshot`, `ProjectStorageManaging`, `ProjectStorageService`, `TelemetryExporting`, `TelemetryExportService`.
+- [MissionReplayStorageService.swift](Services/MissionReplayStorageService.swift)
+  Сохранение, загрузка, удаление replay-сессий, отчётов и summaries.
+- [MissionReplaySettingsStore.swift](Services/MissionReplaySettingsStore.swift)
+  Retention/settings для replay center.
+- [ReplayVideoExportService.swift](Services/ReplayVideoExportService.swift)
+  Экспорт replay в видео через `AVFoundation` и `SCNRenderer`.
+
+### Internal store
+
+`InternalStorePaths` размещает данные в `Application Support/DroneUAVDemo/InternalStore`. Основные зоны:
+
+- `Projects`
+- `Autosaves`
+- `Telemetry`
+- `Replays`
+- `Index`
+
+---
+
+## Input
+
+### `/Input`
+
+- [InputManager.swift](Input/InputManager.swift)
+  Центральный агрегатор input-pipeline: обновляет providers, выбирает dominant source, применяет smoothing/deadzone и объединяет action commands.
+- [KeyboardInputService.swift](Input/KeyboardInputService.swift)
+  Сервис клавиатуры, default bindings, categories, commands и action mapping.
+- [KeyboardInputProvider.swift](Input/KeyboardInputProvider.swift)
+  Adapter клавиатуры к `InputProvider`.
+- [GameControllerInputProvider.swift](Input/GameControllerInputProvider.swift)
+  GameController.framework integration, стики/кнопки, controller summary и right-stick mode.
+- [RemoteInputProvider.swift](Input/RemoteInputProvider.swift)
+  Adapter remote packets к `InputSnapshot`.
+- [AutopilotInputProvider.swift](Input/AutopilotInputProvider.swift)
+  Placeholder для будущей подачи autopilot directives через общий pipeline.
+- [InputSnapshot.swift](Input/InputSnapshot.swift), [ResolvedControlState.swift](Input/ResolvedControlState.swift), [InputProvider.swift](Input/InputProvider.swift), [InputSourceKind.swift](Input/InputSourceKind.swift)
+  Общие типы input-pipeline.
+- [InputBindingsStore.swift](Input/InputBindingsStore.swift), [ControllerSettingsStore.swift](Input/ControllerSettingsStore.swift), [InputCaptureCoordinator.swift](Input/InputCaptureCoordinator.swift)
+  Persistence и UI-настройка биндов/controller behavior.
+
+---
+
+## Remote
+
+### `/Remote`
+
+- [RemoteTransport.swift](Remote/RemoteTransport.swift)
+  Протокол транспорта с packet/disconnect handlers.
+- [NetworkRemoteHost.swift](Remote/NetworkRemoteHost.swift)
+  TCP listener на `Network.framework`, по умолчанию порт `7777`.
+- [RemotePacketDecoder.swift](Remote/RemotePacketDecoder.swift)
+  Буферизация bytes и выделение `RemoteControlPacket`.
+- [RemoteControlPacket.swift](Remote/RemoteControlPacket.swift)
+  Wire-format remote-control пакета.
+- [MockRemoteTransport.swift](Remote/MockRemoteTransport.swift)
+  Локальный/mock transport без network listener.
+
+---
+
+## Resources
+
+### `/Resources`
+
+- [Resources/en.lproj/Localizable.strings](Resources/en.lproj/Localizable.strings)
+  Английская локализация.
+- [Resources/ru.lproj/Localizable.strings](Resources/ru.lproj/Localizable.strings)
+  Русская локализация.
+- [Resources/Assets.xcassets](Resources/Assets.xcassets/Contents.json)
+  App icons и asset catalog.
 
 ---
 
 ## Как работает цикл симуляции
 
-### Таймер
-
-`DroneSimulationViewModel.startSimulationLoop()` запускает `Timer` с частотой `1/45` секунды.
-
-### Кадр симуляции
-
-Каждый кадр проходит через `tick()`.
+`DroneSimulationViewModel.startSimulationLoop()` запускает `Timer` с частотой `1/45` секунды. Каждый кадр проходит через `tick()`.
 
 Упрощённый порядок:
 
 1. снять `dt`;
-2. обработать keyboard input;
-3. обновить цели автопилота;
-4. пересчитать collision risk;
-5. собрать `DroneControlInput`;
-6. собрать `DroneSimulationContext`;
-7. передать всё в `physicsEngine.step(...)`;
-8. применить runtime safety и state transitions;
-9. обновить батарею и thermal model;
-10. обновить сцену через `sceneController.update(...)`;
-11. обновить debug visualisation;
-12. пересчитать diagnostics;
-13. опубликовать HUD/telemetry;
-14. выполнить autosave / экспортные накопления, если требуется.
+2. обработать input и controller UI state;
+3. обновить mission/autopilot targets и authority;
+4. пересчитать pre-physics collision risk;
+5. собрать `DroneControlInput` и `DroneSimulationContext`;
+6. выполнить `physicsEngine.step(...)`;
+7. применить runtime safety, signal loss, collision aftermath и state transitions;
+8. обновить battery/thermal/fleet/payload context;
+9. пересчитать post-physics collision risk;
+10. обновить `DroneSceneController`;
+11. записать mission events/replay frames, telemetry и diagnostics;
+12. выполнить autosave/export накопления при необходимости.
 
-Это ключевая точка проекта. Если нужно понять поведение дрона, почти всегда нужно смотреть именно `tick()`.
+Если нужно понять поведение дрона, начинать почти всегда стоит с `tick()` в [DroneSimulationViewModel.swift](Presentation/ViewModels/DroneSimulationViewModel.swift).
 
 ---
 
-## Структура директорий
+## Как устроен UI
 
-## `/DroneUAVDemo`
+Актуальная симуляционная компоновка — toolbar-driven modules.
 
-Корень app-target. Здесь лежит entry point и все основные слои.
+- Верхняя панель `SimulationToolstripView` в [ContentView.swift](Presentation/Views/ContentView.swift) переключает `ControlModule`.
+- Левая панель [SidebarModuleHostView.swift](Presentation/Views/SidebarModuleHostView.swift) показывает активный модуль.
+- Payload открывается отдельным overlay через [PayloadView.swift](Presentation/Views/PayloadView.swift).
+- Replay center открывается в отдельном окне через [ReplayCenterWindowHost.swift](Presentation/Views/ReplayCenterWindowHost.swift).
+- CAD workspace переключает shell в `designWorkshop` и работает через [DesignWorkshopWorkspaceView.swift](Presentation/Views/DesignWorkshopWorkspaceView.swift).
 
-### Ключевые файлы
-
-- [DroneUAVDemoApp.swift](/Users/misha/New%20project/DroneUAVDemo/DroneUAVDemoApp.swift)
-  entry point macOS-приложения.
-- [PROJECT_STRUCTURE_RU.md](/Users/misha/New%20project/DroneUAVDemo/PROJECT_STRUCTURE_RU.md)
-  этот документ.
-
----
-
-## `/DroneUAVDemo/Presentation`
-
-Слой интерфейса на SwiftUI.
-
-### `/Presentation/ViewModels`
-
-- [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
-  единый runtime-viewmodel приложения. Главное место, где соединяются UI, физика, сцена, диагностика, payload, автопилот и хранение проекта.
-
-### `/Presentation/Views`
-
-Тут лежат все SwiftUI-экраны и модульные панели.
-
-#### Каркас и компоновка
-
-- [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift)
-  shell приложения: стартовый экран, toolbar, панель модулей, viewport, payload overlay.
-- [SceneViewportView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift)
-  центральная область со сценой и telemetry HUD.
-- [DroneSceneViewRepresentable.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/DroneSceneViewRepresentable.swift)
-  мост SwiftUI -> `SCNView`; управляет камерой, mouse-look и free-camera control.
-- [SidebarModuleHostView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift)
-  host левой панели: показывает только активный модуль.
-- [ControlModule.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ControlModule.swift)
-  enum модулей: `flightOps`, `uavCatalog`, `camera`, `scenario`, `diagnostics`.
-
-#### Модульные панели
-
-- [FlightOpsModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/FlightOpsModuleView.swift)
-  действия полёта: arm/disarm, takeoff, hover, land, return home, auto path, throttle, control law.
-- [UAVCatalogModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift)
-  выбор платформы, фильтры, открытие редактора abstract-модели.
-- [CameraModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift)
-  режимы камеры, presets, optics и advanced controls.
-- [ScenarioModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ScenarioModuleView.swift)
-  погода, ветер, карта, плотность окружения, boundary visibility.
-- [DiagnosticsModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift)
-  диагностика: overview, telemetry, fleet, service.
-- [PayloadView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift)
-  отдельный overlay-модуль payload system.
-
-#### Вспомогательные панели и элементы
-
-- [CompactTelemetryHUDView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/CompactTelemetryHUDView.swift)
-  компактный HUD поверх сцены.
-- [TelemetryPanelView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/TelemetryPanelView.swift)
-  развернутый telemetry block внутри diagnostics.
-- [PayloadToolbarEntry.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadToolbarEntry.swift)
-  кнопка payload в верхнем toolstrip.
-- [KeyBindingsSettingsView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift)
-  настройки биндов.
-- [AbstractModelEditorView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/AbstractModelEditorView.swift)
-  редактор кастомной абстрактной модели БЛА.
-- [UAVCatalogView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift)
-  список БЛА внутри каталога.
-- [UAVFilterBarView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVFilterBarView.swift)
-  фильтры каталога.
-- [UAVProfileCardView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVProfileCardView.swift)
-  карточка профиля БЛА.
-
-#### Legacy / compatibility
-
-- [ControlPanelView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ControlPanelView.swift)
-  старая длинная панель управления. Сейчас архитектурно важнее toolbar-driven modules, но файл может оставаться как legacy-reference/compatibility code.
+SwiftUI не управляет `SceneKit` напрямую. UI вызывает методы `ViewModel`, а `ViewModel` обновляет `DroneSceneController` на тике.
 
 ---
 
-## `/DroneUAVDemo/Domain`
+## Как работает CAD/design workshop
 
-Чистые модели предметной области. Здесь нет `SceneKit`-сцены и почти нет UI.
-
-### Что здесь лежит
-
-- профили БЛА:
-  - [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift)
-  - [UAVProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVProfile.swift)
-  - [UAVReferenceCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
-  - [UAVCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVCatalog.swift)
-- управление и состояние полёта:
-  - [DroneState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneState.swift)
-  - [DroneControlInput.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneControlInput.swift)
-  - [DroneControlValues.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneControlValues.swift)
-  - [DroneFlightMode.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneFlightMode.swift)
-- камера:
-  - [CameraConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift)
-- окружение:
-  - [WeatherModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/WeatherModel.swift)
-  - [TerrainModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TerrainModel.swift)
-- телеметрия и диагностика:
-  - [TelemetrySnapshot.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TelemetrySnapshot.swift)
-  - [CollisionAnalysis.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/CollisionAnalysis.swift)
-  - [DamageThermalModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DamageThermalModel.swift)
-  - [BatteryState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/BatteryState.swift)
-- fleet / formation:
-  - [DroneFleetModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneFleetModel.swift)
-- payload:
-  - [PayloadConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadConfiguration.swift)
-  - [PayloadType.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadType.swift)
-  - [PayloadState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadState.swift)
-  - [PayloadMountState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadMountState.swift)
-  - [PayloadCapabilityCheck.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadCapabilityCheck.swift)
-  - [PayloadDataQualitySource.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadDataQualitySource.swift)
-  - [PayloadVisualPreset.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadVisualPreset.swift)
-  - [VehicleMassModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/VehicleMassModel.swift)
-- фильтры и UI-facing состояния каталога:
-  - [UAVFilterState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
-  - [UAVSelectionState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVSelectionState.swift)
-  - [UAVVehicleType.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVVehicleType.swift)
-  - [UAVMassCategory.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVMassCategory.swift)
-
-### На что обратить внимание
-
-- [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift) — один из самых важных domain-файлов:
-  - описывает `DroneModelProfile`;
-  - содержит `AbstractDroneParameters`;
-  - хранит `LIPODroneModelRepository`, который отдаёт baseline-набор профилей.
-- [TerrainModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TerrainModel.swift) — задаёт `TerrainPreset`, `MapScale`, `TerrainConfiguration`, `EnvironmentObjectKind`.
-- [WeatherModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/WeatherModel.swift) — описывает пресеты погоды и превращает их в runtime-факторы, влияющие на физику и риск.
+1. [CADWorkshopViewModel.swift](Presentation/ViewModels/CADWorkshopViewModel.swift) хранит `DesignDocument`, selection, active tool, sketch state и feature preview.
+2. [DesignWorkshopWorkspaceView.swift](Presentation/Views/DesignWorkshopWorkspaceView.swift) строит рабочее место CAD.
+3. [DesignPreviewSceneViewRepresentable.swift](Scene/CAD/DesignPreviewSceneViewRepresentable.swift) передаёт pointer/canvas события в CAD view model.
+4. [DesignPreviewSceneBuilder.swift](Scene/CAD/DesignPreviewSceneBuilder.swift) строит CAD scene, grid, planes, snap candidates и camera.
+5. [DesignAssetNodeFactory.swift](Scene/CAD/DesignAssetNodeFactory.swift) превращает domain assets/sketches/solids в `SCNGeometry`.
+6. [CADFeatureTypes.swift](Domain/CAD/CADFeatureTypes.swift) и [CADSolidBackend.swift](Domain/CAD/CADSolidBackend.swift) описывают extrude/cut validation, mesh snapshots и solid evaluation.
 
 ---
 
-## `/DroneUAVDemo/Scene`
-
-Слой сцены и визуализации на `SceneKit`.
-
-### Основные файлы
-
-- [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
-  главный контроллер сцены. Отвечает за:
-  - корневую `SCNScene`;
-  - камеры;
-  - ноду БЛА и её визуал;
-  - weather FX;
-  - dock station;
-  - world bounds;
-  - окружение;
-  - collision debug;
-  - path debug;
-  - dropped payload visuals;
-  - обновление сцены на каждом кадре.
-
-- [SceneFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/SceneFactory.swift)
-  создаёт базовую пустую сцену: ground plane, lights, grid, axes, camera.
-
-- [DroneModelBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneModelBuilder.swift)
-  собирает визуальную модель БЛА и отдаёт связанный набор anchor-нод:
-  - `visualRootNode`
-  - `cameraAnchorNode`
-  - `groundReferenceNode`
-  - `fpvAnchorNode`
-  - `payloadMountNode`
-  - `propellerNodes`
-
-- [UAVVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/UAVVisualFactory.swift)
-  фабрика визуальных вариантов БЛА.
-
-- [FPVCameraAnchor.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/FPVCameraAnchor.swift)
-  конфигурация FPV-привязки.
-
-- [PayloadVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
-  визуальные модели payload.
-
-- [ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
-  генерирует объекты окружения по preset местности.
-
-- [EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
-  совместимый фасад фабрики окружения; делегирует procedural-построение среды.
-
-- [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
-  создаёт procedural-геометрию деревьев, зданий, крыш, тротуаров, дорог и дальнего пояса.
-
-- [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
-  задаёт procedural-материалы земли, коры, листвы, фасадов, обычных окон и кровли без загрузки из внешней папки `Assets`.
-
-### Что происходит в сцене
-
-Когда `ViewModel` вызывает `sceneController.regenerateEnvironment(terrain)`, происходит:
-
-1. выбор пресета местности;
-2. генерация descriptor-ов объектов через `ScenePopulationService`;
-3. создание реальных `SCNNode` через `EnvironmentObjectFactory`;
-4. установка boundary/dock/world visuals;
-5. обновление obstacle-набора для collision logic и debug;
-6. сборка support surface-набора для крыш и других площадок, на которые БЛА может опираться и садиться.
-
----
-
-## `/DroneUAVDemo/Simulation`
-
-Отдельный слой логики симуляции без SwiftUI.
-
-### Основные файлы
-
-- [DronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/DronePhysicsEngine.swift)
-  протокол движка физики.
-
-- [SimpleDronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
-  baseline-физика полёта:
-  - step с фиксированным substep;
-  - multirotor/fixed-wing ветки;
-  - thrust, gravity, drag, wind;
-  - rate control;
-  - ground rest behavior.
-
-- [DroneSimulationContext.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/DroneSimulationContext.swift)
-  входной контекст для физики:
-  - профиль;
-  - активный `UAVProfile`;
-  - погода;
-  - damage/battery;
-  - collision risk;
-  - wind vector;
-  - mass model.
-
-- [CollisionAnalysisService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift)
-  считает риск столкновения и ближайшее препятствие.
-
-- [AutoPathPlannerService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift)
-  планировщик маршрута:
-  - строит навигационную сетку;
-  - помечает blocked/penalty зоны;
-  - выдаёт waypoints;
-  - умеет invalidate и replan.
-
-- [BatteryThermalSimulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/BatteryThermalSimulationService.swift)
-  расчёт разряда батареи и thermal state.
-
-- [DroneFleetManager.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/DroneFleetManager.swift)
-  логика ведомых БЛА, их формаций и междроновых рисков.
-
-- [PayloadController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/PayloadController.swift)
-  payload capability check и mass model с учётом полезной нагрузки.
-
-- [FlightBaselineResolver.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FlightBaselineResolver.swift)
-  резолвит baseline-параметры полёта из runtime profile и active UAV profile.
-
-- [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift)
-  фазовый контроллер навигации к marker target:
-  - `takeoff / cruise / approach / hold`;
-  - разные ветки для `multirotor` и `fixedWing`;
-  - выдаёт `AutoNavigationDirective` с axis intent, target altitude, distance/bearing.
-
-- [MulticopterAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterAutopilotController.swift)
-  низкоуровневый контроллер автопилота для мультикоптеров:
-  - переводит цель в roll/pitch/yaw/throttle;
-  - удерживает высоту через hover throttle и vertical compensation;
-  - ограничивает углы и throttle безопасными диапазонами.
-
-- [FixedWingAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAutopilotController.swift)
-  основной контроллер автопилота самолётных БЛА:
-  - ведёт fixed-wing route follower;
-  - считает cross-track / along-track progress;
-  - выполняет fly-by turns, route capture, final loiter;
-  - управляет launch phases для catapult/hand/runway/vtol-like сценариев;
-  - разделяет lateral guidance и energy/airspeed/altitude control;
-  - публикует `FixedWingAutopilotDebugState`.
-
-- [FixedWingAssistController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAssistController.swift)
-  assisted-control слой для самолётного режима:
-  - heading hold;
-  - altitude hold;
-  - waypoint intercept;
-  - диагностика геометрии перехвата и fallback при потере цели.
-
-- [MissionAutopilotAdapter.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift)
-  адаптер между mission execution и marker/autopilot pipeline:
-  - bind active mission target к `TargetMarkerState`;
-  - расчёт travel altitude с учётом `MissionConstraints`;
-  - speed envelope для mission-speed constraints;
-  - проверка, что текущий marker действительно принадлежит активной цели миссии.
-
-- [MulticopterRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterRouteBuilder.swift)
-  строит polyline-маршрут и `MissionLeg` для коптерных миссий.
-
-- [FixedWingRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingRouteBuilder.swift)
-  строит fixed-wing flyable route с sampled leg segments и return-home leg.
-
-- [MissionPlanBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionPlanBuilder.swift)
-  собирает `MissionPlan` из draft/preview/validation и выбирает route builder по типу аппарата.
-
-- [MissionExecutionBinder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionBinder.swift), [MissionExecutionCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionProgressTracker.swift)
-  runtime execution-механика миссии: bind цели, start/pause/resume/abort, прогресс waypoint-ов и определение достижения active target.
-
-- [MissionAuthorityGuard.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAuthorityGuard.swift), [MissionRuntimeMonitor.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionRuntimeMonitor.swift), [MissionSafetyEvaluator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionSafetyEvaluator.swift), [MissionFailsafeCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionFailsafeCoordinator.swift)
-  safety-контур миссии: контроль authority, target ownership, stall/mismatch detection, runtime constraints, battery/return feasibility и failsafe transitions.
-
-### Когда менять этот слой
-
-- изменить поведение полёта -> `SimpleDronePhysicsEngine`
-- изменить collision risk / avoidance -> `CollisionAnalysisService`
-- изменить авто-маршрут -> `AutoPathPlannerService`
-- изменить автопилот коптера -> `MulticopterAutopilotController`, `AutoNavigationController`
-- изменить автопилот самолётного БЛА -> `FixedWingAutopilotController`, `FixedWingAssistController`, `FixedWingRouteBuilder`
-- изменить привязку миссии к автопилоту -> `MissionAutopilotAdapter`, `MissionExecutionBinder`, `MissionProgressTracker`, `MissionAuthorityGuard`
-- изменить батарею/нагрев -> `BatteryThermalSimulationService`
-- изменить логику payload mass -> `PayloadController`
-- изменить wingmen/fleet -> `DroneFleetManager`
-
----
-
-## Где находится логика автопилота
-
-### Коптерные БЛА
-
-- [MulticopterAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterAutopilotController.swift)
-  основная логика коптерного автопилота: roll/pitch/yaw/throttle-команда к цели.
-- [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift)
-  фазы marker navigation для коптеров: набор высоты, cruise, approach, hold.
-- [MulticopterRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterRouteBuilder.swift)
-  построение коптерного mission route как polyline.
-- [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
-  orchestration: `updateAutopilotTargets(...)`, `updateTargetMarkerAutoNavigation(...)`, `applyAutopilotTrackingControl(...)`, `applyAutopilotCommand(...)`.
-
-### Самолётные БЛА
-
-- [FixedWingAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAutopilotController.swift)
-  основная логика самолётного автопилота: route follower, lateral guidance, energy control, fly-by turns, launch phases, loiter/completion.
-- [FixedWingAssistController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAssistController.swift)
-  assisted-control режимы самолётного БЛА: heading hold, altitude hold, waypoint intercept.
-- [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift)
-  fixed-wing ветка marker navigation: курс, bank intent, pitch/throttle intent, радиусы подхода с учётом minimum turn radius.
-- [FixedWingRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingRouteBuilder.swift)
-  сборка fixed-wing mission legs из preview route.
-- [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
-  orchestration: `applyFixedWingMarkerGuidance(...)`, `applyAutopilotTrackingControl(...)`, `currentFixedWingRouteTrackingContext(...)`, `updateFixedWingLaunchSequence(...)`.
-
-### Общие связующие файлы
-
-- [MissionAutopilotAdapter.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift)
-  связывает mission targets с marker/autopilot pipeline.
-- [FlightControlRouting.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/FlightControlRouting.swift)
-  выбирает authority между manual, marker guidance, failsafe и blocked.
-- [AutopilotInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/AutopilotInputProvider.swift)
-  placeholder для будущей подачи autopilot directives через общий `InputManager`; сейчас возвращает neutral snapshot.
-
----
-
-## `/DroneUAVDemo/Services`
-
-Инфраструктурные сервисы хранения и экспорта.
-
-### [TelemetryExportService.swift](/Users/misha/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
-
-Файл шире, чем подсказывает имя. В нём лежат:
-
-- `InternalStorePaths`
-- `ProjectRecordSummary`
-- `ProjectSnapshot`
-- `ProjectStorageManaging`
-- `ProjectStorageService`
-- `TelemetryExportService`
-
-То есть это одновременно:
-
-- экспорт телеметрии;
-- внутренняя файловая структура приложения;
-- сохранение проекта;
-- загрузка проекта;
-- autosave;
-- project index.
-
-### Где физически лежат данные
-
-Внутренний storage создаётся в:
-
-- `Application Support/DroneUAVDemo/InternalStore/Projects`
-- `Application Support/DroneUAVDemo/InternalStore/Autosaves`
-- `Application Support/DroneUAVDemo/InternalStore/Telemetry`
-- `Application Support/DroneUAVDemo/InternalStore/Index`
-
-Если проект нужно переносить или разбирать сохранения руками, это ключевое место.
-
----
-
-## `/DroneUAVDemo/Input`
-
-Input-слой собирает управление из нескольких источников и отдаёт `ResolvedControlState` в `DroneSimulationViewModel`.
-
-### [InputManager.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputManager.swift)
-
-Центральный агрегатор input-пайплайна:
-
-- обновляет включённые `InputProvider`;
-- выбирает dominant source по activity score;
-- применяет deadzone и smoothing для flight/camera axes;
-- объединяет action-команды из подключённых источников;
-- хранит последний snapshot по каждому `InputSourceKind`.
-
-### [KeyboardInputService.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift)
-
-Сервис клавиатуры. Здесь живут:
-
-- осевые input-структуры:
-  - `KeyboardAxisInput`
-  - `KeyboardYawInput`
-  - `KeyboardLookInput`
-- категории биндов:
-  - `flight`
-  - `camera`
-  - `ui`
-  - `debug`
-- `KeyboardCommand`
-- `KeyBindingDescriptor`
-- `KeyBindingProfile.default`
-
-Сюда смотреть, если нужно:
-
-- поменять стандартные клавиши;
-- добавить новую команду;
-- разделить UI-команды и flight-команды;
-- диагностировать конфликты биндов.
-
-### Остальные input-файлы
-
-- [KeyboardInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputProvider.swift)
-  адаптирует `KeyboardInputService` к общему `InputProvider`.
-- [GameControllerInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/GameControllerInputProvider.swift)
-  читает аппаратный game controller и мапит стики/кнопки в flight, camera и UI actions.
-- [RemoteInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/RemoteInputProvider.swift)
-  принимает `RemoteControlPacket` из remote-транспорта и превращает его в `InputSnapshot`.
-- [AutopilotInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/AutopilotInputProvider.swift)
-  зарезервирован для будущей интеграции autopilot directives в общий input pipeline.
-- [ResolvedControlState.swift](/Users/misha/New%20project/DroneUAVDemo/Input/ResolvedControlState.swift), [InputSnapshot.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputSnapshot.swift), [InputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputProvider.swift), [InputSourceKind.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputSourceKind.swift)
-  общие типы input-пайплайна.
-- [InputBindingsStore.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputBindingsStore.swift), [ControllerSettingsStore.swift](/Users/misha/New%20project/DroneUAVDemo/Input/ControllerSettingsStore.swift), [InputCaptureCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputCaptureCoordinator.swift)
-  persistence и UI-настройка биндов.
-
----
-
-## `/DroneUAVDemo/Remote`
-
-Remote-слой нужен для внешнего управления симуляцией через TCP.
-
-- [RemoteTransport.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/RemoteTransport.swift)
-  протокол транспорта с `packetHandler` и `disconnectHandler`.
-- [NetworkRemoteHost.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/NetworkRemoteHost.swift)
-  TCP listener на `Network.framework`, по умолчанию порт `7777`; принимает поток, декодирует пакеты и передаёт их в handler.
-- [RemotePacketDecoder.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/RemotePacketDecoder.swift)
-  буферизует входящие bytes и выделяет `RemoteControlPacket`.
-- [RemoteControlPacket.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/RemoteControlPacket.swift)
-  wire-format remote-control пакета.
-- [MockRemoteTransport.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/MockRemoteTransport.swift)
-  тестовый/локальный транспорт без сетевого listener.
-
----
-
-## `/DroneUAVDemo/Resources`
-
-Локализация и Xcode asset catalog.
-
-### Подкаталоги
-
-- [Resources/en.lproj/Localizable.strings](/Users/misha/New%20project/DroneUAVDemo/Resources/en.lproj/Localizable.strings)
-  английская локализация.
-- [Resources/ru.lproj/Localizable.strings](/Users/misha/New%20project/DroneUAVDemo/Resources/ru.lproj/Localizable.strings)
-  русская локализация.
-- [Resources/Assets.xcassets](/Users/misha/New%20project/DroneUAVDemo/Resources/Assets.xcassets/Contents.json)
-  app icons и другие системные ассеты Xcode.
-
----
-
-## Legacy: `/DroneUAVDemo/Assets`
-
-Папка может оставаться в репозитории как архив исходных ассетов, но больше не участвует в runtime-конвейере окружения и не подключена к target как folder resource.
-
-Актуальный pipeline окружения теперь строится через:
-
-- [EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
-- [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
-- [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
-
----
-
-## Как устроен UI сейчас
-
-Проект уже переведён на toolbar-driven modules.
-
-### Верхняя панель
-
-`SimulationToolstripView` в [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift) показывает кнопки модулей:
-
-- `Полет`
-- `БЛА`
-- `Камера`
-- `Сценарий`
-- `Диагностика`
-- `ПН`
-
-Нажатие меняет `activeControlModule`.
-
-### Левая панель
-
-[SidebarModuleHostView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SidebarModuleHostView.swift)
-
-Показывает только активный модуль:
-
-- `FlightOpsModuleView`
-- `UAVCatalogModuleView`
-- `CameraModuleView`
-- `ScenarioModuleView`
-- `DiagnosticsModuleView`
-
-`PayloadView` не живёт в левой панели, а открывается как отдельный overlay.
-
-### Центральная область
-
-[SceneViewportView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/SceneViewportView.swift)
-
-Содержит:
-
-- `DroneSceneViewRepresentable` с `SCNView`;
-- компактный telemetry HUD или компактную текстовую шапку в зависимости от состояния панели.
-
----
-
-## Как связаны UI и сцена
-
-### Главный принцип
-
-`SwiftUI` не управляет `SceneKit` напрямую. Всё идёт через `DroneSimulationViewModel`.
-
-Связь выглядит так:
-
-- UI вызывает метод `viewModel`;
-- `viewModel` меняет domain/runtime state;
-- `viewModel` на тике вызывает `sceneController.update(...)`;
-- `sceneController` синхронизирует `SCNNode`-дерево со state;
-- `SceneViewportView` просто показывает уже обновлённую сцену.
-
-Это важное правило проекта: не писать сценовую бизнес-логику напрямую во view.
-
----
-
-## Как работает создание и выбор БЛА
-
-### Базовый путь
-
-1. `DroneSimulationViewModel` создаёт `LIPODroneModelRepository`.
-2. Из него получает `availableDroneProfiles` и `defaultProfile`.
-3. По выбранному runtime profile резолвится `activeUAVProfile`.
-4. `DroneSceneController` строит визуал БЛА через `DroneModelBuilder`.
-5. Физика и mass model используют `selectedDroneProfile + activeUAVProfile + payload`.
-
-### Где править каталог
-
-- runtime flight/visual profile -> [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift)
-- reference UAV data -> [UAVReferenceCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
-- фильтрация и selection state -> [UAVCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVCatalog.swift), [UAVFilterState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
-- UI каталога -> [UAVCatalogModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift)
-
----
-
-## Как работает окружение
-
-### Генерация
-
-[ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift)
-
-По `TerrainConfiguration` генерирует descriptor-ы для:
-
-- `gridDemo`
-- `field`
-- `forest`
-- `city`
-
-Типы объектов:
-
-- `tree`
-- `building`
-- `pole`
-- `crate`
-- `rock`
-- `marker`
-- `distantBelt`
-
-### Визуализация
-
-[EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift)
-
-Это совместимый входной слой. Фактическую procedural-визуализацию выполняют:
-
-- [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift)
-- [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
-
-Через них создаются:
-
-- деревья с отдельным стволом и выраженной кроной;
-- здания с фасадами, обычными окнами и физически поддерживаемой крышей;
-- ground-подложки кварталов, дороги и пешеходные полосы;
-- материалы земли, листвы и фасадов без чтения текстур из `/Assets`.
-
-### Collision и navigation
-
-`DroneSceneController` хранит `environmentObstacles`, а `CollisionAnalysisService` и `AutoPathPlannerService` используют их как вход.
-
-Дополнительно `DroneSceneController` теперь собирает support surfaces для крыш и платформ. `DroneSimulationViewModel` использует их, чтобы:
-
-- считать высоту относительно ближайшей опорной поверхности, а не только от `y = 0`;
-- разрешать посадку и наземные состояния на крыше;
-- не проваливать БЛА сквозь верхние плоскости зданий при мягком касании сверху.
-
----
-
-## Как работает payload system
-
-### Данные
-
-- [PayloadConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadConfiguration.swift)
-- [PayloadType.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadType.swift)
-- [PayloadState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadState.swift)
-- [PayloadCapabilityCheck.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/PayloadCapabilityCheck.swift)
-- [VehicleMassModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/VehicleMassModel.swift)
-
-### Логика
-
-[PayloadController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/PayloadController.swift)
-
-Здесь считается:
-
-- допустимость payload;
-- ограничения по массе;
-- итоговая масса аппарата.
-
-### Визуал
-
-[PayloadVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
-
-### UI
-
-[PayloadView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift)
-
----
-
-## Как работает диагностика
-
-### Runtime-диагностика
-
-`DroneSimulationViewModel` публикует:
-
-- `warnings`
-- `diagnostics`
-- `lastCollisionSource`
-- `collisionAnalysis`
-- `batteryState`
-- `damageState`
-- `thermalState`
-
-### Scene diagnostics
-
-`DroneSceneController.sceneDiagnostics()` отдаёт статистику сцены, которую `ViewModel` переносит в `SimulationDiagnostics`.
-
-### UI-диагностика
-
-[DiagnosticsModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/DiagnosticsModuleView.swift)
-
-Разбита на панели:
-
-- `overview`
-- `telemetry`
-- `fleet`
-- `service`
+## Как работает mission/replay pipeline
+
+1. Mission UI редактирует [MissionDraft.swift](Domain/MissionDraft.swift).
+2. `MissionDraftBuilder` и `MissionDraftValidator` подготавливают draft/status.
+3. `MissionPreviewBuilder` строит preview route, учитывая зоны и тип аппарата.
+4. `MissionPlanBuilder` выбирает `MulticopterRouteBuilder` или `FixedWingRouteBuilder`.
+5. `MissionExecutionBinder`, `MissionExecutionCoordinator`, `MissionProgressTracker` ведут runtime execution.
+6. `MissionAutopilotAdapter` и `MissionGuidanceTargetResolver` связывают active target с autopilot/marker pipeline.
+7. `MissionEventRecorder`, `MissionReplayRecorder`, `MissionReportBuilder` собирают события, кадры и отчёты.
+8. `MissionReplayStorageService` сохраняет replay, а `ReplayCenterView` показывает playback, timeline, compare и export.
 
 ---
 
 ## Где менять что
 
-### Если нужно поменять…
-
-- логику взлёта/посадки/управления
-  -> [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift), [SimpleDronePhysicsEngine.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/SimpleDronePhysicsEngine.swift)
-
-- параметры и модели БЛА
-  -> [DroneModelProfile.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/DroneModelProfile.swift), [UAVReferenceCatalog.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVReferenceCatalog.swift)
-
-- каталог БЛА и фильтры
-  -> [UAVCatalogModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/UAVCatalogView.swift), [UAVFilterState.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/UAVFilterState.swift)
-
-- поведение камеры
-  -> [CameraConfiguration.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/CameraConfiguration.swift), [CameraModuleView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/CameraModuleView.swift), [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
-
-- генерацию мира
-  -> [TerrainModel.swift](/Users/misha/New%20project/DroneUAVDemo/Domain/TerrainModel.swift), [ScenePopulationService.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/ScenePopulationService.swift), [EnvironmentObjectFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentObjectFactory.swift), [EnvironmentProceduralVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralVisualFactory.swift), [EnvironmentProceduralMaterials.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/EnvironmentProceduralMaterials.swift)
-
-- collision risk / obstacle avoidance / pathfinding
-  -> [CollisionAnalysisService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/CollisionAnalysisService.swift), [AutoPathPlannerService.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoPathPlannerService.swift), [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift)
-
-- коптерный автопилот
-  -> [MulticopterAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterAutopilotController.swift), [AutoNavigationController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/AutoNavigationController.swift), [MulticopterRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MulticopterRouteBuilder.swift)
-
-- самолётный автопилот
-  -> [FixedWingAutopilotController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAutopilotController.swift), [FixedWingAssistController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingAssistController.swift), [FixedWingRouteBuilder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/FixedWingRouteBuilder.swift), [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift)
-
-- mission execution и привязку миссии к автопилоту
-  -> [MissionAutopilotAdapter.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAutopilotAdapter.swift), [MissionExecutionBinder.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionBinder.swift), [MissionExecutionCoordinator.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionProgressTracker.swift), [MissionAuthorityGuard.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/MissionAuthorityGuard.swift)
-
-- input pipeline / remote-control
-  -> [InputManager.swift](/Users/misha/New%20project/DroneUAVDemo/Input/InputManager.swift), [KeyboardInputService.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift), [GameControllerInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/GameControllerInputProvider.swift), [RemoteInputProvider.swift](/Users/misha/New%20project/DroneUAVDemo/Input/RemoteInputProvider.swift), [NetworkRemoteHost.swift](/Users/misha/New%20project/DroneUAVDemo/Remote/NetworkRemoteHost.swift)
-
-- payload
-  -> [PayloadController.swift](/Users/misha/New%20project/DroneUAVDemo/Simulation/PayloadController.swift), [PayloadView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/PayloadView.swift), [PayloadVisualFactory.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/PayloadVisualFactory.swift)
-
-- telemetry export / save-load
-  -> [TelemetryExportService.swift](/Users/misha/New%20project/DroneUAVDemo/Services/TelemetryExportService.swift)
-
-- keybindings
-  -> [KeyboardInputService.swift](/Users/misha/New%20project/DroneUAVDemo/Input/KeyboardInputService.swift), [KeyBindingsSettingsView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/KeyBindingsSettingsView.swift)
+- Логика взлёта/посадки/ручного управления:
+  [DroneSimulationViewModel.swift](Presentation/ViewModels/DroneSimulationViewModel.swift), [SimpleDronePhysicsEngine.swift](Simulation/SimpleDronePhysicsEngine.swift), [FlightControlRouting.swift](Domain/FlightControlRouting.swift)
+- Параметры и модели БЛА:
+  [DroneModelProfile.swift](Domain/DroneModelProfile.swift), [UAVReferenceCatalog.swift](Domain/UAVReferenceCatalog.swift), [UAVFlightTuningProfile.swift](Domain/UAVFlightTuningProfile.swift)
+- Каталог БЛА и фильтры:
+  [UAVCatalogModuleView.swift](Presentation/Views/UAVCatalogModuleView.swift), [UAVCatalogView.swift](Presentation/Views/UAVCatalogView.swift), [UAVFilterState.swift](Domain/UAVFilterState.swift)
+- Камеры симуляции:
+  [CameraConfiguration.swift](Domain/CameraConfiguration.swift), [CameraModuleView.swift](Presentation/Views/CameraModuleView.swift), [DroneSceneController.swift](Scene/DroneSceneController.swift)
+- Окружение и procedural visuals:
+  [TerrainModel.swift](Domain/TerrainModel.swift), [ScenePopulationService.swift](Scene/ScenePopulationService.swift), [EnvironmentObjectFactory.swift](Scene/EnvironmentObjectFactory.swift), [EnvironmentProceduralVisualFactory.swift](Scene/EnvironmentProceduralVisualFactory.swift)
+- Collision/pathfinding:
+  [CollisionAnalysisService.swift](Simulation/CollisionAnalysisService.swift), [AutoPathPlannerService.swift](Simulation/AutoPathPlannerService.swift), [DroneSceneController.swift](Scene/DroneSceneController.swift)
+- Коптерный автопилот:
+  [MulticopterAutopilotController.swift](Simulation/MulticopterAutopilotController.swift), [AutoNavigationController.swift](Simulation/AutoNavigationController.swift), [MulticopterRouteBuilder.swift](Simulation/MulticopterRouteBuilder.swift)
+- Самолётный автопилот:
+  [FixedWingAutopilotController.swift](Simulation/FixedWingAutopilotController.swift), [FixedWingAssistController.swift](Simulation/FixedWingAssistController.swift), [FixedWingRouteBuilder.swift](Simulation/FixedWingRouteBuilder.swift), [FixedWingFlyablePath.swift](Simulation/FixedWingFlyablePath.swift)
+- Mission execution/safety:
+  [MissionExecutionCoordinator.swift](Simulation/MissionExecutionCoordinator.swift), [MissionProgressTracker.swift](Simulation/MissionProgressTracker.swift), [MissionSafetyEvaluator.swift](Simulation/MissionSafetyEvaluator.swift), [MissionFailsafeCoordinator.swift](Simulation/MissionFailsafeCoordinator.swift)
+- Replay:
+  [MissionReplayRecorder.swift](Simulation/MissionReplayRecorder.swift), [MissionReplayPlayer.swift](Simulation/MissionReplayPlayer.swift), [ReplayCenterView.swift](Presentation/Views/ReplayCenterView.swift), [MissionReplayStorageService.swift](Services/MissionReplayStorageService.swift), [ReplayVideoExportService.swift](Services/ReplayVideoExportService.swift)
+- CAD/design workshop:
+  [CADWorkshopViewModel.swift](Presentation/ViewModels/CADWorkshopViewModel.swift), [DesignWorkshopWorkspaceView.swift](Presentation/Views/DesignWorkshopWorkspaceView.swift), [DesignAssetKind.swift](Domain/CAD/DesignAssetKind.swift), [CADSolidBackend.swift](Domain/CAD/CADSolidBackend.swift), [DesignAssetNodeFactory.swift](Scene/CAD/DesignAssetNodeFactory.swift)
+- Input/remote-control:
+  [InputManager.swift](Input/InputManager.swift), [KeyboardInputService.swift](Input/KeyboardInputService.swift), [GameControllerInputProvider.swift](Input/GameControllerInputProvider.swift), [RemoteInputProvider.swift](Input/RemoteInputProvider.swift), [NetworkRemoteHost.swift](Remote/NetworkRemoteHost.swift)
+- Payload:
+  [PayloadController.swift](Simulation/PayloadController.swift), [PayloadView.swift](Presentation/Views/PayloadView.swift), [PayloadVisualFactory.swift](Scene/PayloadVisualFactory.swift), [PayloadCameraController.swift](Domain/PayloadCameraController.swift)
+- Project storage / telemetry export:
+  [TelemetryExportService.swift](Services/TelemetryExportService.swift)
+- Локализация:
+  [Resources/en.lproj/Localizable.strings](Resources/en.lproj/Localizable.strings), [Resources/ru.lproj/Localizable.strings](Resources/ru.lproj/Localizable.strings)
 
 ---
 
-## На что обратить внимание при изменениях
+## Важные замечания
 
-### 1. `DroneSimulationViewModel` очень центральный
-
-Это полезно для понимания проекта, но делает файл большим. Любое изменение в поведении симуляции обычно проходит через него.
-
-### 2. `TelemetryExportService.swift` содержит не только экспорт
-
-Там же находится project storage. Не стоит ориентироваться только на имя файла.
-
-### 3. UI уже модульный
-
-Актуальная архитектура — toolbar-driven modules. Если править интерфейс, лучше расширять:
-
-- `ControlModule`
-- `SidebarModuleHostView`
-- отдельные `*ModuleView`
-
-а не возвращаться к старой длинной `ControlPanelView`.
-
-### 4. SceneKit-логика отделена от SwiftUI
-
-Визуальные изменения сцены лучше вносить в `Scene`-слой, а не прямо в SwiftUI view.
+1. [DroneSimulationViewModel.swift](Presentation/ViewModels/DroneSimulationViewModel.swift) остаётся самым центральным и крупным файлом. Поведенческие изменения часто проходят через него.
+2. [TelemetryExportService.swift](Services/TelemetryExportService.swift) содержит не только telemetry export, но и project storage types.
+3. [CADWorkshopViewModel.swift](Presentation/ViewModels/CADWorkshopViewModel.swift) тоже крупный: tool-state, validation и commit logic сейчас живут рядом.
+4. `SceneKit`-логику лучше держать в `Scene/*` и `Scene/CAD/*`, а SwiftUI использовать как слой ввода/отображения.
+5. В рабочем дереве могут быть незакоммиченные изменения в CAD и локализации; перед крупными refactor-ами стоит сверять `git status`.
 
 ---
 
 ## Краткое резюме по слоям
 
 - `DroneUAVDemoApp.swift`
-  запускает окно.
-- `ContentView.swift`
-  shell приложения, стартовый экран и рабочая компоновка.
-- `DroneSimulationViewModel.swift`
-  главный runtime state и orchestration.
+  Запускает окно приложения.
+- `Presentation/*`
+  SwiftUI shell, модули, mission UI, replay UI, CAD workspace и overlays.
+- `Presentation/ViewModels/*`
+  Runtime orchestration для симуляции, CAD, replay library и настроек.
 - `Scene/*`
-  вся `SceneKit`-сцена, дрон, камеры, окружение, payload visual.
+  `SceneKit`-сцена симуляции, replay-сцена, CAD preview, procedural окружение и visuals.
 - `Simulation/*`
-  физика, collision analysis, автопуть, автопилоты, mission execution, батарея/тепло, fleet, payload math.
+  Физика, автопилоты, маршруты, миссии, safety, replay runtime, tactical map, battery/fleet/payload math.
 - `Domain/*`
-  чистые модели данных.
+  Чистые модели данных для БЛА, миссий, payload, replay, карты, input authority и CAD.
 - `Services/*`
-  сохранения, autosave, export.
+  Project storage, telemetry export, replay storage/settings и video export.
 - `Input/*`
-  общий input-pipeline, клавиатура, game controller, remote input, бинды.
+  Keyboard/controller/remote/autopilot input pipeline, бинды и настройки контроллера.
 - `Remote/*`
   TCP remote-control transport и packet decoder.
 - `Resources/*`
-  локализация и системные ресурсы приложения.
+  Локализация и системные ассеты.
 
-Если нужен один файл, с которого начинать чтение проекта, это [DroneSimulationViewModel.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/ViewModels/DroneSimulationViewModel.swift). Если нужен один файл, с которого начинать чтение UI, это [ContentView.swift](/Users/misha/New%20project/DroneUAVDemo/Presentation/Views/ContentView.swift). Если нужен один файл, чтобы понять сцену, это [DroneSceneController.swift](/Users/misha/New%20project/DroneUAVDemo/Scene/DroneSceneController.swift).
+Если нужен один файл для входа в runtime, начните с [DroneSimulationViewModel.swift](Presentation/ViewModels/DroneSimulationViewModel.swift). Если нужен вход в UI, начните с [ContentView.swift](Presentation/Views/ContentView.swift). Если нужен вход в сцену, начните с [DroneSceneController.swift](Scene/DroneSceneController.swift). Если нужен вход в CAD, начните с [CADWorkshopViewModel.swift](Presentation/ViewModels/CADWorkshopViewModel.swift).

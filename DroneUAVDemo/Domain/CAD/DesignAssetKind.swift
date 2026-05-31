@@ -1698,6 +1698,8 @@ struct ExtrudedSolidParameters: Codable, Equatable {
     var material: DesignMaterial
     var faces: [DesignPlanarFace]
     var featureRecord: CADFeatureRecord?
+    var kernelVisualMesh: CADSolidMeshSnapshot?
+    var kernelResultSolid: CADSolid?
 
     init(
         assetID: UUID,
@@ -1712,7 +1714,9 @@ struct ExtrudedSolidParameters: Codable, Equatable {
         depthMeters: Double,
         direction: ExtrudeDirection,
         material: DesignMaterial,
-        featureRecord: CADFeatureRecord? = nil
+        featureRecord: CADFeatureRecord? = nil,
+        kernelVisualMesh: CADSolidMeshSnapshot? = nil,
+        kernelResultSolid: CADSolid? = nil
     ) {
         self.sourceSketchID = sourceSketchID
         self.sourceSketchName = sourceSketchName
@@ -1728,6 +1732,8 @@ struct ExtrudedSolidParameters: Codable, Equatable {
         self.direction = direction
         self.material = material
         self.featureRecord = featureRecord
+        self.kernelVisualMesh = kernelVisualMesh
+        self.kernelResultSolid = kernelResultSolid
         self.faces = DesignPlanarFace.faces(
             assetID: assetID,
             profilePoints: profilePoints,
@@ -1753,6 +1759,8 @@ struct ExtrudedSolidParameters: Codable, Equatable {
         case material
         case faces
         case featureRecord
+        case kernelVisualMesh
+        case kernelResultSolid
     }
 
     init(from decoder: Decoder) throws {
@@ -1778,6 +1786,8 @@ struct ExtrudedSolidParameters: Codable, Equatable {
         material = try container.decodeIfPresent(DesignMaterial.self, forKey: .material) ?? .carbonFiber
         faces = try container.decodeIfPresent([DesignPlanarFace].self, forKey: .faces) ?? []
         featureRecord = try container.decodeIfPresent(CADFeatureRecord.self, forKey: .featureRecord)
+        kernelVisualMesh = try container.decodeIfPresent(CADSolidMeshSnapshot.self, forKey: .kernelVisualMesh)
+        kernelResultSolid = try container.decodeIfPresent(CADSolid.self, forKey: .kernelResultSolid)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1797,6 +1807,8 @@ struct ExtrudedSolidParameters: Codable, Equatable {
         try container.encode(material, forKey: .material)
         try container.encode(faces, forKey: .faces)
         try container.encodeIfPresent(featureRecord, forKey: .featureRecord)
+        try container.encodeIfPresent(kernelVisualMesh, forKey: .kernelVisualMesh)
+        try container.encodeIfPresent(kernelResultSolid, forKey: .kernelResultSolid)
     }
 
     // Shoelace formula — positive when CCW
@@ -1804,9 +1816,20 @@ struct ExtrudedSolidParameters: Codable, Equatable {
         DesignSketch.polygonSignedAreaMeters2(profilePoints)
     }
 
-    var areaMeters2: Double { abs(signedAreaMeters2) }
+    var areaMeters2: Double {
+        max(
+            abs(signedAreaMeters2) - holes.reduce(0.0) { $0 + DesignSketch.polygonAreaMeters2($1) },
+            0
+        )
+    }
 
     var volumeMeters3: Double {
+        if let kernelVisualMesh {
+            let diagnostics = CADSolidMeshValidator.diagnose(kernelVisualMesh)
+            if diagnostics.isClosedManifold, diagnostics.volumeEstimate.isFinite {
+                return max(diagnostics.volumeEstimate, 0)
+            }
+        }
         let baseVolume = areaMeters2 * depthMeters
         let legacyCutVolume = zip(holes, resolvedLegacyHoleDepths()).reduce(0.0) { total, entry in
             total + abs(DesignSketch.polygonSignedAreaMeters2(entry.0)) * min(abs(entry.1), depthMeters)

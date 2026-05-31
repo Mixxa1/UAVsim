@@ -30,7 +30,10 @@ struct SketchProfileGraph: Equatable {
     /// Returns the innermost (smallest) profile area that contains `point`.
     func containingArea(for point: SketchPoint2D) -> SketchProfileArea? {
         areas
-            .filter { SketchProfileEngine.pointInPolygon(point, polygon: $0.outerLoop) }
+            .filter { area in
+                SketchProfileEngine.pointInPolygon(point, polygon: area.outerLoop)
+                    && !area.holes.contains { SketchProfileEngine.pointInPolygon(point, polygon: $0) }
+            }
             .min(by: { $0.areaMeters2 < $1.areaMeters2 })
     }
 }
@@ -123,7 +126,10 @@ enum SketchProfileEngine {
                 id: UUID(),
                 outerLoop: sorted[i].pts,
                 holes: holes,
-                areaMeters2: sorted[i].area,
+                areaMeters2: max(
+                    sorted[i].area - holes.reduce(0.0) { $0 + DesignSketch.polygonAreaMeters2($1) },
+                    0
+                ),
                 centroid: polygonCentroid(sorted[i].pts)
             ))
         }

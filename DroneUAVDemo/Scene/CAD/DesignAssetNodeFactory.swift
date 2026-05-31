@@ -184,6 +184,11 @@ enum DesignAssetNodeFactory {
     // MARK: Extruded Solid geometry
 
     private static func makeExtrudedSolidGeometry(_ p: ExtrudedSolidParameters) -> SCNGeometry {
+        if let kernelVisualMesh = p.kernelVisualMesh,
+           let geometry = makeKernelSolidGeometry(kernelVisualMesh) {
+            return geometry
+        }
+
         let pts = p.profilePoints
         let n = pts.count
         guard n >= 3 else {
@@ -527,20 +532,94 @@ enum DesignAssetNodeFactory {
         return SCNGeometry(sources: [posSrc, normSrc], elements: [el])
     }
 
+    private static func makeKernelSolidGeometry(_ mesh: CADSolidMeshSnapshot) -> SCNGeometry? {
+        guard !mesh.vertices.isEmpty,
+              !mesh.triangles.isEmpty,
+              mesh.vertices.allSatisfy(\.isFinite) else {
+            return nil
+        }
+        var vertexNormals = Array(repeating: DesignVector3.zero, count: mesh.vertices.count)
+        var indices: [Int32] = []
+        indices.reserveCapacity(mesh.triangles.count * 3)
+        for triangle in mesh.triangles {
+            guard mesh.vertices.indices.contains(triangle.a),
+                  mesh.vertices.indices.contains(triangle.b),
+                  mesh.vertices.indices.contains(triangle.c) else {
+                return nil
+            }
+            let a = mesh.vertices[triangle.a]
+            let b = mesh.vertices[triangle.b]
+            let c = mesh.vertices[triangle.c]
+            let normal = (b - a).cross(c - a).normalized(fallback: .zAxis)
+            vertexNormals[triangle.a] = vertexNormals[triangle.a] + normal
+            vertexNormals[triangle.b] = vertexNormals[triangle.b] + normal
+            vertexNormals[triangle.c] = vertexNormals[triangle.c] + normal
+            indices.append(Int32(triangle.a))
+            indices.append(Int32(triangle.b))
+            indices.append(Int32(triangle.c))
+        }
+        let vertices = mesh.vertices.map { SCNVector3(Float($0.x), Float($0.y), Float($0.z)) }
+        let normals = vertexNormals.map {
+            let normal = $0.normalized(fallback: .zAxis)
+            return SCNVector3(Float(normal.x), Float(normal.y), Float(normal.z))
+        }
+        let posSrc = SCNGeometrySource(vertices: vertices)
+        let normSrc = SCNGeometrySource(normals: normals)
+        let el = SCNGeometryElement(indices: indices, primitiveType: .triangles)
+        return SCNGeometry(sources: [posSrc, normSrc], elements: [el])
+    }
+
     private struct BoxBlindCutMeshCandidate {
         var geometry: SCNGeometry
         var vertexCount: Int
         var triangleCount: Int
         var faceSurfacesRendered: Int
         var entryFaceSurfacesRendered: Int
+        var expectedEntryFaceSurfacesRendered: Int
         var invalidEntryFaceTriangulation: Bool
+        var meshSnapshot: CADSolidMeshSnapshot
+        var meshDiagnostics: CADSolidMeshDiagnostics
         var cutStats: [UUID: BoxBlindCutMeshStats]
     }
 
     private struct BoxBlindCutMeshStats {
         var segmentCount: Int
+        var wallQuadCount: Int
         var wallTriangleCount: Int
+        var skippedWallSegmentCount: Int
+        var wallFlippedTriangleCount: Int
         var bottomTriangleCount: Int
+        var cutIntersectionCullCount: Int
+        var minDepthMeters: Double
+        var maxDepthMeters: Double
+    }
+
+    static func debugMeshStats(for params: ExtrudedSolidParameters) -> (vertexCount: Int, triangleCount: Int)? {
+        if !params.boxBlindCutFeatures.isEmpty,
+           let candidate = makeBoxBlindCutCandidate(params) {
+            return (candidate.vertexCount, candidate.triangleCount)
+        }
+
+        let geometry = makeExtrudedSolidGeometry(params)
+        let vertexCount = geometry.sources(for: .vertex).first?.vectorCount ?? 0
+        var triangleCount = 0
+        for index in 0..<geometry.elementCount {
+            let element = geometry.element(at: index)
+            if element.primitiveType == .triangles {
+                triangleCount += element.primitiveCount
+            }
+        }
+        return (vertexCount, triangleCount)
+    }
+
+    static func debugSolidMeshSnapshot(for params: ExtrudedSolidParameters) -> CADSolidMeshSnapshot? {
+        if !params.boxBlindCutFeatures.isEmpty,
+           let candidate = makeBoxBlindCutCandidate(params) {
+            return candidate.meshSnapshot
+        }
+
+        let geometry = makeExtrudedSolidGeometry(params)
+        return solidMeshSnapshot(from: geometry)
     }
 
     static func validateBoxDistanceCutCandidate(params p: ExtrudedSolidParameters) -> CADFeatureValidation {
@@ -553,25 +632,75 @@ enum DesignAssetNodeFactory {
         guard candidate.vertexCount >= 24,
               candidate.triangleCount >= 12,
               candidate.faceSurfacesRendered == p.faces.count,
-              candidate.entryFaceSurfacesRendered == Set(p.boxBlindCutFeatures.map(\.entryFaceID)).count else {
+              candidate.entryFaceSurfacesRendered == candidate.expectedEntryFaceSurfacesRendered else {
             return .unaffectedGeometryWasRemoved
+        }
+        print(
+            "CAD Cut v2 Result Mesh: vertices=\(candidate.vertexCount) " +
+            "triangles=\(candidate.triangleCount) " +
+            "volumeEstimate=\(candidate.meshDiagnostics.volumeEstimate) " +
+            "invalidVertices=\(candidate.meshDiagnostics.invalidVertexCount) " +
+            "zeroAreaTriangles=\(candidate.meshDiagnostics.zeroAreaTriangleCount) " +
+            "sliverTriangles=\(candidate.meshDiagnostics.sliverTriangleCount) " +
+            "duplicateFaces=\(candidate.meshDiagnostics.duplicateFaceCount) " +
+            "boundaryEdges=\(candidate.meshDiagnostics.boundaryEdgeCount) " +
+            "boundaryLoops=\(candidate.meshDiagnostics.boundaryLoopCount) " +
+            "nonManifoldEdges=\(candidate.meshDiagnostics.nonManifoldEdgeCount)"
+        )
+        if candidate.meshDiagnostics.hasInvalidTopology {
+            return .cutResultNotSolid
+        }
+        if candidate.meshDiagnostics.hasOpenBoundary {
+            print(
+                "CAD Cut v2 Mesh Warning: result mesh has open or non-manifold edges " +
+                "(boundary=\(candidate.meshDiagnostics.boundaryEdgeCount), " +
+                "loops=\(candidate.meshDiagnostics.boundaryLoopCount), " +
+                "nonManifold=\(candidate.meshDiagnostics.nonManifoldEdgeCount))."
+            )
         }
 
         for cut in p.boxBlindCutFeatures {
             guard let stats = candidate.cutStats[cut.id] else {
                 return .cutResultNotSolid
             }
+            let expectedWallTriangleCount = stats.segmentCount * 2
+            let expectedWallQuadCount = stats.segmentCount
+            print(
+                "CAD Cut v2 Mesh: cutID=\(cut.id.uuidString) " +
+                "profile=\(cut.profileType.rawValue) " +
+                "segments=\(stats.segmentCount) " +
+                "wallQuads=\(stats.wallQuadCount)/\(expectedWallQuadCount) " +
+                "wallTriangles=\(stats.wallTriangleCount) min=\(expectedWallTriangleCount) " +
+                "skippedWallSegments=\(stats.skippedWallSegmentCount) " +
+                "culledByExistingCuts=\(stats.cutIntersectionCullCount) " +
+                "flippedWallTriangles=\(stats.wallFlippedTriangleCount) " +
+                "bottomTriangles=\(stats.bottomTriangleCount) " +
+                "depthRange=\(stats.minDepthMeters)...\(stats.maxDepthMeters)"
+            )
+            if stats.cutIntersectionCullCount == 0 {
+                guard stats.wallQuadCount == expectedWallQuadCount,
+                      stats.wallTriangleCount >= expectedWallTriangleCount,
+                      stats.skippedWallSegmentCount == 0 else {
+                    return cut.profileType == .circle ? .cutMissingCylindricalWall : .cutMissingInternalWall
+                }
+            }
             switch cut.profileType {
             case .circle:
-                guard stats.segmentCount >= 64 else { return .cutMissingCylindricalWall }
-                guard stats.wallTriangleCount >= stats.segmentCount * 2 else { return .cutMissingCylindricalWall }
-                guard stats.bottomTriangleCount >= stats.segmentCount - 2 else { return .cutMissingBlindBottom }
+                guard stats.segmentCount >= 64 else { return .unsupportedProfileForCutV2 }
+                if cut.depthMode == .throughAll {
+                    guard stats.bottomTriangleCount == 0 else { return .cutMissingExitOpening }
+                } else if stats.cutIntersectionCullCount == 0 {
+                    guard stats.bottomTriangleCount >= stats.segmentCount - 2 else { return .cutMissingBlindBottom }
+                }
             case .rectangle:
-                guard stats.segmentCount == 4 else { return .unsupportedCutApplyStage2A }
-                guard stats.wallTriangleCount >= 8 else { return .cutMissingCylindricalWall }
-                guard stats.bottomTriangleCount >= 2 else { return .cutMissingBlindBottom }
+                guard stats.segmentCount == 4 else { return .unsupportedProfileForCutV2 }
+                if cut.depthMode == .throughAll {
+                    guard stats.bottomTriangleCount == 0 else { return .cutMissingExitOpening }
+                } else if stats.cutIntersectionCullCount == 0 {
+                    guard stats.bottomTriangleCount >= 2 else { return .cutMissingBlindBottom }
+                }
             case .polygon, .unsupported:
-                return .unsupportedCutApplyStage2A
+                return .unsupportedProfileForCutV2
             }
         }
         return .valid
@@ -583,7 +712,7 @@ enum DesignAssetNodeFactory {
               candidate.vertexCount >= 24,
               candidate.triangleCount >= 12,
               candidate.faceSurfacesRendered == p.faces.count,
-              candidate.entryFaceSurfacesRendered == Set(p.boxBlindCutFeatures.map(\.entryFaceID)).count else {
+              candidate.entryFaceSurfacesRendered == candidate.expectedEntryFaceSurfacesRendered else {
             return nil
         }
         return candidate.geometry
@@ -601,9 +730,9 @@ enum DesignAssetNodeFactory {
         let faceByID = Dictionary(uniqueKeysWithValues: p.faces.map { ($0.id, $0) })
         guard p.boxBlindCutFeatures.allSatisfy({
             ($0.profileType == .circle || $0.profileType == .rectangle)
-                && $0.depthMode == .distance
+                && ($0.depthMode == .distance || $0.depthMode == .throughAll)
                 && $0.depthMeters.isFinite
-                && $0.depthMeters > 1e-6
+                && ($0.depthMode == .throughAll || $0.depthMeters > 1e-6)
                 && $0.cutDirection.isFinite
                 && faceByID[$0.entryFaceID] != nil
         }) else {
@@ -629,6 +758,143 @@ enum DesignAssetNodeFactory {
             return index
         }
 
+        var ignoredCutVolumeIDs: Set<UUID> = []
+        var cutVolumeCulledTriangleCount = 0
+        let materialPatchMaxEdgeMeters = 0.01
+        let materialPatchMaxSubdivisions = 28
+
+        func withIgnoredCutVolumes<T>(_ ids: Set<UUID>, _ body: () -> T) -> T {
+            let previous = ignoredCutVolumeIDs
+            ignoredCutVolumeIDs.formUnion(ids)
+            defer { ignoredCutVolumeIDs = previous }
+            return body()
+        }
+
+        func pointInsideProfile(
+            _ point: SketchPoint2D,
+            cut: ExtrudedSolidBoxBlindCutFeature,
+            tolerance: Double
+        ) -> Bool {
+            switch cut.profileType {
+            case .circle:
+                guard cut.profilePoints.count >= 32 else { return false }
+                let sum = cut.profilePoints.reduce(SketchPoint2D.zero) { partial, point in
+                    SketchPoint2D(u: partial.u + point.u, v: partial.v + point.v)
+                }
+                let count = Double(cut.profilePoints.count)
+                let center = SketchPoint2D(u: sum.u / count, v: sum.v / count)
+                let radius = cut.profilePoints.map { $0.distance(to: center) }.reduce(0, +) / count
+                return radius.isFinite && radius > tolerance && point.distance(to: center) < radius - tolerance
+            case .rectangle:
+                let us = cut.profilePoints.map(\.u)
+                let vs = cut.profilePoints.map(\.v)
+                guard let minU = us.min(),
+                      let maxU = us.max(),
+                      let minV = vs.min(),
+                      let maxV = vs.max() else {
+                    return false
+                }
+                return point.u > minU + tolerance
+                    && point.u < maxU - tolerance
+                    && point.v > minV + tolerance
+                    && point.v < maxV - tolerance
+            case .polygon:
+                return SketchProfileEngine.pointInPolygon(point, polygon: cut.profilePoints)
+            case .unsupported:
+                return false
+            }
+        }
+
+        func throughAllDepth(
+            for cut: ExtrudedSolidBoxBlindCutFeature,
+            entryFace: DesignPlanarFace,
+            direction: DesignVector3
+        ) -> Double? {
+            let entryU = entryFace.uAxis.normalized(fallback: .xAxis)
+            let entryV = entryFace.vAxis.normalized(fallback: .yAxis)
+            let center = cut.profilePoints.reduce(SketchPoint2D.zero) { partial, point in
+                SketchPoint2D(u: partial.u + point.u, v: partial.v + point.v)
+            }
+            let count = max(Double(cut.profilePoints.count), 1.0)
+            let entryCenter = entryFace.origin
+                + entryU * (center.u / count)
+                + entryV * (center.v / count)
+
+            for exitFace in p.faces where exitFace.id != entryFace.id {
+                let exitNormal = exitFace.normal.normalized(fallback: direction)
+                guard exitNormal.dot(direction) > 0.99 else { continue }
+                let denominator = direction.dot(exitNormal)
+                guard denominator > 1e-6 else { continue }
+                let distance = (exitFace.origin - entryCenter).dot(exitNormal) / denominator
+                guard distance.isFinite, distance > 1e-6 else { continue }
+
+                let exitU = exitFace.uAxis.normalized(fallback: .xAxis)
+                let exitV = exitFace.vAxis.normalized(fallback: .yAxis)
+                let tolerance = 1e-5
+                let profileProjectsInsideExit = cut.profilePoints.allSatisfy { profilePoint in
+                    let world = entryFace.origin + entryU * profilePoint.u + entryV * profilePoint.v
+                    let projected = world + direction * distance
+                    let localDelta = projected - exitFace.origin
+                    let u = localDelta.dot(exitU)
+                    let v = localDelta.dot(exitV)
+                    return u >= exitFace.bounds.minU - tolerance
+                        && u <= exitFace.bounds.maxU + tolerance
+                        && v >= exitFace.bounds.minV - tolerance
+                        && v <= exitFace.bounds.maxV + tolerance
+                }
+                if profileProjectsInsideExit { return distance }
+            }
+            return nil
+        }
+
+        func pointInsideCutVolume(_ point: DesignVector3, cut: ExtrudedSolidBoxBlindCutFeature) -> Bool {
+            guard !ignoredCutVolumeIDs.contains(cut.id),
+                  let entryFace = faceByID[cut.entryFaceID] else {
+                return false
+            }
+
+            let direction = cut.cutDirection.normalized(fallback: entryFace.normal * -1)
+            let tolerance = 1e-6
+            let depth: Double
+            switch cut.depthMode {
+            case .distance:
+                depth = cut.depthMeters
+            case .throughAll:
+                guard let throughDepth = throughAllDepth(for: cut, entryFace: entryFace, direction: direction) else {
+                    return false
+                }
+                depth = throughDepth
+            case .upToObject, .upToNearestFace:
+                return false
+            }
+            guard depth.isFinite, depth > tolerance else { return false }
+
+            let delta = point - entryFace.origin
+            let distanceAlongCut = delta.dot(direction)
+            guard distanceAlongCut > tolerance,
+                  distanceAlongCut < depth - tolerance else {
+                return false
+            }
+
+            let faceU = entryFace.uAxis.normalized(fallback: .xAxis)
+            let faceV = entryFace.vAxis.normalized(fallback: .yAxis)
+            let local = SketchPoint2D(u: delta.dot(faceU), v: delta.dot(faceV))
+            return pointInsideProfile(local, cut: cut, tolerance: tolerance)
+        }
+
+        func triangleCentroidIsInsideExistingCut(_ a: DesignVector3, _ b: DesignVector3, _ c: DesignVector3) -> Bool {
+            let centroid = (a + b + c) * (1.0 / 3.0)
+            return p.boxBlindCutFeatures.contains { pointInsideCutVolume(centroid, cut: $0) }
+        }
+
+        func triangleVerticesAreInsideSameExistingCut(_ a: DesignVector3, _ b: DesignVector3, _ c: DesignVector3) -> Bool {
+            p.boxBlindCutFeatures.contains { cut in
+                pointInsideCutVolume(a, cut: cut)
+                    && pointInsideCutVolume(b, cut: cut)
+                    && pointInsideCutVolume(c, cut: cut)
+            }
+        }
+
         @discardableResult
         func appendTriangle(
             _ a: DesignVector3,
@@ -640,6 +906,10 @@ enum DesignAssetNodeFactory {
             let windingNormal = (b - a).cross(c - a)
             guard a.isFinite, b.isFinite, c.isFinite, n.isFinite,
                   windingNormal.length > 1e-12 else {
+                return false
+            }
+            if triangleCentroidIsInsideExistingCut(a, b, c) {
+                cutVolumeCulledTriangleCount += 1
                 return false
             }
             let ia = appendVertex(a, normal: n)
@@ -654,6 +924,164 @@ enum DesignAssetNodeFactory {
         }
 
         @discardableResult
+        func appendCutWallTriangle(
+            _ a: DesignVector3,
+            _ b: DesignVector3,
+            _ c: DesignVector3,
+            normalA: DesignVector3,
+            normalB: DesignVector3,
+            normalC: DesignVector3,
+            desiredNormal: DesignVector3,
+            flippedTriangleCount: inout Int
+        ) -> Bool {
+            let n = desiredNormal.normalized(fallback: .zAxis)
+            let na = normalA.normalized(fallback: n)
+            let nb = normalB.normalized(fallback: n)
+            let nc = normalC.normalized(fallback: n)
+            let windingNormal = (b - a).cross(c - a)
+            guard a.isFinite, b.isFinite, c.isFinite,
+                  n.isFinite, na.isFinite, nb.isFinite, nc.isFinite,
+                  windingNormal.length > 1e-12 else {
+                return false
+            }
+            if triangleVerticesAreInsideSameExistingCut(a, b, c) {
+                cutVolumeCulledTriangleCount += 1
+                return false
+            }
+
+            let ia = appendVertex(a, normal: na)
+            let ib = appendVertex(b, normal: nb)
+            let ic = appendVertex(c, normal: nc)
+            if windingNormal.dot(n) < 0 {
+                indices += [ia, ic, ib]
+                flippedTriangleCount += 1
+            } else {
+                indices += [ia, ib, ic]
+            }
+            return true
+        }
+
+        func subdivisionCount(for length: Double) -> Int {
+            guard length.isFinite, length > materialPatchMaxEdgeMeters else { return 1 }
+            return min(materialPatchMaxSubdivisions, max(1, Int(ceil(length / materialPatchMaxEdgeMeters))))
+        }
+
+        func bilerp(
+            _ a: DesignVector3,
+            _ b: DesignVector3,
+            _ c: DesignVector3,
+            _ d: DesignVector3,
+            u: Double,
+            v: Double
+        ) -> DesignVector3 {
+            let top = a * (1.0 - u) + b * u
+            let bottom = d * (1.0 - u) + c * u
+            return top * (1.0 - v) + bottom * v
+        }
+
+        @discardableResult
+        func appendTriangle(
+            _ a: DesignVector3,
+            _ b: DesignVector3,
+            _ c: DesignVector3,
+            normalA: DesignVector3,
+            normalB: DesignVector3,
+            normalC: DesignVector3,
+            desiredNormal: DesignVector3,
+            flippedTriangleCount: inout Int
+        ) -> Bool {
+            let n = desiredNormal.normalized(fallback: .zAxis)
+            let na = normalA.normalized(fallback: n)
+            let nb = normalB.normalized(fallback: n)
+            let nc = normalC.normalized(fallback: n)
+            let windingNormal = (b - a).cross(c - a)
+            guard a.isFinite, b.isFinite, c.isFinite,
+                  n.isFinite, na.isFinite, nb.isFinite, nc.isFinite,
+                  windingNormal.length > 1e-12 else {
+                return false
+            }
+            if triangleCentroidIsInsideExistingCut(a, b, c) {
+                cutVolumeCulledTriangleCount += 1
+                return false
+            }
+            let ia = appendVertex(a, normal: na)
+            let ib = appendVertex(b, normal: nb)
+            let ic = appendVertex(c, normal: nc)
+            if windingNormal.dot(n) < 0 {
+                indices += [ia, ic, ib]
+                flippedTriangleCount += 1
+            } else {
+                indices += [ia, ib, ic]
+            }
+            return true
+        }
+
+        @discardableResult
+        func appendSubdividedQuad(
+            _ a: DesignVector3,
+            _ b: DesignVector3,
+            _ c: DesignVector3,
+            _ d: DesignVector3,
+            normalA: DesignVector3,
+            normalB: DesignVector3,
+            normalC: DesignVector3,
+            normalD: DesignVector3,
+            desiredNormal: DesignVector3,
+            flippedTriangleCount: inout Int
+        ) -> Int {
+            let uLength = max((b - a).length, (c - d).length)
+            let vLength = max((d - a).length, (c - b).length)
+            let uSteps = subdivisionCount(for: uLength)
+            let vSteps = subdivisionCount(for: vLength)
+            var count = 0
+
+            for uIndex in 0..<uSteps {
+                let u0 = Double(uIndex) / Double(uSteps)
+                let u1 = Double(uIndex + 1) / Double(uSteps)
+                for vIndex in 0..<vSteps {
+                    let v0 = Double(vIndex) / Double(vSteps)
+                    let v1 = Double(vIndex + 1) / Double(vSteps)
+
+                    let p00 = bilerp(a, b, c, d, u: u0, v: v0)
+                    let p10 = bilerp(a, b, c, d, u: u1, v: v0)
+                    let p11 = bilerp(a, b, c, d, u: u1, v: v1)
+                    let p01 = bilerp(a, b, c, d, u: u0, v: v1)
+                    let n00 = bilerp(normalA, normalB, normalC, normalD, u: u0, v: v0)
+                    let n10 = bilerp(normalA, normalB, normalC, normalD, u: u1, v: v0)
+                    let n11 = bilerp(normalA, normalB, normalC, normalD, u: u1, v: v1)
+                    let n01 = bilerp(normalA, normalB, normalC, normalD, u: u0, v: v1)
+
+                    if appendTriangle(
+                        p00,
+                        p10,
+                        p11,
+                        normalA: n00,
+                        normalB: n10,
+                        normalC: n11,
+                        desiredNormal: desiredNormal,
+                        flippedTriangleCount: &flippedTriangleCount
+                    ) {
+                        count += 1
+                    }
+                    if appendTriangle(
+                        p00,
+                        p11,
+                        p01,
+                        normalA: n00,
+                        normalB: n11,
+                        normalC: n01,
+                        desiredNormal: desiredNormal,
+                        flippedTriangleCount: &flippedTriangleCount
+                    ) {
+                        count += 1
+                    }
+                }
+            }
+
+            return count
+        }
+
+        @discardableResult
         func appendQuad(
             _ a: DesignVector3,
             _ b: DesignVector3,
@@ -661,14 +1089,129 @@ enum DesignAssetNodeFactory {
             _ d: DesignVector3,
             desiredNormal: DesignVector3
         ) -> Int {
+            var flippedTriangleCount = 0
+            return appendSubdividedQuad(
+                a,
+                b,
+                c,
+                d,
+                normalA: desiredNormal,
+                normalB: desiredNormal,
+                normalC: desiredNormal,
+                normalD: desiredNormal,
+                desiredNormal: desiredNormal,
+                flippedTriangleCount: &flippedTriangleCount
+            )
+        }
+
+        @discardableResult
+        func appendCutWallQuad(
+            _ a: DesignVector3,
+            _ b: DesignVector3,
+            _ c: DesignVector3,
+            _ d: DesignVector3,
+            normalA: DesignVector3,
+            normalB: DesignVector3,
+            normalC: DesignVector3,
+            normalD: DesignVector3,
+            desiredNormal: DesignVector3,
+            flippedTriangleCount: inout Int
+        ) -> Int {
             var count = 0
-            if appendTriangle(a, b, c, desiredNormal: desiredNormal) { count += 1 }
-            if appendTriangle(a, c, d, desiredNormal: desiredNormal) { count += 1 }
+            if appendCutWallTriangle(
+                a,
+                b,
+                c,
+                normalA: normalA,
+                normalB: normalB,
+                normalC: normalC,
+                desiredNormal: desiredNormal,
+                flippedTriangleCount: &flippedTriangleCount
+            ) {
+                count += 1
+            }
+            if appendCutWallTriangle(
+                a,
+                c,
+                d,
+                normalA: normalA,
+                normalB: normalC,
+                normalC: normalD,
+                desiredNormal: desiredNormal,
+                flippedTriangleCount: &flippedTriangleCount
+            ) {
+                count += 1
+            }
             return count
         }
 
         func faceWorldPoint(_ face: DesignPlanarFace, _ point: SketchPoint2D) -> DesignVector3 {
             face.origin + face.uAxis * point.u + face.vAxis * point.v
+        }
+
+        func projectCutProfile(
+            _ cut: ExtrudedSolidBoxBlindCutFeature,
+            from entryFace: DesignPlanarFace,
+            to exitFace: DesignPlanarFace
+        ) -> [SketchPoint2D]? {
+            let direction = cut.cutDirection.normalized(fallback: entryFace.normal * -1)
+            let exitNormal = exitFace.normal.normalized(fallback: direction)
+            let denominator = direction.dot(exitNormal)
+            guard denominator > 1e-6 else { return nil }
+
+            let exitU = exitFace.uAxis.normalized(fallback: .xAxis)
+            let exitV = exitFace.vAxis.normalized(fallback: .yAxis)
+            let tolerance = 1e-5
+            var projected: [SketchPoint2D] = []
+            for point in cut.profilePoints {
+                let world = faceWorldPoint(entryFace, point)
+                let distance = (exitFace.origin - world).dot(exitNormal) / denominator
+                guard distance.isFinite, distance > 1e-6 else { return nil }
+                let exitWorld = world + direction * distance
+                let delta = exitWorld - exitFace.origin
+                let local = SketchPoint2D(u: delta.dot(exitU), v: delta.dot(exitV))
+                guard local.u >= exitFace.bounds.minU - tolerance,
+                      local.u <= exitFace.bounds.maxU + tolerance,
+                      local.v >= exitFace.bounds.minV - tolerance,
+                      local.v <= exitFace.bounds.maxV + tolerance else {
+                    return nil
+                }
+                projected.append(local)
+            }
+            return projected
+        }
+
+        func throughAllExitFace(
+            for cut: ExtrudedSolidBoxBlindCutFeature,
+            entryFace: DesignPlanarFace
+        ) -> DesignPlanarFace? {
+            guard cut.depthMode == .throughAll else { return nil }
+            let direction = cut.cutDirection.normalized(fallback: entryFace.normal * -1)
+            return p.faces.first { face in
+                face.id != entryFace.id
+                    && face.normal.normalized(fallback: .zAxis).dot(direction) > 0.99
+                    && projectCutProfile(cut, from: entryFace, to: face) != nil
+            }
+        }
+
+        func cutProjectedOnFace(
+            _ cut: ExtrudedSolidBoxBlindCutFeature,
+            face: DesignPlanarFace
+        ) -> ExtrudedSolidBoxBlindCutFeature? {
+            if cut.entryFaceID == face.id {
+                return cut
+            }
+            guard cut.depthMode == .throughAll,
+                  let entryFace = faceByID[cut.entryFaceID],
+                  let exitFace = throughAllExitFace(for: cut, entryFace: entryFace),
+                  exitFace.id == face.id,
+                  let projectedProfile = projectCutProfile(cut, from: entryFace, to: face) else {
+                return nil
+            }
+            var projectedCut = cut
+            projectedCut.entryFaceID = face.id
+            projectedCut.profilePoints = projectedProfile
+            return projectedCut
         }
 
         func faceOuterLoop(_ face: DesignPlanarFace) -> [SketchPoint2D] {
@@ -693,6 +1236,32 @@ enum DesignAssetNodeFactory {
                 .reduce(0, +) / count
             guard radius.isFinite, radius > 1e-6 else { return nil }
             return (resolvedCenter, radius)
+        }
+
+        func rectangleDescriptor(
+            for cut: ExtrudedSolidBoxBlindCutFeature
+        ) -> (minU: Double, maxU: Double, minV: Double, maxV: Double)? {
+            guard cut.profileType == .rectangle, cut.profilePoints.count == 4 else { return nil }
+            let us = cut.profilePoints.map(\.u)
+            let vs = cut.profilePoints.map(\.v)
+            guard us.allSatisfy(\.isFinite), vs.allSatisfy(\.isFinite),
+                  let minU = us.min(),
+                  let maxU = us.max(),
+                  let minV = vs.min(),
+                  let maxV = vs.max(),
+                  maxU - minU > 1e-6,
+                  maxV - minV > 1e-6 else {
+                return nil
+            }
+
+            let tolerance = max(1e-6, max(maxU - minU, maxV - minV) * 0.002)
+            let pointsMatchRectangle = cut.profilePoints.allSatisfy { point in
+                let onVerticalEdge = abs(point.u - minU) <= tolerance || abs(point.u - maxU) <= tolerance
+                let onHorizontalEdge = abs(point.v - minV) <= tolerance || abs(point.v - maxV) <= tolerance
+                return onVerticalEdge && onHorizontalEdge
+            }
+            guard pointsMatchRectangle else { return nil }
+            return (minU, maxU, minV, maxV)
         }
 
         func entryTriangleAllowed(
@@ -724,6 +1293,91 @@ enum DesignAssetNodeFactory {
                     }
                     let closest = closestPointOnSegment(from: circle.center, segA: p0, segB: p1)
                     if closest.distance(to: circle.center) < circle.radius - tolerance {
+                        return false
+                    }
+                }
+            }
+            return true
+        }
+
+        func entryTriangleAllowed(
+            _ a: SketchPoint2D,
+            _ b: SketchPoint2D,
+            _ c: SketchPoint2D,
+            rectangleHoles: [(minU: Double, maxU: Double, minV: Double, maxV: Double)]
+        ) -> Bool {
+            let area2 = abs((b.u - a.u) * (c.v - a.v) - (b.v - a.v) * (c.u - a.u))
+            guard area2 > 1e-12 else { return true }
+
+            func pointInside(_ point: SketchPoint2D, _ rect: (minU: Double, maxU: Double, minV: Double, maxV: Double), tolerance: Double) -> Bool {
+                point.u > rect.minU + tolerance
+                    && point.u < rect.maxU - tolerance
+                    && point.v > rect.minV + tolerance
+                    && point.v < rect.maxV - tolerance
+            }
+
+            func segmentIntersectsInterior(
+                _ p0: SketchPoint2D,
+                _ p1: SketchPoint2D,
+                _ rect: (minU: Double, maxU: Double, minV: Double, maxV: Double),
+                tolerance: Double
+            ) -> Bool {
+                let minU = rect.minU + tolerance
+                let maxU = rect.maxU - tolerance
+                let minV = rect.minV + tolerance
+                let maxV = rect.maxV - tolerance
+                guard minU < maxU, minV < maxV else { return false }
+                if pointInside(p0, rect, tolerance: tolerance) || pointInside(p1, rect, tolerance: tolerance) {
+                    return true
+                }
+
+                let dx = p1.u - p0.u
+                let dy = p1.v - p0.v
+                var t0 = 0.0
+                var t1 = 1.0
+
+                func clip(_ p: Double, _ q: Double) -> Bool {
+                    if abs(p) < 1e-12 {
+                        return q >= 0
+                    }
+                    let r = q / p
+                    if p < 0 {
+                        if r > t1 { return false }
+                        if r > t0 { t0 = r }
+                    } else {
+                        if r < t0 { return false }
+                        if r < t1 { t1 = r }
+                    }
+                    return true
+                }
+
+                guard clip(-dx, p0.u - minU),
+                      clip(dx, maxU - p0.u),
+                      clip(-dy, p0.v - minV),
+                      clip(dy, maxV - p0.v) else {
+                    return false
+                }
+                return t0 < t1 && t1 > 1e-9 && t0 < 1.0 - 1e-9
+            }
+
+            for rect in rectangleHoles {
+                let tolerance = max(1e-6, max(rect.maxU - rect.minU, rect.maxV - rect.minV) * 0.002)
+                let centroid = SketchPoint2D(
+                    u: (a.u + b.u + c.u) / 3.0,
+                    v: (a.v + b.v + c.v) / 3.0
+                )
+                if pointInside(centroid, rect, tolerance: tolerance) {
+                    return false
+                }
+
+                let tri = [a, b, c]
+                for index in tri.indices {
+                    if segmentIntersectsInterior(
+                        tri[index],
+                        tri[(index + 1) % tri.count],
+                        rect,
+                        tolerance: tolerance
+                    ) {
                         return false
                     }
                 }
@@ -780,9 +1434,30 @@ enum DesignAssetNodeFactory {
                 appendLocalTriangle(a, b, c) + appendLocalTriangle(a, c, d)
             }
 
+            func appendLocalMaterialQuad(
+                _ a: SketchPoint2D,
+                _ b: SketchPoint2D,
+                _ c: SketchPoint2D,
+                _ d: SketchPoint2D
+            ) -> Int {
+                var flippedTriangleCount = 0
+                return appendSubdividedQuad(
+                    faceWorldPoint(face, a),
+                    faceWorldPoint(face, b),
+                    faceWorldPoint(face, c),
+                    faceWorldPoint(face, d),
+                    normalA: normal,
+                    normalB: normal,
+                    normalC: normal,
+                    normalD: normal,
+                    desiredNormal: normal,
+                    flippedTriangleCount: &flippedTriangleCount
+                )
+            }
+
             func appendRect(minU: Double, maxU: Double, minV: Double, maxV: Double) -> Int {
                 guard maxU - minU > tolerance, maxV - minV > tolerance else { return 0 }
-                return appendLocalQuad(
+                return appendLocalMaterialQuad(
                     SketchPoint2D(u: minU, v: minV),
                     SketchPoint2D(u: maxU, v: minV),
                     SketchPoint2D(u: maxU, v: maxV),
@@ -823,48 +1498,124 @@ enum DesignAssetNodeFactory {
         }
 
         @discardableResult
-        func appendFaceSurface(_ face: DesignPlanarFace, cuts: [ExtrudedSolidBoxBlindCutFeature]) -> Int {
+        func appendRectangleEntryFaceSurface(
+            _ face: DesignPlanarFace,
+            cut: ExtrudedSolidBoxBlindCutFeature,
+            rectangle: (minU: Double, maxU: Double, minV: Double, maxV: Double)
+        ) -> Int {
             let normal = face.normal.normalized(fallback: .zAxis)
-            let holes = cuts.map(\.profilePoints)
-            if holes.isEmpty {
-                let outer = faceOuterLoop(face)
-                let world = outer.map { faceWorldPoint(face, $0) }
-                return appendQuad(world[0], world[1], world[2], world[3], desiredNormal: normal)
-            }
-            if cuts.count == 1,
-               cuts[0].profileType == .circle,
-               let circle = circleDescriptor(for: cuts[0]) {
-                return appendCircleEntryFaceSurface(face, cut: cuts[0], circle: circle)
+            let faceMinU = face.bounds.minU
+            let faceMaxU = face.bounds.maxU
+            let faceMinV = face.bounds.minV
+            let faceMaxV = face.bounds.maxV
+            let tolerance = 1e-6
+            guard rectangle.minU > faceMinU + tolerance,
+                  rectangle.maxU < faceMaxU - tolerance,
+                  rectangle.minV > faceMinV + tolerance,
+                  rectangle.maxV < faceMaxV - tolerance else {
+                invalidEntryFaceTriangulation = true
+                return 0
             }
 
-            let merged = mergePolygonWithHoles(outer: faceOuterLoop(face), holes: holes)
-            guard merged.count >= 3 else { return 0 }
-            let circleHoles = cuts.compactMap(circleDescriptor(for:))
-            var count = 0
-            for (ia, ib, ic) in earClipTriangulate(merged) {
-                guard entryTriangleAllowed(
-                    merged[ia],
-                    merged[ib],
-                    merged[ic],
-                    circleHoles: circleHoles
-                ) else {
-                    continue
+            func appendLocalTriangle(
+                _ a: SketchPoint2D,
+                _ b: SketchPoint2D,
+                _ c: SketchPoint2D
+            ) -> Int {
+                guard entryTriangleAllowed(a, b, c, rectangleHoles: [rectangle]) else {
+                    invalidEntryFaceTriangulation = true
+                    return 0
                 }
-                if appendTriangle(
-                    faceWorldPoint(face, merged[ia]),
-                    faceWorldPoint(face, merged[ib]),
-                    faceWorldPoint(face, merged[ic]),
+                return appendTriangle(
+                    faceWorldPoint(face, a),
+                    faceWorldPoint(face, b),
+                    faceWorldPoint(face, c),
                     desiredNormal: normal
-                ) {
-                    count += 1
-                }
+                ) ? 1 : 0
             }
-            return count
+
+            func appendLocalQuad(
+                _ a: SketchPoint2D,
+                _ b: SketchPoint2D,
+                _ c: SketchPoint2D,
+                _ d: SketchPoint2D
+            ) -> Int {
+                var flippedTriangleCount = 0
+                return appendSubdividedQuad(
+                    faceWorldPoint(face, a),
+                    faceWorldPoint(face, b),
+                    faceWorldPoint(face, c),
+                    faceWorldPoint(face, d),
+                    normalA: normal,
+                    normalB: normal,
+                    normalC: normal,
+                    normalD: normal,
+                    desiredNormal: normal,
+                    flippedTriangleCount: &flippedTriangleCount
+                )
+            }
+
+            func appendRect(minU: Double, maxU: Double, minV: Double, maxV: Double) -> Int {
+                guard maxU - minU > tolerance, maxV - minV > tolerance else { return 0 }
+                return appendLocalQuad(
+                    SketchPoint2D(u: minU, v: minV),
+                    SketchPoint2D(u: maxU, v: minV),
+                    SketchPoint2D(u: maxU, v: maxV),
+                    SketchPoint2D(u: minU, v: maxV)
+                )
+            }
+
+            var count = 0
+            count += appendRect(minU: faceMinU, maxU: faceMaxU, minV: faceMinV, maxV: rectangle.minV)
+            count += appendRect(minU: faceMinU, maxU: faceMaxU, minV: rectangle.maxV, maxV: faceMaxV)
+            count += appendRect(minU: faceMinU, maxU: rectangle.minU, minV: rectangle.minV, maxV: rectangle.maxV)
+            count += appendRect(minU: rectangle.maxU, maxU: faceMaxU, minV: rectangle.minV, maxV: rectangle.maxV)
+
+            if count < 8 {
+                invalidEntryFaceTriangulation = true
+                return 0
+            }
+            return invalidEntryFaceTriangulation ? 0 : count
+        }
+
+        @discardableResult
+        func appendFaceSurface(_ face: DesignPlanarFace, cuts: [ExtrudedSolidBoxBlindCutFeature]) -> Int {
+            return withIgnoredCutVolumes(Set(cuts.map(\.id))) {
+                let normal = face.normal.normalized(fallback: .zAxis)
+                let holes = cuts.map(\.profilePoints)
+                if holes.isEmpty {
+                    let outer = faceOuterLoop(face)
+                    let world = outer.map { faceWorldPoint(face, $0) }
+                    return appendQuad(world[0], world[1], world[2], world[3], desiredNormal: normal)
+                }
+                if cuts.count == 1,
+                   cuts[0].profileType == .circle,
+                   let circle = circleDescriptor(for: cuts[0]) {
+                    return appendCircleEntryFaceSurface(face, cut: cuts[0], circle: circle)
+                }
+                if cuts.count == 1,
+                   cuts[0].profileType == .rectangle,
+                   let rectangle = rectangleDescriptor(for: cuts[0]) {
+                    return appendRectangleEntryFaceSurface(face, cut: cuts[0], rectangle: rectangle)
+                }
+
+                invalidEntryFaceTriangulation = true
+                return 0
+            }
         }
 
         @discardableResult
         func appendConvexCap(points: [DesignVector3], desiredNormal: DesignVector3) -> Int {
             guard points.count >= 3 else { return 0 }
+            if points.count == 4 {
+                return appendQuad(
+                    points[0],
+                    points[1],
+                    points[2],
+                    points[3],
+                    desiredNormal: desiredNormal
+                )
+            }
             var count = 0
             for index in 1..<(points.count - 1) {
                 if appendTriangle(
@@ -879,8 +1630,20 @@ enum DesignAssetNodeFactory {
             return count
         }
 
+        guard p.boxBlindCutFeatures.allSatisfy({ cut in
+            guard cut.depthMode == .throughAll else { return true }
+            guard let entryFace = faceByID[cut.entryFaceID] else { return false }
+            return throughAllExitFace(for: cut, entryFace: entryFace) != nil
+        }) else {
+            return nil
+        }
+
+        let expectedCutFaceIDs = Set(p.faces.compactMap { face -> UUID? in
+            p.boxBlindCutFeatures.contains { cutProjectedOnFace($0, face: face) != nil } ? face.id : nil
+        })
+
         for face in p.faces {
-            let faceCuts = p.boxBlindCutFeatures.filter { $0.entryFaceID == face.id }
+            let faceCuts = p.boxBlindCutFeatures.compactMap { cutProjectedOnFace($0, face: face) }
             let triangles = appendFaceSurface(face, cuts: faceCuts)
             if triangles > 0 {
                 faceSurfacesRendered += 1
@@ -895,32 +1658,131 @@ enum DesignAssetNodeFactory {
             let entryPoints = cut.profilePoints.map { faceWorldPoint(face, $0) }
             guard entryPoints.count >= 3 else { continue }
             let cutDirection = cut.cutDirection.normalized(fallback: face.normal * -1)
-            let bottomPoints = entryPoints.map { $0 + cutDirection * cut.depthMeters }
-            let center = entryPoints.reduce(DesignVector3.zero, +) * (1.0 / Double(entryPoints.count))
+            let endPoints: [DesignVector3]
+            if cut.depthMode == .throughAll {
+                guard let exitFace = throughAllExitFace(for: cut, entryFace: face),
+                      let projectedProfile = projectCutProfile(cut, from: face, to: exitFace) else {
+                    invalidEntryFaceTriangulation = true
+                    continue
+                }
+                endPoints = projectedProfile.map { faceWorldPoint(exitFace, $0) }
+            } else {
+                endPoints = entryPoints.map { $0 + cutDirection * cut.depthMeters }
+            }
+            guard endPoints.count == entryPoints.count else {
+                invalidEntryFaceTriangulation = true
+                continue
+            }
+            let entryCenter = entryPoints.reduce(DesignVector3.zero, +) * (1.0 / Double(entryPoints.count))
+            let endCenter = endPoints.reduce(DesignVector3.zero, +) * (1.0 / Double(endPoints.count))
+            let axisDirection = (endCenter - entryCenter).normalized(fallback: cutDirection)
+            let depthSamples = zip(entryPoints, endPoints).map { pair in
+                (pair.1 - pair.0).dot(axisDirection)
+            }
+            let minDepthMeters = depthSamples.min() ?? 0
+            let maxDepthMeters = depthSamples.max() ?? 0
             var wallTriangleCount = 0
+            var wallQuadCount = 0
+            var skippedWallSegmentCount = 0
+            var wallFlippedTriangleCount = 0
+            let cullCountBeforeCutSurfaces = cutVolumeCulledTriangleCount
 
-            for index in entryPoints.indices {
-                let next = (index + 1) % entryPoints.count
-                let mid = (entryPoints[index] + entryPoints[next] + bottomPoints[index] + bottomPoints[next]) * 0.25
-                let inwardNormal = (center - mid).normalized(fallback: cutDirection * -1)
-                wallTriangleCount += appendQuad(
-                    entryPoints[index],
-                    entryPoints[next],
-                    bottomPoints[next],
-                    bottomPoints[index],
-                    desiredNormal: inwardNormal
-                )
+            // Internal cut walls face the removed volume, so their normals must point
+            // radially toward the cut axis instead of borrowing any axial depth component.
+            func wallNormal(
+                at point: DesignVector3,
+                fallback: DesignVector3
+            ) -> DesignVector3 {
+                let axialDistance = (point - entryCenter).dot(axisDirection)
+                let axisPoint = entryCenter + axisDirection * axialDistance
+                return (axisPoint - point).normalized(fallback: fallback)
             }
 
-            let bottomTriangleCount = appendConvexCap(points: bottomPoints, desiredNormal: cutDirection * -1)
+            let bottomTriangleCount = withIgnoredCutVolumes(Set([cut.id])) {
+                for index in entryPoints.indices {
+                    let next = (index + 1) % entryPoints.count
+                    let wallMid = (entryPoints[index] + entryPoints[next] + endPoints[index] + endPoints[next]) * 0.25
+                    let segmentFallback = wallNormal(at: wallMid, fallback: cutDirection * -1)
+                    let normalA: DesignVector3
+                    let normalB: DesignVector3
+                    let normalC: DesignVector3
+                    let normalD: DesignVector3
+                    switch cut.profileType {
+                    case .circle:
+                        normalA = wallNormal(at: entryPoints[index], fallback: segmentFallback)
+                        normalB = wallNormal(at: entryPoints[next], fallback: segmentFallback)
+                        normalC = wallNormal(at: endPoints[next], fallback: segmentFallback)
+                        normalD = wallNormal(at: endPoints[index], fallback: segmentFallback)
+                    case .rectangle, .polygon, .unsupported:
+                        normalA = segmentFallback
+                        normalB = segmentFallback
+                        normalC = segmentFallback
+                        normalD = segmentFallback
+                    }
+                    let appendedTriangles = appendCutWallQuad(
+                        entryPoints[index],
+                        entryPoints[next],
+                        endPoints[next],
+                        endPoints[index],
+                        normalA: normalA,
+                        normalB: normalB,
+                        normalC: normalC,
+                        normalD: normalD,
+                        desiredNormal: segmentFallback,
+                        flippedTriangleCount: &wallFlippedTriangleCount
+                    )
+                    wallTriangleCount += appendedTriangles
+                    if appendedTriangles > 0 {
+                        wallQuadCount += 1
+                    } else {
+                        skippedWallSegmentCount += 1
+                    }
+                }
+
+                return cut.depthMode == .throughAll
+                    ? 0
+                    : appendConvexCap(points: endPoints, desiredNormal: cutDirection * -1)
+            }
+            let cutIntersectionCullCount = cutVolumeCulledTriangleCount - cullCountBeforeCutSurfaces
             cutStats[cut.id] = BoxBlindCutMeshStats(
                 segmentCount: entryPoints.count,
+                wallQuadCount: wallQuadCount,
                 wallTriangleCount: wallTriangleCount,
-                bottomTriangleCount: bottomTriangleCount
+                skippedWallSegmentCount: skippedWallSegmentCount,
+                wallFlippedTriangleCount: wallFlippedTriangleCount,
+                bottomTriangleCount: bottomTriangleCount,
+                cutIntersectionCullCount: cutIntersectionCullCount,
+                minDepthMeters: minDepthMeters,
+                maxDepthMeters: maxDepthMeters
             )
         }
 
+        func solidMeshSnapshot() -> CADSolidMeshSnapshot {
+            let vertices = allVerts.map { vertex in
+                DesignVector3(
+                    x: Double(vertex.x),
+                    y: Double(vertex.y),
+                    z: Double(vertex.z)
+                )
+            }
+            var triangles: [CADSolidTriangle] = []
+            var offset = 0
+            while offset + 2 < indices.count {
+                triangles.append(
+                    CADSolidTriangle(
+                        a: Int(indices[offset]),
+                        b: Int(indices[offset + 1]),
+                        c: Int(indices[offset + 2])
+                    )
+                )
+                offset += 3
+            }
+            return CADSolidMeshSnapshot(vertices: vertices, triangles: triangles)
+        }
+
         guard !indices.isEmpty else { return nil }
+        let meshSnapshot = solidMeshSnapshot()
+        let meshDiagnostics = CADSolidMeshValidator.diagnose(meshSnapshot)
         let posSrc = SCNGeometrySource(vertices: allVerts)
         let normSrc = SCNGeometrySource(normals: allNorms)
         let el = SCNGeometryElement(indices: indices, primitiveType: .triangles)
@@ -931,9 +1793,70 @@ enum DesignAssetNodeFactory {
             triangleCount: indices.count / 3,
             faceSurfacesRendered: faceSurfacesRendered,
             entryFaceSurfacesRendered: entryFaceSurfacesRendered,
+            expectedEntryFaceSurfacesRendered: expectedCutFaceIDs.count,
             invalidEntryFaceTriangulation: invalidEntryFaceTriangulation,
+            meshSnapshot: meshSnapshot,
+            meshDiagnostics: meshDiagnostics,
             cutStats: cutStats
         )
+    }
+
+    private static func solidMeshSnapshot(from geometry: SCNGeometry) -> CADSolidMeshSnapshot? {
+        guard let vertexSource = geometry.sources(for: .vertex).first,
+              let vertexData = vertexSource.data as Data? else {
+            return nil
+        }
+
+        var vertices: [DesignVector3] = []
+        vertices.reserveCapacity(vertexSource.vectorCount)
+        vertexData.withUnsafeBytes { rawBuffer in
+            guard let base = rawBuffer.baseAddress else { return }
+            for index in 0..<vertexSource.vectorCount {
+                let offset = vertexSource.dataOffset + index * vertexSource.dataStride
+                let pointer = base.advanced(by: offset).assumingMemoryBound(to: Float.self)
+                vertices.append(
+                    DesignVector3(
+                        x: Double(pointer[0]),
+                        y: Double(pointer[1]),
+                        z: Double(pointer[2])
+                    )
+                )
+            }
+        }
+
+        var triangles: [CADSolidTriangle] = []
+        for elementIndex in 0..<geometry.elementCount {
+            let element = geometry.element(at: elementIndex)
+            guard element.primitiveType == .triangles,
+                  let indexData = element.data as Data? else {
+                continue
+            }
+            let bytesPerIndex = element.bytesPerIndex
+            indexData.withUnsafeBytes { rawBuffer in
+                guard let base = rawBuffer.baseAddress else { return }
+                for primitiveIndex in 0..<element.primitiveCount {
+                    let baseIndex = primitiveIndex * 3
+                    let a = readGeometryIndex(base: base, index: baseIndex, bytesPerIndex: bytesPerIndex)
+                    let b = readGeometryIndex(base: base, index: baseIndex + 1, bytesPerIndex: bytesPerIndex)
+                    let c = readGeometryIndex(base: base, index: baseIndex + 2, bytesPerIndex: bytesPerIndex)
+                    triangles.append(CADSolidTriangle(a: a, b: b, c: c))
+                }
+            }
+        }
+
+        return CADSolidMeshSnapshot(vertices: vertices, triangles: triangles)
+    }
+
+    private static func readGeometryIndex(base: UnsafeRawPointer, index: Int, bytesPerIndex: Int) -> Int {
+        let offset = index * bytesPerIndex
+        switch bytesPerIndex {
+        case 1:
+            return Int(base.advanced(by: offset).assumingMemoryBound(to: UInt8.self).pointee)
+        case 2:
+            return Int(base.advanced(by: offset).assumingMemoryBound(to: UInt16.self).pointee)
+        default:
+            return Int(base.advanced(by: offset).assumingMemoryBound(to: UInt32.self).pointee)
+        }
     }
 
     // MARK: Feature preview node
@@ -967,7 +1890,12 @@ enum DesignAssetNodeFactory {
     }
 
     static func makeCutToolPreviewNode(params: ExtrudedSolidParameters) -> SCNNode {
-        let geometry = makeCutToolPreviewGeometry(params) ?? makeExtrudedSolidGeometry(params)
+        let node = SCNNode()
+        node.name = "CutToolPreviewNode"
+        node.renderingOrder = 10
+        guard let geometry = makeCutToolPreviewGeometry(params) else {
+            return node
+        }
         let mat = SCNMaterial()
         mat.diffuse.contents = NSColor(red: 1.0, green: 0.25, blue: 0.15, alpha: 1)
         mat.transparency = 0.35
@@ -976,9 +1904,7 @@ enum DesignAssetNodeFactory {
         mat.writesToDepthBuffer = false
         mat.readsFromDepthBuffer = false
         geometry.firstMaterial = mat
-        let node = SCNNode(geometry: geometry)
-        node.name = "CutToolPreviewNode"
-        node.renderingOrder = 10
+        node.geometry = geometry
         return node
     }
 
@@ -1803,13 +2729,9 @@ enum DesignAssetNodeFactory {
         mat.lightingModel = .phong
         mat.transparency = 1.0          // fully opaque
         mat.writesToDepthBuffer = true
-        // Stage 1.31 added explicit SCNGeometrySource(normals:); Stage 1.32 corrected all triangle
-        // winding for left-handed UV bases (XZ/YZ planes). Both fixes are required before
-        // isDoubleSided=false is safe: without them, incorrectly-oriented faces become invisible
-        // rather than darkly lit. With both fixes in place:
-        // • outward faces are always CCW in screen-space → render correctly with front-face culling
-        // • interior back-faces no longer leak through the XRay cut preview (fixes "hollow body")
-        // • no more Z-fighting between co-planar front+back faces (fixes "triangular dark patches")
+        // Explicit normals and corrected triangle winding are required before single-sided
+        // body materials are safe. Otherwise incorrectly-oriented faces disappear under
+        // front-face culling or leak through XRay cut previews.
         if case .extrudedSolid = kind {
             mat.isDoubleSided = false
         } else {

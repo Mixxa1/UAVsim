@@ -4124,12 +4124,6 @@ struct DesignWorkshopWorkspaceView: View {
                     }
                     if viewModel.featureOperation == .cutRemoveMaterialV2,
                        viewModel.featureValidation.isValid,
-                       viewModel.featureDepthMode == .throughAll {
-                        statusCallout("cad.cut_v2.reason.through_all_circle_cut_apply_not_ready")
-                    }
-                    if viewModel.featureOperation == .cutRemoveMaterialV2,
-                       viewModel.featureValidation.isValid,
-                       viewModel.featureDepthMode == .distance,
                        !viewModel.cutV2ApplyValidation.isValid,
                        let msgKey = viewModel.cutV2ApplyValidation.messageKey {
                         warningCallout(msgKey)
@@ -4197,6 +4191,14 @@ struct DesignWorkshopWorkspaceView: View {
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.depth_mode", value: NSLocalizedString(viewModel.featureDepthMode.displayNameKey, comment: ""))
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.preview_state", value: viewModel.cutV2PreviewStateDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.apply_state", value: viewModel.cutV2ApplyStateDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.intersects_void", value: viewModel.cutCommitIntersectsExistingVoidDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.kernel_validation", value: viewModel.cutCommitKernelValidationDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.commit_allowed", value: viewModel.cutCommitAllowedDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.failure_reason", value: viewModel.cutCommitFailureReasonDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.ui_target_body_id", value: viewModel.cutCommitUISelectedBodyIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.kernel_target_body_id", value: viewModel.cutCommitKernelTargetBodyIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.apply_target_body_id", value: viewModel.cutCommitApplyTargetBodyIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.preview_target_body_id", value: viewModel.cutCommitPreviewTargetBodyIDDisplayName)
         }
     }
 

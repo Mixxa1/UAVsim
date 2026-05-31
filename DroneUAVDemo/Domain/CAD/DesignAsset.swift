@@ -231,7 +231,11 @@ struct DesignAsset: Codable, Identifiable, Equatable {
     }
 
     private static func extrudedSolidVertices(_ p: ExtrudedSolidParameters) -> [DesignVector3] {
-        p.vertices()
+        if let meshVertices = p.kernelVisualMesh?.vertices,
+           !meshVertices.isEmpty {
+            return meshVertices
+        }
+        return p.vertices()
     }
 
     private static func extrudedSolidBounds(

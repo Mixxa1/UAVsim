@@ -30,8 +30,41 @@ private struct CADAxisAlignedBounds: Equatable {
             && overlap(min.z, max.z, other.min.z, other.max.z)
     }
 
+    func expands(beyond other: CADAxisAlignedBounds, tolerance: Double = 1e-6) -> Bool {
+        min.x < other.min.x - tolerance
+            || min.y < other.min.y - tolerance
+            || min.z < other.min.z - tolerance
+            || max.x > other.max.x + tolerance
+            || max.y > other.max.y + tolerance
+            || max.z > other.max.z + tolerance
+    }
+
     var diagonalLength: Double {
         (max - min).length
+    }
+}
+
+private struct CADCutPreviewCacheKey: Equatable {
+    var operation: CADFeatureOperation
+    var profilePoints: [SketchPoint2D]
+    var sourceReference: SketchReference
+    var targetBodyID: UUID?
+    var selectedProfileID: UUID?
+    var depthMeters: Double
+    var direction: ExtrudeDirection
+    var depthMode: DepthMode
+    var sourceSketchID: UUID
+
+    init(state: CADFeaturePreviewState) {
+        operation = state.operation
+        profilePoints = state.profilePoints
+        sourceReference = state.sourceReference
+        targetBodyID = state.targetBodyID
+        selectedProfileID = state.selectedProfileID
+        depthMeters = state.depthMeters
+        direction = state.direction
+        depthMode = state.depthMode
+        sourceSketchID = state.sourceSketchID
     }
 }
 
@@ -554,6 +587,7 @@ final class CADWorkshopViewModel: ObservableObject {
     @Published private(set) var document: DesignDocument = DesignDocument() {
         didSet { rebuildProfileGraph() }
     }
+    @Published private(set) var cadDocument: CADDocument = CADDocument()
     @Published var canvasOptions = DesignCanvasOptions()
     @Published var pendingCameraCommand: CADPreviewCameraCommand?
     @Published var autoFocusNewAssets: Bool = true
@@ -590,7 +624,7 @@ final class CADWorkshopViewModel: ObservableObject {
         didSet {
             featureApplyFailureReason = nil
             if oldValue.isCutV2 && !featureOperation.isCutV2 {
-                rollbackCutV2Transaction()
+                clearAllTransientCADNodes(resetOperation: false)
             }
             // Through All is only meaningful for Cut — reset to Distance when switching to Extrude.
             if featureOperation == .extrudeNewBody && featureDepthMode == .throughAll {
@@ -623,6 +657,9 @@ final class CADWorkshopViewModel: ObservableObject {
     @Published private(set) var featureValidation: CADFeatureValidation = .noProfile
     @Published private(set) var featurePreviewState: CADFeaturePreviewState?
     @Published private(set) var featureApplyFailureReason: CADFeatureValidation? = nil
+    @Published var cadKernelRenderMode: CADKernelRenderMode = .kernelShadow
+    @Published var allowValidatedIntersectingCutCommit: Bool = true
+    @Published private(set) var lastKernelMeshCandidate: CADKernelMeshCandidate?
 
     @Published private(set) var viewportState: DesignViewportState = DesignViewportState()
     @Published private(set) var extrudeWarningKey: String?
@@ -634,6 +671,18 @@ final class CADWorkshopViewModel: ObservableObject {
     private var movePreviewDelta: SketchPoint2D?
     private var movePreviewEntityIDs: Set<UUID> = []
     private var activeBodyEditTransaction: CADBodyEditTransaction?
+    private var cutPreviewCacheKey: CADCutPreviewCacheKey?
+    private var cutPreviewRebuildCount = 0
+    private var cutBooleanApplyCount = 0
+    private var cutCommittedGeometryRebuildCount = 0
+    private var kernelCandidateBuildCount = 0
+    private var kernelCommitCount = 0
+    private var kernelRejectCount = 0
+    private var kernelShadowBuildCount = 0
+    private var sceneGeometryReplacementCount = 0
+    private var intersectingCutAttemptCount = 0
+    private var intersectingCutCommitCount = 0
+    private var intersectingCutRejectCount = 0
     // Sketch entity clipboard for Cmd+C / Cmd+V — supports multiple entities.
     private var sketchClipboard: [SketchEntity] = []
 
@@ -711,7 +760,7 @@ final class CADWorkshopViewModel: ObservableObject {
     }
 
     var canApplyCutV2Feature: Bool {
-        cutV2ApplyValidation.isValid
+        cutCommitValidationResult.canCommit
     }
 
     var cutV2ApplyValidation: CADFeatureValidation {
@@ -719,9 +768,13 @@ final class CADWorkshopViewModel: ObservableObject {
         guard featureValidation.isValid else { return featureValidation }
         guard let previewState = featurePreviewState,
               previewState.operation == .cutRemoveMaterialV2 else {
-            return .unsupportedCutApplyStage2A
+            return .noSelectedProfileArea
         }
-        return validateCutV2Stage2AApply(state: previewState)
+        return validateCutV2Apply(state: previewState)
+    }
+
+    var cutCommitValidationResult: CutCommitValidationResult {
+        buildCutCommitValidationResult()
     }
 
     var cutV2SelectedProfileDisplayName: String {
@@ -761,7 +814,7 @@ final class CADWorkshopViewModel: ObservableObject {
                 ? "cad.cut_v2.preview.ready"
                 : "cad.cut_v2.preview.invalid")
         }
-        if featureValidation == .unsupportedProfileForCutV2Stage1
+        if featureValidation == .unsupportedProfileForCutV2
             || cutV2ProfileType(for: currentProfileArea(), in: selectedSketch) == .unsupported {
             return localized("cad.cut_v2.preview.unsupported")
         }
@@ -775,9 +828,56 @@ final class CADWorkshopViewModel: ObservableObject {
         guard featureValidation.isValid else {
             return localized("cad.cut_v2.apply.unsupported")
         }
-        return cutV2ApplyValidation.isValid
+        return cutCommitValidationResult.canCommit
             ? localized("cad.cut_v2.apply.ready")
             : localized("cad.cut_v2.apply.unsupported")
+    }
+
+    var cutCommitIntersectsExistingVoidDisplayName: String {
+        localized(cutCommitValidationResult.intersectsExistingVoid
+            ? "cad.cut_v2.commit.yes"
+            : "cad.cut_v2.commit.no")
+    }
+
+    var cutCommitKernelValidationDisplayName: String {
+        let result = cutCommitValidationResult
+        if result.canCommit {
+            return localized(result.intersectsExistingVoid
+                ? "cad.cut_v2.commit.pending"
+                : "cad.cut_v2.commit.passed")
+        }
+        return localized(result.isValid
+            ? "cad.cut_v2.commit.pending"
+            : "cad.cut_v2.commit.failed")
+    }
+
+    var cutCommitAllowedDisplayName: String {
+        localized(cutCommitValidationResult.canCommit
+            ? "cad.cut_v2.commit.yes"
+            : "cad.cut_v2.commit.no")
+    }
+
+    var cutCommitFailureReasonDisplayName: String {
+        guard let reason = cutCommitValidationResult.reason else {
+            return localized("cad.cut_v2.commit.none")
+        }
+        return localized(reason)
+    }
+
+    var cutCommitUISelectedBodyIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.uiSelectedBodyID)
+    }
+
+    var cutCommitKernelTargetBodyIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.kernelTargetBodyID)
+    }
+
+    var cutCommitApplyTargetBodyIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.applyTargetBodyID)
+    }
+
+    var cutCommitPreviewTargetBodyIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.previewTargetBodyID)
     }
 
     /// ID of the solid body to cut into. Returns the face's source asset when the sketch is on a body
@@ -801,6 +901,11 @@ final class CADWorkshopViewModel: ObservableObject {
         }
 
         return nil
+    }
+
+    private func shortDebugID(_ id: UUID?) -> String {
+        guard let id else { return "nil" }
+        return String(id.uuidString.prefix(8))
     }
 
     /// Returns the CADCameraMode that looks normal to the active sketch plane, or nil when no sketch is selected.
@@ -915,7 +1020,11 @@ final class CADWorkshopViewModel: ObservableObject {
               let profileArea = currentProfileArea() else {
             if featureOperation.isCutV2 {
                 rollbackCutV2Transaction()
-                logCutV2PreviewRebuild(validation: validation, previewState: nil)
+                if cutPreviewCacheKey != nil || featurePreviewState != nil {
+                    cutPreviewCacheKey = nil
+                    cutPreviewRebuildCount += 1
+                    logCutV2PreviewRebuild(validation: validation, previewState: nil)
+                }
             }
             featurePreviewState = nil
             refreshViewportState()
@@ -954,6 +1063,7 @@ final class CADWorkshopViewModel: ObservableObject {
             )
         } else {
             activeBodyEditTransaction = nil
+            cutPreviewCacheKey = nil
         }
         let previewState = CADFeaturePreviewState(
             operation: featureOperation,
@@ -968,6 +1078,15 @@ final class CADWorkshopViewModel: ObservableObject {
             sourceSketchID: sketch.id,
             sourceSketchName: sketch.name
         )
+        if featureOperation.isCutV2 {
+            let nextKey = CADCutPreviewCacheKey(state: previewState)
+            if cutPreviewCacheKey == nextKey,
+               featurePreviewState == previewState {
+                return
+            }
+            cutPreviewCacheKey = nextKey
+            cutPreviewRebuildCount += 1
+        }
         featurePreviewState = previewState
         if featureOperation.isCutV2 {
             logCutV2PreviewRebuild(validation: .valid, previewState: previewState)
@@ -976,9 +1095,7 @@ final class CADWorkshopViewModel: ObservableObject {
     }
 
     func cancelFeaturePreview() {
-        rollbackCutV2Transaction()
-        featurePreviewState = nil
-        featureApplyFailureReason = nil
+        clearAllTransientCADNodes(resetOperation: false)
         refreshViewportState()
     }
 
@@ -1002,6 +1119,7 @@ final class CADWorkshopViewModel: ObservableObject {
         }
 
         featurePreviewState = nil
+        cutPreviewCacheKey = nil
         extrudeWarningKey = nil
         refreshViewportState()
     }
@@ -1018,7 +1136,7 @@ final class CADWorkshopViewModel: ObservableObject {
             depthMode: state.depthMode,
             timestamp: Date()
         )
-        let solidParams = ExtrudedSolidParameters(
+        var solidParams = ExtrudedSolidParameters(
             assetID: solidID,
             sourceSketchID: state.sourceSketchID,
             sourceSketchName: state.sourceSketchName,
@@ -1029,6 +1147,33 @@ final class CADWorkshopViewModel: ObservableObject {
             material: state.material,
             featureRecord: record
         )
+        if cadKernelRenderMode != .conservativeLegacy {
+            let solid = CADLimitedSolidKernel.makeSolid(id: solidID, from: solidParams)
+            let candidate = buildKernelMeshCandidate(
+                bodyID: solidID,
+                solid: solid,
+                featureID: record.featureID,
+                operationType: .extrudeAdd,
+                legacyParams: solidParams,
+                legacyCommitted: cadKernelRenderMode != .kernelCommitValidated
+            )
+            if cadKernelRenderMode == .kernelCommitValidated,
+               candidate.validationResult.isValid {
+                solidParams.kernelVisualMesh = candidate.mesh
+                kernelCommitCount += 1
+                sceneGeometryReplacementCount += 1
+                logKernelMeshCandidate(
+                    candidate,
+                    operationType: .extrudeAdd,
+                    legacyParams: solidParams,
+                    legacyCommitted: false,
+                    kernelCommitted: true
+                )
+            } else if cadKernelRenderMode == .kernelCommitValidated {
+                featureApplyFailureReason = .kernelCandidateValidationFailed
+                return
+            }
+        }
         let solid = DesignAsset(
             id: solidID,
             name: uniqueNumberedName(base: localized("cad.kind.extruded_solid")),
@@ -1036,6 +1181,12 @@ final class CADWorkshopViewModel: ObservableObject {
             material: state.material
         )
         document.addAsset(solid)
+        recordCADExtrudeNewBody(
+            asset: solid,
+            params: solidParams,
+            state: state,
+            featureRecord: record
+        )
         selectedAttachmentPointID = solid.attachmentPoints.first?.id
         selectedSketchLineID = nil
         selectedSketchEntityID = nil
@@ -1046,42 +1197,81 @@ final class CADWorkshopViewModel: ObservableObject {
     }
 
     private func applyCutRemoveMaterialV2(_ state: CADFeaturePreviewState) {
-        // Through All needs a separate exit-face builder; keep it disabled until that path is stable.
-        guard state.depthMode == .distance else {
-            featureApplyFailureReason = .throughAllCircleCutApplyNotReady
-            return
-        }
-
         guard let selectedProfileID = state.selectedProfileID else {
             featureApplyFailureReason = .noSelectedProfileArea
             return
         }
 
-        let applyValidation = validateCutV2Stage2AApply(state: state)
+        let applyValidation = validateCutV2Apply(state: state)
         guard applyValidation.isValid else {
             featureApplyFailureReason = applyValidation
             return
         }
 
-        guard let transaction = activeBodyEditTransaction,
-              transaction.targetBodyID == state.targetBodyID else {
-            featureApplyFailureReason = .unsupportedCutApplyStage2A
-            return
-        }
-
         guard let targetBodyID = state.targetBodyID,
-              let targetAsset = document.assets.first(where: { $0.id == targetBodyID }) else {
+              let targetAsset = document.assets.first(where: { $0.id == targetBodyID }),
+              case let .extrudedSolid(currentBodyParams) = targetAsset.kind else {
             featureApplyFailureReason = .noCutTarget
             return
         }
 
-        let bodyParams = transaction.bodyGeometryBefore
-        guard let appliedCut = buildBoxBlindCutStage2AFeature(
+        let bodyParams = currentBodyParams
+        let bodyCountBefore = committedBodyCount
+        let previewNodeCountBeforeApply = activeCutTemporaryNodeCount
+        let beforeMeshStats = DesignAssetNodeFactory.debugMeshStats(for: bodyParams)
+        let beforeBounds = CADAxisAlignedBounds(points: bodyParams.vertices())
+        let cutBounds = cutToolBounds(for: state)
+        let profileType = cutV2ProfileType(for: currentProfileArea(), in: selectedSketch)
+        logCutV2ApplyBefore(
+            state: state,
+            bodyParams: bodyParams,
+            profileType: profileType,
+            meshStats: beforeMeshStats,
+            bodyBounds: beforeBounds,
+            cutBounds: cutBounds,
+            bodyCount: bodyCountBefore
+        )
+        let sourceSolid = CADLimitedSolidKernel.makeSolid(id: targetBodyID, from: bodyParams)
+        logSolidKernelState(reason: "apply-before", solid: sourceSolid)
+
+        cutBooleanApplyCount += 1
+        logCutV2Counters(reason: "apply-start")
+
+        guard let appliedCut = buildBoxBlindCutFeature(
             state: state,
             bodyParams: bodyParams,
             selectedProfileID: selectedProfileID
         ) else {
-            featureApplyFailureReason = .unsupportedCutApplyStage2A
+            featureApplyFailureReason = .cutBooleanFailed
+            return
+        }
+        let kernelValidation = CADLimitedSolidKernel.validateSubtractOperation(
+            bodyParams: bodyParams,
+            cut: appliedCut,
+            blockIntersectingCuts: cadKernelRenderMode == .conservativeLegacy
+        )
+        let isIntersectingCut = CADLimitedSolidKernel.cutIntersectsExistingVoid(
+            bodyParams: bodyParams,
+            cut: appliedCut
+        )
+        if isIntersectingCut {
+            intersectingCutAttemptCount += 1
+        }
+        guard kernelValidation.isValid else {
+            logCADApply(
+                operationType: .extrudeCut,
+                targetBodyID: targetBodyID,
+                profileKind: appliedCut.profileType,
+                depthMode: appliedCut.depthMode,
+                direction: appliedCut.direction,
+                beforeSolid: sourceSolid,
+                afterSolid: sourceSolid,
+                validationResult: cadOperationValidationResult(from: kernelValidation),
+                committed: false,
+                previewNodesRemoved: activeCutTemporaryNodeCount
+            )
+            featureApplyFailureReason = kernelValidation
+            rollbackCutV2Transaction()
             return
         }
 
@@ -1092,43 +1282,142 @@ final class CADWorkshopViewModel: ObservableObject {
             operation: .cutRemoveMaterialV2,
             sourceSketchID: state.sourceSketchID,
             sourceSketchName: state.sourceSketchName,
-            depthMeters: state.depthMeters,
+            depthMeters: appliedCut.depthMeters,
             direction: state.direction,
-            depthMode: state.depthMode,
+            depthMode: appliedCut.depthMode,
             timestamp: Date()
         )
 
-        let validation = validateBoxBlindCutStage2AResult(
-            before: bodyParams,
-            result: resultParams,
-            appliedCut: appliedCut
-        )
-        guard validation.isValid else {
-            featureApplyFailureReason = validation
-            return
-        }
-
-        let candidateValidation = DesignAssetNodeFactory.validateBoxDistanceCutCandidate(params: resultParams)
-        guard candidateValidation.isValid else {
-            featureApplyFailureReason = candidateValidation
-            return
-        }
-
         guard resultParams != bodyParams else {
-            featureApplyFailureReason = .unsupportedCutApplyStage2A
+            featureApplyFailureReason = .cutBooleanFailed
             return
         }
+
+        let resultMeshStats = DesignAssetNodeFactory.debugMeshStats(for: resultParams)
+        let resultBounds = CADAxisAlignedBounds(points: resultParams.vertices())
+        var resultSolid = CADLimitedSolidKernel.makeSolid(id: targetBodyID, from: resultParams)
+        if isIntersectingCut {
+            guard allowValidatedIntersectingCutCommit,
+                  isPrimitiveCutSet(params: resultParams),
+                  let toolVolume = CADLimitedSolidKernel.makeSubtractVolume(for: appliedCut, in: bodyParams) else {
+                intersectingCutRejectCount += 1
+                featureApplyFailureReason = .unsupportedIntersectingCutCase
+                rollbackCutV2Transaction()
+                return
+            }
+            let booleanResult = CADBooleanKernel().evaluate(
+                CADBooleanKernelRequest(
+                    operation: .subtract,
+                    targetBodyID: targetBodyID,
+                    sourceSolid: sourceSolid,
+                    toolVolume: toolVolume,
+                    featureID: appliedCut.id
+                )
+            )
+            guard let candidate = booleanResult.candidate,
+                  booleanResult.validationResult.isValid else {
+                intersectingCutRejectCount += 1
+                featureApplyFailureReason = .intersectingCutValidationFailed
+                rollbackCutV2Transaction()
+                return
+            }
+            lastKernelMeshCandidate = candidate
+            guard validateIntersectingCutCandidate(
+                candidate,
+                before: bodyParams,
+                result: resultParams
+            ) == .valid,
+                  commitValidatedCutKernelMesh(candidate, to: targetBodyID, params: &resultParams) else {
+                intersectingCutRejectCount += 1
+                featureApplyFailureReason = reasonForRejectedIntersectingCandidate(candidate)
+                rollbackCutV2Transaction()
+                return
+            }
+            intersectingCutCommitCount += 1
+            resultSolid = booleanResult.resultSolid ?? CADLimitedSolidKernel.makeSolid(id: targetBodyID, from: resultParams)
+            resultParams.kernelResultSolid = resultSolid
+            sceneGeometryReplacementCount += 1
+        } else {
+            let validation = validateBoxBlindCutResult(
+                before: bodyParams,
+                result: resultParams,
+                appliedCut: appliedCut
+            )
+            guard validation.isValid else {
+                featureApplyFailureReason = validation
+                return
+            }
+
+            let candidateValidation = DesignAssetNodeFactory.validateBoxDistanceCutCandidate(params: resultParams)
+            guard candidateValidation.isValid else {
+                featureApplyFailureReason = candidateValidation
+                return
+            }
+
+            if cadKernelRenderMode != .conservativeLegacy {
+                let candidate = buildKernelMeshCandidate(
+                    bodyID: targetBodyID,
+                    solid: resultSolid,
+                    featureID: appliedCut.id,
+                    operationType: .extrudeCut,
+                    legacyParams: resultParams,
+                    legacyCommitted: cadKernelRenderMode != .kernelCommitValidated
+                )
+                switch cadKernelRenderMode {
+                case .conservativeLegacy:
+                    break
+                case .kernelShadow, .kernelPreview:
+                    break
+                case .kernelCommitValidated:
+                    guard commitValidatedKernelMesh(candidate, to: targetBodyID, params: &resultParams) else {
+                        featureApplyFailureReason = candidate.validationResult.isValid
+                            ? .kernelCommitUnsupportedForCase
+                            : .kernelCandidateValidationFailed
+                        return
+                    }
+                    resultSolid = CADLimitedSolidKernel.makeSolid(id: targetBodyID, from: resultParams)
+                    resultParams.kernelResultSolid = resultSolid
+                    sceneGeometryReplacementCount += 1
+                }
+            }
+        }
+        logSolidKernelState(reason: "apply-after", solid: resultSolid)
+        logMaterialClassificationValidation(
+            reason: "apply-after",
+            solid: resultSolid,
+            mesh: DesignAssetNodeFactory.debugSolidMeshSnapshot(for: resultParams)
+        )
 
         var updatedAsset = targetAsset
         updatedAsset.kind = .extrudedSolid(resultParams)
         updatedAsset.updateDerivedProperties()
         document.updateAsset(updatedAsset)
+        recordCADCut(
+            targetAsset: updatedAsset,
+            resultParams: resultParams,
+            appliedCut: appliedCut,
+            state: state,
+            validation: .valid
+        )
+        cutCommittedGeometryRebuildCount += 1
+
+        logCutV2ApplyAfter(
+            resultParams: resultParams,
+            resultMeshStats: resultMeshStats,
+            beforeBounds: beforeBounds,
+            resultBounds: resultBounds,
+            bodyCountBefore: bodyCountBefore,
+            bodyCountAfter: committedBodyCount,
+            removedPreviewNodeCount: previewNodeCountBeforeApply,
+            appendedFeatureID: appliedCut.id
+        )
 
         finishSuccessfulCutV2Apply(targetBodyID: targetBodyID)
     }
 
     private func finishSuccessfulCutV2Apply(targetBodyID: UUID) {
         activeBodyEditTransaction = nil
+        cutPreviewCacheKey = nil
         featurePreviewState = nil
         featureApplyFailureReason = nil
         selectedProfileAreaID = nil
@@ -1147,6 +1436,194 @@ final class CADWorkshopViewModel: ObservableObject {
         sketchWarningKey = nil
         document.selectAsset(targetBodyID)
         featureOperation = .extrudeNewBody
+    }
+
+    private func recordCADExtrudeNewBody(
+        asset: DesignAsset,
+        params: ExtrudedSolidParameters,
+        state: CADFeaturePreviewState,
+        featureRecord: CADFeatureRecord
+    ) {
+        let solid = CADLimitedSolidKernel.makeSolid(id: asset.id, from: params)
+        let feature = CADFeature(
+            id: featureRecord.featureID,
+            type: .extrudeAdd,
+            targetBodyID: asset.id,
+            sourceSketchID: state.sourceSketchID,
+            sourceProfileID: state.selectedProfileID,
+            createdVolumeID: solid.additiveVolumes.first?.id,
+            parameters: CADFeatureParameters(
+                depthMeters: state.depthMeters,
+                depthMode: state.depthMode,
+                direction: state.direction,
+                profileKind: .polygon
+            ),
+            timestamp: featureRecord.timestamp,
+            order: cadDocument.features.count,
+            validationResult: .valid(debugDetails: ["source=applyExtrudeNewBody"])
+        )
+        let body = CADBody(
+            id: asset.id,
+            name: asset.name,
+            solid: solid,
+            materialID: asset.material,
+            visualMeshCache: solid.visualMeshCache,
+            featureHistory: [feature.id]
+        )
+        cadDocument.bodies.append(body)
+        cadDocument.features.append(feature)
+        cadDocument.sketches = currentCADSketches()
+        cadDocument.activeBodyID = asset.id
+        cadDocument.activeSketchID = state.sourceSketchID
+        logCADApply(
+            operationType: .extrudeAdd,
+            targetBodyID: asset.id,
+            profileKind: .polygon,
+            depthMode: state.depthMode,
+            direction: state.direction,
+            beforeSolid: nil,
+            afterSolid: solid,
+            validationResult: feature.validationResult,
+            committed: true,
+            previewNodesRemoved: 0
+        )
+    }
+
+    private func recordCADCut(
+        targetAsset: DesignAsset,
+        resultParams: ExtrudedSolidParameters,
+        appliedCut: ExtrudedSolidBoxBlindCutFeature,
+        state: CADFeaturePreviewState,
+        validation: CADFeatureValidation
+    ) {
+        guard validation.isValid else { return }
+        let beforeSolid = cadDocument.bodies.first(where: { $0.id == targetAsset.id })?.solid
+        let afterSolid = CADLimitedSolidKernel.makeSolid(id: targetAsset.id, from: resultParams)
+        let validationResult = CADOperationValidationResult.valid(debugDetails: [
+            "source=applyCutRemoveMaterialV2",
+            "createdVolumeID=\(appliedCut.id.uuidString)"
+        ])
+        let feature = CADFeature(
+            id: appliedCut.id,
+            type: .extrudeCut,
+            targetBodyID: targetAsset.id,
+            sourceSketchID: appliedCut.sourceSketchID,
+            sourceProfileID: appliedCut.selectedProfileID,
+            createdVolumeID: appliedCut.id,
+            parameters: CADFeatureParameters(
+                depthMeters: appliedCut.depthMeters,
+                depthMode: appliedCut.depthMode,
+                direction: appliedCut.direction,
+                profileKind: appliedCut.profileType
+            ),
+            timestamp: Date(),
+            order: cadDocument.features.count,
+            validationResult: validationResult
+        )
+        if let bodyIndex = cadDocument.bodies.firstIndex(where: { $0.id == targetAsset.id }) {
+            cadDocument.bodies[bodyIndex].solid = afterSolid
+            cadDocument.bodies[bodyIndex].materialID = targetAsset.material
+            cadDocument.bodies[bodyIndex].visualMeshCache = afterSolid.visualMeshCache
+            cadDocument.bodies[bodyIndex].featureHistory.append(feature.id)
+        } else {
+            cadDocument.bodies.append(
+                CADBody(
+                    id: targetAsset.id,
+                    name: targetAsset.name,
+                    solid: afterSolid,
+                    materialID: targetAsset.material,
+                    visualMeshCache: afterSolid.visualMeshCache,
+                    featureHistory: [feature.id]
+                )
+            )
+        }
+        cadDocument.features.append(feature)
+        cadDocument.sketches = currentCADSketches()
+        cadDocument.activeBodyID = targetAsset.id
+        cadDocument.activeSketchID = appliedCut.sourceSketchID
+        logCADApply(
+            operationType: .extrudeCut,
+            targetBodyID: targetAsset.id,
+            profileKind: appliedCut.profileType,
+            depthMode: appliedCut.depthMode,
+            direction: appliedCut.direction,
+            beforeSolid: beforeSolid,
+            afterSolid: afterSolid,
+            validationResult: validationResult,
+            committed: true,
+            previewNodesRemoved: activeCutTemporaryNodeCount
+        )
+        _ = state
+    }
+
+    private func currentCADSketches() -> [DesignSketch] {
+        document.assets.compactMap { asset in
+            guard case let .sketch2D(parameters) = asset.kind else { return nil }
+            return parameters.sketch
+        }
+    }
+
+    private func cadOperationValidationResult(
+        from validation: CADFeatureValidation
+    ) -> CADOperationValidationResult {
+        guard !validation.isValid else { return .valid() }
+        let reason: CADOperationValidationReasonCode
+        switch validation {
+        case .noCutTarget:
+            reason = .noTargetBody
+        case .noProfile, .noActiveSketch, .noSelectedProfileArea:
+            reason = .noSelectedProfile
+        case .invalidProfileLoop:
+            reason = .profileNotClosed
+        case .invalidDepth, .insufficientDepth, .unsupportedDepthMode:
+            reason = .invalidDepth
+        case .cutNormalMisaligned, .invalidSketchPlaneFrame:
+            reason = .invalidDirection
+        case .cutToolDoesNotIntersectBody, .cutVolumeOutsideTarget:
+            reason = .cutterDoesNotIntersectBody
+        case .unsupportedProfileForCutV2:
+            reason = .unsupportedProfileKind
+        case .cutIntersectsExistingVoidUnsupported:
+            reason = .unsupportedIntersectingCutUntilSolidKernelV02
+        case .cutResultNotSolid,
+             .cutResultBoundsInvalid,
+             .cutBooleanInvalidResult,
+             .cutMissingCylindricalWall,
+             .cutMissingInternalWall,
+             .cutMissingBlindBottom,
+             .cutMissingExitOpening,
+             .unaffectedGeometryWasRemoved,
+             .cutVisibleTriangulationArtifact,
+             .invalidEntryFaceTriangulation,
+             .cutBooleanFailed,
+             .kernelCandidateValidationFailed:
+            reason = .topologyValidationFailed
+        case .kernelCommitUnsupportedForCase:
+            reason = .unsupportedIntersectionCaseV04
+        case .intersectingCutSupportedPendingValidation:
+            reason = .none
+        case .intersectingCutValidationFailed,
+             .kernelCandidateInvalid,
+             .trimLoopResolutionFailed,
+             .boundaryFragmentValidationFailed,
+             .internalOrphanFaceDetected:
+            reason = .topologyValidationFailed
+        case .unsupportedIntersectingCutCase:
+            reason = .unsupportedIntersectionCaseV04
+        case .volumeRuleFailedAfterCut:
+            reason = .topologyValidationFailed
+        case .targetBodyNotSolid,
+             .sketchNotOnFace,
+             .unsupportedOperation:
+            reason = .cadSolidRecordingFailed
+        case .valid:
+            reason = .none
+        }
+        return .invalid(
+            reason,
+            message: validation.messageKey ?? reason.rawValue,
+            debugDetails: ["cadFeatureValidation=\(validation)"]
+        )
     }
 
     @available(*, deprecated, message: "Legacy Cut is disabled. Use applyCutRemoveMaterialV2.")
@@ -1177,10 +1654,10 @@ final class CADWorkshopViewModel: ObservableObject {
     private func validateCutV2Preview(depthMode: DepthMode? = nil) -> CADFeatureValidation {
         guard let sketch = selectedSketch else { return .noActiveSketch }
         guard let profileArea = currentProfileArea() else { return .noSelectedProfileArea }
-        guard !profileArea.hasHoles else { return .unsupportedProfileForCutV2Stage1 }
+        guard !profileArea.hasHoles else { return .unsupportedProfileForCutV2 }
         guard validateProfileLoop(profileArea.outerLoop) else { return .invalidProfileLoop }
         let profileType = cutV2ProfileType(for: profileArea, in: sketch)
-        guard profileType.isSupportedStage1 else { return .unsupportedProfileForCutV2Stage1 }
+        guard profileType.isSupportedForCutPreview else { return .unsupportedProfileForCutV2 }
         guard let targetID = cutTargetBodyID,
               let targetAsset = document.assets.first(where: { $0.id == targetID }),
               case let .extrudedSolid(bodyParams) = targetAsset.kind else {
@@ -1224,12 +1701,9 @@ final class CADWorkshopViewModel: ObservableObject {
             sourceSketchID: sketch.id,
             sourceSketchName: sketch.name
         )
-        guard let bodyBounds = CADAxisAlignedBounds(points: bodyParams.vertices()),
-              let cutBounds = cutToolBounds(for: previewState),
-              cutBounds.intersects(bodyBounds) else {
-            return .cutToolDoesNotIntersectBody
-        }
-        return .valid
+        return cutToolMayIntersectBody(state: previewState, bodyParams: bodyParams)
+            ? .valid
+            : .cutToolDoesNotIntersectBody
     }
 
     // Axis-aligned bounding box of a 2D polygon in sketch space.
@@ -1330,11 +1804,22 @@ final class CADWorkshopViewModel: ObservableObject {
         return false
     }
 
+    private func logCutV2Counters(reason: String) {
+        print(
+            "CAD Cut v2 Counters: " +
+            "reason=\(reason) " +
+            "previewRebuildCount=\(cutPreviewRebuildCount) " +
+            "booleanApplyCount=\(cutBooleanApplyCount) " +
+            "geometryRebuildCount=\(cutCommittedGeometryRebuildCount)"
+        )
+    }
+
     private func logCutV2PreviewRebuild(
         validation: CADFeatureValidation,
         previewState: CADFeaturePreviewState?
     ) {
         guard featureOperation.isCutV2 else { return }
+        logCutV2Counters(reason: "preview")
 
         let sketch = selectedSketch
         let profileArea = currentProfileArea()
@@ -1346,8 +1831,8 @@ final class CADWorkshopViewModel: ObservableObject {
         }
         let targetBounds = bodyParams.flatMap { CADAxisAlignedBounds(points: $0.vertices()) }
         let toolBounds = previewState.flatMap { cutToolBounds(for: $0) }
-        let intersects = targetBounds.flatMap { body in
-            toolBounds.map { tool in tool.intersects(body) }
+        let intersects = previewState.flatMap { state in
+            bodyParams.map { cutToolMayIntersectBody(state: state, bodyParams: $0) }
         } ?? false
         let axes = sketch.map { axesForSketchReference($0.reference) }
         let origin = sketch.map { originForSketchReference($0.reference) }
@@ -1374,12 +1859,413 @@ final class CADWorkshopViewModel: ObservableObject {
         )
     }
 
+    private var committedBodyCount: Int {
+        document.assets.filter {
+            if case .extrudedSolid = $0.kind { return true }
+            return false
+        }.count
+    }
+
+    private var activeCutTemporaryNodeCount: Int {
+        var count = 0
+        if featurePreviewState?.operation == .cutRemoveMaterialV2 { count += 1 }
+        if activeBodyEditTransaction?.previewNodeID != nil, count == 0 { count += 1 }
+        return count
+    }
+
+    private func logCutV2ApplyBefore(
+        state: CADFeaturePreviewState,
+        bodyParams: ExtrudedSolidParameters,
+        profileType: CADCutV2ProfileType,
+        meshStats: (vertexCount: Int, triangleCount: Int)?,
+        bodyBounds: CADAxisAlignedBounds?,
+        cutBounds: CADAxisAlignedBounds?,
+        bodyCount: Int
+    ) {
+        let cutDirection = normalVector(for: state.sourceReference)
+            .normalized(fallback: .zAxis) * (state.direction == .negativeNormal ? -1.0 : 1.0)
+        print(
+            "CAD Cut v2 Apply Before: " +
+            "targetBodyID=\(state.targetBodyID?.uuidString ?? "nil") " +
+            "committedMeshVertices=\(meshStats?.vertexCount ?? 0) " +
+            "committedMeshTriangles=\(meshStats?.triangleCount ?? 0) " +
+            "bodyVolumeEstimate=\(bodyParams.volumeMeters3) " +
+            "existingCutFeatureCount=\(bodyParams.boxBlindCutFeatures.count) " +
+            "cutProfileType=\(profileType.rawValue) " +
+            "cutMode=\(state.depthMode.rawValue) " +
+            "direction=\(state.direction.rawValue) " +
+            "cutDirection=\(formatDebugVector(cutDirection)) " +
+            "cutVolumeBBox=\(formatDebugBounds(cutBounds)) " +
+            "bodyBBox=\(formatDebugBounds(bodyBounds)) " +
+            "bodyCount=\(bodyCount) " +
+            "operation=subtract"
+        )
+    }
+
+    private func logCutV2ApplyAfter(
+        resultParams: ExtrudedSolidParameters,
+        resultMeshStats: (vertexCount: Int, triangleCount: Int)?,
+        beforeBounds: CADAxisAlignedBounds?,
+        resultBounds: CADAxisAlignedBounds?,
+        bodyCountBefore: Int,
+        bodyCountAfter: Int,
+        removedPreviewNodeCount: Int,
+        appendedFeatureID: UUID
+    ) {
+        let expanded = beforeBounds.flatMap { before in
+            resultBounds.map { result in result.expands(beyond: before) }
+        } ?? false
+        print(
+            "CAD Cut v2 Apply After: " +
+            "resultVertices=\(resultMeshStats?.vertexCount ?? 0) " +
+            "resultTriangles=\(resultMeshStats?.triangleCount ?? 0) " +
+            "resultVolumeEstimate=\(resultParams.volumeMeters3) " +
+            "resultBBox=\(formatDebugBounds(resultBounds)) " +
+            "bodyCount=\(bodyCountAfter) " +
+            "bodyCountBefore=\(bodyCountBefore) " +
+            "removedPreviewNodeCount=\(removedPreviewNodeCount) " +
+            "featureAppendedID=\(appendedFeatureID.uuidString) " +
+            "featureStackCount=\(resultParams.boxBlindCutFeatures.count) " +
+            "operation=subtract"
+        )
+        if expanded {
+            print("Cut result expanded body bounds — possible additive/cutter leak.")
+        }
+        if bodyCountAfter > bodyCountBefore {
+            print("CAD Cut v2 Warning: cut apply increased body count — possible leaked cutter body.")
+        }
+        logCutV2Counters(reason: "apply-finish")
+    }
+
+    private func logSolidKernelState(reason: String, solid: CADSolid) {
+        print(
+            "CAD Solid Kernel: " +
+            "reason=\(reason) " +
+            "bodyID=\(solid.id.uuidString) " +
+            "additiveVolumes=\(solid.evaluatedState.additiveVolumeCount) " +
+            "cutterVolumes=\(solid.evaluatedState.cutterVolumeCount) " +
+            "regularizedVolumeEstimate=\(solid.evaluatedState.estimatedVolumeMeters3) " +
+            "bounds=\(formatDebugBounds(solid.evaluatedBounds)) " +
+            "generationVersion=\(solid.generationVersion)"
+        )
+    }
+
+    private func logCADApply(
+        operationType: CADFeatureType,
+        targetBodyID: UUID,
+        profileKind: CADCutV2ProfileType,
+        depthMode: DepthMode,
+        direction: ExtrudeDirection,
+        beforeSolid: CADSolid?,
+        afterSolid: CADSolid,
+        validationResult: CADOperationValidationResult,
+        committed: Bool,
+        previewNodesRemoved: Int
+    ) {
+        print(
+            "CAD Apply: " +
+            "operationType=\(operationType.rawValue) " +
+            "targetBodyID=\(targetBodyID.uuidString) " +
+            "profileKind=\(profileKind.rawValue) " +
+            "depthMode=\(depthMode.rawValue) " +
+            "direction=\(direction.rawValue) " +
+            "additiveVolumeCountBefore=\(beforeSolid?.additiveVolumes.count ?? 0) " +
+            "cutterVolumeCountBefore=\(beforeSolid?.cutterVolumes.count ?? 0) " +
+            "additiveVolumeCountAfter=\(afterSolid.additiveVolumes.count) " +
+            "cutterVolumeCountAfter=\(afterSolid.cutterVolumes.count) " +
+            "validationResult=\(validationResult.reasonCode.rawValue) " +
+            "committed=\(committed) " +
+            "reasonCode=\(validationResult.reasonCode.rawValue) " +
+            "previewNodesRemoved=\(previewNodesRemoved)"
+        )
+    }
+
+    private func buildKernelMeshCandidate(
+        bodyID: UUID,
+        solid: CADSolid,
+        featureID: UUID?,
+        operationType: CADFeatureType,
+        legacyParams: ExtrudedSolidParameters?,
+        legacyCommitted: Bool
+    ) -> CADKernelMeshCandidate {
+        kernelCandidateBuildCount += 1
+        if cadKernelRenderMode == .kernelShadow {
+            kernelShadowBuildCount += 1
+        }
+        let candidate = CADKernelMeshCandidateBuilder().buildCandidate(
+            bodyID: bodyID,
+            solid: solid,
+            featureID: featureID
+        )
+        lastKernelMeshCandidate = candidate
+        if !candidate.validationResult.isValid {
+            kernelRejectCount += 1
+        }
+        logKernelMeshCandidate(
+            candidate,
+            operationType: operationType,
+            legacyParams: legacyParams,
+            legacyCommitted: legacyCommitted,
+            kernelCommitted: false
+        )
+        return candidate
+    }
+
+    private func commitValidatedKernelMesh(
+        _ candidate: CADKernelMeshCandidate,
+        to bodyID: UUID,
+        params: inout ExtrudedSolidParameters
+    ) -> Bool {
+        guard cadKernelRenderMode == .kernelCommitValidated,
+              candidate.validationResult.isValid,
+              candidate.bodyID == bodyID,
+              let bodyIndex = cadDocument.bodies.firstIndex(where: { $0.id == bodyID }),
+              isKernelCommitAllowed(candidate: candidate, params: params) else {
+            kernelRejectCount += 1
+            return false
+        }
+        params.kernelVisualMesh = candidate.mesh
+        cadDocument.bodies[bodyIndex].solid.visualMeshCache = CADVisualMeshCache(
+            mesh: candidate.mesh,
+            diagnostics: candidate.diagnostics,
+            generationVersion: candidate.sourceSolidVersion
+        )
+        cadDocument.bodies[bodyIndex].visualMeshCache = cadDocument.bodies[bodyIndex].solid.visualMeshCache
+        kernelCommitCount += 1
+        logKernelMeshCandidate(
+            candidate,
+            operationType: .extrudeCut,
+            legacyParams: params,
+            legacyCommitted: false,
+            kernelCommitted: true
+        )
+        return true
+    }
+
+    private func commitValidatedCutKernelMesh(
+        _ candidate: CADKernelMeshCandidate,
+        to bodyID: UUID,
+        params: inout ExtrudedSolidParameters
+    ) -> Bool {
+        guard candidate.validationResult.isValid,
+              candidate.bodyID == bodyID,
+              let bodyIndex = cadDocument.bodies.firstIndex(where: { $0.id == bodyID }),
+              isKernelCommitAllowed(candidate: candidate, params: params) else {
+            kernelRejectCount += 1
+            return false
+        }
+        params.kernelVisualMesh = candidate.mesh
+        cadDocument.bodies[bodyIndex].solid.visualMeshCache = CADVisualMeshCache(
+            mesh: candidate.mesh,
+            diagnostics: candidate.diagnostics,
+            generationVersion: candidate.sourceSolidVersion
+        )
+        cadDocument.bodies[bodyIndex].visualMeshCache = cadDocument.bodies[bodyIndex].solid.visualMeshCache
+        kernelCommitCount += 1
+        logKernelMeshCandidate(
+            candidate,
+            operationType: .extrudeCut,
+            legacyParams: params,
+            legacyCommitted: false,
+            kernelCommitted: true
+        )
+        return true
+    }
+
+    private func isKernelCommitAllowed(
+        candidate: CADKernelMeshCandidate,
+        params: ExtrudedSolidParameters
+    ) -> Bool {
+        guard candidate.validationResult.isValid,
+              candidate.diagnostics.boundaryEdgeCount == 0,
+              candidate.diagnostics.nonManifoldEdgeCount == 0,
+              candidate.diagnostics.isClosedManifold,
+              params.cutFeatures.isEmpty,
+              params.holes.isEmpty else {
+            return false
+        }
+        let classifier = CADSolidMaterialClassifier(epsilon: 1e-5)
+        let solid = CADLimitedSolidKernel.makeSolid(id: candidate.bodyID, from: params)
+        let debugReport = classifier.debugReport(for: solid)
+        if debugReport.intersectingCutterVolumeCount > 0 {
+            return allowValidatedIntersectingCutCommit
+                && isPrimitiveCutSet(params: params)
+        }
+        return isPrimitiveCutSet(params: params)
+    }
+
+    private func isPrimitiveCutSet(params: ExtrudedSolidParameters) -> Bool {
+        guard params.cutFeatures.isEmpty,
+              params.holes.isEmpty else {
+            return false
+        }
+        return params.boxBlindCutFeatures.allSatisfy { feature in
+            (feature.profileType == .circle || feature.profileType == .rectangle)
+                && (feature.depthMode == .throughAll || feature.depthMode == .distance)
+        }
+    }
+
+    private func validateIntersectingCutCandidate(
+        _ candidate: CADKernelMeshCandidate,
+        before: ExtrudedSolidParameters,
+        result: ExtrudedSolidParameters
+    ) -> CADFeatureValidation {
+        guard candidate.validationResult.isValid else { return .kernelCandidateInvalid }
+        guard candidate.diagnostics.boundaryEdgeCount == 0,
+              candidate.diagnostics.nonManifoldEdgeCount == 0,
+              candidate.diagnostics.isClosedManifold else {
+            return .cutResultNotSolid
+        }
+        guard let candidateBounds = CADAxisAlignedBounds(points: candidate.mesh.vertices),
+              let beforeBounds = CADAxisAlignedBounds(points: before.vertices()),
+              !candidateBounds.expands(beyond: beforeBounds, tolerance: 1e-5) else {
+            return .volumeRuleFailedAfterCut
+        }
+        guard result.volumeMeters3 <= before.volumeMeters3 + 1e-9 else {
+            return .volumeRuleFailedAfterCut
+        }
+        if candidate.boundaryDiagnostics?.removedInvalidBoundaryTriangles ?? 0 > 0 {
+            return .boundaryFragmentValidationFailed
+        }
+        if candidate.boundaryDiagnostics?.trimLoopCount == 0 {
+            return .trimLoopResolutionFailed
+        }
+        return .valid
+    }
+
+    private func reasonForRejectedIntersectingCandidate(_ candidate: CADKernelMeshCandidate) -> CADFeatureValidation {
+        if !candidate.validationResult.isValid { return .intersectingCutValidationFailed }
+        if candidate.boundaryDiagnostics?.removedInvalidBoundaryTriangles ?? 0 > 0 {
+            return .boundaryFragmentValidationFailed
+        }
+        if candidate.boundaryDiagnostics?.trimLoopCount == 0 {
+            return .trimLoopResolutionFailed
+        }
+        return .kernelCandidateInvalid
+    }
+
+    private func logKernelMeshCandidate(
+        _ candidate: CADKernelMeshCandidate,
+        operationType: CADFeatureType,
+        legacyParams: ExtrudedSolidParameters?,
+        legacyCommitted: Bool,
+        kernelCommitted: Bool
+    ) {
+        let legacyMeshStats = legacyParams.flatMap { DesignAssetNodeFactory.debugMeshStats(for: $0) }
+        let legacyBounds = legacyParams.flatMap { CADAxisAlignedBounds(points: $0.vertices()) }
+        let boundary = candidate.boundaryDiagnostics
+        print(
+            "CAD Kernel Shadow Build: " +
+            "operationType=\(operationType.rawValue) " +
+            "bodyID=\(candidate.bodyID.uuidString) " +
+            "featureID=\(candidate.featureID?.uuidString ?? "nil") " +
+            "mode=\(cadKernelRenderMode.rawValue) " +
+            "sourceMode=\(candidate.sourceMode.rawValue) " +
+            "graphBuildSuccess=\((boundary?.graphBuildCount ?? 0) > 0) " +
+            "trimLoopSuccess=\((boundary?.trimLoopCount ?? 0) >= 0) " +
+            "meshBuildSuccess=\(!candidate.mesh.vertices.isEmpty && !candidate.mesh.triangles.isEmpty) " +
+            "validationSuccess=\(candidate.validationResult.isValid) " +
+            "reasonCode=\(candidate.validationResult.reasonCode.rawValue) " +
+            "legacyCommitted=\(legacyCommitted) " +
+            "kernelCommitted=\(kernelCommitted) " +
+            "legacyVertices=\(legacyMeshStats?.vertexCount ?? 0) " +
+            "legacyTriangles=\(legacyMeshStats?.triangleCount ?? 0) " +
+            "kernelVertices=\(candidate.mesh.vertices.count) " +
+            "kernelTriangles=\(candidate.mesh.triangles.count) " +
+            "legacyBounds=\(formatDebugBounds(legacyBounds)) " +
+            "kernelBounds=\(formatDebugBounds(candidate.bounds)) " +
+            "nonManifoldEdges=\(candidate.diagnostics.nonManifoldEdgeCount) " +
+            "boundaryEdges=\(candidate.diagnostics.boundaryEdgeCount) " +
+            "orphanFaces=\(candidate.validationResults.filter { $0.reasonCode == .orphanFaceInsideVoid }.count) " +
+            "internalFaces=\(candidate.validationResults.filter { $0.reasonCode == .internalFaceInsideMaterial }.count) " +
+            "buildTimeMs=\(String(format: "%.2f", candidate.buildTimeMs)) " +
+            "candidateBuilds=\(kernelCandidateBuildCount) " +
+            "kernelCommits=\(kernelCommitCount) " +
+            "kernelRejects=\(kernelRejectCount) " +
+            "shadowBuilds=\(kernelShadowBuildCount) " +
+            "intersectingAttempts=\(intersectingCutAttemptCount) " +
+            "intersectingCommits=\(intersectingCutCommitCount) " +
+            "intersectingRejects=\(intersectingCutRejectCount) " +
+            "sceneGeometryReplacements=\(sceneGeometryReplacementCount)"
+        )
+    }
+
+    private func logMaterialClassificationValidation(
+        reason: String,
+        solid: CADSolid,
+        mesh: CADSolidMeshSnapshot?
+    ) {
+        let classifier = CADSolidMaterialClassifier(epsilon: 1e-5)
+        let debugReport = classifier.debugReport(for: solid)
+        let boundaryBuildResult = CADBoundarySurfaceBuilder().buildBoundaryMesh(
+            solid: solid,
+            classifier: classifier,
+            options: CADBoundaryBuildOptions()
+        )
+        let validationResults = mesh.map {
+            CADSurfaceBoundaryValidator.validate(mesh: $0, solid: solid, epsilon: 1e-5)
+        } ?? []
+        let invalidInternal = validationResults.filter { $0.reasonCode == .internalFaceInsideMaterial }.count
+        let invalidVoid = validationResults.filter { $0.reasonCode == .orphanFaceInsideVoid }.count
+        let unsupported = validationResults.filter { $0.result == .unsupported }.count
+        let valid = validationResults.filter { $0.result == .valid }.count
+        print(
+            "CAD Solid Classification: " +
+            "reason=\(reason) " +
+            "additiveVolumes=\(debugReport.additiveVolumeCount) " +
+            "cutterVolumes=\(debugReport.cutterVolumeCount) " +
+            "supportedVolumeTypes=\(debugReport.supportedVolumeTypeCount) " +
+            "unsupportedVolumes=\(debugReport.unsupportedVolumeCount) " +
+            "intersectingCutterVolumes=\(debugReport.intersectingCutterVolumeCount) " +
+            "boundaryValidationStatus=\(invalidInternal == 0 && invalidVoid == 0 ? "valid" : "warning") " +
+            "validBoundaryFaces=\(valid) " +
+            "internalFaces=\(invalidInternal) " +
+            "orphanVoidFaces=\(invalidVoid) " +
+            "unsupportedFaces=\(unsupported)"
+        )
+        if let boundaryDiagnostics = boundaryBuildResult.boundaryDiagnostics {
+            print(
+                "CAD Boundary Surface Builder: " +
+                "reason=\(reason) " +
+                "candidateSurfaces=\(boundaryDiagnostics.candidateSurfaceCount) " +
+                "keptFragments=\(boundaryDiagnostics.keptFragmentCount) " +
+                "rejectedFragments=\(boundaryDiagnostics.rejectedFragmentCount) " +
+                "graphBuilds=\(boundaryDiagnostics.graphBuildCount) " +
+                "surfacePairs=\(boundaryDiagnostics.surfacePairTestCount) " +
+                "intersectionCurves=\(boundaryDiagnostics.intersectionCurveCount) " +
+                "trimLoops=\(boundaryDiagnostics.trimLoopCount) " +
+                "seamCrossingCurves=\(boundaryDiagnostics.seamCrossingCurveCount) " +
+                "seamSplits=\(boundaryDiagnostics.seamSplitCount) " +
+                "seamWeldedVertices=\(boundaryDiagnostics.seamWeldedVertexCount) " +
+                "removedDuplicateVertices=\(boundaryDiagnostics.removedDuplicateVertices) " +
+                "removedDuplicateTriangles=\(boundaryDiagnostics.removedDuplicateTriangles) " +
+                "removedZeroAreaTriangles=\(boundaryDiagnostics.removedZeroAreaTriangles) " +
+                "removedSliverTriangles=\(boundaryDiagnostics.removedSliverTriangles) " +
+                "removedInvalidBoundaryTriangles=\(boundaryDiagnostics.removedInvalidBoundaryTriangles) " +
+                "finalVertices=\(boundaryDiagnostics.finalVertexCount) " +
+                "finalTriangles=\(boundaryDiagnostics.finalTriangleCount) " +
+                "validation=\(boundaryBuildResult.validationResult.reasonCode.rawValue)"
+            )
+        }
+        if debugReport.intersectingCutterVolumeCount > 0 {
+            print(
+                "CAD Solid Classification: intersecting cutter volumes detected; " +
+                "classification evaluator ready; mesh split not enabled yet."
+            )
+        }
+    }
+
     private func formatDebugVector(_ vector: DesignVector3?) -> String {
         guard let vector else { return "nil" }
         return String(format: "(%.4f,%.4f,%.4f)", vector.x, vector.y, vector.z)
     }
 
     private func formatDebugBounds(_ bounds: CADAxisAlignedBounds?) -> String {
+        guard let bounds else { return "nil" }
+        return "\(formatDebugVector(bounds.min))...\(formatDebugVector(bounds.max))"
+    }
+
+    private func formatDebugBounds(_ bounds: CADSolidBounds?) -> String {
         guard let bounds else { return "nil" }
         return "\(formatDebugVector(bounds.min))...\(formatDebugVector(bounds.max))"
     }
@@ -1415,13 +2301,20 @@ final class CADWorkshopViewModel: ObservableObject {
         selectedProfileID: UUID,
         sketchReference: SketchReference
     ) {
+        let axes = axesForSketchReference(sketchReference)
+        let sketchPlaneFrame = CADSketchPlaneFrame(
+            origin: originForSketchReference(sketchReference),
+            basisU: axes.u,
+            basisV: axes.v,
+            normal: axes.normal
+        )
         if let activeBodyEditTransaction,
            activeBodyEditTransaction.targetBodyID == targetBodyID,
            activeBodyEditTransaction.selectedProfileID == selectedProfileID,
-           activeBodyEditTransaction.bodyGeometryBefore == bodyParams {
+           activeBodyEditTransaction.bodyGeometryBefore == bodyParams,
+           activeBodyEditTransaction.sketchPlaneFrame == sketchPlaneFrame {
             return
         }
-        let axes = axesForSketchReference(sketchReference)
         activeBodyEditTransaction = CADBodyEditTransaction(
             transactionID: UUID(),
             operationType: .cutRemoveMaterialV2,
@@ -1432,45 +2325,43 @@ final class CADWorkshopViewModel: ObservableObject {
             bodyRenderStateBefore: CADBodyRenderState(),
             bodyVisibilityBefore: true,
             selectedProfileID: selectedProfileID,
-            sketchPlaneFrame: CADSketchPlaneFrame(
-                origin: originForSketchReference(sketchReference),
-                basisU: axes.u,
-                basisV: axes.v,
-                normal: axes.normal
-            ),
+            sketchPlaneFrame: sketchPlaneFrame,
             previewNodeID: "CutToolPreviewNode"
         )
     }
 
     private func rollbackCutV2Transaction() {
-        guard let transaction = activeBodyEditTransaction else { return }
-        defer { activeBodyEditTransaction = nil }
-        guard let current = document.assets.first(where: { $0.id == transaction.targetBodyID }) else { return }
-        let expectedKind = DesignAssetKind.extrudedSolid(transaction.bodyGeometryBefore)
-        guard current.kind != expectedKind
-                || current.material != transaction.bodyMaterialBefore
-                || current.transform != transaction.bodyTransformBefore else {
-            return
-        }
-        let restored = DesignAsset(
-            id: current.id,
-            name: current.name,
-            kind: expectedKind,
-            transform: transaction.bodyTransformBefore,
-            material: transaction.bodyMaterialBefore
-        )
-        document.updateAsset(restored)
+        // Cut v2 preview is visual-only. It must never restore geometry from the transaction,
+        // because the committed body may already include newer sequential cuts.
+        activeBodyEditTransaction = nil
     }
 
-    private func validateCutV2Stage2AApply(state: CADFeaturePreviewState) -> CADFeatureValidation {
+    private func clearAllTransientCADNodes(resetOperation: Bool) {
+        rollbackCutV2Transaction()
+        cutPreviewCacheKey = nil
+        featurePreviewState = nil
+        featureApplyFailureReason = nil
+        if resetOperation {
+            lastKernelMeshCandidate = nil
+        }
+        if resetOperation, featureOperation != .extrudeNewBody {
+            featureOperation = .extrudeNewBody
+        }
+    }
+
+    private func validateCutV2Apply(state: CADFeaturePreviewState) -> CADFeatureValidation {
         guard state.operation == .cutRemoveMaterialV2 else { return .unsupportedOperation }
-        guard state.depthMode == .distance else { return .throughAllCircleCutApplyNotReady }
-        guard state.depthMeters.isFinite, state.depthMeters > 1e-6 else { return .invalidDepth }
+        guard state.depthMode == .distance || state.depthMode == .throughAll else {
+            return .unsupportedDepthMode(state.depthMode)
+        }
+        if state.depthMode == .distance {
+            guard state.depthMeters.isFinite, state.depthMeters > 1e-6 else { return .invalidDepth }
+        }
         guard let selectedProfileID = state.selectedProfileID else { return .noSelectedProfileArea }
-        guard let transaction = activeBodyEditTransaction,
-              transaction.targetBodyID == state.targetBodyID,
-              transaction.selectedProfileID == selectedProfileID else {
-            return .unsupportedCutApplyStage2A
+        if let transaction = activeBodyEditTransaction,
+           transaction.targetBodyID == state.targetBodyID,
+           transaction.selectedProfileID != selectedProfileID {
+            return .noSelectedProfileArea
         }
         guard let targetBodyID = state.targetBodyID,
               let targetAsset = document.assets.first(where: { $0.id == targetBodyID }),
@@ -1478,33 +2369,160 @@ final class CADWorkshopViewModel: ObservableObject {
             return .noCutTarget
         }
 
-        let bodyParams = transaction.bodyGeometryBefore
-        guard currentBodyParams == bodyParams else { return .unaffectedGeometryWasRemoved }
-        guard isSimpleRectangularPrism(bodyParams) else { return .unsupportedCutApplyStage2A }
+        let bodyParams = currentBodyParams
+        guard validateSolidBody(bodyParams) else { return .targetBodyNotSolid }
         guard validateSketchPlaneFrame(state.sourceReference) else { return .invalidSketchPlaneFrame }
         guard profileLiesOnSelectedFace(state: state, bodyParams: bodyParams) else { return .sketchNotOnFace }
 
         let profileType = cutV2ProfileType(for: currentProfileArea(), in: selectedSketch)
         guard profileType == .circle || profileType == .rectangle else {
-            return .unsupportedCutApplyStage2A
+            return .unsupportedProfileForCutV2
         }
 
-        guard let thickness = cutV2LocalThickness(state: state, bodyParams: bodyParams),
-              thickness > 1e-6 else {
-            return .cutToolDoesNotIntersectBody
-        }
-        guard state.depthMeters < thickness - 1e-6 else {
-            return .distanceCutReachesOrExceedsBodyThicknessStage2A
-        }
-        return .valid
+        return cutToolMayIntersectBody(state: state, bodyParams: bodyParams)
+            ? .valid
+            : .cutToolDoesNotIntersectBody
     }
 
-    private func buildBoxBlindCutStage2AFeature(
+    private func buildCutCommitValidationResult() -> CutCommitValidationResult {
+        let profileType = cutV2ProfileType(for: currentProfileArea(), in: selectedSketch)
+        let depthMode = featureDepthMode
+        let direction = featureDirection
+        let uiTargetBodyID = cutTargetBodyID
+        let previewTargetBodyID = featurePreviewState?.targetBodyID
+
+        guard featureOperation == .cutRemoveMaterialV2 else {
+            return .blocked(
+                targetBodyID: uiTargetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                previewTargetBodyID: previewTargetBodyID,
+                cutProfileType: profileType,
+                cutDepthMode: depthMode,
+                cutDirection: direction,
+                reason: CADFeatureValidation.unsupportedOperation.messageKey
+            )
+        }
+
+        guard let state = featurePreviewState,
+              state.operation == .cutRemoveMaterialV2 else {
+            return .blocked(
+                targetBodyID: uiTargetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                previewTargetBodyID: previewTargetBodyID,
+                cutProfileType: profileType,
+                cutDepthMode: depthMode,
+                cutDirection: direction,
+                reason: CADFeatureValidation.noSelectedProfileArea.messageKey
+            )
+        }
+
+        let baseValidation = validateCutV2Apply(state: state)
+        guard baseValidation.isValid else {
+            return .blocked(
+                targetBodyID: state.targetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                kernelTargetBodyID: state.targetBodyID,
+                applyTargetBodyID: state.targetBodyID,
+                previewTargetBodyID: state.targetBodyID,
+                cutProfileType: profileType,
+                cutDepthMode: state.depthMode,
+                cutDirection: state.direction,
+                reason: baseValidation.messageKey
+            )
+        }
+
+        guard let selectedProfileID = state.selectedProfileID,
+              let targetBodyID = state.targetBodyID,
+              let targetAsset = document.assets.first(where: { $0.id == targetBodyID }),
+              case let .extrudedSolid(bodyParams) = targetAsset.kind,
+              let appliedCut = buildBoxBlindCutFeature(
+                  state: state,
+                  bodyParams: bodyParams,
+                  selectedProfileID: selectedProfileID
+              ) else {
+            return .blocked(
+                targetBodyID: state.targetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                kernelTargetBodyID: state.targetBodyID,
+                applyTargetBodyID: state.targetBodyID,
+                previewTargetBodyID: state.targetBodyID,
+                cutProfileType: profileType,
+                cutDepthMode: state.depthMode,
+                cutDirection: state.direction,
+                reason: CADFeatureValidation.cutBooleanFailed.messageKey
+            )
+        }
+
+        let kernelValidation = CADLimitedSolidKernel.validateSubtractOperation(
+            bodyParams: bodyParams,
+            cut: appliedCut,
+            blockIntersectingCuts: cadKernelRenderMode == .conservativeLegacy
+        )
+        let intersectsExistingVoid = CADLimitedSolidKernel.cutIntersectsExistingVoid(
+            bodyParams: bodyParams,
+            cut: appliedCut
+        )
+
+        guard kernelValidation.isValid else {
+            return .blocked(
+                targetBodyID: targetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                kernelTargetBodyID: targetBodyID,
+                applyTargetBodyID: state.targetBodyID,
+                previewTargetBodyID: state.targetBodyID,
+                cutProfileType: appliedCut.profileType,
+                cutDepthMode: appliedCut.depthMode,
+                cutDirection: appliedCut.direction,
+                reason: kernelValidation.messageKey
+            )
+        }
+
+        var resultParams = bodyParams
+        resultParams.boxBlindCutFeatures.append(appliedCut)
+
+        if intersectsExistingVoid {
+            guard allowValidatedIntersectingCutCommit,
+                  isPrimitiveCutSet(params: resultParams) else {
+                return .blocked(
+                    targetBodyID: targetBodyID,
+                    uiSelectedBodyID: uiTargetBodyID,
+                    kernelTargetBodyID: targetBodyID,
+                    applyTargetBodyID: state.targetBodyID,
+                    previewTargetBodyID: state.targetBodyID,
+                    cutProfileType: appliedCut.profileType,
+                    cutDepthMode: appliedCut.depthMode,
+                    cutDirection: appliedCut.direction,
+                    intersectsExistingVoid: true,
+                    reason: CADFeatureValidation.unsupportedIntersectingCutCase.messageKey
+                )
+            }
+        }
+
+        return CutCommitValidationResult(
+            isValid: true,
+            canCommit: true,
+            targetBodyID: targetBodyID,
+            uiSelectedBodyID: uiTargetBodyID,
+            kernelTargetBodyID: targetBodyID,
+            applyTargetBodyID: state.targetBodyID,
+            previewTargetBodyID: state.targetBodyID,
+            cutProfileType: appliedCut.profileType,
+            cutDepthMode: appliedCut.depthMode,
+            cutDirection: appliedCut.direction,
+            intersectsExistingVoid: intersectsExistingVoid,
+            createsOpenShell: false,
+            createsNonManifoldEdges: false,
+            createsFloatingIsland: false,
+            reason: nil
+        )
+    }
+
+    private func buildBoxBlindCutFeature(
         state: CADFeaturePreviewState,
         bodyParams: ExtrudedSolidParameters,
         selectedProfileID: UUID
     ) -> ExtrudedSolidBoxBlindCutFeature? {
-        let validation = validateCutV2Stage2AApply(state: state)
+        let validation = validateCutV2Apply(state: state)
         guard validation.isValid,
               let entryFace = cutV2EntryFace(state: state, bodyParams: bodyParams) else {
             return nil
@@ -1523,6 +2541,10 @@ final class CADWorkshopViewModel: ObservableObject {
         let cutDirection = (state.direction == .negativeNormal ? sketchNormal * -1 : sketchNormal)
             .normalized(fallback: sketchNormal)
         let profileType = cutV2ProfileType(for: currentProfileArea(), in: selectedSketch)
+        let thickness = cutV2LocalThickness(state: state, bodyParams: bodyParams) ?? state.depthMeters
+        let resolvedDepthMode: DepthMode = state.depthMode == .distance && state.depthMeters >= thickness - 1e-6
+            ? .throughAll
+            : state.depthMode
 
         return ExtrudedSolidBoxBlindCutFeature(
             id: UUID(),
@@ -1534,41 +2556,9 @@ final class CADWorkshopViewModel: ObservableObject {
             sourceSketchID: state.sourceSketchID,
             sourceSketchName: state.sourceSketchName,
             selectedProfileID: selectedProfileID,
-            depthMode: state.depthMode,
+            depthMode: resolvedDepthMode,
             direction: state.direction
         )
-    }
-
-    private func isSimpleRectangularPrism(_ params: ExtrudedSolidParameters) -> Bool {
-        guard params.profilePoints.count == 4,
-              params.holes.isEmpty,
-              params.cutFeatures.isEmpty,
-              validateSolidBody(params) else {
-            return false
-        }
-
-        let pts = params.profilePoints
-        let edges = (0..<4).map { index -> SketchPoint2D in
-            let next = (index + 1) % 4
-            return SketchPoint2D(
-                u: pts[next].u - pts[index].u,
-                v: pts[next].v - pts[index].v
-            )
-        }
-        let lengths = edges.map { sqrt($0.u * $0.u + $0.v * $0.v) }
-        guard lengths.allSatisfy({ $0.isFinite && $0 > 1e-6 }) else { return false }
-
-        func dot2(_ lhs: SketchPoint2D, _ rhs: SketchPoint2D) -> Double {
-            lhs.u * rhs.u + lhs.v * rhs.v
-        }
-
-        for index in 0..<4 {
-            let next = (index + 1) % 4
-            let denom = max(lengths[index] * lengths[next], 1e-12)
-            guard abs(dot2(edges[index], edges[next]) / denom) < 0.02 else { return false }
-        }
-        return abs(lengths[0] - lengths[2]) < max(lengths[0], lengths[2]) * 0.02
-            && abs(lengths[1] - lengths[3]) < max(lengths[1], lengths[3]) * 0.02
     }
 
     private func cutV2EntryFace(
@@ -1620,7 +2610,30 @@ final class CADWorkshopViewModel: ObservableObject {
         return projections.max() ?? 0
     }
 
-    private func validateBoxBlindCutStage2AResult(
+    private func cutToolMayIntersectBody(
+        state: CADFeaturePreviewState,
+        bodyParams: ExtrudedSolidParameters
+    ) -> Bool {
+        guard state.operation.isCutV2,
+              state.depthMeters.isFinite,
+              state.depthMeters > 1e-6,
+              state.direction == .positiveNormal || state.direction == .negativeNormal,
+              validateProfileLoop(state.profilePoints) else {
+            return false
+        }
+
+        guard let bodyBounds = CADAxisAlignedBounds(points: bodyParams.vertices()),
+              let cutBounds = cutToolBounds(for: state),
+              cutBounds.intersects(bodyBounds) else {
+            return false
+        }
+
+        // Stabilization stage: preview/apply eligibility is volume-overlap based and cheap.
+        // Do not sample prior cavities or run boolean-like tests while previewing.
+        return (cutV2LocalThickness(state: state, bodyParams: bodyParams) ?? 0) > 1e-6
+    }
+
+    private func validateBoxBlindCutResult(
         before: ExtrudedSolidParameters,
         result: ExtrudedSolidParameters,
         appliedCut: ExtrudedSolidBoxBlindCutFeature
@@ -1639,14 +2652,21 @@ final class CADWorkshopViewModel: ObservableObject {
         }
         guard result.boxBlindCutFeatures.count == before.boxBlindCutFeatures.count + 1,
               result.boxBlindCutFeatures.last == appliedCut else {
-            return .unsupportedCutApplyStage2A
+            return .cutBooleanFailed
         }
-        guard appliedCut.depthMode == .distance,
+        guard result.volumeMeters3 <= before.volumeMeters3 + 1e-9 else {
+            print(
+                "CAD Cut v2 Hard Failure: cut increased volume " +
+                "before=\(before.volumeMeters3) after=\(result.volumeMeters3)"
+            )
+            return .cutBooleanInvalidResult
+        }
+        guard (appliedCut.depthMode == .distance || appliedCut.depthMode == .throughAll),
               appliedCut.depthMeters.isFinite,
-              appliedCut.depthMeters > 1e-6,
+              (appliedCut.depthMode == .throughAll || appliedCut.depthMeters > 1e-6),
               appliedCut.cutDirection.isFinite,
               validateProfileLoop(appliedCut.profilePoints) else {
-            return .unsupportedCutApplyStage2A
+            return .cutBooleanFailed
         }
         guard let beforeBounds = CADAxisAlignedBounds(points: before.vertices()),
               let resultBounds = CADAxisAlignedBounds(points: result.vertices()),
@@ -1654,7 +2674,7 @@ final class CADWorkshopViewModel: ObservableObject {
             return .unaffectedGeometryWasRemoved
         }
         guard let entryFace = before.faces.first(where: { $0.id == appliedCut.entryFaceID }) else {
-            return .unsupportedCutApplyStage2A
+            return .cutBooleanFailed
         }
         let faceOuter = faceOuterLoop(entryFace)
         guard DesignAssetNodeFactory.validateCapTriangulation(
@@ -1666,13 +2686,11 @@ final class CADWorkshopViewModel: ObservableObject {
 
         switch appliedCut.profileType {
         case .circle:
-            guard appliedCut.profilePoints.count >= 32 else { return .cutMissingCylindricalWall }
-            guard appliedCut.depthMeters > 1e-6 else { return .cutMissingBlindBottom }
+            guard appliedCut.profilePoints.count >= 32 else { return .unsupportedProfileForCutV2 }
         case .rectangle:
-            guard appliedCut.profilePoints.count == 4 else { return .unsupportedCutApplyStage2A }
-            guard appliedCut.depthMeters > 1e-6 else { return .cutMissingBlindBottom }
+            guard appliedCut.profilePoints.count == 4 else { return .unsupportedProfileForCutV2 }
         case .polygon, .unsupported:
-            return .unsupportedCutApplyStage2A
+            return .unsupportedProfileForCutV2
         }
         return .valid
     }
@@ -1699,7 +2717,7 @@ final class CADWorkshopViewModel: ObservableObject {
             && abs(lhs.max.z - rhs.max.z) <= tolerance
     }
 
-    @available(*, deprecated, message: "Legacy cap-parallel Cut builder is disabled for Cut v2 Stage 2A.")
+    @available(*, deprecated, message: "Legacy cap-parallel Cut builder is disabled for stabilized Cut v2.")
     private func buildCutV2Feature(
         state: CADFeaturePreviewState,
         bodyParams: ExtrudedSolidParameters,
@@ -1755,7 +2773,7 @@ final class CADWorkshopViewModel: ObservableObject {
         )
     }
 
-    @available(*, deprecated, message: "Legacy cap-parallel Cut validation is disabled for Cut v2 Stage 2A.")
+    @available(*, deprecated, message: "Legacy cap-parallel Cut validation is disabled for stabilized Cut v2.")
     private func validateCutV2Result(
         before: ExtrudedSolidParameters,
         result: ExtrudedSolidParameters,
@@ -2001,7 +3019,11 @@ final class CADWorkshopViewModel: ObservableObject {
     // MARK: Selection
 
     func selectAsset(_ id: UUID?) {
+        let previousAssetID = document.selectedAssetID
         document.selectAsset(id)
+        if previousAssetID != id {
+            clearAllTransientCADNodes(resetOperation: false)
+        }
         extrudeWarningKey = nil
         selectedFaceID = nil
         selectedWorkPlane = nil
@@ -3165,6 +4187,7 @@ final class CADWorkshopViewModel: ObservableObject {
 
     func deleteSelectedAsset() {
         guard let id = document.selectedAssetID else { return }
+        clearAllTransientCADNodes(resetOperation: false)
         document.removeAsset(id: id)
         syncSelectionStateForSelectedAsset()
         focusSelectionOrFit()
@@ -3247,6 +4270,8 @@ final class CADWorkshopViewModel: ObservableObject {
         guard var asset = document.selectedAsset,
               case var .extrudedSolid(parameters) = asset.kind else { return }
         parameters.depthMeters = clampFinite(depthMeters, to: 0.001...5.0)
+        parameters.kernelVisualMesh = nil
+        parameters.kernelResultSolid = nil
         parameters.refreshFaces(assetID: asset.id)
         selectedFaceID = nil
         asset.kind = .extrudedSolid(parameters)
@@ -3258,6 +4283,8 @@ final class CADWorkshopViewModel: ObservableObject {
         guard var asset = document.selectedAsset,
               case var .extrudedSolid(parameters) = asset.kind else { return }
         parameters.direction = direction
+        parameters.kernelVisualMesh = nil
+        parameters.kernelResultSolid = nil
         parameters.refreshFaces(assetID: asset.id)
         selectedFaceID = nil
         asset.kind = .extrudedSolid(parameters)
@@ -3786,9 +4813,13 @@ final class CADWorkshopViewModel: ObservableObject {
 
     func resetDocument() {
         document = DesignDocument()
+        cadDocument = CADDocument()
+        clearAllTransientCADNodes(resetOperation: true)
         selectedAttachmentPointID = nil
         selectedSketchLineID = nil
         selectedSketchEntityID = nil
+        selectedSketchEntityIDs = []
+        selectedProfileAreaID = nil
         selectedFaceID = nil
         hoveredWorkPlaneID = nil
         selectedWorkPlane = nil
@@ -3796,10 +4827,13 @@ final class CADWorkshopViewModel: ObservableObject {
         activeToolMode = .select
         activeSketchPlane = .xz
         activeSketchReference = .canonicalPlane(.xz, offsetMeters: 0)
+        featureDepthMode = .distance
         resetDrawingToolStates(activating: nil)
+        featureValidation = .noProfile
         extrudeWarningKey = nil
         sketchWarningKey = nil
         requestViewPreset(.iso, focus: .origin)
+        refreshViewportState()
     }
 
     // MARK: Sketch Tool Canvas Events

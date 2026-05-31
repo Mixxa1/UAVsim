@@ -1,7 +1,7 @@
 import Foundation
 
 // Placeholder for a future attachment-point based assembly editor.
-// Stage 1.3 keeps this disconnected from UI and simulation logic.
+// Keep this disconnected from UI and simulation logic until assembly editing is implemented.
 struct DesignAssemblyLink: Codable, Identifiable, Equatable {
     var id: UUID
     var parentAssetID: UUID
