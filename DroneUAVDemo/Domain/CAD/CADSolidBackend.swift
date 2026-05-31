@@ -593,6 +593,7 @@ struct CADBooleanKernel {
             candidate: candidate,
             validationResult: validation,
             canCommit: validation.isValid
+                && candidate.diagnostics.isClosedManifold
         )
     }
 
@@ -649,14 +650,13 @@ struct CADBooleanKernel {
         guard candidate.validationResult.isValid else {
             return candidate.validationResult
         }
-        guard candidate.diagnostics.boundaryEdgeCount == 0,
-              candidate.diagnostics.nonManifoldEdgeCount == 0,
-              candidate.diagnostics.isClosedManifold else {
+        guard candidate.diagnostics.isClosedManifold else {
             return .invalid(
                 .topologyValidationFailed,
-                message: "Commit blocked: result mesh is not a closed manifold.",
+                message: "Commit blocked: boolean result is not a closed solid body.",
                 debugDetails: [
                     "boundaryEdges=\(candidate.diagnostics.boundaryEdgeCount)",
+                    "boundaryLoops=\(candidate.diagnostics.boundaryLoopCount)",
                     "nonManifoldEdges=\(candidate.diagnostics.nonManifoldEdgeCount)"
                 ]
             )
@@ -777,6 +777,16 @@ struct CADKernelMeshCandidateBuilder {
         }) else {
             return .invalid(.topologyValidationFailed, message: "Kernel candidate contains preview/cutter material")
         }
+        guard !buildResult.diagnostics.hasOpenBoundary else {
+            return .invalid(
+                .topologyValidationFailed,
+                message: "Commit blocked: result shell is open.",
+                debugDetails: [
+                    "boundaryEdges=\(buildResult.diagnostics.boundaryEdgeCount)",
+                    "boundaryLoops=\(buildResult.diagnostics.boundaryLoopCount)"
+                ]
+            )
+        }
         guard buildResult.diagnostics.isClosedManifold else {
             return .invalid(
                 .topologyValidationFailed,
@@ -785,7 +795,8 @@ struct CADKernelMeshCandidateBuilder {
                     "zeroAreaTriangles=\(buildResult.diagnostics.zeroAreaTriangleCount)",
                     "duplicateFaces=\(buildResult.diagnostics.duplicateFaceCount)",
                     "nonManifoldEdges=\(buildResult.diagnostics.nonManifoldEdgeCount)",
-                    "boundaryEdges=\(buildResult.diagnostics.boundaryEdgeCount)"
+                    "boundaryEdges=\(buildResult.diagnostics.boundaryEdgeCount)",
+                    "boundaryLoops=\(buildResult.diagnostics.boundaryLoopCount)"
                 ]
             )
         }
@@ -1984,16 +1995,18 @@ struct CADBoundarySurfaceBuilder {
             epsilon: options.tolerance.classificationEpsilon
         )
         let invalidBoundaryCount = validationResults.filter { $0.result == .invalid }.count
-        let validationResult: CADOperationValidationResult = diagnostics.isClosedManifold
+        let validationResult: CADOperationValidationResult = invalidBoundaryCount == 0 && diagnostics.isClosedManifold
             ? .valid(debugDetails: ["source=CADBoundarySurfaceBuilder"])
             : .invalid(
                 .topologyValidationFailed,
                 message: "Boundary builder validation failed",
                 debugDetails: [
                     "invalidBoundaryTriangles=\(invalidBoundaryCount)",
-                    "nonManifoldEdges=\(diagnostics.nonManifoldEdgeCount)",
                     "boundaryEdges=\(diagnostics.boundaryEdgeCount)",
-                    "duplicateFaces=\(diagnostics.duplicateFaceCount)"
+                    "boundaryLoops=\(diagnostics.boundaryLoopCount)",
+                    "nonManifoldEdges=\(diagnostics.nonManifoldEdgeCount)",
+                    "duplicateFaces=\(diagnostics.duplicateFaceCount)",
+                    "zeroAreaTriangles=\(diagnostics.zeroAreaTriangleCount)"
                 ]
             )
         let normals = cleanup.triangles.map { triangle -> DesignVector3 in

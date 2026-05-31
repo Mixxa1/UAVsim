@@ -79,7 +79,7 @@ enum DepthMode: String, Codable, CaseIterable, Identifiable {
 
 // MARK: - Feature Validation
 
-enum CADFeatureValidation: Equatable {
+enum CADFeatureValidation: Error, Equatable {
     case valid
     case noProfile
     case insufficientDepth
@@ -96,6 +96,8 @@ enum CADFeatureValidation: Equatable {
     case targetBodyNotSolid
     case invalidSketchPlaneFrame
     case invalidDepth
+    case profileOutsideFace
+    case generatedMeshEmpty
     case cutToolDoesNotIntersectBody
     case unsupportedProfileForCutV2
     case cutIntersectsExistingVoidUnsupported
@@ -140,6 +142,8 @@ enum CADFeatureValidation: Equatable {
         case .targetBodyNotSolid:            return "cad.cut_v2.reason.target_body_not_solid"
         case .invalidSketchPlaneFrame:       return "cad.cut_v2.reason.invalid_sketch_plane_frame"
         case .invalidDepth:                  return "cad.cut_v2.reason.invalid_depth"
+        case .profileOutsideFace:            return "cad.cut_v1.reason.profile_outside_face"
+        case .generatedMeshEmpty:            return "cad.cut_v1.reason.generated_mesh_empty"
         case .cutToolDoesNotIntersectBody:   return "cad.cut_v2.reason.cut_tool_does_not_intersect_body"
         case .unsupportedProfileForCutV2:    return "cad.cut_v2.reason.unsupported_profile_for_cut_v2"
         case .cutIntersectsExistingVoidUnsupported: return "cad.cut_v2.reason.intersecting_cut_unsupported"
@@ -394,6 +398,9 @@ struct CutCommitValidationResult: Equatable {
     var createsOpenShell: Bool
     var createsNonManifoldEdges: Bool
     var createsFloatingIsland: Bool
+    var boundaryEdgeCount: Int?
+    var boundaryLoopCount: Int?
+    var kernelFallback: Bool
     var reason: String?
 
     static func blocked(
@@ -409,6 +416,9 @@ struct CutCommitValidationResult: Equatable {
         createsOpenShell: Bool = false,
         createsNonManifoldEdges: Bool = false,
         createsFloatingIsland: Bool = false,
+        boundaryEdgeCount: Int? = nil,
+        boundaryLoopCount: Int? = nil,
+        kernelFallback: Bool = false,
         reason: String?
     ) -> CutCommitValidationResult {
         CutCommitValidationResult(
@@ -426,6 +436,9 @@ struct CutCommitValidationResult: Equatable {
             createsOpenShell: createsOpenShell,
             createsNonManifoldEdges: createsNonManifoldEdges,
             createsFloatingIsland: createsFloatingIsland,
+            boundaryEdgeCount: boundaryEdgeCount,
+            boundaryLoopCount: boundaryLoopCount,
+            kernelFallback: kernelFallback,
             reason: reason
         )
     }
