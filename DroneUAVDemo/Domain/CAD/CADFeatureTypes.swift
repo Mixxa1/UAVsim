@@ -402,6 +402,18 @@ struct CutCommitValidationResult: Equatable {
     var boundaryLoopCount: Int?
     var kernelFallback: Bool
     var reason: String?
+    var committedCutsCount: Int
+    var candidateCutID: UUID?
+    var affectedEntryFaceID: UUID?
+    var affectedExitFaceID: UUID?
+    var cutsOnEntryFace: Int
+    var cutsOnExitFace: Int
+    var multiCutValidationPassed: Bool
+    var multiCutValidationReason: String?
+    var meshVertexCount: Int?
+    var meshTriangleCount: Int?
+    var trianglesInsideAnyHole: Int
+    var capFacesGenerated: Int
 
     static func blocked(
         targetBodyID: UUID?,
@@ -419,7 +431,19 @@ struct CutCommitValidationResult: Equatable {
         boundaryEdgeCount: Int? = nil,
         boundaryLoopCount: Int? = nil,
         kernelFallback: Bool = false,
-        reason: String?
+        reason: String?,
+        committedCutsCount: Int = 0,
+        candidateCutID: UUID? = nil,
+        affectedEntryFaceID: UUID? = nil,
+        affectedExitFaceID: UUID? = nil,
+        cutsOnEntryFace: Int = 0,
+        cutsOnExitFace: Int = 0,
+        multiCutValidationPassed: Bool = false,
+        multiCutValidationReason: String? = nil,
+        meshVertexCount: Int? = nil,
+        meshTriangleCount: Int? = nil,
+        trianglesInsideAnyHole: Int = 0,
+        capFacesGenerated: Int = 0
     ) -> CutCommitValidationResult {
         CutCommitValidationResult(
             isValid: false,
@@ -439,7 +463,19 @@ struct CutCommitValidationResult: Equatable {
             boundaryEdgeCount: boundaryEdgeCount,
             boundaryLoopCount: boundaryLoopCount,
             kernelFallback: kernelFallback,
-            reason: reason
+            reason: reason,
+            committedCutsCount: committedCutsCount,
+            candidateCutID: candidateCutID,
+            affectedEntryFaceID: affectedEntryFaceID,
+            affectedExitFaceID: affectedExitFaceID,
+            cutsOnEntryFace: cutsOnEntryFace,
+            cutsOnExitFace: cutsOnExitFace,
+            multiCutValidationPassed: multiCutValidationPassed,
+            multiCutValidationReason: multiCutValidationReason,
+            meshVertexCount: meshVertexCount,
+            meshTriangleCount: meshTriangleCount,
+            trianglesInsideAnyHole: trianglesInsideAnyHole,
+            capFacesGenerated: capFacesGenerated
         )
     }
 }

@@ -1785,7 +1785,7 @@
 "cad.cut_v2.reason.invalid_depth" = "Cut depth must be at least 1 mm.";
 "cad.cut_v2.reason.cut_tool_does_not_intersect_body" = "Profile does not intersect the target body.";
 "cad.cut_v2.reason.unsupported_profile_for_cut_v2" = "This profile type is not supported yet.";
-"cad.cut_v2.reason.intersecting_cut_unsupported" = "Existing cut intersection is not supported in Cut V1.";
+"cad.cut_v2.reason.intersecting_cut_unsupported" = "Intersecting or touching cuts are not supported yet.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Cut result is not a valid solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Cut result bounds are invalid.";
 "cad.cut_v2.reason.cut_missing_cylindrical_wall" = "Cut result is missing the inner cylindrical wall.";
@@ -1837,6 +1837,17 @@
 "cad.cut_v2.inspector.kernel_target_body_id" = "Validated body id";
 "cad.cut_v2.inspector.apply_target_body_id" = "Apply target body id";
 "cad.cut_v2.inspector.preview_target_body_id" = "Preview target body id";
+"cad.cut_v2.inspector.committed_cuts_count" = "Committed cuts";
+"cad.cut_v2.inspector.candidate_cut_id" = "Candidate cut id";
+"cad.cut_v2.inspector.affected_entry_face_id" = "Entry face id";
+"cad.cut_v2.inspector.affected_exit_face_id" = "Exit face id";
+"cad.cut_v2.inspector.cuts_on_entry_face" = "Cuts on entry face";
+"cad.cut_v2.inspector.cuts_on_exit_face" = "Cuts on exit face";
+"cad.cut_v2.inspector.multi_cut_validation" = "Multi-cut validation";
+"cad.cut_v2.inspector.mesh_vertex_count" = "Mesh vertices";
+"cad.cut_v2.inspector.mesh_triangle_count" = "Mesh triangles";
+"cad.cut_v2.inspector.triangles_inside_any_hole" = "Triangles inside holes";
+"cad.cut_v2.inspector.cap_faces_generated" = "Cap faces";
 "cad.cut_v2.commit.yes" = "Yes";
 "cad.cut_v2.commit.no" = "No";
 "cad.cut_v2.commit.pending" = "Pending Apply";

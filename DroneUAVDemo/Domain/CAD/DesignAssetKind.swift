@@ -1701,6 +1701,11 @@ struct ExtrudedSolidParameters: Codable, Equatable {
     var kernelVisualMesh: CADSolidMeshSnapshot?
     var kernelResultSolid: CADSolid?
 
+    var stableCutFeatures: [ExtrudedSolidBoxBlindCutFeature] {
+        get { boxBlindCutFeatures }
+        set { boxBlindCutFeatures = newValue }
+    }
+
     init(
         assetID: UUID,
         sourceSketchID: UUID,
@@ -1858,19 +1863,39 @@ struct ExtrudedSolidParameters: Codable, Equatable {
     mutating func refreshFaces(assetID: UUID) {
         sourcePlane = sourceReference.plane
         planeOffsetMeters = sourceReference.planeOffsetMeters
-        faces = DesignPlanarFace.faces(
+        let previousFaces = faces
+        var refreshedFaces = DesignPlanarFace.faces(
             assetID: assetID,
             profilePoints: profilePoints,
             reference: sourceReference,
             depthMeters: depthMeters,
             direction: direction
         )
+        for index in refreshedFaces.indices {
+            if let matchingFace = previousFaces.first(where: { faceMatchesForStableID($0, refreshedFaces[index]) }) {
+                refreshedFaces[index].id = matchingFace.id
+            } else if previousFaces.indices.contains(index) {
+                refreshedFaces[index].id = previousFaces[index].id
+            }
+        }
+        faces = refreshedFaces
     }
 
     func resolvedLegacyHoleDepths() -> [Double] {
         var depths = holeDepths
         while depths.count < holes.count { depths.append(depthMeters) }
         return depths
+    }
+
+    private func faceMatchesForStableID(_ lhs: DesignPlanarFace, _ rhs: DesignPlanarFace) -> Bool {
+        let normalAligned = lhs.normal.normalized(fallback: .zAxis)
+            .dot(rhs.normal.normalized(fallback: .zAxis)) > 0.999
+        return normalAligned
+            && (lhs.center - rhs.center).length <= 1e-6
+            && abs(lhs.bounds.minU - rhs.bounds.minU) <= 1e-6
+            && abs(lhs.bounds.maxU - rhs.bounds.maxU) <= 1e-6
+            && abs(lhs.bounds.minV - rhs.bounds.minV) <= 1e-6
+            && abs(lhs.bounds.maxV - rhs.bounds.maxV) <= 1e-6
     }
 }
 

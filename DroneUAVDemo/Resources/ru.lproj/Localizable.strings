@@ -1780,7 +1780,7 @@
 "cad.cut_v2.reason.invalid_depth" = "Глубина выреза должна быть не меньше 1 мм.";
 "cad.cut_v2.reason.cut_tool_does_not_intersect_body" = "Профиль не пересекает целевое тело.";
 "cad.cut_v2.reason.unsupported_profile_for_cut_v2" = "Этот тип профиля пока не поддерживается.";
-"cad.cut_v2.reason.intersecting_cut_unsupported" = "Пересечение с существующим вырезом не поддерживается в Cut V1.";
+"cad.cut_v2.reason.intersecting_cut_unsupported" = "Пересекающиеся или касающиеся вырезы пока не поддерживаются.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Результат выреза не является корректным solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Границы результата выреза некорректны.";
 "cad.cut_v2.reason.cut_missing_cylindrical_wall" = "В результате выреза отсутствует внутренняя цилиндрическая стенка.";
@@ -1832,6 +1832,17 @@
 "cad.cut_v2.inspector.kernel_target_body_id" = "ID проверенного тела";
 "cad.cut_v2.inspector.apply_target_body_id" = "Apply target body id";
 "cad.cut_v2.inspector.preview_target_body_id" = "Preview target body id";
+"cad.cut_v2.inspector.committed_cuts_count" = "Committed cuts";
+"cad.cut_v2.inspector.candidate_cut_id" = "ID кандидата";
+"cad.cut_v2.inspector.affected_entry_face_id" = "ID входной грани";
+"cad.cut_v2.inspector.affected_exit_face_id" = "ID выходной грани";
+"cad.cut_v2.inspector.cuts_on_entry_face" = "Вырезов на входе";
+"cad.cut_v2.inspector.cuts_on_exit_face" = "Вырезов на выходе";
+"cad.cut_v2.inspector.multi_cut_validation" = "Проверка multi-cut";
+"cad.cut_v2.inspector.mesh_vertex_count" = "Вершин mesh";
+"cad.cut_v2.inspector.mesh_triangle_count" = "Треугольников mesh";
+"cad.cut_v2.inspector.triangles_inside_any_hole" = "Треугольников в отверстиях";
+"cad.cut_v2.inspector.cap_faces_generated" = "Cap faces";
 "cad.cut_v2.commit.yes" = "Да";
 "cad.cut_v2.commit.no" = "Нет";
 "cad.cut_v2.commit.pending" = "Ожидает Apply";

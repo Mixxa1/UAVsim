@@ -874,6 +874,54 @@ final class CADWorkshopViewModel: ObservableObject {
         shortDebugID(cutCommitValidationResult.previewTargetBodyID)
     }
 
+    var cutCommitCommittedCutsCountDisplayName: String {
+        String(cutCommitValidationResult.committedCutsCount)
+    }
+
+    var cutCommitCandidateCutIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.candidateCutID)
+    }
+
+    var cutCommitAffectedEntryFaceIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.affectedEntryFaceID)
+    }
+
+    var cutCommitAffectedExitFaceIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.affectedExitFaceID)
+    }
+
+    var cutCommitCutsOnEntryFaceDisplayName: String {
+        String(cutCommitValidationResult.cutsOnEntryFace)
+    }
+
+    var cutCommitCutsOnExitFaceDisplayName: String {
+        String(cutCommitValidationResult.cutsOnExitFace)
+    }
+
+    var cutCommitMultiCutValidationDisplayName: String {
+        cutCommitValidationResult.multiCutValidationPassed
+            ? "passed"
+            : "blocked"
+    }
+
+    var cutCommitMeshVertexCountDisplayName: String {
+        cutCommitValidationResult.meshVertexCount.map(String.init)
+            ?? localized("cad.cut_v2.commit.none")
+    }
+
+    var cutCommitMeshTriangleCountDisplayName: String {
+        cutCommitValidationResult.meshTriangleCount.map(String.init)
+            ?? localized("cad.cut_v2.commit.none")
+    }
+
+    var cutCommitTrianglesInsideAnyHoleDisplayName: String {
+        String(cutCommitValidationResult.trianglesInsideAnyHole)
+    }
+
+    var cutCommitCapFacesGeneratedDisplayName: String {
+        String(cutCommitValidationResult.capFacesGenerated)
+    }
+
     /// ID of the solid body to cut into. Returns the face's source asset when the sketch is on a body
     /// face, or auto-detects the first extruded solid whose source plane matches the sketch's canonical
     /// plane. Returns nil when no matching body exists.
@@ -1235,7 +1283,9 @@ final class CADWorkshopViewModel: ObservableObject {
             bodyCountBefore: bodyCountBefore,
             bodyCountAfter: committedBodyCount,
             removedPreviewNodeCount: previewNodeCountBeforeApply,
-            appendedFeatureID: commitResult.feature.id
+            appendedFeatureID: commitResult.feature.id,
+            rebuildDiagnostics: commitResult.rebuildDiagnostics,
+            multiCutValidation: commitResult.multiCutValidation
         )
 
         finishSuccessfulCutV2Apply(targetBodyID: request.targetBodyID)
@@ -1837,24 +1887,51 @@ final class CADWorkshopViewModel: ObservableObject {
         bodyCountBefore: Int,
         bodyCountAfter: Int,
         removedPreviewNodeCount: Int,
-        appendedFeatureID: UUID
+        appendedFeatureID: UUID,
+        rebuildDiagnostics: CADCutMeshRebuildDiagnostics,
+        multiCutValidation: CADMultiCutValidationResult
     ) {
         let expanded = beforeBounds.flatMap { before in
             resultBounds.map { result in result.expands(beyond: before) }
         } ?? false
-        print(
-            "CAD Cut v2 Apply After: " +
-            "resultVertices=\(resultMeshStats?.vertexCount ?? 0) " +
-            "resultTriangles=\(resultMeshStats?.triangleCount ?? 0) " +
-            "resultVolumeEstimate=\(resultParams.volumeMeters3) " +
-            "resultBBox=\(formatDebugBounds(resultBounds)) " +
-            "bodyCount=\(bodyCountAfter) " +
-            "bodyCountBefore=\(bodyCountBefore) " +
-            "removedPreviewNodeCount=\(removedPreviewNodeCount) " +
-            "featureAppendedID=\(appendedFeatureID.uuidString) " +
-            "featureStackCount=\(resultParams.boxBlindCutFeatures.count) " +
-            "operation=subtract"
-        )
+        let messageParts: [String] = [
+            "CAD Cut v2 Apply After: ",
+            "resultVertices=\(resultMeshStats?.vertexCount ?? 0) ",
+            "resultTriangles=\(resultMeshStats?.triangleCount ?? 0) ",
+            "resultVolumeEstimate=\(resultParams.volumeMeters3) ",
+            "resultBBox=\(formatDebugBounds(resultBounds)) ",
+            "bodyCount=\(bodyCountAfter) ",
+            "bodyCountBefore=\(bodyCountBefore) ",
+            "removedPreviewNodeCount=\(removedPreviewNodeCount) ",
+            "featureAppendedID=\(appendedFeatureID.uuidString) ",
+            "featureStackCount=\(resultParams.boxBlindCutFeatures.count) ",
+            "committedCutsCount=\(multiCutValidation.committedCutsCount) ",
+            "candidateCutID=\(multiCutValidation.candidateCutID.uuidString) ",
+            "affectedEntryFaceID=\(multiCutValidation.affectedEntryFaceID.uuidString) ",
+            "affectedExitFaceID=\(multiCutValidation.affectedExitFaceID?.uuidString ?? "nil") ",
+            "cutsOnEntryFace=\(multiCutValidation.cutsOnEntryFace) ",
+            "cutsOnExitFace=\(multiCutValidation.cutsOnExitFace) ",
+            "multiCutValidation=passed ",
+            "meshVertexCount=\(resultMeshStats?.vertexCount ?? 0) ",
+            "meshTriangleCount=\(resultMeshStats?.triangleCount ?? 0) ",
+            "affectedFaceID=\(rebuildDiagnostics.affectedFaceID?.uuidString ?? "nil") ",
+            "holeCountOnFace=\(rebuildDiagnostics.holeCountOnFace) ",
+            "holeTypesOnFace=\(rebuildDiagnostics.holeTypesOnFace.joined(separator: ",")) ",
+            "sameFaceTriangulationPassed=\(rebuildDiagnostics.sameFaceTriangulationPassed) ",
+            "holeIntersectionDetected=\(rebuildDiagnostics.holeIntersectionDetected) ",
+            "holeTouchDetected=\(rebuildDiagnostics.holeTouchDetected) ",
+            "orphanTriangleCount=\(rebuildDiagnostics.orphanTriangleCount) ",
+            "nonCoplanarFaceTriangleCount=\(rebuildDiagnostics.nonCoplanarFaceTriangleCount) ",
+            "trianglesCrossingBetweenHoles=\(rebuildDiagnostics.trianglesCrossingBetweenHoles) ",
+            "trianglesOutsideFace=\(rebuildDiagnostics.trianglesOutsideFace) ",
+            "trianglesInsideAnyHole=\(rebuildDiagnostics.trianglesInsideAnyHole) ",
+            "oldFullFaceRetained=\(rebuildDiagnostics.oldFullFaceRetained) ",
+            "oldFullEntryFaceKept=\(rebuildDiagnostics.oldFullEntryFaceKept) ",
+            "oldFullExitFaceKept=\(rebuildDiagnostics.oldFullExitFaceKept) ",
+            "capFacesGenerated=\(rebuildDiagnostics.capFacesGenerated) ",
+            "operation=subtract",
+        ]
+        print(messageParts.joined())
         if expanded {
             print("Cut result expanded body bounds — possible additive/cutter leak.")
         }
@@ -2253,7 +2330,7 @@ final class CADWorkshopViewModel: ObservableObject {
             bodyVisibilityBefore: true,
             selectedProfileID: selectedProfileID,
             sketchPlaneFrame: sketchPlaneFrame,
-            previewNodeID: "CutToolPreviewNode"
+            previewNodeID: "cad.cut.cutterVolume"
         )
     }
 
@@ -2315,6 +2392,11 @@ final class CADWorkshopViewModel: ObservableObject {
 
         let build = makeCurrentCutRequest(depthMode: state.depthMode)
         guard let request = build.request else {
+            let existingCutCount: Int = state.targetBodyID.flatMap { id in
+                guard let asset = document.assets.first(where: { $0.id == id }),
+                      case let .extrudedSolid(params) = asset.kind else { return nil }
+                return params.stableCutFeatures.count
+            } ?? 0
             return .blocked(
                 targetBodyID: state.targetBodyID,
                 uiSelectedBodyID: uiTargetBodyID,
@@ -2325,7 +2407,68 @@ final class CADWorkshopViewModel: ObservableObject {
                 cutDepthMode: state.depthMode,
                 cutDirection: state.direction,
                 intersectsExistingVoid: build.validation == .cutIntersectsExistingVoidUnsupported,
-                reason: build.validation.messageKey
+                reason: build.validation.messageKey,
+                committedCutsCount: existingCutCount,
+                multiCutValidationReason: build.validation.messageKey
+            )
+        }
+
+        let candidateCut = request.feature()
+        let multiCutValidation = CADMultiCutValidator.validate(
+            baseBody: request.targetBodyGeometry,
+            existingCuts: request.targetBodyGeometry.stableCutFeatures,
+            newCut: candidateCut
+        )
+        guard multiCutValidation.isValid else {
+            return .blocked(
+                targetBodyID: request.targetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                kernelTargetBodyID: request.targetBodyID,
+                applyTargetBodyID: request.targetBodyID,
+                previewTargetBodyID: request.targetBodyID,
+                cutProfileType: request.profileType,
+                cutDepthMode: request.depthMode,
+                cutDirection: request.directionForSketchReference,
+                intersectsExistingVoid: multiCutValidation.validation == .cutIntersectsExistingVoidUnsupported,
+                reason: multiCutValidation.reason,
+                committedCutsCount: multiCutValidation.committedCutsCount,
+                candidateCutID: multiCutValidation.candidateCutID,
+                affectedEntryFaceID: multiCutValidation.affectedEntryFaceID,
+                affectedExitFaceID: multiCutValidation.affectedExitFaceID,
+                cutsOnEntryFace: multiCutValidation.cutsOnEntryFace,
+                cutsOnExitFace: multiCutValidation.cutsOnExitFace,
+                multiCutValidationPassed: false,
+                multiCutValidationReason: multiCutValidation.reason
+            )
+        }
+
+        var candidateParams = request.targetBodyGeometry
+        candidateParams.stableCutFeatures = multiCutValidation.candidateCuts
+        candidateParams.kernelVisualMesh = nil
+        candidateParams.kernelResultSolid = nil
+        candidateParams.refreshFaces(assetID: request.targetBodyID)
+        guard let meshBuild = CADCutMeshRebuilder.rebuildBodyMesh(
+            bodyID: request.targetBodyID,
+            bodyParams: candidateParams
+        ) else {
+            return .blocked(
+                targetBodyID: request.targetBodyID,
+                uiSelectedBodyID: uiTargetBodyID,
+                kernelTargetBodyID: request.targetBodyID,
+                applyTargetBodyID: request.targetBodyID,
+                previewTargetBodyID: request.targetBodyID,
+                cutProfileType: request.profileType,
+                cutDepthMode: request.depthMode,
+                cutDirection: request.directionForSketchReference,
+                reason: CADFeatureValidation.generatedMeshEmpty.messageKey,
+                committedCutsCount: multiCutValidation.committedCutsCount,
+                candidateCutID: multiCutValidation.candidateCutID,
+                affectedEntryFaceID: multiCutValidation.affectedEntryFaceID,
+                affectedExitFaceID: multiCutValidation.affectedExitFaceID,
+                cutsOnEntryFace: multiCutValidation.cutsOnEntryFace,
+                cutsOnExitFace: multiCutValidation.cutsOnExitFace,
+                multiCutValidationPassed: true,
+                multiCutValidationReason: CADFeatureValidation.generatedMeshEmpty.messageKey
             )
         }
 
@@ -2347,7 +2490,19 @@ final class CADWorkshopViewModel: ObservableObject {
             boundaryEdgeCount: nil,
             boundaryLoopCount: nil,
             kernelFallback: false,
-            reason: nil
+            reason: nil,
+            committedCutsCount: multiCutValidation.committedCutsCount,
+            candidateCutID: multiCutValidation.candidateCutID,
+            affectedEntryFaceID: multiCutValidation.affectedEntryFaceID,
+            affectedExitFaceID: multiCutValidation.affectedExitFaceID,
+            cutsOnEntryFace: multiCutValidation.cutsOnEntryFace,
+            cutsOnExitFace: multiCutValidation.cutsOnExitFace,
+            multiCutValidationPassed: true,
+            multiCutValidationReason: nil,
+            meshVertexCount: meshBuild.mesh.vertices.count,
+            meshTriangleCount: meshBuild.mesh.triangles.count,
+            trianglesInsideAnyHole: meshBuild.rebuildDiagnostics.trianglesInsideAnyHole,
+            capFacesGenerated: meshBuild.rebuildDiagnostics.capFacesGenerated
         )
     }
 

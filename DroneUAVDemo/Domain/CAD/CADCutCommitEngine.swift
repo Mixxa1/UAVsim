@@ -5,18 +5,28 @@ struct CADCutCommitResult: Equatable {
     var feature: ExtrudedSolidBoxBlindCutFeature
     var mesh: CADSolidMeshSnapshot
     var diagnostics: CADSolidMeshDiagnostics
+    var rebuildDiagnostics: CADCutMeshRebuildDiagnostics
+    var multiCutValidation: CADMultiCutValidationResult
 }
 
 enum CADCutCommitEngine {
     static func commit(_ request: CADCutRequest) -> Result<CADCutCommitResult, CADFeatureValidation> {
-        let validation = CADCutValidator.validate(request)
+        let feature = request.feature()
+        let validation = CADCutValidator.validate(request, candidateFeature: feature)
         guard validation.isValid else { return .failure(validation) }
 
-        let feature = request.feature()
+        let multiCutValidation = CADMultiCutValidator.validate(
+            baseBody: request.targetBodyGeometry,
+            existingCuts: request.targetBodyGeometry.stableCutFeatures,
+            newCut: feature
+        )
+        guard multiCutValidation.isValid else { return .failure(multiCutValidation.validation) }
+
         var resultParams = request.targetBodyGeometry
-        resultParams.boxBlindCutFeatures.append(feature)
+        resultParams.stableCutFeatures = multiCutValidation.candidateCuts
         resultParams.kernelResultSolid = nil
         resultParams.kernelVisualMesh = nil
+        resultParams.refreshFaces(assetID: request.targetBodyID)
 
         guard let build = CADCutMeshRebuilder.rebuildBodyMesh(
             bodyID: request.targetBodyID,
@@ -41,7 +51,9 @@ enum CADCutCommitEngine {
             bodyParams: resultParams,
             feature: feature,
             mesh: build.mesh,
-            diagnostics: build.diagnostics
+            diagnostics: build.diagnostics,
+            rebuildDiagnostics: build.rebuildDiagnostics,
+            multiCutValidation: multiCutValidation
         ))
     }
 }

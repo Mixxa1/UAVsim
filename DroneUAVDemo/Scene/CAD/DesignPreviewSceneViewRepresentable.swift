@@ -4,9 +4,14 @@ import simd
 
 struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
     typealias NSViewType = CADCanvasView
-    private static let cadTransientRootNodeName = "cadTransientRootNode"
-    private static let cutPreviewNodeName = "CutToolPreviewNode"
-    private static let extrudePreviewNodeName = "feature_preview"
+    private static let cadTransientRootNodeName = "cad.cut.transientRoot"
+    private static let cutPreviewNodeName = "cad.cut.preview"
+    private static let cutterVolumeNodeName = "cad.cut.cutterVolume"
+    private static let cutDebugNodePrefix = "cad.cut.debug"
+    private static let cutHighlightNodePrefix = "cad.cut.highlight"
+    private static let legacyCadTransientRootNodeName = "cadTransientRootNode"
+    private static let legacyCutPreviewNodeName = "CutToolPreviewNode"
+    private static let legacyExtrudePreviewNodeName = "feature_preview"
 
     let document: DesignDocument
     let viewportState: DesignViewportState
@@ -32,6 +37,16 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
     let onEntityDragEnded: ((SketchPoint2D) -> Void)?
     let onEntityDragCanceled: (() -> Void)?
     let onSketchEntityShiftSelected: ((UUID?) -> Void)?
+
+    private struct CADCutArtifactDiagnostics {
+        var transientCutNodeCount: Int
+        var cutterPreviewNodeCount: Int
+        var ghostTransparentNodeCount: Int
+        var bodyOpaqueStateRestored: Bool
+        var bodyTransparentMaterialCount: Int
+        var bodyRenderingOrderAnomalyCount: Int
+        var previewNodesRemovedAfterApply: Bool
+    }
 
     init(
         document: DesignDocument,
@@ -1571,10 +1586,17 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
             let scale = Float(max(0.01, min(asset.transform.scale, 100.0)))
             node.scale = SCNVector3(scale, scale, scale)
             container.addChildNode(node)
+            if case .extrudedSolid = asset.kind {
+                restoreOpaqueBodyRenderState(bodyNode: node)
+            }
             DesignAssetNodeFactory.applyHighlight(node, selected: asset.id == viewportState.selectedAssetID)
         }
 
         updateFeaturePreviewNode(in: container, coordinator: nil)
+        logCutArtifactDiagnostics(
+            artifactDiagnostics(in: container, removedPreviewNodeCount: 0),
+            committedMeshStats: committedMeshStats()
+        )
     }
 
     private func updateFeaturePreviewNode(in container: SCNNode, coordinator: Coordinator?) {
@@ -1591,12 +1613,20 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
 
         if let coordinator {
             coordinator.featurePreviewNodeRebuildCount += 1
+            let diagnostics = artifactDiagnostics(in: container, removedPreviewNodeCount: removedPreviewNodeCount)
             print(
                 "CAD Cut v2 Scene Counters: " +
                 "previewNodeRebuildCount=\(coordinator.featurePreviewNodeRebuildCount) " +
                 "assetGeometryRebuildCount=\(coordinator.assetGeometryRebuildCount) " +
                 "removedPreviewNodeCount=\(removedPreviewNodeCount) " +
-                "previewVisible=\(viewportState.featurePreviewParams != nil)"
+                "previewVisible=\(viewportState.featurePreviewParams != nil) " +
+                "transientCutNodeCount=\(diagnostics.transientCutNodeCount) " +
+                "cutterPreviewNodeCount=\(diagnostics.cutterPreviewNodeCount) " +
+                "ghostTransparentNodeCount=\(diagnostics.ghostTransparentNodeCount) " +
+                "bodyOpaqueStateRestored=\(diagnostics.bodyOpaqueStateRestored) " +
+                "bodyTransparentMaterialCount=\(diagnostics.bodyTransparentMaterialCount) " +
+                "bodyRenderingOrderAnomalyCount=\(diagnostics.bodyRenderingOrderAnomalyCount) " +
+                "previewNodesRemovedAfterApply=\(diagnostics.previewNodesRemovedAfterApply)"
             )
         }
     }
@@ -1604,19 +1634,34 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
     @discardableResult
     private func clearAllTransientCADNodes(in container: SCNNode) -> Int {
         var removedCount = 0
-        if let transientRoot = container.childNode(
-            withName: Self.cadTransientRootNodeName,
-            recursively: false
-        ) {
-            removedCount += transientRoot.childNodes.count
-            transientRoot.removeFromParentNode()
+        let removablePrefixes = [
+            "cad.cut.",
+            Self.cutDebugNodePrefix,
+            Self.cutHighlightNodePrefix,
+        ]
+        let legacyNames = [
+            Self.legacyCadTransientRootNodeName,
+            Self.legacyCutPreviewNodeName,
+            Self.legacyExtrudePreviewNodeName,
+        ]
+
+        func shouldRemove(_ node: SCNNode) -> Bool {
+            guard let name = node.name else { return false }
+            return removablePrefixes.contains { name.hasPrefix($0) }
+                || legacyNames.contains(name)
         }
-        for name in [Self.cutPreviewNodeName, Self.extrudePreviewNodeName] {
-            if let legacyNode = container.childNode(withName: name, recursively: false) {
-                legacyNode.removeFromParentNode()
-                removedCount += 1
+
+        func scan(_ node: SCNNode) {
+            for child in node.childNodes {
+                if shouldRemove(child) {
+                    removedCount += max(1, child.flattenedChildCount)
+                    child.removeFromParentNode()
+                } else {
+                    scan(child)
+                }
             }
         }
+        scan(container)
         return removedCount
     }
 
@@ -1633,6 +1678,103 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
             container.addChildNode(root)
         }
         return root
+    }
+
+    private func restoreOpaqueBodyRenderState(bodyNode: SCNNode) {
+        for node in [bodyNode] + bodyNode.childNodesRecursive {
+            guard node.name?.hasPrefix("cad.body.mesh.") == true else { continue }
+            node.opacity = 1.0
+            node.renderingOrder = 0
+            guard let geometry = node.geometry else { continue }
+            for material in geometry.materials {
+                material.transparency = 1.0
+                material.writesToDepthBuffer = true
+                material.readsFromDepthBuffer = true
+                material.blendMode = .alpha
+            }
+        }
+    }
+
+    private func artifactDiagnostics(
+        in container: SCNNode,
+        removedPreviewNodeCount: Int
+    ) -> CADCutArtifactDiagnostics {
+        var transientCutNodeCount = 0
+        var cutterPreviewNodeCount = 0
+        var ghostTransparentNodeCount = 0
+        var bodyTransparentMaterialCount = 0
+        var bodyRenderingOrderAnomalyCount = 0
+
+        for node in [container] + container.childNodesRecursive {
+            let name = node.name ?? ""
+            if name.hasPrefix("cad.cut.") || name == Self.legacyCutPreviewNodeName || name == Self.legacyExtrudePreviewNodeName {
+                transientCutNodeCount += 1
+                if name == Self.cutterVolumeNodeName || name == Self.legacyCutPreviewNodeName {
+                    cutterPreviewNodeCount += 1
+                }
+                if nodeHasTransparentMaterial(node) {
+                    ghostTransparentNodeCount += 1
+                }
+            }
+
+            guard name.hasPrefix("cad.body.mesh.") else { continue }
+            if node.renderingOrder != 0 {
+                bodyRenderingOrderAnomalyCount += 1
+            }
+            if let geometry = node.geometry {
+                for material in geometry.materials where material.transparency < 0.999 || !material.writesToDepthBuffer || !material.readsFromDepthBuffer {
+                    bodyTransparentMaterialCount += 1
+                }
+            }
+        }
+
+        return CADCutArtifactDiagnostics(
+            transientCutNodeCount: transientCutNodeCount,
+            cutterPreviewNodeCount: cutterPreviewNodeCount,
+            ghostTransparentNodeCount: ghostTransparentNodeCount,
+            bodyOpaqueStateRestored: bodyTransparentMaterialCount == 0 && bodyRenderingOrderAnomalyCount == 0,
+            bodyTransparentMaterialCount: bodyTransparentMaterialCount,
+            bodyRenderingOrderAnomalyCount: bodyRenderingOrderAnomalyCount,
+            previewNodesRemovedAfterApply: removedPreviewNodeCount > 0 || viewportState.featurePreviewParams == nil
+        )
+    }
+
+    private func nodeHasTransparentMaterial(_ node: SCNNode) -> Bool {
+        guard let geometry = node.geometry else { return false }
+        return geometry.materials.contains { material in
+            material.transparency < 0.999 || !material.writesToDepthBuffer
+        }
+    }
+
+    private func logCutArtifactDiagnostics(
+        _ diagnostics: CADCutArtifactDiagnostics,
+        committedMeshStats: (vertices: Int, triangles: Int)
+    ) {
+        print(
+            "CAD Cut Artifact Diagnostics: " +
+            "transientCutNodeCount=\(diagnostics.transientCutNodeCount) " +
+            "cutterPreviewNodeCount=\(diagnostics.cutterPreviewNodeCount) " +
+            "ghostTransparentNodeCount=\(diagnostics.ghostTransparentNodeCount) " +
+            "bodyOpaqueStateRestored=\(diagnostics.bodyOpaqueStateRestored) " +
+            "bodyTransparentMaterialCount=\(diagnostics.bodyTransparentMaterialCount) " +
+            "bodyRenderingOrderAnomalyCount=\(diagnostics.bodyRenderingOrderAnomalyCount) " +
+            "committedMeshVertexCount=\(committedMeshStats.vertices) " +
+            "committedMeshTriangleCount=\(committedMeshStats.triangles) " +
+            "previewNodesRemovedAfterApply=\(diagnostics.previewNodesRemovedAfterApply)"
+        )
+    }
+
+    private func committedMeshStats() -> (vertices: Int, triangles: Int) {
+        document.assets.reduce((vertices: 0, triangles: 0)) { result, asset in
+            guard case let .extrudedSolid(params) = asset.kind,
+                  let mesh = params.kernelVisualMesh else {
+                return result
+            }
+            return (
+                vertices: result.vertices + mesh.vertices.count,
+                triangles: result.triangles + mesh.triangles.count
+            )
+        }
     }
 
     private func hoveredFaceID(from workPlaneID: String?) -> UUID? {
@@ -1799,5 +1941,17 @@ final class CADCanvasView: SCNView {
             return
         }
         super.scrollWheel(with: event)
+    }
+}
+
+private extension SCNNode {
+    var childNodesRecursive: [SCNNode] {
+        childNodes + childNodes.flatMap(\.childNodesRecursive)
+    }
+
+    var flattenedChildCount: Int {
+        1 + childNodes.reduce(0) { partialResult, child in
+            partialResult + child.flattenedChildCount
+        }
     }
 }

@@ -35,6 +35,7 @@ enum DesignAssetNodeFactory {
             geometry.firstMaterial = material
 
             let bodyNode = SCNNode(geometry: geometry)
+            bodyNode.name = "cad.body.mesh.\(asset.id.uuidString)"
             node.addChildNode(bodyNode)
             if case let .extrudedSolid(parameters) = asset.kind {
                 for face in parameters.faces {
@@ -1883,7 +1884,7 @@ enum DesignAssetNodeFactory {
         mat.readsFromDepthBuffer = false
         geometry.firstMaterial = mat
         let node = SCNNode(geometry: geometry)
-        node.name = "feature_preview"
+        node.name = "cad.cut.preview"
         // Render after all opaque geometry so depth buffer state from the body is intact.
         node.renderingOrder = 10
         return node
@@ -1891,7 +1892,7 @@ enum DesignAssetNodeFactory {
 
     static func makeCutToolPreviewNode(params: ExtrudedSolidParameters) -> SCNNode {
         let node = SCNNode()
-        node.name = "CutToolPreviewNode"
+        node.name = "cad.cut.cutterVolume"
         node.renderingOrder = 10
         guard let geometry = makeCutToolPreviewGeometry(params) else {
             return node
@@ -2625,7 +2626,8 @@ enum DesignAssetNodeFactory {
         material.lightingModel = .constant
         material.writesToDepthBuffer = false
         material.readsFromDepthBuffer = true
-        let alpha: CGFloat = selected ? 0.30 : (hovered ? 0.17 : 0.001)
+        let alpha: CGFloat = selected ? 0.30 : (hovered ? 0.17 : 0.0)
+        material.transparency = selected || hovered ? 1.0 : 0.0
         material.diffuse.contents = CGColor(red: 0.38, green: 0.72, blue: 1.0, alpha: alpha)
         material.emission.contents = CGColor(red: 0.10, green: 0.28, blue: 0.55, alpha: selected || hovered ? alpha : 0.0)
         geometry.firstMaterial = material

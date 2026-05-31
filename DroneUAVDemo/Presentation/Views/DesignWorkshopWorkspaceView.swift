@@ -4199,6 +4199,17 @@ struct DesignWorkshopWorkspaceView: View {
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.kernel_target_body_id", value: viewModel.cutCommitKernelTargetBodyIDDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.apply_target_body_id", value: viewModel.cutCommitApplyTargetBodyIDDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.preview_target_body_id", value: viewModel.cutCommitPreviewTargetBodyIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.committed_cuts_count", value: viewModel.cutCommitCommittedCutsCountDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.candidate_cut_id", value: viewModel.cutCommitCandidateCutIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.affected_entry_face_id", value: viewModel.cutCommitAffectedEntryFaceIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.affected_exit_face_id", value: viewModel.cutCommitAffectedExitFaceIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.cuts_on_entry_face", value: viewModel.cutCommitCutsOnEntryFaceDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.cuts_on_exit_face", value: viewModel.cutCommitCutsOnExitFaceDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.multi_cut_validation", value: viewModel.cutCommitMultiCutValidationDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.mesh_vertex_count", value: viewModel.cutCommitMeshVertexCountDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.mesh_triangle_count", value: viewModel.cutCommitMeshTriangleCountDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.triangles_inside_any_hole", value: viewModel.cutCommitTrianglesInsideAnyHoleDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.cap_faces_generated", value: viewModel.cutCommitCapFacesGeneratedDisplayName)
         }
     }
 

@@ -8,13 +8,40 @@ struct CADCutMeshBuildResult: Equatable {
 
 struct CADCutMeshRebuildDiagnostics: Equatable {
     var throughAll: Bool
+    var depthMode: DepthMode?
+    var entryFaceID: UUID?
+    var exitFaceID: UUID?
+    var affectedFaceID: UUID?
+    var entryLoopVertexCount: Int
+    var exitLoopVertexCount: Int
+    var holeCountOnFace: Int
+    var holeTypesOnFace: [String]
+    var sameFaceTriangulationPassed: Bool
+    var holeIntersectionDetected: Bool
+    var holeTouchDetected: Bool
     var entryFaceRebuiltWithHole: Bool
     var exitFaceRebuiltWithHole: Bool
     var capFacesGenerated: Int
+    var orphanTriangleCount: Int
+    var nonCoplanarFaceTriangleCount: Int
+    var trianglesCrossingBetweenHoles: Int
+    var trianglesOutsideFace: Int
     var trianglesInsideEntryHole: Int
     var trianglesInsideExitHole: Int
+    var trianglesInsideAnyHole: Int
+    var oldFullFaceRetained: Bool
+    var oldFullEntryFaceKept: Bool
+    var oldFullExitFaceKept: Bool
     var suspectedOrphanPlugTriangles: Int
     var reversedNormalTriangles: Int
+    var committedCutsCount: Int
+    var candidateCutID: UUID?
+    var affectedEntryFaceID: UUID?
+    var affectedExitFaceID: UUID?
+    var cutsOnEntryFace: Int
+    var cutsOnExitFace: Int
+    var multiCutValidationPassed: Bool
+    var multiCutValidationReason: String?
 }
 
 enum CADCutMeshRebuilder {
@@ -25,6 +52,51 @@ enum CADCutMeshRebuilder {
         var exitProfile: [SketchPoint2D]?
         var depthMeters: Double
         var direction: DesignVector3
+    }
+
+    private struct FaceHole {
+        var cutID: UUID
+        var profileType: CADCutV2ProfileType
+        var profile: [SketchPoint2D]
+    }
+
+    private typealias UVBounds = (minU: Double, maxU: Double, minV: Double, maxV: Double)
+
+    private struct SameFaceHoleValidation {
+        var isValid = true
+        var intersectionDetected = false
+        var touchDetected = false
+    }
+
+    private struct SameFaceTriangulationStats {
+        var passed = true
+        var trianglesCrossingBetweenHoles = 0
+        var trianglesOutsideFace = 0
+        var trianglesInsideAnyHole = 0
+    }
+
+    private struct HoleStripInterval {
+        var leftBottom: Double
+        var rightBottom: Double
+        var leftTop: Double
+        var rightTop: Double
+        var leftMid: Double
+        var rightMid: Double
+    }
+
+    private struct SurfaceValidationResult {
+        var orphanTriangleCount = 0
+        var nonCoplanarFaceTriangleCount = 0
+        var trianglesOutsideFace = 0
+        var oldFullEntryFaceKept = false
+        var oldFullExitFaceKept = false
+
+        var isValid: Bool {
+            orphanTriangleCount == 0
+                && nonCoplanarFaceTriangleCount == 0
+                && !oldFullEntryFaceKept
+                && !oldFullExitFaceKept
+        }
     }
 
     private struct MeshWriter {
@@ -70,24 +142,77 @@ enum CADCutMeshRebuilder {
 
     private struct RebuildCounters {
         var throughAll = false
+        var depthMode: DepthMode?
+        var entryFaceID: UUID?
+        var exitFaceID: UUID?
+        var affectedFaceID: UUID?
+        var entryLoopVertexCount = 0
+        var exitLoopVertexCount = 0
+        var holeCountOnFace = 0
+        var holeTypesOnFace: [String] = []
+        var sameFaceTriangulationPassed = true
+        var holeIntersectionDetected = false
+        var holeTouchDetected = false
         var entryFaceRebuiltWithHole = false
         var exitFaceRebuiltWithHole = false
         var capFacesGenerated = 0
+        var orphanTriangleCount = 0
+        var nonCoplanarFaceTriangleCount = 0
+        var trianglesCrossingBetweenHoles = 0
+        var trianglesOutsideFace = 0
         var trianglesInsideEntryHole = 0
         var trianglesInsideExitHole = 0
+        var trianglesInsideAnyHole = 0
+        var oldFullEntryFaceKept = false
+        var oldFullExitFaceKept = false
         var suspectedOrphanPlugTriangles = 0
         var reversedNormalTriangles = 0
+        var committedCutsCount = 0
+        var candidateCutID: UUID?
+        var affectedEntryFaceID: UUID?
+        var affectedExitFaceID: UUID?
+        var cutsOnEntryFace = 0
+        var cutsOnExitFace = 0
+        var multiCutValidationPassed = true
+        var multiCutValidationReason: String?
 
         var diagnostics: CADCutMeshRebuildDiagnostics {
             CADCutMeshRebuildDiagnostics(
                 throughAll: throughAll,
+                depthMode: depthMode,
+                entryFaceID: entryFaceID,
+                exitFaceID: exitFaceID,
+                affectedFaceID: affectedFaceID,
+                entryLoopVertexCount: entryLoopVertexCount,
+                exitLoopVertexCount: exitLoopVertexCount,
+                holeCountOnFace: holeCountOnFace,
+                holeTypesOnFace: holeTypesOnFace,
+                sameFaceTriangulationPassed: sameFaceTriangulationPassed,
+                holeIntersectionDetected: holeIntersectionDetected,
+                holeTouchDetected: holeTouchDetected,
                 entryFaceRebuiltWithHole: entryFaceRebuiltWithHole,
                 exitFaceRebuiltWithHole: exitFaceRebuiltWithHole,
                 capFacesGenerated: capFacesGenerated,
+                orphanTriangleCount: orphanTriangleCount,
+                nonCoplanarFaceTriangleCount: nonCoplanarFaceTriangleCount,
+                trianglesCrossingBetweenHoles: trianglesCrossingBetweenHoles,
+                trianglesOutsideFace: trianglesOutsideFace,
                 trianglesInsideEntryHole: trianglesInsideEntryHole,
                 trianglesInsideExitHole: trianglesInsideExitHole,
+                trianglesInsideAnyHole: trianglesInsideAnyHole,
+                oldFullFaceRetained: oldFullEntryFaceKept || oldFullExitFaceKept,
+                oldFullEntryFaceKept: oldFullEntryFaceKept,
+                oldFullExitFaceKept: oldFullExitFaceKept,
                 suspectedOrphanPlugTriangles: suspectedOrphanPlugTriangles,
-                reversedNormalTriangles: reversedNormalTriangles
+                reversedNormalTriangles: reversedNormalTriangles,
+                committedCutsCount: committedCutsCount,
+                candidateCutID: candidateCutID,
+                affectedEntryFaceID: affectedEntryFaceID,
+                affectedExitFaceID: affectedExitFaceID,
+                cutsOnEntryFace: cutsOnEntryFace,
+                cutsOnExitFace: cutsOnExitFace,
+                multiCutValidationPassed: multiCutValidationPassed,
+                multiCutValidationReason: multiCutValidationReason
             )
         }
     }
@@ -109,21 +234,50 @@ enum CADCutMeshRebuilder {
         var writer = MeshWriter()
         var counters = RebuildCounters()
         counters.throughAll = cuts.contains { $0.feature.depthMode == .throughAll }
+        counters.depthMode = cuts.last?.feature.depthMode
+        counters.entryFaceID = cuts.last?.entryFace.id
+        counters.exitFaceID = cuts.last?.exitFace?.id
+        counters.entryLoopVertexCount = cuts.last?.feature.profilePoints.count ?? 0
+        counters.exitLoopVertexCount = cuts.last?.exitProfile?.count ?? 0
+        counters.committedCutsCount = cuts.count
+        counters.candidateCutID = cuts.last?.feature.id
+        counters.affectedEntryFaceID = cuts.last?.entryFace.id
+        counters.affectedExitFaceID = cuts.last?.exitFace?.id
+        if let entryFaceID = counters.affectedEntryFaceID {
+            counters.cutsOnEntryFace = cuts.filter { $0.entryFace.id == entryFaceID }.count
+        }
+        if let exitFaceID = counters.affectedExitFaceID {
+            counters.cutsOnExitFace = cuts.filter { $0.exitFace?.id == exitFaceID }.count
+        }
 
         for face in bodyParams.faces {
             let entryCuts = cuts.filter { $0.entryFace.id == face.id }
             let exitCuts = cuts.filter { $0.exitFace?.id == face.id }
-            let faceCuts = entryCuts + exitCuts
-            guard faceCuts.count <= 1 else { return nil }
 
-            if let cut = entryCuts.first {
-                appendFace(face, cut: cut, profile: cut.feature.profilePoints, to: &writer)
-                if cut.feature.depthMode == .throughAll {
+            if !entryCuts.isEmpty || !exitCuts.isEmpty {
+                var holes = entryCuts.map {
+                    FaceHole(
+                        cutID: $0.feature.id,
+                        profileType: $0.feature.profileType,
+                        profile: $0.feature.profilePoints
+                    )
+                }
+                holes += exitCuts.compactMap { cut in
+                    guard let exitProfile = cut.exitProfile else { return nil }
+                    return FaceHole(
+                        cutID: cut.feature.id,
+                        profileType: cut.feature.profileType,
+                        profile: exitProfile
+                    )
+                }
+                guard appendFace(face, holes: holes, to: &writer, counters: &counters) else {
+                    logRebuildDiagnostics(counters.diagnostics)
+                    return nil
+                }
+                if !entryCuts.isEmpty {
                     counters.entryFaceRebuiltWithHole = true
                 }
-            } else if let cut = exitCuts.first, let exitProfile = cut.exitProfile {
-                appendFace(face, cut: cut, profile: exitProfile, to: &writer)
-                if cut.feature.depthMode == .throughAll {
+                if !exitCuts.isEmpty {
                     counters.exitFaceRebuiltWithHole = true
                 }
             } else {
@@ -140,10 +294,29 @@ enum CADCutMeshRebuilder {
             from: writer.snapshot(),
             cuts: cuts
         )
-        countThroughAllFaceHoleViolations(in: mesh, cuts: cuts, counters: &counters)
+        countFaceHoleViolations(in: mesh, cuts: cuts, counters: &counters)
+        let surfaceValidation = validateGeneratedSurfaces(in: mesh, cuts: cuts, bodyFaces: bodyParams.faces)
+        counters.orphanTriangleCount = surfaceValidation.orphanTriangleCount
+        counters.nonCoplanarFaceTriangleCount = surfaceValidation.nonCoplanarFaceTriangleCount
+        counters.trianglesOutsideFace += surfaceValidation.trianglesOutsideFace
+        counters.oldFullEntryFaceKept = surfaceValidation.oldFullEntryFaceKept
+        counters.oldFullExitFaceKept = surfaceValidation.oldFullExitFaceKept
+        if counters.throughAll, counters.capFacesGenerated != 0 {
+            counters.orphanTriangleCount += counters.capFacesGenerated
+        }
         guard !mesh.vertices.isEmpty,
               !mesh.triangles.isEmpty,
-              mesh.vertices.allSatisfy(\.isFinite) else {
+              mesh.vertices.allSatisfy(\.isFinite),
+              surfaceValidation.isValid,
+              (!counters.throughAll || counters.capFacesGenerated == 0),
+              counters.sameFaceTriangulationPassed,
+              !counters.holeIntersectionDetected,
+              !counters.holeTouchDetected,
+              counters.trianglesCrossingBetweenHoles == 0,
+              counters.trianglesOutsideFace == 0,
+              counters.trianglesInsideEntryHole == 0,
+              counters.trianglesInsideExitHole == 0 else {
+            logRebuildDiagnostics(counters.diagnostics)
             return nil
         }
         let rebuildDiagnostics = counters.diagnostics
@@ -251,19 +424,374 @@ enum CADCutMeshRebuilder {
         )
     }
 
+    @discardableResult
     private static func appendFace(
         _ face: DesignPlanarFace,
-        cut: ResolvedCut,
-        profile: [SketchPoint2D],
-        to writer: inout MeshWriter
-    ) {
-        switch cut.feature.profileType {
+        holes: [FaceHole],
+        to writer: inout MeshWriter,
+        counters: inout RebuildCounters
+    ) -> Bool {
+        guard !holes.isEmpty else {
+            appendFullFace(face, to: &writer)
+            return true
+        }
+        if holes.count == 1 {
+            return appendSingleHoleFace(face, hole: holes[0], to: &writer)
+        }
+
+        counters.affectedFaceID = face.id
+        counters.holeCountOnFace = max(counters.holeCountOnFace, holes.count)
+        counters.holeTypesOnFace = holes.map(\.profileType.rawValue)
+        let validation = validateSameFaceHoles(face: face, holes: holes)
+        counters.holeIntersectionDetected = counters.holeIntersectionDetected || validation.intersectionDetected
+        counters.holeTouchDetected = counters.holeTouchDetected || validation.touchDetected
+        guard validation.isValid else {
+            counters.sameFaceTriangulationPassed = false
+            return false
+        }
+
+        let stats = appendMultiHoleFaceByHorizontalSweep(face, holes: holes, to: &writer)
+        counters.sameFaceTriangulationPassed = counters.sameFaceTriangulationPassed && stats.passed
+        counters.trianglesCrossingBetweenHoles += stats.trianglesCrossingBetweenHoles
+        counters.trianglesOutsideFace += stats.trianglesOutsideFace
+        counters.trianglesInsideAnyHole += stats.trianglesInsideAnyHole
+        return stats.passed
+    }
+
+    private static func validateSameFaceHoles(
+        face: DesignPlanarFace,
+        holes: [FaceHole]
+    ) -> SameFaceHoleValidation {
+        var result = SameFaceHoleValidation()
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        var holeBoundsList: [UVBounds] = []
+
+        for hole in holes {
+            guard hole.profile.count >= 3,
+                  hole.profile.allSatisfy({ $0.u.isFinite && $0.v.isFinite }),
+                  abs(DesignSketch.polygonSignedAreaMeters2(hole.profile)) > 1e-12,
+                  let holeBounds = bounds(for: hole),
+                  holeBounds.minU > face.bounds.minU + tolerance,
+                  holeBounds.maxU < face.bounds.maxU - tolerance,
+                  holeBounds.minV > face.bounds.minV + tolerance,
+                  holeBounds.maxV < face.bounds.maxV - tolerance else {
+                result.isValid = false
+                return result
+            }
+            holeBoundsList.append(holeBounds)
+        }
+
+        for lhsIndex in holeBoundsList.indices {
+            for rhsIndex in holeBoundsList.indices where rhsIndex > lhsIndex {
+                let relation = boundsRelation(holeBoundsList[lhsIndex], holeBoundsList[rhsIndex], tolerance: tolerance)
+                switch relation {
+                case .separate:
+                    continue
+                case .touching:
+                    result.isValid = false
+                    result.touchDetected = true
+                case .intersecting:
+                    result.isValid = false
+                    result.intersectionDetected = true
+                }
+            }
+        }
+
+        return result
+    }
+
+    private enum BoundsRelation {
+        case separate
+        case touching
+        case intersecting
+    }
+
+    private static func boundsRelation(
+        _ lhs: UVBounds,
+        _ rhs: UVBounds,
+        tolerance: Double
+    ) -> BoundsRelation {
+        let gapU = max(max(lhs.minU - rhs.maxU, rhs.minU - lhs.maxU), 0.0)
+        let gapV = max(max(lhs.minV - rhs.maxV, rhs.minV - lhs.maxV), 0.0)
+        let overlapU = lhs.minU < rhs.maxU - tolerance && lhs.maxU > rhs.minU + tolerance
+        let overlapV = lhs.minV < rhs.maxV - tolerance && lhs.maxV > rhs.minV + tolerance
+        if overlapU && overlapV {
+            return .intersecting
+        }
+        if hypot(gapU, gapV) <= tolerance {
+            return .touching
+        }
+        return .separate
+    }
+
+    private static func bounds(for hole: FaceHole) -> UVBounds? {
+        switch hole.profileType {
         case .rectangle:
-            appendRectFaceWithRectHole(face, hole: profile, to: &writer)
+            return CADCutGeometry.profileBounds(hole.profile)
         case .circle:
-            appendRectFaceWithCircleHole(face, cut: cut, profile: profile, to: &writer)
+            guard let circle = CADCutGeometry.circleMetrics(
+                points: hole.profile,
+                explicitCenter: CADCutGeometry.profileCenter(hole.profile),
+                explicitRadius: nil
+            ) else {
+                return nil
+            }
+            return (
+                minU: circle.center.u - circle.radius,
+                maxU: circle.center.u + circle.radius,
+                minV: circle.center.v - circle.radius,
+                maxV: circle.center.v + circle.radius
+            )
         case .polygon, .unsupported:
-            break
+            return nil
+        }
+    }
+
+    private static func appendMultiHoleFaceByHorizontalSweep(
+        _ face: DesignPlanarFace,
+        holes: [FaceHole],
+        to writer: inout MeshWriter
+    ) -> SameFaceTriangulationStats {
+        var stats = SameFaceTriangulationStats()
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        var yLevels = [face.bounds.minV, face.bounds.maxV]
+        for hole in holes {
+            yLevels += hole.profile.map(\.v)
+        }
+        yLevels = uniqueSortedValues(yLevels, tolerance: tolerance)
+            .filter { $0 >= face.bounds.minV - tolerance && $0 <= face.bounds.maxV + tolerance }
+        guard yLevels.count >= 2 else {
+            stats.passed = false
+            return stats
+        }
+
+        for index in 0..<(yLevels.count - 1) {
+            let bottom = max(yLevels[index], face.bounds.minV)
+            let top = min(yLevels[index + 1], face.bounds.maxV)
+            guard top - bottom > tolerance else { continue }
+
+            var intervals: [HoleStripInterval] = []
+            for hole in holes {
+                guard let holeIntervals = stripIntervals(
+                    for: hole,
+                    bottom: bottom,
+                    top: top,
+                    tolerance: tolerance
+                ) else {
+                    stats.passed = false
+                    return stats
+                }
+                intervals += holeIntervals
+            }
+            intervals.sort { $0.leftMid < $1.leftMid }
+            for pairIndex in 0..<(max(intervals.count - 1, 0)) {
+                if intervals[pairIndex].rightMid + tolerance >= intervals[pairIndex + 1].leftMid {
+                    stats.trianglesCrossingBetweenHoles += 1
+                    stats.passed = false
+                    return stats
+                }
+            }
+
+            var currentBottom = face.bounds.minU
+            var currentTop = face.bounds.minU
+            for interval in intervals {
+                appendSweepGap(
+                    face,
+                    bottom: bottom,
+                    top: top,
+                    leftBottom: currentBottom,
+                    rightBottom: interval.leftBottom,
+                    leftTop: currentTop,
+                    rightTop: interval.leftTop,
+                    holes: holes,
+                    to: &writer,
+                    stats: &stats
+                )
+                currentBottom = interval.rightBottom
+                currentTop = interval.rightTop
+            }
+            appendSweepGap(
+                face,
+                bottom: bottom,
+                top: top,
+                leftBottom: currentBottom,
+                rightBottom: face.bounds.maxU,
+                leftTop: currentTop,
+                rightTop: face.bounds.maxU,
+                holes: holes,
+                to: &writer,
+                stats: &stats
+            )
+            guard stats.passed else { return stats }
+        }
+
+        return stats
+    }
+
+    private static func stripIntervals(
+        for hole: FaceHole,
+        bottom: Double,
+        top: Double,
+        tolerance: Double
+    ) -> [HoleStripInterval]? {
+        let mid = (bottom + top) * 0.5
+        let loop = hole.profile
+        guard loop.count >= 3 else { return nil }
+
+        var intersections: [(bottom: Double, top: Double, mid: Double)] = []
+        for index in loop.indices {
+            let a = loop[index]
+            let b = loop[(index + 1) % loop.count]
+            let minV = min(a.v, b.v)
+            let maxV = max(a.v, b.v)
+            guard maxV - minV > tolerance,
+                  minV < mid,
+                  maxV > mid else {
+                continue
+            }
+            intersections.append((
+                bottom: xOnSegment(a, b, atY: bottom),
+                top: xOnSegment(a, b, atY: top),
+                mid: xOnSegment(a, b, atY: mid)
+            ))
+        }
+
+        guard !intersections.isEmpty else { return [] }
+        guard intersections.count.isMultiple(of: 2) else { return nil }
+        intersections.sort { $0.mid < $1.mid }
+
+        var intervals: [HoleStripInterval] = []
+        for index in stride(from: 0, to: intersections.count, by: 2) {
+            let left = intersections[index]
+            let right = intersections[index + 1]
+            guard right.mid >= left.mid - tolerance else { return nil }
+            intervals.append(HoleStripInterval(
+                leftBottom: min(left.bottom, right.bottom),
+                rightBottom: max(left.bottom, right.bottom),
+                leftTop: min(left.top, right.top),
+                rightTop: max(left.top, right.top),
+                leftMid: left.mid,
+                rightMid: right.mid
+            ))
+        }
+        return intervals
+    }
+
+    private static func xOnSegment(
+        _ a: SketchPoint2D,
+        _ b: SketchPoint2D,
+        atY y: Double
+    ) -> Double {
+        let denominator = b.v - a.v
+        guard abs(denominator) > 1e-12 else { return a.u }
+        let t = min(max((y - a.v) / denominator, 0.0), 1.0)
+        return a.u + (b.u - a.u) * t
+    }
+
+    private static func appendSweepGap(
+        _ face: DesignPlanarFace,
+        bottom: Double,
+        top: Double,
+        leftBottom: Double,
+        rightBottom: Double,
+        leftTop: Double,
+        rightTop: Double,
+        holes: [FaceHole],
+        to writer: inout MeshWriter,
+        stats: inout SameFaceTriangulationStats
+    ) {
+        let midWidth = ((rightBottom + rightTop) - (leftBottom + leftTop)) * 0.5
+        guard midWidth > max(CADCutGeometry.epsilon * 10.0, 1e-6) else { return }
+
+        let p0 = SketchPoint2D(u: leftBottom, v: bottom)
+        let p1 = SketchPoint2D(u: rightBottom, v: bottom)
+        let p2 = SketchPoint2D(u: rightTop, v: top)
+        let p3 = SketchPoint2D(u: leftTop, v: top)
+        appendSweepTriangle(p0, p1, p2, face: face, holes: holes, to: &writer, stats: &stats)
+        appendSweepTriangle(p0, p2, p3, face: face, holes: holes, to: &writer, stats: &stats)
+    }
+
+    private static func appendSweepTriangle(
+        _ a: SketchPoint2D,
+        _ b: SketchPoint2D,
+        _ c: SketchPoint2D,
+        face: DesignPlanarFace,
+        holes: [FaceHole],
+        to writer: inout MeshWriter,
+        stats: inout SameFaceTriangulationStats
+    ) {
+        let area = abs((b.u - a.u) * (c.v - a.v) - (b.v - a.v) * (c.u - a.u)) * 0.5
+        guard area > 1e-12 else { return }
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        guard pointIsInsideFaceBounds(a, face: face, tolerance: tolerance),
+              pointIsInsideFaceBounds(b, face: face, tolerance: tolerance),
+              pointIsInsideFaceBounds(c, face: face, tolerance: tolerance) else {
+            stats.trianglesOutsideFace += 1
+            stats.passed = false
+            return
+        }
+
+        let centroid = SketchPoint2D(
+            u: (a.u + b.u + c.u) / 3.0,
+            v: (a.v + b.v + c.v) / 3.0
+        )
+        if holes.contains(where: { pointIsStrictlyInsideHole(centroid, profile: $0.profile, profileType: $0.profileType) }) {
+            stats.trianglesInsideAnyHole += 1
+            stats.passed = false
+            return
+        }
+
+        writer.appendTriangle(
+            CADCutGeometry.worldPoint(on: face, local: a),
+            CADCutGeometry.worldPoint(on: face, local: b),
+            CADCutGeometry.worldPoint(on: face, local: c),
+            desiredNormal: face.normal
+        )
+    }
+
+    private static func pointIsInsideFaceBounds(
+        _ point: SketchPoint2D,
+        face: DesignPlanarFace,
+        tolerance: Double
+    ) -> Bool {
+        point.u >= face.bounds.minU - tolerance
+            && point.u <= face.bounds.maxU + tolerance
+            && point.v >= face.bounds.minV - tolerance
+            && point.v <= face.bounds.maxV + tolerance
+    }
+
+    private static func uniqueSortedValues(
+        _ values: [Double],
+        tolerance: Double
+    ) -> [Double] {
+        values
+            .filter(\.isFinite)
+            .sorted()
+            .reduce(into: [Double]()) { result, value in
+                guard let last = result.last else {
+                    result.append(value)
+                    return
+                }
+                if abs(value - last) > tolerance {
+                    result.append(value)
+                }
+            }
+    }
+
+    private static func appendSingleHoleFace(
+        _ face: DesignPlanarFace,
+        hole: FaceHole,
+        to writer: inout MeshWriter
+    ) -> Bool {
+        switch hole.profileType {
+        case .rectangle:
+            appendRectFaceWithRectHole(face, hole: hole.profile, to: &writer)
+            return true
+        case .circle:
+            appendRectFaceWithCircleHole(face, profile: hole.profile, to: &writer)
+            return true
+        case .polygon, .unsupported:
+            return false
         }
     }
 
@@ -285,13 +813,12 @@ enum CADCutMeshRebuilder {
 
     private static func appendRectFaceWithCircleHole(
         _ face: DesignPlanarFace,
-        cut: ResolvedCut,
         profile: [SketchPoint2D],
         to writer: inout MeshWriter
     ) {
         guard let circle = CADCutGeometry.circleMetrics(
             points: profile,
-            explicitCenter: cut.feature.profileType == .circle ? CADCutGeometry.profileCenter(profile) : nil,
+            explicitCenter: CADCutGeometry.profileCenter(profile),
             explicitRadius: nil
         ) else {
             appendFullFace(face, to: &writer)
@@ -495,12 +1022,12 @@ enum CADCutMeshRebuilder {
         return CADSolidMeshSnapshot(vertices: mesh.vertices, triangles: triangles)
     }
 
-    private static func countThroughAllFaceHoleViolations(
+    private static func countFaceHoleViolations(
         in mesh: CADSolidMeshSnapshot,
         cuts: [ResolvedCut],
         counters: inout RebuildCounters
     ) {
-        for cut in cuts where cut.feature.depthMode == .throughAll {
+        for cut in cuts {
             for triangle in mesh.triangles {
                 if let entry = triangleHoleTest(
                     triangle,
@@ -510,14 +1037,18 @@ enum CADCutMeshRebuilder {
                     profileType: cut.feature.profileType
                 ) {
                     if entry.centroidInsideHole {
+                        counters.trianglesInsideAnyHole += 1
+                    }
+                    if entry.centroidInsideHole {
                         counters.trianglesInsideEntryHole += 1
                     }
-                    if entry.suspectedPlug {
+                    if cut.feature.depthMode == .throughAll, entry.suspectedPlug {
                         counters.suspectedOrphanPlugTriangles += 1
                     }
                 }
 
-                guard let exitFace = cut.exitFace,
+                guard cut.feature.depthMode == .throughAll,
+                      let exitFace = cut.exitFace,
                       let exitProfile = cut.exitProfile,
                       let exit = triangleHoleTest(
                         triangle,
@@ -529,6 +1060,7 @@ enum CADCutMeshRebuilder {
                     continue
                 }
                 if exit.centroidInsideHole {
+                    counters.trianglesInsideAnyHole += 1
                     counters.trianglesInsideExitHole += 1
                 }
                 if exit.suspectedPlug {
@@ -536,6 +1068,240 @@ enum CADCutMeshRebuilder {
                 }
             }
         }
+    }
+
+    private static func validateGeneratedSurfaces(
+        in mesh: CADSolidMeshSnapshot,
+        cuts: [ResolvedCut],
+        bodyFaces: [DesignPlanarFace]
+    ) -> SurfaceValidationResult {
+        var result = SurfaceValidationResult()
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-5)
+
+        for triangle in mesh.triangles {
+            guard let vertices = triangleVertices(triangle, mesh: mesh),
+                  vertices.allSatisfy(\.isFinite),
+                  triangleArea(vertices) > 1e-12 else {
+                result.orphanTriangleCount += 1
+                continue
+            }
+
+            if let face = bodyFaces.first(where: { triangleIsCoplanar(vertices, with: $0, tolerance: tolerance) }) {
+                validateFaceTriangle(
+                    triangle,
+                    mesh: mesh,
+                    face: face,
+                    cuts: cuts,
+                    result: &result
+                )
+                continue
+            }
+
+            if cuts.contains(where: { triangleMatchesInternalWall(vertices, for: $0, tolerance: tolerance) }) {
+                continue
+            }
+
+            if cuts.contains(where: { triangleMatchesBlindCap(vertices, for: $0, tolerance: tolerance) }) {
+                continue
+            }
+
+            if triangleTouchesMultipleBodyPlanes(vertices, faces: bodyFaces, tolerance: tolerance) {
+                result.nonCoplanarFaceTriangleCount += 1
+            }
+            result.orphanTriangleCount += 1
+        }
+
+        return result
+    }
+
+    private static func validateFaceTriangle(
+        _ triangle: CADSolidTriangle,
+        mesh: CADSolidMeshSnapshot,
+        face: DesignPlanarFace,
+        cuts: [ResolvedCut],
+        result: inout SurfaceValidationResult
+    ) {
+        if let vertices = triangleVertices(triangle, mesh: mesh) {
+            let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-5)
+            let local = vertices.map { CADCutGeometry.localPoint(on: face, world: $0) }
+            if local.contains(where: { !pointIsInsideFaceBounds($0, face: face, tolerance: tolerance) }) {
+                result.trianglesOutsideFace += 1
+            }
+        }
+
+        for cut in cuts where cut.entryFace.id == face.id {
+            guard let test = triangleHoleTest(
+                triangle,
+                mesh: mesh,
+                face: face,
+                profile: cut.feature.profilePoints,
+                profileType: cut.feature.profileType
+            ) else {
+                continue
+            }
+            if test.suspectedPlug {
+                result.oldFullEntryFaceKept = true
+                result.orphanTriangleCount += 1
+            }
+        }
+
+        for cut in cuts where cut.exitFace?.id == face.id {
+            guard let exitProfile = cut.exitProfile,
+                  let test = triangleHoleTest(
+                    triangle,
+                    mesh: mesh,
+                    face: face,
+                    profile: exitProfile,
+                    profileType: cut.feature.profileType
+                  ) else {
+                continue
+            }
+            if test.suspectedPlug {
+                result.oldFullExitFaceKept = true
+                result.orphanTriangleCount += 1
+            }
+        }
+    }
+
+    private static func triangleVertices(
+        _ triangle: CADSolidTriangle,
+        mesh: CADSolidMeshSnapshot
+    ) -> [DesignVector3]? {
+        guard triangle.a >= 0, triangle.a < mesh.vertices.count,
+              triangle.b >= 0, triangle.b < mesh.vertices.count,
+              triangle.c >= 0, triangle.c < mesh.vertices.count else {
+            return nil
+        }
+        return [
+            mesh.vertices[triangle.a],
+            mesh.vertices[triangle.b],
+            mesh.vertices[triangle.c],
+        ]
+    }
+
+    private static func triangleArea(_ vertices: [DesignVector3]) -> Double {
+        guard vertices.count == 3 else { return 0 }
+        return (vertices[1] - vertices[0]).cross(vertices[2] - vertices[0]).length * 0.5
+    }
+
+    private static func triangleIsCoplanar(
+        _ vertices: [DesignVector3],
+        with face: DesignPlanarFace,
+        tolerance: Double
+    ) -> Bool {
+        let normal = face.normal.normalized(fallback: .zAxis)
+        return vertices.allSatisfy { abs(($0 - face.center).dot(normal)) <= tolerance }
+    }
+
+    private static func triangleTouchesMultipleBodyPlanes(
+        _ vertices: [DesignVector3],
+        faces: [DesignPlanarFace],
+        tolerance: Double
+    ) -> Bool {
+        let memberships = vertices.map { vertex in
+            Set(faces.compactMap { face -> UUID? in
+                let normal = face.normal.normalized(fallback: .zAxis)
+                return abs((vertex - face.center).dot(normal)) <= tolerance ? face.id : nil
+            })
+        }
+        let union = memberships.reduce(into: Set<UUID>()) { partial, entry in
+            partial.formUnion(entry)
+        }
+        guard union.count > 1 else { return false }
+        return faces.first(where: { face in
+            memberships.allSatisfy { $0.contains(face.id) }
+        }) == nil
+    }
+
+    private static func triangleMatchesInternalWall(
+        _ vertices: [DesignVector3],
+        for cut: ResolvedCut,
+        tolerance: Double
+    ) -> Bool {
+        guard vertices.count == 3 else { return false }
+        let direction = cut.direction.normalized(fallback: cut.entryFace.normal * -1)
+        return vertices.allSatisfy { vertex in
+            let delta = vertex - cut.entryFace.origin
+            let distance = delta.dot(direction)
+            guard distance >= -tolerance,
+                  distance <= cut.depthMeters + tolerance else {
+                return false
+            }
+            let local = CADCutGeometry.localPoint(on: cut.entryFace, world: vertex - direction * distance)
+            return pointIsOnProfileBoundary(
+                local,
+                profile: cut.feature.profilePoints,
+                profileType: cut.feature.profileType,
+                tolerance: tolerance
+            )
+        }
+    }
+
+    private static func triangleMatchesBlindCap(
+        _ vertices: [DesignVector3],
+        for cut: ResolvedCut,
+        tolerance: Double
+    ) -> Bool {
+        guard cut.feature.depthMode == .distance,
+              vertices.count == 3 else {
+            return false
+        }
+        let direction = cut.direction.normalized(fallback: cut.entryFace.normal * -1)
+        let allOnCapPlane = vertices.allSatisfy { vertex in
+            abs((vertex - cut.entryFace.origin).dot(direction) - cut.depthMeters) <= tolerance
+        }
+        guard allOnCapPlane else { return false }
+        let centroid = (vertices[0] + vertices[1] + vertices[2]) * (1.0 / 3.0)
+        let projectedCentroid = CADCutGeometry.localPoint(
+            on: cut.entryFace,
+            world: centroid - direction * cut.depthMeters
+        )
+        return pointIsInsideOrOnHole(
+            projectedCentroid,
+            profile: cut.feature.profilePoints,
+            profileType: cut.feature.profileType,
+            tolerance: tolerance
+        )
+    }
+
+    private static func pointIsOnProfileBoundary(
+        _ point: SketchPoint2D,
+        profile: [SketchPoint2D],
+        profileType: CADCutV2ProfileType,
+        tolerance: Double
+    ) -> Bool {
+        switch profileType {
+        case .rectangle:
+            guard let bounds = CADCutGeometry.profileBounds(profile) else { return false }
+            let withinU = point.u >= bounds.minU - tolerance && point.u <= bounds.maxU + tolerance
+            let withinV = point.v >= bounds.minV - tolerance && point.v <= bounds.maxV + tolerance
+            let onU = abs(point.u - bounds.minU) <= tolerance || abs(point.u - bounds.maxU) <= tolerance
+            let onV = abs(point.v - bounds.minV) <= tolerance || abs(point.v - bounds.maxV) <= tolerance
+            return withinU && withinV && (onU || onV)
+        case .circle:
+            guard let circle = CADCutGeometry.circleMetrics(
+                points: profile,
+                explicitCenter: CADCutGeometry.profileCenter(profile),
+                explicitRadius: nil
+            ) else {
+                return false
+            }
+            return abs(point.distance(to: circle.center) - circle.radius) <= max(tolerance, circle.radius * 0.01)
+        case .polygon, .unsupported:
+            return false
+        }
+    }
+
+    private static func pointIsInsideOrOnHole(
+        _ point: SketchPoint2D,
+        profile: [SketchPoint2D],
+        profileType: CADCutV2ProfileType,
+        tolerance: Double
+    ) -> Bool {
+        if pointIsStrictlyInsideHole(point, profile: profile, profileType: profileType) {
+            return true
+        }
+        return pointIsOnProfileBoundary(point, profile: profile, profileType: profileType, tolerance: tolerance)
     }
 
     private static func triangleHoleTest(
@@ -623,13 +1389,40 @@ enum CADCutMeshRebuilder {
         print(
             "CAD Cut V1 Mesh Rebuild: " +
             "throughAll=\(diagnostics.throughAll) " +
+            "depthMode=\(diagnostics.depthMode?.rawValue ?? "nil") " +
+            "entryFaceID=\(diagnostics.entryFaceID?.uuidString ?? "nil") " +
+            "exitFaceID=\(diagnostics.exitFaceID?.uuidString ?? "nil") " +
+            "affectedFaceID=\(diagnostics.affectedFaceID?.uuidString ?? "nil") " +
+            "entryLoopVertexCount=\(diagnostics.entryLoopVertexCount) " +
+            "exitLoopVertexCount=\(diagnostics.exitLoopVertexCount) " +
+            "holeCountOnFace=\(diagnostics.holeCountOnFace) " +
+            "holeTypesOnFace=\(diagnostics.holeTypesOnFace.joined(separator: ",")) " +
+            "sameFaceTriangulationPassed=\(diagnostics.sameFaceTriangulationPassed) " +
+            "holeIntersectionDetected=\(diagnostics.holeIntersectionDetected) " +
+            "holeTouchDetected=\(diagnostics.holeTouchDetected) " +
             "entryFaceRebuiltWithHole=\(diagnostics.entryFaceRebuiltWithHole) " +
             "exitFaceRebuiltWithHole=\(diagnostics.exitFaceRebuiltWithHole) " +
             "capFacesGenerated=\(diagnostics.capFacesGenerated) " +
+            "orphanTriangleCount=\(diagnostics.orphanTriangleCount) " +
+            "nonCoplanarFaceTriangleCount=\(diagnostics.nonCoplanarFaceTriangleCount) " +
+            "trianglesCrossingBetweenHoles=\(diagnostics.trianglesCrossingBetweenHoles) " +
+            "trianglesOutsideFace=\(diagnostics.trianglesOutsideFace) " +
             "trianglesInsideEntryHole=\(diagnostics.trianglesInsideEntryHole) " +
             "trianglesInsideExitHole=\(diagnostics.trianglesInsideExitHole) " +
+            "trianglesInsideAnyHole=\(diagnostics.trianglesInsideAnyHole) " +
+            "oldFullFaceRetained=\(diagnostics.oldFullFaceRetained) " +
+            "oldFullEntryFaceKept=\(diagnostics.oldFullEntryFaceKept) " +
+            "oldFullExitFaceKept=\(diagnostics.oldFullExitFaceKept) " +
             "suspectedOrphanPlugTriangles=\(diagnostics.suspectedOrphanPlugTriangles) " +
-            "reversedNormalTriangles=\(diagnostics.reversedNormalTriangles)"
+            "reversedNormalTriangles=\(diagnostics.reversedNormalTriangles) " +
+            "committedCutsCount=\(diagnostics.committedCutsCount) " +
+            "candidateCutID=\(diagnostics.candidateCutID?.uuidString ?? "nil") " +
+            "affectedEntryFaceID=\(diagnostics.affectedEntryFaceID?.uuidString ?? "nil") " +
+            "affectedExitFaceID=\(diagnostics.affectedExitFaceID?.uuidString ?? "nil") " +
+            "cutsOnEntryFace=\(diagnostics.cutsOnEntryFace) " +
+            "cutsOnExitFace=\(diagnostics.cutsOnExitFace) " +
+            "multiCutValidation=\(diagnostics.multiCutValidationPassed ? "passed" : "blocked") " +
+            "multiCutValidationReason=\(diagnostics.multiCutValidationReason ?? "none")"
         )
     }
 }
