@@ -1798,7 +1798,7 @@
 "cad.cut_v2.reason.intersecting_cut_unsupported" = "Intersecting cuts are not supported yet.";
 "cad.cut_v2.reason.same_face_intersecting_different_depth_unsupported" = "Intersecting cuts with different depths are not supported yet.";
 "cad.cut_v2.reason.distance_through_all_intersection_unsupported" = "Distance and ThroughAll intersections are not supported yet.";
-"cad.cut_v2.reason.cross_face_intersecting_cut_unsupported" = "Intersecting cuts from different faces are not supported for this type yet.";
+"cad.cut_v2.reason.cross_face_intersecting_cut_unsupported" = "Intersecting cuts from different faces are not supported for this mode yet.";
 "cad.cut_v2.reason.profile_union_failed" = "Could not merge the intersecting cut profiles.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Cut result is not a valid solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Cut result bounds are invalid.";

@@ -1793,7 +1793,7 @@
 "cad.cut_v2.reason.intersecting_cut_unsupported" = "Пересекающиеся вырезы пока не поддерживаются.";
 "cad.cut_v2.reason.same_face_intersecting_different_depth_unsupported" = "Пересекающиеся вырезы с разной глубиной пока не поддерживаются.";
 "cad.cut_v2.reason.distance_through_all_intersection_unsupported" = "Перечение Distance и ThroughAll пока не поддерживается.";
-"cad.cut_v2.reason.cross_face_intersecting_cut_unsupported" = "Пересекающиеся вырезы с разных граней для этого типа пока не поддерживаются.";
+"cad.cut_v2.reason.cross_face_intersecting_cut_unsupported" = "Пересекающиеся вырезы с разных граней для этого режима пока не поддерживаются.";
 "cad.cut_v2.reason.profile_union_failed" = "Не удалось объединить пересекающиеся профили вырезов.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Результат выреза не является корректным solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Границы результата выреза некорректны.";

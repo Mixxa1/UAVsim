@@ -188,7 +188,7 @@ enum CADPrismTriangleClassification: Equatable {
     case crossing
 }
 
-struct CADConvexPrismVolume: Equatable {
+struct CADCutPrismVolume: Equatable {
     struct Plane: Equatable {
         var point: DesignVector3
         var normal: DesignVector3
@@ -213,7 +213,7 @@ struct CADConvexPrismVolume: Equatable {
         }
     }
 
-    func intersects(_ other: CADConvexPrismVolume, epsilon: Double = CADCutGeometry.epsilon) -> Bool {
+    func intersects(_ other: CADCutPrismVolume, epsilon: Double = CADCutGeometry.epsilon) -> Bool {
         intersectionRelation(with: other, epsilon: epsilon) != .separate
     }
 
@@ -237,7 +237,7 @@ struct CADConvexPrismVolume: Equatable {
     }
 
     func intersectionRelation(
-        with other: CADConvexPrismVolume,
+        with other: CADCutPrismVolume,
         epsilon: Double = CADCutGeometry.epsilon
     ) -> IntersectionRelation {
         let tolerance = max(epsilon, CADCutGeometry.epsilon)
@@ -275,13 +275,13 @@ struct CADConvexPrismVolume: Equatable {
         return hasTouchingAxis ? .touching : .intersecting
     }
 
-    static func rectanglePrism(
+    static func prism(
         entryFace: DesignPlanarFace,
         profilePoints: [SketchPoint2D],
         direction: DesignVector3,
         depthMeters: Double
-    ) -> CADConvexPrismVolume? {
-        guard profilePoints.count == 4,
+    ) -> CADCutPrismVolume? {
+        guard profilePoints.count >= 3,
               depthMeters.isFinite,
               depthMeters > CADCutGeometry.epsilon else {
             return nil
@@ -292,7 +292,7 @@ struct CADConvexPrismVolume: Equatable {
         let entryLoop = profilePoints.map { CADCutGeometry.worldPoint(on: entryFace, local: $0) }
         let farLoop = entryLoop.map { $0 + d * depthMeters }
         let vertices = entryLoop + farLoop
-        guard vertices.count == 8,
+        guard vertices.count == profilePoints.count * 2,
               vertices.allSatisfy(\.isFinite) else {
             return nil
         }
@@ -323,11 +323,26 @@ struct CADConvexPrismVolume: Equatable {
             faceAxes.append(sideNormal)
         }
 
-        return CADConvexPrismVolume(
+        return CADCutPrismVolume(
             vertices: vertices,
             planes: planes,
             faceAxes: faceAxes,
             edgeAxes: edgeAxes
+        )
+    }
+
+    static func rectanglePrism(
+        entryFace: DesignPlanarFace,
+        profilePoints: [SketchPoint2D],
+        direction: DesignVector3,
+        depthMeters: Double
+    ) -> CADCutPrismVolume? {
+        guard profilePoints.count == 4 else { return nil }
+        return prism(
+            entryFace: entryFace,
+            profilePoints: profilePoints,
+            direction: direction,
+            depthMeters: depthMeters
         )
     }
 
@@ -349,7 +364,9 @@ struct CADConvexPrismVolume: Equatable {
     }
 }
 
-enum CADCrossFaceCutUnionV1 {
+typealias CADConvexPrismVolume = CADCutPrismVolume
+
+enum CADCrossProjectionCutUnionV1 {
     static let unsupportedReasonKey = "cad.cut_v2.reason.cross_face_intersecting_cut_unsupported"
 
     struct CutVolumeRecord: Equatable {
@@ -358,7 +375,7 @@ enum CADCrossFaceCutUnionV1 {
         var profileType: CADCutV2ProfileType
         var depthMode: DepthMode
         var depthMeters: Double
-        var volume: CADConvexPrismVolume
+        var volume: CADCutPrismVolume
     }
 
     struct Analysis: Equatable {
@@ -366,6 +383,10 @@ enum CADCrossFaceCutUnionV1 {
         var crossFaceIntersectionGroupCount = 0
         var crossFaceSupported = false
         var crossFaceUnsupportedReason: String?
+        var crossProjectionMixedShapeDetected = false
+        var crossProjectionGroupCount = 0
+        var rectangleCircleIntersectionSupported = false
+        var cutterVolumeTypes: [String] = []
         var crossFaceCutIDs: Set<UUID> = []
         var supportedPairKeys: Set<String> = []
         var volumeRecords: [CutVolumeRecord] = []
@@ -386,7 +407,7 @@ enum CADCrossFaceCutUnionV1 {
     private struct PairRelation {
         var lhs: UUID
         var rhs: UUID
-        var relation: CADConvexPrismVolume.IntersectionRelation
+        var relation: CADCutPrismVolume.IntersectionRelation
     }
 
     static func analyze(
@@ -398,7 +419,7 @@ enum CADCrossFaceCutUnionV1 {
         analysis.volumeRecords = cuts.compactMap { cut in
             guard let entryFace = faces.first(where: { $0.id == cut.entryFaceID }),
                   let depth = resolvedDepth(for: cut, entryFace: entryFace, bodyVertices: bodyVertices),
-                  let volume = CADConvexPrismVolume.rectanglePrism(
+                  let volume = CADCutPrismVolume.prism(
                     entryFace: entryFace,
                     profilePoints: cut.profilePoints,
                     direction: cut.cutDirection,
@@ -437,9 +458,15 @@ enum CADCrossFaceCutUnionV1 {
 
         let components = connectedComponents(from: crossFacePairs)
         analysis.crossFaceIntersectionGroupCount = components.count
+        analysis.crossProjectionGroupCount = components.count
         analysis.crossFaceCutIDs = components.reduce(into: Set<UUID>()) { result, component in
             result.formUnion(component)
         }
+        analysis.cutterVolumeTypes = uniqueSortedProfileTypes(
+            analysis.volumeRecords
+                .filter { analysis.crossFaceCutIDs.contains($0.cutID) }
+                .map(\.profileType)
+        )
 
         var supportedPairKeys: Set<String> = []
         for component in components {
@@ -452,13 +479,23 @@ enum CADCrossFaceCutUnionV1 {
                     Set([$0.lhs, $0.rhs]) == Set([lhsID, rhsID])
                   }),
                   pair.relation == .intersecting,
-                  lhs.profileType == .rectangle,
-                  rhs.profileType == .rectangle,
                   lhs.depthMode == .throughAll,
                   rhs.depthMode == .throughAll else {
                 analysis.crossFaceSupported = false
                 analysis.crossFaceUnsupportedReason = unsupportedReasonKey
                 return analysis
+            }
+            let shapeSet = Set([lhs.profileType, rhs.profileType])
+            let isRectangleRectangle = shapeSet == [.rectangle]
+            let isRectangleCircle = shapeSet == [.rectangle, .circle]
+            guard isRectangleRectangle || isRectangleCircle else {
+                analysis.crossFaceSupported = false
+                analysis.crossFaceUnsupportedReason = unsupportedReasonKey
+                return analysis
+            }
+            if isRectangleCircle {
+                analysis.crossProjectionMixedShapeDetected = true
+                analysis.rectangleCircleIntersectionSupported = true
             }
             supportedPairKeys.insert(Analysis.pairKey(lhsID, rhsID))
         }
@@ -466,6 +503,10 @@ enum CADCrossFaceCutUnionV1 {
         analysis.supportedPairKeys = supportedPairKeys
         analysis.crossFaceSupported = true
         return analysis
+    }
+
+    private static func uniqueSortedProfileTypes(_ types: [CADCutV2ProfileType]) -> [String] {
+        Array(Set(types.map(\.rawValue))).sorted()
     }
 
     private static func resolvedDepth(
@@ -520,6 +561,8 @@ enum CADCrossFaceCutUnionV1 {
         return components
     }
 }
+
+typealias CADCrossFaceCutUnionV1 = CADCrossProjectionCutUnionV1
 
 struct CADPlanarProfileUnionResult: Equatable {
     var succeeded: Bool

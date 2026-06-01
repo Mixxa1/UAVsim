@@ -28,17 +28,26 @@ struct CADCutMeshRebuildDiagnostics: Equatable {
     var crossFaceIntersectionGroupCount: Int
     var crossFaceSupported: Bool
     var crossFaceUnsupportedReason: String?
+    var crossProjectionMixedShapeDetected: Bool
+    var crossProjectionGroupCount: Int
+    var cutterVolumeTypes: [String]
+    var rectangleCircleIntersectionSupported: Bool
     var sameFaceOverlapGroupCount: Int
     var mergedProfileLoopCount: Int
     var unionFailureCount: Int
     var trianglesInsideMergedHole: Int
     var crossFaceIntersectionBlocked: Bool
     var removedInternalWallTriangleCount: Int
+    var wallTrianglesGenerated: Int
+    var wallTrianglesRemovedInsideOtherCut: Int
     var remainingInternalWallInsideOtherCutCount: Int
     var crossingWallTriangleCount: Int
+    var crossingWallTriangles: Int
+    var unresolvedCrossingTriangles: Int
     var entryFaceRebuiltWithHole: Bool
     var exitFaceRebuiltWithHole: Bool
     var capFacesGenerated: Int
+    var throughAllCapGenerated: Int
     var orphanTriangleCount: Int
     var nonCoplanarFaceTriangleCount: Int
     var trianglesCrossingBetweenHoles: Int
@@ -190,14 +199,21 @@ enum CADCutMeshRebuilder {
         var crossFaceIntersectionGroupCount = 0
         var crossFaceSupported = false
         var crossFaceUnsupportedReason: String?
+        var crossProjectionMixedShapeDetected = false
+        var crossProjectionGroupCount = 0
+        var cutterVolumeTypes: [String] = []
+        var rectangleCircleIntersectionSupported = false
         var sameFaceOverlapGroupCount = 0
         var mergedProfileLoopCount = 0
         var unionFailureCount = 0
         var trianglesInsideMergedHole = 0
         var crossFaceIntersectionBlocked = false
         var removedInternalWallTriangleCount = 0
+        var wallTrianglesGenerated = 0
+        var wallTrianglesRemovedInsideOtherCut = 0
         var remainingInternalWallInsideOtherCutCount = 0
         var crossingWallTriangleCount = 0
+        var unresolvedCrossingTriangles = 0
         var entryFaceRebuiltWithHole = false
         var exitFaceRebuiltWithHole = false
         var capFacesGenerated = 0
@@ -245,17 +261,26 @@ enum CADCutMeshRebuilder {
                 crossFaceIntersectionGroupCount: crossFaceIntersectionGroupCount,
                 crossFaceSupported: crossFaceSupported,
                 crossFaceUnsupportedReason: crossFaceUnsupportedReason,
+                crossProjectionMixedShapeDetected: crossProjectionMixedShapeDetected,
+                crossProjectionGroupCount: crossProjectionGroupCount,
+                cutterVolumeTypes: cutterVolumeTypes,
+                rectangleCircleIntersectionSupported: rectangleCircleIntersectionSupported,
                 sameFaceOverlapGroupCount: sameFaceOverlapGroupCount,
                 mergedProfileLoopCount: mergedProfileLoopCount,
                 unionFailureCount: unionFailureCount,
                 trianglesInsideMergedHole: trianglesInsideMergedHole,
                 crossFaceIntersectionBlocked: crossFaceIntersectionBlocked,
                 removedInternalWallTriangleCount: removedInternalWallTriangleCount,
+                wallTrianglesGenerated: wallTrianglesGenerated,
+                wallTrianglesRemovedInsideOtherCut: wallTrianglesRemovedInsideOtherCut,
                 remainingInternalWallInsideOtherCutCount: remainingInternalWallInsideOtherCutCount,
                 crossingWallTriangleCount: crossingWallTriangleCount,
+                crossingWallTriangles: crossingWallTriangleCount,
+                unresolvedCrossingTriangles: unresolvedCrossingTriangles,
                 entryFaceRebuiltWithHole: entryFaceRebuiltWithHole,
                 exitFaceRebuiltWithHole: exitFaceRebuiltWithHole,
                 capFacesGenerated: capFacesGenerated,
+                throughAllCapGenerated: throughAll ? capFacesGenerated : 0,
                 orphanTriangleCount: orphanTriangleCount,
                 nonCoplanarFaceTriangleCount: nonCoplanarFaceTriangleCount,
                 trianglesCrossingBetweenHoles: trianglesCrossingBetweenHoles,
@@ -311,6 +336,10 @@ enum CADCutMeshRebuilder {
         counters.crossFaceSupported = crossFaceAnalysis.crossFaceIntersectionDetected
             && crossFaceAnalysis.crossFaceSupported
         counters.crossFaceUnsupportedReason = crossFaceAnalysis.crossFaceUnsupportedReason
+        counters.crossProjectionMixedShapeDetected = crossFaceAnalysis.crossProjectionMixedShapeDetected
+        counters.crossProjectionGroupCount = crossFaceAnalysis.crossProjectionGroupCount
+        counters.cutterVolumeTypes = crossFaceAnalysis.cutterVolumeTypes
+        counters.rectangleCircleIntersectionSupported = crossFaceAnalysis.rectangleCircleIntersectionSupported
         counters.unsupportedIntersectingCutDetected = crossFaceAnalysis.crossFaceIntersectionDetected
             && !crossFaceAnalysis.crossFaceSupported
         counters.crossFaceIntersectionBlocked = crossFaceAnalysis.crossFaceIntersectionDetected
@@ -438,7 +467,7 @@ enum CADCutMeshRebuilder {
               counters.trianglesInsideExitHole == 0,
               counters.trianglesInsideMergedHole == 0,
               counters.remainingInternalWallInsideOtherCutCount == 0,
-              counters.crossingWallTriangleCount == 0 else {
+              counters.unresolvedCrossingTriangles == 0 else {
             logRebuildDiagnostics(counters.diagnostics)
             return nil
         }
@@ -1248,13 +1277,14 @@ enum CADCutMeshRebuilder {
 
     private static func appendCrossFaceUnionInternalSurfaces(
         _ cut: ResolvedCut,
-        otherVolumes: [CADConvexPrismVolume],
+        otherVolumes: [CADCutPrismVolume],
         to writer: inout MeshWriter,
         counters: inout RebuildCounters
     ) -> Bool {
-        guard cut.feature.profileType == .rectangle,
+        guard (cut.feature.profileType == .rectangle || cut.feature.profileType == .circle),
               cut.feature.depthMode == .throughAll,
-              cut.feature.profilePoints.count == 4 else {
+              cut.feature.profilePoints.count >= 3,
+              cut.farWorldLoop.count == cut.feature.profilePoints.count else {
             counters.crossFaceUnsupportedReason = CADCrossFaceCutUnionV1.unsupportedReasonKey
             counters.crossFaceIntersectionBlocked = true
             counters.unsupportedIntersectingCutDetected = true
@@ -1282,13 +1312,13 @@ enum CADCutMeshRebuilder {
         profile: [SketchPoint2D],
         entryFace: DesignPlanarFace,
         fallbackCenter center: DesignVector3,
-        otherVolumes: [CADConvexPrismVolume],
+        otherVolumes: [CADCutPrismVolume],
         to writer: inout MeshWriter,
         counters: inout RebuildCounters
     ) -> Bool {
         guard entry.count == far.count,
               entry.count == profile.count,
-              entry.count == 4 else {
+              entry.count >= 3 else {
             return false
         }
         let windingSign = DesignSketch.polygonSignedAreaMeters2(profile) >= 0 ? 1.0 : -1.0
@@ -1323,7 +1353,7 @@ enum CADCutMeshRebuilder {
         farA: DesignVector3,
         farB: DesignVector3,
         desiredNormal: DesignVector3,
-        otherVolumes: [CADConvexPrismVolume],
+        otherVolumes: [CADCutPrismVolume],
         to writer: inout MeshWriter,
         counters: inout RebuildCounters
     ) -> Bool {
@@ -1360,37 +1390,275 @@ enum CADCutMeshRebuilder {
                 let p01 = point(s0, t1)
                 let p11 = point(s1, t1)
                 let p10 = point(s1, t0)
-                let centroid = (p00 + p01 + p11 + p10) * 0.25
-
-                var removedByUnion = false
-                for volume in otherVolumes {
-                    let centroidInside = volume.contains(centroid, epsilon: -tolerance)
-                    let corners = [p00, p01, p11, p10]
-                    let allCornersInsideOrOn = corners.allSatisfy { volume.contains($0, epsilon: tolerance) }
-                    let anyCornerStrictlyInside = corners.contains { volume.contains($0, epsilon: -tolerance) }
-
-                    if centroidInside {
-                        guard allCornersInsideOrOn else {
-                            counters.crossingWallTriangleCount += 2
-                            return false
-                        }
-                        counters.removedInternalWallTriangleCount += 2
-                        removedByUnion = true
-                        break
-                    }
-
-                    if anyCornerStrictlyInside {
-                        counters.crossingWallTriangleCount += 2
-                        return false
-                    }
+                guard appendClassifiedWallCell(
+                    p00: p00,
+                    p01: p01,
+                    p11: p11,
+                    p10: p10,
+                    desiredNormal: desiredNormal,
+                    otherVolumes: otherVolumes,
+                    depth: 0,
+                    maxDepth: 1,
+                    to: &writer,
+                    counters: &counters
+                ) else {
+                    return false
                 }
-
-                guard !removedByUnion else { continue }
-                writer.appendQuad(p00, p01, p11, p10, desiredNormal: desiredNormal)
             }
         }
 
         return true
+    }
+
+    private enum WallCellVolumeRelation {
+        case outside
+        case inside
+        case crossing
+    }
+
+    private static func appendClassifiedWallCell(
+        p00: DesignVector3,
+        p01: DesignVector3,
+        p11: DesignVector3,
+        p10: DesignVector3,
+        desiredNormal: DesignVector3,
+        otherVolumes: [CADCutPrismVolume],
+        depth: Int,
+        maxDepth: Int,
+        to writer: inout MeshWriter,
+        counters: inout RebuildCounters
+    ) -> Bool {
+        let points = [p00, p01, p11, p10]
+        guard points.allSatisfy(\.isFinite) else {
+            counters.unresolvedCrossingTriangles += 2
+            return false
+        }
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        var crossesAnotherVolume = false
+        for volume in otherVolumes {
+            switch wallCellRelation(points, to: volume, tolerance: tolerance) {
+            case .outside:
+                continue
+            case .inside:
+                counters.removedInternalWallTriangleCount += 2
+                counters.wallTrianglesRemovedInsideOtherCut += 2
+                return true
+            case .crossing:
+                crossesAnotherVolume = true
+            }
+        }
+
+        guard crossesAnotherVolume else {
+            appendGeneratedWallQuad(
+                p00,
+                p01,
+                p11,
+                p10,
+                desiredNormal: desiredNormal,
+                otherVolumes: otherVolumes,
+                to: &writer,
+                counters: &counters
+            )
+            return true
+        }
+
+        counters.crossingWallTriangleCount += 2
+        if depth < maxDepth {
+            let leftMid = (p00 + p01) * 0.5
+            let topMid = (p01 + p11) * 0.5
+            let rightMid = (p10 + p11) * 0.5
+            let bottomMid = (p00 + p10) * 0.5
+            let center = (p00 + p01 + p11 + p10) * 0.25
+            return appendClassifiedWallCell(
+                p00: p00,
+                p01: leftMid,
+                p11: center,
+                p10: bottomMid,
+                desiredNormal: desiredNormal,
+                otherVolumes: otherVolumes,
+                depth: depth + 1,
+                maxDepth: maxDepth,
+                to: &writer,
+                counters: &counters
+            ) && appendClassifiedWallCell(
+                p00: leftMid,
+                p01: p01,
+                p11: topMid,
+                p10: center,
+                desiredNormal: desiredNormal,
+                otherVolumes: otherVolumes,
+                depth: depth + 1,
+                maxDepth: maxDepth,
+                to: &writer,
+                counters: &counters
+            ) && appendClassifiedWallCell(
+                p00: center,
+                p01: topMid,
+                p11: p11,
+                p10: rightMid,
+                desiredNormal: desiredNormal,
+                otherVolumes: otherVolumes,
+                depth: depth + 1,
+                maxDepth: maxDepth,
+                to: &writer,
+                counters: &counters
+            ) && appendClassifiedWallCell(
+                p00: bottomMid,
+                p01: center,
+                p11: rightMid,
+                p10: p10,
+                desiredNormal: desiredNormal,
+                otherVolumes: otherVolumes,
+                depth: depth + 1,
+                maxDepth: maxDepth,
+                to: &writer,
+                counters: &counters
+            )
+        }
+
+        appendGeneratedWallQuad(
+            p00,
+            p01,
+            p11,
+            p10,
+            desiredNormal: desiredNormal,
+            otherVolumes: otherVolumes,
+            to: &writer,
+            counters: &counters
+        )
+        return true
+    }
+
+    private static func appendGeneratedWallQuad(
+        _ p00: DesignVector3,
+        _ p01: DesignVector3,
+        _ p11: DesignVector3,
+        _ p10: DesignVector3,
+        desiredNormal: DesignVector3,
+        otherVolumes: [CADCutPrismVolume],
+        to writer: inout MeshWriter,
+        counters: inout RebuildCounters
+    ) {
+        appendGeneratedWallTriangle(
+            p00,
+            p01,
+            p11,
+            desiredNormal: desiredNormal,
+            otherVolumes: otherVolumes,
+            to: &writer,
+            counters: &counters
+        )
+        appendGeneratedWallTriangle(
+            p00,
+            p11,
+            p10,
+            desiredNormal: desiredNormal,
+            otherVolumes: otherVolumes,
+            to: &writer,
+            counters: &counters
+        )
+    }
+
+    private static func appendGeneratedWallTriangle(
+        _ a: DesignVector3,
+        _ b: DesignVector3,
+        _ c: DesignVector3,
+        desiredNormal: DesignVector3,
+        otherVolumes: [CADCutPrismVolume],
+        to writer: inout MeshWriter,
+        counters: inout RebuildCounters
+    ) {
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        let centroid = (a + b + c) * (1.0 / 3.0)
+        if otherVolumes.contains(where: { $0.contains(centroid, epsilon: -tolerance) }) {
+            counters.removedInternalWallTriangleCount += 1
+            counters.wallTrianglesRemovedInsideOtherCut += 1
+            return
+        }
+        let triangleCount = writer.triangles.count
+        writer.appendTriangle(a, b, c, desiredNormal: desiredNormal)
+        counters.wallTrianglesGenerated += writer.triangles.count - triangleCount
+    }
+
+    private static func wallCellRelation(
+        _ points: [DesignVector3],
+        to volume: CADCutPrismVolume,
+        tolerance: Double
+    ) -> WallCellVolumeRelation {
+        guard points.count == 4,
+              points.allSatisfy(\.isFinite) else {
+            return .crossing
+        }
+        let centroid = points.reduce(DesignVector3.zero, +) * (1.0 / Double(points.count))
+        let allCornersInsideOrOn = points.allSatisfy { volume.contains($0, epsilon: tolerance) }
+        if allCornersInsideOrOn,
+           volume.contains(centroid, epsilon: -tolerance) {
+            return .inside
+        }
+
+        var clipped = points
+        for plane in volume.planes {
+            clipped = clipPolygon(clipped, inside: plane, tolerance: tolerance)
+            if clipped.count < 3 {
+                return .outside
+            }
+        }
+        guard polygonArea3D(clipped) > 1e-12 else {
+            return .outside
+        }
+        return .crossing
+    }
+
+    private static func clipPolygon(
+        _ points: [DesignVector3],
+        inside plane: CADCutPrismVolume.Plane,
+        tolerance: Double
+    ) -> [DesignVector3] {
+        guard points.count >= 3 else { return [] }
+        var result: [DesignVector3] = []
+        for index in points.indices {
+            let current = points[index]
+            let next = points[(index + 1) % points.count]
+            let currentDistance = (current - plane.point).dot(plane.normal) - tolerance
+            let nextDistance = (next - plane.point).dot(plane.normal) - tolerance
+            let currentInside = currentDistance <= 0
+            let nextInside = nextDistance <= 0
+
+            if currentInside && nextInside {
+                result.append(next)
+            } else if currentInside && !nextInside {
+                if let intersection = planeIntersection(from: current, to: next, currentDistance: currentDistance, nextDistance: nextDistance) {
+                    result.append(intersection)
+                }
+            } else if !currentInside && nextInside {
+                if let intersection = planeIntersection(from: current, to: next, currentDistance: currentDistance, nextDistance: nextDistance) {
+                    result.append(intersection)
+                }
+                result.append(next)
+            }
+        }
+        return result
+    }
+
+    private static func planeIntersection(
+        from current: DesignVector3,
+        to next: DesignVector3,
+        currentDistance: Double,
+        nextDistance: Double
+    ) -> DesignVector3? {
+        let denominator = currentDistance - nextDistance
+        guard abs(denominator) > 1e-12 else { return nil }
+        let t = min(max(currentDistance / denominator, 0.0), 1.0)
+        return current + (next - current) * t
+    }
+
+    private static func polygonArea3D(_ points: [DesignVector3]) -> Double {
+        guard points.count >= 3 else { return 0 }
+        var area = 0.0
+        for index in 1..<(points.count - 1) {
+            area += (points[index] - points[0]).cross(points[index + 1] - points[0]).length * 0.5
+        }
+        return area
     }
 
     private static func wallSplitParameters(
@@ -1398,7 +1666,7 @@ enum CADCutMeshRebuilder {
         entryB: DesignVector3,
         farA: DesignVector3,
         farB: DesignVector3,
-        otherVolumes: [CADConvexPrismVolume],
+        otherVolumes: [CADCutPrismVolume],
         tolerance: Double
     ) -> (sValues: [Double], tValues: [Double]) {
         var sValues = [0.0, 1.0]
@@ -1410,7 +1678,7 @@ enum CADCutMeshRebuilder {
             return entryPoint + (farPoint - entryPoint) * t
         }
 
-        func signedDistance(to plane: CADConvexPrismVolume.Plane, s: Double, t: Double) -> Double {
+        func signedDistance(to plane: CADCutPrismVolume.Plane, s: Double, t: Double) -> Double {
             (point(s, t) - plane.point).dot(plane.normal)
         }
 
@@ -2068,17 +2336,26 @@ enum CADCutMeshRebuilder {
             "crossFaceIntersectionGroupCount=\(diagnostics.crossFaceIntersectionGroupCount) " +
             "crossFaceSupported=\(diagnostics.crossFaceSupported) " +
             "crossFaceUnsupportedReason=\(diagnostics.crossFaceUnsupportedReason ?? "none") " +
+            "crossProjectionMixedShapeDetected=\(diagnostics.crossProjectionMixedShapeDetected) " +
+            "crossProjectionGroupCount=\(diagnostics.crossProjectionGroupCount) " +
+            "cutterVolumeTypes=\(diagnostics.cutterVolumeTypes.joined(separator: ",")) " +
+            "rectangleCircleIntersectionSupported=\(diagnostics.rectangleCircleIntersectionSupported) " +
             "sameFaceOverlapGroupCount=\(diagnostics.sameFaceOverlapGroupCount) " +
             "mergedProfileLoopCount=\(diagnostics.mergedProfileLoopCount) " +
             "unionFailureCount=\(diagnostics.unionFailureCount) " +
             "trianglesInsideMergedHole=\(diagnostics.trianglesInsideMergedHole) " +
             "crossFaceIntersectionBlocked=\(diagnostics.crossFaceIntersectionBlocked) " +
             "removedInternalWallTriangleCount=\(diagnostics.removedInternalWallTriangleCount) " +
+            "wallTrianglesGenerated=\(diagnostics.wallTrianglesGenerated) " +
+            "wallTrianglesRemovedInsideOtherCut=\(diagnostics.wallTrianglesRemovedInsideOtherCut) " +
             "remainingInternalWallInsideOtherCutCount=\(diagnostics.remainingInternalWallInsideOtherCutCount) " +
             "crossingWallTriangleCount=\(diagnostics.crossingWallTriangleCount) " +
+            "crossingWallTriangles=\(diagnostics.crossingWallTriangles) " +
+            "unresolvedCrossingTriangles=\(diagnostics.unresolvedCrossingTriangles) " +
             "entryFaceRebuiltWithHole=\(diagnostics.entryFaceRebuiltWithHole) " +
             "exitFaceRebuiltWithHole=\(diagnostics.exitFaceRebuiltWithHole) " +
             "capFacesGenerated=\(diagnostics.capFacesGenerated) " +
+            "throughAllCapGenerated=\(diagnostics.throughAllCapGenerated) " +
             "orphanTriangleCount=\(diagnostics.orphanTriangleCount) " +
             "nonCoplanarFaceTriangleCount=\(diagnostics.nonCoplanarFaceTriangleCount) " +
             "trianglesCrossingBetweenHoles=\(diagnostics.trianglesCrossingBetweenHoles) " +
