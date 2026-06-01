@@ -182,6 +182,345 @@ enum CADCutGeometry {
     }
 }
 
+enum CADPrismTriangleClassification: Equatable {
+    case outside
+    case inside
+    case crossing
+}
+
+struct CADConvexPrismVolume: Equatable {
+    struct Plane: Equatable {
+        var point: DesignVector3
+        var normal: DesignVector3
+    }
+
+    enum IntersectionRelation: Equatable {
+        case separate
+        case touching
+        case intersecting
+        case uncertain
+    }
+
+    var vertices: [DesignVector3]
+    var planes: [Plane]
+    var faceAxes: [DesignVector3]
+    var edgeAxes: [DesignVector3]
+
+    func contains(_ point: DesignVector3, epsilon: Double = CADCutGeometry.epsilon) -> Bool {
+        guard point.isFinite else { return false }
+        return planes.allSatisfy { plane in
+            (point - plane.point).dot(plane.normal) <= epsilon
+        }
+    }
+
+    func intersects(_ other: CADConvexPrismVolume, epsilon: Double = CADCutGeometry.epsilon) -> Bool {
+        intersectionRelation(with: other, epsilon: epsilon) != .separate
+    }
+
+    func classifyTriangle(
+        _ vertices: [DesignVector3],
+        epsilon: Double = CADCutGeometry.epsilon
+    ) -> CADPrismTriangleClassification {
+        guard vertices.count == 3,
+              vertices.allSatisfy(\.isFinite) else {
+            return .outside
+        }
+        let inside = vertices.map { contains($0, epsilon: epsilon) }
+        if inside.allSatisfy({ $0 }) {
+            return .inside
+        }
+        if inside.contains(true) {
+            return .crossing
+        }
+        let centroid = vertices.reduce(DesignVector3.zero, +) * (1.0 / 3.0)
+        return contains(centroid, epsilon: epsilon) ? .crossing : .outside
+    }
+
+    func intersectionRelation(
+        with other: CADConvexPrismVolume,
+        epsilon: Double = CADCutGeometry.epsilon
+    ) -> IntersectionRelation {
+        let tolerance = max(epsilon, CADCutGeometry.epsilon)
+        var axes = faceAxes + other.faceAxes
+        for lhsEdge in edgeAxes {
+            for rhsEdge in other.edgeAxes {
+                let axis = lhsEdge.cross(rhsEdge)
+                if axis.length > tolerance {
+                    axes.append(axis.normalized(fallback: .zAxis))
+                }
+            }
+        }
+
+        var hasTouchingAxis = false
+        for axis in axes {
+            let normalized = axis.normalized(fallback: .zAxis)
+            guard normalized.isFinite,
+                  normalized.length > tolerance,
+                  let lhsInterval = projectionInterval(vertices, axis: normalized),
+                  let rhsInterval = projectionInterval(other.vertices, axis: normalized) else {
+                return .uncertain
+            }
+
+            if lhsInterval.max < rhsInterval.min - tolerance
+                || rhsInterval.max < lhsInterval.min - tolerance {
+                return .separate
+            }
+
+            let overlap = min(lhsInterval.max, rhsInterval.max) - max(lhsInterval.min, rhsInterval.min)
+            if overlap <= tolerance {
+                hasTouchingAxis = true
+            }
+        }
+
+        return hasTouchingAxis ? .touching : .intersecting
+    }
+
+    static func rectanglePrism(
+        entryFace: DesignPlanarFace,
+        profilePoints: [SketchPoint2D],
+        direction: DesignVector3,
+        depthMeters: Double
+    ) -> CADConvexPrismVolume? {
+        guard profilePoints.count == 4,
+              depthMeters.isFinite,
+              depthMeters > CADCutGeometry.epsilon else {
+            return nil
+        }
+        let d = direction.normalized(fallback: entryFace.normal * -1)
+        guard d.isFinite, d.length > CADCutGeometry.epsilon else { return nil }
+
+        let entryLoop = profilePoints.map { CADCutGeometry.worldPoint(on: entryFace, local: $0) }
+        let farLoop = entryLoop.map { $0 + d * depthMeters }
+        let vertices = entryLoop + farLoop
+        guard vertices.count == 8,
+              vertices.allSatisfy(\.isFinite) else {
+            return nil
+        }
+
+        let center = vertices.reduce(DesignVector3.zero, +) * (1.0 / Double(vertices.count))
+        var planes: [Plane] = [
+            Plane(point: entryLoop[0], normal: d * -1),
+            Plane(point: farLoop[0], normal: d),
+        ]
+        var faceAxes: [DesignVector3] = [d]
+        var edgeAxes: [DesignVector3] = [d]
+
+        for index in entryLoop.indices {
+            let next = (index + 1) % entryLoop.count
+            let edge = entryLoop[next] - entryLoop[index]
+            guard edge.length > CADCutGeometry.epsilon else { return nil }
+            let edgeAxis = edge.normalized(fallback: .xAxis)
+            edgeAxes.append(edgeAxis)
+
+            var sideNormal = edgeAxis.cross(d)
+            guard sideNormal.length > CADCutGeometry.epsilon else { return nil }
+            sideNormal = sideNormal.normalized(fallback: .zAxis)
+            let sideCenter = (entryLoop[index] + entryLoop[next] + farLoop[index] + farLoop[next]) * 0.25
+            if (center - sideCenter).dot(sideNormal) > 0 {
+                sideNormal = sideNormal * -1
+            }
+            planes.append(Plane(point: entryLoop[index], normal: sideNormal))
+            faceAxes.append(sideNormal)
+        }
+
+        return CADConvexPrismVolume(
+            vertices: vertices,
+            planes: planes,
+            faceAxes: faceAxes,
+            edgeAxes: edgeAxes
+        )
+    }
+
+    private func projectionInterval(
+        _ vertices: [DesignVector3],
+        axis: DesignVector3
+    ) -> (min: Double, max: Double)? {
+        guard let first = vertices.first else { return nil }
+        var minValue = first.dot(axis)
+        var maxValue = minValue
+        guard minValue.isFinite else { return nil }
+        for vertex in vertices.dropFirst() {
+            let value = vertex.dot(axis)
+            guard value.isFinite else { return nil }
+            minValue = min(minValue, value)
+            maxValue = max(maxValue, value)
+        }
+        return (minValue, maxValue)
+    }
+}
+
+enum CADCrossFaceCutUnionV1 {
+    static let unsupportedReasonKey = "cad.cut_v2.reason.cross_face_intersecting_cut_unsupported"
+
+    struct CutVolumeRecord: Equatable {
+        var cutID: UUID
+        var entryFaceID: UUID
+        var profileType: CADCutV2ProfileType
+        var depthMode: DepthMode
+        var depthMeters: Double
+        var volume: CADConvexPrismVolume
+    }
+
+    struct Analysis: Equatable {
+        var crossFaceIntersectionDetected = false
+        var crossFaceIntersectionGroupCount = 0
+        var crossFaceSupported = false
+        var crossFaceUnsupportedReason: String?
+        var crossFaceCutIDs: Set<UUID> = []
+        var supportedPairKeys: Set<String> = []
+        var volumeRecords: [CutVolumeRecord] = []
+
+        func volumeRecord(for cutID: UUID) -> CutVolumeRecord? {
+            volumeRecords.first { $0.cutID == cutID }
+        }
+
+        func pairIsSupported(_ lhs: UUID, _ rhs: UUID) -> Bool {
+            supportedPairKeys.contains(Self.pairKey(lhs, rhs))
+        }
+
+        static func pairKey(_ lhs: UUID, _ rhs: UUID) -> String {
+            [lhs.uuidString, rhs.uuidString].sorted().joined(separator: "|")
+        }
+    }
+
+    private struct PairRelation {
+        var lhs: UUID
+        var rhs: UUID
+        var relation: CADConvexPrismVolume.IntersectionRelation
+    }
+
+    static func analyze(
+        cuts: [ExtrudedSolidBoxBlindCutFeature],
+        faces: [DesignPlanarFace],
+        bodyVertices: [DesignVector3]
+    ) -> Analysis {
+        var analysis = Analysis()
+        analysis.volumeRecords = cuts.compactMap { cut in
+            guard let entryFace = faces.first(where: { $0.id == cut.entryFaceID }),
+                  let depth = resolvedDepth(for: cut, entryFace: entryFace, bodyVertices: bodyVertices),
+                  let volume = CADConvexPrismVolume.rectanglePrism(
+                    entryFace: entryFace,
+                    profilePoints: cut.profilePoints,
+                    direction: cut.cutDirection,
+                    depthMeters: depth
+                  ) else {
+                return nil
+            }
+            return CutVolumeRecord(
+                cutID: cut.id,
+                entryFaceID: cut.entryFaceID,
+                profileType: cut.profileType,
+                depthMode: cut.depthMode,
+                depthMeters: depth,
+                volume: volume
+            )
+        }
+
+        let recordsByID = Dictionary(uniqueKeysWithValues: analysis.volumeRecords.map { ($0.cutID, $0) })
+        var crossFacePairs: [PairRelation] = []
+        for lhsIndex in analysis.volumeRecords.indices {
+            for rhsIndex in analysis.volumeRecords.indices where rhsIndex > lhsIndex {
+                let lhs = analysis.volumeRecords[lhsIndex]
+                let rhs = analysis.volumeRecords[rhsIndex]
+                guard lhs.entryFaceID != rhs.entryFaceID else { continue }
+                let relation = lhs.volume.intersectionRelation(
+                    with: rhs.volume,
+                    epsilon: max(CADCutGeometry.epsilon * 10.0, 1e-6)
+                )
+                guard relation != .separate else { continue }
+                crossFacePairs.append(PairRelation(lhs: lhs.cutID, rhs: rhs.cutID, relation: relation))
+            }
+        }
+
+        guard !crossFacePairs.isEmpty else { return analysis }
+        analysis.crossFaceIntersectionDetected = true
+
+        let components = connectedComponents(from: crossFacePairs)
+        analysis.crossFaceIntersectionGroupCount = components.count
+        analysis.crossFaceCutIDs = components.reduce(into: Set<UUID>()) { result, component in
+            result.formUnion(component)
+        }
+
+        var supportedPairKeys: Set<String> = []
+        for component in components {
+            guard component.count == 2,
+                  let lhsID = component.first,
+                  let rhsID = component.dropFirst().first,
+                  let lhs = recordsByID[lhsID],
+                  let rhs = recordsByID[rhsID],
+                  let pair = crossFacePairs.first(where: {
+                    Set([$0.lhs, $0.rhs]) == Set([lhsID, rhsID])
+                  }),
+                  pair.relation == .intersecting,
+                  lhs.profileType == .rectangle,
+                  rhs.profileType == .rectangle,
+                  lhs.depthMode == .throughAll,
+                  rhs.depthMode == .throughAll else {
+                analysis.crossFaceSupported = false
+                analysis.crossFaceUnsupportedReason = unsupportedReasonKey
+                return analysis
+            }
+            supportedPairKeys.insert(Analysis.pairKey(lhsID, rhsID))
+        }
+
+        analysis.supportedPairKeys = supportedPairKeys
+        analysis.crossFaceSupported = true
+        return analysis
+    }
+
+    private static func resolvedDepth(
+        for cut: ExtrudedSolidBoxBlindCutFeature,
+        entryFace: DesignPlanarFace,
+        bodyVertices: [DesignVector3]
+    ) -> Double? {
+        guard let thickness = CADCutGeometry.bodyThickness(
+            entryFaceCenter: entryFace.center,
+            bodyWorldVertices: bodyVertices,
+            direction: cut.cutDirection
+        ), thickness > CADCutGeometry.epsilon else {
+            return nil
+        }
+        switch cut.depthMode {
+        case .throughAll:
+            return thickness
+        case .distance:
+            guard cut.depthMeters.isFinite,
+                  cut.depthMeters > CADCutGeometry.epsilon,
+                  cut.depthMeters < thickness - CADCutGeometry.epsilon else {
+                return nil
+            }
+            return cut.depthMeters
+        case .upToObject, .upToNearestFace:
+            return nil
+        }
+    }
+
+    private static func connectedComponents(from pairs: [PairRelation]) -> [Set<UUID>] {
+        var adjacency: [UUID: Set<UUID>] = [:]
+        for pair in pairs {
+            adjacency[pair.lhs, default: []].insert(pair.rhs)
+            adjacency[pair.rhs, default: []].insert(pair.lhs)
+        }
+
+        var visited: Set<UUID> = []
+        var components: [Set<UUID>] = []
+        for start in adjacency.keys where !visited.contains(start) {
+            var component: Set<UUID> = []
+            var stack = [start]
+            visited.insert(start)
+            while let current = stack.popLast() {
+                component.insert(current)
+                for next in adjacency[current, default: []] where !visited.contains(next) {
+                    visited.insert(next)
+                    stack.append(next)
+                }
+            }
+            components.append(component)
+        }
+        return components
+    }
+}
+
 struct CADPlanarProfileUnionResult: Equatable {
     var succeeded: Bool
     var loops: [[SketchPoint2D]]

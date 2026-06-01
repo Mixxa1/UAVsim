@@ -268,6 +268,11 @@ enum CADMultiCutValidator {
 
         let existingCutByID = Dictionary(uniqueKeysWithValues: existingCuts.map { ($0.id, $0) })
         var sameFaceUnionNeedsValidation = false
+        let crossFaceAnalysis = CADCrossFaceCutUnionV1.analyze(
+            cuts: candidateCuts,
+            faces: baseBody.faces,
+            bodyVertices: baseBody.vertices()
+        )
 
         for newSurface in newSurfaces {
             for existingSurface in existingSurfaces where existingSurface.faceID == newSurface.faceID {
@@ -351,14 +356,15 @@ enum CADMultiCutValidator {
                 continue
             }
 
-            switch cutVolumeRelation(
+            let volumeRelation = cutVolumeRelation(
                 lhs: newCut,
                 lhsEntryFace: entryFace,
                 lhsDepth: newDepth,
                 rhs: existingCut,
                 rhsEntryFace: existingEntryFace,
                 rhsDepth: existingDepth
-            ) {
+            )
+            switch volumeRelation {
             case .separate:
                 continue
             case .intersecting, .touching:
@@ -382,6 +388,11 @@ enum CADMultiCutValidator {
                     sameFaceUnionNeedsValidation = true
                     continue
                 }
+                if volumeRelation == .intersecting,
+                   crossFaceAnalysis.crossFaceSupported,
+                   crossFaceAnalysis.pairIsSupported(newCut.id, existingCut.id) {
+                    continue
+                }
                 return result(
                     .crossFaceIntersectingCutUnsupported,
                     reason: CADFeatureValidation.crossFaceIntersectingCutUnsupported.messageKey,
@@ -402,6 +413,19 @@ enum CADMultiCutValidator {
             }
         }
 
+        if crossFaceAnalysis.crossFaceIntersectionDetected,
+           !crossFaceAnalysis.crossFaceSupported {
+            return result(
+                .crossFaceIntersectingCutUnsupported,
+                reason: CADFeatureValidation.crossFaceIntersectingCutUnsupported.messageKey,
+                existingSurfaces: existingSurfaces,
+                newSurfaces: newSurfaces,
+                cutVolumeIntersectionDetected: true,
+                unsupportedIntersectingCutDetected: true,
+                crossFaceIntersectionBlocked: true
+            )
+        }
+
         if sameFaceUnionNeedsValidation,
            !sameFaceUnionIsValid(on: entryFace, cuts: candidateCuts.filter { $0.entryFaceID == newCut.entryFaceID }) {
             return result(
@@ -417,7 +441,8 @@ enum CADMultiCutValidator {
         return result(
             .valid,
             existingSurfaces: existingSurfaces,
-            newSurfaces: newSurfaces
+            newSurfaces: newSurfaces,
+            cutVolumeIntersectionDetected: crossFaceAnalysis.crossFaceIntersectionDetected
         )
     }
 
@@ -570,7 +595,7 @@ enum CADMultiCutValidator {
         let expectedCenter = entryFace.center + direction * depth
         return body.faces
             .filter { $0.id != entryFace.id }
-            .filter { $0.normal.normalized(fallback: .zAxis).dot(direction) > 0.995 }
+            .filter { abs($0.normal.normalized(fallback: .zAxis).dot(direction)) > 0.995 }
             .min(by: {
                 ($0.center - expectedCenter).length < ($1.center - expectedCenter).length
             })
@@ -585,7 +610,7 @@ enum CADMultiCutValidator {
         let d = direction.normalized(fallback: entryFace.normal * -1)
         let exitNormal = exitFace.normal.normalized(fallback: d)
         let denominator = d.dot(exitNormal)
-        guard denominator > 1e-6 else { return nil }
+        guard abs(denominator) > 1e-6 else { return nil }
 
         var projected: [SketchPoint2D] = []
         for point in profile {
