@@ -1613,6 +1613,10 @@ final class CADWorkshopViewModel: ObservableObject {
             reason = .unsupportedProfileKind
         case .cutIntersectsExistingVoidUnsupported:
             reason = .unsupportedIntersectingCutUntilSolidKernelV02
+        case .sameFaceIntersectingCutsDifferentDepthUnsupported,
+             .distanceThroughAllIntersectionUnsupported,
+             .crossFaceIntersectingCutUnsupported:
+            reason = .unsupportedIntersectingCutUntilSolidKernelV02
         case .cutResultNotSolid,
              .cutResultBoundsInvalid,
              .cutBooleanInvalidResult,
@@ -1625,6 +1629,7 @@ final class CADWorkshopViewModel: ObservableObject {
              .invalidEntryFaceTriangulation,
              .cutBooleanFailed,
              .kernelCandidateValidationFailed,
+             .profileUnionFailed,
              .generatedMeshEmpty:
             reason = .topologyValidationFailed
         case .kernelCommitUnsupportedForCase:
@@ -2035,6 +2040,7 @@ final class CADWorkshopViewModel: ObservableObject {
             "removedPreviewNodeCount=\(removedPreviewNodeCount) ",
             "featureAppendedID=\(appendedFeatureID.uuidString) ",
             "featureStackCount=\(resultParams.boxBlindCutFeatures.count) ",
+            "totalCuts=\(rebuildDiagnostics.totalCutCount) ",
             "totalCutCount=\(rebuildDiagnostics.totalCutCount) ",
             "affectedFaceCount=\(rebuildDiagnostics.affectedFaceCount) ",
             "cutsGroupedByFace=\(rebuildDiagnostics.cutsGroupedByFace.joined(separator: ",")) ",
@@ -2049,6 +2055,11 @@ final class CADWorkshopViewModel: ObservableObject {
             "multiCutValidation=passed ",
             "cutVolumeIntersectionDetected=\(multiCutValidation.cutVolumeIntersectionDetected || rebuildDiagnostics.cutVolumeIntersectionDetected) ",
             "unsupportedIntersectingCutDetected=\(multiCutValidation.unsupportedIntersectingCutDetected || rebuildDiagnostics.unsupportedIntersectingCutDetected) ",
+            "sameFaceOverlapGroupCount=\(rebuildDiagnostics.sameFaceOverlapGroupCount) ",
+            "mergedProfileLoopCount=\(rebuildDiagnostics.mergedProfileLoopCount) ",
+            "unionFailureCount=\(rebuildDiagnostics.unionFailureCount) ",
+            "trianglesInsideMergedHole=\(rebuildDiagnostics.trianglesInsideMergedHole) ",
+            "crossFaceIntersectionBlocked=\(multiCutValidation.crossFaceIntersectionBlocked || rebuildDiagnostics.crossFaceIntersectionBlocked) ",
             "meshVertexCount=\(resultMeshStats?.vertexCount ?? 0) ",
             "meshTriangleCount=\(resultMeshStats?.triangleCount ?? 0) ",
             "affectedFaceID=\(rebuildDiagnostics.affectedFaceID?.uuidString ?? "nil") ",
@@ -2498,6 +2509,18 @@ final class CADWorkshopViewModel: ObservableObject {
         return makeCurrentCutRequest(depthMode: state.depthMode).validation
     }
 
+    private func cutValidationIndicatesIntersectingUnsupported(_ validation: CADFeatureValidation) -> Bool {
+        switch validation {
+        case .cutIntersectsExistingVoidUnsupported,
+             .sameFaceIntersectingCutsDifferentDepthUnsupported,
+             .distanceThroughAllIntersectionUnsupported,
+             .crossFaceIntersectingCutUnsupported:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func buildCutCommitValidationResult() -> CutCommitValidationResult {
         let profileType = cutV2ProfileType(for: currentProfileArea(), in: selectedSketch)
         let depthMode = featureDepthMode
@@ -2546,7 +2569,7 @@ final class CADWorkshopViewModel: ObservableObject {
                 cutProfileType: profileType,
                 cutDepthMode: state.depthMode,
                 cutDirection: state.direction,
-                intersectsExistingVoid: build.validation == .cutIntersectsExistingVoidUnsupported,
+                intersectsExistingVoid: cutValidationIndicatesIntersectingUnsupported(build.validation),
                 reason: build.validation.messageKey,
                 committedCutsCount: existingCutCount,
                 multiCutValidationReason: build.validation.messageKey
@@ -2569,7 +2592,7 @@ final class CADWorkshopViewModel: ObservableObject {
                 cutProfileType: request.profileType,
                 cutDepthMode: request.depthMode,
                 cutDirection: request.directionForSketchReference,
-                intersectsExistingVoid: multiCutValidation.validation == .cutIntersectsExistingVoidUnsupported,
+                intersectsExistingVoid: cutValidationIndicatesIntersectingUnsupported(multiCutValidation.validation),
                 reason: multiCutValidation.reason,
                 committedCutsCount: multiCutValidation.committedCutsCount,
                 candidateCutID: multiCutValidation.candidateCutID,

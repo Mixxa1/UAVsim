@@ -101,6 +101,10 @@ enum CADFeatureValidation: Error, Equatable {
     case cutToolDoesNotIntersectBody
     case unsupportedProfileForCutV2
     case cutIntersectsExistingVoidUnsupported
+    case sameFaceIntersectingCutsDifferentDepthUnsupported
+    case distanceThroughAllIntersectionUnsupported
+    case crossFaceIntersectingCutUnsupported
+    case profileUnionFailed
     case cutResultNotSolid
     case cutResultBoundsInvalid
     case cutMissingCylindricalWall
@@ -147,6 +151,10 @@ enum CADFeatureValidation: Error, Equatable {
         case .cutToolDoesNotIntersectBody:   return "cad.cut_v2.reason.cut_tool_does_not_intersect_body"
         case .unsupportedProfileForCutV2:    return "cad.cut_v2.reason.unsupported_profile_for_cut_v2"
         case .cutIntersectsExistingVoidUnsupported: return "cad.cut_v2.reason.intersecting_cut_unsupported"
+        case .sameFaceIntersectingCutsDifferentDepthUnsupported: return "cad.cut_v2.reason.same_face_intersecting_different_depth_unsupported"
+        case .distanceThroughAllIntersectionUnsupported: return "cad.cut_v2.reason.distance_through_all_intersection_unsupported"
+        case .crossFaceIntersectingCutUnsupported: return "cad.cut_v2.reason.cross_face_intersecting_cut_unsupported"
+        case .profileUnionFailed: return "cad.cut_v2.reason.profile_union_failed"
         case .cutResultNotSolid:             return "cad.cut_v2.reason.cut_result_not_solid"
         case .cutResultBoundsInvalid:        return "cad.cut_v2.reason.cut_result_bounds_invalid"
         case .cutMissingCylindricalWall:     return "cad.cut_v2.reason.cut_missing_cylindrical_wall"

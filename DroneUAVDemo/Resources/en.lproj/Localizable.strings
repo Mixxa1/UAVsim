@@ -1796,6 +1796,10 @@
 "cad.cut_v2.reason.cut_tool_does_not_intersect_body" = "Profile does not intersect the target body.";
 "cad.cut_v2.reason.unsupported_profile_for_cut_v2" = "This profile type is not supported yet.";
 "cad.cut_v2.reason.intersecting_cut_unsupported" = "Intersecting cuts are not supported yet.";
+"cad.cut_v2.reason.same_face_intersecting_different_depth_unsupported" = "Intersecting cuts with different depths are not supported yet.";
+"cad.cut_v2.reason.distance_through_all_intersection_unsupported" = "Distance and ThroughAll intersections are not supported yet.";
+"cad.cut_v2.reason.cross_face_intersecting_cut_unsupported" = "Intersecting cuts from different faces are not supported yet.";
+"cad.cut_v2.reason.profile_union_failed" = "Could not merge the intersecting cut profiles.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Cut result is not a valid solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Cut result bounds are invalid.";
 "cad.cut_v2.reason.cut_missing_cylindrical_wall" = "Cut result is missing the inner cylindrical wall.";

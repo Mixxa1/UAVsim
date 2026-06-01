@@ -1791,6 +1791,10 @@
 "cad.cut_v2.reason.cut_tool_does_not_intersect_body" = "Профиль не пересекает целевое тело.";
 "cad.cut_v2.reason.unsupported_profile_for_cut_v2" = "Этот тип профиля пока не поддерживается.";
 "cad.cut_v2.reason.intersecting_cut_unsupported" = "Пересекающиеся вырезы пока не поддерживаются.";
+"cad.cut_v2.reason.same_face_intersecting_different_depth_unsupported" = "Пересекающиеся вырезы с разной глубиной пока не поддерживаются.";
+"cad.cut_v2.reason.distance_through_all_intersection_unsupported" = "Перечение Distance и ThroughAll пока не поддерживается.";
+"cad.cut_v2.reason.cross_face_intersecting_cut_unsupported" = "Пересекающиеся вырезы с разных граней пока не поддерживаются.";
+"cad.cut_v2.reason.profile_union_failed" = "Не удалось объединить пересекающиеся профили вырезов.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Результат выреза не является корректным solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Границы результата выреза некорректны.";
 "cad.cut_v2.reason.cut_missing_cylindrical_wall" = "В результате выреза отсутствует внутренняя цилиндрическая стенка.";

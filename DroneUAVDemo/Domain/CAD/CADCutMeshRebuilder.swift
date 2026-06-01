@@ -24,6 +24,11 @@ struct CADCutMeshRebuildDiagnostics: Equatable {
     var holeTouchDetected: Bool
     var cutVolumeIntersectionDetected: Bool
     var unsupportedIntersectingCutDetected: Bool
+    var sameFaceOverlapGroupCount: Int
+    var mergedProfileLoopCount: Int
+    var unionFailureCount: Int
+    var trianglesInsideMergedHole: Int
+    var crossFaceIntersectionBlocked: Bool
     var entryFaceRebuiltWithHole: Bool
     var exitFaceRebuiltWithHole: Bool
     var capFacesGenerated: Int
@@ -59,12 +64,21 @@ enum CADCutMeshRebuilder {
         var farWorldLoop: [DesignVector3]
         var depthMeters: Double
         var direction: DesignVector3
+        var isUnionResult: Bool
     }
 
     private struct FaceHole {
         var cutID: UUID
         var profileType: CADCutV2ProfileType
         var profile: [SketchPoint2D]
+    }
+
+    private struct ResolveResult {
+        var cuts: [ResolvedCut]
+        var originalCutCount: Int
+        var sameFaceOverlapGroupCount: Int
+        var mergedProfileLoopCount: Int
+        var unionFailureCount: Int
     }
 
     private typealias UVBounds = (minU: Double, maxU: Double, minV: Double, maxV: Double)
@@ -165,6 +179,11 @@ enum CADCutMeshRebuilder {
         var holeTouchDetected = false
         var cutVolumeIntersectionDetected = false
         var unsupportedIntersectingCutDetected = false
+        var sameFaceOverlapGroupCount = 0
+        var mergedProfileLoopCount = 0
+        var unionFailureCount = 0
+        var trianglesInsideMergedHole = 0
+        var crossFaceIntersectionBlocked = false
         var entryFaceRebuiltWithHole = false
         var exitFaceRebuiltWithHole = false
         var capFacesGenerated = 0
@@ -208,6 +227,11 @@ enum CADCutMeshRebuilder {
                 holeTouchDetected: holeTouchDetected,
                 cutVolumeIntersectionDetected: cutVolumeIntersectionDetected,
                 unsupportedIntersectingCutDetected: unsupportedIntersectingCutDetected,
+                sameFaceOverlapGroupCount: sameFaceOverlapGroupCount,
+                mergedProfileLoopCount: mergedProfileLoopCount,
+                unionFailureCount: unionFailureCount,
+                trianglesInsideMergedHole: trianglesInsideMergedHole,
+                crossFaceIntersectionBlocked: crossFaceIntersectionBlocked,
                 entryFaceRebuiltWithHole: entryFaceRebuiltWithHole,
                 exitFaceRebuiltWithHole: exitFaceRebuiltWithHole,
                 capFacesGenerated: capFacesGenerated,
@@ -249,17 +273,21 @@ enum CADCutMeshRebuilder {
             return nil
         }
 
-        guard let cuts = resolveCuts(in: bodyParams) else { return nil }
+        guard let resolve = resolveCuts(in: bodyParams) else { return nil }
+        let cuts = resolve.cuts
         var writer = MeshWriter()
         var counters = RebuildCounters()
         counters.throughAll = cuts.contains { $0.feature.depthMode == .throughAll }
-        counters.totalCutCount = cuts.count
+        counters.totalCutCount = resolve.originalCutCount
+        counters.sameFaceOverlapGroupCount = resolve.sameFaceOverlapGroupCount
+        counters.mergedProfileLoopCount = resolve.mergedProfileLoopCount
+        counters.unionFailureCount = resolve.unionFailureCount
         counters.depthMode = cuts.last?.feature.depthMode
         counters.entryFaceID = cuts.last?.entryFace.id
         counters.exitFaceID = cuts.last?.exitFace?.id
         counters.entryLoopVertexCount = cuts.last?.feature.profilePoints.count ?? 0
         counters.exitLoopVertexCount = cuts.last?.exitProfile?.count ?? 0
-        counters.committedCutsCount = cuts.count
+        counters.committedCutsCount = resolve.originalCutCount
         counters.candidateCutID = cuts.last?.feature.id
         counters.affectedEntryFaceID = cuts.last?.entryFace.id
         counters.affectedExitFaceID = cuts.last?.exitFace?.id
@@ -346,7 +374,8 @@ enum CADCutMeshRebuilder {
               counters.trianglesCrossingBetweenHoles == 0,
               counters.trianglesOutsideFace == 0,
               counters.trianglesInsideEntryHole == 0,
-              counters.trianglesInsideExitHole == 0 else {
+              counters.trianglesInsideExitHole == 0,
+              counters.trianglesInsideMergedHole == 0 else {
             logRebuildDiagnostics(counters.diagnostics)
             return nil
         }
@@ -359,12 +388,73 @@ enum CADCutMeshRebuilder {
         )
     }
 
-    private static func resolveCuts(in body: ExtrudedSolidParameters) -> [ResolvedCut]? {
+    private static func resolveCuts(in body: ExtrudedSolidParameters) -> ResolveResult? {
         let bodyVertices = body.vertices()
         var resolved: [ResolvedCut] = []
-        for feature in body.boxBlindCutFeatures {
+        var overlapGroupCount = 0
+        var mergedLoopCount = 0
+        var unionFailureCount = 0
+
+        let orderedEntryFaceIDs = body.boxBlindCutFeatures.reduce(into: [UUID]()) { result, feature in
+            if !result.contains(feature.entryFaceID) {
+                result.append(feature.entryFaceID)
+            }
+        }
+
+        for entryFaceID in orderedEntryFaceIDs {
+            let faceCuts = body.boxBlindCutFeatures.filter { $0.entryFaceID == entryFaceID }
+            for group in overlappingGroups(cuts: faceCuts) {
+                guard let first = group.first else { continue }
+                if group.count == 1 {
+                    guard let cut = resolveCut(
+                        feature: first,
+                        body: body,
+                        bodyVertices: bodyVertices,
+                        isUnionResult: false
+                    ) else {
+                        return nil
+                    }
+                    resolved.append(cut)
+                    continue
+                }
+
+                overlapGroupCount += 1
+                guard let unionFeatures = unionFeatures(for: group, body: body) else {
+                    unionFailureCount += 1
+                    return nil
+                }
+                mergedLoopCount += unionFeatures.count
+                for unionFeature in unionFeatures {
+                    guard let cut = resolveCut(
+                        feature: unionFeature,
+                        body: body,
+                        bodyVertices: bodyVertices,
+                        isUnionResult: true
+                    ) else {
+                        return nil
+                    }
+                    resolved.append(cut)
+                }
+            }
+        }
+
+        return ResolveResult(
+            cuts: resolved,
+            originalCutCount: body.boxBlindCutFeatures.count,
+            sameFaceOverlapGroupCount: overlapGroupCount,
+            mergedProfileLoopCount: mergedLoopCount,
+            unionFailureCount: unionFailureCount
+        )
+    }
+
+    private static func resolveCut(
+        feature: ExtrudedSolidBoxBlindCutFeature,
+        body: ExtrudedSolidParameters,
+        bodyVertices: [DesignVector3],
+        isUnionResult: Bool
+    ) -> ResolvedCut? {
             guard let entryFace = body.faces.first(where: { $0.id == feature.entryFaceID }),
-                  feature.profileType == .rectangle || feature.profileType == .circle,
+                  feature.profileType == .rectangle || feature.profileType == .circle || feature.profileType == .polygon,
                   feature.depthMode == .distance || feature.depthMode == .throughAll else {
                 return nil
             }
@@ -412,11 +502,86 @@ enum CADCutMeshRebuilder {
                 exitProfile: exitProfile,
                 farWorldLoop: farWorldLoop,
                 depthMeters: depth,
-                direction: direction
+                direction: direction,
+                isUnionResult: isUnionResult
             )
-            resolved.append(cut)
+            return cut
+    }
+
+    private static func unionFeatures(
+        for cuts: [ExtrudedSolidBoxBlindCutFeature],
+        body: ExtrudedSolidParameters
+    ) -> [ExtrudedSolidBoxBlindCutFeature]? {
+        guard let first = cuts.first,
+              let entryFace = body.faces.first(where: { $0.id == first.entryFaceID }) else {
+            return nil
         }
-        return resolved
+        for cut in cuts {
+            guard cut.entryFaceID == first.entryFaceID,
+                  cut.depthMode == first.depthMode,
+                  cut.cutDirection.normalized(fallback: entryFace.normal * -1)
+                    .dot(first.cutDirection.normalized(fallback: entryFace.normal * -1)) > 0.999 else {
+                return nil
+            }
+            if first.depthMode == .distance,
+               abs(cut.depthMeters - first.depthMeters) > max(CADCutGeometry.epsilon * 10.0, 1e-6) {
+                return nil
+            }
+        }
+
+        let union = CADPlanarProfileUnion.union(
+            loops: cuts.map(\.profilePoints),
+            tolerance: max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        )
+        guard union.succeeded, !union.loops.isEmpty else { return nil }
+
+        return union.loops.enumerated().map { index, loop in
+            ExtrudedSolidBoxBlindCutFeature(
+                id: index == 0 ? first.id : UUID(),
+                profileType: .polygon,
+                entryFaceID: first.entryFaceID,
+                profilePoints: loop,
+                depthMeters: first.depthMeters,
+                cutDirection: first.cutDirection,
+                sourceSketchID: first.sourceSketchID,
+                sourceSketchName: first.sourceSketchName,
+                selectedProfileID: first.selectedProfileID,
+                depthMode: first.depthMode,
+                direction: first.direction
+            )
+        }
+    }
+
+    private static func overlappingGroups(
+        cuts: [ExtrudedSolidBoxBlindCutFeature]
+    ) -> [[ExtrudedSolidBoxBlindCutFeature]] {
+        guard !cuts.isEmpty else { return [] }
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        var visited = Set<UUID>()
+        var groups: [[ExtrudedSolidBoxBlindCutFeature]] = []
+        for cut in cuts where !visited.contains(cut.id) {
+            var group: [ExtrudedSolidBoxBlindCutFeature] = []
+            var queue = [cut]
+            visited.insert(cut.id)
+            while let current = queue.popLast() {
+                group.append(current)
+                for other in cuts where !visited.contains(other.id) {
+                    guard CADPlanarProfileUnion.profilesOverlapOrTouch(
+                        profileA: current.profilePoints,
+                        typeA: current.profileType,
+                        profileB: other.profilePoints,
+                        typeB: other.profileType,
+                        tolerance: tolerance
+                    ) else {
+                        continue
+                    }
+                    visited.insert(other.id)
+                    queue.append(other)
+                }
+            }
+            groups.append(group)
+        }
+        return groups
     }
 
     private static func findExitFace(
@@ -513,7 +678,7 @@ enum CADCutMeshRebuilder {
         if holes.count >= counters.holeTypesOnFace.count {
             counters.holeTypesOnFace = holes.map(\.profileType.rawValue)
         }
-        if holes.count == 1 {
+        if holes.count == 1, holes[0].profileType != .polygon {
             return appendSingleHoleFace(face, hole: holes[0], to: &writer)
         }
 
@@ -558,7 +723,15 @@ enum CADCutMeshRebuilder {
 
         for lhsIndex in holeBoundsList.indices {
             for rhsIndex in holeBoundsList.indices where rhsIndex > lhsIndex {
-                let relation = boundsRelation(holeBoundsList[lhsIndex], holeBoundsList[rhsIndex], tolerance: tolerance)
+                let lhs = holes[lhsIndex]
+                let rhs = holes[rhsIndex]
+                let relation = CADPlanarProfileUnion.relation(
+                    profileA: lhs.profile,
+                    typeA: lhs.profileType,
+                    profileB: rhs.profile,
+                    typeB: rhs.profileType,
+                    tolerance: tolerance
+                )
                 switch relation {
                 case .separate:
                     continue
@@ -575,38 +748,21 @@ enum CADCutMeshRebuilder {
         return result
     }
 
-    private enum BoundsRelation {
-        case separate
-        case touching
-        case intersecting
-    }
-
-    private static func boundsRelation(
-        _ lhs: UVBounds,
-        _ rhs: UVBounds,
-        tolerance: Double
-    ) -> BoundsRelation {
-        let gapU = max(max(lhs.minU - rhs.maxU, rhs.minU - lhs.maxU), 0.0)
-        let gapV = max(max(lhs.minV - rhs.maxV, rhs.minV - lhs.maxV), 0.0)
-        let overlapU = lhs.minU < rhs.maxU - tolerance && lhs.maxU > rhs.minU + tolerance
-        let overlapV = lhs.minV < rhs.maxV - tolerance && lhs.maxV > rhs.minV + tolerance
-        if overlapU && overlapV {
-            return .intersecting
-        }
-        if hypot(gapU, gapV) <= tolerance {
-            return .touching
-        }
-        return .separate
-    }
-
     private static func bounds(for hole: FaceHole) -> UVBounds? {
-        switch hole.profileType {
+        profileBounds(profileType: hole.profileType, points: hole.profile)
+    }
+
+    private static func profileBounds(
+        profileType: CADCutV2ProfileType,
+        points: [SketchPoint2D]
+    ) -> UVBounds? {
+        switch profileType {
         case .rectangle:
-            return CADCutGeometry.profileBounds(hole.profile)
+            return CADCutGeometry.profileBounds(points)
         case .circle:
             guard let circle = CADCutGeometry.circleMetrics(
-                points: hole.profile,
-                explicitCenter: CADCutGeometry.profileCenter(hole.profile),
+                points: points,
+                explicitCenter: CADCutGeometry.profileCenter(points),
                 explicitRadius: nil
             ) else {
                 return nil
@@ -617,7 +773,9 @@ enum CADCutMeshRebuilder {
                 minV: circle.center.v - circle.radius,
                 maxV: circle.center.v + circle.radius
             )
-        case .polygon, .unsupported:
+        case .polygon:
+            return CADCutGeometry.profileBounds(points)
+        case .unsupported:
             return nil
         }
     }
@@ -1002,19 +1160,25 @@ enum CADCutMeshRebuilder {
         }
 
         switch cut.feature.profileType {
-        case .rectangle:
-            appendLoopWalls(entry: entryWorldLoop, far: bottomLoop, center: cutCenter(cut), to: &writer)
+        case .rectangle, .circle, .polygon:
+            appendLoopWalls(
+                entry: entryWorldLoop,
+                far: bottomLoop,
+                profile: entryLoop,
+                entryFace: entryFace,
+                fallbackCenter: cutCenter(cut),
+                to: &writer
+            )
             if cut.feature.depthMode == .distance {
-                appendPolygonCap(bottomLoop, normal: cut.direction * -1, to: &writer)
+                appendPolygonCap(
+                    profile: cut.feature.profilePoints,
+                    worldLoop: bottomLoop,
+                    normal: cut.direction * -1,
+                    to: &writer
+                )
                 counters.capFacesGenerated += max(bottomLoop.count - 2, 0)
             }
-        case .circle:
-            appendLoopWalls(entry: entryWorldLoop, far: bottomLoop, center: cutCenter(cut), to: &writer)
-            if cut.feature.depthMode == .distance {
-                appendPolygonCap(bottomLoop, normal: cut.direction * -1, to: &writer)
-                counters.capFacesGenerated += max(bottomLoop.count - 2, 0)
-            }
-        case .polygon, .unsupported:
+        case .unsupported:
             break
         }
     }
@@ -1031,14 +1195,24 @@ enum CADCutMeshRebuilder {
     private static func appendLoopWalls(
         entry: [DesignVector3],
         far: [DesignVector3],
-        center: DesignVector3,
+        profile: [SketchPoint2D],
+        entryFace: DesignPlanarFace,
+        fallbackCenter center: DesignVector3,
         to writer: inout MeshWriter
     ) {
-        guard entry.count == far.count, entry.count >= 3 else { return }
+        guard entry.count == far.count,
+              entry.count == profile.count,
+              entry.count >= 3 else { return }
+        let windingSign = DesignSketch.polygonSignedAreaMeters2(profile) >= 0 ? 1.0 : -1.0
+        let uAxis = entryFace.uAxis.normalized(fallback: .xAxis)
+        let vAxis = entryFace.vAxis.normalized(fallback: .yAxis)
         for index in entry.indices {
             let next = (index + 1) % entry.count
+            let edgeU = profile[next].u - profile[index].u
+            let edgeV = profile[next].v - profile[index].v
             let mid = (entry[index] + entry[next] + far[index] + far[next]) * 0.25
-            let normal = (center - mid).normalized(fallback: .zAxis)
+            let localInteriorNormal = (uAxis * (-edgeV) + vAxis * edgeU) * windingSign
+            let normal = localInteriorNormal.normalized(fallback: (center - mid).normalized(fallback: .zAxis))
             writer.appendQuad(
                 entry[index],
                 far[index],
@@ -1050,13 +1224,24 @@ enum CADCutMeshRebuilder {
     }
 
     private static func appendPolygonCap(
-        _ points: [DesignVector3],
+        profile: [SketchPoint2D],
+        worldLoop points: [DesignVector3],
         normal: DesignVector3,
         to writer: inout MeshWriter
     ) {
-        guard points.count >= 3 else { return }
-        for index in 1..<(points.count - 1) {
-            writer.appendTriangle(points[0], points[index], points[index + 1], desiredNormal: normal)
+        guard points.count == profile.count,
+              points.count >= 3 else {
+            return
+        }
+        let triangles = earClipTriangulate(profile)
+        guard !triangles.isEmpty else { return }
+        for triangle in triangles {
+            writer.appendTriangle(
+                points[triangle.a],
+                points[triangle.b],
+                points[triangle.c],
+                desiredNormal: normal
+            )
         }
     }
 
@@ -1118,6 +1303,9 @@ enum CADCutMeshRebuilder {
                     }
                     if entry.centroidInsideHole {
                         counters.trianglesInsideEntryHole += 1
+                        if cut.isUnionResult {
+                            counters.trianglesInsideMergedHole += 1
+                        }
                     }
                     if cut.feature.depthMode == .throughAll, entry.suspectedPlug {
                         counters.suspectedOrphanPlugTriangles += 1
@@ -1139,6 +1327,9 @@ enum CADCutMeshRebuilder {
                 if exit.centroidInsideHole {
                     counters.trianglesInsideAnyHole += 1
                     counters.trianglesInsideExitHole += 1
+                    if cut.isUnionResult {
+                        counters.trianglesInsideMergedHole += 1
+                    }
                 }
                 if exit.suspectedPlug {
                     counters.suspectedOrphanPlugTriangles += 1
@@ -1364,7 +1555,16 @@ enum CADCutMeshRebuilder {
                 return false
             }
             return abs(point.distance(to: circle.center) - circle.radius) <= max(tolerance, circle.radius * 0.01)
-        case .polygon, .unsupported:
+        case .polygon:
+            return profile.indices.contains { index in
+                let next = (index + 1) % profile.count
+                return point.distance(to: closestPointOnSegment(
+                    from: point,
+                    segA: profile[index],
+                    segB: profile[next]
+                )) <= tolerance
+            }
+        case .unsupported:
             return false
         }
     }
@@ -1442,9 +1642,35 @@ enum CADCutMeshRebuilder {
                 return false
             }
             return point.distance(to: circle.center) < circle.radius - CADCutGeometry.epsilon
-        case .polygon, .unsupported:
+        case .polygon:
+            guard !pointIsOnProfileBoundary(
+                point,
+                profile: profile,
+                profileType: profileType,
+                tolerance: CADCutGeometry.epsilon
+            ) else {
+                return false
+            }
+            return pointInPolygon(point, polygon: profile)
+        case .unsupported:
             return false
         }
+    }
+
+    private static func pointInPolygon(_ point: SketchPoint2D, polygon: [SketchPoint2D]) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var inside = false
+        var j = polygon.count - 1
+        for i in polygon.indices {
+            let pi = polygon[i]
+            let pj = polygon[j]
+            if (pi.v > point.v) != (pj.v > point.v) {
+                let x = (pj.u - pi.u) * (point.v - pi.v) / (pj.v - pi.v) + pi.u
+                if point.u < x { inside.toggle() }
+            }
+            j = i
+        }
+        return inside
     }
 
     private static func pointInTriangle(
@@ -1462,10 +1688,50 @@ enum CADCutMeshRebuilder {
         return alpha >= -tolerance && beta >= -tolerance && gamma >= -tolerance
     }
 
+    private static func earClipTriangulate(_ points: [SketchPoint2D]) -> [CADSolidTriangle] {
+        guard points.count >= 3 else { return [] }
+        var indices = DesignSketch.polygonSignedAreaMeters2(points) >= 0
+            ? Array(points.indices)
+            : Array(points.indices.reversed())
+        var triangles: [CADSolidTriangle] = []
+        var guardCount = 0
+
+        while indices.count > 3, guardCount < points.count * points.count {
+            guardCount += 1
+            var clipped = false
+            for localIndex in indices.indices {
+                let prev = indices[(localIndex + indices.count - 1) % indices.count]
+                let current = indices[localIndex]
+                let next = indices[(localIndex + 1) % indices.count]
+                guard isConvex(points[prev], points[current], points[next]) else { continue }
+                let containsPoint = indices.contains { candidate in
+                    candidate != prev && candidate != current && candidate != next
+                        && pointInTriangle(points[candidate], points[prev], points[current], points[next])
+                }
+                guard !containsPoint else { continue }
+                triangles.append(CADSolidTriangle(a: prev, b: current, c: next))
+                indices.remove(at: localIndex)
+                clipped = true
+                break
+            }
+            if !clipped { break }
+        }
+
+        if indices.count == 3 {
+            triangles.append(CADSolidTriangle(a: indices[0], b: indices[1], c: indices[2]))
+        }
+        return triangles
+    }
+
+    private static func isConvex(_ a: SketchPoint2D, _ b: SketchPoint2D, _ c: SketchPoint2D) -> Bool {
+        ((b.u - a.u) * (c.v - a.v) - (b.v - a.v) * (c.u - a.u)) > 1e-14
+    }
+
     private static func logRebuildDiagnostics(_ diagnostics: CADCutMeshRebuildDiagnostics) {
         print(
             "CAD Cut V1 Mesh Rebuild: " +
             "throughAll=\(diagnostics.throughAll) " +
+            "totalCuts=\(diagnostics.totalCutCount) " +
             "totalCutCount=\(diagnostics.totalCutCount) " +
             "affectedFaceCount=\(diagnostics.affectedFaceCount) " +
             "cutsGroupedByFace=\(diagnostics.cutsGroupedByFace.joined(separator: ",")) " +
@@ -1482,6 +1748,11 @@ enum CADCutMeshRebuilder {
             "holeTouchDetected=\(diagnostics.holeTouchDetected) " +
             "cutVolumeIntersectionDetected=\(diagnostics.cutVolumeIntersectionDetected) " +
             "unsupportedIntersectingCutDetected=\(diagnostics.unsupportedIntersectingCutDetected) " +
+            "sameFaceOverlapGroupCount=\(diagnostics.sameFaceOverlapGroupCount) " +
+            "mergedProfileLoopCount=\(diagnostics.mergedProfileLoopCount) " +
+            "unionFailureCount=\(diagnostics.unionFailureCount) " +
+            "trianglesInsideMergedHole=\(diagnostics.trianglesInsideMergedHole) " +
+            "crossFaceIntersectionBlocked=\(diagnostics.crossFaceIntersectionBlocked) " +
             "entryFaceRebuiltWithHole=\(diagnostics.entryFaceRebuiltWithHole) " +
             "exitFaceRebuiltWithHole=\(diagnostics.exitFaceRebuiltWithHole) " +
             "capFacesGenerated=\(diagnostics.capFacesGenerated) " +

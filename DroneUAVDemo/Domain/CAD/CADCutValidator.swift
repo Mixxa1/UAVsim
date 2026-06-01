@@ -148,6 +148,7 @@ struct CADMultiCutValidationResult: Equatable {
     var reason: String?
     var cutVolumeIntersectionDetected: Bool
     var unsupportedIntersectingCutDetected: Bool
+    var crossFaceIntersectionBlocked: Bool
 
     var isValid: Bool { validation.isValid }
 }
@@ -191,7 +192,8 @@ enum CADMultiCutValidator {
             existingSurfaces: [SurfaceCut] = [],
             newSurfaces: [SurfaceCut] = [],
             cutVolumeIntersectionDetected: Bool = false,
-            unsupportedIntersectingCutDetected: Bool = false
+            unsupportedIntersectingCutDetected: Bool = false,
+            crossFaceIntersectionBlocked: Bool = false
         ) -> CADMultiCutValidationResult {
             let exitFaceID = newSurfaces.first(where: { $0.isExit })?.faceID
             let cutsOnEntryFace = existingSurfaces.filter { $0.faceID == newCut.entryFaceID }.count + 1
@@ -209,7 +211,8 @@ enum CADMultiCutValidator {
                 committedCutsCount: validation.isValid ? candidateCuts.count : existingCuts.count,
                 reason: reason ?? validation.messageKey,
                 cutVolumeIntersectionDetected: cutVolumeIntersectionDetected,
-                unsupportedIntersectingCutDetected: unsupportedIntersectingCutDetected
+                unsupportedIntersectingCutDetected: unsupportedIntersectingCutDetected,
+                crossFaceIntersectionBlocked: crossFaceIntersectionBlocked
             )
         }
 
@@ -263,16 +266,49 @@ enum CADMultiCutValidator {
             )
         }
 
+        let existingCutByID = Dictionary(uniqueKeysWithValues: existingCuts.map { ($0.id, $0) })
+        var sameFaceUnionNeedsValidation = false
+
         for newSurface in newSurfaces {
             for existingSurface in existingSurfaces where existingSurface.faceID == newSurface.faceID {
                 guard !profilesOverlapOrTouch(newSurface, existingSurface) else {
+                    guard let existingCut = existingCutByID[existingSurface.cutID] else {
+                        return result(
+                            .cutIntersectsExistingVoidUnsupported,
+                            reason: intersectingCutUnsupportedReason,
+                            existingSurfaces: existingSurfaces,
+                            newSurfaces: newSurfaces,
+                            unsupportedIntersectingCutDetected: true
+                        )
+                    }
+                    if existingCut.entryFaceID == newCut.entryFaceID {
+                        if let failure = sameFaceIntersectionFailure(
+                            lhs: newCut,
+                            lhsEntryFace: entryFace,
+                            lhsDepth: newDepth,
+                            rhs: existingCut,
+                            body: baseBody
+                        ) {
+                            return result(
+                                failure,
+                                reason: failure.messageKey,
+                                existingSurfaces: existingSurfaces,
+                                newSurfaces: newSurfaces,
+                                cutVolumeIntersectionDetected: true,
+                                unsupportedIntersectingCutDetected: true
+                            )
+                        }
+                        sameFaceUnionNeedsValidation = true
+                        continue
+                    }
                     return result(
-                        .cutIntersectsExistingVoidUnsupported,
-                        reason: intersectingCutUnsupportedReason,
+                        .crossFaceIntersectingCutUnsupported,
+                        reason: CADFeatureValidation.crossFaceIntersectingCutUnsupported.messageKey,
                         existingSurfaces: existingSurfaces,
                         newSurfaces: newSurfaces,
                         cutVolumeIntersectionDetected: true,
-                        unsupportedIntersectingCutDetected: true
+                        unsupportedIntersectingCutDetected: true,
+                        crossFaceIntersectionBlocked: true
                     )
                 }
             }
@@ -326,13 +362,34 @@ enum CADMultiCutValidator {
             case .separate:
                 continue
             case .intersecting, .touching:
+                if existingCut.entryFaceID == newCut.entryFaceID {
+                    if let failure = sameFaceIntersectionFailure(
+                        lhs: newCut,
+                        lhsEntryFace: entryFace,
+                        lhsDepth: newDepth,
+                        rhs: existingCut,
+                        body: baseBody
+                    ) {
+                        return result(
+                            failure,
+                            reason: failure.messageKey,
+                            existingSurfaces: existingSurfaces,
+                            newSurfaces: newSurfaces,
+                            cutVolumeIntersectionDetected: true,
+                            unsupportedIntersectingCutDetected: true
+                        )
+                    }
+                    sameFaceUnionNeedsValidation = true
+                    continue
+                }
                 return result(
-                    .cutIntersectsExistingVoidUnsupported,
-                    reason: intersectingCutUnsupportedReason,
+                    .crossFaceIntersectingCutUnsupported,
+                    reason: CADFeatureValidation.crossFaceIntersectingCutUnsupported.messageKey,
                     existingSurfaces: existingSurfaces,
                     newSurfaces: newSurfaces,
                     cutVolumeIntersectionDetected: true,
-                    unsupportedIntersectingCutDetected: true
+                    unsupportedIntersectingCutDetected: true,
+                    crossFaceIntersectionBlocked: true
                 )
             case .uncertain:
                 return result(
@@ -343,6 +400,18 @@ enum CADMultiCutValidator {
                     unsupportedIntersectingCutDetected: true
                 )
             }
+        }
+
+        if sameFaceUnionNeedsValidation,
+           !sameFaceUnionIsValid(on: entryFace, cuts: candidateCuts.filter { $0.entryFaceID == newCut.entryFaceID }) {
+            return result(
+                .profileUnionFailed,
+                reason: CADFeatureValidation.profileUnionFailed.messageKey,
+                existingSurfaces: existingSurfaces,
+                newSurfaces: newSurfaces,
+                cutVolumeIntersectionDetected: true,
+                unsupportedIntersectingCutDetected: true
+            )
         }
 
         return result(
@@ -528,6 +597,94 @@ enum CADMultiCutValidator {
         return projected
     }
 
+    private static func sameFaceIntersectionFailure(
+        lhs: ExtrudedSolidBoxBlindCutFeature,
+        lhsEntryFace: DesignPlanarFace,
+        lhsDepth: Double,
+        rhs: ExtrudedSolidBoxBlindCutFeature,
+        body: ExtrudedSolidParameters
+    ) -> CADFeatureValidation? {
+        guard let rhsEntryFace = body.faces.first(where: { $0.id == rhs.entryFaceID }),
+              let rhsDepth = resolvedDepth(for: rhs, entryFace: rhsEntryFace, body: body) else {
+            return .cutIntersectsExistingVoidUnsupported
+        }
+        if lhs.depthMode != rhs.depthMode {
+            return .distanceThroughAllIntersectionUnsupported
+        }
+        if lhs.depthMode == .distance {
+            let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+            guard abs(lhsDepth - rhsDepth) <= tolerance else {
+                return .sameFaceIntersectingCutsDifferentDepthUnsupported
+            }
+        }
+        let lhsDirection = lhs.cutDirection.normalized(fallback: lhsEntryFace.normal * -1)
+        let rhsDirection = rhs.cutDirection.normalized(fallback: rhsEntryFace.normal * -1)
+        guard lhsDirection.dot(rhsDirection) > 0.999 else {
+            return .cutIntersectsExistingVoidUnsupported
+        }
+        return nil
+    }
+
+    private static func sameFaceUnionIsValid(
+        on face: DesignPlanarFace,
+        cuts: [ExtrudedSolidBoxBlindCutFeature]
+    ) -> Bool {
+        guard !cuts.isEmpty else { return true }
+        let groups = overlappingGroups(cuts: cuts)
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        for group in groups where group.count > 1 {
+            let union = CADPlanarProfileUnion.union(
+                loops: group.map(\.profilePoints),
+                tolerance: tolerance
+            )
+            guard union.succeeded, !union.loops.isEmpty else { return false }
+            for loop in union.loops {
+                guard loop.count >= 3,
+                      abs(DesignSketch.polygonSignedAreaMeters2(loop)) > tolerance * tolerance,
+                      let bounds = CADCutGeometry.profileBounds(loop),
+                      bounds.minU > face.bounds.minU + tolerance,
+                      bounds.maxU < face.bounds.maxU - tolerance,
+                      bounds.minV > face.bounds.minV + tolerance,
+                      bounds.maxV < face.bounds.maxV - tolerance else {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+
+    private static func overlappingGroups(
+        cuts: [ExtrudedSolidBoxBlindCutFeature]
+    ) -> [[ExtrudedSolidBoxBlindCutFeature]] {
+        guard !cuts.isEmpty else { return [] }
+        let tolerance = max(CADCutGeometry.epsilon * 10.0, 1e-6)
+        var visited = Set<UUID>()
+        var groups: [[ExtrudedSolidBoxBlindCutFeature]] = []
+        for cut in cuts where !visited.contains(cut.id) {
+            var group: [ExtrudedSolidBoxBlindCutFeature] = []
+            var queue = [cut]
+            visited.insert(cut.id)
+            while let current = queue.popLast() {
+                group.append(current)
+                for other in cuts where !visited.contains(other.id) {
+                    guard CADPlanarProfileUnion.profilesOverlapOrTouch(
+                        profileA: current.profilePoints,
+                        typeA: current.profileType,
+                        profileB: other.profilePoints,
+                        typeB: other.profileType,
+                        tolerance: tolerance
+                    ) else {
+                        continue
+                    }
+                    visited.insert(other.id)
+                    queue.append(other)
+                }
+            }
+            groups.append(group)
+        }
+        return groups
+    }
+
     private static func cutVolumeRelation(
         lhs: ExtrudedSolidBoxBlindCutFeature,
         lhsEntryFace: DesignPlanarFace,
@@ -637,14 +794,17 @@ enum CADMultiCutValidator {
         tolerance: Double = CADCutGeometry.epsilon
     ) -> Bool {
         guard lhs.cutID != rhs.cutID,
-              let lhsBounds = profileBounds(profileType: lhs.profileType, points: lhs.profilePoints),
-              let rhsBounds = profileBounds(profileType: rhs.profileType, points: rhs.profilePoints) else {
+              profileBounds(profileType: lhs.profileType, points: lhs.profilePoints) != nil,
+              profileBounds(profileType: rhs.profileType, points: rhs.profilePoints) != nil else {
             return true
         }
-        return lhsBounds.minU <= rhsBounds.maxU + tolerance
-            && lhsBounds.maxU + tolerance >= rhsBounds.minU
-            && lhsBounds.minV <= rhsBounds.maxV + tolerance
-            && lhsBounds.maxV + tolerance >= rhsBounds.minV
+        return CADPlanarProfileUnion.profilesOverlapOrTouch(
+            profileA: lhs.profilePoints,
+            typeA: lhs.profileType,
+            profileB: rhs.profilePoints,
+            typeB: rhs.profileType,
+            tolerance: tolerance
+        )
     }
 
     private static func profileBounds(for cut: ExtrudedSolidBoxBlindCutFeature) -> ProfileBounds? {
