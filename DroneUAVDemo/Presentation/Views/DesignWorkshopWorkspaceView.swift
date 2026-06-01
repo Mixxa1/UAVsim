@@ -1480,13 +1480,21 @@ struct DesignWorkshopWorkspaceView: View {
                                     }
                                     if !parameters.boxBlindCutFeatures.isEmpty {
                                         ForEach(parameters.boxBlindCutFeatures.indices, id: \.self) { index in
+                                            let cut = parameters.boxBlindCutFeatures[index]
                                             treeLeaf(
                                                 icon: "minus.square",
                                                 name: String(format: NSLocalizedString("cad.tree.cut_feature", comment: ""), index + 1),
                                                 level: 3,
-                                                isSelected: false
+                                                isSelected: viewModel.selectedCutTargetBodyID == asset.id
+                                                    && viewModel.selectedCutFeatureID == cut.id
                                             ) {
-                                                viewModel.selectAsset(asset.id)
+                                                viewModel.selectCutFeature(bodyID: asset.id, cutID: cut.id)
+                                            }
+                                            .contextMenu {
+                                                Button(NSLocalizedString("cad.cut_v2.action.delete_cut", comment: ""), role: .destructive) {
+                                                    viewModel.selectCutFeature(bodyID: asset.id, cutID: cut.id)
+                                                    viewModel.deleteSelectedCutFeature()
+                                                }
                                             }
                                         }
                                     }
@@ -3539,9 +3547,46 @@ struct DesignWorkshopWorkspaceView: View {
     @ViewBuilder
     private func extrudedSolidInspector(_ asset: DesignAsset, parameters: ExtrudedSolidParameters) -> some View {
         materialPicker(asset)
+        selectedCutInspectorSection(for: asset)
         extrudedSolidInfo(asset, parameters: parameters)
         massInfoSection(asset)
         attachmentPointsSection(asset)
+    }
+
+    @ViewBuilder
+    private func selectedCutInspectorSection(for asset: DesignAsset) -> some View {
+        if let cut = viewModel.selectedCutInspectorData,
+           cut.bodyID == asset.id {
+            ModuleSection(titleKey: "cad.cut_v2.selected_cut.title") {
+                VStack(alignment: .leading, spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                        WorkshopMetricCell(labelKey: "cad.cut_v2.selected_cut.name", value: String(format: NSLocalizedString("cad.tree.cut_feature", comment: ""), cut.displayIndex))
+                        WorkshopMetricCell(labelKey: "cad.cut_v2.selected_cut.type", value: cut.profileTypeName)
+                        WorkshopMetricCell(labelKey: "cad.cut_v2.selected_cut.mode", value: cut.depthModeName)
+                        WorkshopMetricCell(labelKey: "cad.cut_v2.selected_cut.depth", value: String(format: "%.2f mm", cut.depthMeters * 1000))
+                        WorkshopMetricCell(labelKey: "cad.cut_v2.selected_cut.sketch", value: cut.sourceSketchName)
+                        WorkshopMetricCell(labelKey: "cad.cut_v2.selected_cut.entry_face", value: cut.entryFaceDisplayName)
+                    }
+
+                    Button {
+                        viewModel.deleteSelectedCutFeature()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(LocalizedStringKey("cad.cut_v2.action.delete_cut"))
+                                .font(.caption.weight(.semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(GroundControlPalette.danger)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(GroundControlPalette.inset))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(GroundControlPalette.danger.opacity(0.35), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 
     private func extrudedSolidInfo(_ asset: DesignAsset, parameters p: ExtrudedSolidParameters) -> some View {

@@ -1682,6 +1682,14 @@
 "cad.tree.cut_extrude_feature" = "Вырез выдавливанием %d";
 "cad.tree.cuts" = "Вырезы";
 "cad.tree.cut_feature" = "Вырез %d";
+"cad.cut_v2.selected_cut.title" = "Выбранный вырез";
+"cad.cut_v2.selected_cut.name" = "Вырез";
+"cad.cut_v2.selected_cut.type" = "Тип";
+"cad.cut_v2.selected_cut.mode" = "Режим";
+"cad.cut_v2.selected_cut.depth" = "Глубина";
+"cad.cut_v2.selected_cut.sketch" = "Эскиз";
+"cad.cut_v2.selected_cut.entry_face" = "Входная грань";
+"cad.cut_v2.action.delete_cut" = "Удалить вырез";
 
 // CAD инструмент Линия (интерактивный)
 "cad.line.idle" = "Инструмент «Линия» готов";

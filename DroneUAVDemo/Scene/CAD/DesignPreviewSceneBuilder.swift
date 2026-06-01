@@ -257,6 +257,8 @@ struct DesignViewportState: Equatable {
     var selectedSketchEntityID: UUID?
     var selectedSketchEntityIDs: Set<UUID>
     var selectedFaceID: UUID?
+    var selectedCutFeatureID: UUID?
+    var selectedCutTargetBodyID: UUID?
     var hoveredWorkPlaneID: String?
     var selectedWorkPlaneID: String?
     var activeTool: DesignWorkshopToolMode
@@ -285,6 +287,8 @@ struct DesignViewportState: Equatable {
         selectedSketchEntityID: UUID? = nil,
         selectedSketchEntityIDs: Set<UUID> = [],
         selectedFaceID: UUID? = nil,
+        selectedCutFeatureID: UUID? = nil,
+        selectedCutTargetBodyID: UUID? = nil,
         hoveredWorkPlaneID: String? = nil,
         selectedWorkPlaneID: String? = nil,
         activeTool: DesignWorkshopToolMode = .select,
@@ -312,6 +316,8 @@ struct DesignViewportState: Equatable {
         self.selectedSketchEntityID = selectedSketchEntityID
         self.selectedSketchEntityIDs = selectedSketchEntityIDs
         self.selectedFaceID = selectedFaceID
+        self.selectedCutFeatureID = selectedCutFeatureID
+        self.selectedCutTargetBodyID = selectedCutTargetBodyID
         self.hoveredWorkPlaneID = hoveredWorkPlaneID
         self.selectedWorkPlaneID = selectedWorkPlaneID
         self.activeTool = activeTool

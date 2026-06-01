@@ -1909,6 +1909,77 @@ enum DesignAssetNodeFactory {
         return node
     }
 
+    static func makeCutSelectionHighlightNode(
+        bodyParams: ExtrudedSolidParameters,
+        cutID: UUID
+    ) -> SCNNode? {
+        guard let cut = bodyParams.boxBlindCutFeatures.first(where: { $0.id == cutID }),
+              let entryFace = bodyParams.faces.first(where: { $0.id == cut.entryFaceID }) else {
+            return nil
+        }
+
+        let root = SCNNode()
+        root.name = "cad.cut.selectionHighlight"
+        root.renderingOrder = 14
+
+        let highlightColor = NSColor(red: 0.18, green: 0.80, blue: 1.0, alpha: 1.0)
+        let outlineMaterial = SCNMaterial()
+        outlineMaterial.lightingModel = .constant
+        outlineMaterial.diffuse.contents = highlightColor
+        outlineMaterial.emission.contents = highlightColor.withAlphaComponent(0.55)
+        outlineMaterial.writesToDepthBuffer = false
+        outlineMaterial.readsFromDepthBuffer = false
+
+        let faceNormal = entryFace.normal.normalized(fallback: .zAxis)
+        let outlinePoints = cut.profilePoints.map {
+            CADCutGeometry.worldPoint(on: entryFace, local: $0) + faceNormal * 0.00035
+        }
+        guard outlinePoints.count >= 3 else { return nil }
+
+        let lineRadius: CGFloat = cut.profileType == .circle ? 0.0018 : 0.0022
+        for index in outlinePoints.indices {
+            let next = (index + 1) % outlinePoints.count
+            let segment = makeHighlightSegmentNode(
+                from: outlinePoints[index],
+                to: outlinePoints[next],
+                radius: lineRadius,
+                material: outlineMaterial
+            )
+            segment.name = "cad.cut.selectionHighlight.outline"
+            root.addChildNode(segment)
+        }
+
+        let direction = cut.cutDirection.normalized(fallback: entryFace.normal * -1)
+        let depth = cut.depthMode == .throughAll
+            ? (CADCutGeometry.bodyThickness(
+                entryFaceCenter: entryFace.center,
+                bodyWorldVertices: bodyParams.vertices(),
+                direction: direction
+            ) ?? cut.depthMeters)
+            : cut.depthMeters
+        if depth > CADCutGeometry.epsilon,
+           let wallGeometry = makeCutSelectionWallGeometry(
+                entryPoints: cut.profilePoints.map { CADCutGeometry.worldPoint(on: entryFace, local: $0) },
+                farPoints: cut.profilePoints.map { CADCutGeometry.worldPoint(on: entryFace, local: $0) + direction * depth }
+           ) {
+            let wallMaterial = SCNMaterial()
+            wallMaterial.lightingModel = .constant
+            wallMaterial.diffuse.contents = highlightColor.withAlphaComponent(0.16)
+            wallMaterial.emission.contents = highlightColor.withAlphaComponent(0.18)
+            wallMaterial.transparency = 0.18
+            wallMaterial.isDoubleSided = true
+            wallMaterial.writesToDepthBuffer = false
+            wallMaterial.readsFromDepthBuffer = true
+            wallGeometry.firstMaterial = wallMaterial
+            let wallNode = SCNNode(geometry: wallGeometry)
+            wallNode.name = "cad.cut.selectionHighlight.wall"
+            wallNode.renderingOrder = 13
+            root.addChildNode(wallNode)
+        }
+
+        return root
+    }
+
     private static func makeCutToolPreviewGeometry(_ p: ExtrudedSolidParameters) -> SCNGeometry? {
         let pts = p.profilePoints
         guard pts.count >= 3,
@@ -2009,6 +2080,54 @@ enum DesignAssetNodeFactory {
         let normSrc = SCNGeometrySource(normals: normals)
         let el = SCNGeometryElement(indices: indices, primitiveType: .triangles)
         return SCNGeometry(sources: [posSrc, normSrc], elements: [el])
+    }
+
+    private static func makeCutSelectionWallGeometry(
+        entryPoints: [DesignVector3],
+        farPoints: [DesignVector3]
+    ) -> SCNGeometry? {
+        guard entryPoints.count >= 3, entryPoints.count == farPoints.count else { return nil }
+        var vertices: [SCNVector3] = []
+        var indices: [Int32] = []
+
+        for index in entryPoints.indices {
+            let next = (index + 1) % entryPoints.count
+            let base = Int32(vertices.count)
+            vertices.append(scnVector(entryPoints[index]))
+            vertices.append(scnVector(entryPoints[next]))
+            vertices.append(scnVector(farPoints[next]))
+            vertices.append(scnVector(farPoints[index]))
+            indices += [base, base + 1, base + 2, base, base + 2, base + 3]
+        }
+
+        return SCNGeometry(
+            sources: [SCNGeometrySource(vertices: vertices)],
+            elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)]
+        )
+    }
+
+    private static func makeHighlightSegmentNode(
+        from start: DesignVector3,
+        to end: DesignVector3,
+        radius: CGFloat,
+        material: SCNMaterial
+    ) -> SCNNode {
+        let delta = end - start
+        let length = max(delta.length, 1e-6)
+        let cylinder = SCNCylinder(radius: radius, height: CGFloat(length))
+        cylinder.radialSegmentCount = 12
+        cylinder.firstMaterial = material
+        let node = SCNNode(geometry: cylinder)
+        node.position = scnVector((start + end) * 0.5)
+        node.simdOrientation = simd_quatf(
+            from: SIMD3<Float>(0, 1, 0),
+            to: simd_float3(Float(delta.x), Float(delta.y), Float(delta.z))
+        )
+        return node
+    }
+
+    private static func scnVector(_ point: DesignVector3) -> SCNVector3 {
+        SCNVector3(Float(point.x), Float(point.y), Float(point.z))
     }
 
     private static func triangulateFan(

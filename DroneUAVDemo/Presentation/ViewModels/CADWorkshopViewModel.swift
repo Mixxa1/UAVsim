@@ -596,6 +596,8 @@ final class CADWorkshopViewModel: ObservableObject {
     @Published var selectedSketchEntityID: UUID?
     @Published var selectedSketchEntityIDs: Set<UUID> = []
     @Published var selectedFaceID: UUID?
+    @Published var selectedCutFeatureID: UUID?
+    @Published var selectedCutTargetBodyID: UUID?
     @Published var hoveredWorkPlaneID: String?
     @Published var selectedWorkPlane: CADWorkPlane?
     @Published var workPlaneQuickAction: CADWorkPlaneQuickAction?
@@ -971,6 +973,40 @@ final class CADWorkshopViewModel: ObservableObject {
 
     var cutCommitCapFacesGeneratedDisplayName: String {
         String(cutCommitValidationResult.capFacesGenerated)
+    }
+
+    struct SelectedCutInspectorData: Equatable {
+        var bodyID: UUID
+        var cutID: UUID
+        var displayIndex: Int
+        var profileTypeName: String
+        var depthModeName: String
+        var depthMeters: Double
+        var sourceSketchName: String
+        var entryFaceDisplayName: String
+    }
+
+    var selectedCutInspectorData: SelectedCutInspectorData? {
+        guard let bodyID = selectedCutTargetBodyID,
+              let cutID = selectedCutFeatureID,
+              let asset = document.assets.first(where: { $0.id == bodyID }),
+              case let .extrudedSolid(params) = asset.kind,
+              let index = params.boxBlindCutFeatures.firstIndex(where: { $0.id == cutID }) else {
+            return nil
+        }
+        let cut = params.boxBlindCutFeatures[index]
+        let face = params.faces.first(where: { $0.id == cut.entryFaceID })
+        let faceName = face.map { "\($0.name) [\(shortDebugID($0.id))]" } ?? shortDebugID(cut.entryFaceID)
+        return SelectedCutInspectorData(
+            bodyID: bodyID,
+            cutID: cut.id,
+            displayIndex: index + 1,
+            profileTypeName: localized(cut.profileType.displayNameKey),
+            depthModeName: localized(cut.depthMode.displayNameKey),
+            depthMeters: cut.depthMeters,
+            sourceSketchName: cut.sourceSketchName,
+            entryFaceDisplayName: faceName
+        )
     }
 
     /// ID of the solid body to cut into. Returns the face's source asset when the sketch is on a body
@@ -3179,12 +3215,32 @@ final class CADWorkshopViewModel: ObservableObject {
         if previousAssetID != id {
             clearAllTransientCADNodes(resetOperation: false)
         }
+        selectedCutFeatureID = nil
+        selectedCutTargetBodyID = nil
         extrudeWarningKey = nil
         selectedFaceID = nil
         selectedWorkPlane = nil
         hoveredWorkPlaneID = nil
         workPlaneQuickAction = nil
         syncSelectionStateForSelectedAsset()
+    }
+
+    func selectCutFeature(bodyID: UUID, cutID: UUID) {
+        guard let asset = document.assets.first(where: { $0.id == bodyID }),
+              case let .extrudedSolid(params) = asset.kind,
+              params.boxBlindCutFeatures.contains(where: { $0.id == cutID }) else {
+            return
+        }
+        document.selectAsset(bodyID)
+        selectedCutTargetBodyID = bodyID
+        selectedCutFeatureID = cutID
+        selectedAttachmentPointID = nil
+        selectedFaceID = nil
+        selectedWorkPlane = nil
+        hoveredWorkPlaneID = nil
+        workPlaneQuickAction = nil
+        clearAllTransientCADNodes(resetOperation: false)
+        refreshViewportState()
     }
 
     /// Select a sketch from the tree and immediately transition to its native 2D view.
@@ -3256,12 +3312,16 @@ final class CADWorkshopViewModel: ObservableObject {
               case let .extrudedSolid(parameters) = selectedAsset.kind,
               let face = parameters.faces.first(where: { $0.id == id }) else {
             selectedFaceID = nil
+            selectedCutFeatureID = nil
+            selectedCutTargetBodyID = nil
             selectedWorkPlane = nil
             workPlaneQuickAction = nil
             refreshViewportState()
             return
         }
         selectedFaceID = id
+        selectedCutFeatureID = nil
+        selectedCutTargetBodyID = nil
         selectedWorkPlane = .face(face)
         hoveredWorkPlaneID = selectedWorkPlane?.id
         workPlaneQuickAction = nil
@@ -4346,6 +4406,56 @@ final class CADWorkshopViewModel: ObservableObject {
         document.removeAsset(id: id)
         syncSelectionStateForSelectedAsset()
         focusSelectionOrFit()
+    }
+
+    func deleteSelectedCutFeature() {
+        guard let bodyID = selectedCutTargetBodyID,
+              let cutID = selectedCutFeatureID,
+              let bodyIndex = document.assets.firstIndex(where: { $0.id == bodyID }),
+              case var .extrudedSolid(params) = document.assets[bodyIndex].kind else {
+            return
+        }
+
+        let originalCount = params.boxBlindCutFeatures.count
+        params.boxBlindCutFeatures.removeAll { $0.id == cutID }
+        guard params.boxBlindCutFeatures.count != originalCount else { return }
+
+        params.kernelResultSolid = nil
+        params.kernelVisualMesh = nil
+        params.refreshFaces(assetID: bodyID)
+
+        if !params.boxBlindCutFeatures.isEmpty {
+            guard let rebuild = CADCutMeshRebuilder.rebuildBodyMesh(
+                bodyID: bodyID,
+                bodyParams: params
+            ) else {
+                featureApplyFailureReason = .generatedMeshEmpty
+                return
+            }
+            params.kernelVisualMesh = rebuild.mesh
+        }
+
+        var updatedAsset = document.assets[bodyIndex]
+        updatedAsset.kind = .extrudedSolid(params)
+        updatedAsset.updateDerivedProperties()
+        document.updateAsset(updatedAsset)
+
+        if let cadBodyIndex = cadDocument.bodies.firstIndex(where: { $0.id == bodyID }) {
+            let recordedSolid = cutV1RecordedSolid(id: bodyID, resultParams: params)
+            cadDocument.bodies[cadBodyIndex].solid = recordedSolid
+            cadDocument.bodies[cadBodyIndex].visualMeshCache = recordedSolid.visualMeshCache
+            cadDocument.bodies[cadBodyIndex].featureHistory.removeAll { $0 == cutID }
+        }
+        cadDocument.features.removeAll { $0.id == cutID }
+        cadDocument.activeBodyID = bodyID
+        cadDocument.sketches = currentCADSketches()
+        featureApplyFailureReason = nil
+
+        selectedCutFeatureID = nil
+        selectedCutTargetBodyID = nil
+        clearAllTransientCADNodes(resetOperation: false)
+        document.selectAsset(bodyID)
+        syncSelectionStateForSelectedAsset()
     }
 
     func duplicateSelectedAsset() {
@@ -5711,6 +5821,8 @@ final class CADWorkshopViewModel: ObservableObject {
             selectedSketchEntityID = nil
             selectedSketchEntityIDs = []
             selectedFaceID = nil
+            selectedCutFeatureID = nil
+            selectedCutTargetBodyID = nil
             refreshViewportState()
             return
         }
@@ -5718,6 +5830,8 @@ final class CADWorkshopViewModel: ObservableObject {
         if case let .sketch2D(parameters) = asset.kind {
             selectedAttachmentPointID = nil
             selectedFaceID = nil
+            selectedCutFeatureID = nil
+            selectedCutTargetBodyID = nil
             activeSketchPlane = parameters.sketch.plane
             activeSketchReference = parameters.sketch.reference
             selectedSketchEntityID = parameters.sketch.entities.first?.id
@@ -5736,8 +5850,17 @@ final class CADWorkshopViewModel: ObservableObject {
                 } else {
                     selectedFaceID = nil
                 }
+                if let selectedCutFeatureID,
+                   parameters.boxBlindCutFeatures.contains(where: { $0.id == selectedCutFeatureID }) {
+                    selectedCutTargetBodyID = asset.id
+                } else {
+                    selectedCutFeatureID = nil
+                    selectedCutTargetBodyID = nil
+                }
             } else {
                 selectedFaceID = nil
+                selectedCutFeatureID = nil
+                selectedCutTargetBodyID = nil
             }
             refreshViewportState()
         }
@@ -5766,6 +5889,8 @@ final class CADWorkshopViewModel: ObservableObject {
             selectedSketchEntityID: selectedSketchEntityID,
             selectedSketchEntityIDs: selectedSketchEntityIDs,
             selectedFaceID: selectedFaceID,
+            selectedCutFeatureID: activeToolMode == .select ? selectedCutFeatureID : nil,
+            selectedCutTargetBodyID: activeToolMode == .select ? selectedCutTargetBodyID : nil,
             hoveredWorkPlaneID: hoveredWorkPlaneID,
             selectedWorkPlaneID: selectedWorkPlane?.id,
             activeTool: activeToolMode,

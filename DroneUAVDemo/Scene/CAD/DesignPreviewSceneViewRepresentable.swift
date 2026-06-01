@@ -7,6 +7,7 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
     private static let cadTransientRootNodeName = "cad.cut.transientRoot"
     private static let cutPreviewNodeName = "cad.cut.preview"
     private static let cutterVolumeNodeName = "cad.cut.cutterVolume"
+    private static let cutSelectionHighlightNodeName = "cad.cut.selectionHighlight"
     private static let cutDebugNodePrefix = "cad.cut.debug"
     private static let cutHighlightNodePrefix = "cad.cut.highlight"
     private static let legacyCadTransientRootNodeName = "cadTransientRootNode"
@@ -1379,6 +1380,9 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
 
         let didFeaturePreviewChange = context.coordinator.lastViewportState?.featurePreviewParams != viewportState.featurePreviewParams
             || context.coordinator.lastViewportState?.featurePreviewIsCut != viewportState.featurePreviewIsCut
+        let didCutSelectionChange = context.coordinator.lastViewportState?.selectedCutFeatureID != viewportState.selectedCutFeatureID
+            || context.coordinator.lastViewportState?.selectedCutTargetBodyID != viewportState.selectedCutTargetBodyID
+            || context.coordinator.lastViewportState?.activeTool != viewportState.activeTool
 
         if didCommittedAssetStateChange {
             repopulateScene(view: nsView, scene: scene, coordinator: context.coordinator)
@@ -1388,6 +1392,9 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         } else if didFeaturePreviewChange,
                   let container = scene.rootNode.childNode(withName: "assets_container", recursively: false) {
             updateFeaturePreviewNode(in: container, coordinator: context.coordinator)
+        } else if didCutSelectionChange,
+                  let container = scene.rootNode.childNode(withName: "assets_container", recursively: false) {
+            updateCutSelectionHighlight(in: container)
         }
 
         // Move preview: directly translate entity nodes without full rebuild.
@@ -1593,6 +1600,7 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
         }
 
         updateFeaturePreviewNode(in: container, coordinator: nil)
+        updateCutSelectionHighlight(in: container)
         logCutArtifactDiagnostics(
             artifactDiagnostics(in: container, removedPreviewNodeCount: 0),
             committedMeshStats: committedMeshStats()
@@ -1629,6 +1637,37 @@ struct DesignPreviewSceneViewRepresentable: NSViewRepresentable {
                 "previewNodesRemovedAfterApply=\(diagnostics.previewNodesRemovedAfterApply)"
             )
         }
+    }
+
+    private func updateCutSelectionHighlight(in container: SCNNode) {
+        _ = clearCutSelectionHighlight(in: container)
+
+        guard viewportState.activeTool == .select,
+              let bodyID = viewportState.selectedCutTargetBodyID,
+              let cutID = viewportState.selectedCutFeatureID,
+              let asset = document.assets.first(where: { $0.id == bodyID }),
+              case let .extrudedSolid(params) = asset.kind,
+              let highlightNode = DesignAssetNodeFactory.makeCutSelectionHighlightNode(
+                bodyParams: params,
+                cutID: cutID
+              ) else {
+            return
+        }
+
+        let root = cadTransientRootNode(in: container, createIfNeeded: true)
+        root.addChildNode(highlightNode)
+    }
+
+    @discardableResult
+    private func clearCutSelectionHighlight(in container: SCNNode) -> Int {
+        var removed = 0
+        for node in [container] + container.childNodesRecursive {
+            for child in node.childNodes where child.name == Self.cutSelectionHighlightNodeName {
+                removed += max(1, child.flattenedChildCount)
+                child.removeFromParentNode()
+            }
+        }
+        return removed
     }
 
     @discardableResult

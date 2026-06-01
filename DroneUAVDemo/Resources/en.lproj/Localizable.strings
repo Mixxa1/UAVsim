@@ -1687,6 +1687,14 @@
 "cad.tree.cut_extrude_feature" = "Cut Extrude %d";
 "cad.tree.cuts" = "Cuts";
 "cad.tree.cut_feature" = "Cut %d";
+"cad.cut_v2.selected_cut.title" = "Selected Cut";
+"cad.cut_v2.selected_cut.name" = "Cut";
+"cad.cut_v2.selected_cut.type" = "Type";
+"cad.cut_v2.selected_cut.mode" = "Mode";
+"cad.cut_v2.selected_cut.depth" = "Depth";
+"cad.cut_v2.selected_cut.sketch" = "Sketch";
+"cad.cut_v2.selected_cut.entry_face" = "Entry Face";
+"cad.cut_v2.action.delete_cut" = "Delete Cut";
 
 // CAD line tool interactive
 "cad.line.idle" = "Line tool ready";
