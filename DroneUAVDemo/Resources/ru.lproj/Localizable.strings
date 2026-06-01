@@ -1680,6 +1680,8 @@
 "cad.tree.extruded" = "Выдавленные";
 "cad.tree.extruded_empty" = "Выдавленных тел пока нет.";
 "cad.tree.cut_extrude_feature" = "Вырез выдавливанием %d";
+"cad.tree.cuts" = "Вырезы";
+"cad.tree.cut_feature" = "Вырез %d";
 
 // CAD инструмент Линия (интерактивный)
 "cad.line.idle" = "Инструмент «Линия» готов";
@@ -1780,7 +1782,7 @@
 "cad.cut_v2.reason.invalid_depth" = "Глубина выреза должна быть не меньше 1 мм.";
 "cad.cut_v2.reason.cut_tool_does_not_intersect_body" = "Профиль не пересекает целевое тело.";
 "cad.cut_v2.reason.unsupported_profile_for_cut_v2" = "Этот тип профиля пока не поддерживается.";
-"cad.cut_v2.reason.intersecting_cut_unsupported" = "Пересекающиеся или касающиеся вырезы пока не поддерживаются.";
+"cad.cut_v2.reason.intersecting_cut_unsupported" = "Пересекающиеся вырезы пока не поддерживаются.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Результат выреза не является корректным solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Границы результата выреза некорректны.";
 "cad.cut_v2.reason.cut_missing_cylindrical_wall" = "В результате выреза отсутствует внутренняя цилиндрическая стенка.";
@@ -1822,6 +1824,12 @@
 "cad.cut_v2.inspector.depth_mode" = "Режим глубины";
 "cad.cut_v2.inspector.preview_state" = "Состояние preview";
 "cad.cut_v2.inspector.apply_state" = "Cut Apply";
+"cad.cut_v2.inspector.current_body_id" = "currentBodyID";
+"cad.cut_v2.inspector.active_sketch_id" = "activeSketchID";
+"cad.cut_v2.inspector.selected_profile_type" = "selectedProfileType";
+"cad.cut_v2.inspector.affected_face_id" = "affectedFaceID";
+"cad.cut_v2.inspector.last_apply_status" = "lastCutApplyStatus";
+"cad.cut_v2.inspector.last_apply_reason" = "lastCutApplyReason";
 "cad.cut_v2.inspector.intersects_void" = "Пересекает пустоту";
 "cad.cut_v2.inspector.kernel_validation" = "Проверка Cut V1";
 "cad.cut_v2.inspector.commit_allowed" = "Commit разрешён";
@@ -1843,6 +1851,10 @@
 "cad.cut_v2.inspector.mesh_triangle_count" = "Треугольников mesh";
 "cad.cut_v2.inspector.triangles_inside_any_hole" = "Треугольников в отверстиях";
 "cad.cut_v2.inspector.cap_faces_generated" = "Cap faces";
+"cad.cut_v2.inspector.transient_cut_node_count" = "transientCutNodeCount";
+"cad.cut_v2.inspector.cutter_preview_node_count" = "cutterPreviewNodeCount";
+"cad.cut_v2.inspector.body_transparent_material_count" = "bodyTransparentMaterialCount";
+"cad.cut_v2.inspector.preview_nodes_removed_after_apply" = "previewNodesRemovedAfterApply";
 "cad.cut_v2.commit.yes" = "Да";
 "cad.cut_v2.commit.no" = "Нет";
 "cad.cut_v2.commit.pending" = "Ожидает Apply";

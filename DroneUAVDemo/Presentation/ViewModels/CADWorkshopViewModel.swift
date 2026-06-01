@@ -658,8 +658,14 @@ final class CADWorkshopViewModel: ObservableObject {
     @Published private(set) var featurePreviewState: CADFeaturePreviewState?
     @Published private(set) var featureApplyFailureReason: CADFeatureValidation? = nil
     @Published private(set) var cutV1ApplyStatus: CADCutApplyStatus = .blocked
+    @Published private(set) var lastCutApplyStatus: CADCutApplyStatus = .blocked
+    @Published private(set) var lastCutApplyReason: String? = nil
+    @Published private(set) var transientCutNodeCount: Int = 0
+    @Published private(set) var cutterPreviewNodeCount: Int = 0
+    @Published private(set) var bodyTransparentMaterialCount: Int = 0
+    @Published private(set) var previewNodesRemovedAfterApply: Bool = false
     @Published var cadKernelRenderMode: CADKernelRenderMode = .kernelShadow
-    @Published var allowValidatedIntersectingCutCommit: Bool = true
+    @Published var allowValidatedIntersectingCutCommit: Bool = false
     @Published private(set) var lastKernelMeshCandidate: CADKernelMeshCandidate?
 
     @Published private(set) var viewportState: DesignViewportState = DesignViewportState()
@@ -823,6 +829,17 @@ final class CADWorkshopViewModel: ObservableObject {
         localized(cutV1ApplyStatus.displayNameKey)
     }
 
+    var cutV2LastApplyStateDisplayName: String {
+        localized(lastCutApplyStatus.displayNameKey)
+    }
+
+    var cutV2LastApplyReasonDisplayName: String {
+        guard let lastCutApplyReason else {
+            return localized("cad.cut_v2.commit.none")
+        }
+        return localized(lastCutApplyReason)
+    }
+
     var cutCommitIntersectsExistingVoidDisplayName: String {
         localized(cutCommitValidationResult.intersectsExistingVoid
             ? "cad.cut_v2.commit.yes"
@@ -875,7 +892,41 @@ final class CADWorkshopViewModel: ObservableObject {
     }
 
     var cutCommitCommittedCutsCountDisplayName: String {
-        String(cutCommitValidationResult.committedCutsCount)
+        String(currentCutDiagnosticsCommittedCutsCount)
+    }
+
+    var cutCommitCurrentBodyIDDisplayName: String {
+        shortDebugID(cutTargetBodyID ?? document.selectedAssetID)
+    }
+
+    var cutCommitActiveSketchIDDisplayName: String {
+        shortDebugID(selectedSketch?.id)
+    }
+
+    var cutCommitSelectedProfileTypeDisplayName: String {
+        cutV2ProfileType(for: currentProfileArea(), in: selectedSketch).rawValue
+    }
+
+    var cutCommitAffectedFaceIDDisplayName: String {
+        shortDebugID(cutCommitValidationResult.affectedEntryFaceID ?? selectedFaceID)
+    }
+
+    var transientCutNodeCountDisplayName: String {
+        String(transientCutNodeCount)
+    }
+
+    var cutterPreviewNodeCountDisplayName: String {
+        String(cutterPreviewNodeCount)
+    }
+
+    var bodyTransparentMaterialCountDisplayName: String {
+        String(bodyTransparentMaterialCount)
+    }
+
+    var previewNodesRemovedAfterApplyDisplayName: String {
+        localized(previewNodesRemovedAfterApply
+            ? "cad.cut_v2.commit.yes"
+            : "cad.cut_v2.commit.no")
     }
 
     var cutCommitCandidateCutIDDisplayName: String {
@@ -1071,6 +1122,10 @@ final class CADWorkshopViewModel: ObservableObject {
             featurePreviewState = nil
             if featureOperation.isCutV2 {
                 cutV1ApplyStatus = .blocked
+                lastCutApplyStatus = .blocked
+                lastCutApplyReason = validation.messageKey
+                transientCutNodeCount = 0
+                cutterPreviewNodeCount = 0
             }
             refreshViewportState()
             return
@@ -1081,6 +1136,10 @@ final class CADWorkshopViewModel: ObservableObject {
                   let targetAsset = document.assets.first(where: { $0.id == request.targetBodyID }) else {
                 featurePreviewState = nil
                 cutV1ApplyStatus = .blocked
+                lastCutApplyStatus = .blocked
+                lastCutApplyReason = build.validation.messageKey
+                transientCutNodeCount = 0
+                cutterPreviewNodeCount = 0
                 logCutV2PreviewRebuild(validation: build.validation, previewState: nil)
                 refreshViewportState()
                 return
@@ -1102,6 +1161,12 @@ final class CADWorkshopViewModel: ObservableObject {
             cutPreviewCacheKey = nextKey
             cutPreviewRebuildCount += 1
             cutV1ApplyStatus = .supported
+            lastCutApplyStatus = .supported
+            lastCutApplyReason = nil
+            transientCutNodeCount = 1
+            cutterPreviewNodeCount = 1
+            bodyTransparentMaterialCount = 0
+            previewNodesRemovedAfterApply = false
             featurePreviewState = previewState
             logCutV2PreviewRebuild(validation: .valid, previewState: previewState)
             refreshViewportState()
@@ -1235,11 +1300,15 @@ final class CADWorkshopViewModel: ObservableObject {
         guard let request = build.request else {
             featureApplyFailureReason = build.validation
             cutV1ApplyStatus = .blocked
+            lastCutApplyStatus = .blocked
+            lastCutApplyReason = build.validation.messageKey
             return
         }
         guard let targetAsset = document.assets.first(where: { $0.id == request.targetBodyID }) else {
             featureApplyFailureReason = .noCutTarget
             cutV1ApplyStatus = .blocked
+            lastCutApplyStatus = .blocked
+            lastCutApplyReason = CADFeatureValidation.noCutTarget.messageKey
             return
         }
         let bodyCountBefore = committedBodyCount
@@ -1255,6 +1324,8 @@ final class CADWorkshopViewModel: ObservableObject {
         case let .failure(reason):
             featureApplyFailureReason = reason
             cutV1ApplyStatus = .blocked
+            lastCutApplyStatus = .blocked
+            lastCutApplyReason = reason.messageKey
             return
         }
 
@@ -1290,6 +1361,9 @@ final class CADWorkshopViewModel: ObservableObject {
 
         finishSuccessfulCutV2Apply(targetBodyID: request.targetBodyID)
         cutV1ApplyStatus = .committed
+        lastCutApplyStatus = .committed
+        lastCutApplyReason = nil
+        recordCutCleanupGuard(previewNodesRemoved: previewNodeCountBeforeApply > 0)
     }
 
     private func finishSuccessfulCutV2Apply(targetBodyID: UUID) {
@@ -1843,11 +1917,30 @@ final class CADWorkshopViewModel: ObservableObject {
         }.count
     }
 
+    private var currentCutDiagnosticsCommittedCutsCount: Int {
+        if featurePreviewState?.operation == .cutRemoveMaterialV2 {
+            return cutCommitValidationResult.committedCutsCount
+        }
+        guard let bodyID = cutTargetBodyID ?? document.selectedAssetID,
+              let asset = document.assets.first(where: { $0.id == bodyID }),
+              case let .extrudedSolid(params) = asset.kind else {
+            return 0
+        }
+        return params.stableCutFeatures.count
+    }
+
     private var activeCutTemporaryNodeCount: Int {
         var count = 0
         if featurePreviewState?.operation == .cutRemoveMaterialV2 { count += 1 }
         if activeBodyEditTransaction?.previewNodeID != nil, count == 0 { count += 1 }
         return count
+    }
+
+    private func recordCutCleanupGuard(previewNodesRemoved: Bool) {
+        transientCutNodeCount = 0
+        cutterPreviewNodeCount = 0
+        bodyTransparentMaterialCount = 0
+        previewNodesRemovedAfterApply = previewNodesRemoved
     }
 
     private func logCutV2ApplyBefore(
@@ -2341,10 +2434,12 @@ final class CADWorkshopViewModel: ObservableObject {
     }
 
     private func clearAllTransientCADNodes(resetOperation: Bool) {
+        let previewNodesWereActive = activeCutTemporaryNodeCount > 0
         rollbackCutV2Transaction()
         cutPreviewCacheKey = nil
         featurePreviewState = nil
         featureApplyFailureReason = nil
+        recordCutCleanupGuard(previewNodesRemoved: previewNodesWereActive)
         if resetOperation {
             lastKernelMeshCandidate = nil
         }
@@ -4890,6 +4985,9 @@ final class CADWorkshopViewModel: ObservableObject {
         featureDepthMode = .distance
         resetDrawingToolStates(activating: nil)
         featureValidation = .noProfile
+        lastCutApplyStatus = .blocked
+        lastCutApplyReason = nil
+        recordCutCleanupGuard(previewNodesRemoved: false)
         extrudeWarningKey = nil
         sketchWarningKey = nil
         requestViewPreset(.iso, focus: .origin)

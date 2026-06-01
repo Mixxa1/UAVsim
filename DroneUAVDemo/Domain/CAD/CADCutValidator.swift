@@ -189,7 +189,7 @@ enum CADMultiCutValidator {
                 affectedExitFaceID: exitFaceID,
                 cutsOnEntryFace: cutsOnEntryFace,
                 cutsOnExitFace: cutsOnExitFace,
-                committedCutsCount: candidateCuts.count,
+                committedCutsCount: validation.isValid ? candidateCuts.count : existingCuts.count,
                 reason: reason ?? validation.messageKey
             )
         }

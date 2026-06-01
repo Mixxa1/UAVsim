@@ -1469,14 +1469,25 @@ struct DesignWorkshopWorkspaceView: View {
                                     }
                                 }
                                 if case let .extrudedSolid(parameters) = asset.kind {
-                                    ForEach(parameters.boxBlindCutFeatures.indices, id: \.self) { index in
-                                        treeLeaf(
-                                            icon: "minus.square",
-                                            name: String(format: NSLocalizedString("cad.tree.cut_extrude_feature", comment: ""), index + 1),
-                                            level: 2,
-                                            isSelected: false
-                                        ) {
-                                            viewModel.selectAsset(asset.id)
+                                    treeFolder(
+                                        icon: "minus.square",
+                                        name: NSLocalizedString("cad.tree.cuts", comment: ""),
+                                        count: parameters.boxBlindCutFeatures.count,
+                                        isExpanded: true,
+                                        level: 2
+                                    ) {
+                                        viewModel.selectAsset(asset.id)
+                                    }
+                                    if !parameters.boxBlindCutFeatures.isEmpty {
+                                        ForEach(parameters.boxBlindCutFeatures.indices, id: \.self) { index in
+                                            treeLeaf(
+                                                icon: "minus.square",
+                                                name: String(format: NSLocalizedString("cad.tree.cut_feature", comment: ""), index + 1),
+                                                level: 3,
+                                                isSelected: false
+                                            ) {
+                                                viewModel.selectAsset(asset.id)
+                                            }
                                         }
                                     }
                                 }
@@ -1551,10 +1562,14 @@ struct DesignWorkshopWorkspaceView: View {
         name: String,
         count: Int? = nil,
         isExpanded: Bool,
+        level: Int = 0,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
+                if level > 0 {
+                    Color.clear.frame(width: CGFloat(level * 14))
+                }
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
@@ -4191,6 +4206,12 @@ struct DesignWorkshopWorkspaceView: View {
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.depth_mode", value: NSLocalizedString(viewModel.featureDepthMode.displayNameKey, comment: ""))
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.preview_state", value: viewModel.cutV2PreviewStateDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.apply_state", value: viewModel.cutV2ApplyStateDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.current_body_id", value: viewModel.cutCommitCurrentBodyIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.active_sketch_id", value: viewModel.cutCommitActiveSketchIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.selected_profile_type", value: viewModel.cutCommitSelectedProfileTypeDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.affected_face_id", value: viewModel.cutCommitAffectedFaceIDDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.last_apply_status", value: viewModel.cutV2LastApplyStateDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.last_apply_reason", value: viewModel.cutV2LastApplyReasonDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.intersects_void", value: viewModel.cutCommitIntersectsExistingVoidDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.kernel_validation", value: viewModel.cutCommitKernelValidationDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.commit_allowed", value: viewModel.cutCommitAllowedDisplayName)
@@ -4210,6 +4231,10 @@ struct DesignWorkshopWorkspaceView: View {
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.mesh_triangle_count", value: viewModel.cutCommitMeshTriangleCountDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.triangles_inside_any_hole", value: viewModel.cutCommitTrianglesInsideAnyHoleDisplayName)
             WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.cap_faces_generated", value: viewModel.cutCommitCapFacesGeneratedDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.transient_cut_node_count", value: viewModel.transientCutNodeCountDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.cutter_preview_node_count", value: viewModel.cutterPreviewNodeCountDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.body_transparent_material_count", value: viewModel.bodyTransparentMaterialCountDisplayName)
+            WorkshopMetricCell(labelKey: "cad.cut_v2.inspector.preview_nodes_removed_after_apply", value: viewModel.previewNodesRemovedAfterApplyDisplayName)
         }
     }
 

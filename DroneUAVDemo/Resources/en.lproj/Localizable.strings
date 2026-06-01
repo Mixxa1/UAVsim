@@ -1685,6 +1685,8 @@
 "cad.tree.extruded" = "Extruded";
 "cad.tree.extruded_empty" = "No extruded bodies yet.";
 "cad.tree.cut_extrude_feature" = "Cut Extrude %d";
+"cad.tree.cuts" = "Cuts";
+"cad.tree.cut_feature" = "Cut %d";
 
 // CAD line tool interactive
 "cad.line.idle" = "Line tool ready";
@@ -1785,7 +1787,7 @@
 "cad.cut_v2.reason.invalid_depth" = "Cut depth must be at least 1 mm.";
 "cad.cut_v2.reason.cut_tool_does_not_intersect_body" = "Profile does not intersect the target body.";
 "cad.cut_v2.reason.unsupported_profile_for_cut_v2" = "This profile type is not supported yet.";
-"cad.cut_v2.reason.intersecting_cut_unsupported" = "Intersecting or touching cuts are not supported yet.";
+"cad.cut_v2.reason.intersecting_cut_unsupported" = "Intersecting cuts are not supported yet.";
 "cad.cut_v2.reason.cut_result_not_solid" = "Cut result is not a valid solid body.";
 "cad.cut_v2.reason.cut_result_bounds_invalid" = "Cut result bounds are invalid.";
 "cad.cut_v2.reason.cut_missing_cylindrical_wall" = "Cut result is missing the inner cylindrical wall.";
@@ -1827,6 +1829,12 @@
 "cad.cut_v2.inspector.depth_mode" = "Depth mode";
 "cad.cut_v2.inspector.preview_state" = "Preview state";
 "cad.cut_v2.inspector.apply_state" = "Cut Apply";
+"cad.cut_v2.inspector.current_body_id" = "currentBodyID";
+"cad.cut_v2.inspector.active_sketch_id" = "activeSketchID";
+"cad.cut_v2.inspector.selected_profile_type" = "selectedProfileType";
+"cad.cut_v2.inspector.affected_face_id" = "affectedFaceID";
+"cad.cut_v2.inspector.last_apply_status" = "lastCutApplyStatus";
+"cad.cut_v2.inspector.last_apply_reason" = "lastCutApplyReason";
 "cad.cut_v2.inspector.intersects_void" = "Intersects void";
 "cad.cut_v2.inspector.kernel_validation" = "Cut V1 validation";
 "cad.cut_v2.inspector.commit_allowed" = "Commit allowed";
@@ -1848,6 +1856,10 @@
 "cad.cut_v2.inspector.mesh_triangle_count" = "Mesh triangles";
 "cad.cut_v2.inspector.triangles_inside_any_hole" = "Triangles inside holes";
 "cad.cut_v2.inspector.cap_faces_generated" = "Cap faces";
+"cad.cut_v2.inspector.transient_cut_node_count" = "transientCutNodeCount";
+"cad.cut_v2.inspector.cutter_preview_node_count" = "cutterPreviewNodeCount";
+"cad.cut_v2.inspector.body_transparent_material_count" = "bodyTransparentMaterialCount";
+"cad.cut_v2.inspector.preview_nodes_removed_after_apply" = "previewNodesRemovedAfterApply";
 "cad.cut_v2.commit.yes" = "Yes";
 "cad.cut_v2.commit.no" = "No";
 "cad.cut_v2.commit.pending" = "Pending Apply";
