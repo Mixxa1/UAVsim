@@ -1941,6 +1941,7 @@ final class CADWorkshopViewModel: ObservableObject {
             "targetBodyBounds=\(formatDebugBounds(targetBounds)) " +
             "cutToolBounds=\(formatDebugBounds(toolBounds)) " +
             "cutToolIntersectsBody=\(intersects) " +
+            "transientPreviewNodeCount=\(activeCutTemporaryNodeCount) " +
             "previewCreated=\(previewState != nil && validation.isValid) " +
             "invalidReason=\(invalidReason)"
         )
@@ -2034,13 +2035,20 @@ final class CADWorkshopViewModel: ObservableObject {
             "removedPreviewNodeCount=\(removedPreviewNodeCount) ",
             "featureAppendedID=\(appendedFeatureID.uuidString) ",
             "featureStackCount=\(resultParams.boxBlindCutFeatures.count) ",
+            "totalCutCount=\(rebuildDiagnostics.totalCutCount) ",
+            "affectedFaceCount=\(rebuildDiagnostics.affectedFaceCount) ",
+            "cutsGroupedByFace=\(rebuildDiagnostics.cutsGroupedByFace.joined(separator: ",")) ",
             "committedCutsCount=\(multiCutValidation.committedCutsCount) ",
             "candidateCutID=\(multiCutValidation.candidateCutID.uuidString) ",
             "affectedEntryFaceID=\(multiCutValidation.affectedEntryFaceID.uuidString) ",
             "affectedExitFaceID=\(multiCutValidation.affectedExitFaceID?.uuidString ?? "nil") ",
+            "entryFaceID=\(rebuildDiagnostics.entryFaceID?.uuidString ?? "nil") ",
+            "exitFaceID=\(rebuildDiagnostics.exitFaceID?.uuidString ?? "nil") ",
             "cutsOnEntryFace=\(multiCutValidation.cutsOnEntryFace) ",
             "cutsOnExitFace=\(multiCutValidation.cutsOnExitFace) ",
             "multiCutValidation=passed ",
+            "cutVolumeIntersectionDetected=\(multiCutValidation.cutVolumeIntersectionDetected || rebuildDiagnostics.cutVolumeIntersectionDetected) ",
+            "unsupportedIntersectingCutDetected=\(multiCutValidation.unsupportedIntersectingCutDetected || rebuildDiagnostics.unsupportedIntersectingCutDetected) ",
             "meshVertexCount=\(resultMeshStats?.vertexCount ?? 0) ",
             "meshTriangleCount=\(resultMeshStats?.triangleCount ?? 0) ",
             "affectedFaceID=\(rebuildDiagnostics.affectedFaceID?.uuidString ?? "nil") ",
@@ -2058,6 +2066,7 @@ final class CADWorkshopViewModel: ObservableObject {
             "oldFullEntryFaceKept=\(rebuildDiagnostics.oldFullEntryFaceKept) ",
             "oldFullExitFaceKept=\(rebuildDiagnostics.oldFullExitFaceKept) ",
             "capFacesGenerated=\(rebuildDiagnostics.capFacesGenerated) ",
+            "transientPreviewNodeCount=\(removedPreviewNodeCount) ",
             "operation=subtract",
         ]
         print(messageParts.joined())

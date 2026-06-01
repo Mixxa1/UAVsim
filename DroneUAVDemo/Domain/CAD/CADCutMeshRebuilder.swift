@@ -8,6 +8,9 @@ struct CADCutMeshBuildResult: Equatable {
 
 struct CADCutMeshRebuildDiagnostics: Equatable {
     var throughAll: Bool
+    var totalCutCount: Int
+    var affectedFaceCount: Int
+    var cutsGroupedByFace: [String]
     var depthMode: DepthMode?
     var entryFaceID: UUID?
     var exitFaceID: UUID?
@@ -19,6 +22,8 @@ struct CADCutMeshRebuildDiagnostics: Equatable {
     var sameFaceTriangulationPassed: Bool
     var holeIntersectionDetected: Bool
     var holeTouchDetected: Bool
+    var cutVolumeIntersectionDetected: Bool
+    var unsupportedIntersectingCutDetected: Bool
     var entryFaceRebuiltWithHole: Bool
     var exitFaceRebuiltWithHole: Bool
     var capFacesGenerated: Int
@@ -42,6 +47,7 @@ struct CADCutMeshRebuildDiagnostics: Equatable {
     var cutsOnExitFace: Int
     var multiCutValidationPassed: Bool
     var multiCutValidationReason: String?
+    var transientPreviewNodeCount: Int
 }
 
 enum CADCutMeshRebuilder {
@@ -50,6 +56,7 @@ enum CADCutMeshRebuilder {
         var entryFace: DesignPlanarFace
         var exitFace: DesignPlanarFace?
         var exitProfile: [SketchPoint2D]?
+        var farWorldLoop: [DesignVector3]
         var depthMeters: Double
         var direction: DesignVector3
     }
@@ -142,6 +149,9 @@ enum CADCutMeshRebuilder {
 
     private struct RebuildCounters {
         var throughAll = false
+        var totalCutCount = 0
+        var affectedFaceCount = 0
+        var cutsGroupedByFace: [String] = []
         var depthMode: DepthMode?
         var entryFaceID: UUID?
         var exitFaceID: UUID?
@@ -153,6 +163,8 @@ enum CADCutMeshRebuilder {
         var sameFaceTriangulationPassed = true
         var holeIntersectionDetected = false
         var holeTouchDetected = false
+        var cutVolumeIntersectionDetected = false
+        var unsupportedIntersectingCutDetected = false
         var entryFaceRebuiltWithHole = false
         var exitFaceRebuiltWithHole = false
         var capFacesGenerated = 0
@@ -175,10 +187,14 @@ enum CADCutMeshRebuilder {
         var cutsOnExitFace = 0
         var multiCutValidationPassed = true
         var multiCutValidationReason: String?
+        var transientPreviewNodeCount = 0
 
         var diagnostics: CADCutMeshRebuildDiagnostics {
             CADCutMeshRebuildDiagnostics(
                 throughAll: throughAll,
+                totalCutCount: totalCutCount,
+                affectedFaceCount: affectedFaceCount,
+                cutsGroupedByFace: cutsGroupedByFace,
                 depthMode: depthMode,
                 entryFaceID: entryFaceID,
                 exitFaceID: exitFaceID,
@@ -190,6 +206,8 @@ enum CADCutMeshRebuilder {
                 sameFaceTriangulationPassed: sameFaceTriangulationPassed,
                 holeIntersectionDetected: holeIntersectionDetected,
                 holeTouchDetected: holeTouchDetected,
+                cutVolumeIntersectionDetected: cutVolumeIntersectionDetected,
+                unsupportedIntersectingCutDetected: unsupportedIntersectingCutDetected,
                 entryFaceRebuiltWithHole: entryFaceRebuiltWithHole,
                 exitFaceRebuiltWithHole: exitFaceRebuiltWithHole,
                 capFacesGenerated: capFacesGenerated,
@@ -212,7 +230,8 @@ enum CADCutMeshRebuilder {
                 cutsOnEntryFace: cutsOnEntryFace,
                 cutsOnExitFace: cutsOnExitFace,
                 multiCutValidationPassed: multiCutValidationPassed,
-                multiCutValidationReason: multiCutValidationReason
+                multiCutValidationReason: multiCutValidationReason,
+                transientPreviewNodeCount: transientPreviewNodeCount
             )
         }
     }
@@ -234,6 +253,7 @@ enum CADCutMeshRebuilder {
         var writer = MeshWriter()
         var counters = RebuildCounters()
         counters.throughAll = cuts.contains { $0.feature.depthMode == .throughAll }
+        counters.totalCutCount = cuts.count
         counters.depthMode = cuts.last?.feature.depthMode
         counters.entryFaceID = cuts.last?.entryFace.id
         counters.exitFaceID = cuts.last?.exitFace?.id
@@ -250,26 +270,37 @@ enum CADCutMeshRebuilder {
             counters.cutsOnExitFace = cuts.filter { $0.exitFace?.id == exitFaceID }.count
         }
 
-        for face in bodyParams.faces {
-            let entryCuts = cuts.filter { $0.entryFace.id == face.id }
-            let exitCuts = cuts.filter { $0.exitFace?.id == face.id }
-
-            if !entryCuts.isEmpty || !exitCuts.isEmpty {
-                var holes = entryCuts.map {
+        var holesByFace: [UUID: [FaceHole]] = [:]
+        for cut in cuts {
+            holesByFace[cut.entryFace.id, default: []].append(
+                FaceHole(
+                    cutID: cut.feature.id,
+                    profileType: cut.feature.profileType,
+                    profile: cut.feature.profilePoints
+                )
+            )
+            if let exitFace = cut.exitFace,
+               let exitProfile = cut.exitProfile {
+                holesByFace[exitFace.id, default: []].append(
                     FaceHole(
-                        cutID: $0.feature.id,
-                        profileType: $0.feature.profileType,
-                        profile: $0.feature.profilePoints
-                    )
-                }
-                holes += exitCuts.compactMap { cut in
-                    guard let exitProfile = cut.exitProfile else { return nil }
-                    return FaceHole(
                         cutID: cut.feature.id,
                         profileType: cut.feature.profileType,
                         profile: exitProfile
                     )
-                }
+                )
+            }
+        }
+        counters.affectedFaceCount = holesByFace.count
+        counters.cutsGroupedByFace = bodyParams.faces.compactMap { face in
+            guard let holes = holesByFace[face.id], !holes.isEmpty else { return nil }
+            return "\(face.id.uuidString):\(holes.count)"
+        }
+
+        for face in bodyParams.faces {
+            let entryCuts = cuts.filter { $0.entryFace.id == face.id }
+            let exitCuts = cuts.filter { $0.exitFace?.id == face.id }
+
+            if let holes = holesByFace[face.id], !holes.isEmpty {
                 guard appendFace(face, holes: holes, to: &writer, counters: &counters) else {
                     logRebuildDiagnostics(counters.diagnostics)
                     return nil
@@ -351,28 +382,35 @@ enum CADCutMeshRebuilder {
             guard depth > CADCutGeometry.epsilon else { return nil }
 
             let exitFace: DesignPlanarFace?
+            let exitProfile: [SketchPoint2D]?
+            let farWorldLoop: [DesignVector3]
             if feature.depthMode == .throughAll {
-                guard let foundExitFace = findExitFace(
+                guard let exit = findExitFace(
                     for: feature,
                     entryFace: entryFace,
                     body: body,
-                    direction: direction,
-                    depth: depth
+                    direction: direction
                 ) else {
                     return nil
                 }
-                exitFace = foundExitFace
+                exitFace = exit.face
+                exitProfile = exit.profile
+                farWorldLoop = exit.profile.map {
+                    CADCutGeometry.worldPoint(on: exit.face, local: $0)
+                }
             } else {
                 exitFace = nil
-            }
-            let exitProfile = exitFace.map {
-                projectProfile(feature.profilePoints, from: entryFace, to: $0, direction: direction, depth: depth)
+                exitProfile = nil
+                farWorldLoop = feature.profilePoints.map {
+                    CADCutGeometry.worldPoint(on: entryFace, local: $0) + direction * depth
+                }
             }
             let cut = ResolvedCut(
                 feature: feature,
                 entryFace: entryFace,
                 exitFace: exitFace,
                 exitProfile: exitProfile,
+                farWorldLoop: farWorldLoop,
                 depthMeters: depth,
                 direction: direction
             )
@@ -385,30 +423,65 @@ enum CADCutMeshRebuilder {
         for feature: ExtrudedSolidBoxBlindCutFeature,
         entryFace: DesignPlanarFace,
         body: ExtrudedSolidParameters,
-        direction: DesignVector3,
-        depth: Double
-    ) -> DesignPlanarFace? {
-        _ = feature
-        let expectedCenter = entryFace.center + direction * depth
+        direction: DesignVector3
+    ) -> (face: DesignPlanarFace, profile: [SketchPoint2D])? {
+        let entryCenter = CADCutGeometry.profileCenter(feature.profilePoints).map {
+            CADCutGeometry.worldPoint(on: entryFace, local: $0)
+        } ?? entryFace.center
         return body.faces
             .filter { $0.id != entryFace.id }
             .filter { $0.normal.normalized(fallback: .zAxis).dot(direction) > 0.995 }
+            .compactMap { face -> (face: DesignPlanarFace, profile: [SketchPoint2D], distance: Double)? in
+                guard let profile = projectProfile(
+                    feature.profilePoints,
+                    from: entryFace,
+                    to: face,
+                    direction: direction
+                ) else {
+                    return nil
+                }
+                let exitNormal = face.normal.normalized(fallback: direction)
+                let distance = (face.origin - entryCenter).dot(exitNormal) / direction.dot(exitNormal)
+                guard distance.isFinite, distance > CADCutGeometry.epsilon else { return nil }
+                let hole = FaceHole(
+                    cutID: feature.id,
+                    profileType: feature.profileType,
+                    profile: profile
+                )
+                guard let bounds = bounds(for: hole),
+                      bounds.minU > face.bounds.minU + CADCutGeometry.epsilon,
+                      bounds.maxU < face.bounds.maxU - CADCutGeometry.epsilon,
+                      bounds.minV > face.bounds.minV + CADCutGeometry.epsilon,
+                      bounds.maxV < face.bounds.maxV - CADCutGeometry.epsilon else {
+                    return nil
+                }
+                return (face, profile, distance)
+            }
             .min(by: {
-                ($0.center - expectedCenter).length < ($1.center - expectedCenter).length
+                $0.distance < $1.distance
             })
+            .map { (face: $0.face, profile: $0.profile) }
     }
 
     private static func projectProfile(
         _ profile: [SketchPoint2D],
         from entryFace: DesignPlanarFace,
         to exitFace: DesignPlanarFace,
-        direction: DesignVector3,
-        depth: Double
-    ) -> [SketchPoint2D] {
-        profile.map { point in
-            let world = CADCutGeometry.worldPoint(on: entryFace, local: point) + direction * depth
-            return CADCutGeometry.localPoint(on: exitFace, world: world)
+        direction: DesignVector3
+    ) -> [SketchPoint2D]? {
+        let d = direction.normalized(fallback: entryFace.normal * -1)
+        let exitNormal = exitFace.normal.normalized(fallback: d)
+        let denominator = d.dot(exitNormal)
+        guard denominator > CADCutGeometry.epsilon else { return nil }
+
+        var projected: [SketchPoint2D] = []
+        for point in profile {
+            let world = CADCutGeometry.worldPoint(on: entryFace, local: point)
+            let distance = (exitFace.origin - world).dot(exitNormal) / denominator
+            guard distance.isFinite, distance > CADCutGeometry.epsilon else { return nil }
+            projected.append(CADCutGeometry.localPoint(on: exitFace, world: world + d * distance))
         }
+        return projected
     }
 
     private static func appendFullFace(_ face: DesignPlanarFace, to writer: inout MeshWriter) {
@@ -435,13 +508,15 @@ enum CADCutMeshRebuilder {
             appendFullFace(face, to: &writer)
             return true
         }
+        counters.affectedFaceID = face.id
+        counters.holeCountOnFace = max(counters.holeCountOnFace, holes.count)
+        if holes.count >= counters.holeTypesOnFace.count {
+            counters.holeTypesOnFace = holes.map(\.profileType.rawValue)
+        }
         if holes.count == 1 {
             return appendSingleHoleFace(face, hole: holes[0], to: &writer)
         }
 
-        counters.affectedFaceID = face.id
-        counters.holeCountOnFace = max(counters.holeCountOnFace, holes.count)
-        counters.holeTypesOnFace = holes.map(\.profileType.rawValue)
         let validation = validateSameFaceHoles(face: face, holes: holes)
         counters.holeIntersectionDetected = counters.holeIntersectionDetected || validation.intersectionDetected
         counters.holeTouchDetected = counters.holeTouchDetected || validation.touchDetected
@@ -921,9 +996,7 @@ enum CADCutMeshRebuilder {
     ) {
         let entryFace = cut.entryFace
         let entryLoop = cut.feature.profilePoints
-        let bottomLoop = entryLoop.map {
-            CADCutGeometry.worldPoint(on: entryFace, local: $0) + cut.direction * cut.depthMeters
-        }
+        let bottomLoop = cut.farWorldLoop
         let entryWorldLoop = entryLoop.map {
             CADCutGeometry.worldPoint(on: entryFace, local: $0)
         }
@@ -947,8 +1020,12 @@ enum CADCutMeshRebuilder {
     }
 
     private static func cutCenter(_ cut: ResolvedCut) -> DesignVector3 {
-        let center = CADCutGeometry.profileCenter(cut.feature.profilePoints) ?? .zero
-        return CADCutGeometry.worldPoint(on: cut.entryFace, local: center) + cut.direction * (cut.depthMeters * 0.5)
+        let entryWorldLoop = cut.feature.profilePoints.map {
+            CADCutGeometry.worldPoint(on: cut.entryFace, local: $0)
+        }
+        let allPoints = entryWorldLoop + cut.farWorldLoop
+        guard !allPoints.isEmpty else { return cut.entryFace.center + cut.direction * (cut.depthMeters * 0.5) }
+        return allPoints.reduce(DesignVector3.zero, +) * (1.0 / Double(allPoints.count))
     }
 
     private static func appendLoopWalls(
@@ -1389,6 +1466,9 @@ enum CADCutMeshRebuilder {
         print(
             "CAD Cut V1 Mesh Rebuild: " +
             "throughAll=\(diagnostics.throughAll) " +
+            "totalCutCount=\(diagnostics.totalCutCount) " +
+            "affectedFaceCount=\(diagnostics.affectedFaceCount) " +
+            "cutsGroupedByFace=\(diagnostics.cutsGroupedByFace.joined(separator: ",")) " +
             "depthMode=\(diagnostics.depthMode?.rawValue ?? "nil") " +
             "entryFaceID=\(diagnostics.entryFaceID?.uuidString ?? "nil") " +
             "exitFaceID=\(diagnostics.exitFaceID?.uuidString ?? "nil") " +
@@ -1400,6 +1480,8 @@ enum CADCutMeshRebuilder {
             "sameFaceTriangulationPassed=\(diagnostics.sameFaceTriangulationPassed) " +
             "holeIntersectionDetected=\(diagnostics.holeIntersectionDetected) " +
             "holeTouchDetected=\(diagnostics.holeTouchDetected) " +
+            "cutVolumeIntersectionDetected=\(diagnostics.cutVolumeIntersectionDetected) " +
+            "unsupportedIntersectingCutDetected=\(diagnostics.unsupportedIntersectingCutDetected) " +
             "entryFaceRebuiltWithHole=\(diagnostics.entryFaceRebuiltWithHole) " +
             "exitFaceRebuiltWithHole=\(diagnostics.exitFaceRebuiltWithHole) " +
             "capFacesGenerated=\(diagnostics.capFacesGenerated) " +
@@ -1422,7 +1504,8 @@ enum CADCutMeshRebuilder {
             "cutsOnEntryFace=\(diagnostics.cutsOnEntryFace) " +
             "cutsOnExitFace=\(diagnostics.cutsOnExitFace) " +
             "multiCutValidation=\(diagnostics.multiCutValidationPassed ? "passed" : "blocked") " +
-            "multiCutValidationReason=\(diagnostics.multiCutValidationReason ?? "none")"
+            "multiCutValidationReason=\(diagnostics.multiCutValidationReason ?? "none") " +
+            "transientPreviewNodeCount=\(diagnostics.transientPreviewNodeCount)"
         )
     }
 }

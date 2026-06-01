@@ -740,6 +740,43 @@ enum DesignAssetNodeFactory {
             return nil
         }
 
+        if let assetID = p.faces.first?.assetID,
+           let build = CADCutMeshRebuilder.rebuildBodyMesh(bodyID: assetID, bodyParams: p),
+           let geometry = makeKernelSolidGeometry(build.mesh) {
+            let cutStats = Dictionary(uniqueKeysWithValues: p.boxBlindCutFeatures.map { cut in
+                let segmentCount = cut.profilePoints.count
+                let bottomTriangleCount = cut.depthMode == .throughAll
+                    ? 0
+                    : max(segmentCount - 2, 0)
+                return (
+                    cut.id,
+                    BoxBlindCutMeshStats(
+                        segmentCount: segmentCount,
+                        wallQuadCount: segmentCount,
+                        wallTriangleCount: segmentCount * 2,
+                        skippedWallSegmentCount: 0,
+                        wallFlippedTriangleCount: 0,
+                        bottomTriangleCount: bottomTriangleCount,
+                        cutIntersectionCullCount: 0,
+                        minDepthMeters: cut.depthMeters,
+                        maxDepthMeters: cut.depthMeters
+                    )
+                )
+            })
+            return BoxBlindCutMeshCandidate(
+                geometry: geometry,
+                vertexCount: build.mesh.vertices.count,
+                triangleCount: build.mesh.triangles.count,
+                faceSurfacesRendered: p.faces.count,
+                entryFaceSurfacesRendered: build.rebuildDiagnostics.affectedFaceCount,
+                expectedEntryFaceSurfacesRendered: build.rebuildDiagnostics.affectedFaceCount,
+                invalidEntryFaceTriangulation: false,
+                meshSnapshot: build.mesh,
+                meshDiagnostics: build.diagnostics,
+                cutStats: cutStats
+            )
+        }
+
         var allVerts: [SCNVector3] = []
         var allNorms: [SCNVector3] = []
         var indices: [Int32] = []
