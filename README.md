@@ -25,7 +25,7 @@
 
 ---
 
-## Быстрый маршрут по коду
+## Дорожная карта
 
 Если нужно быстро понять проект, читайте в таком порядке:
 
@@ -110,8 +110,6 @@ flowchart LR
 
 - [DroneUAVDemoApp.swift](DroneUAVDemoApp.swift)
   Entry point приложения, размер окна, fullscreen-команда.
-- [PROJECT_STRUCTURE_RU.md](PROJECT_STRUCTURE_RU.md)
-  Этот документ.
 
 В соседнем [DroneUAVDemo.xcodeproj](../DroneUAVDemo.xcodeproj/project.pbxproj) лежит Xcode project target.
 
