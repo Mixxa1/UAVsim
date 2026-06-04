@@ -38,7 +38,7 @@ enum WindowFullscreenController {
 struct DroneUAVDemoApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            LegalGateRootView()
         }
         .defaultSize(width: 1440, height: 900)
         .windowResizability(.automatic)

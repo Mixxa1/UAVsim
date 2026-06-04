@@ -240,6 +240,11 @@
 		100000000000000000000349 /* CADCutPreviewBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000343 /* CADCutPreviewBuilder.swift */; };
 		10000000000000000000034A /* CADCutCommitEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000344 /* CADCutCommitEngine.swift */; };
 		10000000000000000000034B /* CADCutMeshRebuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000345 /* CADCutMeshRebuilder.swift */; };
+		10000000000000000000034C /* LegalAgreementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000034D /* LegalAgreementService.swift */; };
+		10000000000000000000034E /* LegalAgreementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000034F /* LegalAgreementViewModel.swift */; };
+		100000000000000000000350 /* LegalAgreementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000351 /* LegalAgreementView.swift */; };
+		100000000000000000000352 /* LegalGateRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000353 /* LegalGateRootView.swift */; };
+		100000000000000000000354 /* LegalDocuments.json in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000355 /* LegalDocuments.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -479,6 +484,11 @@
 		100000000000000000000308 /* CADWorkshopViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADWorkshopViewModel.swift; sourceTree = "<group>"; };
 		100000000000000000000309 /* CADWorkshopModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADWorkshopModuleView.swift; sourceTree = "<group>"; };
 		100000000000000000000318 /* DesignWorkshopWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignWorkshopWorkspaceView.swift; sourceTree = "<group>"; };
+		10000000000000000000034D /* LegalAgreementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalAgreementService.swift; sourceTree = "<group>"; };
+		10000000000000000000034F /* LegalAgreementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalAgreementViewModel.swift; sourceTree = "<group>"; };
+		100000000000000000000351 /* LegalAgreementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalAgreementView.swift; sourceTree = "<group>"; };
+		100000000000000000000353 /* LegalGateRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalGateRootView.swift; sourceTree = "<group>"; };
+		100000000000000000000355 /* LegalDocuments.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Legal/LegalDocuments.json"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -743,6 +753,8 @@
 				1000000000000000000002E6 /* FullscreenReplayViewerView.swift */,
 				10000000000000000000033A /* ReplayCenterWindowHost.swift */,
 				1000000000000000000002F6 /* ReplayTimelineEditorView.swift */,
+				100000000000000000000351 /* LegalAgreementView.swift */,
+				100000000000000000000353 /* LegalGateRootView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -755,6 +767,7 @@
 				1000000000000000000002AE /* BindingsViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
 				1000000000000000000002D3 /* ReplayLibraryViewModel.swift */,
+				10000000000000000000034F /* LegalAgreementViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -786,6 +799,7 @@
 				1000000000000000000002D1 /* MissionReplayStorageService.swift */,
 				1000000000000000000002D2 /* MissionReplaySettingsStore.swift */,
 				1000000000000000000002F4 /* ReplayVideoExportService.swift */,
+				10000000000000000000034D /* LegalAgreementService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -807,6 +821,7 @@
 			children = (
 				10000000000000000000012B /* Assets.xcassets */,
 				100000000000000000000126 /* Localizable.strings */,
+				100000000000000000000355 /* LegalDocuments.json */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -914,6 +929,7 @@
 			files = (
 				100000000000000000000225 /* Localizable.strings in Resources */,
 				100000000000000000000228 /* Assets.xcassets in Resources */,
+				100000000000000000000354 /* LegalDocuments.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1148,6 +1164,10 @@
 				100000000000000000000349 /* CADCutPreviewBuilder.swift in Sources */,
 				10000000000000000000034A /* CADCutCommitEngine.swift in Sources */,
 				10000000000000000000034B /* CADCutMeshRebuilder.swift in Sources */,
+				10000000000000000000034C /* LegalAgreementService.swift in Sources */,
+				10000000000000000000034E /* LegalAgreementViewModel.swift in Sources */,
+				100000000000000000000350 /* LegalAgreementView.swift in Sources */,
+				100000000000000000000352 /* LegalGateRootView.swift in Sources */,
 				100000000000000000000311 /* DesignPreviewSceneBuilder.swift in Sources */,
 				100000000000000000000312 /* DesignAssetNodeFactory.swift in Sources */,
 				100000000000000000000313 /* DesignPreviewSceneViewRepresentable.swift in Sources */,

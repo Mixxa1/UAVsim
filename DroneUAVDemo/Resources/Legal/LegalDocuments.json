@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "documents": [
+    {
+      "kind": "eula",
+      "version": "2026.06.04",
+      "title": "End User License Agreement",
+      "subtitle": "Лицензионное соглашение конечного пользователя",
+      "body": [
+        "DroneUAVDemo is provided as an educational and engineering simulation tool.",
+        "This application is not certified flight control software.",
+        "The user is responsible for using the application in accordance with applicable laws, safety rules and local regulations.",
+        "The software is provided without warranty."
+      ]
+    },
+    {
+      "kind": "tos",
+      "version": "2026.06.04",
+      "title": "Terms of Service",
+      "subtitle": "Условия использования",
+      "body": [
+        "By using DroneUAVDemo, you agree to these terms.",
+        "The application is intended for UAV simulation, mission planning experiments, CAD prototyping and educational use.",
+        "The application must not be used as a certified aviation, navigation or operational control system.",
+        "Deleting the local acceptance record will require accepting these terms again."
+      ]
+    }
+  ]
+}

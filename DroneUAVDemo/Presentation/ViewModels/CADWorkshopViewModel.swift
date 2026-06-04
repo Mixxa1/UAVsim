@@ -68,6 +68,42 @@ private struct CADCutPreviewCacheKey: Equatable {
     }
 }
 
+// Key for memoizing buildCutCommitValidationResult / validateCutV2Apply.
+// Excludes camera, viewport, and hover state — only actual cut inputs.
+private struct CADCutEvaluationKey: Equatable {
+    var featureOperation: CADFeatureOperation
+    var depthMM: Double
+    var direction: ExtrudeDirection
+    var depthMode: DepthMode
+    var selectedProfileAreaID: UUID?
+    var activeSketchID: UUID?
+    var activeSketchReference: SketchReference?
+    var cutTargetBodyID: UUID?
+    var existingCutIDs: [UUID]
+
+    init(
+        operation: CADFeatureOperation,
+        depthMM: Double,
+        direction: ExtrudeDirection,
+        depthMode: DepthMode,
+        selectedProfileAreaID: UUID?,
+        activeSketchID: UUID?,
+        activeSketchReference: SketchReference?,
+        cutTargetBodyID: UUID?,
+        existingCutIDs: [UUID]
+    ) {
+        self.featureOperation = operation
+        self.depthMM = depthMM
+        self.direction = direction
+        self.depthMode = depthMode
+        self.selectedProfileAreaID = selectedProfileAreaID
+        self.activeSketchID = activeSketchID
+        self.activeSketchReference = activeSketchReference
+        self.cutTargetBodyID = cutTargetBodyID
+        self.existingCutIDs = existingCutIDs
+    }
+}
+
 // MARK: - Line Tool State Types
 
 enum LineToolPhase: Equatable {
@@ -686,6 +722,15 @@ final class CADWorkshopViewModel: ObservableObject {
     private var cutCommittedGeometryRebuildCount = 0
     private var kernelCandidateBuildCount = 0
     private var kernelCommitCount = 0
+
+    // Memoization for the expensive cut validation result (prevents CPU spike on camera rotation).
+    private var _cachedCutCommitValidationResult: CutCommitValidationResult?
+    private var _cachedCutEvaluationKey: CADCutEvaluationKey?
+    private var _cachedCutApplyValidation: CADFeatureValidation?
+    private var _cachedCutApplyValidationKey: CADCutEvaluationKey?
+    private var cutValidationCacheHitCount = 0
+    private var cutValidationComputeCount = 0
+    private var meshValidationCount = 0
     private var kernelRejectCount = 0
     private var kernelShadowBuildCount = 0
     private var sceneGeometryReplacementCount = 0
@@ -779,11 +824,27 @@ final class CADWorkshopViewModel: ObservableObject {
               previewState.operation == .cutRemoveMaterialV2 else {
             return .noSelectedProfileArea
         }
-        return validateCutV2Apply(state: previewState)
+        let key = makeCutEvaluationKey()
+        if let cached = _cachedCutApplyValidation, _cachedCutApplyValidationKey == key {
+            return cached
+        }
+        let result = validateCutV2Apply(state: previewState)
+        _cachedCutApplyValidation = result
+        _cachedCutApplyValidationKey = key
+        return result
     }
 
     var cutCommitValidationResult: CutCommitValidationResult {
-        buildCutCommitValidationResult()
+        let key = makeCutEvaluationKey()
+        if let cached = _cachedCutCommitValidationResult, _cachedCutEvaluationKey == key {
+            cutValidationCacheHitCount += 1
+            return cached
+        }
+        cutValidationComputeCount += 1
+        let result = buildCutCommitValidationResult()
+        _cachedCutCommitValidationResult = result
+        _cachedCutEvaluationKey = key
+        return result
     }
 
     var cutV2SelectedProfileDisplayName: String {
@@ -1405,6 +1466,7 @@ final class CADWorkshopViewModel: ObservableObject {
     private func finishSuccessfulCutV2Apply(targetBodyID: UUID) {
         activeBodyEditTransaction = nil
         cutPreviewCacheKey = nil
+        invalidateCutEvaluationCache()
         featurePreviewState = nil
         featureApplyFailureReason = nil
         cutV1ApplyStatus = .blocked
@@ -1897,13 +1959,18 @@ final class CADWorkshopViewModel: ObservableObject {
     }
 
     private func logCutV2Counters(reason: String) {
+        #if DEBUG
         print(
             "CAD Cut v2 Counters: " +
             "reason=\(reason) " +
             "previewRebuildCount=\(cutPreviewRebuildCount) " +
             "booleanApplyCount=\(cutBooleanApplyCount) " +
-            "geometryRebuildCount=\(cutCommittedGeometryRebuildCount)"
+            "geometryRebuildCount=\(cutCommittedGeometryRebuildCount) " +
+            "validationComputeCount=\(cutValidationComputeCount) " +
+            "validationCacheHitCount=\(cutValidationCacheHitCount) " +
+            "meshValidationCount=\(meshValidationCount)"
         )
+        #endif
     }
 
     private func logCutV2PreviewRebuild(
@@ -2493,6 +2560,7 @@ final class CADWorkshopViewModel: ObservableObject {
         let previewNodesWereActive = activeCutTemporaryNodeCount > 0
         rollbackCutV2Transaction()
         cutPreviewCacheKey = nil
+        invalidateCutEvaluationCache()
         featurePreviewState = nil
         featureApplyFailureReason = nil
         recordCutCleanupGuard(previewNodesRemoved: previewNodesWereActive)
@@ -2507,6 +2575,32 @@ final class CADWorkshopViewModel: ObservableObject {
     private func validateCutV2Apply(state: CADFeaturePreviewState) -> CADFeatureValidation {
         guard state.operation == .cutRemoveMaterialV2 else { return .unsupportedOperation }
         return makeCurrentCutRequest(depthMode: state.depthMode).validation
+    }
+
+    private func makeCutEvaluationKey() -> CADCutEvaluationKey {
+        let existingCutIDs: [UUID] = cutTargetBodyID.flatMap { id in
+            guard let asset = document.assets.first(where: { $0.id == id }),
+                  case let .extrudedSolid(p) = asset.kind else { return nil }
+            return p.stableCutFeatures.map(\.id)
+        } ?? []
+        return CADCutEvaluationKey(
+            operation: featureOperation,
+            depthMM: featureDepthMM,
+            direction: featureDirection,
+            depthMode: featureDepthMode,
+            selectedProfileAreaID: currentProfileArea()?.id,
+            activeSketchID: selectedSketch?.id,
+            activeSketchReference: selectedSketch?.reference,
+            cutTargetBodyID: cutTargetBodyID,
+            existingCutIDs: existingCutIDs
+        )
+    }
+
+    private func invalidateCutEvaluationCache() {
+        _cachedCutCommitValidationResult = nil
+        _cachedCutEvaluationKey = nil
+        _cachedCutApplyValidation = nil
+        _cachedCutApplyValidationKey = nil
     }
 
     private func cutValidationIndicatesIntersectingUnsupported(_ validation: CADFeatureValidation) -> Bool {
@@ -2610,6 +2704,7 @@ final class CADWorkshopViewModel: ObservableObject {
         candidateParams.kernelVisualMesh = nil
         candidateParams.kernelResultSolid = nil
         candidateParams.refreshFaces(assetID: request.targetBodyID)
+        meshValidationCount += 1
         guard let meshBuild = CADCutMeshRebuilder.rebuildBodyMesh(
             bodyID: request.targetBodyID,
             bodyParams: candidateParams
