@@ -1968,3 +1968,9 @@
 "cad.cut_v2.reason.internal_orphan_face_detected" = "Operation rejected: internal or orphan faces detected.";
 "cad.cut_v2.reason.volume_rule_failed_after_cut" = "Operation rejected: cut must not increase body volume.";
 "cad.cut_v2.reason.kernel_candidate_invalid" = "Operation rejected: kernel candidate is invalid.";
+
+"cadnext.menu.title" = "CAD";
+"cadnext.menu.open" = "Open CADNext";
+"cadnext.alert.notFound.title" = "CADNext executable was not found";
+"cadnext.alert.notFound.message" = "Searched paths:\n%@\n\nBuild it with:\n%@";
+"cadnext.alert.launchFailed.title" = "Failed to launch CADNext";

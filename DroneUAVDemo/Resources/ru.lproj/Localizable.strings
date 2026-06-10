@@ -1963,3 +1963,9 @@
 "cad.cut_v2.reason.internal_orphan_face_detected" = "Операция отклонена: обнаружены внутренние или фантомные грани.";
 "cad.cut_v2.reason.volume_rule_failed_after_cut" = "Операция отклонена: вырез не должен увеличивать объём тела.";
 "cad.cut_v2.reason.kernel_candidate_invalid" = "Операция отклонена: kernel candidate некорректен.";
+
+"cadnext.menu.title" = "CAD";
+"cadnext.menu.open" = "Открыть CADNext";
+"cadnext.alert.notFound.title" = "Исполняемый файл CADNext не найден";
+"cadnext.alert.notFound.message" = "Проверенные пути:\n%@\n\nСоберите его командой:\n%@";
+"cadnext.alert.launchFailed.title" = "Не удалось запустить CADNext";

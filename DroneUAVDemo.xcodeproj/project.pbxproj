@@ -217,34 +217,16 @@
 		1000000000000000000002D9 /* ReplayCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002D4 /* ReplayCenterView.swift */; };
 		1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E6 /* FullscreenReplayViewerView.swift */; };
 		10000000000000000000033B /* ReplayCenterWindowHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000033A /* ReplayCenterWindowHost.swift */; };
-		10000000000000000000030A /* DesignAssetKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002FE /* DesignAssetKind.swift */; };
-		10000000000000000000030B /* DesignMaterial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002FF /* DesignMaterial.swift */; };
-		10000000000000000000030C /* DesignTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000300 /* DesignTransform.swift */; };
-		10000000000000000000030D /* AttachmentPoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000301 /* AttachmentPoint.swift */; };
-		10000000000000000000030E /* DesignMassProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000302 /* DesignMassProperties.swift */; };
-		10000000000000000000030F /* DesignAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000303 /* DesignAsset.swift */; };
-		100000000000000000000310 /* DesignDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000304 /* DesignDocument.swift */; };
-		100000000000000000000311 /* DesignPreviewSceneBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000305 /* DesignPreviewSceneBuilder.swift */; };
-		100000000000000000000312 /* DesignAssetNodeFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000306 /* DesignAssetNodeFactory.swift */; };
-		100000000000000000000313 /* DesignPreviewSceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000307 /* DesignPreviewSceneViewRepresentable.swift */; };
-		100000000000000000000314 /* CADWorkshopViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000308 /* CADWorkshopViewModel.swift */; };
-		100000000000000000000315 /* CADWorkshopModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000309 /* CADWorkshopModuleView.swift */; };
-		100000000000000000000319 /* DesignWorkshopWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000318 /* DesignWorkshopWorkspaceView.swift */; };
-		10000000000000000000031B /* DesignAssemblyLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000031A /* DesignAssemblyLink.swift */; };
-		10000000000000000000031D /* DesignSketchProfileGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000031C /* DesignSketchProfileGraph.swift */; };
-		10000000000000000000031F /* CADFeatureTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000031E /* CADFeatureTypes.swift */; };
-		10000000000000000000033C /* CADSolidBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000033D /* CADSolidBackend.swift */; };
-		100000000000000000000346 /* CADCutDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000340 /* CADCutDiagnostics.swift */; };
-		100000000000000000000347 /* CADCutRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000341 /* CADCutRequest.swift */; };
-		100000000000000000000348 /* CADCutValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000342 /* CADCutValidator.swift */; };
-		100000000000000000000349 /* CADCutPreviewBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000343 /* CADCutPreviewBuilder.swift */; };
-		10000000000000000000034A /* CADCutCommitEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000344 /* CADCutCommitEngine.swift */; };
-		10000000000000000000034B /* CADCutMeshRebuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000345 /* CADCutMeshRebuilder.swift */; };
 		10000000000000000000034C /* LegalAgreementService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000034D /* LegalAgreementService.swift */; };
+		100000000000000000000360 /* CADNextLauncherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000361 /* CADNextLauncherService.swift */; };
 		10000000000000000000034E /* LegalAgreementViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000034F /* LegalAgreementViewModel.swift */; };
 		100000000000000000000350 /* LegalAgreementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000351 /* LegalAgreementView.swift */; };
 		100000000000000000000352 /* LegalGateRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000353 /* LegalGateRootView.swift */; };
 		100000000000000000000354 /* LegalDocuments.json in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000355 /* LegalDocuments.json */; };
+		100000000000000000000356 /* CADExternalModelReference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000035A /* CADExternalModelReference.swift */; };
+		100000000000000000000357 /* CADModelImportDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000035B /* CADModelImportDescriptor.swift */; };
+		100000000000000000000358 /* CADAttachmentImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000035C /* CADAttachmentImport.swift */; };
+		100000000000000000000359 /* CADMassPropertiesImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000035D /* CADMassPropertiesImport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -461,34 +443,16 @@
 		1000000000000000000002E6 /* FullscreenReplayViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenReplayViewerView.swift; sourceTree = "<group>"; };
 		10000000000000000000033A /* ReplayCenterWindowHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCenterWindowHost.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
-		1000000000000000000002FE /* DesignAssetKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignAssetKind.swift; sourceTree = "<group>"; };
-		1000000000000000000002FF /* DesignMaterial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignMaterial.swift; sourceTree = "<group>"; };
-		100000000000000000000300 /* DesignTransform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTransform.swift; sourceTree = "<group>"; };
-		100000000000000000000301 /* AttachmentPoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPoint.swift; sourceTree = "<group>"; };
-		100000000000000000000302 /* DesignMassProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignMassProperties.swift; sourceTree = "<group>"; };
-		100000000000000000000303 /* DesignAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignAsset.swift; sourceTree = "<group>"; };
-		100000000000000000000304 /* DesignDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignDocument.swift; sourceTree = "<group>"; };
-		10000000000000000000031A /* DesignAssemblyLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignAssemblyLink.swift; sourceTree = "<group>"; };
-		10000000000000000000031C /* DesignSketchProfileGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSketchProfileGraph.swift; sourceTree = "<group>"; };
-		10000000000000000000031E /* CADFeatureTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADFeatureTypes.swift; sourceTree = "<group>"; };
-		10000000000000000000033D /* CADSolidBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADSolidBackend.swift; sourceTree = "<group>"; };
-		100000000000000000000340 /* CADCutDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADCutDiagnostics.swift; sourceTree = "<group>"; };
-		100000000000000000000341 /* CADCutRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADCutRequest.swift; sourceTree = "<group>"; };
-		100000000000000000000342 /* CADCutValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADCutValidator.swift; sourceTree = "<group>"; };
-		100000000000000000000343 /* CADCutPreviewBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADCutPreviewBuilder.swift; sourceTree = "<group>"; };
-		100000000000000000000344 /* CADCutCommitEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADCutCommitEngine.swift; sourceTree = "<group>"; };
-		100000000000000000000345 /* CADCutMeshRebuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADCutMeshRebuilder.swift; sourceTree = "<group>"; };
-		100000000000000000000305 /* DesignPreviewSceneBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignPreviewSceneBuilder.swift; sourceTree = "<group>"; };
-		100000000000000000000306 /* DesignAssetNodeFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignAssetNodeFactory.swift; sourceTree = "<group>"; };
-		100000000000000000000307 /* DesignPreviewSceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignPreviewSceneViewRepresentable.swift; sourceTree = "<group>"; };
-		100000000000000000000308 /* CADWorkshopViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADWorkshopViewModel.swift; sourceTree = "<group>"; };
-		100000000000000000000309 /* CADWorkshopModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADWorkshopModuleView.swift; sourceTree = "<group>"; };
-		100000000000000000000318 /* DesignWorkshopWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignWorkshopWorkspaceView.swift; sourceTree = "<group>"; };
 		10000000000000000000034D /* LegalAgreementService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalAgreementService.swift; sourceTree = "<group>"; };
+		100000000000000000000361 /* CADNextLauncherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADNextLauncherService.swift; sourceTree = "<group>"; };
 		10000000000000000000034F /* LegalAgreementViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalAgreementViewModel.swift; sourceTree = "<group>"; };
 		100000000000000000000351 /* LegalAgreementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalAgreementView.swift; sourceTree = "<group>"; };
 		100000000000000000000353 /* LegalGateRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalGateRootView.swift; sourceTree = "<group>"; };
 		100000000000000000000355 /* LegalDocuments.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Legal/LegalDocuments.json"; sourceTree = "<group>"; };
+		10000000000000000000035A /* CADExternalModelReference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADExternalModelReference.swift; sourceTree = "<group>"; };
+		10000000000000000000035B /* CADModelImportDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADModelImportDescriptor.swift; sourceTree = "<group>"; };
+		10000000000000000000035C /* CADAttachmentImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADAttachmentImport.swift; sourceTree = "<group>"; };
+		10000000000000000000035D /* CADMassPropertiesImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADMassPropertiesImport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -538,7 +502,7 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
-				100000000000000000000316 /* CAD */,
+				10000000000000000000035E /* CADBridge */,
 				100000000000000000000121 /* AppLanguage.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
@@ -680,7 +644,6 @@
 		100000000000000000000013 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
-				100000000000000000000317 /* CAD */,
 				10000000000000000000010E /* DroneModelBuilder.swift */,
 				10000000000000000000010F /* DroneSceneController.swift */,
 				10000000000000000000011C /* EnvironmentObjectFactory.swift */,
@@ -709,8 +672,6 @@
 		100000000000000000000015 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				100000000000000000000309 /* CADWorkshopModuleView.swift */,
-				100000000000000000000318 /* DesignWorkshopWorkspaceView.swift */,
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
 				100000000000000000000154 /* CompassOverlayView.swift */,
@@ -762,7 +723,6 @@
 		100000000000000000000016 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
-				100000000000000000000308 /* CADWorkshopViewModel.swift */,
 				100000000000000000000153 /* CompassViewModel.swift */,
 				1000000000000000000002AE /* BindingsViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
@@ -800,6 +760,7 @@
 				1000000000000000000002D2 /* MissionReplaySettingsStore.swift */,
 				1000000000000000000002F4 /* ReplayVideoExportService.swift */,
 				10000000000000000000034D /* LegalAgreementService.swift */,
+				100000000000000000000361 /* CADNextLauncherService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -856,38 +817,15 @@
 		};
 /* End PBXNativeTarget section */
 
-		100000000000000000000316 /* CAD */ = {
+		10000000000000000000035E /* CADBridge */ = {
 			isa = PBXGroup;
 			children = (
-				1000000000000000000002FE /* DesignAssetKind.swift */,
-				1000000000000000000002FF /* DesignMaterial.swift */,
-				100000000000000000000300 /* DesignTransform.swift */,
-				100000000000000000000301 /* AttachmentPoint.swift */,
-				100000000000000000000302 /* DesignMassProperties.swift */,
-				100000000000000000000303 /* DesignAsset.swift */,
-				100000000000000000000304 /* DesignDocument.swift */,
-				10000000000000000000031A /* DesignAssemblyLink.swift */,
-				10000000000000000000031C /* DesignSketchProfileGraph.swift */,
-				10000000000000000000031E /* CADFeatureTypes.swift */,
-				10000000000000000000033D /* CADSolidBackend.swift */,
-				100000000000000000000340 /* CADCutDiagnostics.swift */,
-				100000000000000000000341 /* CADCutRequest.swift */,
-				100000000000000000000342 /* CADCutValidator.swift */,
-				100000000000000000000343 /* CADCutPreviewBuilder.swift */,
-				100000000000000000000344 /* CADCutCommitEngine.swift */,
-				100000000000000000000345 /* CADCutMeshRebuilder.swift */,
+				10000000000000000000035A /* CADExternalModelReference.swift */,
+				10000000000000000000035B /* CADModelImportDescriptor.swift */,
+				10000000000000000000035C /* CADAttachmentImport.swift */,
+				10000000000000000000035D /* CADMassPropertiesImport.swift */,
 			);
-			path = CAD;
-			sourceTree = "<group>";
-		};
-		100000000000000000000317 /* CAD */ = {
-			isa = PBXGroup;
-			children = (
-				100000000000000000000305 /* DesignPreviewSceneBuilder.swift */,
-				100000000000000000000306 /* DesignAssetNodeFactory.swift */,
-				100000000000000000000307 /* DesignPreviewSceneViewRepresentable.swift */,
-			);
-			path = CAD;
+			path = CADBridge;
 			sourceTree = "<group>";
 		};
 		/* Begin PBXProject section */
@@ -1147,34 +1085,16 @@
 				1000000000000000000002F1 /* ReplayComparisonBuilder.swift in Sources */,
 				1000000000000000000002F3 /* ReplayTrimmer.swift in Sources */,
 				1000000000000000000002F5 /* ReplayVideoExportService.swift in Sources */,
-				10000000000000000000030A /* DesignAssetKind.swift in Sources */,
-				10000000000000000000030B /* DesignMaterial.swift in Sources */,
-				10000000000000000000030C /* DesignTransform.swift in Sources */,
-				10000000000000000000030D /* AttachmentPoint.swift in Sources */,
-				10000000000000000000030E /* DesignMassProperties.swift in Sources */,
-				10000000000000000000030F /* DesignAsset.swift in Sources */,
-				100000000000000000000310 /* DesignDocument.swift in Sources */,
-				10000000000000000000031B /* DesignAssemblyLink.swift in Sources */,
-				10000000000000000000031D /* DesignSketchProfileGraph.swift in Sources */,
-				10000000000000000000031F /* CADFeatureTypes.swift in Sources */,
-				10000000000000000000033C /* CADSolidBackend.swift in Sources */,
-				100000000000000000000346 /* CADCutDiagnostics.swift in Sources */,
-				100000000000000000000347 /* CADCutRequest.swift in Sources */,
-				100000000000000000000348 /* CADCutValidator.swift in Sources */,
-				100000000000000000000349 /* CADCutPreviewBuilder.swift in Sources */,
-				10000000000000000000034A /* CADCutCommitEngine.swift in Sources */,
-				10000000000000000000034B /* CADCutMeshRebuilder.swift in Sources */,
 				10000000000000000000034C /* LegalAgreementService.swift in Sources */,
+				100000000000000000000360 /* CADNextLauncherService.swift in Sources */,
 				10000000000000000000034E /* LegalAgreementViewModel.swift in Sources */,
 				100000000000000000000350 /* LegalAgreementView.swift in Sources */,
 				100000000000000000000352 /* LegalGateRootView.swift in Sources */,
-				100000000000000000000311 /* DesignPreviewSceneBuilder.swift in Sources */,
-				100000000000000000000312 /* DesignAssetNodeFactory.swift in Sources */,
-				100000000000000000000313 /* DesignPreviewSceneViewRepresentable.swift in Sources */,
-				100000000000000000000314 /* CADWorkshopViewModel.swift in Sources */,
-				100000000000000000000315 /* CADWorkshopModuleView.swift in Sources */,
-					100000000000000000000319 /* DesignWorkshopWorkspaceView.swift in Sources */,
-					1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
+				100000000000000000000356 /* CADExternalModelReference.swift in Sources */,
+				100000000000000000000357 /* CADModelImportDescriptor.swift in Sources */,
+				100000000000000000000358 /* CADAttachmentImport.swift in Sources */,
+				100000000000000000000359 /* CADMassPropertiesImport.swift in Sources */,
+				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

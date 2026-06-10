@@ -18,3 +18,9 @@ DerivedData/
 # Local derived data variants
 .deriveddata-*
 .codex-derived-data/
+
+# CADNext local CMake build artifacts
+CADNext/build/
+CADNext/build-gui/
+CADNext/build-occt/
+CADNext/build-gui-occt/

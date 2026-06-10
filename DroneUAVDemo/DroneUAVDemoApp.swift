@@ -49,6 +49,11 @@ struct DroneUAVDemoApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.control, .command])
             }
+            CommandMenu("cadnext.menu.title") {
+                Button("cadnext.menu.open") {
+                    CADNextLauncherService.shared.openCADNext()
+                }
+            }
         }
     }
 }
