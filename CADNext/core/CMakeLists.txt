@@ -3,7 +3,11 @@ add_library(cadnext_core
     src/DocumentSerializer.cpp
     src/Object.cpp
     src/Sketch.cpp
+    src/SketchInput.cpp
+    src/ViewportPolicy.cpp
+    src/WorkPlane.cpp
     src/SketchProfile.cpp
+    src/Extrude.cpp
     src/Feature.cpp
     src/Material.cpp
     src/Transform.cpp

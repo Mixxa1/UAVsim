@@ -7,14 +7,21 @@
 #ifdef CADNEXT_WITH_OCCT
 #include <unordered_map>
 
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <Standard_Failure.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
 #endif
 
 namespace cadnext::kernel {
@@ -130,6 +137,96 @@ cadnext::Result<ShapeHandle> OcctKernel::makeSphere(const SphereParameters& para
     }
 }
 
+cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedPolygon(
+    const ExtrudedPolygonParameters& params) {
+    if (params.loop.size() < 3) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Extruded polygon needs at least 3 loop points"
+        });
+    }
+    const gp_Vec extrusion(params.extrusion.x, params.extrusion.y, params.extrusion.z);
+    if (extrusion.Magnitude() <= 1.0e-12) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Extrusion vector must be non-zero"
+        });
+    }
+    try {
+        // Closed planar loop → wire → face → prism along the world vector.
+        BRepBuilderAPI_MakePolygon polygon;
+        for (const cadnext::Vector3& point : params.loop) {
+            polygon.Add(gp_Pnt(point.x, point.y, point.z));
+        }
+        polygon.Close();
+        if (!polygon.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed,
+                 "OCCT polygon wire construction failed"});
+        }
+        BRepBuilderAPI_MakeFace face(polygon.Wire());
+        if (!face.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed,
+                 "OCCT profile face construction failed (loop not planar/closed?)"});
+        }
+        BRepPrimAPI_MakePrism prism(face.Face(), extrusion);
+        prism.Build();
+        if (!prism.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed, "OCCT prism construction failed"});
+        }
+        return cadnext::Result<ShapeHandle>::ok(impl_->store(prism.Shape(), "occt-extrude"));
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT polygon extrude failed: ") + failure.GetMessageString()});
+    }
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedCircle(
+    const ExtrudedCircleParameters& params) {
+    if (!isPositiveFinite(params.radius)) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Extruded circle radius must be finite and positive"
+        });
+    }
+    const gp_Vec extrusion(params.extrusion.x, params.extrusion.y, params.extrusion.z);
+    if (extrusion.Magnitude() <= 1.0e-12) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Extrusion vector must be non-zero"
+        });
+    }
+    try {
+        // Exact circular wire (no polygon approximation in the BRep path).
+        const gp_Ax2 axis(gp_Pnt(params.center.x, params.center.y, params.center.z),
+                          gp_Dir(params.normal.x, params.normal.y, params.normal.z));
+        const gp_Circ circle(axis, params.radius);
+        BRepBuilderAPI_MakeEdge edge(circle);
+        BRepBuilderAPI_MakeWire wire(edge.Edge());
+        BRepBuilderAPI_MakeFace face(wire.Wire());
+        if (!face.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed,
+                 "OCCT circle face construction failed"});
+        }
+        BRepPrimAPI_MakePrism prism(face.Face(), extrusion);
+        prism.Build();
+        if (!prism.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed, "OCCT prism construction failed"});
+        }
+        return cadnext::Result<ShapeHandle>::ok(
+            impl_->store(prism.Shape(), "occt-extrude-circle"));
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT circle extrude failed: ") + failure.GetMessageString()});
+    }
+}
+
 bool OcctKernel::isShapeValid(const ShapeHandle& shape) const {
     const TopoDS_Shape* topoShape = findShape(shape);
     if (!topoShape || topoShape->IsNull()) {
@@ -169,6 +266,14 @@ cadnext::Result<ShapeHandle> OcctKernel::makeCylinder(const CylinderParameters&)
 
 cadnext::Result<ShapeHandle> OcctKernel::makeSphere(const SphereParameters&) {
     return unavailable("OCCT sphere");
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedPolygon(const ExtrudedPolygonParameters&) {
+    return unavailable("OCCT polygon extrude");
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedCircle(const ExtrudedCircleParameters&) {
+    return unavailable("OCCT circle extrude");
 }
 
 bool OcctKernel::isShapeValid(const ShapeHandle&) const {

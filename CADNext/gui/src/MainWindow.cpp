@@ -7,9 +7,12 @@
 
 #include <QCloseEvent>
 #include <QDockWidget>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QCursor>
 #include <QLabel>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSignalBlocker>
@@ -18,10 +21,12 @@
 #include <QtLogging>
 
 #include "cadnext/DocumentSerializer.hpp"
+#include "cadnext/gui/ExtrudeDialog.hpp"
 #include "cadnext/gui/ProjectTree.hpp"
 #include "cadnext/gui/PropertyPanel.hpp"
 #include "cadnext/gui/SketchToolBar.hpp"
 #include "cadnext/gui/ToolBar.hpp"
+#include "cadnext/kernel/ExtrudeMesh.hpp"
 #include "cadnext/kernel/KernelFactory.hpp"
 
 namespace cadnext::gui {
@@ -46,12 +51,60 @@ QString treeTypeText(const Object& object) {
     return QString::fromUtf8(primitiveKindName(object.primitive.kind));
 }
 
+QString workPlaneTypeText(const WorkPlane& plane) {
+    switch (plane.kind) {
+    case WorkPlaneKind::XY: return QObject::tr("Canonical XY");
+    case WorkPlaneKind::XZ: return QObject::tr("Canonical XZ");
+    case WorkPlaneKind::YZ: return QObject::tr("Canonical YZ");
+    case WorkPlaneKind::ObjectPlane: return QObject::tr("Reference Plane");
+    case WorkPlaneKind::FacePlane: return QObject::tr("Face Plane");
+    }
+    return QObject::tr("Work Plane");
+}
+
 int maxNumberSuffix(const std::string& id, const char* prefix, int current) {
     if (id.rfind(prefix, 0) == 0) {
         const int number = std::atoi(id.c_str() + std::strlen(prefix));
         return std::max(current, number + 1);
     }
     return current;
+}
+
+QString profileKindText(cadnext::SketchProfileKind kind) {
+    switch (kind) {
+    case cadnext::SketchProfileKind::Rectangle: return QObject::tr("Rectangle");
+    case cadnext::SketchProfileKind::Circle: return QObject::tr("Circle");
+    case cadnext::SketchProfileKind::Polygon: return QObject::tr("Polygon");
+    case cadnext::SketchProfileKind::Unsupported: break;
+    }
+    return QObject::tr("Profile");
+}
+
+const cadnext::SketchProfile* profileById(const std::vector<cadnext::SketchProfile>& profiles,
+                                          const std::string& profileId) {
+    for (const cadnext::SketchProfile& profile : profiles) {
+        if (profile.id == profileId) {
+            return &profile;
+        }
+    }
+    return nullptr;
+}
+
+// Profile a clicked entity stands for: rectangles/circles match their own
+// profile, a line matches the polygon loop it participates in.
+const cadnext::SketchProfile* profileForEntityId(
+    const std::vector<cadnext::SketchProfile>& profiles, const std::string& entityId) {
+    for (const cadnext::SketchProfile& profile : profiles) {
+        if (profile.sourceEntityId == entityId) {
+            return &profile;
+        }
+        for (const std::string& id : profile.sourceEntityIds) {
+            if (id == entityId) {
+                return &profile;
+            }
+        }
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -74,16 +127,21 @@ MainWindow::MainWindow(QWidget* parent)
     addToolBar(Qt::TopToolBarArea, sketchToolBar_);
 
     projectTree_ = new ProjectTree(this);
-    auto* treeDock = new QDockWidget(tr("Project"), this);
-    treeDock->setWidget(projectTree_);
-    treeDock->setFeatures(QDockWidget::DockWidgetMovable);
-    addDockWidget(Qt::LeftDockWidgetArea, treeDock);
+    addCanonicalWorkPlanesToTree();
+    treeDock_ = new QDockWidget(tr("Project"), this);
+    treeDock_->setWidget(projectTree_);
+    treeDock_->setFeatures(QDockWidget::DockWidgetMovable);
+    addDockWidget(Qt::LeftDockWidgetArea, treeDock_);
 
+    // Properties live in a right-side inspector dock (CAD layout: tree |
+    // viewport | inspector) so they no longer cost viewport height.
     propertyPanel_ = new PropertyPanel(this);
-    auto* propertyDock = new QDockWidget(tr("Properties"), this);
-    propertyDock->setWidget(propertyPanel_);
-    propertyDock->setFeatures(QDockWidget::DockWidgetMovable);
-    addDockWidget(Qt::BottomDockWidgetArea, propertyDock);
+    propertyDock_ = new QDockWidget(tr("Properties"), this);
+    propertyDock_->setWidget(propertyPanel_);
+    propertyDock_->setFeatures(QDockWidget::DockWidgetMovable |
+                               QDockWidget::DockWidgetClosable);
+    propertyDock_->setMinimumWidth(300);
+    addDockWidget(Qt::RightDockWidgetArea, propertyDock_);
 
     createMenus();
 
@@ -96,6 +154,8 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { addPrimitiveObject(PrimitiveKind::Sphere); });
     connect(toolBar_->addPlaneAction(), &QAction::triggered, this,
             [this]() { addReferencePlane(); });
+    connect(toolBar_->extrudeAction(), &QAction::triggered, this,
+            [this]() { openExtrudeDialog(); });
     connect(toolBar_->deleteSelectedAction(), &QAction::triggered, this,
             [this]() { deleteSelected(); });
     connect(toolBar_->fitViewAction(), &QAction::triggered, this, [this]() {
@@ -116,6 +176,8 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { newSketch(SketchPlane::XZ); });
     connect(sketchToolBar_->newSketchYZAction(), &QAction::triggered, this,
             [this]() { newSketch(SketchPlane::YZ); });
+    connect(sketchToolBar_->createSketchAction(), &QAction::triggered, this,
+            [this]() { createSketchFromSelectedPlane(); });
     connect(sketchToolBar_->enterSketchAction(), &QAction::triggered, this, [this]() {
         if (selectionKind_ == SelectionKind::Sketch) {
             enterSketchMode(selectedId_);
@@ -131,8 +193,16 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { setSketchTool(SketchTool::Rectangle); });
     connect(sketchToolBar_->circleToolAction(), &QAction::triggered, this,
             [this]() { setSketchTool(SketchTool::Circle); });
+    connect(sketchToolBar_->snapGridAction(), &QAction::toggled, this,
+            [this](bool enabled) { onSnapToggled(enabled); });
+    connect(sketchToolBar_->showGridAction(), &QAction::toggled, this,
+            [this](bool visible) { onShowGridToggled(visible); });
+    connect(sketchToolBar_->gridStepSpinBox(), &QDoubleSpinBox::valueChanged, this,
+            [this](double step) { onGridStepChanged(step); });
 
     // Project tree.
+    connect(projectTree_, &ProjectTree::workPlaneSelected, this,
+            [this](const QString& planeId) { selectWorkPlane(planeId.toStdString()); });
     connect(projectTree_, &ProjectTree::bodySelected, this,
             [this](const QString& objectId) { selectBody(objectId.toStdString()); });
     connect(projectTree_, &ProjectTree::sketchSelected, this,
@@ -169,9 +239,10 @@ MainWindow::MainWindow(QWidget* parent)
                 onPrimitiveEdited(objectId, parameters);
             });
 
-    statusBar()->showMessage(
-        tr("Click an object in the viewport or the project tree to select it; "
-           "click empty space to clear the selection"));
+    statusBar()->showMessage(tr("Free3D: select body, work plane or sketch"));
+    modeStatusLabel_ = new QLabel(this);
+    statusBar()->addPermanentWidget(modeStatusLabel_);
+    updateModeStatusLabel();
 #ifdef CADNEXT_WITH_OCCT
     statusBar()->addPermanentWidget(
         new QLabel(tr("Geometry backend: OCCT BRep evaluation"), this));
@@ -197,16 +268,43 @@ void MainWindow::initializeViewport() {
 
     selection_ = std::make_unique<viewer::SelectionController>(viewer_->scene());
 
-    viewer_->setPickCallback([this](const viewer::ViewportPickTarget& target) {
+    viewer_->setPickCallback([this](const viewer::ViewportPickTarget& target, bool contextClick) {
         if (target.isSketchEntity()) {
             selectEntity(target.sketchId, target.entityId);
+        } else if (target.isProfile()) {
+            // Click inside a detected closed region selects the profile.
+            selectProfile(target.profileId);
+        } else if (target.isWorkPlane()) {
+            selectWorkPlane(target.workPlaneId);
+            showPlaneActionPalette(contextClick);
         } else if (target.isBody()) {
             selectBody(target.objectId);
         } else {
             clearSelection();
         }
+        // Context click on a profile/entity offers Extrude directly.
+        if (contextClick && (target.isProfile() || target.isSketchEntity()) &&
+            toolBar_->extrudeAction()->isEnabled()) {
+            QMenu menu(this);
+            QAction* extrude = menu.addAction(tr("Extrude"));
+            if (menu.exec(QCursor::pos()) == extrude) {
+                openExtrudeDialog();
+            }
+        }
+    });
+    viewer_->setHoverCallback([this](const viewer::ViewportPickTarget& target) {
+        const std::string next = target.isWorkPlane() ? target.workPlaneId : std::string();
+        if (next == hoveredWorkPlaneId_) {
+            return;
+        }
+        hoveredWorkPlaneId_ = next;
+        viewer_->scene().setHoveredWorkPlane(hoveredWorkPlaneId_);
     });
     viewer_->setSketchPointCallback([this](double u, double v) { onSketchPoint(u, v); });
+    viewer_->setSketchMoveCallback([this](double u, double v) { onSketchMove(u, v); });
+    viewer_->setSketchMissCallback([this]() {
+        statusBar()->showMessage(tr("Cursor is not over the active sketch plane"), 3000);
+    });
     viewer_->setSketchCancelCallback([this]() { cancelSketchTool(); });
 }
 
@@ -219,6 +317,18 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 // --- Selection ------------------------------------------------------------
+
+void MainWindow::selectWorkPlane(const std::string& planeId) {
+    if (selectionKind_ == SelectionKind::WorkPlane && selectedId_ == planeId) {
+        return;
+    }
+    selectionKind_ = SelectionKind::WorkPlane;
+    selectedId_ = planeId;
+    selectedSketchId_.clear();
+    syncTreeSelection();
+    syncViewportSelection();
+    refreshPropertyPanel();
+}
 
 void MainWindow::selectBody(const std::string& objectId) {
     if (selectionKind_ == SelectionKind::Body && selectedId_ == objectId) {
@@ -255,6 +365,8 @@ void MainWindow::selectEntity(const std::string& sketchId, const std::string& en
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
+    // A rectangle/circle (or a loop line) stands for its profile.
+    selectProfileForEntity(sketchId, entityId);
 }
 
 void MainWindow::clearSelection() {
@@ -272,6 +384,9 @@ void MainWindow::clearSelection() {
 void MainWindow::syncTreeSelection() {
     const QSignalBlocker blocker(projectTree_);
     switch (selectionKind_) {
+    case SelectionKind::WorkPlane:
+        projectTree_->setCurrentWorkPlane(QString::fromStdString(selectedId_));
+        break;
     case SelectionKind::Body:
         projectTree_->setCurrentBody(QString::fromStdString(selectedId_));
         break;
@@ -299,6 +414,9 @@ void MainWindow::syncViewportSelection() {
     } else {
         selection_->clearSelection();
     }
+    viewer_->setSelectedWorkPlane(selectionKind_ == SelectionKind::WorkPlane
+                                      ? selectedId_
+                                      : std::string());
 
     // Sketch entity highlight.
     if (!highlightedEntityId_.empty()) {
@@ -313,12 +431,23 @@ void MainWindow::syncViewportSelection() {
         highlightedEntityId_ = selectedId_;
     }
 
+    sketchToolBar_->setCreateSketchEnabled(selectionKind_ == SelectionKind::WorkPlane);
     sketchToolBar_->setEnterSketchEnabled(selectionKind_ == SelectionKind::Sketch &&
                                           !activeSketchId_);
+    updateExtrudeActionEnabled();
+    updateModeStatusLabel();
 }
 
 void MainWindow::refreshPropertyPanel() {
     switch (selectionKind_) {
+    case SelectionKind::WorkPlane: {
+        const std::optional<WorkPlane> plane = workPlaneById(selectedId_);
+        if (plane) {
+            propertyPanel_->showWorkPlane(*plane);
+            return;
+        }
+        break;
+    }
     case SelectionKind::Body: {
         const Result<Object> object = document_.objectById(selectedId_);
         if (object.isOk()) {
@@ -349,6 +478,66 @@ void MainWindow::refreshPropertyPanel() {
         break;
     }
     propertyPanel_->clearObject();
+}
+
+std::optional<WorkPlane> MainWindow::workPlaneById(const std::string& planeId) const {
+    if (planeId == canonicalWorkPlaneId(SketchPlane::XY)) {
+        return makeCanonicalWorkPlane(SketchPlane::XY, 8.0);
+    }
+    if (planeId == canonicalWorkPlaneId(SketchPlane::XZ)) {
+        return makeCanonicalWorkPlane(SketchPlane::XZ, 8.0);
+    }
+    if (planeId == canonicalWorkPlaneId(SketchPlane::YZ)) {
+        return makeCanonicalWorkPlane(SketchPlane::YZ, 8.0);
+    }
+    const Result<Object> object = document_.objectById(planeId);
+    if (object.isOk() && object.value().type == ObjectType::ReferencePlane) {
+        return workPlaneFromReferencePlaneObject(object.value());
+    }
+    return std::nullopt;
+}
+
+WorkPlane MainWindow::workPlaneForSketch(const Sketch& sketch) const {
+    if (sketch.reference.type == SketchReferenceType::WorkPlane) {
+        const std::optional<WorkPlane> plane = workPlaneById(sketch.reference.sourceId);
+        if (plane) {
+            return *plane;
+        }
+    }
+    if (sketch.reference.type == SketchReferenceType::CanonicalPlane) {
+        if (const std::optional<WorkPlane> plane = workPlaneById(sketch.reference.sourceId)) {
+            return *plane;
+        }
+        return makeCanonicalWorkPlane(sketch.plane, 8.0);
+    }
+
+    WorkPlane plane;
+    plane.id = sketch.reference.sourceId;
+    plane.name = sketch.name;
+    plane.kind = sketch.reference.type == SketchReferenceType::Face
+                     ? WorkPlaneKind::FacePlane
+                     : WorkPlaneKind::ObjectPlane;
+    plane.origin = sketch.reference.origin;
+    plane.uAxis = sketch.reference.uAxis;
+    plane.vAxis = sketch.reference.vAxis;
+    plane.normal = sketch.reference.normal;
+    plane.width = 8.0;
+    plane.height = 8.0;
+    return plane;
+}
+
+void MainWindow::addCanonicalWorkPlanesToTree() {
+    const WorkPlane planes[] = {
+        makeCanonicalWorkPlane(SketchPlane::XY, 8.0),
+        makeCanonicalWorkPlane(SketchPlane::XZ, 8.0),
+        makeCanonicalWorkPlane(SketchPlane::YZ, 8.0),
+    };
+    const QSignalBlocker blocker(projectTree_);
+    for (const WorkPlane& plane : planes) {
+        projectTree_->addWorkPlaneItem(QString::fromStdString(plane.id),
+                                       QString::fromStdString(plane.name),
+                                       workPlaneTypeText(plane));
+    }
 }
 
 // --- Body creation/removal ----------------------------------------------
@@ -411,10 +600,21 @@ void MainWindow::registerObject(const Object& object) {
     buildObjectVisual(object);
     {
         const QSignalBlocker blocker(projectTree_);
-        projectTree_->addBodyItem(QString::fromStdString(object.id),
-                                  QString::fromStdString(object.name), treeTypeText(object));
+        if (object.type == ObjectType::ReferencePlane) {
+            const WorkPlane plane = workPlaneFromReferencePlaneObject(object);
+            projectTree_->addWorkPlaneItem(QString::fromStdString(plane.id),
+                                           QString::fromStdString(plane.name),
+                                           workPlaneTypeText(plane));
+        } else {
+            projectTree_->addBodyItem(QString::fromStdString(object.id),
+                                      QString::fromStdString(object.name), treeTypeText(object));
+        }
     }
-    selectBody(object.id);
+    if (object.type == ObjectType::ReferencePlane) {
+        selectWorkPlane(object.id);
+    } else {
+        selectBody(object.id);
+    }
     markDirty();
 }
 
@@ -464,6 +664,23 @@ Vector3 MainWindow::nextSpawnPosition(double groundOffset) const {
 
 void MainWindow::deleteSelected() {
     switch (selectionKind_) {
+    case SelectionKind::WorkPlane: {
+        const std::optional<WorkPlane> plane = workPlaneById(selectedId_);
+        if (!plane || plane->kind != WorkPlaneKind::ObjectPlane) {
+            statusBar()->showMessage(tr("Canonical work planes cannot be deleted"), 3000);
+            break;
+        }
+        const std::string objectId = selectedId_;
+        clearSelection();
+        document_.removeObject(objectId);
+        viewer_->scene().removeObjectNode(objectId);
+        {
+            const QSignalBlocker blocker(projectTree_);
+            projectTree_->removeWorkPlaneItem(QString::fromStdString(objectId));
+        }
+        markDirty();
+        break;
+    }
     case SelectionKind::Body: {
         const std::string objectId = selectedId_;
         clearSelection();
@@ -504,6 +721,7 @@ void MainWindow::deleteSelected() {
             projectTree_->removeEntityItem(QString::fromStdString(sketchId),
                                            QString::fromStdString(entityId));
         }
+        refreshSketchProfiles();
         selectSketch(sketchId);
         markDirty();
         break;
@@ -516,16 +734,38 @@ void MainWindow::deleteSelected() {
 // --- Sketch workflow ----------------------------------------------------
 
 void MainWindow::newSketch(SketchPlane plane) {
+    createSketchOnPlane(makeCanonicalWorkPlane(plane, 8.0));
+}
+
+void MainWindow::createSketchFromSelectedPlane() {
+    if (selectionKind_ != SelectionKind::WorkPlane) {
+        return;
+    }
+    const std::optional<WorkPlane> plane = workPlaneById(selectedId_);
+    if (plane) {
+        createSketchOnPlane(*plane);
+    }
+}
+
+void MainWindow::createSketchOnPlane(const WorkPlane& plane) {
     if (!viewer_) {
         return;
     }
 
     Sketch sketch;
     sketch.id = "sketch-" + std::to_string(nextSketchNumber_);
-    sketch.name = std::string("Sketch ") + sketchPlaneName(plane) + " " +
-                  std::to_string(nextSketchNumber_);
+    sketch.name = "Sketch " + plane.name + " " + std::to_string(nextSketchNumber_);
     ++nextSketchNumber_;
-    sketch.plane = plane;
+    switch (plane.kind) {
+    case WorkPlaneKind::XY: sketch.plane = SketchPlane::XY; break;
+    case WorkPlaneKind::XZ: sketch.plane = SketchPlane::XZ; break;
+    case WorkPlaneKind::YZ: sketch.plane = SketchPlane::YZ; break;
+    case WorkPlaneKind::ObjectPlane:
+    case WorkPlaneKind::FacePlane:
+        sketch.plane = SketchPlane::XY;
+        break;
+    }
+    sketch.reference = sketchReferenceFromWorkPlane(plane);
 
     document_.addSketch(sketch);
     viewer_->scene().addOrUpdateSketchNode(sketch);
@@ -545,17 +785,26 @@ void MainWindow::enterSketchMode(const std::string& sketchId) {
         return;
     }
     activeSketchId_ = sketchId;
-    pendingSketchPoint_.reset();
-    sketchTool_ = SketchTool::Select;
+    sketchInput_.resetPending();
+    sketchInput_.activeTool = SketchTool::Select;
+    activeSketchPlane_ = workPlaneForSketch(sketch.value());
+    // Input/preview must use the same reference the committed entities are
+    // rendered with (the recorded one when present).
+    activeSketchReference_ = sketch.value().reference.sourceId.empty()
+                                 ? canonicalSketchReference(sketch.value().plane)
+                                 : sketch.value().reference;
 
-    viewer_->scene().showSketchPlane(sketch.value().plane);
-    viewer_->setSketchInputMode(false, sketch.value().plane);
+    viewer_->enterSketch2DView(*activeSketchPlane_, sketchInput_.options.gridStep,
+                               sketchInput_.options.showSketchGrid);
+    viewer_->setSketchInputMode(false, activeSketchReference_);
+    refreshSketchProfiles();
     sketchToolBar_->setSketchModeActive(true);
     sketchToolBar_->checkSelectTool();
     sketchToolBar_->setEnterSketchEnabled(false);
+    updateModeStatusLabel();
     statusBar()->showMessage(
-        tr("Sketch mode (%1): pick Line / Rectangle / Circle and click on the plane; "
-           "Esc cancels the tool, Exit Sketch finishes")
+        tr("Sketch2D (%1): pick Line / Rectangle / Circle and click on the plane; "
+           "Esc cancels, Exit Sketch finishes")
             .arg(QString::fromStdString(sketch.value().name)));
 }
 
@@ -564,88 +813,134 @@ void MainWindow::exitSketchMode() {
         return;
     }
     activeSketchId_.reset();
-    pendingSketchPoint_.reset();
-    sketchTool_ = SketchTool::Select;
+    activeSketchPlane_.reset();
+    sketchInput_.resetPending();
+    sketchInput_.activeTool = SketchTool::Select;
     if (viewer_) {
-        viewer_->scene().hideSketchPlane();
-        viewer_->setSketchInputMode(false, SketchPlane::XY);
+        viewer_->setSketchInputMode(false, SketchReference{});
+        // Also hides the sketch plane and clears cursor/anchor/preview.
+        viewer_->exitSketch2DView();
+        viewer_->scene().clearSketchProfiles();
+        viewer_->scene().setSelectedProfile(std::string());
     }
+    activeProfiles_.clear();
+    selectedProfileId_.clear();
+    updateExtrudeActionEnabled();
     sketchToolBar_->setSketchModeActive(false);
     sketchToolBar_->setEnterSketchEnabled(selectionKind_ == SelectionKind::Sketch);
-    statusBar()->showMessage(tr("Sketch mode finished"), 4000);
+    updateModeStatusLabel();
+    statusBar()->showMessage(tr("Free3D: select body, work plane or sketch"));
 }
 
 void MainWindow::setSketchTool(SketchTool tool) {
-    sketchTool_ = tool;
-    pendingSketchPoint_.reset();
-    if (!viewer_ || !activeSketchId_) {
+    sketchInput_.activeTool = tool;
+    sketchInput_.resetPending();
+    if (!viewer_) {
         return;
     }
-    const Result<Sketch> sketch = document_.sketchById(*activeSketchId_);
-    if (!sketch.isOk()) {
+    clearPendingSketchVisuals();
+    if (tool == SketchTool::Select) {
+        viewer_->scene().hideSketchCursor();
+    }
+    if (!activeSketchId_) {
         return;
     }
-    viewer_->setSketchInputMode(tool != SketchTool::Select, sketch.value().plane);
+    viewer_->setSketchInputMode(tool != SketchTool::Select, activeSketchReference_);
+    if (tool != SketchTool::Select) {
+        statusBar()->showMessage(sketchToolPrompt());
+    }
 }
 
 void MainWindow::cancelSketchTool() {
-    pendingSketchPoint_.reset();
+    if (sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
+        // First Esc cancels only the pending operation; the tool stays
+        // armed. A second Esc then drops back to Select.
+        sketchInput_.resetPending();
+        clearPendingSketchVisuals();
+        statusBar()->showMessage(tr("Cancelled — %1").arg(sketchToolPrompt()));
+        return;
+    }
     setSketchTool(SketchTool::Select);
     sketchToolBar_->checkSelectTool();
     statusBar()->showMessage(tr("Sketch tool cancelled"), 3000);
 }
 
 void MainWindow::onSketchPoint(double u, double v) {
-    if (!activeSketchId_ || sketchTool_ == SketchTool::Select) {
+    if (!activeSketchId_ || sketchInput_.activeTool == SketchTool::Select) {
         return;
     }
     if (!std::isfinite(u) || !std::isfinite(v)) {
         return;
     }
 
-    if (!pendingSketchPoint_) {
-        pendingSketchPoint_ = SketchPoint2D{u, v};
-        statusBar()->showMessage(tr("First point set — click the second point (Esc cancels)"));
+    const SketchPoint2D point = applySketchSnap({u, v}, sketchInput_.options);
+
+    if (sketchInput_.phase == SketchInputPhase::Idle) {
+        sketchInput_.firstPoint = point;
+        sketchInput_.currentPoint = point;
+        sketchInput_.phase = SketchInputPhase::WaitingSecondPoint;
+        if (viewer_) {
+            viewer_->scene().showSketchAnchor(point, activeSketchReference_);
+            updateSketchPreview(point);
+        }
+        switch (sketchInput_.activeTool) {
+        case SketchTool::Line:
+            statusBar()->showMessage(
+                tr("Line: first point set — click second point (Esc cancels)"));
+            break;
+        case SketchTool::Rectangle:
+            statusBar()->showMessage(
+                tr("Rectangle: first corner set — click opposite corner (Esc cancels)"));
+            break;
+        case SketchTool::Circle:
+            statusBar()->showMessage(
+                tr("Circle: center set — click radius point (Esc cancels)"));
+            break;
+        case SketchTool::Select:
+            break;
+        }
         return;
     }
 
-    const SketchPoint2D first = *pendingSketchPoint_;
-    pendingSketchPoint_.reset();
+    const SketchPoint2D first = *sketchInput_.firstPoint;
 
     SketchEntity entity;
     entity.id = "entity-" + std::to_string(nextEntityNumber_++);
 
-    switch (sketchTool_) {
+    switch (sketchInput_.activeTool) {
     case SketchTool::Line: {
-        if (std::fabs(u - first.u) < kMinSketchExtent &&
-            std::fabs(v - first.v) < kMinSketchExtent) {
-            statusBar()->showMessage(tr("Zero-length line ignored"), 3000);
+        if (std::fabs(point.u - first.u) < kMinSketchExtent &&
+            std::fabs(point.v - first.v) < kMinSketchExtent) {
+            statusBar()->showMessage(tr("Zero-length line ignored — click a different point"),
+                                     3000);
             return;
         }
         entity.type = SketchEntityType::Line;
         entity.name = "Line " + std::to_string(++lineCount_);
         entity.line.start = first;
-        entity.line.end = {u, v};
+        entity.line.end = point;
         break;
     }
     case SketchTool::Rectangle: {
-        const double width = std::fabs(u - first.u);
-        const double height = std::fabs(v - first.v);
+        const double width = std::fabs(point.u - first.u);
+        const double height = std::fabs(point.v - first.v);
         if (width < kMinSketchExtent || height < kMinSketchExtent) {
-            statusBar()->showMessage(tr("Degenerate rectangle ignored"), 3000);
+            statusBar()->showMessage(tr("Degenerate rectangle ignored — click a different corner"),
+                                     3000);
             return;
         }
         entity.type = SketchEntityType::Rectangle;
         entity.name = "Rectangle " + std::to_string(++rectangleCount_);
-        entity.rectangle.origin = {std::min(first.u, u), std::min(first.v, v)};
+        entity.rectangle.origin = {std::min(first.u, point.u), std::min(first.v, point.v)};
         entity.rectangle.width = width;
         entity.rectangle.height = height;
         break;
     }
     case SketchTool::Circle: {
-        const double radius = std::hypot(u - first.u, v - first.v);
+        const double radius = std::hypot(point.u - first.u, point.v - first.v);
         if (radius < kMinSketchExtent) {
-            statusBar()->showMessage(tr("Zero-radius circle ignored"), 3000);
+            statusBar()->showMessage(tr("Zero-radius circle ignored — click a different point"),
+                                     3000);
             return;
         }
         entity.type = SketchEntityType::Circle;
@@ -658,7 +953,204 @@ void MainWindow::onSketchPoint(double u, double v) {
         return;
     }
 
+    // Plane-integrity check: both committed points, mapped through the
+    // active reference, must land on the active plane. This only fires
+    // when the reference axes are inconsistent with its normal.
+    if (!isWorldPointOnSketchPlane(sketchPointToWorld(first, activeSketchReference_),
+                                   activeSketchReference_) ||
+        !isWorldPointOnSketchPlane(sketchPointToWorld(point, activeSketchReference_),
+                                   activeSketchReference_)) {
+        qWarning("CADNext: sketch reference axes are inconsistent with its normal; "
+                 "entity %s may render off-plane", entity.id.c_str());
+    }
+
+    sketchInput_.resetPending();
+    clearPendingSketchVisuals();
     addSketchEntity(std::move(entity));
+    // The tool stays armed for the next entity (CAD workflow).
+    statusBar()->showMessage(sketchToolPrompt());
+}
+
+void MainWindow::onSketchMove(double u, double v) {
+    if (!viewer_ || !activeSketchId_ || sketchInput_.activeTool == SketchTool::Select) {
+        return;
+    }
+    if (!std::isfinite(u) || !std::isfinite(v)) {
+        return;
+    }
+
+    const SketchPoint2D snapped = applySketchSnap({u, v}, sketchInput_.options);
+    sketchInput_.currentPoint = snapped;
+    if (sketchInput_.options.showSketchCursor) {
+        viewer_->scene().showSketchCursor(snapped, activeSketchReference_);
+    }
+    if (sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
+        updateSketchPreview(snapped);
+    }
+}
+
+// --- Sketch input UX helpers ----------------------------------------------
+
+void MainWindow::updateSketchPreview(const SketchPoint2D& current) {
+    if (!viewer_ || !sketchInput_.firstPoint || !sketchInput_.options.showLivePreview) {
+        return;
+    }
+    const SketchPoint2D first = *sketchInput_.firstPoint;
+    switch (sketchInput_.activeTool) {
+    case SketchTool::Line:
+        viewer_->scene().updateLinePreview(first, current, activeSketchReference_);
+        break;
+    case SketchTool::Rectangle:
+        viewer_->scene().updateRectanglePreview(first, current, activeSketchReference_);
+        break;
+    case SketchTool::Circle:
+        viewer_->scene().updateCirclePreview(first, current, activeSketchReference_);
+        break;
+    case SketchTool::Select:
+        break;
+    }
+}
+
+void MainWindow::clearPendingSketchVisuals() {
+    if (!viewer_) {
+        return;
+    }
+    viewer_->scene().clearSketchPreview();
+    viewer_->scene().hideSketchAnchor();
+}
+
+void MainWindow::onSnapToggled(bool enabled) {
+    sketchInput_.options.snapToGrid = enabled;
+    updateModeStatusLabel();
+    statusBar()->showMessage(enabled ? tr("Snap to grid: ON") : tr("Snap to grid: OFF"), 3000);
+}
+
+void MainWindow::onShowGridToggled(bool visible) {
+    sketchInput_.options.showSketchGrid = visible;
+    refreshSketchPlaneVisual();
+    statusBar()->showMessage(visible ? tr("Sketch grid: shown") : tr("Sketch grid: hidden"),
+                             3000);
+}
+
+void MainWindow::onGridStepChanged(double step) {
+    if (!std::isfinite(step) || step <= 0.0) {
+        return; // the spinbox range already prevents this
+    }
+    sketchInput_.options.gridStep = std::max(step, kMinSketchGridStep);
+    refreshSketchPlaneVisual();
+    updateModeStatusLabel();
+}
+
+void MainWindow::refreshSketchPlaneVisual() {
+    if (!viewer_ || !activeSketchId_ || !activeSketchPlane_) {
+        return;
+    }
+    // Rebuilding the plane helper clears the transient visuals, so restore
+    // the ones that represent live input state.
+    viewer_->scene().showSketchPlane(*activeSketchPlane_, sketchInput_.options.gridStep,
+                                     sketchInput_.options.showSketchGrid);
+    if (sketchInput_.firstPoint) {
+        viewer_->scene().showSketchAnchor(*sketchInput_.firstPoint, activeSketchReference_);
+    }
+    if (sketchInput_.currentPoint && sketchInput_.activeTool != SketchTool::Select &&
+        sketchInput_.options.showSketchCursor) {
+        viewer_->scene().showSketchCursor(*sketchInput_.currentPoint, activeSketchReference_);
+        if (sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
+            updateSketchPreview(*sketchInput_.currentPoint);
+        }
+    }
+}
+
+void MainWindow::updateModeStatusLabel() {
+    if (!modeStatusLabel_) {
+        return;
+    }
+    if (activeSketchId_) {
+        const Result<Sketch> sketch = document_.sketchById(*activeSketchId_);
+        const QString sketchName = sketch.isOk() ? QString::fromStdString(sketch.value().name)
+                                                 : tr("Sketch");
+        const QString plane = activeSketchPlane_
+                                  ? QString::fromStdString(activeSketchPlane_->name)
+                                  : tr("plane");
+        modeStatusLabel_->setText(
+            sketchInput_.options.snapToGrid
+                ? tr("Sketch2D: %1, Plane %2, Snap ON, Grid %3")
+                      .arg(sketchName, plane)
+                      .arg(sketchInput_.options.gridStep, 0, 'f', 3)
+                : tr("Sketch2D: %1, Plane %2, Snap OFF").arg(sketchName, plane));
+        return;
+    }
+    if (selectionKind_ == SelectionKind::WorkPlane) {
+        if (const std::optional<WorkPlane> plane = workPlaneById(selectedId_)) {
+            modeStatusLabel_->setText(
+                tr("Selected plane: %1 — Create Sketch or Normal to Plane")
+                    .arg(QString::fromStdString(plane->name)));
+            return;
+        }
+    }
+    modeStatusLabel_->setText(tr("Free3D: select body, work plane or sketch"));
+}
+
+QString MainWindow::sketchToolPrompt() const {
+    switch (sketchInput_.activeTool) {
+    case SketchTool::Line:
+        return tr("Line: click first point");
+    case SketchTool::Rectangle:
+        return tr("Rectangle: click first corner");
+    case SketchTool::Circle:
+        return tr("Circle: click center");
+    case SketchTool::Select:
+        break;
+    }
+    return tr("Select: click an entity on the plane");
+}
+
+// --- Work plane view helpers ------------------------------------------------
+
+void MainWindow::normalToSelectedPlane() {
+    if (!viewer_ || selectionKind_ != SelectionKind::WorkPlane) {
+        return;
+    }
+    const std::optional<WorkPlane> plane = workPlaneById(selectedId_);
+    if (plane) {
+        viewer_->setViewNormalToPlane(*plane);
+    }
+}
+
+void MainWindow::fitSketchView() {
+    if (viewer_) {
+        viewer_->fitView();
+    }
+}
+
+void MainWindow::showPlaneActionPalette(bool contextClick) {
+    // The palette only appears on context (right/middle) clicks; a plain
+    // left click on a plane just selects it. A plain QMenu for now — the
+    // entries share their handlers with the toolbar paths, so it can be
+    // swapped for a floating action palette later.
+    if (!contextClick || selectionKind_ != SelectionKind::WorkPlane || activeSketchId_) {
+        return;
+    }
+    QMenu menu(this);
+    QAction* createSketch = menu.addAction(tr("Create Sketch"));
+    QAction* normalView = menu.addAction(tr("Normal to Plane"));
+    QAction* fitPlane = menu.addAction(tr("Fit Plane"));
+    const bool othersHidden = viewer_->otherWorkPlanesHidden();
+    QAction* hideOthers = menu.addAction(othersHidden ? tr("Show Other Planes")
+                                                      : tr("Hide Other Planes"));
+    QAction* chosen = menu.exec(QCursor::pos());
+    if (chosen == createSketch) {
+        createSketchFromSelectedPlane();
+    } else if (chosen == normalView) {
+        normalToSelectedPlane();
+    } else if (chosen == fitPlane) {
+        viewer_->fitWorkPlane(selectedId_);
+    } else if (chosen == hideOthers) {
+        viewer_->setOtherWorkPlanesHidden(!othersHidden);
+        statusBar()->showMessage(othersHidden ? tr("All work planes shown")
+                                              : tr("Other work planes hidden"),
+                                 3000);
+    }
 }
 
 void MainWindow::addSketchEntity(SketchEntity entity) {
@@ -682,9 +1174,347 @@ void MainWindow::addSketchEntity(SketchEntity entity) {
         projectTree_->addEntityItem(QString::fromStdString(sketchId), entityId, entityName,
                                     entityType);
     }
+    refreshSketchProfiles();
     selectEntity(sketchId, entityId.toStdString());
     markDirty();
     updateUndoRedoActions();
+}
+
+// --- Extrude workflow ---------------------------------------------------------
+
+void MainWindow::refreshSketchProfiles() {
+    if (!viewer_) {
+        return;
+    }
+    if (!activeSketchId_) {
+        activeProfiles_.clear();
+        viewer_->scene().clearSketchProfiles();
+        updateExtrudeActionEnabled();
+        return;
+    }
+    const Result<Sketch> sketch = document_.sketchById(*activeSketchId_);
+    if (!sketch.isOk()) {
+        return;
+    }
+    activeProfiles_ = SketchProfileDetector().detect(sketch.value());
+    if (!selectedProfileId_.empty() && !profileById(activeProfiles_, selectedProfileId_)) {
+        selectedProfileId_.clear();
+        viewer_->scene().setSelectedProfile(std::string());
+    }
+    viewer_->scene().showSketchProfiles(sketch.value(), activeProfiles_);
+    updateExtrudeActionEnabled();
+}
+
+void MainWindow::selectProfile(const std::string& profileId) {
+    if (!viewer_) {
+        return;
+    }
+    selectedProfileId_ = profileId;
+    viewer_->scene().setSelectedProfile(profileId);
+    updateExtrudeActionEnabled();
+    if (const SketchProfile* profile = profileById(activeProfiles_, profileId)) {
+        statusBar()->showMessage(tr("Profile selected: %1 (area %2) — Extrude is available")
+                                     .arg(profileKindText(profile->kind))
+                                     .arg(profile->area, 0, 'f', 3));
+    }
+}
+
+void MainWindow::selectProfileForEntity(const std::string& sketchId,
+                                        const std::string& entityId) {
+    if (!viewer_ || !activeSketchId_ || *activeSketchId_ != sketchId) {
+        return;
+    }
+    if (const SketchProfile* profile = profileForEntityId(activeProfiles_, entityId)) {
+        selectProfile(profile->id);
+    } else {
+        selectedProfileId_.clear();
+        viewer_->scene().setSelectedProfile(std::string());
+    }
+}
+
+void MainWindow::updateExtrudeActionEnabled() {
+    bool enabled = false;
+    if (const std::optional<Sketch> sketch = sketchForExtrude()) {
+        const std::vector<SketchProfile> profiles = SketchProfileDetector().detect(*sketch);
+        for (const SketchProfile& profile : profiles) {
+            if (profile.isValid) {
+                enabled = true;
+                break;
+            }
+        }
+    }
+    toolBar_->extrudeAction()->setEnabled(enabled);
+}
+
+std::optional<Sketch> MainWindow::sketchForExtrude() const {
+    // Priority: the sketch being edited, then the selected sketch, then
+    // the sketch owning the selected entity.
+    std::string sketchId;
+    if (activeSketchId_) {
+        sketchId = *activeSketchId_;
+    } else if (selectionKind_ == SelectionKind::Sketch) {
+        sketchId = selectedId_;
+    } else if (selectionKind_ == SelectionKind::Entity) {
+        sketchId = selectedSketchId_;
+    }
+    if (sketchId.empty()) {
+        return std::nullopt;
+    }
+    const Result<Sketch> sketch = document_.sketchById(sketchId);
+    if (!sketch.isOk()) {
+        return std::nullopt;
+    }
+    return sketch.value();
+}
+
+void MainWindow::openExtrudeDialog() {
+    if (!viewer_) {
+        return;
+    }
+    const std::optional<Sketch> sketch = sketchForExtrude();
+    if (!sketch) {
+        statusBar()->showMessage(
+            tr("Select a sketch with a closed profile to extrude"), 5000);
+        return;
+    }
+
+    dialogProfiles_.clear();
+    for (SketchProfile& profile : SketchProfileDetector().detect(*sketch)) {
+        if (profile.isValid) {
+            dialogProfiles_.push_back(std::move(profile));
+        }
+    }
+    if (dialogProfiles_.empty()) {
+        statusBar()->showMessage(
+            selectionKind_ == SelectionKind::Entity
+                ? tr("Selected sketch entity is not a closed profile.")
+                : tr("Sketch has no closed profile to extrude"),
+            5000);
+        return;
+    }
+    extrudeSketchId_ = sketch->id;
+
+    // Leave Sketch2D first: the prism preview only reads in the free 3D
+    // view (in the flat normal view it projects to the profile itself).
+    if (activeSketchId_) {
+        exitSketchMode();
+    }
+
+    if (!extrudeDialog_) {
+        extrudeDialog_ = new ExtrudeDialog(this);
+        connect(extrudeDialog_, &ExtrudeDialog::parametersChanged, this,
+                [this]() { onExtrudeParametersChanged(); });
+        connect(extrudeDialog_, &ExtrudeDialog::applyRequested, this,
+                [this]() { applyExtrude(); });
+        connect(extrudeDialog_, &ExtrudeDialog::cancelRequested, this,
+                [this]() { cancelExtrude(); });
+    }
+
+    QList<ExtrudeProfileItem> items;
+    QString selected;
+    for (const SketchProfile& profile : dialogProfiles_) {
+        QString label = profileKindText(profile.kind);
+        if (!profile.sourceEntityId.empty()) {
+            if (const SketchEntity* entity =
+                    findSketchEntity(*sketch, profile.sourceEntityId)) {
+                label = QString::fromStdString(entity->name);
+            }
+        } else if (profile.kind == SketchProfileKind::Polygon) {
+            label = tr("Polygon Profile (%1 lines)")
+                        .arg(profile.sourceEntityIds.size());
+        }
+        label += tr(" — area %1").arg(profile.area, 0, 'f', 3);
+        items.append({QString::fromStdString(profile.id), label});
+        if (profile.id == selectedProfileId_) {
+            selected = QString::fromStdString(profile.id);
+        }
+    }
+    extrudeDialog_->setProfiles(items, selected);
+    extrudeDialog_->show();
+    extrudeDialog_->raise();
+    extrudeDialog_->activateWindow();
+    onExtrudeParametersChanged();
+    statusBar()->showMessage(
+        tr("Extrude: pick profile, distance and direction — Apply creates a new body"));
+}
+
+void MainWindow::onExtrudeParametersChanged() {
+    if (!viewer_ || !extrudeDialog_ || !extrudeDialog_->isVisible()) {
+        return;
+    }
+    if (!extrudeDialog_->previewEnabled()) {
+        viewer_->scene().hideExtrudePreview();
+        return;
+    }
+    const std::string profileId = extrudeDialog_->selectedProfileId().toStdString();
+    const SketchProfile* profile = profileById(dialogProfiles_, profileId);
+    const Result<Sketch> sketch = document_.sketchById(extrudeSketchId_);
+    if (!profile || !sketch.isOk()) {
+        viewer_->scene().hideExtrudePreview();
+        return;
+    }
+
+    ExtrudeParameters parameters;
+    parameters.sketchId = extrudeSketchId_;
+    parameters.profileId = profileId;
+    parameters.direction = extrudeDialog_->direction();
+    parameters.distance = extrudeDialog_->distance();
+
+    kernel::TriangleMesh mesh;
+    if (buildExtrudeMesh(sketch.value(), *profile, parameters, mesh, nullptr)) {
+        viewer_->scene().showExtrudePreview(mesh);
+    } else {
+        viewer_->scene().hideExtrudePreview();
+    }
+}
+
+void MainWindow::applyExtrude() {
+    if (!viewer_ || !extrudeDialog_) {
+        return;
+    }
+    const std::string profileId = extrudeDialog_->selectedProfileId().toStdString();
+    const SketchProfile* profile = profileById(dialogProfiles_, profileId);
+    const Result<Sketch> sketch = document_.sketchById(extrudeSketchId_);
+    if (!profile || !profile->isValid || !sketch.isOk()) {
+        statusBar()->showMessage(tr("Selected sketch entity is not a closed profile."), 5000);
+        return;
+    }
+
+    ExtrudeParameters parameters;
+    parameters.sketchId = extrudeSketchId_;
+    parameters.profileId = profileId;
+    parameters.direction = extrudeDialog_->direction();
+    parameters.distance = extrudeDialog_->distance();
+    if (!extrudeParametersValid(parameters)) {
+        statusBar()->showMessage(tr("Extrude distance must be greater than zero"), 5000);
+        return;
+    }
+
+    QString failureReason;
+    kernel::TriangleMesh mesh;
+    if (!buildExtrudeMesh(sketch.value(), *profile, parameters, mesh, &failureReason)) {
+        QMessageBox::warning(this, tr("Extrude Failed"),
+                             failureReason.isEmpty()
+                                 ? tr("The profile could not be extruded.")
+                                 : failureReason);
+        return;
+    }
+
+    // The mesh is built in world coordinates; the body keeps an identity
+    // transform (moving it later goes through the normal transform path).
+    Object body;
+    body.id = "object-" + std::to_string(nextObjectNumber_++);
+    body.type = ObjectType::Body;
+    body.name = "Extrude Body " + std::to_string(extrudeCount_ + 1);
+    body.primitive.kind = PrimitiveKind::None;
+    document_.addObject(body);
+    viewer_->scene().addOrUpdateObjectMesh(body, mesh);
+
+    Feature feature;
+    feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
+    feature.name = "Extrude " + std::to_string(extrudeCount_ + 1);
+    feature.type = FeatureType::Extrude;
+    feature.targetObjectId = body.id;
+    feature.createdBodyId = body.id;
+    feature.extrude = parameters;
+    document_.addFeature(feature);
+    ++extrudeCount_;
+
+    {
+        const QSignalBlocker blocker(projectTree_);
+        projectTree_->addBodyItem(QString::fromStdString(body.id),
+                                  QString::fromStdString(body.name), tr("Extrude"));
+    }
+
+    viewer_->scene().hideExtrudePreview();
+    extrudeDialog_->hide();
+    selectBody(body.id);
+    markDirty();
+    statusBar()->showMessage(tr("%1 created from %2")
+                                 .arg(QString::fromStdString(body.name),
+                                      QString::fromStdString(sketch.value().name)),
+                             5000);
+}
+
+void MainWindow::cancelExtrude() {
+    if (viewer_) {
+        viewer_->scene().hideExtrudePreview();
+    }
+    if (extrudeDialog_) {
+        extrudeDialog_->hide();
+    }
+    statusBar()->showMessage(tr("Extrude cancelled"), 3000);
+}
+
+bool MainWindow::buildExtrudeMesh(const Sketch& sketch, const SketchProfile& profile,
+                                  const ExtrudeParameters& parameters,
+                                  kernel::TriangleMesh& outMesh, QString* failureReason) {
+    const SketchReference reference = sketch.reference.sourceId.empty()
+                                          ? canonicalSketchReference(sketch.plane)
+                                          : sketch.reference;
+    // BRep path first (exact prism + extracted mesh in OCCT builds) ...
+    if (evaluator_) {
+        const Result<kernel::EvaluatedGeometry> evaluated =
+            evaluator_->evaluateExtrude(reference, profile, parameters);
+        if (evaluated.isOk() && evaluated.value().isValid &&
+            !evaluated.value().previewMesh.isEmpty()) {
+            outMesh = evaluated.value().previewMesh;
+            return true;
+        }
+        if (!evaluated.isOk() && failureReason) {
+            *failureReason = QString::fromStdString(evaluated.error().message);
+        }
+    }
+    // ... procedural prism fallback otherwise (no BRep backend).
+    const Result<kernel::TriangleMesh> mesh =
+        kernel::buildExtrudedProfileMesh(reference, profile, parameters);
+    if (mesh.isOk() && !mesh.value().isEmpty()) {
+        outMesh = mesh.value();
+        return true;
+    }
+    if (failureReason && failureReason->isEmpty() && !mesh.isOk()) {
+        *failureReason = QString::fromStdString(mesh.error().message);
+    }
+    return false;
+}
+
+void MainWindow::buildExtrudedBodyVisual(const Object& object, const Feature& feature) {
+    if (!viewer_) {
+        return;
+    }
+    const Result<Sketch> sketch = document_.sketchById(feature.extrude.sketchId);
+    if (!sketch.isOk()) {
+        qWarning("CADNext: extrude feature %s references missing sketch %s",
+                 feature.id.c_str(), feature.extrude.sketchId.c_str());
+        return;
+    }
+    // Profiles are not serialized: re-detect and look the recipe's profile
+    // up by its stable id (entity id / "<sketchId>-loop").
+    const std::vector<SketchProfile> profiles =
+        SketchProfileDetector().detect(sketch.value());
+    const SketchProfile* profile = profileById(profiles, feature.extrude.profileId);
+    if (!profile) {
+        qWarning("CADNext: extrude feature %s references missing profile %s",
+                 feature.id.c_str(), feature.extrude.profileId.c_str());
+        return;
+    }
+    QString failureReason;
+    kernel::TriangleMesh mesh;
+    if (buildExtrudeMesh(sketch.value(), *profile, feature.extrude, mesh, &failureReason)) {
+        viewer_->scene().addOrUpdateObjectMesh(object, mesh);
+    } else {
+        qWarning("CADNext: extrude regeneration failed for %s: %s", object.name.c_str(),
+                 failureReason.toUtf8().constData());
+    }
+}
+
+const Feature* MainWindow::extrudeFeatureForBody(const std::string& objectId) const {
+    for (const Feature& feature : document_.features()) {
+        if (feature.type == FeatureType::Extrude && feature.createdBodyId == objectId) {
+            return &feature;
+        }
+    }
+    return nullptr;
 }
 
 // --- Property edits ---------------------------------------------------------
@@ -865,6 +1695,7 @@ void MainWindow::rebuildUiFromDocument() {
         const QSignalBlocker blocker(projectTree_);
         projectTree_->clearAll();
     }
+    addCanonicalWorkPlanesToTree();
     if (viewer_) {
         viewer_->scene().clearObjectNodes();
         viewer_->scene().clearSketchNodes();
@@ -872,11 +1703,26 @@ void MainWindow::rebuildUiFromDocument() {
     }
     for (const Object& object : document_.objects()) {
         // Shapes are never serialized; every load re-evaluates the
-        // primitive descriptors through the kernel.
-        buildObjectVisual(object);
+        // primitive descriptors through the kernel. Extruded bodies are
+        // re-derived from their feature recipe (sketch profile + extrude
+        // parameters).
+        const Feature* extrudeFeature = extrudeFeatureForBody(object.id);
+        if (extrudeFeature) {
+            buildExtrudedBodyVisual(object, *extrudeFeature);
+        } else {
+            buildObjectVisual(object);
+        }
         const QSignalBlocker blocker(projectTree_);
-        projectTree_->addBodyItem(QString::fromStdString(object.id),
-                                  QString::fromStdString(object.name), treeTypeText(object));
+        if (object.type == ObjectType::ReferencePlane) {
+            const WorkPlane plane = workPlaneFromReferencePlaneObject(object);
+            projectTree_->addWorkPlaneItem(QString::fromStdString(plane.id),
+                                           QString::fromStdString(plane.name),
+                                           workPlaneTypeText(plane));
+        } else {
+            projectTree_->addBodyItem(QString::fromStdString(object.id),
+                                      QString::fromStdString(object.name),
+                                      extrudeFeature ? tr("Extrude") : treeTypeText(object));
+        }
     }
     for (const Sketch& sketch : document_.sketches()) {
         if (viewer_) {
@@ -894,6 +1740,7 @@ void MainWindow::rebuildUiFromDocument() {
     }
     deriveCountersFromDocument();
     refreshPropertyPanel();
+    updateExtrudeActionEnabled();
 }
 
 void MainWindow::deriveCountersFromDocument() {
@@ -907,6 +1754,15 @@ void MainWindow::deriveCountersFromDocument() {
     lineCount_ = 0;
     rectangleCount_ = 0;
     circleCount_ = 0;
+    nextFeatureNumber_ = 1;
+    extrudeCount_ = 0;
+
+    for (const Feature& feature : document_.features()) {
+        nextFeatureNumber_ = maxNumberSuffix(feature.id, "feature-", nextFeatureNumber_);
+        if (feature.type == FeatureType::Extrude) {
+            ++extrudeCount_;
+        }
+    }
 
     for (const Object& object : document_.objects()) {
         // Keep generated ids unique across load: continue after the
@@ -1011,6 +1867,13 @@ void MainWindow::createMenus() {
                                       [this]() { undo(); });
     redoAction_ = editMenu->addAction(tr("&Redo"), QKeySequence::Redo, this,
                                       [this]() { redo(); });
+
+    QMenu* partMenu = menuBar()->addMenu(tr("&Part"));
+    partMenu->addAction(toolBar_->extrudeAction());
+
+    QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    viewMenu->addAction(treeDock_->toggleViewAction());
+    viewMenu->addAction(propertyDock_->toggleViewAction());
 }
 
 } // namespace cadnext::gui

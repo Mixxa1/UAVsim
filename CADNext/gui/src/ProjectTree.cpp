@@ -25,6 +25,9 @@ ProjectTree::ProjectTree(QWidget* parent)
         }
         QTreeWidgetItem* item = selected.first();
         switch (item->data(0, kKindRole).toInt()) {
+        case WorkPlaneKind:
+            emit workPlaneSelected(item->data(0, kIdRole).toString());
+            break;
         case BodyKind:
             emit bodySelected(item->data(0, kIdRole).toString());
             break;
@@ -51,6 +54,11 @@ ProjectTree::ProjectTree(QWidget* parent)
 void ProjectTree::clearAll() {
     clear();
 
+    workPlanesGroup_ = new QTreeWidgetItem(this);
+    workPlanesGroup_->setText(0, tr("Work Planes"));
+    workPlanesGroup_->setData(0, kKindRole, GroupKind);
+    workPlanesGroup_->setFlags(Qt::ItemIsEnabled);
+
     bodiesGroup_ = new QTreeWidgetItem(this);
     bodiesGroup_->setText(0, tr("Bodies"));
     bodiesGroup_->setData(0, kKindRole, GroupKind);
@@ -62,6 +70,34 @@ void ProjectTree::clearAll() {
     sketchesGroup_->setFlags(Qt::ItemIsEnabled);
 
     expandAll();
+}
+
+void ProjectTree::addWorkPlaneItem(const QString& planeId, const QString& name,
+                                   const QString& type) {
+    auto* item = new QTreeWidgetItem(workPlanesGroup_);
+    item->setText(0, name);
+    item->setText(1, type);
+    item->setData(0, kKindRole, WorkPlaneKind);
+    item->setData(0, kIdRole, planeId);
+    workPlanesGroup_->setExpanded(true);
+}
+
+void ProjectTree::removeWorkPlaneItem(const QString& planeId) {
+    delete workPlaneItem(planeId);
+}
+
+void ProjectTree::updateWorkPlaneName(const QString& planeId, const QString& name) {
+    if (QTreeWidgetItem* item = workPlaneItem(planeId)) {
+        item->setText(0, name);
+    }
+}
+
+void ProjectTree::setCurrentWorkPlane(const QString& planeId) {
+    if (QTreeWidgetItem* item = workPlaneItem(planeId)) {
+        setCurrentItem(item);
+    } else {
+        clearTreeSelection();
+    }
 }
 
 void ProjectTree::addBodyItem(const QString& objectId, const QString& name,
@@ -156,6 +192,16 @@ void ProjectTree::setCurrentEntity(const QString& sketchId, const QString& entit
 void ProjectTree::clearTreeSelection() {
     clearSelection();
     setCurrentItem(nullptr);
+}
+
+QTreeWidgetItem* ProjectTree::workPlaneItem(const QString& planeId) const {
+    for (int i = 0; i < workPlanesGroup_->childCount(); ++i) {
+        QTreeWidgetItem* item = workPlanesGroup_->child(i);
+        if (item->data(0, kIdRole).toString() == planeId) {
+            return item;
+        }
+    }
+    return nullptr;
 }
 
 QTreeWidgetItem* ProjectTree::bodyItem(const QString& objectId) const {

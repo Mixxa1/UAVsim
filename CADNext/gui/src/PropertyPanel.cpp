@@ -25,6 +25,24 @@ QString objectTypeText(ObjectType type) {
     return QStringLiteral("Unknown");
 }
 
+QString workPlaneTypeText(WorkPlaneKind kind) {
+    switch (kind) {
+    case WorkPlaneKind::XY: return QStringLiteral("XY");
+    case WorkPlaneKind::XZ: return QStringLiteral("XZ");
+    case WorkPlaneKind::YZ: return QStringLiteral("YZ");
+    case WorkPlaneKind::ObjectPlane: return QStringLiteral("Reference Plane");
+    case WorkPlaneKind::FacePlane: return QStringLiteral("Face Plane");
+    }
+    return QStringLiteral("Work Plane");
+}
+
+QString vectorText(const Vector3& v) {
+    return QStringLiteral("%1, %2, %3")
+        .arg(v.x, 0, 'f', 3)
+        .arg(v.y, 0, 'f', 3)
+        .arg(v.z, 0, 'f', 3);
+}
+
 void setVector(QDoubleSpinBox* x, QDoubleSpinBox* y, QDoubleSpinBox* z, const Vector3& v) {
     x->setValue(v.x);
     y->setValue(v.y);
@@ -223,6 +241,7 @@ void PropertyPanel::showObject(const Object& object) {
 
     idLabel_->setText(currentObjectId_);
     nameEdit_->setText(currentName_);
+    nameEdit_->setEnabled(true);
     typeLabel_->setText(objectTypeText(object.type));
     kindLabel_->setText(QString::fromUtf8(primitiveKindName(object.primitive.kind)));
 
@@ -242,6 +261,35 @@ void PropertyPanel::showObject(const Object& object) {
     setEnabled(true);
 }
 
+void PropertyPanel::showWorkPlane(const WorkPlane& plane) {
+    updating_ = true;
+    mode_ = Mode::None;
+
+    currentObjectId_ = QString::fromStdString(plane.id);
+    currentSketchId_.clear();
+    currentName_ = QString::fromStdString(plane.name);
+    currentKind_ = PrimitiveKind::None;
+
+    idLabel_->setText(currentObjectId_);
+    nameEdit_->setText(currentName_);
+    nameEdit_->setEnabled(false);
+    typeLabel_->setText(tr("Work Plane"));
+    kindLabel_->setText(workPlaneTypeText(plane.kind));
+    detailsLabel_->setText(tr("Origin: %1\nU Axis: %2\nV Axis: %3\nNormal: %4\nWidth: %5\nHeight: %6")
+                               .arg(vectorText(plane.origin))
+                               .arg(vectorText(plane.uAxis))
+                               .arg(vectorText(plane.vAxis))
+                               .arg(vectorText(plane.normal))
+                               .arg(plane.width, 0, 'f', 3)
+                               .arg(plane.height, 0, 'f', 3));
+
+    setObjectRowsVisible(false);
+    hideDimensionRows();
+
+    updating_ = false;
+    setEnabled(true);
+}
+
 void PropertyPanel::showSketch(const Sketch& sketch) {
     updating_ = true;
     mode_ = Mode::Sketch;
@@ -253,6 +301,7 @@ void PropertyPanel::showSketch(const Sketch& sketch) {
 
     idLabel_->setText(currentObjectId_);
     nameEdit_->setText(currentName_);
+    nameEdit_->setEnabled(true);
     typeLabel_->setText(tr("Sketch"));
     kindLabel_->setText(QString::fromUtf8(sketchPlaneName(sketch.plane)));
     detailsLabel_->setText(tr("Plane: %1\nEntities: %2")
@@ -277,6 +326,7 @@ void PropertyPanel::showSketchEntity(const Sketch& sketch, const SketchEntity& e
 
     idLabel_->setText(currentObjectId_);
     nameEdit_->setText(currentName_);
+    nameEdit_->setEnabled(true);
     typeLabel_->setText(tr("Sketch Entity"));
     kindLabel_->setText(QString::fromUtf8(sketchEntityTypeName(entity.type)));
 
@@ -326,6 +376,7 @@ void PropertyPanel::clearObject() {
     const QString placeholder = QStringLiteral("—");
     idLabel_->setText(placeholder);
     nameEdit_->clear();
+    nameEdit_->setEnabled(false);
     typeLabel_->setText(placeholder);
     kindLabel_->setText(placeholder);
 
@@ -337,9 +388,12 @@ void PropertyPanel::clearObject() {
     for (QDoubleSpinBox* box : {scaleX_, scaleY_, scaleZ_}) {
         box->setValue(1.0);
     }
-    detailsLabel_->setText(placeholder);
+    detailsLabel_->setText(tr("No selection"));
 
-    setObjectRowsVisible(true);
+    // Compact empty state: no transform/dimension rows, just the details
+    // row reading "No selection" — the inspector dock keeps its size so
+    // nothing jumps when objects are created or deselected.
+    setObjectRowsVisible(false);
     hideDimensionRows();
 
     updating_ = false;

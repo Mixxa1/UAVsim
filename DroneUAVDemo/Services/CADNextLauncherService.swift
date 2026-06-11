@@ -13,11 +13,13 @@ final class CADNextLauncherService {
     cmake --build CADNext/build-gui
     """
 
-    /// Относительные пути к собранному бинарнику внутри репозитория;
-    /// OCCT-сборка предпочтительнее, если есть обе.
+    /// Относительные пути к собранному бинарнику внутри репозитория.
+    /// build-gui — основная актуальная сборка (CADNext 0.6 quick fix:
+    /// именно её пересобирают чаще всего, поэтому она идёт первой);
+    /// build-gui-occt — запасной кандидат.
     private static let relativeExecutablePaths = [
-        "CADNext/build-gui-occt/app/cadnext_app",
-        "CADNext/build-gui/app/cadnext_app"
+        "CADNext/build-gui/app/cadnext_app",
+        "CADNext/build-gui-occt/app/cadnext_app"
     ]
 
     func openCADNext() {
@@ -39,9 +41,11 @@ final class CADNextLauncherService {
         let fileManager = FileManager.default
         for candidate in candidateExecutables() {
             if fileManager.isExecutableFile(atPath: candidate.path) {
+                print("[CADNextLauncher] Selected: \(candidate.path)")
                 return candidate
             }
         }
+        print("[CADNextLauncher] No cadnext_app found among candidates")
         return nil
     }
 

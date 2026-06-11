@@ -1,6 +1,9 @@
 #pragma once
 
+#include <vector>
+
 #include "cadnext/Result.hpp"
+#include "cadnext/Vector3.hpp"
 #include "cadnext/kernel/ShapeHandle.hpp"
 
 namespace cadnext::kernel {
@@ -31,6 +34,22 @@ enum class BooleanOperation {
     Common
 };
 
+// Extruded sketch profiles (CADNext 0.6). The loop is the closed planar
+// outer boundary in world coordinates (last point != first point);
+// `extrusion` is the world vector from the base face to the top face.
+struct ExtrudedPolygonParameters {
+    std::vector<cadnext::Vector3> loop;
+    cadnext::Vector3 extrusion;
+};
+
+// Exact circle profile (no polygonal approximation in the BRep path).
+struct ExtrudedCircleParameters {
+    cadnext::Vector3 center;
+    cadnext::Vector3 normal; // unit sketch plane normal
+    double radius = 0.5;
+    cadnext::Vector3 extrusion;
+};
+
 class Kernel {
 public:
     virtual ~Kernel() = default;
@@ -38,6 +57,12 @@ public:
     virtual cadnext::Result<ShapeHandle> makeBox(const BoxParameters& params) = 0;
     virtual cadnext::Result<ShapeHandle> makeCylinder(const CylinderParameters& params) = 0;
     virtual cadnext::Result<ShapeHandle> makeSphere(const SphereParameters& params) = 0;
+
+    // Sketch profile → wire → face → prism (CADNext 0.6 Extrude).
+    virtual cadnext::Result<ShapeHandle> makeExtrudedPolygon(
+        const ExtrudedPolygonParameters& params) = 0;
+    virtual cadnext::Result<ShapeHandle> makeExtrudedCircle(
+        const ExtrudedCircleParameters& params) = 0;
 
     virtual cadnext::Result<ShapeHandle> booleanFuse(
         const ShapeHandle& a,

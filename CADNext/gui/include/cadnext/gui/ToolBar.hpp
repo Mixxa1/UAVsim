@@ -17,6 +17,7 @@ public:
     QAction* addCylinderAction() const { return addCylinderAction_; }
     QAction* addSphereAction() const { return addSphereAction_; }
     QAction* addPlaneAction() const { return addPlaneAction_; }
+    QAction* extrudeAction() const { return extrudeAction_; }
     QAction* deleteSelectedAction() const { return deleteSelectedAction_; }
     QAction* fitViewAction() const { return fitViewAction_; }
     QAction* resetCameraAction() const { return resetCameraAction_; }
@@ -26,6 +27,7 @@ private:
     QAction* addCylinderAction_ = nullptr;
     QAction* addSphereAction_ = nullptr;
     QAction* addPlaneAction_ = nullptr;
+    QAction* extrudeAction_ = nullptr;
     QAction* deleteSelectedAction_ = nullptr;
     QAction* fitViewAction_ = nullptr;
     QAction* resetCameraAction_ = nullptr;

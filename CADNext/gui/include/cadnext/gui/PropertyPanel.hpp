@@ -4,6 +4,7 @@
 
 #include "cadnext/Object.hpp"
 #include "cadnext/Sketch.hpp"
+#include "cadnext/WorkPlane.hpp"
 
 class QDoubleSpinBox;
 class QFormLayout;
@@ -25,6 +26,7 @@ public:
     explicit PropertyPanel(QWidget* parent = nullptr);
 
     void showObject(const Object& object);
+    void showWorkPlane(const WorkPlane& plane);
     void showSketch(const Sketch& sketch);
     void showSketchEntity(const Sketch& sketch, const SketchEntity& entity);
     void clearObject();

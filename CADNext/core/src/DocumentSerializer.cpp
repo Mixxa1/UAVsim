@@ -1,5 +1,7 @@
 #include "cadnext/DocumentSerializer.hpp"
 
+#include "cadnext/WorkPlane.hpp"
+
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -364,6 +366,21 @@ SketchPoint2D pointFromJson(const JsonValue* value) {
     return out;
 }
 
+SketchReference sketchReferenceFromJson(const JsonValue* value, SketchPlane fallbackPlane) {
+    SketchReference reference = canonicalSketchReference(fallbackPlane);
+    if (!value || !value->isObject()) {
+        return reference;
+    }
+    reference.type =
+        sketchReferenceTypeFromName(value->stringOr("type", sketchReferenceTypeName(reference.type)));
+    reference.sourceId = value->stringOr("sourceId", reference.sourceId);
+    reference.origin = vectorFromJson(value->member("origin"));
+    reference.uAxis = vectorFromJson(value->member("uAxis"));
+    reference.vAxis = vectorFromJson(value->member("vAxis"));
+    reference.normal = vectorFromJson(value->member("normal"));
+    return reference;
+}
+
 Result<Document> parseError(const std::string& message) {
     return Result<Document>::fail({ErrorCode::SerializationFailed, message});
 }
@@ -411,11 +428,24 @@ std::string DocumentSerializer::toJson(const Document& document) {
     const auto& sketches = document.sketches();
     for (size_t i = 0; i < sketches.size(); ++i) {
         const Sketch& sketch = sketches[i];
+        const SketchReference reference = sketch.reference.sourceId.empty()
+                                              ? canonicalSketchReference(sketch.plane)
+                                              : sketch.reference;
         out << (i == 0 ? "\n" : ",\n");
         out << "      {\n";
         out << "        \"id\": \"" << escapeString(sketch.id) << "\",\n";
         out << "        \"name\": \"" << escapeString(sketch.name) << "\",\n";
         out << "        \"plane\": \"" << sketchPlaneName(sketch.plane) << "\",\n";
+        out << "        \"reference\": {\n";
+        out << "          \"type\": \"" << sketchReferenceTypeName(reference.type)
+            << "\",\n";
+        out << "          \"sourceId\": \"" << escapeString(reference.sourceId)
+            << "\",\n";
+        out << "          \"origin\": " << vectorJson(reference.origin) << ",\n";
+        out << "          \"uAxis\": " << vectorJson(reference.uAxis) << ",\n";
+        out << "          \"vAxis\": " << vectorJson(reference.vAxis) << ",\n";
+        out << "          \"normal\": " << vectorJson(reference.normal) << "\n";
+        out << "        },\n";
         out << "        \"entities\": [";
         for (size_t j = 0; j < sketch.entities.size(); ++j) {
             const SketchEntity& entity = sketch.entities[j];
@@ -470,6 +500,25 @@ std::string DocumentSerializer::toJson(const Document& document) {
         out << "        \"type\": \"" << featureTypeName(feature.type) << "\",\n";
         out << "        \"targetObjectId\": \"" << escapeString(feature.targetObjectId)
             << "\",\n";
+        if (feature.type == FeatureType::Extrude) {
+            // Parametric extrude recipe; the generated body mesh itself is
+            // never serialized (it is re-derived on load).
+            out << "        \"createdBodyId\": \"" << escapeString(feature.createdBodyId)
+                << "\",\n";
+            out << "        \"extrude\": {\n";
+            out << "          \"sketchId\": \"" << escapeString(feature.extrude.sketchId)
+                << "\",\n";
+            out << "          \"profileId\": \"" << escapeString(feature.extrude.profileId)
+                << "\",\n";
+            out << "          \"operation\": \""
+                << extrudeOperationName(feature.extrude.operation) << "\",\n";
+            out << "          \"direction\": \""
+                << extrudeDirectionName(feature.extrude.direction) << "\",\n";
+            out << "          \"depthMode\": \""
+                << extrudeDepthModeName(feature.extrude.depthMode) << "\",\n";
+            out << "          \"distance\": " << numberText(feature.extrude.distance) << "\n";
+            out << "        },\n";
+        }
         out << "        \"suppressed\": " << (feature.suppressed ? "true" : "false") << "\n";
         out << "      }";
     }
@@ -568,6 +617,8 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
             }
             sketch.name = sketchValue.stringOr("name", "Sketch");
             sketch.plane = sketchPlaneFromName(sketchValue.stringOr("plane", "XY"));
+            sketch.reference = sketchReferenceFromJson(sketchValue.member("reference"),
+                                                       sketch.plane);
 
             if (const JsonValue* entities = sketchValue.member("entities");
                 entities && entities->isArray()) {
@@ -639,6 +690,21 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
             const JsonValue* suppressed = featureValue.member("suppressed");
             feature.suppressed =
                 suppressed && suppressed->type == JsonValue::Type::Bool && suppressed->boolValue;
+            // "createdBodyId"/"extrude" are optional: pre-0.6 files have
+            // neither, and non-extrude features never write them.
+            feature.createdBodyId = featureValue.stringOr("createdBodyId", "");
+            if (const JsonValue* extrude = featureValue.member("extrude");
+                extrude && extrude->isObject()) {
+                feature.extrude.sketchId = extrude->stringOr("sketchId", "");
+                feature.extrude.profileId = extrude->stringOr("profileId", "");
+                feature.extrude.operation =
+                    extrudeOperationFromName(extrude->stringOr("operation", "NewBody"));
+                feature.extrude.direction =
+                    extrudeDirectionFromName(extrude->stringOr("direction", "Positive"));
+                feature.extrude.depthMode =
+                    extrudeDepthModeFromName(extrude->stringOr("depthMode", "Distance"));
+                feature.extrude.distance = extrude->numberOr("distance", 1.0);
+            }
             document.addFeature(std::move(feature));
         }
     }

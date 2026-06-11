@@ -1,8 +1,25 @@
 #include "cadnext/Sketch.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace cadnext {
+
+namespace {
+
+double dot(const Vector3& a, const Vector3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+Vector3 normalizedOr(const Vector3& v, const Vector3& fallback) {
+    const double length = std::sqrt(dot(v, v));
+    if (length <= 1.0e-12 || !std::isfinite(length)) {
+        return fallback;
+    }
+    return {v.x / length, v.y / length, v.z / length};
+}
+
+} // namespace
 
 const char* sketchPlaneName(SketchPlane plane) {
     switch (plane) {
@@ -17,6 +34,21 @@ SketchPlane sketchPlaneFromName(const std::string& name) {
     if (name == "XZ") return SketchPlane::XZ;
     if (name == "YZ") return SketchPlane::YZ;
     return SketchPlane::XY;
+}
+
+const char* sketchReferenceTypeName(SketchReferenceType type) {
+    switch (type) {
+    case SketchReferenceType::CanonicalPlane: return "CanonicalPlane";
+    case SketchReferenceType::WorkPlane: return "WorkPlane";
+    case SketchReferenceType::Face: return "Face";
+    }
+    return "CanonicalPlane";
+}
+
+SketchReferenceType sketchReferenceTypeFromName(const std::string& name) {
+    if (name == "WorkPlane") return SketchReferenceType::WorkPlane;
+    if (name == "Face") return SketchReferenceType::Face;
+    return SketchReferenceType::CanonicalPlane;
 }
 
 const char* sketchEntityTypeName(SketchEntityType type) {
@@ -54,6 +86,30 @@ bool removeSketchEntity(Sketch& sketch, const std::string& entityId) {
     }
     sketch.entities.erase(it);
     return true;
+}
+
+Vector3 sketchPointToWorld(const SketchPoint2D& point, const SketchReference& reference) {
+    return {reference.origin.x + reference.uAxis.x * point.u + reference.vAxis.x * point.v,
+            reference.origin.y + reference.uAxis.y * point.u + reference.vAxis.y * point.v,
+            reference.origin.z + reference.uAxis.z * point.u + reference.vAxis.z * point.v};
+}
+
+SketchPoint2D worldToSketchPoint(const Vector3& world, const SketchReference& reference) {
+    const Vector3 delta{world.x - reference.origin.x,
+                        world.y - reference.origin.y,
+                        world.z - reference.origin.z};
+    const Vector3 u = normalizedOr(reference.uAxis, {1.0, 0.0, 0.0});
+    const Vector3 v = normalizedOr(reference.vAxis, {0.0, 1.0, 0.0});
+    return {dot(delta, u), dot(delta, v)};
+}
+
+bool isWorldPointOnSketchPlane(const Vector3& world, const SketchReference& reference,
+                               double tolerance) {
+    const Vector3 delta{world.x - reference.origin.x,
+                        world.y - reference.origin.y,
+                        world.z - reference.origin.z};
+    const Vector3 normal = normalizedOr(reference.normal, {0.0, 0.0, 1.0});
+    return std::fabs(dot(delta, normal)) < tolerance;
 }
 
 } // namespace cadnext

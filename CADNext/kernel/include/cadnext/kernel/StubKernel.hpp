@@ -14,6 +14,10 @@ public:
     cadnext::Result<ShapeHandle> makeBox(const BoxParameters& params) override;
     cadnext::Result<ShapeHandle> makeCylinder(const CylinderParameters& params) override;
     cadnext::Result<ShapeHandle> makeSphere(const SphereParameters& params) override;
+    cadnext::Result<ShapeHandle> makeExtrudedPolygon(
+        const ExtrudedPolygonParameters& params) override;
+    cadnext::Result<ShapeHandle> makeExtrudedCircle(
+        const ExtrudedCircleParameters& params) override;
     cadnext::Result<ShapeHandle> booleanFuse(const ShapeHandle& a, const ShapeHandle& b) override;
     cadnext::Result<ShapeHandle> booleanCut(const ShapeHandle& target, const ShapeHandle& tool) override;
     cadnext::Result<ShapeHandle> booleanCommon(const ShapeHandle& a, const ShapeHandle& b) override;

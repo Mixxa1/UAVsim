@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "cadnext/Extrude.hpp"
+
 namespace cadnext {
 
 enum class FeatureType {
@@ -23,15 +25,12 @@ struct Feature {
     std::string targetObjectId;
     std::vector<std::string> inputObjectIds;
     bool suppressed = false;
-};
 
-// Placeholder for the CADNext 0.6 Sketch → Face → Extrude workflow.
-// Not evaluated anywhere yet; declared so the feature pipeline shape is
-// settled before the OCCT extrude implementation lands.
-struct ExtrudeParameters {
-    std::string sketchId;
-    std::string profileId;
-    double depth = 1.0;
+    // FeatureType::Extrude: the parametric recipe (sketch + profile +
+    // parameters) and the body it generated. The recipe is the source of
+    // truth — body meshes are re-derived from it on load.
+    ExtrudeParameters extrude;
+    std::string createdBodyId;
 };
 
 } // namespace cadnext

@@ -12,6 +12,11 @@ ToolBar::ToolBar(QWidget* parent)
     addSphereAction_ = addAction(tr("Add Sphere"));
     addPlaneAction_ = addAction(tr("Add Plane"));
     addSeparator();
+    // Enabled by MainWindow whenever the relevant sketch has a valid
+    // closed profile.
+    extrudeAction_ = addAction(tr("Extrude"));
+    extrudeAction_->setEnabled(false);
+    addSeparator();
     deleteSelectedAction_ = addAction(tr("Delete Selected"));
     addSeparator();
     fitViewAction_ = addAction(tr("Fit View"));

@@ -25,7 +25,7 @@ int main() {
     empty.id = "sketch-empty";
     assert(detector.detect(empty).empty());
 
-    // Rectangle entity → rectangle profile.
+    // Rectangle entity → valid rectangle profile.
     cadnext::Sketch withRect;
     withRect.id = "sketch-rect";
     cadnext::SketchEntity rect;
@@ -39,10 +39,14 @@ int main() {
     const auto rectProfiles = detector.detect(withRect);
     assert(rectProfiles.size() == 1);
     assert(rectProfiles[0].kind == cadnext::SketchProfileKind::Rectangle);
+    assert(rectProfiles[0].sketchId == "sketch-rect");
+    assert(rectProfiles[0].sourceEntityId == "rect-1");
     assert(rectProfiles[0].outerLoop.size() == 4);
     assert(std::fabs(rectProfiles[0].area - 1.0) < 1e-9);
+    assert(rectProfiles[0].isClosed);
+    assert(rectProfiles[0].isValid);
 
-    // Circle entity → circle profile.
+    // Circle entity → valid circle profile.
     cadnext::Sketch withCircle;
     withCircle.id = "sketch-circle";
     cadnext::SketchEntity circle;
@@ -55,8 +59,10 @@ int main() {
     const auto circleProfiles = detector.detect(withCircle);
     assert(circleProfiles.size() == 1);
     assert(circleProfiles[0].kind == cadnext::SketchProfileKind::Circle);
+    assert(circleProfiles[0].sourceEntityId == "circle-1");
     assert(!circleProfiles[0].outerLoop.empty());
     assert(std::fabs(circleProfiles[0].area - M_PI * 0.25) < 1e-9);
+    assert(circleProfiles[0].isValid);
 
     // Degenerate entities yield nothing.
     cadnext::Sketch degenerate;
@@ -68,7 +74,7 @@ int main() {
     degenerate.entities.push_back(zeroCircle);
     assert(detector.detect(degenerate).empty());
 
-    // Sequential closed line loop → ClosedLoop profile (unit triangle).
+    // Sequential closed line loop → valid Polygon profile (unit triangle).
     cadnext::Sketch loop;
     loop.id = "sketch-loop";
     loop.entities.push_back(makeLine("l1", 0.0, 0.0, 1.0, 0.0));
@@ -77,16 +83,56 @@ int main() {
 
     const auto loopProfiles = detector.detect(loop);
     assert(loopProfiles.size() == 1);
-    assert(loopProfiles[0].kind == cadnext::SketchProfileKind::ClosedLoop);
+    assert(loopProfiles[0].kind == cadnext::SketchProfileKind::Polygon);
+    assert(loopProfiles[0].id == "sketch-loop-loop");
+    assert(loopProfiles[0].sketchId == "sketch-loop");
+    assert(loopProfiles[0].sourceEntityIds.size() == 3);
+    assert(loopProfiles[0].sourceEntityIds[0] == "l1");
+    assert(loopProfiles[0].sourceEntityIds[2] == "l3");
     assert(loopProfiles[0].outerLoop.size() == 3);
     assert(std::fabs(loopProfiles[0].area - 0.5) < 1e-9);
+    assert(loopProfiles[0].isClosed);
+    assert(loopProfiles[0].isValid);
 
-    // Open chain → no loop profile.
+    // A concave (L-shaped) loop is still a valid polygon profile.
+    cadnext::Sketch concave;
+    concave.id = "sketch-concave";
+    concave.entities.push_back(makeLine("c1", 0.0, 0.0, 2.0, 0.0));
+    concave.entities.push_back(makeLine("c2", 2.0, 0.0, 2.0, 1.0));
+    concave.entities.push_back(makeLine("c3", 2.0, 1.0, 1.0, 1.0));
+    concave.entities.push_back(makeLine("c4", 1.0, 1.0, 1.0, 2.0));
+    concave.entities.push_back(makeLine("c5", 1.0, 2.0, 0.0, 2.0));
+    concave.entities.push_back(makeLine("c6", 0.0, 2.0, 0.0, 0.0));
+    const auto concaveProfiles = detector.detect(concave);
+    assert(concaveProfiles.size() == 1);
+    assert(concaveProfiles[0].kind == cadnext::SketchProfileKind::Polygon);
+    assert(std::fabs(concaveProfiles[0].area - 3.0) < 1e-9);
+    assert(concaveProfiles[0].isValid);
+    // ... and it triangulates (ear clipping handles the reflex corner).
+    assert(cadnext::triangulatePolygon(concaveProfiles[0].outerLoop).size() == (6 - 2) * 3);
+
+    // Open chain → no valid profile.
     cadnext::Sketch open;
     open.id = "sketch-open";
     open.entities.push_back(makeLine("l1", 0.0, 0.0, 1.0, 0.0));
     open.entities.push_back(makeLine("l2", 1.0, 0.0, 0.0, 1.0));
     assert(detector.detect(open).empty());
+
+    // Self-intersecting (bow-tie) closed chain → invalid, no profile.
+    cadnext::Sketch bowTie;
+    bowTie.id = "sketch-bowtie";
+    bowTie.entities.push_back(makeLine("b1", 0.0, 0.0, 1.0, 1.0));
+    bowTie.entities.push_back(makeLine("b2", 1.0, 1.0, 1.0, 0.0));
+    bowTie.entities.push_back(makeLine("b3", 1.0, 0.0, 0.0, 1.0));
+    bowTie.entities.push_back(makeLine("b4", 0.0, 1.0, 0.0, 0.0));
+    assert(detector.detect(bowTie).empty());
+
+    // Helper sanity: point-in-polygon for profile click selection.
+    const std::vector<cadnext::SketchPoint2D> square = {
+        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}};
+    assert(cadnext::polygonContainsPoint(square, {1.0, 1.0}));
+    assert(!cadnext::polygonContainsPoint(square, {3.0, 1.0}));
+    assert(cadnext::polygonContainsPoint(square, {2.0, 1.0})); // boundary
 
     return 0;
 }

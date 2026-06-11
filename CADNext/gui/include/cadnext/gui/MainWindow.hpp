@@ -8,16 +8,23 @@
 
 #include "cadnext/CommandStack.hpp"
 #include "cadnext/Document.hpp"
+#include "cadnext/Extrude.hpp"
 #include "cadnext/Sketch.hpp"
+#include "cadnext/SketchInput.hpp"
+#include "cadnext/SketchProfile.hpp"
+#include "cadnext/WorkPlane.hpp"
 #include "cadnext/kernel/GeometryEvaluator.hpp"
 #include "cadnext/kernel/Kernel.hpp"
 #include "cadnext/viewer/CoinViewer.hpp"
 #include "cadnext/viewer/SelectionController.hpp"
 
 class QCloseEvent;
+class QDockWidget;
+class QLabel;
 
 namespace cadnext::gui {
 
+class ExtrudeDialog;
 class ProjectTree;
 class PropertyPanel;
 class SketchToolBar;
@@ -42,10 +49,10 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
-    enum class SelectionKind { None, Body, Sketch, Entity };
-    enum class SketchTool { Select, Line, Rectangle, Circle };
+    enum class SelectionKind { None, WorkPlane, Body, Sketch, Entity };
 
     // Selection.
+    void selectWorkPlane(const std::string& planeId);
     void selectBody(const std::string& objectId);
     void selectSketch(const std::string& sketchId);
     void selectEntity(const std::string& sketchId, const std::string& entityId);
@@ -53,6 +60,9 @@ private:
     void syncTreeSelection();
     void syncViewportSelection();
     void refreshPropertyPanel();
+    std::optional<WorkPlane> workPlaneById(const std::string& planeId) const;
+    WorkPlane workPlaneForSketch(const Sketch& sketch) const;
+    void addCanonicalWorkPlanesToTree();
 
     // Body creation/removal (0.2–0.4 workflow).
     void addPrimitiveObject(PrimitiveKind kind);
@@ -64,12 +74,46 @@ private:
 
     // Sketch workflow (0.5).
     void newSketch(SketchPlane plane);
+    void createSketchFromSelectedPlane();
+    void createSketchOnPlane(const WorkPlane& plane);
     void enterSketchMode(const std::string& sketchId);
     void exitSketchMode();
+    void normalToSelectedPlane();
+    void fitSketchView();
+    void showPlaneActionPalette(bool contextClick);
     void setSketchTool(SketchTool tool);
     void onSketchPoint(double u, double v);
+    void onSketchMove(double u, double v);
     void cancelSketchTool();
     void addSketchEntity(SketchEntity entity);
+
+    // Extrude workflow (0.6): profile detection/selection + dialog.
+    void refreshSketchProfiles();
+    void selectProfile(const std::string& profileId);
+    void selectProfileForEntity(const std::string& sketchId, const std::string& entityId);
+    void updateExtrudeActionEnabled();
+    std::optional<Sketch> sketchForExtrude() const;
+    void openExtrudeDialog();
+    void onExtrudeParametersChanged();
+    void applyExtrude();
+    void cancelExtrude();
+    bool buildExtrudeMesh(const Sketch& sketch, const SketchProfile& profile,
+                          const ExtrudeParameters& parameters,
+                          kernel::TriangleMesh& outMesh, QString* failureReason);
+    void buildExtrudedBodyVisual(const Object& object, const Feature& feature);
+    const Feature* extrudeFeatureForBody(const std::string& objectId) const;
+
+    // Sketch input UX (cursor / snap / live preview).
+    void onSnapToggled(bool enabled);
+    void onShowGridToggled(bool visible);
+    void onGridStepChanged(double step);
+    void refreshSketchPlaneVisual();
+    void updateSketchPreview(const SketchPoint2D& current);
+    void clearPendingSketchVisuals();
+    // Permanent status-bar mode line: Free3D / selected plane / Sketch2D
+    // (with sketch name, plane, snap and grid step).
+    void updateModeStatusLabel();
+    QString sketchToolPrompt() const;
 
     // Property edits.
     void onObjectNameEdited(const QString& objectId, const QString& newName);
@@ -113,18 +157,31 @@ private:
     std::string selectedSketchId_; // owner sketch id in Entity kind
     std::string highlightedEntitySketch_;
     std::string highlightedEntityId_;
+    std::string hoveredWorkPlaneId_;
 
     std::optional<std::string> activeSketchId_;
-    SketchTool sketchTool_ = SketchTool::Select;
-    std::optional<SketchPoint2D> pendingSketchPoint_;
+    std::optional<WorkPlane> activeSketchPlane_;
+    SketchReference activeSketchReference_;
+    SketchInputState sketchInput_;
+
+    // Extrude state: profiles of the active sketch (viewport display) and
+    // of the sketch the dialog is operating on.
+    std::vector<SketchProfile> activeProfiles_;
+    std::vector<SketchProfile> dialogProfiles_;
+    std::string selectedProfileId_;
+    std::string extrudeSketchId_;
+    ExtrudeDialog* extrudeDialog_ = nullptr;
 
     ToolBar* toolBar_ = nullptr;
     SketchToolBar* sketchToolBar_ = nullptr;
     ProjectTree* projectTree_ = nullptr;
     PropertyPanel* propertyPanel_ = nullptr;
+    QDockWidget* treeDock_ = nullptr;
+    QDockWidget* propertyDock_ = nullptr;
 
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
+    QLabel* modeStatusLabel_ = nullptr;
 
     QString currentFilePath_;
     bool dirty_ = false;
@@ -139,6 +196,8 @@ private:
     int lineCount_ = 0;
     int rectangleCount_ = 0;
     int circleCount_ = 0;
+    int nextFeatureNumber_ = 1;
+    int extrudeCount_ = 0;
 };
 
 } // namespace cadnext::gui

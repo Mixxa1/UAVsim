@@ -1,4 +1,5 @@
 #include "cadnext/DocumentSerializer.hpp"
+#include "cadnext/WorkPlane.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -20,6 +21,7 @@ int main() {
     sketch.id = "sketch-1";
     sketch.name = "Sketch XY 1";
     sketch.plane = cadnext::SketchPlane::XZ;
+    sketch.reference = cadnext::canonicalSketchReference(cadnext::SketchPlane::XZ);
 
     cadnext::SketchEntity line;
     line.id = "line-1";
@@ -51,6 +53,7 @@ int main() {
     // Round trip.
     const std::string json = cadnext::DocumentSerializer::toJson(document);
     assert(json.find("\"sketches\"") != std::string::npos);
+    assert(json.find("\"reference\"") != std::string::npos);
 
     const auto loaded = cadnext::DocumentSerializer::fromJson(json);
     assert(loaded.isOk());
@@ -60,6 +63,11 @@ int main() {
     assert(restored.id == "sketch-1");
     assert(restored.name == "Sketch XY 1");
     assert(restored.plane == cadnext::SketchPlane::XZ);
+    assert(restored.reference.type == cadnext::SketchReferenceType::CanonicalPlane);
+    assert(restored.reference.sourceId == "workplane-xz");
+    assert(nearlyEqual(restored.reference.uAxis.x, 1.0));
+    assert(nearlyEqual(restored.reference.vAxis.z, 1.0));
+    assert(nearlyEqual(restored.reference.normal.y, 1.0));
     assert(restored.entities.size() == 3);
 
     const cadnext::SketchEntity& restoredLine = restored.entities[0];
@@ -105,9 +113,37 @@ int main() {
     assert(partial.isOk());
     assert(partial.value().sketches().size() == 1);
     assert(partial.value().sketches().front().plane == cadnext::SketchPlane::YZ);
+    assert(partial.value().sketches().front().reference.sourceId == "workplane-yz");
     // "line-x" has no geometry block and is skipped; only line-good remains.
     assert(partial.value().sketches().front().entities.size() == 1);
     assert(partial.value().sketches().front().entities.front().id == "line-good");
+
+    cadnext::Document objectPlaneDocument;
+    cadnext::Object planeObject;
+    planeObject.id = "object-plane-1";
+    planeObject.name = "Plane 1";
+    planeObject.type = cadnext::ObjectType::ReferencePlane;
+    planeObject.transform.position = {1.0, 2.0, 3.0};
+    objectPlaneDocument.addObject(planeObject);
+
+    cadnext::Sketch objectPlaneSketch;
+    objectPlaneSketch.id = "sketch-object-plane";
+    objectPlaneSketch.name = "Sketch Plane 1";
+    objectPlaneSketch.reference = cadnext::sketchReferenceFromWorkPlane(
+        cadnext::workPlaneFromReferencePlaneObject(planeObject));
+    objectPlaneDocument.addSketch(objectPlaneSketch);
+
+    const auto objectPlaneLoaded =
+        cadnext::DocumentSerializer::fromJson(
+            cadnext::DocumentSerializer::toJson(objectPlaneDocument));
+    assert(objectPlaneLoaded.isOk());
+    const cadnext::Sketch& loadedObjectPlaneSketch =
+        objectPlaneLoaded.value().sketches().front();
+    assert(loadedObjectPlaneSketch.reference.type == cadnext::SketchReferenceType::WorkPlane);
+    assert(loadedObjectPlaneSketch.reference.sourceId == "object-plane-1");
+    assert(nearlyEqual(loadedObjectPlaneSketch.reference.origin.x, 1.0));
+    assert(nearlyEqual(loadedObjectPlaneSketch.reference.origin.y, 2.0));
+    assert(nearlyEqual(loadedObjectPlaneSketch.reference.origin.z, 3.0));
 
     return 0;
 }

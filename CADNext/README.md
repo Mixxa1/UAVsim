@@ -49,10 +49,60 @@ CADNext строится как отдельный CAD-компонент:
 - CADNext 0.2: Touchable Viewer Prototype — done.
 - CADNext 0.3: Interaction & Document Editing Layer — done.
 - CADNext 0.4: OCCT primitives and BRep-backed shapes — done.
-- CADNext 0.5: Sketch Workspace v1 — current.
-- CADNext 0.6: Sketch profile → face → extrude.
-- CADNext 0.7: Boolean operations.
+- CADNext 0.5: Sketch Workspace v1.
+- CADNext 0.6: Extrude + Custom Profiles v1 — current.
+- CADNext 0.7: Boolean operations (cut / fuse), extended depth modes.
 - CADNext 0.8: Bridge/export into UAVsim.
+
+## CADNext 0.6 — Extrude + Custom Profiles v1
+
+Implemented:
+
+- sketch profile detector v1;
+- rectangle profile detection;
+- circle profile detection;
+- closed line-loop polygon profile detection;
+- profile selection;
+- Extrude command;
+- Extrude dialog:
+  - New Body operation;
+  - Distance depth mode;
+  - Positive / Negative / Symmetric direction;
+- extrude preview;
+- Apply Extrude creates a new body;
+- extrusion direction respects sketch plane normal;
+- `.cadnext` save/load for extrude metadata.
+
+Not implemented yet:
+
+- boolean cut;
+- add material / fuse;
+- through all;
+- up to object;
+- up to face;
+- advanced feature regeneration;
+- constraints.
+
+Custom closed profiles are built from lines: consecutive line entities
+whose endpoints chain together (small tolerance) and whose last endpoint
+returns to the first form one Polygon profile. Open chains and
+self-intersecting loops are invalid and cannot be extruded. Detected
+profiles are shown with a faint fill in sketch mode; clicking inside a
+region (or on a rectangle/circle entity) selects the profile, which then
+gets a brighter fill and an orange outline.
+
+Extrusion follows the sketch plane normal (`world = origin + u·U + v·V`,
+direction = ±normal, Symmetric = ±distance/2): XY extrudes along Z, XZ
+along Y, YZ along X. With OCCT enabled the body is built as a BRep prism
+(wire → face → prism; circles use an exact circular wire); without OCCT a
+procedural prism mesh (ear-clipped caps + side walls) keeps the GUI build
+working. In both paths the profile + `ExtrudeParameters` stay the source
+of truth — the generated body mesh is derived, never serialized, and is
+re-derived from the feature recipe on load.
+
+`.cadnext` files gain optional `extrude`/`createdBodyId` members on
+features (format version unchanged; pre-0.6 files keep loading).
+Profiles are not saved — the detector finds them again after load.
 
 ## CADNext 0.5 — Sketch Workspace v1
 
@@ -91,6 +141,94 @@ YZ: u=Y, v=Z, normal=X
 
 This stage intentionally does not implement boolean operations.
 Extrude from sketch is planned as the next stage.
+
+### CADNext 0.5 UX Fix — WorkPlane Rendering and Sketch2D Navigation
+
+Fixed in this stage:
+
+- work planes are helper overlays and no longer visually occlude bodies;
+- selected plane uses outline-first highlighting;
+- non-active planes are hidden/dimmed in Sketch2D;
+- Sketch2D switches to true orthographic normal-to-plane view;
+- orbit is disabled in Sketch2D;
+- trackpad gestures in Sketch2D map to pan/zoom;
+- Properties panel moved to the right inspector dock;
+- sketch cursor/live preview/snap remain on the active sketch plane;
+- Fit View ignores infinite axes and helper overlays where appropriate.
+
+Work plane helpers live in their own scene layer rendered after the
+bodies, are drawn outline-first (the fill quad is an invisible pick proxy
+that only gets a faint tint on hover/selection) and never write the depth
+buffer, so a helper plane can tint a body but never hide it. The world
+grid/axes and all plane frames are hidden in Sketch2D — only the active
+sketch plane helper (fill, grid, local U/V axes, origin marker) remains.
+
+The Sketch2D camera is orthographic and locked normal to the plane with
+U horizontal and V vertical on screen; for the left-handed canonical XZ
+plane the camera sits on the -Y side so +X still points right
+(`planeNormalViewSide`). In Sketch2D mode, orbit is disabled. Trackpad
+gestures are mapped to pan and zoom so the active sketch plane remains
+locked to the screen: two-finger scroll pans along U/V, pinch zooms at
+the cursor (a discrete mouse wheel zooms too), and a left drag pans.
+
+The helper visibility / navigation / Fit View rules are encoded in the
+headless-testable `cadnext::ViewportPolicy`
+(`tests/test_workplane_visibility_policy.cpp`,
+`tests/test_sketch2d_view_state.cpp`,
+`tests/test_sketch_reference_mapping.cpp`). A selected plane offers a
+context menu (secondary click): Create Sketch, Normal to Plane, Fit
+Plane, Hide Other Planes. The Properties inspector is a right-side dock
+(View menu toggles it), so the viewport keeps its full height; with no
+selection it shows a "No selection" empty state.
+
+### Sketch Plane Input Fix
+
+CADNext sketch input now uses a strict active SketchReference:
+
+- New Sketch XY/XZ/YZ automatically enters Sketch2D view.
+- The camera becomes normal to the active sketch plane.
+- Orthographic sketch view is used for 2D input.
+- Mouse coordinates are projected onto the active sketch plane
+  (analytic camera-ray/plane intersection — never a depth pick, never
+  the world grid).
+- Sketch cursor/crosshair shows the exact point that will be used.
+- Snap-to-grid is applied in local U/V coordinates.
+- Line/Rectangle/Circle tools show live preview before commit.
+- Final sketch entities are stored in the local U/V coordinates of their
+  sketch plane.
+- In Sketch2D the left drag pans (orbit is disabled and can never knock
+  the camera off the plane normal); wheel zoom keeps working.
+
+Invariant: cursor, preview and committed geometry must use the same
+active SketchReference. The shared `sketchPointToWorld` /
+`worldToSketchPoint` core transforms are the single source of truth for
+input projection, transient previews and committed entity rendering
+(`isWorldPointOnSketchPlane` guards this at commit time).
+
+### Sketch input UX
+
+CADNext sketch mode supports:
+
+- live sketch cursor/crosshair;
+- snap-to-grid;
+- configurable grid step;
+- show/hide sketch grid;
+- rubber-band preview for Line;
+- live rectangle preview;
+- live circle preview;
+- anchor marker after the first point;
+- Esc cancellation for pending sketch operations.
+
+Esc is two-stage: the first press cancels the pending operation and keeps
+the tool armed, the second press returns to Select. The snap/grid controls
+live on the sketch toolbar (`Snap Grid`, `Show Grid`, `Grid:` step
+spinbox); the status bar shows the current mode
+(`Sketch: Snap ON, Grid 0.100`). The grid step drives both the snap math
+and the drawn sketch grid (the drawn spacing is capped for very fine
+steps; snapping always uses the exact step, minimum 0.001).
+
+Transient preview geometry is not stored in `.cadnext`.
+Only committed sketch entities are serialized.
 
 CADNext can be launched from the DroneUAVDemo application menu
 (CAD → Open CADNext); the Swift simulator only starts the standalone

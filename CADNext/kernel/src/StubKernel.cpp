@@ -34,6 +34,28 @@ cadnext::Result<ShapeHandle> StubKernel::makeSphere(const SphereParameters& para
     return makeGeneratedHandle("stub-sphere");
 }
 
+cadnext::Result<ShapeHandle> StubKernel::makeExtrudedPolygon(
+    const ExtrudedPolygonParameters& params) {
+    if (params.loop.size() < 3) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Extruded polygon needs at least 3 loop points"
+        });
+    }
+    return makeGeneratedHandle("stub-extrude-polygon");
+}
+
+cadnext::Result<ShapeHandle> StubKernel::makeExtrudedCircle(
+    const ExtrudedCircleParameters& params) {
+    if (params.radius <= 0.0) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Extruded circle radius must be positive"
+        });
+    }
+    return makeGeneratedHandle("stub-extrude-circle");
+}
+
 cadnext::Result<ShapeHandle> StubKernel::booleanFuse(const ShapeHandle& a, const ShapeHandle& b) {
     return makeBooleanHandle("fuse", a, b);
 }
