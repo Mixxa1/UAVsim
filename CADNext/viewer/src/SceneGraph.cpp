@@ -1,10 +1,19 @@
 #include "cadnext/viewer/SceneGraph.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <map>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "cadnext/SketchInput.hpp"
 
+#include <Inventor/SoPickedPoint.h>
+#include <Inventor/details/SoDetail.h>
+#include <Inventor/details/SoFaceDetail.h>
 #include <Inventor/SoPath.h>
 #include <Inventor/nodes/SoBaseColor.h>
 #include <Inventor/nodes/SoCoordinate3.h>
@@ -18,6 +27,7 @@
 #include <Inventor/nodes/SoLightModel.h>
 #include <Inventor/nodes/SoLineSet.h>
 #include <Inventor/nodes/SoMaterial.h>
+#include <Inventor/nodes/SoNode.h>
 #include <Inventor/nodes/SoPickStyle.h>
 #include <Inventor/nodes/SoRotation.h>
 #include <Inventor/nodes/SoSeparator.h>
@@ -309,7 +319,13 @@ constexpr float kProfileFillTransparency = 0.88f;
 constexpr float kProfileSelectedFillTransparency = 0.72f;
 
 const SbColor kExtrudePreviewColor(0.35f, 0.85f, 0.95f);
+const SbColor kCutterPreviewColor(0.95f, 0.35f, 0.25f);
 constexpr float kExtrudePreviewTransparency = 0.65f;
+constexpr double kFacePointTolerance = 0.05;
+
+double dot3(const Vector3& a, const Vector3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
 
 // Transient input visuals: distinct from committed entity white so the
 // user can tell pending geometry from real geometry at a glance.
@@ -336,7 +352,7 @@ SbVec3f transientPoint(const cadnext::SketchReference& reference, double u, doub
 // Triangle mesh derived from an evaluated BRep shape (OCCT path). Coin
 // computes smooth normals from the crease angle, so curved OCCT surfaces
 // shade correctly without explicit per-vertex normals.
-void addMeshShape(SoSeparator* parent, const cadnext::kernel::TriangleMesh& mesh) {
+SoIndexedFaceSet* addMeshShape(SoSeparator* parent, const cadnext::kernel::TriangleMesh& mesh) {
     auto* hints = new SoShapeHints;
     hints->vertexOrdering = SoShapeHints::COUNTERCLOCKWISE;
     hints->shapeType = SoShapeHints::SOLID;
@@ -362,6 +378,7 @@ void addMeshShape(SoSeparator* parent, const cadnext::kernel::TriangleMesh& mesh
         faceSet->coordIndex.set1Value(index++, -1);
     }
     parent->addChild(faceSet);
+    return faceSet;
 }
 
 // rotationEuler is stored in degrees (see README); applied as a rotation
@@ -402,6 +419,15 @@ SceneGraph::SceneGraph() {
     sketchesRoot_ = new SoSeparator;
     documentRoot_->addChild(sketchesRoot_);
     root_->addChild(documentRoot_);
+
+    // Body face overlays render right after the bodies (and before the
+    // work planes): lifted, depth-write-free fills that act as the face
+    // pick proxies. The switch hides all of them in Sketch2D.
+    bodyFacesSwitch_ = new SoSwitch;
+    bodyFacesSwitch_->whichChild = SO_SWITCH_ALL;
+    bodyFacesRoot_ = new SoSeparator;
+    bodyFacesSwitch_->addChild(bodyFacesRoot_);
+    root_->addChild(bodyFacesSwitch_);
 
     // Work planes render after the document so their depth-write-free
     // fill blends over bodies instead of occluding them.
@@ -497,6 +523,7 @@ void SceneGraph::removeObjectNode(const std::string& objectId) {
     if (it == objectNodes_.end()) {
         return;
     }
+    removeMeshPickInfoForObject(objectId);
     nodeToObjectId_.erase(it->second);
     nodeToWorkPlaneId_.erase(it->second);
     objectsRoot_->removeChild(it->second);
@@ -511,19 +538,26 @@ void SceneGraph::removeObjectNode(const std::string& objectId) {
     if (selectedWorkPlaneId_ == objectId) {
         selectedWorkPlaneId_.clear();
     }
+    removeBodyFaces(objectId);
 }
 
 void SceneGraph::clearObjectNodes() {
+    // Only the entries owned by object nodes are dropped: the canonical
+    // and document work plane helpers keep their pick-map entries.
+    for (const auto& entry : objectNodes_) {
+        nodeToObjectId_.erase(entry.second);
+        nodeToWorkPlaneId_.erase(entry.second);
+    }
     objectsRoot_->removeAllChildren();
     objectNodes_.clear();
     objectTransforms_.clear();
     objectMaterials_.clear();
     objectBaseColors_.clear();
     objectTypes_.clear();
-    nodeToObjectId_.clear();
-    nodeToWorkPlaneId_.clear();
+    meshPickInfo_.clear();
     hoveredWorkPlaneId_.clear();
     selectedWorkPlaneId_.clear();
+    clearBodyFaces();
 }
 
 bool SceneGraph::hasObjectNode(const std::string& objectId) const {
@@ -549,11 +583,13 @@ void SceneGraph::updateObjectPrimitive(const Object& object) {
     while (node->getNumChildren() > kMaterialChildIndex + 1) {
         node->removeChild(node->getNumChildren() - 1);
     }
+    removeMeshPickInfoForObject(object.id);
     addPrimitiveShape(node, object);
 }
 
 void SceneGraph::addOrUpdateObjectMesh(const Object& object,
                                        const kernel::TriangleMesh& mesh) {
+    removeMeshPickInfoForObject(object.id);
     auto it = objectNodes_.find(object.id);
     if (it == objectNodes_.end()) {
         // Create the node skeleton (transform + material) without shape
@@ -576,7 +612,14 @@ void SceneGraph::addOrUpdateObjectMesh(const Object& object,
         objectTypes_[object.id] = object.type;
         nodeToObjectId_[node] = object.id;
 
-        addMeshShape(node, mesh);
+        SoIndexedFaceSet* meshNode = addMeshShape(node, mesh);
+        MeshPickInfo info;
+        info.objectId = object.id;
+        info.triangleFaceIds.reserve(mesh.triangles.size());
+        for (const kernel::MeshTriangle& triangle : mesh.triangles) {
+            info.triangleFaceIds.push_back(triangle.faceId);
+        }
+        meshPickInfo_[meshNode] = std::move(info);
         return;
     }
 
@@ -584,7 +627,60 @@ void SceneGraph::addOrUpdateObjectMesh(const Object& object,
     while (node->getNumChildren() > kMaterialChildIndex + 1) {
         node->removeChild(node->getNumChildren() - 1);
     }
-    addMeshShape(node, mesh);
+    SoIndexedFaceSet* meshNode = addMeshShape(node, mesh);
+    MeshPickInfo info;
+    info.objectId = object.id;
+    info.triangleFaceIds.reserve(mesh.triangles.size());
+    for (const kernel::MeshTriangle& triangle : mesh.triangles) {
+        info.triangleFaceIds.push_back(triangle.faceId);
+    }
+    meshPickInfo_[meshNode] = std::move(info);
+}
+
+void SceneGraph::removeMeshPickInfoForObject(const std::string& objectId) {
+    for (auto it = meshPickInfo_.begin(); it != meshPickInfo_.end();) {
+        if (it->second.objectId == objectId) {
+            it = meshPickInfo_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+std::string SceneGraph::resolveBodyFaceFromPoint(const std::string& bodyId,
+                                                 const SbVec3f& worldPoint) const {
+    const auto it = bodyFaceReferences_.find(bodyId);
+    if (it == bodyFaceReferences_.end()) {
+        return {};
+    }
+
+    const Vector3 point{worldPoint[0], worldPoint[1], worldPoint[2]};
+    const kernel::FaceReference* bestFace = nullptr;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    for (const kernel::FaceReference& face : it->second) {
+        if (face.faceId.empty()) {
+            continue;
+        }
+        const Vector3 delta{point.x - face.origin.x, point.y - face.origin.y,
+                            point.z - face.origin.z};
+        const double signedDistance = dot3(delta, face.normal);
+        const double distance = std::fabs(signedDistance);
+        if (distance > kFacePointTolerance || distance >= bestDistance) {
+            continue;
+        }
+
+        const double u = dot3(delta, face.uAxis);
+        const double v = dot3(delta, face.vAxis);
+        const double uLimit = face.width * 0.5 + kFacePointTolerance;
+        const double vLimit = face.height * 0.5 + kFacePointTolerance;
+        if (std::fabs(u) > uLimit || std::fabs(v) > vLimit) {
+            continue;
+        }
+
+        bestDistance = distance;
+        bestFace = &face;
+    }
+    return bestFace ? bestFace->faceId : std::string();
 }
 
 void SceneGraph::setHighlighted(const std::string& objectId, bool highlighted) {
@@ -620,8 +716,11 @@ void SceneGraph::showCanonicalWorkPlanes(double extent) {
     workPlaneFillMaterials_.clear();
     workPlaneBorderColors_.clear();
     workPlaneBorderStyles_.clear();
+    // Reference-plane objects keep their entries (their nodes live under
+    // objectsRoot_); canonical and document plane nodes were just removed.
     for (auto it = nodeToWorkPlaneId_.begin(); it != nodeToWorkPlaneId_.end();) {
-        if (it->second.rfind("workplane-", 0) == 0) {
+        if (it->second.rfind("workplane-", 0) == 0 ||
+            it->second.rfind("faceplane-", 0) == 0) {
             it = nodeToWorkPlaneId_.erase(it);
         } else {
             ++it;
@@ -630,76 +729,123 @@ void SceneGraph::showCanonicalWorkPlanes(double extent) {
 
     const SketchPlane planes[] = {SketchPlane::XY, SketchPlane::XZ, SketchPlane::YZ};
     for (const SketchPlane sketchPlane : planes) {
-        const WorkPlane plane = makeCanonicalWorkPlane(sketchPlane, extent);
-        auto* node = new SoSeparator;
+        addWorkPlaneVisual(makeCanonicalWorkPlane(sketchPlane, extent));
+    }
+}
 
-        // Fill quad: invisible by default (outline-first), faintly tinted
-        // on hover/selection. No depth write, so it can never hide bodies
-        // or the other plane frames; it stays pickable as the pick proxy
-        // for the whole plane area.
-        auto* fill = new SoSeparator;
-        fill->addChild(noDepthWrite());
-        auto* hints = new SoShapeHints;
-        hints->vertexOrdering = SoShapeHints::COUNTERCLOCKWISE;
-        hints->shapeType = SoShapeHints::UNKNOWN_SHAPE_TYPE;
-        fill->addChild(hints);
+void SceneGraph::addWorkPlaneVisual(const WorkPlane& plane) {
+    auto* node = new SoSeparator;
 
-        auto* material = new SoMaterial;
-        material->diffuseColor = kWorkPlaneFill;
-        material->transparency = kWorkPlaneFillIdleTransparency;
-        fill->addChild(material);
+    // Fill quad: invisible by default (outline-first), faintly tinted
+    // on hover/selection. No depth write, so it can never hide bodies
+    // or the other plane frames; it stays pickable as the pick proxy
+    // for the whole plane area.
+    auto* fill = new SoSeparator;
+    fill->addChild(noDepthWrite());
+    auto* hints = new SoShapeHints;
+    hints->vertexOrdering = SoShapeHints::COUNTERCLOCKWISE;
+    hints->shapeType = SoShapeHints::UNKNOWN_SHAPE_TYPE;
+    fill->addChild(hints);
 
-        const double halfW = plane.width * 0.5;
-        const double halfH = plane.height * 0.5;
-        auto* fillCoords = new SoCoordinate3;
-        fillCoords->point.set1Value(0, planePoint(plane, -halfW, -halfH));
-        fillCoords->point.set1Value(1, planePoint(plane, halfW, -halfH));
-        fillCoords->point.set1Value(2, planePoint(plane, halfW, halfH));
-        fillCoords->point.set1Value(3, planePoint(plane, -halfW, halfH));
-        fill->addChild(fillCoords);
+    auto* material = new SoMaterial;
+    material->diffuseColor = kWorkPlaneFill;
+    material->transparency = kWorkPlaneFillIdleTransparency;
+    fill->addChild(material);
 
-        auto* face = new SoFaceSet;
-        face->numVertices.set1Value(0, 4);
-        fill->addChild(face);
-        node->addChild(fill);
+    const double halfW = plane.width * 0.5;
+    const double halfH = plane.height * 0.5;
+    auto* fillCoords = new SoCoordinate3;
+    fillCoords->point.set1Value(0, planePoint(plane, -halfW, -halfH));
+    fillCoords->point.set1Value(1, planePoint(plane, halfW, -halfH));
+    fillCoords->point.set1Value(2, planePoint(plane, halfW, halfH));
+    fillCoords->point.set1Value(3, planePoint(plane, -halfW, halfH));
+    fill->addChild(fillCoords);
 
-        auto* border = new SoSeparator;
-        border->addChild(unpickableStyle());
-        auto* lightModel = new SoLightModel;
-        lightModel->model = SoLightModel::BASE_COLOR;
-        border->addChild(lightModel);
+    auto* face = new SoFaceSet;
+    face->numVertices.set1Value(0, 4);
+    fill->addChild(face);
+    node->addChild(fill);
 
-        auto* borderColor = new SoBaseColor;
-        borderColor->rgb = kWorkPlaneBorder;
-        border->addChild(borderColor);
+    auto* border = new SoSeparator;
+    border->addChild(unpickableStyle());
+    auto* lightModel = new SoLightModel;
+    lightModel->model = SoLightModel::BASE_COLOR;
+    border->addChild(lightModel);
 
-        auto* borderStyle = new SoDrawStyle;
-        borderStyle->lineWidth = 1.5f;
-        border->addChild(borderStyle);
+    auto* borderColor = new SoBaseColor;
+    borderColor->rgb = kWorkPlaneBorder;
+    border->addChild(borderColor);
 
-        auto* borderCoords = new SoCoordinate3;
-        borderCoords->point.set1Value(0, planePoint(plane, -halfW, -halfH));
-        borderCoords->point.set1Value(1, planePoint(plane, halfW, -halfH));
-        borderCoords->point.set1Value(2, planePoint(plane, halfW, halfH));
-        borderCoords->point.set1Value(3, planePoint(plane, -halfW, halfH));
-        borderCoords->point.set1Value(4, planePoint(plane, -halfW, -halfH));
-        border->addChild(borderCoords);
+    auto* borderStyle = new SoDrawStyle;
+    borderStyle->lineWidth = 1.5f;
+    border->addChild(borderStyle);
 
-        auto* line = new SoLineSet;
-        line->numVertices.set1Value(0, 5);
-        border->addChild(line);
-        node->addChild(border);
+    auto* borderCoords = new SoCoordinate3;
+    borderCoords->point.set1Value(0, planePoint(plane, -halfW, -halfH));
+    borderCoords->point.set1Value(1, planePoint(plane, halfW, -halfH));
+    borderCoords->point.set1Value(2, planePoint(plane, halfW, halfH));
+    borderCoords->point.set1Value(3, planePoint(plane, -halfW, halfH));
+    borderCoords->point.set1Value(4, planePoint(plane, -halfW, -halfH));
+    border->addChild(borderCoords);
 
-        auto* planeSwitch = new SoSwitch;
-        planeSwitch->whichChild = SO_SWITCH_ALL;
-        planeSwitch->addChild(node);
-        workPlaneRoot_->addChild(planeSwitch);
-        workPlaneNodes_[plane.id] = node;
-        workPlaneSwitches_[plane.id] = planeSwitch;
-        workPlaneFillMaterials_[plane.id] = material;
-        workPlaneBorderColors_[plane.id] = borderColor;
-        workPlaneBorderStyles_[plane.id] = borderStyle;
-        nodeToWorkPlaneId_[node] = plane.id;
+    auto* line = new SoLineSet;
+    line->numVertices.set1Value(0, 5);
+    border->addChild(line);
+    node->addChild(border);
+
+    auto* planeSwitch = new SoSwitch;
+    planeSwitch->whichChild = SO_SWITCH_ALL;
+    planeSwitch->addChild(node);
+    workPlaneRoot_->addChild(planeSwitch);
+    workPlaneNodes_[plane.id] = node;
+    workPlaneSwitches_[plane.id] = planeSwitch;
+    workPlaneFillMaterials_[plane.id] = material;
+    workPlaneBorderColors_[plane.id] = borderColor;
+    workPlaneBorderStyles_[plane.id] = borderStyle;
+    nodeToWorkPlaneId_[node] = plane.id;
+}
+
+void SceneGraph::addOrUpdateDocumentWorkPlane(const WorkPlane& plane) {
+    removeDocumentWorkPlane(plane.id);
+    addWorkPlaneVisual(plane);
+    updateWorkPlaneVisual(plane.id);
+}
+
+void SceneGraph::removeDocumentWorkPlane(const std::string& planeId) {
+    // Canonical planes can never be removed through the document path.
+    if (planeId.rfind("workplane-", 0) == 0) {
+        return;
+    }
+    auto switchIt = workPlaneSwitches_.find(planeId);
+    if (switchIt == workPlaneSwitches_.end()) {
+        return;
+    }
+    if (auto nodeIt = workPlaneNodes_.find(planeId); nodeIt != workPlaneNodes_.end()) {
+        nodeToWorkPlaneId_.erase(nodeIt->second);
+        workPlaneNodes_.erase(nodeIt);
+    }
+    workPlaneRoot_->removeChild(switchIt->second);
+    workPlaneSwitches_.erase(switchIt);
+    workPlaneFillMaterials_.erase(planeId);
+    workPlaneBorderColors_.erase(planeId);
+    workPlaneBorderStyles_.erase(planeId);
+    if (hoveredWorkPlaneId_ == planeId) {
+        hoveredWorkPlaneId_.clear();
+    }
+    if (selectedWorkPlaneId_ == planeId) {
+        selectedWorkPlaneId_.clear();
+    }
+}
+
+void SceneGraph::clearDocumentWorkPlanes() {
+    std::vector<std::string> documentPlaneIds;
+    for (const auto& entry : workPlaneSwitches_) {
+        if (entry.first.rfind("workplane-", 0) != 0) {
+            documentPlaneIds.push_back(entry.first);
+        }
+    }
+    for (const std::string& planeId : documentPlaneIds) {
+        removeDocumentWorkPlane(planeId);
     }
 }
 
@@ -764,6 +910,273 @@ void SceneGraph::updateWorkPlaneVisual(const std::string& planeId) {
         it->second->emissiveColor = selected ? SbColor(0.25f, 0.14f, 0.03f)
                                              : SbColor(0.0f, 0.0f, 0.0f);
         it->second->transparency = selected ? 0.55f : (hovered ? 0.65f : 0.75f);
+    }
+}
+
+// --- Body face overlays -------------------------------------------------------
+
+namespace {
+
+const SbColor kFaceHoverFill(0.30f, 0.60f, 0.88f);
+const SbColor kFaceSelectedFill(0.90f, 0.62f, 0.18f);
+const SbColor kFaceSelectedOutline(1.0f, 0.82f, 0.30f);
+const SbColor kFaceHoverOutline(0.70f, 0.88f, 1.0f);
+constexpr float kFaceFillIdleTransparency = 1.0f;
+constexpr float kFaceFillHoverTransparency = 0.85f;
+constexpr float kFaceFillSelectedTransparency = 0.62f;
+
+// Overlay geometry is lifted along the per-vertex normals so the proxy
+// renders (and ray-picks) just above the coincident body surface.
+constexpr double kFaceOverlayLift = 0.0035;
+
+std::string bodyFaceKey(const std::string& bodyId, const std::string& faceId) {
+    return bodyId + "\n" + faceId;
+}
+
+} // namespace
+
+void SceneGraph::setBodyFaces(const std::string& bodyId,
+                              const std::vector<kernel::FaceReference>& faces) {
+    removeBodyFaces(bodyId);
+    bodyFaceReferences_[bodyId] = faces;
+    if (faces.empty()) {
+        return;
+    }
+
+    auto* group = new SoSeparator;
+    for (const kernel::FaceReference& face : faces) {
+        const kernel::TriangleMesh& mesh = face.previewMesh;
+        if (mesh.isEmpty()) {
+            continue;
+        }
+
+        // Per-vertex lift directions: averaged triangle normals, so the
+        // overlay clears the surface for planar and curved faces alike.
+        std::vector<SbVec3f> liftDirections(mesh.vertices.size(), SbVec3f(0.0f, 0.0f, 0.0f));
+        for (const kernel::MeshTriangle& triangle : mesh.triangles) {
+            const kernel::MeshVertex& a = mesh.vertices[triangle.a];
+            const kernel::MeshVertex& b = mesh.vertices[triangle.b];
+            const kernel::MeshVertex& c = mesh.vertices[triangle.c];
+            const SbVec3f ab(static_cast<float>(b.x - a.x), static_cast<float>(b.y - a.y),
+                             static_cast<float>(b.z - a.z));
+            const SbVec3f ac(static_cast<float>(c.x - a.x), static_cast<float>(c.y - a.y),
+                             static_cast<float>(c.z - a.z));
+            const SbVec3f normal = ab.cross(ac);
+            liftDirections[triangle.a] += normal;
+            liftDirections[triangle.b] += normal;
+            liftDirections[triangle.c] += normal;
+        }
+        std::vector<SbVec3f> liftedPoints(mesh.vertices.size());
+        for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+            SbVec3f direction = liftDirections[i];
+            if (direction.normalize() == 0.0f) {
+                direction = SbVec3f(0.0f, 0.0f, 0.0f);
+            }
+            liftedPoints[i] =
+                SbVec3f(static_cast<float>(mesh.vertices[i].x),
+                        static_cast<float>(mesh.vertices[i].y),
+                        static_cast<float>(mesh.vertices[i].z)) +
+                direction * static_cast<float>(kFaceOverlayLift);
+        }
+
+        auto* faceNode = new SoSeparator;
+
+        // Fill: the pickable face proxy. Invisible idle, tinted on
+        // hover/selection; never writes depth so it can only tint the
+        // body, not occlude it.
+        auto* fill = new SoSeparator;
+        fill->addChild(noDepthWrite());
+        auto* hints = new SoShapeHints;
+        hints->vertexOrdering = SoShapeHints::COUNTERCLOCKWISE;
+        hints->shapeType = SoShapeHints::UNKNOWN_SHAPE_TYPE;
+        fill->addChild(hints);
+
+        auto* material = new SoMaterial;
+        material->diffuseColor = kFaceHoverFill;
+        material->transparency = kFaceFillIdleTransparency;
+        fill->addChild(material);
+
+        auto* coords = new SoCoordinate3;
+        coords->point.setNum(static_cast<int>(liftedPoints.size()));
+        for (size_t i = 0; i < liftedPoints.size(); ++i) {
+            coords->point.set1Value(static_cast<int>(i), liftedPoints[i]);
+        }
+        fill->addChild(coords);
+
+        auto* faceSet = new SoIndexedFaceSet;
+        faceSet->coordIndex.setNum(static_cast<int>(mesh.triangles.size() * 4));
+        int index = 0;
+        for (const kernel::MeshTriangle& triangle : mesh.triangles) {
+            faceSet->coordIndex.set1Value(index++, static_cast<int>(triangle.a));
+            faceSet->coordIndex.set1Value(index++, static_cast<int>(triangle.b));
+            faceSet->coordIndex.set1Value(index++, static_cast<int>(triangle.c));
+            faceSet->coordIndex.set1Value(index++, -1);
+        }
+        fill->addChild(faceSet);
+        faceNode->addChild(fill);
+
+        // Outline: boundary edges of the face triangulation (edges used
+        // by exactly one triangle). Hidden idle, shown on hover/selection.
+        std::map<std::pair<std::uint32_t, std::uint32_t>, int> edgeCounts;
+        const auto countEdge = [&edgeCounts](std::uint32_t a, std::uint32_t b) {
+            ++edgeCounts[{std::min(a, b), std::max(a, b)}];
+        };
+        for (const kernel::MeshTriangle& triangle : mesh.triangles) {
+            countEdge(triangle.a, triangle.b);
+            countEdge(triangle.b, triangle.c);
+            countEdge(triangle.c, triangle.a);
+        }
+
+        auto* outlineSwitch = new SoSwitch;
+        outlineSwitch->whichChild = SO_SWITCH_NONE;
+
+        auto* outline = new SoSeparator;
+        outline->addChild(unpickableStyle());
+        auto* lightModel = new SoLightModel;
+        lightModel->model = SoLightModel::BASE_COLOR;
+        outline->addChild(lightModel);
+
+        auto* outlineColor = new SoBaseColor;
+        outlineColor->rgb = kFaceSelectedOutline;
+        outline->addChild(outlineColor);
+
+        auto* outlineStyle = new SoDrawStyle;
+        outlineStyle->lineWidth = 3.0f;
+        outline->addChild(outlineStyle);
+
+        auto* outlineCoords = new SoCoordinate3;
+        auto* outlineLines = new SoLineSet;
+        int vertex = 0;
+        int line = 0;
+        for (const auto& entry : edgeCounts) {
+            if (entry.second != 1) {
+                continue;
+            }
+            outlineCoords->point.set1Value(vertex++, liftedPoints[entry.first.first]);
+            outlineCoords->point.set1Value(vertex++, liftedPoints[entry.first.second]);
+            outlineLines->numVertices.set1Value(line++, 2);
+        }
+        outline->addChild(outlineCoords);
+        outline->addChild(outlineLines);
+        outlineSwitch->addChild(outline);
+        faceNode->addChild(outlineSwitch);
+
+        group->addChild(faceNode);
+        const std::string key = bodyFaceKey(bodyId, face.faceId);
+        nodeToBodyFace_[faceNode] = {bodyId, face.faceId};
+        faceFillMaterials_[key] = material;
+        faceOutlineSwitches_[key] = outlineSwitch;
+        updateBodyFaceVisual(key);
+    }
+    bodyFacesRoot_->addChild(group);
+    bodyFaceGroups_[bodyId] = group;
+}
+
+void SceneGraph::removeBodyFaces(const std::string& bodyId) {
+    bodyFaceReferences_.erase(bodyId);
+    auto it = bodyFaceGroups_.find(bodyId);
+    if (it == bodyFaceGroups_.end()) {
+        return;
+    }
+    for (auto faceIt = nodeToBodyFace_.begin(); faceIt != nodeToBodyFace_.end();) {
+        if (faceIt->second.first == bodyId) {
+            faceIt = nodeToBodyFace_.erase(faceIt);
+        } else {
+            ++faceIt;
+        }
+    }
+    const std::string keyPrefix = bodyId + "\n";
+    for (auto matIt = faceFillMaterials_.begin(); matIt != faceFillMaterials_.end();) {
+        if (matIt->first.rfind(keyPrefix, 0) == 0) {
+            matIt = faceFillMaterials_.erase(matIt);
+        } else {
+            ++matIt;
+        }
+    }
+    for (auto swIt = faceOutlineSwitches_.begin(); swIt != faceOutlineSwitches_.end();) {
+        if (swIt->first.rfind(keyPrefix, 0) == 0) {
+            swIt = faceOutlineSwitches_.erase(swIt);
+        } else {
+            ++swIt;
+        }
+    }
+    if (hoveredBodyFaceKey_.rfind(keyPrefix, 0) == 0) {
+        hoveredBodyFaceKey_.clear();
+    }
+    if (selectedBodyFaceKey_.rfind(keyPrefix, 0) == 0) {
+        selectedBodyFaceKey_.clear();
+    }
+    bodyFacesRoot_->removeChild(it->second);
+    bodyFaceGroups_.erase(it);
+}
+
+void SceneGraph::clearBodyFaces() {
+    bodyFacesRoot_->removeAllChildren();
+    bodyFaceGroups_.clear();
+    nodeToBodyFace_.clear();
+    faceFillMaterials_.clear();
+    faceOutlineSwitches_.clear();
+    bodyFaceReferences_.clear();
+    hoveredBodyFaceKey_.clear();
+    selectedBodyFaceKey_.clear();
+}
+
+void SceneGraph::setBodyFacesVisible(bool visible) {
+    bodyFacesSwitch_->whichChild = visible ? SO_SWITCH_ALL : SO_SWITCH_NONE;
+}
+
+void SceneGraph::setHoveredBodyFace(const std::string& bodyId, const std::string& faceId) {
+    const std::string key = faceId.empty() ? std::string() : bodyFaceKey(bodyId, faceId);
+    if (hoveredBodyFaceKey_ == key) {
+        return;
+    }
+    const std::string old = hoveredBodyFaceKey_;
+    hoveredBodyFaceKey_ = key;
+    updateBodyFaceVisual(old);
+    updateBodyFaceVisual(hoveredBodyFaceKey_);
+}
+
+void SceneGraph::setSelectedBodyFace(const std::string& bodyId, const std::string& faceId) {
+    const std::string key = faceId.empty() ? std::string() : bodyFaceKey(bodyId, faceId);
+    if (selectedBodyFaceKey_ == key) {
+        return;
+    }
+    const std::string old = selectedBodyFaceKey_;
+    selectedBodyFaceKey_ = key;
+    updateBodyFaceVisual(old);
+    updateBodyFaceVisual(selectedBodyFaceKey_);
+}
+
+void SceneGraph::updateBodyFaceVisual(const std::string& faceKey) {
+    if (faceKey.empty()) {
+        return;
+    }
+    const bool selected = faceKey == selectedBodyFaceKey_;
+    const bool hovered = faceKey == hoveredBodyFaceKey_;
+
+    if (auto it = faceFillMaterials_.find(faceKey); it != faceFillMaterials_.end()) {
+        it->second->diffuseColor = selected ? kFaceSelectedFill : kFaceHoverFill;
+        it->second->emissiveColor = selected ? SbColor(0.25f, 0.14f, 0.03f)
+                                             : SbColor(0.0f, 0.0f, 0.0f);
+        it->second->transparency = selected
+                                       ? kFaceFillSelectedTransparency
+                                       : (hovered ? kFaceFillHoverTransparency
+                                                  : kFaceFillIdleTransparency);
+    }
+    if (auto it = faceOutlineSwitches_.find(faceKey); it != faceOutlineSwitches_.end()) {
+        it->second->whichChild = (selected || hovered) ? SO_SWITCH_ALL : SO_SWITCH_NONE;
+        if (it->second->getNumChildren() > 0) {
+            // Outline color follows the state: bright frame when selected,
+            // soft frame on hover.
+            auto* outline = static_cast<SoSeparator*>(it->second->getChild(0));
+            for (int i = 0; i < outline->getNumChildren(); ++i) {
+                if (outline->getChild(i)->isOfType(SoBaseColor::getClassTypeId())) {
+                    static_cast<SoBaseColor*>(outline->getChild(i))->rgb =
+                        selected ? kFaceSelectedOutline : kFaceHoverOutline;
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -887,6 +1300,9 @@ void SceneGraph::showSketchPlane(const WorkPlane& plane, double gridStep, bool s
     }
 
     // U/V axes + labels (unpickable so they never swallow tool clicks).
+    // Color and label follow the world axis each direction maps to
+    // (X=red, Y=green, Z=blue), so the XY/XZ/YZ sketch views are
+    // immediately distinguishable.
     {
         auto* axes = new SoSeparator;
         axes->addChild(unpickableStyle());
@@ -899,14 +1315,23 @@ void SceneGraph::showSketchPlane(const WorkPlane& plane, double gridStep, bool s
         style->lineWidth = 2.0f;
         axes->addChild(style);
 
+        const auto worldAxisColor = [](const char* name) {
+            switch (name[0]) {
+            case 'X': return SbColor(0.85f, 0.20f, 0.20f);
+            case 'Y': return SbColor(0.20f, 0.75f, 0.25f);
+            default: return SbColor(0.25f, 0.45f, 0.95f);
+            }
+        };
+        const char* uName = dominantWorldAxisName(plane.uAxis);
+        const char* vName = dominantWorldAxisName(plane.vAxis);
         const struct {
             SbColor color;
             double endU;
             double endV;
-            const char* label;
+            std::string label;
         } axisDefs[] = {
-            {SbColor(0.95f, 0.45f, 0.25f), 3.0, 0.0, "U"},
-            {SbColor(0.35f, 0.85f, 0.45f), 0.0, 3.0, "V"},
+            {worldAxisColor(uName), 3.0, 0.0, std::string("U: ") + uName},
+            {worldAxisColor(vName), 0.0, 3.0, std::string("V: ") + vName},
         };
         for (const auto& def : axisDefs) {
             auto* axis = new SoSeparator;
@@ -928,7 +1353,7 @@ void SceneGraph::showSketchPlane(const WorkPlane& plane, double gridStep, bool s
             axis->addChild(offset);
 
             auto* text = new SoText2;
-            text->string = def.label;
+            text->string = def.label.c_str();
             axis->addChild(text);
 
             axes->addChild(axis);
@@ -1344,7 +1769,7 @@ void SceneGraph::updateProfileVisual(const std::string& profileId) {
 
 // --- Extrude preview ----------------------------------------------------------
 
-void SceneGraph::showExtrudePreview(const kernel::TriangleMesh& mesh) {
+void SceneGraph::showExtrudePreview(const kernel::TriangleMesh& mesh, bool cutStyle) {
     hideExtrudePreview();
     if (mesh.isEmpty()) {
         return;
@@ -1353,7 +1778,7 @@ void SceneGraph::showExtrudePreview(const kernel::TriangleMesh& mesh) {
     node->addChild(unpickableStyle());
 
     auto* material = new SoMaterial;
-    material->diffuseColor = kExtrudePreviewColor;
+    material->diffuseColor = cutStyle ? kCutterPreviewColor : kExtrudePreviewColor;
     material->transparency = kExtrudePreviewTransparency;
     node->addChild(material);
 
@@ -1369,13 +1794,77 @@ void SceneGraph::hideExtrudePreview() {
     }
 }
 
+ViewportPickTarget SceneGraph::pickTargetForPickedPoint(const SoPickedPoint* picked) const {
+    if (!picked) {
+        return {};
+    }
+    const SoPath* path = picked->getPath();
+    if (!path) {
+        return {};
+    }
+    for (int i = path->getLength() - 1; i >= 0; --i) {
+        const SoNode* node = path->getNode(i);
+        if (!node->isOfType(SoIndexedFaceSet::getClassTypeId())) {
+            continue;
+        }
+        const auto* faceSet = static_cast<const SoIndexedFaceSet*>(node);
+        auto meshIt = meshPickInfo_.find(faceSet);
+        if (meshIt == meshPickInfo_.end()) {
+            continue;
+        }
+        ViewportPickTarget target;
+        target.objectId = meshIt->second.objectId;
+        target.faceLookupAttempted = true;
+
+        const auto resolveFromPoint = [&]() {
+            const std::string faceId =
+                resolveBodyFaceFromPoint(meshIt->second.objectId, picked->getPoint());
+            if (!faceId.empty()) {
+                target.faceId = faceId;
+            }
+        };
+
+        const SoDetail* detail = picked->getDetail(faceSet);
+        const auto* faceDetail = dynamic_cast<const SoFaceDetail*>(detail);
+        if (!faceDetail) {
+            resolveFromPoint();
+            return target;
+        }
+        target.triangleIndex = faceDetail->getFaceIndex();
+        if (target.triangleIndex < 0 ||
+            static_cast<size_t>(target.triangleIndex) >=
+                meshIt->second.triangleFaceIds.size()) {
+            resolveFromPoint();
+            return target;
+        }
+        target.faceId = meshIt->second.triangleFaceIds[static_cast<size_t>(target.triangleIndex)];
+        if (target.faceId.empty()) {
+            resolveFromPoint();
+        }
+        return target;
+    }
+    ViewportPickTarget target = pickTargetForPath(path);
+    if (target.isBody() && !target.isBodyFace()) {
+        target.faceLookupAttempted = true;
+        const std::string faceId = resolveBodyFaceFromPoint(target.objectId, picked->getPoint());
+        if (!faceId.empty()) {
+            target.faceId = faceId;
+        }
+    }
+    return target;
+}
+
 ViewportPickTarget SceneGraph::pickTargetForPath(const SoPath* path) const {
     ViewportPickTarget target;
     if (!path) {
         return target;
     }
     for (int i = path->getLength() - 1; i >= 0; --i) {
-        const auto* node = static_cast<const SoSeparator*>(path->getNode(i));
+        const SoNode* rawNode = path->getNode(i);
+        if (!rawNode->isOfType(SoSeparator::getClassTypeId())) {
+            continue;
+        }
+        const auto* node = static_cast<const SoSeparator*>(rawNode);
         auto entityIt = nodeToSketchEntity_.find(node);
         if (entityIt != nodeToSketchEntity_.end()) {
             target.sketchId = entityIt->second.first;
@@ -1385,6 +1874,14 @@ ViewportPickTarget SceneGraph::pickTargetForPath(const SoPath* path) const {
         auto profileIt = nodeToProfileId_.find(node);
         if (profileIt != nodeToProfileId_.end()) {
             target.profileId = profileIt->second;
+            return target;
+        }
+        auto faceIt = nodeToBodyFace_.find(node);
+        if (faceIt != nodeToBodyFace_.end()) {
+            // Face picks carry the owning body too: face picking layers on
+            // top of body picking instead of replacing it.
+            target.objectId = faceIt->second.first;
+            target.faceId = faceIt->second.second;
             return target;
         }
         auto planeIt = nodeToWorkPlaneId_.find(node);

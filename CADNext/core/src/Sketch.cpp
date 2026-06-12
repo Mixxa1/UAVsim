@@ -40,14 +40,15 @@ const char* sketchReferenceTypeName(SketchReferenceType type) {
     switch (type) {
     case SketchReferenceType::CanonicalPlane: return "CanonicalPlane";
     case SketchReferenceType::WorkPlane: return "WorkPlane";
-    case SketchReferenceType::Face: return "Face";
+    case SketchReferenceType::BodyFace: return "BodyFace";
     }
     return "CanonicalPlane";
 }
 
 SketchReferenceType sketchReferenceTypeFromName(const std::string& name) {
     if (name == "WorkPlane") return SketchReferenceType::WorkPlane;
-    if (name == "Face") return SketchReferenceType::Face;
+    // "Face" is the pre-0.8 spelling of the body-face reference type.
+    if (name == "BodyFace" || name == "Face") return SketchReferenceType::BodyFace;
     return SketchReferenceType::CanonicalPlane;
 }
 

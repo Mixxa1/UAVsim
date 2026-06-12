@@ -60,21 +60,33 @@ struct SketchEntity {
 };
 
 // What a sketch is attached to. Canonical planes cover XY/XZ/YZ; WorkPlane
-// covers reference-plane objects (sourceId = object id); Face is reserved
-// for body faces in a later stage.
+// covers reference-plane objects and document work planes (sourceId =
+// plane/object id); BodyFace covers planar faces of evaluated bodies
+// (CADNext 0.8 Sketch on Face).
 enum class SketchReferenceType {
     CanonicalPlane,
     WorkPlane,
-    Face
+    BodyFace
 };
 
 struct SketchReference {
     SketchReferenceType type = SketchReferenceType::CanonicalPlane;
     std::string sourceId;
+
+    // BodyFace only: the body and the face-signature id the sketch was
+    // created on. Face ids are stable for the current evaluated body state
+    // (no full topological naming yet) — when the id cannot be re-resolved
+    // after load, the resolved origin/axes below are the fallback plane.
+    std::string sourceBodyId;
+    std::string sourceFaceId;
+
     Vector3 origin;
     Vector3 uAxis{1.0, 0.0, 0.0};
     Vector3 vAxis{0.0, 1.0, 0.0};
     Vector3 normal{0.0, 0.0, 1.0};
+
+    // Human-readable source label, e.g. "Face of Extrude Body 1".
+    std::string displayName;
 };
 
 struct Sketch {

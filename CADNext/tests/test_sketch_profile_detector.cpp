@@ -84,7 +84,7 @@ int main() {
     const auto loopProfiles = detector.detect(loop);
     assert(loopProfiles.size() == 1);
     assert(loopProfiles[0].kind == cadnext::SketchProfileKind::Polygon);
-    assert(loopProfiles[0].id == "sketch-loop-loop");
+    assert(loopProfiles[0].id.rfind("profile-poly-", 0) == 0);
     assert(loopProfiles[0].sketchId == "sketch-loop");
     assert(loopProfiles[0].sourceEntityIds.size() == 3);
     assert(loopProfiles[0].sourceEntityIds[0] == "l1");
@@ -118,14 +118,20 @@ int main() {
     open.entities.push_back(makeLine("l2", 1.0, 0.0, 0.0, 1.0));
     assert(detector.detect(open).empty());
 
-    // Self-intersecting (bow-tie) closed chain → invalid, no profile.
+    // Self-intersecting (bow-tie) closed chain → closed but invalid profile.
     cadnext::Sketch bowTie;
     bowTie.id = "sketch-bowtie";
     bowTie.entities.push_back(makeLine("b1", 0.0, 0.0, 1.0, 1.0));
     bowTie.entities.push_back(makeLine("b2", 1.0, 1.0, 1.0, 0.0));
     bowTie.entities.push_back(makeLine("b3", 1.0, 0.0, 0.0, 1.0));
     bowTie.entities.push_back(makeLine("b4", 0.0, 1.0, 0.0, 0.0));
-    assert(detector.detect(bowTie).empty());
+    const auto bowTieProfiles = detector.detect(bowTie);
+    assert(bowTieProfiles.size() == 1);
+    assert(bowTieProfiles[0].kind == cadnext::SketchProfileKind::Polygon);
+    assert(bowTieProfiles[0].isClosed);
+    assert(!bowTieProfiles[0].isValid);
+    assert(bowTieProfiles[0].invalidReason ==
+           cadnext::SketchProfileInvalidReason::SelfIntersecting);
 
     // Helper sanity: point-in-polygon for profile click selection.
     const std::vector<cadnext::SketchPoint2D> square = {

@@ -16,6 +16,11 @@ void assertVector(cadnext::Vector3 v, double x, double y, double z) {
     assert(nearlyEqual(v.z, z));
 }
 
+void assertPoint(cadnext::SketchPoint2D p, double u, double v) {
+    assert(nearlyEqual(p.u, u));
+    assert(nearlyEqual(p.v, v));
+}
+
 } // namespace
 
 int main() {
@@ -57,6 +62,19 @@ int main() {
     // shared axis, which {1,2} does not).
     assert(!cadnext::isWorldPointOnSketchPlane(cadnext::sketchPointToWorld({1.0, 2.0}, xy), xz));
     assert(!cadnext::isWorldPointOnSketchPlane(cadnext::sketchPointToWorld({1.0, 2.0}, xz), xy));
+
+    const cadnext::Vector3 xyWorld = cadnext::sketchPointToWorld({3.0, -4.0}, xy);
+    const cadnext::Vector3 xzWorld = cadnext::sketchPointToWorld({3.0, -4.0}, xz);
+    const cadnext::Vector3 yzWorld = cadnext::sketchPointToWorld({3.0, -4.0}, yz);
+    assertPoint(cadnext::worldToSketchPoint(xyWorld, xy), 3.0, -4.0);
+    assertPoint(cadnext::worldToSketchPoint(xzWorld, xz), 3.0, -4.0);
+    assertPoint(cadnext::worldToSketchPoint(yzWorld, yz), 3.0, -4.0);
+    assertVector(cadnext::sketchPointToWorld(cadnext::worldToSketchPoint(xyWorld, xy), xy),
+                 xyWorld.x, xyWorld.y, xyWorld.z);
+    assertVector(cadnext::sketchPointToWorld(cadnext::worldToSketchPoint(xzWorld, xz), xz),
+                 xzWorld.x, xzWorld.y, xzWorld.z);
+    assertVector(cadnext::sketchPointToWorld(cadnext::worldToSketchPoint(yzWorld, yz), yz),
+                 yzWorld.x, yzWorld.y, yzWorld.z);
 
     return 0;
 }

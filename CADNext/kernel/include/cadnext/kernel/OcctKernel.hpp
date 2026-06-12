@@ -14,7 +14,8 @@ namespace cadnext::kernel {
 // by the ShapeHandle id; OCCT types never appear in the public core model,
 // in Object, in the GUI, or in serialized .cadnext files.
 //
-// Boolean operations are intentionally not implemented in CADNext 0.4.
+// booleanCut runs the topological BRepAlgoAPI_Cut (CADNext 0.7 Cut
+// Extrude); fuse/common remain unimplemented until they are needed.
 class OcctKernel final : public Kernel {
 public:
     OcctKernel();
@@ -33,6 +34,7 @@ public:
     cadnext::Result<ShapeHandle> booleanFuse(const ShapeHandle& a, const ShapeHandle& b) override;
     cadnext::Result<ShapeHandle> booleanCut(const ShapeHandle& target, const ShapeHandle& tool) override;
     cadnext::Result<ShapeHandle> booleanCommon(const ShapeHandle& a, const ShapeHandle& b) override;
+    cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) override;
     bool isShapeValid(const ShapeHandle& shape) const override;
 
     bool isAvailable() const;

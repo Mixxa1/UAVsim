@@ -7,9 +7,11 @@
 
 namespace cadnext {
 
-// Profile detection v1 (CADNext 0.6). Profiles are closed regions found in
-// a sketch; they are the input of the Sketch → Profile → Extrude workflow.
-// No nesting, holes or multi-loop graph solving yet.
+// Profile detection v2 (CADNext 0.7). Profiles are closed regions found in
+// a sketch; they are the input of the Extrude / Cut Extrude workflows.
+// Detection is stateless: every call rebuilds profiles from the committed
+// sketch entities only — no cache, no transient/preview geometry, never a
+// stale entity id.
 enum class SketchProfileKind {
     Rectangle,
     Circle,
@@ -17,7 +19,20 @@ enum class SketchProfileKind {
     Unsupported
 };
 
+enum class SketchProfileInvalidReason {
+    None,
+    SelfIntersecting
+};
+
+// Endpoint clustering tolerance for line-loop detection: two endpoints
+// closer than this are the same loop vertex.
+inline constexpr double kSketchEndpointTolerance = 1.0e-5;
+
 struct SketchProfile {
+    // Deterministic, content-derived id: "profile-<entityId>" for
+    // rectangle/circle profiles, "profile-poly-<fnv1a of sorted entity
+    // ids>" for line loops. Deleting a source line therefore removes the
+    // old profile id on the next rebuild.
     std::string id;
     std::string sketchId;
     SketchProfileKind kind = SketchProfileKind::Unsupported;
@@ -31,14 +46,20 @@ struct SketchProfile {
     double area = 0.0;
     bool isClosed = false;
     bool isValid = false;
+    SketchProfileInvalidReason invalidReason = SketchProfileInvalidReason::None;
 };
 
 class SketchProfileDetector {
 public:
     // Rectangle/Circle entities each yield one profile. Line entities are
-    // checked for one sequential closed chain (entity order, endpoints
-    // matched with a small tolerance) — no graph solving in v1. Open
-    // chains and self-intersecting loops yield no valid profile.
+    // clustered by endpoints (kSketchEndpointTolerance) into a graph;
+    // every connected component whose vertices all have degree 2 forms a
+    // simple loop, independent of the order the lines were drawn in, and
+    // multiple separate loops are all reported. Open chains and branching
+    // components yield nothing; a closed but self-intersecting loop
+    // (bow-tie) is reported with isValid=false /
+    // SketchProfileInvalidReason::SelfIntersecting so the GUI can explain
+    // why it cannot be extruded.
     std::vector<SketchProfile> detect(const Sketch& sketch) const;
 };
 

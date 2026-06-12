@@ -1,6 +1,9 @@
 #include "cadnext/SketchProfile.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 
 namespace cadnext {
 
@@ -10,8 +13,22 @@ constexpr double kPointTolerance = 1.0e-6;
 constexpr double kMinArea = 1.0e-9;
 constexpr int kCircleApproximationSegments = 32;
 
-bool samePoint(const SketchPoint2D& a, const SketchPoint2D& b) {
-    return std::fabs(a.u - b.u) <= kPointTolerance && std::fabs(a.v - b.v) <= kPointTolerance;
+// FNV-1a over the sorted source entity ids: the polygon profile id is a
+// pure function of its member lines, stable across runs and platforms.
+std::string fnv1aHex(const std::vector<std::string>& parts) {
+    std::uint64_t hash = 1469598103934665603ull;
+    for (const std::string& part : parts) {
+        for (const char c : part) {
+            hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(c));
+            hash *= 1099511628211ull;
+        }
+        hash ^= static_cast<std::uint64_t>('\n');
+        hash *= 1099511628211ull;
+    }
+    char buffer[20];
+    std::snprintf(buffer, sizeof(buffer), "%016llx",
+                  static_cast<unsigned long long>(hash));
+    return buffer;
 }
 
 double signedDoubledArea(const std::vector<SketchPoint2D>& loop) {
@@ -80,7 +97,7 @@ void detectRectangle(const Sketch& sketch, const SketchEntity& entity,
         return;
     }
     SketchProfile profile;
-    profile.id = entity.id;
+    profile.id = "profile-" + entity.id;
     profile.sketchId = sketch.id;
     profile.kind = SketchProfileKind::Rectangle;
     profile.sourceEntityId = entity.id;
@@ -104,7 +121,7 @@ void detectCircle(const Sketch& sketch, const SketchEntity& entity,
         return;
     }
     SketchProfile profile;
-    profile.id = entity.id;
+    profile.id = "profile-" + entity.id;
     profile.sketchId = sketch.id;
     profile.kind = SketchProfileKind::Circle;
     profile.sourceEntityId = entity.id;
@@ -121,61 +138,139 @@ void detectCircle(const Sketch& sketch, const SketchEntity& entity,
     profiles.push_back(std::move(profile));
 }
 
-// v1 closed-loop detection: the line entities, in entity order, must form
-// one continuous chain whose last endpoint returns to the first. Open
-// chains and self-intersecting loops yield nothing — they cannot be
-// extruded.
-void detectClosedLineLoop(const Sketch& sketch, std::vector<SketchProfile>& profiles) {
-    std::vector<const SketchEntity*> lines;
+// v2 closed-loop detection: graph-based, order-independent. Line
+// endpoints are clustered into vertices with kSketchEndpointTolerance;
+// every connected component whose vertices all have degree 2 is walked as
+// one simple loop. Open chains and branching components yield nothing;
+// closed but self-intersecting loops are reported as invalid so the GUI
+// can explain why they cannot be extruded. Multiple separate loops in one
+// sketch all become profiles.
+void detectLineLoops(const Sketch& sketch, std::vector<SketchProfile>& profiles) {
+    struct Edge {
+        size_t nodeA = 0;
+        size_t nodeB = 0;
+        const SketchEntity* entity = nullptr;
+    };
+
+    // Endpoint clustering: a point joins the first existing vertex within
+    // tolerance, otherwise it becomes a new vertex.
+    std::vector<SketchPoint2D> nodes;
+    const auto nodeFor = [&nodes](const SketchPoint2D& point) -> size_t {
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            if (std::hypot(nodes[i].u - point.u, nodes[i].v - point.v) <=
+                kSketchEndpointTolerance) {
+                return i;
+            }
+        }
+        nodes.push_back(point);
+        return nodes.size() - 1;
+    };
+
+    std::vector<Edge> edges;
     for (const SketchEntity& entity : sketch.entities) {
-        if (entity.type == SketchEntityType::Line) {
-            lines.push_back(&entity);
+        if (entity.type != SketchEntityType::Line) {
+            continue;
         }
+        if (!isFinitePoint(entity.line.start) || !isFinitePoint(entity.line.end)) {
+            continue;
+        }
+        const size_t a = nodeFor(entity.line.start);
+        const size_t b = nodeFor(entity.line.end);
+        if (a == b) {
+            continue; // degenerate (zero-length) line
+        }
+        edges.push_back({a, b, &entity});
     }
-    if (lines.size() < 3) {
+    if (edges.size() < 3) {
         return;
     }
 
-    std::vector<SketchPoint2D> loop;
-    std::vector<std::string> entityIds;
-    loop.push_back(lines.front()->line.start);
-    entityIds.push_back(lines.front()->id);
-    SketchPoint2D cursor = lines.front()->line.end;
-    for (size_t i = 1; i < lines.size(); ++i) {
-        if (!samePoint(lines[i]->line.start, cursor)) {
-            return; // chain broken — not a sequential loop
-        }
-        loop.push_back(lines[i]->line.start);
-        entityIds.push_back(lines[i]->id);
-        cursor = lines[i]->line.end;
-    }
-    if (!samePoint(cursor, lines.front()->line.start)) {
-        return; // chain does not close
-    }
-    for (const SketchPoint2D& point : loop) {
-        if (!isFinitePoint(point)) {
-            return;
-        }
+    std::vector<std::vector<size_t>> adjacency(nodes.size());
+    for (size_t e = 0; e < edges.size(); ++e) {
+        adjacency[edges[e].nodeA].push_back(e);
+        adjacency[edges[e].nodeB].push_back(e);
     }
 
-    const double area = polygonArea(loop);
-    if (area < kMinArea) {
-        return;
-    }
-    if (polygonIsSelfIntersecting(loop)) {
-        return; // invalid in v1 — cannot be extruded
-    }
+    std::vector<bool> edgeUsed(edges.size(), false);
+    for (size_t startEdge = 0; startEdge < edges.size(); ++startEdge) {
+        if (edgeUsed[startEdge]) {
+            continue;
+        }
 
-    SketchProfile profile;
-    profile.id = sketch.id + "-loop";
-    profile.sketchId = sketch.id;
-    profile.kind = SketchProfileKind::Polygon;
-    profile.outerLoop = std::move(loop);
-    profile.sourceEntityIds = std::move(entityIds);
-    profile.area = area;
-    profile.isClosed = true;
-    profile.isValid = true;
-    profiles.push_back(std::move(profile));
+        // Walk the component as a degree-2 chain. Any vertex with a
+        // different degree means open chain or branching — not a simple
+        // loop; its edges are marked used so they are not retried.
+        const size_t startNode = edges[startEdge].nodeA;
+        std::vector<size_t> loopNodes;
+        std::vector<const SketchEntity*> loopEntities;
+        std::vector<size_t> walkedEdges;
+        size_t currentNode = startNode;
+        size_t currentEdge = startEdge;
+        bool isLoop = true;
+        while (true) {
+            if (adjacency[currentNode].size() != 2) {
+                isLoop = false;
+                break;
+            }
+            loopNodes.push_back(currentNode);
+            loopEntities.push_back(edges[currentEdge].entity);
+            walkedEdges.push_back(currentEdge);
+            edgeUsed[currentEdge] = true;
+
+            const Edge& edge = edges[currentEdge];
+            const size_t nextNode = edge.nodeA == currentNode ? edge.nodeB : edge.nodeA;
+            if (nextNode == startNode) {
+                break; // closed
+            }
+            if (adjacency[nextNode].size() != 2) {
+                isLoop = false;
+                break;
+            }
+            const size_t next0 = adjacency[nextNode][0];
+            const size_t next1 = adjacency[nextNode][1];
+            const size_t nextEdge = next0 == currentEdge ? next1 : next0;
+            if (edgeUsed[nextEdge]) {
+                isLoop = false; // already consumed — malformed component
+                break;
+            }
+            currentNode = nextNode;
+            currentEdge = nextEdge;
+        }
+        if (!isLoop || loopNodes.size() < 3) {
+            continue;
+        }
+
+        std::vector<SketchPoint2D> loop;
+        loop.reserve(loopNodes.size());
+        for (const size_t node : loopNodes) {
+            loop.push_back(nodes[node]);
+        }
+        const double area = polygonArea(loop);
+        const bool selfIntersecting = polygonIsSelfIntersecting(loop);
+        if (area < kMinArea && !selfIntersecting) {
+            continue;
+        }
+
+        SketchProfile profile;
+        profile.sketchId = sketch.id;
+        profile.kind = SketchProfileKind::Polygon;
+        profile.outerLoop = std::move(loop);
+        for (const SketchEntity* entity : loopEntities) {
+            profile.sourceEntityIds.push_back(entity->id);
+        }
+        std::vector<std::string> sortedIds = profile.sourceEntityIds;
+        std::sort(sortedIds.begin(), sortedIds.end());
+        profile.id = "profile-poly-" + fnv1aHex(sortedIds);
+        profile.area = area;
+        profile.isClosed = true;
+        if (selfIntersecting) {
+            profile.isValid = false;
+            profile.invalidReason = SketchProfileInvalidReason::SelfIntersecting;
+        } else {
+            profile.isValid = true;
+        }
+        profiles.push_back(std::move(profile));
+    }
 }
 
 } // namespace
@@ -191,10 +286,10 @@ std::vector<SketchProfile> SketchProfileDetector::detect(const Sketch& sketch) c
             detectCircle(sketch, entity, profiles);
             break;
         case SketchEntityType::Line:
-            break; // handled as a chain below
+            break; // handled as loops below
         }
     }
-    detectClosedLineLoop(sketch, profiles);
+    detectLineLoops(sketch, profiles);
     return profiles;
 }
 

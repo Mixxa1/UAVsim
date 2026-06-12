@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <string>
+#include <utility>
 
 namespace cadnext::kernel {
 
@@ -31,12 +33,14 @@ double signedDoubledArea(const std::vector<cadnext::SketchPoint2D>& loop) {
 }
 
 void pushTriangle(TriangleMesh& mesh, std::uint32_t a, std::uint32_t b, std::uint32_t c,
-                  bool flip) {
+                  bool flip, std::string faceId) {
+    MeshTriangle triangle;
     if (flip) {
-        mesh.triangles.push_back({a, c, b});
+        triangle = {a, c, b, std::move(faceId)};
     } else {
-        mesh.triangles.push_back({a, b, c});
+        triangle = {a, b, c, std::move(faceId)};
     }
+    mesh.triangles.push_back(std::move(triangle));
 }
 
 } // namespace
@@ -45,13 +49,27 @@ cadnext::Result<TriangleMesh> buildExtrudedProfileMesh(
     const cadnext::SketchReference& reference,
     const cadnext::SketchProfile& profile,
     const cadnext::ExtrudeParameters& parameters) {
+    if (!cadnext::extrudeParametersValid(parameters)) {
+        return meshError(cadnext::ErrorCode::InvalidArgument,
+                         "Extrude parameters are invalid (distance must be > 0)");
+    }
+    double startOffset = 0.0;
+    double endOffset = 0.0;
+    cadnext::extrudeSpan(parameters, startOffset, endOffset);
+    return buildProfilePrismMesh(reference, profile, startOffset, endOffset);
+}
+
+cadnext::Result<TriangleMesh> buildProfilePrismMesh(
+    const cadnext::SketchReference& reference,
+    const cadnext::SketchProfile& profile,
+    double startOffset, double endOffset) {
     if (!profile.isValid || !profile.isClosed || profile.outerLoop.size() < 3) {
         return meshError(cadnext::ErrorCode::InvalidArgument,
                          "Profile is not a valid closed loop");
     }
-    if (!cadnext::extrudeParametersValid(parameters)) {
+    if (!std::isfinite(endOffset - startOffset) || endOffset - startOffset <= 0.0) {
         return meshError(cadnext::ErrorCode::InvalidArgument,
-                         "Extrude parameters are invalid (distance must be > 0)");
+                         "Prism span must be positive");
     }
 
     const std::vector<unsigned int> capTriangles =
@@ -60,10 +78,6 @@ cadnext::Result<TriangleMesh> buildExtrudedProfileMesh(
         return meshError(cadnext::ErrorCode::KernelOperationFailed,
                          "Profile loop could not be triangulated");
     }
-
-    double startOffset = 0.0;
-    double endOffset = 0.0;
-    cadnext::extrudeSpan(parameters, startOffset, endOffset);
 
     const cadnext::Vector3 normal =
         normalizedOrFallback(reference.normal, {0.0, 0.0, 1.0});
@@ -107,8 +121,9 @@ cadnext::Result<TriangleMesh> buildExtrudedProfileMesh(
         const auto b = static_cast<std::uint32_t>(capTriangles[t + 1]);
         const auto c = static_cast<std::uint32_t>(capTriangles[t + 2]);
         const auto topOffset = static_cast<std::uint32_t>(n);
-        pushTriangle(mesh, a + topOffset, b + topOffset, c + topOffset, leftHanded);
-        pushTriangle(mesh, a, b, c, !leftHanded);
+        pushTriangle(mesh, a + topOffset, b + topOffset, c + topOffset, leftHanded,
+                     "face-cap-end");
+        pushTriangle(mesh, a, b, c, !leftHanded, "face-cap-start");
     }
 
     // Side walls along the CCW-in-UV boundary (a CW loop is walked in
@@ -121,8 +136,9 @@ cadnext::Result<TriangleMesh> buildExtrudedProfileMesh(
         const auto bj = static_cast<std::uint32_t>(jRaw);
         const auto ti = static_cast<std::uint32_t>(i + n);
         const auto tj = static_cast<std::uint32_t>(jRaw + n);
-        pushTriangle(mesh, bi, bj, tj, leftHanded);
-        pushTriangle(mesh, bi, tj, ti, leftHanded);
+        const std::string faceId = "face-side-" + std::to_string(k);
+        pushTriangle(mesh, bi, bj, tj, leftHanded, faceId);
+        pushTriangle(mesh, bi, tj, ti, leftHanded, faceId);
     }
 
     return cadnext::Result<TriangleMesh>::ok(std::move(mesh));

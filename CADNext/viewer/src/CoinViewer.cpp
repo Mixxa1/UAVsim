@@ -398,7 +398,7 @@ void CoinViewer::setPickCallback(PickCallback callback) {
         if (!callback) {
             return;
         }
-        callback(picked ? scene_->pickTargetForPath(picked->getPath()) : ViewportPickTarget{},
+        callback(picked ? scene_->pickTargetForPickedPoint(picked) : ViewportPickTarget{},
                  contextClick);
     };
 }
@@ -408,7 +408,7 @@ void CoinViewer::setHoverCallback(HoverCallback callback) {
         if (!callback) {
             return;
         }
-        callback(picked ? scene_->pickTargetForPath(picked->getPath()) : ViewportPickTarget{});
+        callback(picked ? scene_->pickTargetForPickedPoint(picked) : ViewportPickTarget{});
     };
 }
 

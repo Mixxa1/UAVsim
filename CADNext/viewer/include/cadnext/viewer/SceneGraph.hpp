@@ -4,43 +4,54 @@
 #include <unordered_map>
 
 #include <utility>
+#include <vector>
 
 #include "cadnext/Object.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchProfile.hpp"
 #include "cadnext/WorkPlane.hpp"
+#include "cadnext/kernel/FaceAnalyzer.hpp"
 #include "cadnext/kernel/TriangleMesh.hpp"
 
 #include <Inventor/SbColor.h>
+#include <Inventor/SbVec3f.h>
 
 class SoBaseColor;
 class SoCoordinate3;
 class SoDrawStyle;
+class SoIndexedFaceSet;
 class SoLineSet;
 class SoMaterial;
 class SoPath;
+class SoPickedPoint;
 class SoSeparator;
 class SoSwitch;
 class SoTransform;
 
 namespace cadnext::viewer {
 
-// What a viewport click resolved to: a body, a sketch entity, a sketch
-// profile region, or nothing.
+// What a viewport click resolved to: a body, a body face, a sketch
+// entity, a sketch profile region, or nothing. Face picks carry both the
+// face id and the owning body id (objectId), so body picking keeps
+// working underneath face picking.
 struct ViewportPickTarget {
     std::string objectId;
     std::string workPlaneId;
     std::string sketchId;
     std::string entityId;
     std::string profileId;
+    std::string faceId;
+    int triangleIndex = -1;
+    bool faceLookupAttempted = false;
 
     bool isBody() const { return !objectId.empty(); }
+    bool isBodyFace() const { return !faceId.empty(); }
     bool isWorkPlane() const { return !workPlaneId.empty(); }
     bool isSketchEntity() const { return !entityId.empty(); }
     bool isProfile() const { return !profileId.empty(); }
     bool isEmpty() const {
         return objectId.empty() && workPlaneId.empty() && entityId.empty() &&
-               profileId.empty();
+               profileId.empty() && faceId.empty();
     }
 };
 
@@ -104,6 +115,28 @@ public:
     void setHoveredWorkPlane(const std::string& planeId);
     void setSelectedWorkPlane(const std::string& planeId);
 
+    // Document work planes (CADNext 0.8: planes created from body faces).
+    // Same outline-first visual and hover/selection states as the
+    // canonical planes; they share the work-plane pick target path.
+    void addOrUpdateDocumentWorkPlane(const WorkPlane& plane);
+    void removeDocumentWorkPlane(const std::string& planeId);
+    void clearDocumentWorkPlanes();
+
+    // --- Body face overlays (CADNext 0.8 Sketch on Face) -----------------
+    // Per-face pick proxies built from the FaceAnalyzer triangulation,
+    // lifted slightly along the face normal so they win picks over the
+    // body surface. Idle faces are invisible; hover tints the fill,
+    // selection brightens the fill and shows the boundary outline. The
+    // overlays are viewer-only state: never part of the document, never
+    // serialized. Hidden in Sketch2D so they cannot steal sketch picks.
+    void setBodyFaces(const std::string& bodyId,
+                      const std::vector<kernel::FaceReference>& faces);
+    void removeBodyFaces(const std::string& bodyId);
+    void clearBodyFaces();
+    void setBodyFacesVisible(bool visible);
+    void setHoveredBodyFace(const std::string& bodyId, const std::string& faceId);
+    void setSelectedBodyFace(const std::string& bodyId, const std::string& faceId);
+
     // --- Helper visibility (ViewportPolicy application) -------------------
     // World grid + axes; hidden in Sketch2D so no huge 3D axes cross the
     // flat sketch view.
@@ -135,10 +168,12 @@ public:
     void clearSketchProfiles();
     void setSelectedProfile(const std::string& profileId);
 
-    // --- Extrude preview ---------------------------------------------------
-    // Translucent, unpickable prism mesh shown while the Extrude dialog is
-    // open. Never part of the document and never serialized.
-    void showExtrudePreview(const kernel::TriangleMesh& mesh);
+    // --- Extrude / cutter preview -------------------------------------------
+    // Translucent, unpickable prism mesh shown while the Extrude or Cut
+    // Extrude dialog is open. cutStyle renders the cutter volume in
+    // warning red/orange instead of the additive cyan. Never part of the
+    // document and never serialized.
+    void showExtrudePreview(const kernel::TriangleMesh& mesh, bool cutStyle = false);
     void hideExtrudePreview();
 
     // --- Transient sketch input visuals -----------------------------------
@@ -163,11 +198,22 @@ public:
     // Maps a pick path to a body or sketch entity. Grid and axes are
     // unpickable; the sketch plane helper IS pickable (sketch tools read
     // click positions from ray hits on it) but resolves to an empty target.
+    ViewportPickTarget pickTargetForPickedPoint(const SoPickedPoint* picked) const;
     ViewportPickTarget pickTargetForPath(const SoPath* path) const;
 
 private:
+    struct MeshPickInfo {
+        std::string objectId;
+        std::vector<std::string> triangleFaceIds;
+    };
+
+    void removeMeshPickInfoForObject(const std::string& objectId);
+    std::string resolveBodyFaceFromPoint(const std::string& bodyId,
+                                         const SbVec3f& worldPoint) const;
     void updateWorkPlaneVisual(const std::string& planeId);
     void updateProfileVisual(const std::string& profileId);
+    void updateBodyFaceVisual(const std::string& faceKey);
+    void addWorkPlaneVisual(const WorkPlane& plane);
 
     // Lazily creates one transient polyline slot (cursor/anchor/preview).
     SoSeparator* ensureTransientPolyline(SoSeparator*& node, SoCoordinate3*& coords,
@@ -200,6 +246,8 @@ private:
     std::unordered_map<std::string, SoMaterial*> objectMaterials_;
     std::unordered_map<std::string, SbColor> objectBaseColors_;
     std::unordered_map<std::string, ObjectType> objectTypes_;
+    std::unordered_map<const SoIndexedFaceSet*, MeshPickInfo> meshPickInfo_;
+    std::unordered_map<std::string, std::vector<kernel::FaceReference>> bodyFaceReferences_;
     std::unordered_map<const SoSeparator*, std::string> nodeToObjectId_;
     std::unordered_map<const SoSeparator*, std::string> nodeToWorkPlaneId_;
     std::unordered_map<std::string, SoSeparator*> workPlaneNodes_;
@@ -215,9 +263,19 @@ private:
     std::unordered_map<std::string, SoMaterial*> profileFillMaterials_;
     std::unordered_map<std::string, SoBaseColor*> profileOutlineColors_;
     std::unordered_map<std::string, SoDrawStyle*> profileOutlineStyles_;
+    // Body face overlays, keyed by "bodyId\nfaceId".
+    SoSwitch* bodyFacesSwitch_ = nullptr;
+    SoSeparator* bodyFacesRoot_ = nullptr;
+    std::unordered_map<std::string, SoSeparator*> bodyFaceGroups_; // per body
+    std::unordered_map<const SoSeparator*, std::pair<std::string, std::string>>
+        nodeToBodyFace_;
+    std::unordered_map<std::string, SoMaterial*> faceFillMaterials_;
+    std::unordered_map<std::string, SoSwitch*> faceOutlineSwitches_;
     std::string hoveredWorkPlaneId_;
     std::string selectedWorkPlaneId_;
     std::string selectedProfileId_;
+    std::string hoveredBodyFaceKey_;
+    std::string selectedBodyFaceKey_;
     bool bodiesDimmed_ = false;
 };
 

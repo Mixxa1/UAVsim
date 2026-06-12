@@ -32,11 +32,21 @@ struct WorkPlane {
 
     double width = 1.0;
     double height = 1.0;
+
+    // FacePlane only: the body face the plane was created from. The
+    // resolved frame above is the save/load fallback when the face id
+    // cannot be re-resolved (no full topological naming yet).
+    std::string sourceBodyId;
+    std::string sourceFaceId;
 };
 
 // Stable ids of the canonical planes: "workplane-xy" / "workplane-xz" /
 // "workplane-yz".
 const char* canonicalWorkPlaneId(SketchPlane plane);
+
+// Serialization names (stable .cadnext strings) for document work planes.
+const char* workPlaneKindName(WorkPlaneKind kind);
+WorkPlaneKind workPlaneKindFromName(const std::string& name);
 
 // Canonical plane following the documented u/v convention
 // (XY: u=X,v=Y,n=Z | XZ: u=X,v=Z,n=Y | YZ: u=Y,v=Z,n=X).
@@ -58,5 +68,10 @@ SketchReference canonicalSketchReference(SketchPlane plane);
 // +1 for a right-handed u/v/normal triad, -1 for a left-handed one (the
 // canonical XZ plane, where u x v == -normal).
 double planeNormalViewSide(const Vector3& uAxis, const Vector3& vAxis, const Vector3& normal);
+
+// Name of the world axis a (plane U/V) direction mostly points along:
+// "X", "Y" or "Z". Drives the Sketch2D plane badge and the U/V axis
+// colors/labels, so XY/XZ/YZ views are visually distinguishable.
+const char* dominantWorldAxisName(const Vector3& direction);
 
 } // namespace cadnext

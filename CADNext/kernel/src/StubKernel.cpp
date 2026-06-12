@@ -68,6 +68,13 @@ cadnext::Result<ShapeHandle> StubKernel::booleanCommon(const ShapeHandle& a, con
     return makeBooleanHandle("common", a, b);
 }
 
+cadnext::Result<ShapeBounds> StubKernel::boundingBox(const ShapeHandle&) {
+    return cadnext::Result<ShapeBounds>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Shape bounds require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
+    });
+}
+
 bool StubKernel::isShapeValid(const ShapeHandle& shape) const {
     return !shape.isNull();
 }

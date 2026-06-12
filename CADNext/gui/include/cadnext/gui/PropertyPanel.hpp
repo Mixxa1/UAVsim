@@ -5,6 +5,7 @@
 #include "cadnext/Object.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/WorkPlane.hpp"
+#include "cadnext/kernel/FaceAnalyzer.hpp"
 
 class QDoubleSpinBox;
 class QFormLayout;
@@ -29,6 +30,9 @@ public:
     void showWorkPlane(const WorkPlane& plane);
     void showSketch(const Sketch& sketch);
     void showSketchEntity(const Sketch& sketch, const SketchEntity& entity);
+    // Selected body face (CADNext 0.8): read-only face data — kind, plane
+    // frame, size and whether a sketch can be created on it.
+    void showBodyFace(const QString& bodyName, const kernel::FaceReference& face);
     void clearObject();
 
 signals:

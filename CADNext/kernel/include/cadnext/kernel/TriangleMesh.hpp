@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace cadnext::kernel {
@@ -19,6 +20,11 @@ struct MeshTriangle {
     std::uint32_t a = 0;
     std::uint32_t b = 0;
     std::uint32_t c = 0;
+
+    // Optional topological/display ownership. When present, viewport
+    // picking can resolve a clicked rendered triangle back to the body
+    // face it came from. Empty means "body-only fallback".
+    std::string faceId;
 };
 
 struct TriangleMesh {

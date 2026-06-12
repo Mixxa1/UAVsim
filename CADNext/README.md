@@ -50,9 +50,132 @@ CADNext строится как отдельный CAD-компонент:
 - CADNext 0.3: Interaction & Document Editing Layer — done.
 - CADNext 0.4: OCCT primitives and BRep-backed shapes — done.
 - CADNext 0.5: Sketch Workspace v1.
-- CADNext 0.6: Extrude + Custom Profiles v1 — current.
-- CADNext 0.7: Boolean operations (cut / fuse), extended depth modes.
-- CADNext 0.8: Bridge/export into UAVsim.
+- CADNext 0.6: Extrude + Custom Profiles v1 — done.
+- CADNext 0.7: Stable Custom Profiles and Extrude Cut v1 — done.
+- CADNext 0.8: Work Planes on Body Faces / Sketch on Face — current.
+- CADNext 0.9: Bridge/export into UAVsim.
+
+## CADNext 0.8 — Work Planes on Body Faces / Sketch on Face
+
+Workflow цели этапа:
+
+```text
+Extrude body
+→ select planar face
+→ Create Sketch on Face
+→ camera normal to selected face
+→ draw sketch on that face
+→ Extrude / Cut from face sketch
+```
+
+Implemented:
+
+- face picking поверх body picking: клик по телу выбирает конкретную
+  грань (hover — слабая подсветка, selected — заливка + рамка);
+- rendered body mesh carries triangle face ownership:
+  `MeshTriangle::faceId` maps the picked `SoIndexedFaceSet` face index
+  back to the owning body face before falling back to body selection;
+- procedural prism/extrude meshes assign face ids (`face-cap-start`,
+  `face-cap-end`, `face-side-N`), so non-OCCT extruded bodies can still
+  be face-picked and sketched on; procedural viewer primitives without a
+  face-owned mesh remain body-only and report that face picking requires
+  an OCCT backend;
+- Coin3D face overlays are still used for hover/selected highlight and
+  as an additional pick proxy, but the primary body-surface path is now
+  triangle ownership from the rendered mesh;
+- planar face analysis через OCCT (`FaceAnalyzer`):
+  - `TopExp_Explorer` по `TopAbs_FACE`;
+  - `BRepAdaptor_Surface` + `GeomAbs_Plane` / `gp_Pln`;
+  - orthonormal right-handed u/v/normal frame, normal наружу из тела;
+  - width/height/origin из face bounds, area из triangulation;
+  - классификация Planar/Cylindrical/Conical/Spherical/Other;
+  - только planar faces получают `isSketchable = true`;
+- stable-ish face id v1: `face-<index>-<normalHash>-<centerHash>-<areaHash>`
+  из квантованной геометрии — простые extrude bodies получают те же ids
+  после save/load;
+- Property Panel для выбранной грани: Body, Face id, Kind, Origin,
+  U/V/Normal, Size, Area, Sketchable;
+- `Create Work Plane from Face`: WorkPlane объект в Document, в дереве
+  (`Work Planes → Plane from Face N`), selectable/sketchable как обычная
+  плоскость, удаляемый;
+- `Create Sketch on Face`: face-based sketch через единый вход
+  `enterSketchOnReference(...)` — тот же путь, что canonical planes;
+- `Normal to Face` (toolbar, Part menu и context menu на грани);
+- камера автоматически становится normal to face при входе в эскиз;
+- sketch grid/cursor/preview лежат строго на плоскости грани, геометрия
+  хранится в локальных face u/v;
+- Extrude / Cut Extrude от face-based sketch работают через существующий
+  OCCT pipeline без отдельной логики (top face cut, side face cut);
+- save/load: `SketchReference` типа `BodyFace` (`sourceBodyId`,
+  `sourceFaceId`, resolved plane, `displayName`) и массив `workPlanes`
+  в `.cadnext`; при load faceId ре-резолвится по пересобранным телам.
+
+Not implemented yet (осознанно за рамками 0.8):
+
+- full/robust topological naming;
+- parametric regeneration зависимых features после изменения ранних;
+- sketch on curved faces (цилиндр/конус/сфера — not sketchable);
+- offset face / tangent plane;
+- face constraints, assembly constraints.
+
+CADNext 0.8 stores resolved face plane geometry as fallback.
+Full robust topological naming is planned later.
+
+Face ids стабильны для текущего evaluated body state; если после load
+(или после изменения тела) faceId не находится, face-based sketch и
+work plane продолжают работать от сохранённой resolved plane reference —
+документ обязан загружаться в любом случае. Face workflows доступны
+только в OCCT-сборках: без BRep backend список граней пуст и face-действия
+просто остаются недоступными.
+
+## CADNext 0.7 — Stable Custom Profiles and Extrude Cut v1
+
+Implemented:
+
+- robust custom polygon profile detection from committed line loops;
+- endpoint clustering for line loops with stable tolerance;
+- profile rebuild after add/delete/cancel/load/undo/redo;
+- stale profile cache prevention;
+- self-intersecting closed loops reported as invalid profiles;
+- clearer XY/XZ/YZ Sketch2D orientation;
+- Sketch2D plane badge:
+  - Plane XY: U=X, V=Y;
+  - Plane XZ: U=X, V=Z;
+  - Plane YZ: U=Y, V=Z;
+- local U/V axis labels and colors follow world axes:
+  - X red;
+  - Y green;
+  - Z blue;
+- Cut Extrude command;
+- Distance cut mode;
+- Through All cut mode;
+- To Object cut mode v1 using limit object bounding box projection;
+- Cut preview as a transient red/orange cutter volume;
+- OCCT BRep cut pipeline:
+  - Sketch profile → TopoDS_Wire;
+  - TopoDS_Wire → TopoDS_Face;
+  - BRepPrimAPI_MakePrism cutter solid;
+  - BRepAlgoAPI_Cut topological boolean cut;
+  - BRepMesh_IncrementalMesh / MeshExtractor viewport mesh.
+
+Not implemented yet:
+
+- Up To Face;
+- Up To Nearest Face;
+- Thin cut;
+- Draft angle;
+- offset from face;
+- advanced feature regeneration after sketch edits;
+- multi-body boolean management;
+- pattern/mirror.
+
+Cut Extrude is available only in OCCT-enabled builds. The non-OCCT
+procedural fallback keeps Extrude New Body working but intentionally does
+not perform mesh subtraction. Cut features are saved as metadata
+(`targetBodyId`, `sketchId`, `profileId`, `depthMode`, `direction`,
+`distance`, `limitObjectId`) and replayed on load when an OCCT backend is
+available; the transient cutter preview and raw OCCT shape internals are
+never serialized.
 
 ## CADNext 0.6 — Extrude + Custom Profiles v1
 

@@ -326,6 +326,7 @@ const char* featureTypeName(FeatureType type) {
     switch (type) {
     case FeatureType::Sketch: return "Sketch";
     case FeatureType::Extrude: return "Extrude";
+    case FeatureType::ExtrudeCut: return "ExtrudeCut";
     case FeatureType::Cut: return "Cut";
     case FeatureType::Fillet: return "Fillet";
     case FeatureType::Chamfer: return "Chamfer";
@@ -338,6 +339,7 @@ const char* featureTypeName(FeatureType type) {
 
 FeatureType featureTypeFromName(const std::string& name) {
     if (name == "Extrude") return FeatureType::Extrude;
+    if (name == "ExtrudeCut") return FeatureType::ExtrudeCut;
     if (name == "Cut") return FeatureType::Cut;
     if (name == "Fillet") return FeatureType::Fillet;
     if (name == "Chamfer") return FeatureType::Chamfer;
@@ -374,6 +376,10 @@ SketchReference sketchReferenceFromJson(const JsonValue* value, SketchPlane fall
     reference.type =
         sketchReferenceTypeFromName(value->stringOr("type", sketchReferenceTypeName(reference.type)));
     reference.sourceId = value->stringOr("sourceId", reference.sourceId);
+    // BodyFace source ids + label are optional (pre-0.8 files have none).
+    reference.sourceBodyId = value->stringOr("sourceBodyId", "");
+    reference.sourceFaceId = value->stringOr("sourceFaceId", "");
+    reference.displayName = value->stringOr("displayName", "");
     reference.origin = vectorFromJson(value->member("origin"));
     reference.uAxis = vectorFromJson(value->member("uAxis"));
     reference.vAxis = vectorFromJson(value->member("vAxis"));
@@ -441,6 +447,12 @@ std::string DocumentSerializer::toJson(const Document& document) {
             << "\",\n";
         out << "          \"sourceId\": \"" << escapeString(reference.sourceId)
             << "\",\n";
+        out << "          \"sourceBodyId\": \"" << escapeString(reference.sourceBodyId)
+            << "\",\n";
+        out << "          \"sourceFaceId\": \"" << escapeString(reference.sourceFaceId)
+            << "\",\n";
+        out << "          \"displayName\": \"" << escapeString(reference.displayName)
+            << "\",\n";
         out << "          \"origin\": " << vectorJson(reference.origin) << ",\n";
         out << "          \"uAxis\": " << vectorJson(reference.uAxis) << ",\n";
         out << "          \"vAxis\": " << vectorJson(reference.vAxis) << ",\n";
@@ -489,6 +501,30 @@ std::string DocumentSerializer::toJson(const Document& document) {
     }
     out << (sketches.empty() ? "],\n" : "\n    ],\n");
 
+    // Document work planes (CADNext 0.8: planes created from body faces).
+    // The resolved frame is stored alongside the face source ids so loads
+    // survive an unresolvable faceId.
+    out << "    \"workPlanes\": [";
+    const auto& workPlanes = document.workPlanes();
+    for (size_t i = 0; i < workPlanes.size(); ++i) {
+        const WorkPlane& plane = workPlanes[i];
+        out << (i == 0 ? "\n" : ",\n");
+        out << "      {\n";
+        out << "        \"id\": \"" << escapeString(plane.id) << "\",\n";
+        out << "        \"name\": \"" << escapeString(plane.name) << "\",\n";
+        out << "        \"kind\": \"" << workPlaneKindName(plane.kind) << "\",\n";
+        out << "        \"sourceBodyId\": \"" << escapeString(plane.sourceBodyId) << "\",\n";
+        out << "        \"sourceFaceId\": \"" << escapeString(plane.sourceFaceId) << "\",\n";
+        out << "        \"origin\": " << vectorJson(plane.origin) << ",\n";
+        out << "        \"uAxis\": " << vectorJson(plane.uAxis) << ",\n";
+        out << "        \"vAxis\": " << vectorJson(plane.vAxis) << ",\n";
+        out << "        \"normal\": " << vectorJson(plane.normal) << ",\n";
+        out << "        \"width\": " << numberText(plane.width) << ",\n";
+        out << "        \"height\": " << numberText(plane.height) << "\n";
+        out << "      }";
+    }
+    out << (workPlanes.empty() ? "],\n" : "\n    ],\n");
+
     out << "    \"features\": [";
     const auto& features = document.features();
     for (size_t i = 0; i < features.size(); ++i) {
@@ -517,6 +553,28 @@ std::string DocumentSerializer::toJson(const Document& document) {
             out << "          \"depthMode\": \""
                 << extrudeDepthModeName(feature.extrude.depthMode) << "\",\n";
             out << "          \"distance\": " << numberText(feature.extrude.distance) << "\n";
+            out << "        },\n";
+        }
+        if (feature.type == FeatureType::ExtrudeCut) {
+            // Parametric cut recipe; the cutter solid and the resulting
+            // BRep/mesh are never serialized — cuts are replayed on load.
+            out << "        \"modifiedBodyId\": \"" << escapeString(feature.modifiedBodyId)
+                << "\",\n";
+            out << "        \"extrudeCut\": {\n";
+            out << "          \"targetBodyId\": \""
+                << escapeString(feature.extrudeCut.targetBodyId) << "\",\n";
+            out << "          \"sketchId\": \"" << escapeString(feature.extrudeCut.sketchId)
+                << "\",\n";
+            out << "          \"profileId\": \""
+                << escapeString(feature.extrudeCut.profileId) << "\",\n";
+            out << "          \"depthMode\": \""
+                << cutDepthModeName(feature.extrudeCut.depthMode) << "\",\n";
+            out << "          \"direction\": \""
+                << cutDirectionName(feature.extrudeCut.direction) << "\",\n";
+            out << "          \"distance\": " << numberText(feature.extrudeCut.distance)
+                << ",\n";
+            out << "          \"limitObjectId\": \""
+                << escapeString(feature.extrudeCut.limitObjectId) << "\"\n";
             out << "        },\n";
         }
         out << "        \"suppressed\": " << (feature.suppressed ? "true" : "false") << "\n";
@@ -673,6 +731,33 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
         }
     }
 
+    // "workPlanes" is optional: pre-0.8 files predate document work
+    // planes. Malformed entries are skipped instead of failing the load.
+    const JsonValue* workPlanesValue = documentValue->member("workPlanes");
+    if (workPlanesValue && workPlanesValue->isArray()) {
+        for (const JsonValue& planeValue : workPlanesValue->arrayItems) {
+            if (!planeValue.isObject()) {
+                continue;
+            }
+            WorkPlane plane;
+            plane.id = planeValue.stringOr("id", "");
+            if (plane.id.empty()) {
+                continue;
+            }
+            plane.name = planeValue.stringOr("name", "Work Plane");
+            plane.kind = workPlaneKindFromName(planeValue.stringOr("kind", "FacePlane"));
+            plane.sourceBodyId = planeValue.stringOr("sourceBodyId", "");
+            plane.sourceFaceId = planeValue.stringOr("sourceFaceId", "");
+            plane.origin = vectorFromJson(planeValue.member("origin"));
+            plane.uAxis = vectorFromJson(planeValue.member("uAxis"));
+            plane.vAxis = vectorFromJson(planeValue.member("vAxis"));
+            plane.normal = vectorFromJson(planeValue.member("normal"));
+            plane.width = planeValue.numberOr("width", 1.0);
+            plane.height = planeValue.numberOr("height", 1.0);
+            document.addWorkPlane(std::move(plane));
+        }
+    }
+
     const JsonValue* featuresValue = documentValue->member("features");
     if (featuresValue) {
         if (!featuresValue->isArray()) {
@@ -704,6 +789,19 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                 feature.extrude.depthMode =
                     extrudeDepthModeFromName(extrude->stringOr("depthMode", "Distance"));
                 feature.extrude.distance = extrude->numberOr("distance", 1.0);
+            }
+            feature.modifiedBodyId = featureValue.stringOr("modifiedBodyId", "");
+            if (const JsonValue* cut = featureValue.member("extrudeCut");
+                cut && cut->isObject()) {
+                feature.extrudeCut.targetBodyId = cut->stringOr("targetBodyId", "");
+                feature.extrudeCut.sketchId = cut->stringOr("sketchId", "");
+                feature.extrudeCut.profileId = cut->stringOr("profileId", "");
+                feature.extrudeCut.depthMode =
+                    cutDepthModeFromName(cut->stringOr("depthMode", "Distance"));
+                feature.extrudeCut.direction =
+                    cutDirectionFromName(cut->stringOr("direction", "Positive"));
+                feature.extrudeCut.distance = cut->numberOr("distance", 1.0);
+                feature.extrudeCut.limitObjectId = cut->stringOr("limitObjectId", "");
             }
             document.addFeature(std::move(feature));
         }

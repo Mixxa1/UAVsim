@@ -36,6 +36,17 @@ QString workPlaneTypeText(WorkPlaneKind kind) {
     return QStringLiteral("Work Plane");
 }
 
+QString faceKindText(kernel::FaceKind kind) {
+    switch (kind) {
+    case kernel::FaceKind::Planar: return QStringLiteral("Planar");
+    case kernel::FaceKind::Cylindrical: return QStringLiteral("Cylindrical");
+    case kernel::FaceKind::Conical: return QStringLiteral("Conical");
+    case kernel::FaceKind::Spherical: return QStringLiteral("Spherical");
+    case kernel::FaceKind::Other: break;
+    }
+    return QStringLiteral("Other");
+}
+
 QString vectorText(const Vector3& v) {
     return QStringLiteral("%1, %2, %3")
         .arg(v.x, 0, 'f', 3)
@@ -356,6 +367,41 @@ void PropertyPanel::showSketchEntity(const Sketch& sketch, const SketchEntity& e
         break;
     }
     detailsLabel_->setText(details);
+
+    setObjectRowsVisible(false);
+    hideDimensionRows();
+
+    updating_ = false;
+    setEnabled(true);
+}
+
+void PropertyPanel::showBodyFace(const QString& bodyName, const kernel::FaceReference& face) {
+    updating_ = true;
+    mode_ = Mode::None;
+
+    currentObjectId_.clear();
+    currentSketchId_.clear();
+    currentName_.clear();
+    currentKind_ = PrimitiveKind::None;
+
+    idLabel_->setText(QString::fromStdString(face.faceId));
+    nameEdit_->setText(bodyName);
+    nameEdit_->setEnabled(false);
+    typeLabel_->setText(tr("Body Face"));
+    kindLabel_->setText(faceKindText(face.kind));
+    detailsLabel_->setText(
+        tr("Body: %1\nKind: %2\nOrigin: %3\nU Axis: %4\nV Axis: %5\nNormal: %6\n"
+           "Size: %7 x %8\nArea: %9\nSketchable: %10")
+            .arg(bodyName)
+            .arg(faceKindText(face.kind))
+            .arg(vectorText(face.origin))
+            .arg(vectorText(face.uAxis))
+            .arg(vectorText(face.vAxis))
+            .arg(vectorText(face.normal))
+            .arg(face.width, 0, 'f', 3)
+            .arg(face.height, 0, 'f', 3)
+            .arg(face.area, 0, 'f', 3)
+            .arg(face.isSketchable ? tr("Yes") : tr("No")));
 
     setObjectRowsVisible(false);
     hideDimensionRows();

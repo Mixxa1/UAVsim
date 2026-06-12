@@ -88,6 +88,39 @@ Sketch* Document::mutableSketchById(const std::string& sketchId) {
 
 const std::vector<Sketch>& Document::sketches() const { return sketches_; }
 
+void Document::addWorkPlane(WorkPlane plane) { workPlanes_.push_back(std::move(plane)); }
+
+bool Document::removeWorkPlane(const std::string& planeId) {
+    auto it = std::find_if(workPlanes_.begin(), workPlanes_.end(),
+                           [&](const WorkPlane& plane) { return plane.id == planeId; });
+    if (it == workPlanes_.end()) {
+        return false;
+    }
+    workPlanes_.erase(it);
+    return true;
+}
+
+Result<WorkPlane> Document::workPlaneById(const std::string& planeId) const {
+    auto it = std::find_if(workPlanes_.begin(), workPlanes_.end(),
+                           [&](const WorkPlane& plane) { return plane.id == planeId; });
+    if (it == workPlanes_.end()) {
+        return Result<WorkPlane>::fail(
+            {ErrorCode::NotFound, "Work plane not found: " + planeId});
+    }
+    return Result<WorkPlane>::ok(*it);
+}
+
+WorkPlane* Document::mutableWorkPlaneById(const std::string& planeId) {
+    auto it = std::find_if(workPlanes_.begin(), workPlanes_.end(),
+                           [&](const WorkPlane& plane) { return plane.id == planeId; });
+    if (it == workPlanes_.end()) {
+        return nullptr;
+    }
+    return &*it;
+}
+
+const std::vector<WorkPlane>& Document::workPlanes() const { return workPlanes_; }
+
 void Document::addFeature(Feature feature) { features_.push_back(std::move(feature)); }
 
 const std::vector<Object>& Document::objects() const { return objects_; }

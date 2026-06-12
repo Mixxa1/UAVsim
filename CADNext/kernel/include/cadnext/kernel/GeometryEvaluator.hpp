@@ -4,6 +4,7 @@
 #include <string>
 
 #include "cadnext/Extrude.hpp"
+#include "cadnext/ExtrudeCut.hpp"
 #include "cadnext/Object.hpp"
 #include "cadnext/Result.hpp"
 #include "cadnext/Sketch.hpp"
@@ -49,7 +50,29 @@ public:
         const cadnext::SketchProfile& profile,
         const cadnext::ExtrudeParameters& parameters);
 
+    // Profile prism between two offsets along the sketch plane normal
+    // (relative to the sketch origin, start < end): the shared builder
+    // behind evaluateExtrude and the Cut Extrude cutter solid.
+    cadnext::Result<ShapeHandle> buildProfilePrism(
+        const cadnext::SketchReference& reference,
+        const cadnext::SketchProfile& profile,
+        double startOffset, double endOffset);
+
+    // Cut Extrude: profile prism cutter over `span`, subtracted from the
+    // target through the kernel's topological boolean (BRepAlgoAPI_Cut in
+    // OCCT builds — never a mesh boolean), result meshed for display.
+    // KernelUnavailable comes back as ok with isValid=false, like the
+    // other evaluate paths.
+    cadnext::Result<EvaluatedGeometry> evaluateExtrudeCut(
+        const ShapeHandle& targetShape,
+        const cadnext::SketchReference& reference,
+        const cadnext::SketchProfile& profile,
+        const cadnext::CutSpan& span);
+
 private:
+    // Shared mesh-extraction tail: validates the shape and fills
+    // previewMesh/isValid/message.
+    cadnext::Result<EvaluatedGeometry> finishShapeEvaluation(EvaluatedGeometry geometry);
     Kernel& kernel_;
     std::unique_ptr<MeshExtractor> meshExtractor_;
 };

@@ -7,6 +7,8 @@
 #ifdef CADNEXT_WITH_OCCT
 #include <unordered_map>
 
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -16,6 +18,7 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
+#include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax2.hxx>
@@ -227,6 +230,71 @@ cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedCircle(
     }
 }
 
+cadnext::Result<ShapeHandle> OcctKernel::booleanCut(const ShapeHandle& target,
+                                                    const ShapeHandle& tool) {
+    const TopoDS_Shape* targetShape = findShape(target);
+    const TopoDS_Shape* toolShape = findShape(tool);
+    if (!targetShape || targetShape->IsNull() || !toolShape || toolShape->IsNull()) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::ShapeInvalid,
+            "Boolean cut requires two valid shape handles"
+        });
+    }
+    try {
+        // Topological BRep boolean (never a mesh subtraction).
+        BRepAlgoAPI_Cut cut(*targetShape, *toolShape);
+        cut.Build();
+        if (!cut.IsDone() || cut.HasErrors()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed, "OCCT boolean cut failed"});
+        }
+        const TopoDS_Shape result = cut.Shape();
+        if (result.IsNull()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed,
+                 "OCCT boolean cut produced an empty shape"});
+        }
+        return cadnext::Result<ShapeHandle>::ok(impl_->store(result, "occt-cut"));
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT boolean cut failed: ") + failure.GetMessageString()});
+    }
+}
+
+cadnext::Result<ShapeBounds> OcctKernel::boundingBox(const ShapeHandle& shape) {
+    const TopoDS_Shape* topoShape = findShape(shape);
+    if (!topoShape || topoShape->IsNull()) {
+        return cadnext::Result<ShapeBounds>::fail({
+            cadnext::ErrorCode::ShapeInvalid,
+            "Bounding box requires a valid shape handle"
+        });
+    }
+    try {
+        Bnd_Box box;
+        BRepBndLib::Add(*topoShape, box);
+        if (box.IsVoid()) {
+            return cadnext::Result<ShapeBounds>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed, "Shape bounding box is void"});
+        }
+        Standard_Real xMin = 0.0;
+        Standard_Real yMin = 0.0;
+        Standard_Real zMin = 0.0;
+        Standard_Real xMax = 0.0;
+        Standard_Real yMax = 0.0;
+        Standard_Real zMax = 0.0;
+        box.Get(xMin, yMin, zMin, xMax, yMax, zMax);
+        ShapeBounds bounds;
+        bounds.min = {xMin, yMin, zMin};
+        bounds.max = {xMax, yMax, zMax};
+        return cadnext::Result<ShapeBounds>::ok(bounds);
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeBounds>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT bounding box failed: ") + failure.GetMessageString()});
+    }
+}
+
 bool OcctKernel::isShapeValid(const ShapeHandle& shape) const {
     const TopoDS_Shape* topoShape = findShape(shape);
     if (!topoShape || topoShape->IsNull()) {
@@ -276,6 +344,17 @@ cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedCircle(const ExtrudedCircle
     return unavailable("OCCT circle extrude");
 }
 
+cadnext::Result<ShapeHandle> OcctKernel::booleanCut(const ShapeHandle&, const ShapeHandle&) {
+    return unavailable("OCCT boolean cut");
+}
+
+cadnext::Result<ShapeBounds> OcctKernel::boundingBox(const ShapeHandle&) {
+    return cadnext::Result<ShapeBounds>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Shape bounds require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
+    });
+}
+
 bool OcctKernel::isShapeValid(const ShapeHandle&) const {
     return false;
 }
@@ -284,10 +363,6 @@ bool OcctKernel::isShapeValid(const ShapeHandle&) const {
 
 cadnext::Result<ShapeHandle> OcctKernel::booleanFuse(const ShapeHandle&, const ShapeHandle&) {
     return notImplemented("OCCT boolean fuse");
-}
-
-cadnext::Result<ShapeHandle> OcctKernel::booleanCut(const ShapeHandle&, const ShapeHandle&) {
-    return notImplemented("OCCT boolean cut");
 }
 
 cadnext::Result<ShapeHandle> OcctKernel::booleanCommon(const ShapeHandle&, const ShapeHandle&) {

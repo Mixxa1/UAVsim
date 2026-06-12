@@ -34,6 +34,13 @@ enum class BooleanOperation {
     Common
 };
 
+// Axis-aligned bounding box of a BRep shape in world coordinates
+// (Cut Extrude uses it for Through All / To Object cutter sizing).
+struct ShapeBounds {
+    cadnext::Vector3 min;
+    cadnext::Vector3 max;
+};
+
 // Extruded sketch profiles (CADNext 0.6). The loop is the closed planar
 // outer boundary in world coordinates (last point != first point);
 // `extrusion` is the world vector from the base face to the top face.
@@ -78,6 +85,8 @@ public:
         const ShapeHandle& a,
         const ShapeHandle& b
     ) = 0;
+
+    virtual cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) = 0;
 
     virtual bool isShapeValid(const ShapeHandle& shape) const = 0;
 };

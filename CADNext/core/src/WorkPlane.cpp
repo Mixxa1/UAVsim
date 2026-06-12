@@ -61,6 +61,25 @@ const char* canonicalWorkPlaneId(SketchPlane plane) {
     return "workplane-xy";
 }
 
+const char* workPlaneKindName(WorkPlaneKind kind) {
+    switch (kind) {
+    case WorkPlaneKind::XY: return "XY";
+    case WorkPlaneKind::XZ: return "XZ";
+    case WorkPlaneKind::YZ: return "YZ";
+    case WorkPlaneKind::ObjectPlane: return "ObjectPlane";
+    case WorkPlaneKind::FacePlane: return "FacePlane";
+    }
+    return "XY";
+}
+
+WorkPlaneKind workPlaneKindFromName(const std::string& name) {
+    if (name == "XZ") return WorkPlaneKind::XZ;
+    if (name == "YZ") return WorkPlaneKind::YZ;
+    if (name == "ObjectPlane") return WorkPlaneKind::ObjectPlane;
+    if (name == "FacePlane") return WorkPlaneKind::FacePlane;
+    return WorkPlaneKind::XY;
+}
+
 WorkPlane makeCanonicalWorkPlane(SketchPlane plane, double extent) {
     WorkPlane workPlane;
     workPlane.id = canonicalWorkPlaneId(plane);
@@ -120,14 +139,19 @@ SketchReference sketchReferenceFromWorkPlane(const WorkPlane& plane) {
     SketchReference reference;
     reference.type = (plane.kind == WorkPlaneKind::ObjectPlane)
                          ? SketchReferenceType::WorkPlane
-                         : (plane.kind == WorkPlaneKind::FacePlane ? SketchReferenceType::Face
+                         : (plane.kind == WorkPlaneKind::FacePlane ? SketchReferenceType::BodyFace
                                                                    : SketchReferenceType::CanonicalPlane);
     reference.sourceId = plane.id;
+    reference.sourceBodyId = plane.sourceBodyId;
+    reference.sourceFaceId = plane.sourceFaceId;
     reference.origin = plane.origin;
     reference.uAxis = normalized(plane.uAxis, {1.0, 0.0, 0.0});
     reference.vAxis = normalized(plane.vAxis, {0.0, 1.0, 0.0});
     reference.normal = normalized(plane.normal, normalized(cross(reference.uAxis, reference.vAxis),
                                                            {0.0, 0.0, 1.0}));
+    if (plane.kind == WorkPlaneKind::FacePlane || plane.kind == WorkPlaneKind::ObjectPlane) {
+        reference.displayName = plane.name;
+    }
     return reference;
 }
 
@@ -139,6 +163,16 @@ double planeNormalViewSide(const Vector3& uAxis, const Vector3& vAxis, const Vec
     const Vector3 handed = cross(uAxis, vAxis);
     const double alignment = handed.x * normal.x + handed.y * normal.y + handed.z * normal.z;
     return alignment < 0.0 ? -1.0 : 1.0;
+}
+
+const char* dominantWorldAxisName(const Vector3& direction) {
+    const double absX = std::fabs(direction.x);
+    const double absY = std::fabs(direction.y);
+    const double absZ = std::fabs(direction.z);
+    if (absX >= absY && absX >= absZ) {
+        return "X";
+    }
+    return absY >= absZ ? "Y" : "Z";
 }
 
 } // namespace cadnext

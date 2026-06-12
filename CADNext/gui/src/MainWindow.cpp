@@ -1,9 +1,11 @@
 #include "cadnext/gui/MainWindow.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 #include <QCloseEvent>
 #include <QDockWidget>
@@ -21,6 +23,7 @@
 #include <QtLogging>
 
 #include "cadnext/DocumentSerializer.hpp"
+#include "cadnext/gui/CutExtrudeDialog.hpp"
 #include "cadnext/gui/ExtrudeDialog.hpp"
 #include "cadnext/gui/ProjectTree.hpp"
 #include "cadnext/gui/PropertyPanel.hpp"
@@ -36,6 +39,14 @@ namespace {
 constexpr double kMinScale = 0.001;
 constexpr double kMinDimension = 0.001;
 constexpr double kMinSketchExtent = 1.0e-6;
+
+// Cut Extrude runs through the OCCT boolean pipeline only — there is no
+// procedural mesh-boolean fallback by design.
+#ifdef CADNEXT_WITH_OCCT
+constexpr bool kOcctBackendAvailable = true;
+#else
+constexpr bool kOcctBackendAvailable = false;
+#endif
 
 double sanitize(double value, double fallback, double minimum = -1.0e12) {
     if (!std::isfinite(value)) {
@@ -107,6 +118,55 @@ const cadnext::SketchProfile* profileForEntityId(
     return nullptr;
 }
 
+double dot(const Vector3& a, const Vector3& b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+double projectedOffsetAlongNormal(const Vector3& point, const SketchReference& reference) {
+    const Vector3 delta{point.x - reference.origin.x,
+                        point.y - reference.origin.y,
+                        point.z - reference.origin.z};
+    return dot(delta, reference.normal);
+}
+
+void accumulateProjectedBounds(const kernel::ShapeBounds& bounds,
+                               const SketchReference& reference,
+                               double& outMin, double& outMax) {
+    outMin = std::numeric_limits<double>::infinity();
+    outMax = -std::numeric_limits<double>::infinity();
+    const std::array<Vector3, 8> corners = {
+        Vector3{bounds.min.x, bounds.min.y, bounds.min.z},
+        Vector3{bounds.max.x, bounds.min.y, bounds.min.z},
+        Vector3{bounds.min.x, bounds.max.y, bounds.min.z},
+        Vector3{bounds.max.x, bounds.max.y, bounds.min.z},
+        Vector3{bounds.min.x, bounds.min.y, bounds.max.z},
+        Vector3{bounds.max.x, bounds.min.y, bounds.max.z},
+        Vector3{bounds.min.x, bounds.max.y, bounds.max.z},
+        Vector3{bounds.max.x, bounds.max.y, bounds.max.z},
+    };
+    for (const Vector3& corner : corners) {
+        const double offset = projectedOffsetAlongNormal(corner, reference);
+        outMin = std::min(outMin, offset);
+        outMax = std::max(outMax, offset);
+    }
+}
+
+double boundsDiagonal(const kernel::ShapeBounds& bounds) {
+    const double dx = bounds.max.x - bounds.min.x;
+    const double dy = bounds.max.y - bounds.min.y;
+    const double dz = bounds.max.z - bounds.min.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+QString cutDepthModeText(CutDepthMode mode) {
+    switch (mode) {
+    case CutDepthMode::Distance: return QObject::tr("Distance");
+    case CutDepthMode::ThroughAll: return QObject::tr("Through All");
+    case CutDepthMode::ToObject: return QObject::tr("To Object");
+    }
+    return QObject::tr("Distance");
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -156,6 +216,14 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { addReferencePlane(); });
     connect(toolBar_->extrudeAction(), &QAction::triggered, this,
             [this]() { openExtrudeDialog(); });
+    connect(toolBar_->cutExtrudeAction(), &QAction::triggered, this,
+            [this]() { openCutExtrudeDialog(); });
+    connect(toolBar_->createSketchOnFaceAction(), &QAction::triggered, this,
+            [this]() { createSketchOnSelectedFace(); });
+    connect(toolBar_->workPlaneFromFaceAction(), &QAction::triggered, this,
+            [this]() { createWorkPlaneFromSelectedFace(); });
+    connect(toolBar_->normalToFaceAction(), &QAction::triggered, this,
+            [this]() { normalToSelectedFace(); });
     connect(toolBar_->deleteSelectedAction(), &QAction::triggered, this,
             [this]() { deleteSelected(); });
     connect(toolBar_->fitViewAction(), &QAction::triggered, this, [this]() {
@@ -266,6 +334,17 @@ void MainWindow::initializeViewport() {
     layout->addWidget(viewer_->widget());
     setCentralWidget(container);
 
+    // Sketch2D plane identity badge: overlay in the viewport corner so the
+    // user always sees which plane (and which world axes) they draw on.
+    planeBadge_ = new QLabel(container);
+    planeBadge_->setStyleSheet(
+        QStringLiteral("background-color: rgba(20, 24, 34, 190); color: #e8ecf4;"
+                       "border: 1px solid rgba(120, 150, 210, 120); border-radius: 4px;"
+                       "padding: 6px 10px; font-weight: 600;"));
+    planeBadge_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    planeBadge_->move(16, 16);
+    planeBadge_->hide();
+
     selection_ = std::make_unique<viewer::SelectionController>(viewer_->scene());
 
     viewer_->setPickCallback([this](const viewer::ViewportPickTarget& target, bool contextClick) {
@@ -277,28 +356,62 @@ void MainWindow::initializeViewport() {
         } else if (target.isWorkPlane()) {
             selectWorkPlane(target.workPlaneId);
             showPlaneActionPalette(contextClick);
+        } else if (target.isBodyFace()) {
+            // Face picking layers on top of body picking: the click
+            // selects the face; the owning body stays reachable through
+            // the tree (and is reported in the property panel).
+            qInfo("[FacePick] body=%s triangle=%d faceId=%s",
+                  target.objectId.c_str(), target.triangleIndex, target.faceId.c_str());
+            selectBodyFace(target.objectId, target.faceId);
+            showFaceActionPalette(contextClick);
         } else if (target.isBody()) {
+            if (target.faceLookupAttempted) {
+                qInfo("[FacePick] fallback Body selection: body=%s triangle=%d has no faceId",
+                      target.objectId.c_str(), target.triangleIndex);
+            } else if (!kOcctBackendAvailable &&
+                       bodyFaces_.find(target.objectId) == bodyFaces_.end()) {
+                statusBar()->showMessage(tr("Face picking requires OCCT backend"), 5000);
+            }
             selectBody(target.objectId);
         } else {
             clearSelection();
         }
-        // Context click on a profile/entity offers Extrude directly.
+        // Context click on a profile/entity offers Extrude/Cut directly.
         if (contextClick && (target.isProfile() || target.isSketchEntity()) &&
-            toolBar_->extrudeAction()->isEnabled()) {
+            (toolBar_->extrudeAction()->isEnabled() ||
+             toolBar_->cutExtrudeAction()->isEnabled())) {
             QMenu menu(this);
-            QAction* extrude = menu.addAction(tr("Extrude"));
-            if (menu.exec(QCursor::pos()) == extrude) {
+            QAction* extrude = nullptr;
+            QAction* cutExtrude = nullptr;
+            if (toolBar_->extrudeAction()->isEnabled()) {
+                extrude = menu.addAction(tr("Extrude"));
+            }
+            if (toolBar_->cutExtrudeAction()->isEnabled()) {
+                cutExtrude = menu.addAction(tr("Cut Extrude"));
+            }
+            QAction* chosen = menu.exec(QCursor::pos());
+            if (chosen == extrude) {
                 openExtrudeDialog();
+            } else if (chosen == cutExtrude) {
+                openCutExtrudeDialog();
             }
         }
     });
     viewer_->setHoverCallback([this](const viewer::ViewportPickTarget& target) {
-        const std::string next = target.isWorkPlane() ? target.workPlaneId : std::string();
-        if (next == hoveredWorkPlaneId_) {
-            return;
+        const std::string nextPlane =
+            target.isWorkPlane() ? target.workPlaneId : std::string();
+        if (nextPlane != hoveredWorkPlaneId_) {
+            hoveredWorkPlaneId_ = nextPlane;
+            viewer_->scene().setHoveredWorkPlane(hoveredWorkPlaneId_);
         }
-        hoveredWorkPlaneId_ = next;
-        viewer_->scene().setHoveredWorkPlane(hoveredWorkPlaneId_);
+        const std::string nextFaceBody =
+            target.isBodyFace() ? target.objectId : std::string();
+        const std::string nextFaceId = target.isBodyFace() ? target.faceId : std::string();
+        if (nextFaceBody != hoveredFace_.bodyId || nextFaceId != hoveredFace_.faceId) {
+            hoveredFace_.bodyId = nextFaceBody;
+            hoveredFace_.faceId = nextFaceId;
+            viewer_->scene().setHoveredBodyFace(hoveredFace_.bodyId, hoveredFace_.faceId);
+        }
     });
     viewer_->setSketchPointCallback([this](double u, double v) { onSketchPoint(u, v); });
     viewer_->setSketchMoveCallback([this](double u, double v) { onSketchMove(u, v); });
@@ -342,6 +455,32 @@ void MainWindow::selectBody(const std::string& objectId) {
     refreshPropertyPanel();
 }
 
+void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& faceId) {
+    if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId &&
+        selectedFace_.faceId == faceId) {
+        return;
+    }
+    selectionKind_ = SelectionKind::BodyFace;
+    selectedId_ = bodyId; // the owning body, so body-based actions keep working
+    selectedSketchId_.clear();
+    selectedFace_ = {bodyId, faceId};
+    syncTreeSelection();
+    syncViewportSelection();
+    refreshPropertyPanel();
+    if (const kernel::FaceReference* face = findBodyFace(bodyId, faceId)) {
+        qInfo("[FacePick] selected BodyFace body=%s face=%s sketchable=%s",
+              bodyId.c_str(), faceId.c_str(), face->isSketchable ? "true" : "false");
+        statusBar()->showMessage(
+            face->isSketchable
+                ? tr("Planar face selected — Sketch on Face / Work Plane from Face available")
+                : tr("Face selected — not planar, sketches need a planar face"),
+            5000);
+    } else {
+        qInfo("[FacePick] selected BodyFace body=%s face=%s but FaceReference was not found",
+              bodyId.c_str(), faceId.c_str());
+    }
+}
+
 void MainWindow::selectSketch(const std::string& sketchId) {
     if (selectionKind_ == SelectionKind::Sketch && selectedId_ == sketchId) {
         return;
@@ -376,6 +515,7 @@ void MainWindow::clearSelection() {
     selectionKind_ = SelectionKind::None;
     selectedId_.clear();
     selectedSketchId_.clear();
+    selectedFace_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -389,6 +529,10 @@ void MainWindow::syncTreeSelection() {
         break;
     case SelectionKind::Body:
         projectTree_->setCurrentBody(QString::fromStdString(selectedId_));
+        break;
+    case SelectionKind::BodyFace:
+        // Faces have no tree rows; highlight the owning body instead.
+        projectTree_->setCurrentBody(QString::fromStdString(selectedFace_.bodyId));
         break;
     case SelectionKind::Sketch:
         projectTree_->setCurrentSketch(QString::fromStdString(selectedId_));
@@ -418,6 +562,13 @@ void MainWindow::syncViewportSelection() {
                                       ? selectedId_
                                       : std::string());
 
+    // Body face highlight (0.8).
+    if (selectionKind_ == SelectionKind::BodyFace) {
+        viewer_->scene().setSelectedBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+    } else {
+        viewer_->scene().setSelectedBodyFace(std::string(), std::string());
+    }
+
     // Sketch entity highlight.
     if (!highlightedEntityId_.empty()) {
         viewer_->scene().setSketchEntityHighlighted(highlightedEntitySketch_,
@@ -435,6 +586,7 @@ void MainWindow::syncViewportSelection() {
     sketchToolBar_->setEnterSketchEnabled(selectionKind_ == SelectionKind::Sketch &&
                                           !activeSketchId_);
     updateExtrudeActionEnabled();
+    updateFaceActionsEnabled();
     updateModeStatusLabel();
 }
 
@@ -474,6 +626,16 @@ void MainWindow::refreshPropertyPanel() {
         }
         break;
     }
+    case SelectionKind::BodyFace: {
+        const kernel::FaceReference* face =
+            findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+        const Result<Object> body = document_.objectById(selectedFace_.bodyId);
+        if (face && body.isOk()) {
+            propertyPanel_->showBodyFace(QString::fromStdString(body.value().name), *face);
+            return;
+        }
+        break;
+    }
     case SelectionKind::None:
         break;
     }
@@ -494,6 +656,11 @@ std::optional<WorkPlane> MainWindow::workPlaneById(const std::string& planeId) c
     if (object.isOk() && object.value().type == ObjectType::ReferencePlane) {
         return workPlaneFromReferencePlaneObject(object.value());
     }
+    // Document work planes (0.8: planes created from body faces).
+    const Result<WorkPlane> documentPlane = document_.workPlaneById(planeId);
+    if (documentPlane.isOk()) {
+        return documentPlane.value();
+    }
     return std::nullopt;
 }
 
@@ -513,16 +680,32 @@ WorkPlane MainWindow::workPlaneForSketch(const Sketch& sketch) const {
 
     WorkPlane plane;
     plane.id = sketch.reference.sourceId;
-    plane.name = sketch.name;
-    plane.kind = sketch.reference.type == SketchReferenceType::Face
+    plane.name = sketch.reference.displayName.empty() ? sketch.name
+                                                      : sketch.reference.displayName;
+    plane.kind = sketch.reference.type == SketchReferenceType::BodyFace
                      ? WorkPlaneKind::FacePlane
                      : WorkPlaneKind::ObjectPlane;
+    // Always the recorded reference frame: the committed entities live in
+    // its u/v coordinates, so grid/camera and geometry can never disagree.
     plane.origin = sketch.reference.origin;
     plane.uAxis = sketch.reference.uAxis;
     plane.vAxis = sketch.reference.vAxis;
     plane.normal = sketch.reference.normal;
     plane.width = 8.0;
     plane.height = 8.0;
+    if (sketch.reference.type == SketchReferenceType::BodyFace) {
+        plane.sourceBodyId = sketch.reference.sourceBodyId;
+        plane.sourceFaceId = sketch.reference.sourceFaceId;
+        // Size the helper from the live face when it still resolves; a
+        // missing face keeps a compact default instead of the 8 m helper.
+        plane.width = 4.0;
+        plane.height = 4.0;
+        if (const kernel::FaceReference* face = findBodyFace(
+                sketch.reference.sourceBodyId, sketch.reference.sourceFaceId)) {
+            plane.width = std::max(face->width * 1.6, 1.0);
+            plane.height = std::max(face->height * 1.6, 1.0);
+        }
+    }
     return plane;
 }
 
@@ -628,7 +811,12 @@ void MainWindow::buildObjectVisual(const Object& object) {
             evaluator_->evaluateObject(object);
         if (evaluated.isOk() && evaluated.value().isValid &&
             !evaluated.value().previewMesh.isEmpty()) {
+            // Remember the BRep handle: Cut Extrude needs the target's
+            // current shape, not just its display mesh.
+            bodyShapes_[object.id] = evaluated.value().shape;
+            bodyMeshes_[object.id] = evaluated.value().previewMesh;
             viewer_->scene().addOrUpdateObjectMesh(object, evaluated.value().previewMesh);
+            refreshBodyFaces(object.id);
             return;
         }
 #ifdef CADNEXT_WITH_OCCT
@@ -649,6 +837,10 @@ void MainWindow::buildObjectVisual(const Object& object) {
     }
 
     // Procedural fallback path (no BRep backend or evaluation failed).
+    bodyShapes_.erase(object.id);
+    bodyMeshes_.erase(object.id);
+    bodyFaces_.erase(object.id);
+    viewer_->scene().removeBodyFaces(object.id);
     if (viewer_->scene().hasObjectNode(object.id)) {
         viewer_->scene().updateObjectPrimitive(object);
     } else {
@@ -666,17 +858,26 @@ void MainWindow::deleteSelected() {
     switch (selectionKind_) {
     case SelectionKind::WorkPlane: {
         const std::optional<WorkPlane> plane = workPlaneById(selectedId_);
-        if (!plane || plane->kind != WorkPlaneKind::ObjectPlane) {
+        if (!plane || (plane->kind != WorkPlaneKind::ObjectPlane &&
+                       plane->kind != WorkPlaneKind::FacePlane)) {
             statusBar()->showMessage(tr("Canonical work planes cannot be deleted"), 3000);
             break;
         }
-        const std::string objectId = selectedId_;
+        const std::string planeId = selectedId_;
         clearSelection();
-        document_.removeObject(objectId);
-        viewer_->scene().removeObjectNode(objectId);
+        if (plane->kind == WorkPlaneKind::FacePlane) {
+            // Document work plane (created from a face): not an object.
+            document_.removeWorkPlane(planeId);
+            viewer_->scene().removeDocumentWorkPlane(planeId);
+        } else {
+        document_.removeObject(planeId);
+        bodyShapes_.erase(planeId);
+        bodyMeshes_.erase(planeId);
+        viewer_->scene().removeObjectNode(planeId);
+        }
         {
             const QSignalBlocker blocker(projectTree_);
-            projectTree_->removeWorkPlaneItem(QString::fromStdString(objectId));
+            projectTree_->removeWorkPlaneItem(QString::fromStdString(planeId));
         }
         markDirty();
         break;
@@ -685,6 +886,9 @@ void MainWindow::deleteSelected() {
         const std::string objectId = selectedId_;
         clearSelection();
         document_.removeObject(objectId);
+        bodyShapes_.erase(objectId);
+        bodyMeshes_.erase(objectId);
+        bodyFaces_.erase(objectId);
         viewer_->scene().removeObjectNode(objectId);
         {
             const QSignalBlocker blocker(projectTree_);
@@ -693,6 +897,10 @@ void MainWindow::deleteSelected() {
         markDirty();
         break;
     }
+    case SelectionKind::BodyFace:
+        statusBar()->showMessage(
+            tr("Faces cannot be deleted — delete the body instead"), 3000);
+        break;
     case SelectionKind::Sketch: {
         const std::string sketchId = selectedId_;
         if (activeSketchId_ == sketchId) {
@@ -748,24 +956,35 @@ void MainWindow::createSketchFromSelectedPlane() {
 }
 
 void MainWindow::createSketchOnPlane(const WorkPlane& plane) {
+    enterSketchOnReference(sketchReferenceFromWorkPlane(plane));
+}
+
+// The single sketch-creation entry point: canonical planes, reference
+// planes, document work planes and body faces all create and enter their
+// sketches here, with the reference as the only geometric input.
+void MainWindow::enterSketchOnReference(const SketchReference& reference) {
     if (!viewer_) {
         return;
     }
 
     Sketch sketch;
     sketch.id = "sketch-" + std::to_string(nextSketchNumber_);
-    sketch.name = "Sketch " + plane.name + " " + std::to_string(nextSketchNumber_);
-    ++nextSketchNumber_;
-    switch (plane.kind) {
-    case WorkPlaneKind::XY: sketch.plane = SketchPlane::XY; break;
-    case WorkPlaneKind::XZ: sketch.plane = SketchPlane::XZ; break;
-    case WorkPlaneKind::YZ: sketch.plane = SketchPlane::YZ; break;
-    case WorkPlaneKind::ObjectPlane:
-    case WorkPlaneKind::FacePlane:
-        sketch.plane = SketchPlane::XY;
-        break;
+    sketch.plane = SketchPlane::XY;
+    std::string label = reference.displayName;
+    if (reference.type == SketchReferenceType::CanonicalPlane) {
+        if (reference.sourceId == canonicalWorkPlaneId(SketchPlane::XZ)) {
+            sketch.plane = SketchPlane::XZ;
+        } else if (reference.sourceId == canonicalWorkPlaneId(SketchPlane::YZ)) {
+            sketch.plane = SketchPlane::YZ;
+        }
+        label = sketchPlaneName(sketch.plane);
+    } else if (label.empty()) {
+        const std::optional<WorkPlane> plane = workPlaneById(reference.sourceId);
+        label = plane ? plane->name : "Plane";
     }
-    sketch.reference = sketchReferenceFromWorkPlane(plane);
+    sketch.name = "Sketch " + label + " " + std::to_string(nextSketchNumber_);
+    ++nextSketchNumber_;
+    sketch.reference = reference;
 
     document_.addSketch(sketch);
     viewer_->scene().addOrUpdateSketchNode(sketch);
@@ -797,11 +1016,15 @@ void MainWindow::enterSketchMode(const std::string& sketchId) {
     viewer_->enterSketch2DView(*activeSketchPlane_, sketchInput_.options.gridStep,
                                sketchInput_.options.showSketchGrid);
     viewer_->setSketchInputMode(false, activeSketchReference_);
+    // Face overlays must never steal sketch picks; the dimmed body stays
+    // visible as orientation context.
+    viewer_->scene().setBodyFacesVisible(false);
     refreshSketchProfiles();
     sketchToolBar_->setSketchModeActive(true);
     sketchToolBar_->checkSelectTool();
     sketchToolBar_->setEnterSketchEnabled(false);
     updateModeStatusLabel();
+    updatePlaneBadge();
     statusBar()->showMessage(
         tr("Sketch2D (%1): pick Line / Rectangle / Circle and click on the plane; "
            "Esc cancels, Exit Sketch finishes")
@@ -822,6 +1045,7 @@ void MainWindow::exitSketchMode() {
         viewer_->exitSketch2DView();
         viewer_->scene().clearSketchProfiles();
         viewer_->scene().setSelectedProfile(std::string());
+        viewer_->scene().setBodyFacesVisible(true);
     }
     activeProfiles_.clear();
     selectedProfileId_.clear();
@@ -829,6 +1053,7 @@ void MainWindow::exitSketchMode() {
     sketchToolBar_->setSketchModeActive(false);
     sketchToolBar_->setEnterSketchEnabled(selectionKind_ == SelectionKind::Sketch);
     updateModeStatusLabel();
+    updatePlaneBadge();
     statusBar()->showMessage(tr("Free3D: select body, work plane or sketch"));
 }
 
@@ -1088,6 +1313,15 @@ void MainWindow::updateModeStatusLabel() {
             return;
         }
     }
+    if (selectionKind_ == SelectionKind::BodyFace) {
+        const kernel::FaceReference* face =
+            findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+        modeStatusLabel_->setText(
+            face && face->isSketchable
+                ? tr("Selected face: planar — Sketch on Face or Work Plane from Face")
+                : tr("Selected face: not planar"));
+        return;
+    }
     modeStatusLabel_->setText(tr("Free3D: select body, work plane or sketch"));
 }
 
@@ -1233,17 +1467,27 @@ void MainWindow::selectProfileForEntity(const std::string& sketchId,
 }
 
 void MainWindow::updateExtrudeActionEnabled() {
-    bool enabled = false;
+    bool hasValidProfile = false;
     if (const std::optional<Sketch> sketch = sketchForExtrude()) {
         const std::vector<SketchProfile> profiles = SketchProfileDetector().detect(*sketch);
         for (const SketchProfile& profile : profiles) {
             if (profile.isValid) {
-                enabled = true;
+                hasValidProfile = true;
                 break;
             }
         }
     }
-    toolBar_->extrudeAction()->setEnabled(enabled);
+    toolBar_->extrudeAction()->setEnabled(hasValidProfile);
+
+    bool hasTargetBody = false;
+    for (const Object& object : document_.objects()) {
+        if (object.type == ObjectType::Body && bodyShapes_.find(object.id) != bodyShapes_.end()) {
+            hasTargetBody = true;
+            break;
+        }
+    }
+    toolBar_->cutExtrudeAction()->setEnabled(kOcctBackendAvailable && hasValidProfile &&
+                                             hasTargetBody);
 }
 
 std::optional<Sketch> MainWindow::sketchForExtrude() const {
@@ -1392,7 +1636,9 @@ void MainWindow::applyExtrude() {
 
     QString failureReason;
     kernel::TriangleMesh mesh;
-    if (!buildExtrudeMesh(sketch.value(), *profile, parameters, mesh, &failureReason)) {
+    kernel::ShapeHandle shape;
+    if (!buildExtrudeMesh(sketch.value(), *profile, parameters, mesh, &failureReason,
+                          &shape)) {
         QMessageBox::warning(this, tr("Extrude Failed"),
                              failureReason.isEmpty()
                                  ? tr("The profile could not be extruded.")
@@ -1408,7 +1654,12 @@ void MainWindow::applyExtrude() {
     body.name = "Extrude Body " + std::to_string(extrudeCount_ + 1);
     body.primitive.kind = PrimitiveKind::None;
     document_.addObject(body);
+    if (!shape.isNull()) {
+        bodyShapes_[body.id] = shape;
+    }
+    bodyMeshes_[body.id] = mesh;
     viewer_->scene().addOrUpdateObjectMesh(body, mesh);
+    refreshBodyFaces(body.id);
 
     Feature feature;
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
@@ -1448,7 +1699,8 @@ void MainWindow::cancelExtrude() {
 
 bool MainWindow::buildExtrudeMesh(const Sketch& sketch, const SketchProfile& profile,
                                   const ExtrudeParameters& parameters,
-                                  kernel::TriangleMesh& outMesh, QString* failureReason) {
+                                  kernel::TriangleMesh& outMesh, QString* failureReason,
+                                  kernel::ShapeHandle* outShape) {
     const SketchReference reference = sketch.reference.sourceId.empty()
                                           ? canonicalSketchReference(sketch.plane)
                                           : sketch.reference;
@@ -1459,6 +1711,9 @@ bool MainWindow::buildExtrudeMesh(const Sketch& sketch, const SketchProfile& pro
         if (evaluated.isOk() && evaluated.value().isValid &&
             !evaluated.value().previewMesh.isEmpty()) {
             outMesh = evaluated.value().previewMesh;
+            if (outShape) {
+                *outShape = evaluated.value().shape;
+            }
             return true;
         }
         if (!evaluated.isOk() && failureReason) {
@@ -1489,10 +1744,11 @@ void MainWindow::buildExtrudedBodyVisual(const Object& object, const Feature& fe
         return;
     }
     // Profiles are not serialized: re-detect and look the recipe's profile
-    // up by its stable id (entity id / "<sketchId>-loop").
+    // up by its stable id (with a fallback for pre-0.7 ids).
     const std::vector<SketchProfile> profiles =
         SketchProfileDetector().detect(sketch.value());
-    const SketchProfile* profile = profileById(profiles, feature.extrude.profileId);
+    const SketchProfile* profile =
+        profileByIdOrLegacy(profiles, feature.extrude.profileId, sketch.value());
     if (!profile) {
         qWarning("CADNext: extrude feature %s references missing profile %s",
                  feature.id.c_str(), feature.extrude.profileId.c_str());
@@ -1500,12 +1756,42 @@ void MainWindow::buildExtrudedBodyVisual(const Object& object, const Feature& fe
     }
     QString failureReason;
     kernel::TriangleMesh mesh;
-    if (buildExtrudeMesh(sketch.value(), *profile, feature.extrude, mesh, &failureReason)) {
+    kernel::ShapeHandle shape;
+    if (buildExtrudeMesh(sketch.value(), *profile, feature.extrude, mesh, &failureReason,
+                         &shape)) {
+        if (!shape.isNull()) {
+            bodyShapes_[object.id] = shape;
+        }
+        bodyMeshes_[object.id] = mesh;
         viewer_->scene().addOrUpdateObjectMesh(object, mesh);
+        refreshBodyFaces(object.id);
     } else {
         qWarning("CADNext: extrude regeneration failed for %s: %s", object.name.c_str(),
                  failureReason.toUtf8().constData());
     }
+}
+
+const SketchProfile* MainWindow::profileByIdOrLegacy(
+    const std::vector<SketchProfile>& profiles, const std::string& profileId,
+    const Sketch& sketch) const {
+    if (const SketchProfile* profile = profileById(profiles, profileId)) {
+        return profile;
+    }
+    // Pre-0.7 ids: "<entityId>" for rectangle/circle profiles and
+    // "<sketchId>-loop" for the single sequential line loop.
+    for (const SketchProfile& profile : profiles) {
+        if (!profile.sourceEntityId.empty() && profile.sourceEntityId == profileId) {
+            return &profile;
+        }
+    }
+    if (profileId == sketch.id + "-loop") {
+        for (const SketchProfile& profile : profiles) {
+            if (profile.kind == SketchProfileKind::Polygon && profile.isValid) {
+                return &profile;
+            }
+        }
+    }
+    return nullptr;
 }
 
 const Feature* MainWindow::extrudeFeatureForBody(const std::string& objectId) const {
@@ -1515,6 +1801,655 @@ const Feature* MainWindow::extrudeFeatureForBody(const std::string& objectId) co
         }
     }
     return nullptr;
+}
+
+void MainWindow::openCutExtrudeDialog() {
+    if (!viewer_) {
+        return;
+    }
+    if (!kOcctBackendAvailable) {
+        statusBar()->showMessage(tr("Cut Extrude requires OCCT backend."), 6000);
+        return;
+    }
+
+    const std::optional<Sketch> sketch = sketchForExtrude();
+    if (!sketch) {
+        statusBar()->showMessage(tr("Select a closed sketch profile."), 5000);
+        return;
+    }
+
+    cutDialogProfiles_.clear();
+    for (SketchProfile& profile : SketchProfileDetector().detect(*sketch)) {
+        if (profile.isValid) {
+            cutDialogProfiles_.push_back(std::move(profile));
+        }
+    }
+    if (cutDialogProfiles_.empty()) {
+        statusBar()->showMessage(tr("Select a closed sketch profile."), 5000);
+        return;
+    }
+
+    QList<CutBodyItem> bodies;
+    QString selectedBody;
+    for (const Object& object : document_.objects()) {
+        if (object.type != ObjectType::Body) {
+            continue;
+        }
+        if (bodyShapes_.find(object.id) == bodyShapes_.end()) {
+            continue;
+        }
+        bodies.append({QString::fromStdString(object.id),
+                       QString::fromStdString(object.name)});
+        if (selectionKind_ == SelectionKind::Body && selectedId_ == object.id) {
+            selectedBody = QString::fromStdString(object.id);
+        }
+    }
+    if (bodies.empty()) {
+        statusBar()->showMessage(tr("Select target body for cut."), 5000);
+        return;
+    }
+    if (selectedBody.isEmpty()) {
+        selectedBody = bodies.front().id;
+    }
+
+    cutSketchId_ = sketch->id;
+    if (activeSketchId_) {
+        exitSketchMode();
+    }
+
+    if (!cutDialog_) {
+        cutDialog_ = new CutExtrudeDialog(this);
+        connect(cutDialog_, &CutExtrudeDialog::parametersChanged, this,
+                [this]() { onCutParametersChanged(); });
+        connect(cutDialog_, &CutExtrudeDialog::applyRequested, this,
+                [this]() { applyCutExtrude(); });
+        connect(cutDialog_, &CutExtrudeDialog::cancelRequested, this,
+                [this]() { cancelCutExtrude(); });
+    }
+
+    QList<ExtrudeProfileItem> profiles;
+    QString selectedProfile;
+    for (const SketchProfile& profile : cutDialogProfiles_) {
+        QString label = profileKindText(profile.kind);
+        if (!profile.sourceEntityId.empty()) {
+            if (const SketchEntity* entity = findSketchEntity(*sketch, profile.sourceEntityId)) {
+                label = QString::fromStdString(entity->name);
+            }
+        } else if (profile.kind == SketchProfileKind::Polygon) {
+            label = tr("Polygon Profile (%1 lines)").arg(profile.sourceEntityIds.size());
+        }
+        label += tr(" — area %1").arg(profile.area, 0, 'f', 3);
+        profiles.append({QString::fromStdString(profile.id), label});
+        if (profile.id == selectedProfileId_) {
+            selectedProfile = QString::fromStdString(profile.id);
+        }
+    }
+    if (selectedProfile.isEmpty() && !profiles.empty()) {
+        selectedProfile = profiles.front().id;
+    }
+    QString selectedLimit;
+    for (const CutBodyItem& body : bodies) {
+        if (body.id != selectedBody) {
+            selectedLimit = body.id;
+            break;
+        }
+    }
+
+    cutDialog_->setTargetBodies(bodies, selectedBody);
+    cutDialog_->setProfiles(profiles, selectedProfile);
+    cutDialog_->setLimitObjects(bodies, selectedLimit);
+    cutDialog_->show();
+    cutDialog_->raise();
+    cutDialog_->activateWindow();
+    onCutParametersChanged();
+    statusBar()->showMessage(
+        tr("Cut Extrude: choose target, profile and depth mode — Apply modifies the body"));
+}
+
+void MainWindow::onCutParametersChanged() {
+    if (!viewer_ || !cutDialog_ || !cutDialog_->isVisible()) {
+        return;
+    }
+    if (!cutDialog_->previewEnabled()) {
+        viewer_->scene().hideExtrudePreview();
+        return;
+    }
+
+    const std::string profileId = cutDialog_->selectedProfileId().toStdString();
+    const SketchProfile* profile = profileById(cutDialogProfiles_, profileId);
+    const Result<Sketch> sketch = document_.sketchById(cutSketchId_);
+    if (!profile || !profile->isValid || !sketch.isOk()) {
+        viewer_->scene().hideExtrudePreview();
+        return;
+    }
+
+    ExtrudeCutParameters parameters;
+    parameters.targetBodyId = cutDialog_->targetBodyId().toStdString();
+    parameters.sketchId = cutSketchId_;
+    parameters.profileId = profileId;
+    parameters.depthMode = cutDialog_->depthMode();
+    parameters.direction = cutDialog_->direction();
+    parameters.distance = cutDialog_->distance();
+    parameters.limitObjectId = cutDialog_->limitObjectId().toStdString();
+
+    const SketchReference reference = sketch.value().reference.sourceId.empty()
+                                          ? canonicalSketchReference(sketch.value().plane)
+                                          : sketch.value().reference;
+    CutSpan span;
+    QString failureReason;
+    if (!computeCutSpanForParameters(parameters, reference, span, &failureReason)) {
+        viewer_->scene().hideExtrudePreview();
+        return;
+    }
+    const Result<kernel::TriangleMesh> mesh =
+        kernel::buildProfilePrismMesh(reference, *profile, span.start, span.end);
+    if (mesh.isOk() && !mesh.value().isEmpty()) {
+        viewer_->scene().showExtrudePreview(mesh.value(), true);
+    } else {
+        viewer_->scene().hideExtrudePreview();
+    }
+}
+
+void MainWindow::applyCutExtrude() {
+    if (!viewer_ || !cutDialog_) {
+        return;
+    }
+    if (!kOcctBackendAvailable) {
+        statusBar()->showMessage(tr("Cut Extrude requires OCCT backend."), 6000);
+        return;
+    }
+
+    const std::string targetBodyId = cutDialog_->targetBodyId().toStdString();
+    Object* target = document_.mutableObjectById(targetBodyId);
+    if (!target || target->type != ObjectType::Body) {
+        statusBar()->showMessage(tr("Select target body for cut."), 5000);
+        return;
+    }
+
+    const std::string profileId = cutDialog_->selectedProfileId().toStdString();
+    const SketchProfile* profile = profileById(cutDialogProfiles_, profileId);
+    const Result<Sketch> sketch = document_.sketchById(cutSketchId_);
+    if (!profile || !profile->isValid || !sketch.isOk()) {
+        statusBar()->showMessage(tr("Select a closed sketch profile."), 5000);
+        return;
+    }
+
+    ExtrudeCutParameters parameters;
+    parameters.targetBodyId = targetBodyId;
+    parameters.sketchId = cutSketchId_;
+    parameters.profileId = profileId;
+    parameters.depthMode = cutDialog_->depthMode();
+    parameters.direction = cutDialog_->direction();
+    parameters.distance = cutDialog_->distance();
+    parameters.limitObjectId = cutDialog_->limitObjectId().toStdString();
+    if (!extrudeCutParametersValid(parameters)) {
+        statusBar()->showMessage(tr("Cut parameters are invalid."), 5000);
+        return;
+    }
+
+    const SketchReference reference = sketch.value().reference.sourceId.empty()
+                                          ? canonicalSketchReference(sketch.value().plane)
+                                          : sketch.value().reference;
+    CutSpan span;
+    QString failureReason;
+    if (!computeCutSpanForParameters(parameters, reference, span, &failureReason)) {
+        QMessageBox::warning(this, tr("Cut Extrude Failed"),
+                             failureReason.isEmpty()
+                                 ? tr("The cut extent could not be computed.")
+                                 : failureReason);
+        return;
+    }
+
+    const auto targetShapeIt = bodyShapes_.find(targetBodyId);
+    if (targetShapeIt == bodyShapes_.end() || targetShapeIt->second.isNull()) {
+        QMessageBox::warning(this, tr("Cut Extrude Failed"),
+                             tr("Target body has no OCCT shape."));
+        return;
+    }
+
+    const Result<kernel::EvaluatedGeometry> evaluated =
+        evaluator_->evaluateExtrudeCut(targetShapeIt->second, reference, *profile, span);
+    if (!evaluated.isOk() || !evaluated.value().isValid ||
+        evaluated.value().previewMesh.isEmpty()) {
+        const QString reason = evaluated.isOk()
+                                   ? QString::fromStdString(evaluated.value().message)
+                                   : QString::fromStdString(evaluated.error().message);
+        QMessageBox::warning(this, tr("Cut Extrude Failed"),
+                             reason.isEmpty() ? tr("OCCT boolean cut failed.") : reason);
+        return;
+    }
+
+    bodyShapes_[targetBodyId] = evaluated.value().shape;
+    bodyMeshes_[targetBodyId] = evaluated.value().previewMesh;
+    viewer_->scene().addOrUpdateObjectMesh(*target, evaluated.value().previewMesh);
+    refreshBodyFaces(targetBodyId);
+
+    Feature feature;
+    feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
+    feature.name = "Cut Extrude " + std::to_string(cutCount_ + 1);
+    feature.type = FeatureType::ExtrudeCut;
+    feature.targetObjectId = targetBodyId;
+    feature.modifiedBodyId = targetBodyId;
+    feature.extrudeCut = parameters;
+    document_.addFeature(feature);
+    ++cutCount_;
+
+    viewer_->scene().hideExtrudePreview();
+    cutDialog_->hide();
+    selectBody(targetBodyId);
+    markDirty();
+    statusBar()->showMessage(
+        tr("%1 cut applied (%2)")
+            .arg(QString::fromStdString(target->name), cutDepthModeText(parameters.depthMode)),
+        5000);
+}
+
+void MainWindow::cancelCutExtrude() {
+    if (viewer_) {
+        viewer_->scene().hideExtrudePreview();
+    }
+    if (cutDialog_) {
+        cutDialog_->hide();
+    }
+    statusBar()->showMessage(tr("Cut Extrude cancelled"), 3000);
+}
+
+bool MainWindow::computeCutSpanForParameters(const ExtrudeCutParameters& parameters,
+                                             const SketchReference& reference,
+                                             CutSpan& outSpan,
+                                             QString* failureReason) {
+    if (!kernel_) {
+        if (failureReason) {
+            *failureReason = tr("Geometry kernel is not available.");
+        }
+        return false;
+    }
+    if (!extrudeCutParametersValid(parameters)) {
+        if (failureReason) {
+            *failureReason = tr("Cut parameters are invalid.");
+        }
+        return false;
+    }
+
+    const auto targetIt = bodyShapes_.find(parameters.targetBodyId);
+    if (targetIt == bodyShapes_.end() || targetIt->second.isNull()) {
+        if (failureReason) {
+            *failureReason = tr("Target body has no OCCT shape.");
+        }
+        return false;
+    }
+
+    CutExtents extents;
+    const Result<kernel::ShapeBounds> targetBounds = kernel_->boundingBox(targetIt->second);
+    if (!targetBounds.isOk()) {
+        if (failureReason) {
+            *failureReason = QString::fromStdString(targetBounds.error().message);
+        }
+        return false;
+    }
+    accumulateProjectedBounds(targetBounds.value(), reference, extents.targetMin,
+                              extents.targetMax);
+    extents.targetDiagonal = boundsDiagonal(targetBounds.value());
+
+    if (parameters.depthMode == CutDepthMode::ToObject) {
+        if (parameters.limitObjectId == parameters.targetBodyId) {
+            if (failureReason) {
+                *failureReason = tr("Limit object must be different from the target body.");
+            }
+            return false;
+        }
+        const auto limitIt = bodyShapes_.find(parameters.limitObjectId);
+        if (limitIt == bodyShapes_.end() || limitIt->second.isNull()) {
+            if (failureReason) {
+                *failureReason = tr("Limit object has no OCCT shape.");
+            }
+            return false;
+        }
+        const Result<kernel::ShapeBounds> limitBounds = kernel_->boundingBox(limitIt->second);
+        if (!limitBounds.isOk()) {
+            if (failureReason) {
+                *failureReason = QString::fromStdString(limitBounds.error().message);
+            }
+            return false;
+        }
+        accumulateProjectedBounds(limitBounds.value(), reference, extents.limitMin,
+                                  extents.limitMax);
+        extents.hasLimit = true;
+    }
+
+    const Result<CutSpan> span = computeCutSpan(parameters, extents);
+    if (!span.isOk()) {
+        if (failureReason) {
+            *failureReason = QString::fromStdString(span.error().message);
+        }
+        return false;
+    }
+    outSpan = span.value();
+    return true;
+}
+
+bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failureReason) {
+    if (feature.type != FeatureType::ExtrudeCut || feature.suppressed) {
+        return true;
+    }
+    if (!kOcctBackendAvailable) {
+        if (failureReason) {
+            *failureReason = tr("Cut Extrude requires OCCT backend.");
+        }
+        return false;
+    }
+
+    Object* target = document_.mutableObjectById(feature.extrudeCut.targetBodyId);
+    if (!target || target->type != ObjectType::Body) {
+        if (failureReason) {
+            *failureReason = tr("Cut feature references a missing target body.");
+        }
+        return false;
+    }
+    const Result<Sketch> sketch = document_.sketchById(feature.extrudeCut.sketchId);
+    if (!sketch.isOk()) {
+        if (failureReason) {
+            *failureReason = QString::fromStdString(sketch.error().message);
+        }
+        return false;
+    }
+    const std::vector<SketchProfile> profiles = SketchProfileDetector().detect(sketch.value());
+    const SketchProfile* profile =
+        profileByIdOrLegacy(profiles, feature.extrudeCut.profileId, sketch.value());
+    if (!profile || !profile->isValid) {
+        if (failureReason) {
+            *failureReason = tr("Cut feature references a missing or invalid profile.");
+        }
+        return false;
+    }
+
+    const SketchReference reference = sketch.value().reference.sourceId.empty()
+                                          ? canonicalSketchReference(sketch.value().plane)
+                                          : sketch.value().reference;
+    CutSpan span;
+    if (!computeCutSpanForParameters(feature.extrudeCut, reference, span, failureReason)) {
+        return false;
+    }
+    const auto targetShapeIt = bodyShapes_.find(feature.extrudeCut.targetBodyId);
+    if (targetShapeIt == bodyShapes_.end() || targetShapeIt->second.isNull()) {
+        if (failureReason) {
+            *failureReason = tr("Target body has no OCCT shape.");
+        }
+        return false;
+    }
+    const Result<kernel::EvaluatedGeometry> evaluated =
+        evaluator_->evaluateExtrudeCut(targetShapeIt->second, reference, *profile, span);
+    if (!evaluated.isOk() || !evaluated.value().isValid ||
+        evaluated.value().previewMesh.isEmpty()) {
+        if (failureReason) {
+            *failureReason = evaluated.isOk()
+                                 ? QString::fromStdString(evaluated.value().message)
+                                 : QString::fromStdString(evaluated.error().message);
+        }
+        return false;
+    }
+    bodyShapes_[target->id] = evaluated.value().shape;
+    bodyMeshes_[target->id] = evaluated.value().previewMesh;
+    if (viewer_) {
+        viewer_->scene().addOrUpdateObjectMesh(*target, evaluated.value().previewMesh);
+    }
+    refreshBodyFaces(target->id);
+    return true;
+}
+
+// --- Face workflow (0.8 Sketch on Face) --------------------------------------
+
+void MainWindow::refreshBodyFaces(const std::string& bodyId) {
+    if (!viewer_ || !kernel_) {
+        return;
+    }
+    const auto shapeIt = bodyShapes_.find(bodyId);
+    if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
+        const auto meshIt = bodyMeshes_.find(bodyId);
+        if (meshIt != bodyMeshes_.end()) {
+            std::vector<kernel::FaceReference> faces =
+                kernel::planarFacesForMesh(bodyId, meshIt->second);
+            viewer_->scene().setBodyFaces(bodyId, faces);
+            bodyFaces_[bodyId] = std::move(faces);
+            if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId &&
+                !findBodyFace(bodyId, selectedFace_.faceId)) {
+                clearSelection();
+            }
+            updateFaceActionsEnabled();
+            return;
+        }
+        bodyFaces_.erase(bodyId);
+        viewer_->scene().removeBodyFaces(bodyId);
+        updateFaceActionsEnabled();
+        return;
+    }
+    kernel::FaceAnalyzer analyzer(*kernel_);
+    std::vector<kernel::FaceReference> faces =
+        analyzer.planarFacesForBody(bodyId, shapeIt->second);
+    viewer_->scene().setBodyFaces(bodyId, faces);
+    bodyFaces_[bodyId] = std::move(faces);
+    // The shape changed, so the selected face id may no longer exist.
+    if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId &&
+        !findBodyFace(bodyId, selectedFace_.faceId)) {
+        clearSelection();
+    }
+    updateFaceActionsEnabled();
+}
+
+const kernel::FaceReference* MainWindow::findBodyFace(const std::string& bodyId,
+                                                      const std::string& faceId) const {
+    const auto it = bodyFaces_.find(bodyId);
+    if (it == bodyFaces_.end()) {
+        return nullptr;
+    }
+    for (const kernel::FaceReference& face : it->second) {
+        if (face.faceId == faceId) {
+            return &face;
+        }
+    }
+    return nullptr;
+}
+
+SketchReference MainWindow::sketchReferenceFromFace(const kernel::FaceReference& face) const {
+    SketchReference reference;
+    reference.type = SketchReferenceType::BodyFace;
+    reference.sourceId = face.faceId;
+    reference.sourceBodyId = face.bodyId;
+    reference.sourceFaceId = face.faceId;
+    reference.origin = face.origin;
+    reference.uAxis = face.uAxis;
+    reference.vAxis = face.vAxis;
+    reference.normal = face.normal;
+    const Result<Object> body = document_.objectById(face.bodyId);
+    reference.displayName =
+        "Face of " + (body.isOk() ? body.value().name : face.bodyId);
+    return reference;
+}
+
+void MainWindow::createSketchOnSelectedFace() {
+    if (selectionKind_ != SelectionKind::BodyFace) {
+        statusBar()->showMessage(tr("Select a planar body face first."), 5000);
+        return;
+    }
+    const kernel::FaceReference* face =
+        findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+    if (!face || !face->isSketchable) {
+        statusBar()->showMessage(tr("Sketches need a planar face."), 5000);
+        return;
+    }
+    enterSketchOnReference(sketchReferenceFromFace(*face));
+}
+
+void MainWindow::createWorkPlaneFromSelectedFace() {
+    if (!viewer_ || selectionKind_ != SelectionKind::BodyFace) {
+        statusBar()->showMessage(tr("Select a planar body face first."), 5000);
+        return;
+    }
+    const kernel::FaceReference* face =
+        findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+    if (!face || !face->isSketchable) {
+        statusBar()->showMessage(tr("Work planes need a planar face."), 5000);
+        return;
+    }
+
+    WorkPlane plane;
+    ++facePlaneCount_;
+    plane.id = "faceplane-" + std::to_string(facePlaneCount_);
+    plane.name = "Plane from Face " + std::to_string(facePlaneCount_);
+    plane.kind = WorkPlaneKind::FacePlane;
+    plane.origin = face->origin;
+    plane.uAxis = face->uAxis;
+    plane.vAxis = face->vAxis;
+    plane.normal = face->normal;
+    plane.width = std::max(face->width, 0.25);
+    plane.height = std::max(face->height, 0.25);
+    plane.sourceBodyId = face->bodyId;
+    plane.sourceFaceId = face->faceId;
+
+    document_.addWorkPlane(plane);
+    viewer_->scene().addOrUpdateDocumentWorkPlane(plane);
+    {
+        const QSignalBlocker blocker(projectTree_);
+        projectTree_->addWorkPlaneItem(QString::fromStdString(plane.id),
+                                       QString::fromStdString(plane.name),
+                                       workPlaneTypeText(plane));
+    }
+    markDirty();
+    selectWorkPlane(plane.id);
+    statusBar()->showMessage(tr("%1 created — Create Sketch or Normal to Plane")
+                                 .arg(QString::fromStdString(plane.name)),
+                             5000);
+}
+
+void MainWindow::normalToSelectedFace() {
+    if (!viewer_ || selectionKind_ != SelectionKind::BodyFace) {
+        return;
+    }
+    const kernel::FaceReference* face =
+        findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+    if (!face) {
+        return;
+    }
+    WorkPlane plane;
+    plane.id = face->faceId;
+    plane.name = "Face";
+    plane.kind = WorkPlaneKind::FacePlane;
+    plane.origin = face->origin;
+    plane.uAxis = face->uAxis;
+    plane.vAxis = face->vAxis;
+    plane.normal = face->normal;
+    plane.width = std::max(face->width, 0.25);
+    plane.height = std::max(face->height, 0.25);
+    viewer_->setViewNormalToPlane(plane);
+}
+
+void MainWindow::updateFaceActionsEnabled() {
+    const kernel::FaceReference* face =
+        selectionKind_ == SelectionKind::BodyFace
+            ? findBodyFace(selectedFace_.bodyId, selectedFace_.faceId)
+            : nullptr;
+    const bool planar = face && face->isSketchable;
+    toolBar_->createSketchOnFaceAction()->setEnabled(planar && !activeSketchId_);
+    toolBar_->workPlaneFromFaceAction()->setEnabled(planar && !activeSketchId_);
+    toolBar_->normalToFaceAction()->setEnabled(planar);
+}
+
+void MainWindow::showFaceActionPalette(bool contextClick) {
+    if (!contextClick || selectionKind_ != SelectionKind::BodyFace || activeSketchId_) {
+        return;
+    }
+    const kernel::FaceReference* face =
+        findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
+    if (!face) {
+        return;
+    }
+    QMenu menu(this);
+    QAction* createSketch = nullptr;
+    QAction* createPlane = nullptr;
+    QAction* normalView = nullptr;
+    if (face->isSketchable) {
+        createSketch = menu.addAction(tr("Create Sketch"));
+        createPlane = menu.addAction(tr("Create Work Plane"));
+        normalView = menu.addAction(tr("Normal to Face"));
+    } else {
+        menu.addAction(tr("Face is not planar — no sketch actions"))->setEnabled(false);
+    }
+    QAction* chosen = menu.exec(QCursor::pos());
+    if (chosen && chosen == createSketch) {
+        createSketchOnSelectedFace();
+    } else if (chosen && chosen == createPlane) {
+        createWorkPlaneFromSelectedFace();
+    } else if (chosen && chosen == normalView) {
+        normalToSelectedFace();
+    }
+}
+
+void MainWindow::resolveFaceReferencesAfterLoad() {
+    // Stable-ish face ids v1: try to re-resolve every saved bodyId/faceId
+    // pair against the rebuilt bodies. Found faces refresh the resolved
+    // plane (the body may have been re-evaluated slightly differently);
+    // missing ids keep the saved resolved plane — the document must load
+    // and stay editable either way.
+    for (const Sketch& sketch : document_.sketches()) {
+        if (sketch.reference.type != SketchReferenceType::BodyFace ||
+            sketch.reference.sourceFaceId.empty()) {
+            continue;
+        }
+        Sketch* mutableSketch = document_.mutableSketchById(sketch.id);
+        if (!mutableSketch) {
+            continue;
+        }
+        if (const kernel::FaceReference* face = findBodyFace(
+                sketch.reference.sourceBodyId, sketch.reference.sourceFaceId)) {
+            mutableSketch->reference.origin = face->origin;
+            mutableSketch->reference.uAxis = face->uAxis;
+            mutableSketch->reference.vAxis = face->vAxis;
+            mutableSketch->reference.normal = face->normal;
+        } else {
+            qWarning("CADNext: sketch %s references face %s that no longer resolves; "
+                     "using the saved plane fallback",
+                     sketch.id.c_str(), sketch.reference.sourceFaceId.c_str());
+        }
+    }
+    for (const WorkPlane& plane : document_.workPlanes()) {
+        if (plane.kind != WorkPlaneKind::FacePlane || plane.sourceFaceId.empty()) {
+            continue;
+        }
+        WorkPlane* mutablePlane = document_.mutableWorkPlaneById(plane.id);
+        if (!mutablePlane) {
+            continue;
+        }
+        if (const kernel::FaceReference* face =
+                findBodyFace(plane.sourceBodyId, plane.sourceFaceId)) {
+            mutablePlane->origin = face->origin;
+            mutablePlane->uAxis = face->uAxis;
+            mutablePlane->vAxis = face->vAxis;
+            mutablePlane->normal = face->normal;
+            mutablePlane->width = std::max(face->width, 0.25);
+            mutablePlane->height = std::max(face->height, 0.25);
+        } else {
+            qWarning("CADNext: work plane %s references face %s that no longer resolves; "
+                     "using the saved plane fallback",
+                     plane.id.c_str(), plane.sourceFaceId.c_str());
+        }
+    }
+}
+
+void MainWindow::updatePlaneBadge() {
+    if (!planeBadge_) {
+        return;
+    }
+    if (!activeSketchId_ || !activeSketchPlane_) {
+        planeBadge_->hide();
+        return;
+    }
+    const QString plane = QString::fromStdString(activeSketchPlane_->name);
+    const QString uAxis = QString::fromUtf8(dominantWorldAxisName(activeSketchPlane_->uAxis));
+    const QString vAxis = QString::fromUtf8(dominantWorldAxisName(activeSketchPlane_->vAxis));
+    planeBadge_->setText(tr("Sketch2D — Plane %1\nU: %2    V: %3")
+                             .arg(plane, uAxis, vAxis));
+    planeBadge_->adjustSize();
+    planeBadge_->show();
 }
 
 // --- Property edits ---------------------------------------------------------
@@ -1699,8 +2634,12 @@ void MainWindow::rebuildUiFromDocument() {
     if (viewer_) {
         viewer_->scene().clearObjectNodes();
         viewer_->scene().clearSketchNodes();
+        viewer_->scene().clearDocumentWorkPlanes();
         viewer_->scene().hideSketchPlane();
     }
+    bodyShapes_.clear();
+    bodyMeshes_.clear();
+    bodyFaces_.clear();
     for (const Object& object : document_.objects()) {
         // Shapes are never serialized; every load re-evaluates the
         // primitive descriptors through the kernel. Extruded bodies are
@@ -1723,6 +2662,33 @@ void MainWindow::rebuildUiFromDocument() {
                                       QString::fromStdString(object.name),
                                       extrudeFeature ? tr("Extrude") : treeTypeText(object));
         }
+    }
+    for (const Feature& feature : document_.features()) {
+        if (feature.type != FeatureType::ExtrudeCut) {
+            continue;
+        }
+        QString failureReason;
+        if (!replayExtrudeCutFeature(feature, &failureReason)) {
+            qWarning("CADNext: cut feature %s replay failed: %s",
+                     feature.id.c_str(), failureReason.toUtf8().constData());
+            statusBar()->showMessage(
+                tr("Cut feature replay failed for %1 (%2)")
+                    .arg(QString::fromStdString(feature.name), failureReason),
+                8000);
+        }
+    }
+    // Re-attach face-based references against the rebuilt bodies (found
+    // ids refresh the resolved plane, missing ids keep the saved one),
+    // then mirror the document work planes into scene and tree.
+    resolveFaceReferencesAfterLoad();
+    for (const WorkPlane& plane : document_.workPlanes()) {
+        if (viewer_) {
+            viewer_->scene().addOrUpdateDocumentWorkPlane(plane);
+        }
+        const QSignalBlocker blocker(projectTree_);
+        projectTree_->addWorkPlaneItem(QString::fromStdString(plane.id),
+                                       QString::fromStdString(plane.name),
+                                       workPlaneTypeText(plane));
     }
     for (const Sketch& sketch : document_.sketches()) {
         if (viewer_) {
@@ -1756,11 +2722,24 @@ void MainWindow::deriveCountersFromDocument() {
     circleCount_ = 0;
     nextFeatureNumber_ = 1;
     extrudeCount_ = 0;
+    cutCount_ = 0;
+    facePlaneCount_ = 0;
+
+    for (const WorkPlane& plane : document_.workPlanes()) {
+        // facePlaneCount_ is the highest used "faceplane-N" number, so new
+        // planes continue after the loaded ones.
+        if (plane.id.rfind("faceplane-", 0) == 0) {
+            facePlaneCount_ =
+                std::max(facePlaneCount_, std::atoi(plane.id.c_str() + 10));
+        }
+    }
 
     for (const Feature& feature : document_.features()) {
         nextFeatureNumber_ = maxNumberSuffix(feature.id, "feature-", nextFeatureNumber_);
         if (feature.type == FeatureType::Extrude) {
             ++extrudeCount_;
+        } else if (feature.type == FeatureType::ExtrudeCut) {
+            ++cutCount_;
         }
     }
 
@@ -1811,7 +2790,7 @@ void MainWindow::updateWindowTitle() {
     const QString base = currentFilePath_.isEmpty()
                              ? QString::fromStdString(document_.name())
                              : QFileInfo(currentFilePath_).fileName();
-    setWindowTitle(QStringLiteral("%1%2 — CADNext 0.5")
+    setWindowTitle(QStringLiteral("%1%2 — CADNext 0.8")
                        .arg(base, dirty_ ? QStringLiteral("*") : QString()));
 }
 
@@ -1870,6 +2849,11 @@ void MainWindow::createMenus() {
 
     QMenu* partMenu = menuBar()->addMenu(tr("&Part"));
     partMenu->addAction(toolBar_->extrudeAction());
+    partMenu->addAction(toolBar_->cutExtrudeAction());
+    partMenu->addSeparator();
+    partMenu->addAction(toolBar_->createSketchOnFaceAction());
+    partMenu->addAction(toolBar_->workPlaneFromFaceAction());
+    partMenu->addAction(toolBar_->normalToFaceAction());
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(treeDock_->toggleViewAction());

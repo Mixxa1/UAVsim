@@ -8,6 +8,7 @@
 #include "cadnext/Result.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/Units.hpp"
+#include "cadnext/WorkPlane.hpp"
 
 namespace cadnext {
 
@@ -36,6 +37,15 @@ public:
     Sketch* mutableSketchById(const std::string& id);
     const std::vector<Sketch>& sketches() const;
 
+    // Document-owned work planes (CADNext 0.8: planes created from body
+    // faces). Canonical XY/XZ/YZ planes stay UI-level and are never stored
+    // here; reference-plane objects remain in objects_.
+    void addWorkPlane(WorkPlane plane);
+    bool removeWorkPlane(const std::string& id);
+    Result<WorkPlane> workPlaneById(const std::string& id) const;
+    WorkPlane* mutableWorkPlaneById(const std::string& id);
+    const std::vector<WorkPlane>& workPlanes() const;
+
     void addFeature(Feature feature);
     const std::vector<Object>& objects() const;
     const std::vector<Feature>& features() const;
@@ -46,6 +56,7 @@ private:
     UnitSystem units_ = UnitSystem::Metric;
     std::vector<Object> objects_;
     std::vector<Sketch> sketches_;
+    std::vector<WorkPlane> workPlanes_;
     std::vector<Feature> features_;
 };
 

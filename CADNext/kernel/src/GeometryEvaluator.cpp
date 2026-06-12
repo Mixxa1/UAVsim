@@ -110,26 +110,51 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateExtrude(
     const cadnext::SketchReference& reference,
     const cadnext::SketchProfile& profile,
     const cadnext::ExtrudeParameters& parameters) {
-    if (!profile.isValid || !profile.isClosed || profile.outerLoop.size() < 3) {
-        return usageError("Profile \"" + profile.id + "\" is not a valid closed loop");
-    }
     if (!cadnext::extrudeParametersValid(parameters)) {
         return usageError("Extrude parameters are invalid (distance must be > 0)");
     }
 
-    // The base face sits at the span start so Negative/Symmetric extrusions
-    // end up on the correct side(s) of the sketch plane; the prism vector
-    // then covers the whole span.
     double startOffset = 0.0;
     double endOffset = 0.0;
     cadnext::extrudeSpan(parameters, startOffset, endOffset);
+    const cadnext::Result<ShapeHandle> shape =
+        buildProfilePrism(reference, profile, startOffset, endOffset);
+    if (!shape.isOk()) {
+        if (shape.error().code == cadnext::ErrorCode::KernelUnavailable) {
+            // No BRep backend in this build — the caller falls back to the
+            // procedural prism mesh.
+            return cadnext::Result<EvaluatedGeometry>::ok(
+                backendlessResult(shape.error().message));
+        }
+        return cadnext::Result<EvaluatedGeometry>::fail(shape.error());
+    }
+
+    EvaluatedGeometry geometry;
+    geometry.shape = shape.value();
+    return finishShapeEvaluation(std::move(geometry));
+}
+
+cadnext::Result<ShapeHandle> GeometryEvaluator::buildProfilePrism(
+    const cadnext::SketchReference& reference,
+    const cadnext::SketchProfile& profile,
+    double startOffset, double endOffset) {
+    if (!profile.isValid || !profile.isClosed || profile.outerLoop.size() < 3) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::InvalidArgument,
+             "Profile \"" + profile.id + "\" is not a valid closed loop"});
+    }
+    const double span = endOffset - startOffset;
+    if (!std::isfinite(span) || span <= 0.0) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::InvalidArgument, "Prism span must be positive"});
+    }
+
+    // The base face sits at the span start so the prism covers exactly
+    // [startOffset, endOffset] along the plane normal.
     const cadnext::Vector3 normal =
         cadnext::extrudeDirectionVector(reference, cadnext::ExtrudeDirection::Positive);
-    const double span = endOffset - startOffset;
     const cadnext::Vector3 extrusion{normal.x * span, normal.y * span, normal.z * span};
 
-    cadnext::Result<ShapeHandle> shape =
-        cadnext::Result<ShapeHandle>::fail({cadnext::ErrorCode::InvalidArgument, ""});
     if (profile.kind == cadnext::SketchProfileKind::Circle) {
         // Recover the exact circle from the polygonal approximation: the
         // loop is generated from the entity center/radius, so centroid +
@@ -152,35 +177,60 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateExtrude(
         params.normal = normal;
         params.radius = radius;
         params.extrusion = extrusion;
-        shape = kernel_.makeExtrudedCircle(params);
-    } else {
-        ExtrudedPolygonParameters params;
-        params.loop.reserve(profile.outerLoop.size());
-        for (const cadnext::SketchPoint2D& point : profile.outerLoop) {
-            const cadnext::Vector3 world = cadnext::sketchPointToWorld(point, reference);
-            params.loop.push_back({world.x + normal.x * startOffset,
-                                   world.y + normal.y * startOffset,
-                                   world.z + normal.z * startOffset});
-        }
-        params.extrusion = extrusion;
-        shape = kernel_.makeExtrudedPolygon(params);
+        return kernel_.makeExtrudedCircle(params);
     }
 
-    if (!shape.isOk()) {
-        if (shape.error().code == cadnext::ErrorCode::KernelUnavailable) {
-            // No BRep backend in this build — the caller falls back to the
-            // procedural prism mesh.
+    ExtrudedPolygonParameters params;
+    params.loop.reserve(profile.outerLoop.size());
+    for (const cadnext::SketchPoint2D& point : profile.outerLoop) {
+        const cadnext::Vector3 world = cadnext::sketchPointToWorld(point, reference);
+        params.loop.push_back({world.x + normal.x * startOffset,
+                               world.y + normal.y * startOffset,
+                               world.z + normal.z * startOffset});
+    }
+    params.extrusion = extrusion;
+    return kernel_.makeExtrudedPolygon(params);
+}
+
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateExtrudeCut(
+    const ShapeHandle& targetShape,
+    const cadnext::SketchReference& reference,
+    const cadnext::SketchProfile& profile,
+    const cadnext::CutSpan& span) {
+    if (targetShape.isNull()) {
+        return usageError("Cut target shape handle is null");
+    }
+
+    const cadnext::Result<ShapeHandle> cutter =
+        buildProfilePrism(reference, profile, span.start, span.end);
+    if (!cutter.isOk()) {
+        if (cutter.error().code == cadnext::ErrorCode::KernelUnavailable) {
             return cadnext::Result<EvaluatedGeometry>::ok(
-                backendlessResult(shape.error().message));
+                backendlessResult(cutter.error().message));
         }
-        return cadnext::Result<EvaluatedGeometry>::fail(shape.error());
+        return cadnext::Result<EvaluatedGeometry>::fail(cutter.error());
+    }
+
+    const cadnext::Result<ShapeHandle> result =
+        kernel_.booleanCut(targetShape, cutter.value());
+    if (!result.isOk()) {
+        if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
+            return cadnext::Result<EvaluatedGeometry>::ok(
+                backendlessResult(result.error().message));
+        }
+        return cadnext::Result<EvaluatedGeometry>::fail(result.error());
     }
 
     EvaluatedGeometry geometry;
-    geometry.shape = shape.value();
+    geometry.shape = result.value();
+    return finishShapeEvaluation(std::move(geometry));
+}
+
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::finishShapeEvaluation(
+    EvaluatedGeometry geometry) {
     if (!kernel_.isShapeValid(geometry.shape)) {
         geometry.isValid = false;
-        geometry.message = "Kernel reports the extruded shape as invalid";
+        geometry.message = "Kernel reports the evaluated shape as invalid";
         return cadnext::Result<EvaluatedGeometry>::ok(geometry);
     }
 

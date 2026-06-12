@@ -7,12 +7,14 @@ set(CMAKE_AUTOMOC ON)
 # Headers are listed so AUTOMOC picks up Q_OBJECT classes living under
 # include/ (AUTOMOC only auto-discovers headers next to their sources).
 add_library(cadnext_gui
+    include/cadnext/gui/CutExtrudeDialog.hpp
     include/cadnext/gui/ExtrudeDialog.hpp
     include/cadnext/gui/MainWindow.hpp
     include/cadnext/gui/ProjectTree.hpp
     include/cadnext/gui/PropertyPanel.hpp
     include/cadnext/gui/SketchToolBar.hpp
     include/cadnext/gui/ToolBar.hpp
+    src/CutExtrudeDialog.cpp
     src/ExtrudeDialog.cpp
     src/MainWindow.cpp
     src/ProjectTree.cpp

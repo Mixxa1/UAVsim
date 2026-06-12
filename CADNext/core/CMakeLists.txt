@@ -8,6 +8,7 @@ add_library(cadnext_core
     src/WorkPlane.cpp
     src/SketchProfile.cpp
     src/Extrude.cpp
+    src/ExtrudeCut.cpp
     src/Feature.cpp
     src/Material.cpp
     src/Transform.cpp

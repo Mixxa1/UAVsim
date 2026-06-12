@@ -115,6 +115,15 @@ target_link_libraries(cadnext_test_sketch_profile_detector
         cadnext_core
 )
 
+add_executable(cadnext_test_custom_profile_stability
+    test_custom_profile_stability.cpp
+)
+
+target_link_libraries(cadnext_test_custom_profile_stability
+    PRIVATE
+        cadnext_core
+)
+
 add_executable(cadnext_test_sketch_snap
     test_sketch_snap.cpp
 )
@@ -196,6 +205,87 @@ target_link_libraries(cadnext_test_extrude_serialization
         cadnext_core
 )
 
+add_executable(cadnext_test_extrude_cut_parameters
+    test_extrude_cut_parameters.cpp
+)
+
+target_link_libraries(cadnext_test_extrude_cut_parameters
+    PRIVATE
+        cadnext_core
+)
+
+add_executable(cadnext_test_extrude_cut_depth_modes
+    test_extrude_cut_depth_modes.cpp
+)
+
+target_link_libraries(cadnext_test_extrude_cut_depth_modes
+    PRIVATE
+        cadnext_core
+)
+
+add_executable(cadnext_test_face_reference
+    test_face_reference.cpp
+)
+
+target_link_libraries(cadnext_test_face_reference
+    PRIVATE
+        cadnext_kernel
+)
+
+add_executable(cadnext_test_face_mesh_ownership
+    test_face_mesh_ownership.cpp
+)
+
+target_link_libraries(cadnext_test_face_mesh_ownership
+    PRIVATE
+        cadnext_kernel
+)
+
+add_executable(cadnext_test_procedural_prism_face_ids
+    test_procedural_prism_face_ids.cpp
+)
+
+target_link_libraries(cadnext_test_procedural_prism_face_ids
+    PRIVATE
+        cadnext_kernel
+)
+
+add_executable(cadnext_test_face_sketch_reference
+    test_face_sketch_reference.cpp
+)
+
+target_link_libraries(cadnext_test_face_sketch_reference
+    PRIVATE
+        cadnext_core
+)
+
+add_executable(cadnext_test_face_selection_resolution
+    test_face_selection_resolution.cpp
+)
+
+target_link_libraries(cadnext_test_face_selection_resolution
+    PRIVATE
+        cadnext_core
+)
+
+add_executable(cadnext_test_body_face_selection_state
+    test_body_face_selection_state.cpp
+)
+
+target_link_libraries(cadnext_test_body_face_selection_state
+    PRIVATE
+        cadnext_kernel
+)
+
+add_executable(cadnext_test_face_workplane_serialization
+    test_face_workplane_serialization.cpp
+)
+
+target_link_libraries(cadnext_test_face_workplane_serialization
+    PRIVATE
+        cadnext_core
+)
+
 add_test(NAME cadnext_test_sketch_model COMMAND cadnext_test_sketch_model)
 add_test(NAME cadnext_test_sketch_snap COMMAND cadnext_test_sketch_snap)
 add_test(NAME cadnext_test_sketch_plane_mapping COMMAND cadnext_test_sketch_plane_mapping)
@@ -210,10 +300,29 @@ add_test(NAME cadnext_test_extrude_parameters COMMAND cadnext_test_extrude_param
 add_test(NAME cadnext_test_extrude_direction COMMAND cadnext_test_extrude_direction)
 add_test(NAME cadnext_test_extrude_serialization
          COMMAND cadnext_test_extrude_serialization)
+add_test(NAME cadnext_test_extrude_cut_parameters
+         COMMAND cadnext_test_extrude_cut_parameters)
+add_test(NAME cadnext_test_extrude_cut_depth_modes
+         COMMAND cadnext_test_extrude_cut_depth_modes)
+add_test(NAME cadnext_test_face_reference COMMAND cadnext_test_face_reference)
+add_test(NAME cadnext_test_face_mesh_ownership
+         COMMAND cadnext_test_face_mesh_ownership)
+add_test(NAME cadnext_test_procedural_prism_face_ids
+         COMMAND cadnext_test_procedural_prism_face_ids)
+add_test(NAME cadnext_test_face_sketch_reference
+         COMMAND cadnext_test_face_sketch_reference)
+add_test(NAME cadnext_test_face_selection_resolution
+         COMMAND cadnext_test_face_selection_resolution)
+add_test(NAME cadnext_test_body_face_selection_state
+         COMMAND cadnext_test_body_face_selection_state)
+add_test(NAME cadnext_test_face_workplane_serialization
+         COMMAND cadnext_test_face_workplane_serialization)
 add_test(NAME cadnext_test_workplane_model COMMAND cadnext_test_workplane_model)
 add_test(NAME cadnext_test_sketch_reference COMMAND cadnext_test_sketch_reference)
 add_test(NAME cadnext_test_sketch_serialization COMMAND cadnext_test_sketch_serialization)
 add_test(NAME cadnext_test_sketch_profile_detector COMMAND cadnext_test_sketch_profile_detector)
+add_test(NAME cadnext_test_custom_profile_stability
+         COMMAND cadnext_test_custom_profile_stability)
 add_test(NAME cadnext_test_document COMMAND cadnext_test_document)
 add_test(NAME cadnext_test_stub_kernel COMMAND cadnext_test_stub_kernel)
 add_test(NAME cadnext_test_bridge_export COMMAND cadnext_test_bridge_export)
@@ -252,10 +361,65 @@ if(CADNEXT_WITH_OCCT)
             cadnext_kernel
     )
 
+    add_executable(cadnext_test_occt_extrude_cut
+        test_occt_extrude_cut.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_extrude_cut
+        PRIVATE
+            cadnext_kernel
+    )
+
+    add_executable(cadnext_test_occt_planar_face_analyzer
+        test_occt_planar_face_analyzer.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_planar_face_analyzer
+        PRIVATE
+            cadnext_kernel
+    )
+
+    add_executable(cadnext_test_occt_mesh_face_ids
+        test_occt_mesh_face_ids.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_mesh_face_ids
+        PRIVATE
+            cadnext_kernel
+    )
+
+    add_executable(cadnext_test_occt_face_pick_resolution
+        test_occt_face_pick_resolution.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_face_pick_resolution
+        PRIVATE
+            cadnext_kernel
+    )
+
+    add_executable(cadnext_test_occt_sketch_on_face_extrude_cut
+        test_occt_sketch_on_face_extrude_cut.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_sketch_on_face_extrude_cut
+        PRIVATE
+            cadnext_kernel
+    )
+
     add_test(NAME cadnext_test_occt_kernel_primitives
              COMMAND cadnext_test_occt_kernel_primitives)
     add_test(NAME cadnext_test_occt_mesh_extractor
              COMMAND cadnext_test_occt_mesh_extractor)
     add_test(NAME cadnext_test_geometry_evaluator
              COMMAND cadnext_test_geometry_evaluator)
+    add_test(NAME cadnext_test_occt_extrude_cut
+             COMMAND cadnext_test_occt_extrude_cut)
+    add_test(NAME cadnext_test_occt_planar_face_analyzer
+             COMMAND cadnext_test_occt_planar_face_analyzer)
+    add_test(NAME cadnext_test_occt_mesh_face_ids
+             COMMAND cadnext_test_occt_mesh_face_ids)
+    add_test(NAME cadnext_test_occt_face_pick_resolution
+             COMMAND cadnext_test_occt_face_pick_resolution)
+    add_test(NAME cadnext_test_occt_sketch_on_face_extrude_cut
+             COMMAND cadnext_test_occt_sketch_on_face_extrude_cut)
 endif()

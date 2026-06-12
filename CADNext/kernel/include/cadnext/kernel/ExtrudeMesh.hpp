@@ -20,4 +20,12 @@ cadnext::Result<TriangleMesh> buildExtrudedProfileMesh(
     const cadnext::SketchProfile& profile,
     const cadnext::ExtrudeParameters& parameters);
 
+// Same prism mesh over an explicit [startOffset, endOffset] span along
+// the plane normal — used for the Cut Extrude cutter preview, whose span
+// comes from computeCutSpan rather than ExtrudeParameters.
+cadnext::Result<TriangleMesh> buildProfilePrismMesh(
+    const cadnext::SketchReference& reference,
+    const cadnext::SketchProfile& profile,
+    double startOffset, double endOffset);
+
 } // namespace cadnext::kernel
