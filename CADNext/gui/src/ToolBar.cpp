@@ -19,6 +19,10 @@ ToolBar::ToolBar(QWidget* parent)
     extrudeAction_->setEnabled(false);
     cutExtrudeAction_ = addAction(tr("Cut Extrude"));
     cutExtrudeAction_->setEnabled(false);
+    chamferAction_ = addAction(tr("Chamfer"));
+    chamferAction_->setEnabled(false);
+    filletAction_ = addAction(tr("Fillet"));
+    filletAction_->setEnabled(false);
     addSeparator();
     // Enabled by MainWindow when the selection is a sketchable planar
     // body face (CADNext 0.8 Sketch on Face).

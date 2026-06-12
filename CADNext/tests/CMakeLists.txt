@@ -259,11 +259,38 @@ target_link_libraries(cadnext_test_extrude_cut_depth_modes
         cadnext_core
 )
 
+add_executable(cadnext_test_chamfer_parameters
+    test_chamfer_parameters.cpp
+)
+
+target_link_libraries(cadnext_test_chamfer_parameters
+    PRIVATE
+        cadnext_core
+)
+
+add_executable(cadnext_test_fillet_parameters
+    test_fillet_parameters.cpp
+)
+
+target_link_libraries(cadnext_test_fillet_parameters
+    PRIVATE
+        cadnext_core
+)
+
 add_executable(cadnext_test_face_reference
     test_face_reference.cpp
 )
 
 target_link_libraries(cadnext_test_face_reference
+    PRIVATE
+        cadnext_kernel
+)
+
+add_executable(cadnext_test_edge_reference
+    test_edge_reference.cpp
+)
+
+target_link_libraries(cadnext_test_edge_reference
     PRIVATE
         cadnext_kernel
 )
@@ -346,7 +373,12 @@ add_test(NAME cadnext_test_extrude_cut_parameters
          COMMAND cadnext_test_extrude_cut_parameters)
 add_test(NAME cadnext_test_extrude_cut_depth_modes
          COMMAND cadnext_test_extrude_cut_depth_modes)
+add_test(NAME cadnext_test_chamfer_parameters
+         COMMAND cadnext_test_chamfer_parameters)
+add_test(NAME cadnext_test_fillet_parameters
+         COMMAND cadnext_test_fillet_parameters)
 add_test(NAME cadnext_test_face_reference COMMAND cadnext_test_face_reference)
+add_test(NAME cadnext_test_edge_reference COMMAND cadnext_test_edge_reference)
 add_test(NAME cadnext_test_face_mesh_ownership
          COMMAND cadnext_test_face_mesh_ownership)
 add_test(NAME cadnext_test_procedural_prism_face_ids
@@ -439,6 +471,33 @@ if(CADNEXT_WITH_OCCT)
             cadnext_kernel
     )
 
+    add_executable(cadnext_test_occt_edge_analyzer
+        test_occt_edge_analyzer.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_edge_analyzer
+        PRIVATE
+            cadnext_kernel
+    )
+
+    add_executable(cadnext_test_occt_chamfer
+        test_occt_chamfer.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_chamfer
+        PRIVATE
+            cadnext_kernel
+    )
+
+    add_executable(cadnext_test_occt_fillet
+        test_occt_fillet.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_fillet
+        PRIVATE
+            cadnext_kernel
+    )
+
     add_executable(cadnext_test_occt_sketch_on_face_extrude_cut
         test_occt_sketch_on_face_extrude_cut.cpp
     )
@@ -462,6 +521,12 @@ if(CADNEXT_WITH_OCCT)
              COMMAND cadnext_test_occt_mesh_face_ids)
     add_test(NAME cadnext_test_occt_face_pick_resolution
              COMMAND cadnext_test_occt_face_pick_resolution)
+    add_test(NAME cadnext_test_occt_edge_analyzer
+             COMMAND cadnext_test_occt_edge_analyzer)
+    add_test(NAME cadnext_test_occt_chamfer
+             COMMAND cadnext_test_occt_chamfer)
+    add_test(NAME cadnext_test_occt_fillet
+             COMMAND cadnext_test_occt_fillet)
     add_test(NAME cadnext_test_occt_sketch_on_face_extrude_cut
              COMMAND cadnext_test_occt_sketch_on_face_extrude_cut)
 endif()

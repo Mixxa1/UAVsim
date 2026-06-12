@@ -3,8 +3,10 @@
 #include <string>
 #include <vector>
 
+#include "cadnext/Chamfer.hpp"
 #include "cadnext/Extrude.hpp"
 #include "cadnext/ExtrudeCut.hpp"
+#include "cadnext/Fillet.hpp"
 
 namespace cadnext {
 
@@ -12,9 +14,9 @@ enum class FeatureType {
     Sketch,
     Extrude,
     ExtrudeCut,
-    Cut,
-    Fillet,
     Chamfer,
+    Fillet,
+    Cut,
     BooleanFuse,
     BooleanCut,
     BooleanCommon
@@ -39,6 +41,12 @@ struct Feature {
     // Cut features are replayed in order on load (OCCT builds).
     ExtrudeCutParameters extrudeCut;
     std::string modifiedBodyId;
+
+    // FeatureType::Chamfer / FeatureType::Fillet: edge-operation recipes.
+    // Edge ids are stable-ish for the current evaluated body state and are
+    // re-resolved during replay; robust topological naming is future work.
+    ChamferParameters chamfer;
+    FilletParameters fillet;
 };
 
 } // namespace cadnext

@@ -34,6 +34,12 @@ public:
     cadnext::Result<ShapeHandle> booleanFuse(const ShapeHandle& a, const ShapeHandle& b) override;
     cadnext::Result<ShapeHandle> booleanCut(const ShapeHandle& target, const ShapeHandle& tool) override;
     cadnext::Result<ShapeHandle> booleanCommon(const ShapeHandle& a, const ShapeHandle& b) override;
+    cadnext::Result<ShapeHandle> chamferEdges(const ShapeHandle& target,
+                                              const std::vector<std::string>& edgeIds,
+                                              double distance) override;
+    cadnext::Result<ShapeHandle> filletEdges(const ShapeHandle& target,
+                                             const std::vector<std::string>& edgeIds,
+                                             double radius) override;
     cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) override;
     bool isShapeValid(const ShapeHandle& shape) const override;
 

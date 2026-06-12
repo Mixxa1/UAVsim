@@ -68,6 +68,24 @@ cadnext::Result<ShapeHandle> StubKernel::booleanCommon(const ShapeHandle& a, con
     return makeBooleanHandle("common", a, b);
 }
 
+cadnext::Result<ShapeHandle> StubKernel::chamferEdges(const ShapeHandle&,
+                                                      const std::vector<std::string>&,
+                                                      double) {
+    return cadnext::Result<ShapeHandle>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Chamfer requires OCCT backend"
+    });
+}
+
+cadnext::Result<ShapeHandle> StubKernel::filletEdges(const ShapeHandle&,
+                                                     const std::vector<std::string>&,
+                                                     double) {
+    return cadnext::Result<ShapeHandle>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Fillet requires OCCT backend"
+    });
+}
+
 cadnext::Result<ShapeBounds> StubKernel::boundingBox(const ShapeHandle&) {
     return cadnext::Result<ShapeBounds>::fail({
         cadnext::ErrorCode::KernelUnavailable,

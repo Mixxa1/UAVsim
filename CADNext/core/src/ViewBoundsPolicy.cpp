@@ -34,6 +34,10 @@ bool entryMatchesSelection(const ViewBoundsEntry& entry, const SelectionState& s
         return selection.bodyId && selection.faceId &&
                entry.kind == ViewGeometryKind::BodyFace &&
                entry.bodyId == *selection.bodyId && entry.faceId == *selection.faceId;
+    case SelectionKind::BodyEdge:
+        return selection.bodyId && selection.edgeId &&
+               entry.kind == ViewGeometryKind::BodyEdge &&
+               entry.bodyId == *selection.bodyId && entry.edgeId == *selection.edgeId;
     case SelectionKind::Sketch:
         return selection.sketchId &&
                (entry.kind == ViewGeometryKind::Sketch ||
@@ -61,6 +65,7 @@ std::string selectionKindName(const SelectionState& selection) {
     switch (selection.kind) {
     case SelectionKind::Body: return "Body";
     case SelectionKind::BodyFace: return "Face";
+    case SelectionKind::BodyEdge: return "Edge";
     case SelectionKind::Sketch: return "Sketch";
     case SelectionKind::SketchEntity: return "SketchEntity";
     case SelectionKind::SketchProfile: return "SketchProfile";
@@ -138,6 +143,7 @@ bool viewGeometryContributesToFitAll(ViewGeometryKind kind) {
     case ViewGeometryKind::CommittedSketch:
         return true;
     case ViewGeometryKind::BodyFace:
+    case ViewGeometryKind::BodyEdge:
     case ViewGeometryKind::SketchEntity:
     case ViewGeometryKind::SketchProfile:
     case ViewGeometryKind::HelperPlane:
@@ -159,6 +165,7 @@ bool viewGeometryIsHelper(ViewGeometryKind kind) {
         return true;
     case ViewGeometryKind::Body:
     case ViewGeometryKind::BodyFace:
+    case ViewGeometryKind::BodyEdge:
     case ViewGeometryKind::Sketch:
     case ViewGeometryKind::SketchEntity:
     case ViewGeometryKind::SketchProfile:
@@ -221,6 +228,7 @@ const char* viewGeometryKindName(ViewGeometryKind kind) {
     switch (kind) {
     case ViewGeometryKind::Body: return "Body";
     case ViewGeometryKind::BodyFace: return "Face";
+    case ViewGeometryKind::BodyEdge: return "Edge";
     case ViewGeometryKind::Sketch: return "Sketch";
     case ViewGeometryKind::SketchEntity: return "SketchEntity";
     case ViewGeometryKind::SketchProfile: return "SketchProfile";

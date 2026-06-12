@@ -105,5 +105,54 @@ int main() {
     const auto missingFile = cadnext::DocumentSerializer::loadFromFile("does-not-exist.cadnext");
     assert(!missingFile.isOk());
 
+    // Chamfer/Fillet feature metadata roundtrip (resulting BRep/mesh is
+    // derived/transient; feature recipes are the serialized contract).
+    cadnext::Document edgeOps;
+    cadnext::Object body;
+    body.id = "object-1";
+    body.name = "Box 1";
+    body.type = cadnext::ObjectType::Body;
+    body.primitive.kind = cadnext::PrimitiveKind::Box;
+    edgeOps.addObject(body);
+
+    cadnext::Feature chamfer;
+    chamfer.id = "feature-1";
+    chamfer.name = "Chamfer 1";
+    chamfer.type = cadnext::FeatureType::Chamfer;
+    chamfer.targetObjectId = "object-1";
+    chamfer.modifiedBodyId = "object-1";
+    chamfer.chamfer.targetBodyId = "object-1";
+    chamfer.chamfer.edgeIds = {"edge-0-saaa-eaaa-laaa"};
+    chamfer.chamfer.distance = 0.125;
+    edgeOps.addFeature(chamfer);
+
+    cadnext::Feature fillet;
+    fillet.id = "feature-2";
+    fillet.name = "Fillet 1";
+    fillet.type = cadnext::FeatureType::Fillet;
+    fillet.targetObjectId = "object-1";
+    fillet.modifiedBodyId = "object-1";
+    fillet.fillet.targetBodyId = "object-1";
+    fillet.fillet.edgeIds = {"edge-1-sbbb-ebbb-lbbb"};
+    fillet.fillet.radius = 0.25;
+    edgeOps.addFeature(fillet);
+
+    const std::string edgeJson = cadnext::DocumentSerializer::toJson(edgeOps);
+    assert(edgeJson.find("\"chamfer\"") != std::string::npos);
+    assert(edgeJson.find("\"fillet\"") != std::string::npos);
+    const auto edgeRoundtrip = cadnext::DocumentSerializer::fromJson(edgeJson);
+    assert(edgeRoundtrip.isOk());
+    assert(edgeRoundtrip.value().features().size() == 2);
+    assert(edgeRoundtrip.value().features()[0].type == cadnext::FeatureType::Chamfer);
+    assert(edgeRoundtrip.value().features()[0].chamfer.edgeIds.size() == 1);
+    assert(edgeRoundtrip.value().features()[0].chamfer.edgeIds[0] ==
+           "edge-0-saaa-eaaa-laaa");
+    assert(nearlyEqual(edgeRoundtrip.value().features()[0].chamfer.distance, 0.125));
+    assert(edgeRoundtrip.value().features()[1].type == cadnext::FeatureType::Fillet);
+    assert(edgeRoundtrip.value().features()[1].fillet.edgeIds.size() == 1);
+    assert(edgeRoundtrip.value().features()[1].fillet.edgeIds[0] ==
+           "edge-1-sbbb-ebbb-lbbb");
+    assert(nearlyEqual(edgeRoundtrip.value().features()[1].fillet.radius, 0.25));
+
     return 0;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "cadnext/Result.hpp"
@@ -84,6 +85,18 @@ public:
     virtual cadnext::Result<ShapeHandle> booleanCommon(
         const ShapeHandle& a,
         const ShapeHandle& b
+    ) = 0;
+
+    virtual cadnext::Result<ShapeHandle> chamferEdges(
+        const ShapeHandle& target,
+        const std::vector<std::string>& edgeIds,
+        double distance
+    ) = 0;
+
+    virtual cadnext::Result<ShapeHandle> filletEdges(
+        const ShapeHandle& target,
+        const std::vector<std::string>& edgeIds,
+        double radius
     ) = 0;
 
     virtual cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) = 0;

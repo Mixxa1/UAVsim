@@ -24,6 +24,7 @@
 
 #include "cadnext/DocumentSerializer.hpp"
 #include "cadnext/gui/CutExtrudeDialog.hpp"
+#include "cadnext/gui/EdgeOperationDialog.hpp"
 #include "cadnext/gui/ExtrudeDialog.hpp"
 #include "cadnext/gui/ProjectTree.hpp"
 #include "cadnext/gui/PropertyPanel.hpp"
@@ -162,8 +163,27 @@ Vector3 add(Vector3 a, Vector3 b) {
     return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
 
+Vector3 subtract(Vector3 a, Vector3 b) {
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
 Vector3 scale(Vector3 v, double factor) {
     return {v.x * factor, v.y * factor, v.z * factor};
+}
+
+double length(Vector3 v) {
+    return std::sqrt(dot(v, v));
+}
+
+double distancePointToSegment(const Vector3& point, const Vector3& a, const Vector3& b) {
+    const Vector3 ab = subtract(b, a);
+    const double ab2 = dot(ab, ab);
+    if (ab2 <= 1.0e-18 || !std::isfinite(ab2)) {
+        return length(subtract(point, a));
+    }
+    const double t = std::clamp(dot(subtract(point, a), ab) / ab2, 0.0, 1.0);
+    const Vector3 closest = add(a, scale(ab, t));
+    return length(subtract(point, closest));
 }
 
 Vector3 transformPoint(const Vector3& point, const Transform& transform) {
@@ -308,6 +328,45 @@ ViewBounds faceReferenceBounds(const kernel::FaceReference& face) {
     return bounds;
 }
 
+ViewBounds edgeReferenceBounds(const kernel::EdgeReference& edge) {
+    ViewBounds bounds;
+    if (!edge.previewPolyline.empty()) {
+        for (const Vector3& point : edge.previewPolyline) {
+            bounds.include(point);
+        }
+    } else {
+        bounds.include(edge.start);
+        bounds.include(edge.end);
+    }
+    return bounds;
+}
+
+kernel::EdgeReference transformedEdgeReference(const kernel::EdgeReference& edge,
+                                               const Transform& transform) {
+    kernel::EdgeReference out = edge;
+    out.start = transformPoint(edge.start, transform);
+    out.end = transformPoint(edge.end, transform);
+    out.center = transformPoint(edge.center, transform);
+    for (Vector3& point : out.previewPolyline) {
+        point = transformPoint(point, transform);
+    }
+    if (out.previewPolyline.size() >= 2) {
+        double worldLength = 0.0;
+        for (size_t i = 1; i < out.previewPolyline.size(); ++i) {
+            worldLength += length(subtract(out.previewPolyline[i], out.previewPolyline[i - 1]));
+        }
+        if (std::isfinite(worldLength) && worldLength > 0.0) {
+            out.length = worldLength;
+        }
+    } else {
+        const double worldLength = length(subtract(out.end, out.start));
+        if (std::isfinite(worldLength) && worldLength > 0.0) {
+            out.length = worldLength;
+        }
+    }
+    return out;
+}
+
 QString cutDepthModeText(CutDepthMode mode) {
     switch (mode) {
     case CutDepthMode::Distance: return QObject::tr("Distance");
@@ -368,6 +427,10 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { openExtrudeDialog(); });
     connect(toolBar_->cutExtrudeAction(), &QAction::triggered, this,
             [this]() { openCutExtrudeDialog(); });
+    connect(toolBar_->chamferAction(), &QAction::triggered, this,
+            [this]() { openChamferDialog(); });
+    connect(toolBar_->filletAction(), &QAction::triggered, this,
+            [this]() { openFilletDialog(); });
     connect(toolBar_->createSketchOnFaceAction(), &QAction::triggered, this,
             [this]() { createSketchOnSelectedFace(); });
     connect(toolBar_->workPlaneFromFaceAction(), &QAction::triggered, this,
@@ -512,6 +575,11 @@ void MainWindow::initializeViewport() {
             selectWorkPlane(target.workPlaneId);
             showPlaneActionPalette(contextClick);
         } else if (target.isBodyFace()) {
+            if (const kernel::EdgeReference* edge = edgeFromPickTarget(target)) {
+                selectBodyEdge(edge->bodyId, edge->edgeId);
+                showEdgeActionPalette(contextClick);
+                return;
+            }
             // Face picking layers on top of body picking: the click
             // selects the face; the owning body stays reachable through
             // the tree (and is reported in the property panel).
@@ -520,6 +588,11 @@ void MainWindow::initializeViewport() {
             selectBodyFace(target.objectId, target.faceId);
             showFaceActionPalette(contextClick);
         } else if (target.isBody()) {
+            if (const kernel::EdgeReference* edge = edgeFromPickTarget(target)) {
+                selectBodyEdge(edge->bodyId, edge->edgeId);
+                showEdgeActionPalette(contextClick);
+                return;
+            }
             if (target.faceLookupAttempted) {
                 qInfo("[FacePick] fallback Body selection: body=%s triangle=%d has no faceId",
                       target.objectId.c_str(), target.triangleIndex);
@@ -593,6 +666,8 @@ void MainWindow::selectWorkPlane(const std::string& planeId) {
     selectionKind_ = SelectionKind::WorkPlane;
     selectedId_ = planeId;
     selectedSketchId_.clear();
+    selectedFace_ = {};
+    selectedEdge_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -605,6 +680,8 @@ void MainWindow::selectBody(const std::string& objectId) {
     selectionKind_ = SelectionKind::Body;
     selectedId_ = objectId;
     selectedSketchId_.clear();
+    selectedFace_ = {};
+    selectedEdge_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -619,6 +696,7 @@ void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& fa
     selectedId_ = bodyId; // the owning body, so body-based actions keep working
     selectedSketchId_.clear();
     selectedFace_ = {bodyId, faceId};
+    selectedEdge_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -636,6 +714,28 @@ void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& fa
     }
 }
 
+void MainWindow::selectBodyEdge(const std::string& bodyId, const std::string& edgeId) {
+    if (selectionKind_ == SelectionKind::BodyEdge && selectedEdge_.bodyId == bodyId &&
+        selectedEdge_.edgeId == edgeId) {
+        return;
+    }
+    selectionKind_ = SelectionKind::BodyEdge;
+    selectedId_ = bodyId;
+    selectedSketchId_.clear();
+    selectedEdge_ = {bodyId, edgeId};
+    selectedFace_ = {};
+    syncTreeSelection();
+    syncViewportSelection();
+    refreshPropertyPanel();
+    if (const kernel::EdgeReference* edge = findBodyEdge(bodyId, edgeId)) {
+        statusBar()->showMessage(
+            (edge->isChamferable || edge->isFilletable)
+                ? tr("Body edge selected — Chamfer / Fillet available")
+                : tr("Body edge selected"),
+            5000);
+    }
+}
+
 void MainWindow::selectSketch(const std::string& sketchId) {
     if (selectionKind_ == SelectionKind::Sketch && selectedId_ == sketchId) {
         return;
@@ -643,6 +743,8 @@ void MainWindow::selectSketch(const std::string& sketchId) {
     selectionKind_ = SelectionKind::Sketch;
     selectedId_ = sketchId;
     selectedSketchId_.clear();
+    selectedFace_ = {};
+    selectedEdge_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -656,6 +758,8 @@ void MainWindow::selectEntity(const std::string& sketchId, const std::string& en
     selectionKind_ = SelectionKind::Entity;
     selectedId_ = entityId;
     selectedSketchId_ = sketchId;
+    selectedFace_ = {};
+    selectedEdge_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -671,6 +775,7 @@ void MainWindow::clearSelection() {
     selectedId_.clear();
     selectedSketchId_.clear();
     selectedFace_ = {};
+    selectedEdge_ = {};
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
@@ -688,6 +793,10 @@ void MainWindow::syncTreeSelection() {
     case SelectionKind::BodyFace:
         // Faces have no tree rows; highlight the owning body instead.
         projectTree_->setCurrentBody(QString::fromStdString(selectedFace_.bodyId));
+        break;
+    case SelectionKind::BodyEdge:
+        // Edges have no tree rows; highlight the owning body instead.
+        projectTree_->setCurrentBody(QString::fromStdString(selectedEdge_.bodyId));
         break;
     case SelectionKind::Sketch:
         projectTree_->setCurrentSketch(QString::fromStdString(selectedId_));
@@ -724,6 +833,12 @@ void MainWindow::syncViewportSelection() {
         viewer_->scene().setSelectedBodyFace(std::string(), std::string());
     }
 
+    if (selectionKind_ == SelectionKind::BodyEdge) {
+        viewer_->scene().highlightBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
+    } else {
+        viewer_->scene().clearBodyEdgeHighlight();
+    }
+
     // Sketch entity highlight.
     if (!highlightedEntityId_.empty()) {
         viewer_->scene().setSketchEntityHighlighted(highlightedEntitySketch_,
@@ -742,6 +857,7 @@ void MainWindow::syncViewportSelection() {
                                           !activeSketchId_);
     updateExtrudeActionEnabled();
     updateFaceActionsEnabled();
+    updateEdgeActionsEnabled();
     updateModeStatusLabel();
     refreshCameraNavigationContext();
 }
@@ -792,6 +908,16 @@ void MainWindow::refreshPropertyPanel() {
         }
         break;
     }
+    case SelectionKind::BodyEdge: {
+        const kernel::EdgeReference* edge =
+            findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
+        const Result<Object> body = document_.objectById(selectedEdge_.bodyId);
+        if (edge && body.isOk()) {
+            propertyPanel_->showBodyEdge(QString::fromStdString(body.value().name), *edge);
+            return;
+        }
+        break;
+    }
     case SelectionKind::None:
         break;
     }
@@ -816,6 +942,11 @@ SelectionState MainWindow::cameraSelectionState() const {
         selection.kind = cadnext::SelectionKind::BodyFace;
         selection.bodyId = selectedFace_.bodyId;
         selection.faceId = selectedFace_.faceId;
+        break;
+    case SelectionKind::BodyEdge:
+        selection.kind = cadnext::SelectionKind::BodyEdge;
+        selection.bodyId = selectedEdge_.bodyId;
+        selection.edgeId = selectedEdge_.edgeId;
         break;
     case SelectionKind::Sketch:
         selection.kind = cadnext::SelectionKind::Sketch;
@@ -879,6 +1010,22 @@ ViewBoundsScene MainWindow::cameraBoundsScene() const {
             entry.bodyId = face.bodyId;
             entry.faceId = face.faceId;
             entry.debugName = face.faceId;
+            entry.bounds = bounds;
+            scene.entries.push_back(std::move(entry));
+        }
+    }
+
+    for (const auto& bodyEntry : bodyEdges_) {
+        for (const kernel::EdgeReference& edge : bodyEntry.second) {
+            ViewBounds bounds = edgeReferenceBounds(edge);
+            if (!bounds.valid) {
+                continue;
+            }
+            ViewBoundsEntry entry;
+            entry.kind = ViewGeometryKind::BodyEdge;
+            entry.bodyId = edge.bodyId;
+            entry.edgeId = edge.edgeId;
+            entry.debugName = edge.edgeId;
             entry.bounds = bounds;
             scene.entries.push_back(std::move(entry));
         }
@@ -1136,6 +1283,7 @@ void MainWindow::buildObjectVisual(const Object& object) {
             bodyMeshes_[object.id] = evaluated.value().previewMesh;
             viewer_->scene().addOrUpdateObjectMesh(object, evaluated.value().previewMesh);
             refreshBodyFaces(object.id);
+            refreshBodyEdges(object.id);
             return;
         }
 #ifdef CADNEXT_WITH_OCCT
@@ -1159,7 +1307,9 @@ void MainWindow::buildObjectVisual(const Object& object) {
     bodyShapes_.erase(object.id);
     bodyMeshes_.erase(object.id);
     bodyFaces_.erase(object.id);
+    bodyEdges_.erase(object.id);
     viewer_->scene().removeBodyFaces(object.id);
+    viewer_->scene().removeBodyEdges(object.id);
     if (viewer_->scene().hasObjectNode(object.id)) {
         viewer_->scene().updateObjectPrimitive(object);
     } else {
@@ -1189,10 +1339,11 @@ void MainWindow::deleteSelected() {
             document_.removeWorkPlane(planeId);
             viewer_->scene().removeDocumentWorkPlane(planeId);
         } else {
-        document_.removeObject(planeId);
-        bodyShapes_.erase(planeId);
-        bodyMeshes_.erase(planeId);
-        viewer_->scene().removeObjectNode(planeId);
+            document_.removeObject(planeId);
+            bodyShapes_.erase(planeId);
+            bodyMeshes_.erase(planeId);
+            bodyEdges_.erase(planeId);
+            viewer_->scene().removeObjectNode(planeId);
         }
         {
             const QSignalBlocker blocker(projectTree_);
@@ -1208,6 +1359,7 @@ void MainWindow::deleteSelected() {
         bodyShapes_.erase(objectId);
         bodyMeshes_.erase(objectId);
         bodyFaces_.erase(objectId);
+        bodyEdges_.erase(objectId);
         viewer_->scene().removeObjectNode(objectId);
         {
             const QSignalBlocker blocker(projectTree_);
@@ -1219,6 +1371,10 @@ void MainWindow::deleteSelected() {
     case SelectionKind::BodyFace:
         statusBar()->showMessage(
             tr("Faces cannot be deleted — delete the body instead"), 3000);
+        break;
+    case SelectionKind::BodyEdge:
+        statusBar()->showMessage(
+            tr("Edges cannot be deleted — apply Chamfer / Fillet or delete the body"), 3000);
         break;
     case SelectionKind::Sketch: {
         const std::string sketchId = selectedId_;
@@ -1673,6 +1829,13 @@ void MainWindow::updateModeStatusLabel() {
                 : tr("Selected face: not planar"));
         return;
     }
+    if (selectionKind_ == SelectionKind::BodyEdge) {
+        modeStatusLabel_->setText(
+            kOcctBackendAvailable
+                ? tr("Selected edge: Chamfer / Fillet available")
+                : tr("Selected edge: Chamfer / Fillet require OCCT backend"));
+        return;
+    }
     modeStatusLabel_->setText(tr("Free3D: select body, work plane or sketch"));
 }
 
@@ -2011,6 +2174,7 @@ void MainWindow::applyExtrude() {
     bodyMeshes_[body.id] = mesh;
     viewer_->scene().addOrUpdateObjectMesh(body, mesh);
     refreshBodyFaces(body.id);
+    refreshBodyEdges(body.id);
 
     Feature feature;
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
@@ -2116,6 +2280,7 @@ void MainWindow::buildExtrudedBodyVisual(const Object& object, const Feature& fe
         bodyMeshes_[object.id] = mesh;
         viewer_->scene().addOrUpdateObjectMesh(object, mesh);
         refreshBodyFaces(object.id);
+        refreshBodyEdges(object.id);
     } else {
         qWarning("CADNext: extrude regeneration failed for %s: %s", object.name.c_str(),
                  failureReason.toUtf8().constData());
@@ -2169,6 +2334,10 @@ std::string MainWindow::preferredCutTargetBodyId(const Sketch& sketch) const {
     if (selectionKind_ == SelectionKind::BodyFace &&
         bodyShapes_.find(selectedFace_.bodyId) != bodyShapes_.end()) {
         return selectedFace_.bodyId;
+    }
+    if (selectionKind_ == SelectionKind::BodyEdge &&
+        bodyShapes_.find(selectedEdge_.bodyId) != bodyShapes_.end()) {
+        return selectedEdge_.bodyId;
     }
     for (const Object& object : document_.objects()) {
         if (object.type == ObjectType::Body &&
@@ -2413,6 +2582,7 @@ void MainWindow::applyCutExtrude() {
     bodyMeshes_[targetBodyId] = evaluated.value().previewMesh;
     viewer_->scene().addOrUpdateObjectMesh(*target, evaluated.value().previewMesh);
     refreshBodyFaces(targetBodyId);
+    refreshBodyEdges(targetBodyId);
 
     Feature feature;
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
@@ -2584,6 +2754,7 @@ bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failur
         viewer_->scene().addOrUpdateObjectMesh(*target, evaluated.value().previewMesh);
     }
     refreshBodyFaces(target->id);
+    refreshBodyEdges(target->id);
     return true;
 }
 
@@ -2825,6 +2996,455 @@ void MainWindow::resolveFaceReferencesAfterLoad() {
     }
 }
 
+// --- Edge workflow (0.9 Edge Selection + Chamfer / Fillet v1) ---------------
+
+void MainWindow::refreshBodyEdges(const std::string& bodyId) {
+    if (!viewer_ || !kernel_) {
+        return;
+    }
+    const auto shapeIt = bodyShapes_.find(bodyId);
+    if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
+        bodyEdges_.erase(bodyId);
+        viewer_->scene().removeBodyEdges(bodyId);
+        updateEdgeActionsEnabled();
+        return;
+    }
+
+    kernel::EdgeAnalyzer analyzer(*kernel_);
+    std::vector<kernel::EdgeReference> edges =
+        analyzer.edgesForBody(bodyId, shapeIt->second);
+    if (const Result<Object> body = document_.objectById(bodyId); body.isOk()) {
+        for (kernel::EdgeReference& edge : edges) {
+            edge = transformedEdgeReference(edge, body.value().transform);
+        }
+    }
+    viewer_->scene().setBodyEdges(bodyId, edges);
+    bodyEdges_[bodyId] = std::move(edges);
+    if (selectionKind_ == SelectionKind::BodyEdge && selectedEdge_.bodyId == bodyId &&
+        !findBodyEdge(bodyId, selectedEdge_.edgeId)) {
+        clearSelection();
+    }
+    updateEdgeActionsEnabled();
+}
+
+const kernel::EdgeReference* MainWindow::findBodyEdge(const std::string& bodyId,
+                                                      const std::string& edgeId) const {
+    const auto it = bodyEdges_.find(bodyId);
+    if (it == bodyEdges_.end()) {
+        return nullptr;
+    }
+    for (const kernel::EdgeReference& edge : it->second) {
+        if (edge.edgeId == edgeId) {
+            return &edge;
+        }
+    }
+    return nullptr;
+}
+
+const kernel::EdgeReference* MainWindow::nearestBodyEdge(const std::string& bodyId,
+                                                        const Vector3& worldPoint) const {
+    const auto it = bodyEdges_.find(bodyId);
+    if (it == bodyEdges_.end() || it->second.empty()) {
+        return nullptr;
+    }
+
+    ViewBounds bounds;
+    for (const kernel::EdgeReference& edge : it->second) {
+        bounds.include(edgeReferenceBounds(edge));
+    }
+    const double diagonal = bounds.valid ? bounds.radius() * 2.0 : 1.0;
+    const double tolerance = std::clamp(diagonal * 0.025, 0.015, 0.25);
+
+    const kernel::EdgeReference* best = nullptr;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    for (const kernel::EdgeReference& edge : it->second) {
+        std::vector<Vector3> points = edge.previewPolyline;
+        if (points.size() < 2) {
+            points = {edge.start, edge.end};
+        }
+        if (points.size() < 2) {
+            continue;
+        }
+        for (size_t i = 1; i < points.size(); ++i) {
+            const double distance =
+                distancePointToSegment(worldPoint, points[i - 1], points[i]);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = &edge;
+            }
+        }
+    }
+    return bestDistance <= tolerance ? best : nullptr;
+}
+
+const kernel::EdgeReference* MainWindow::edgeFromPickTarget(
+    const viewer::ViewportPickTarget& target) const {
+    if (!target.isBody() || !target.hasWorldPoint) {
+        return nullptr;
+    }
+    return nearestBodyEdge(target.objectId, target.worldPoint);
+}
+
+void MainWindow::updateEdgeActionsEnabled() {
+    const kernel::EdgeReference* edge =
+        selectionKind_ == SelectionKind::BodyEdge
+            ? findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId)
+            : nullptr;
+    const bool canChamfer = kOcctBackendAvailable && edge && edge->isChamferable &&
+                            !activeSketchId_;
+    const bool canFillet = kOcctBackendAvailable && edge && edge->isFilletable &&
+                           !activeSketchId_;
+    toolBar_->chamferAction()->setEnabled(canChamfer);
+    toolBar_->filletAction()->setEnabled(canFillet);
+}
+
+void MainWindow::showEdgeActionPalette(bool contextClick) {
+    if (!contextClick || selectionKind_ != SelectionKind::BodyEdge || activeSketchId_) {
+        return;
+    }
+    const kernel::EdgeReference* edge =
+        findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
+    if (!edge) {
+        return;
+    }
+    QMenu menu(this);
+    QAction* chamfer = nullptr;
+    QAction* fillet = nullptr;
+    if (!kOcctBackendAvailable) {
+        menu.addAction(tr("Chamfer requires OCCT backend"))->setEnabled(false);
+        menu.addAction(tr("Fillet requires OCCT backend"))->setEnabled(false);
+    } else {
+        chamfer = menu.addAction(tr("Chamfer Edge"));
+        chamfer->setEnabled(edge->isChamferable);
+        fillet = menu.addAction(tr("Fillet Edge"));
+        fillet->setEnabled(edge->isFilletable);
+    }
+    QAction* chosen = menu.exec(QCursor::pos());
+    if (chosen && chosen == chamfer) {
+        openChamferDialog();
+    } else if (chosen && chosen == fillet) {
+        openFilletDialog();
+    }
+}
+
+void MainWindow::openChamferDialog() {
+    if (selectionKind_ != SelectionKind::BodyEdge) {
+        statusBar()->showMessage(tr("Select a body edge first."), 5000);
+        return;
+    }
+    const kernel::EdgeReference* edge =
+        findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
+    if (!edge || !edge->isChamferable) {
+        statusBar()->showMessage(tr("Selected edge cannot be chamfered."), 5000);
+        return;
+    }
+    if (!kOcctBackendAvailable) {
+        statusBar()->showMessage(tr("Chamfer requires OCCT backend."), 6000);
+        return;
+    }
+    if (!edgeOperationDialog_) {
+        edgeOperationDialog_ = new EdgeOperationDialog(this);
+        connect(edgeOperationDialog_, &EdgeOperationDialog::parametersChanged, this,
+                [this]() { onEdgeOperationParametersChanged(); });
+        connect(edgeOperationDialog_, &EdgeOperationDialog::applyRequested, this,
+                [this]() { applyEdgeOperation(); });
+        connect(edgeOperationDialog_, &EdgeOperationDialog::cancelRequested, this,
+                [this]() { cancelEdgeOperation(); });
+    }
+    const Result<Object> body = document_.objectById(selectedEdge_.bodyId);
+    edgeOperationDialog_->configure(EdgeOperationDialogKind::Chamfer);
+    edgeOperationDialog_->setTarget(body.isOk() ? QString::fromStdString(body.value().name)
+                                                : QString::fromStdString(selectedEdge_.bodyId),
+                                    QString::fromStdString(selectedEdge_.bodyId), 1);
+    edgeOperationDialog_->show();
+    edgeOperationDialog_->raise();
+    edgeOperationDialog_->activateWindow();
+    onEdgeOperationParametersChanged();
+}
+
+void MainWindow::openFilletDialog() {
+    if (selectionKind_ != SelectionKind::BodyEdge) {
+        statusBar()->showMessage(tr("Select a body edge first."), 5000);
+        return;
+    }
+    const kernel::EdgeReference* edge =
+        findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
+    if (!edge || !edge->isFilletable) {
+        statusBar()->showMessage(tr("Selected edge cannot be filleted."), 5000);
+        return;
+    }
+    if (!kOcctBackendAvailable) {
+        statusBar()->showMessage(tr("Fillet requires OCCT backend."), 6000);
+        return;
+    }
+    if (!edgeOperationDialog_) {
+        edgeOperationDialog_ = new EdgeOperationDialog(this);
+        connect(edgeOperationDialog_, &EdgeOperationDialog::parametersChanged, this,
+                [this]() { onEdgeOperationParametersChanged(); });
+        connect(edgeOperationDialog_, &EdgeOperationDialog::applyRequested, this,
+                [this]() { applyEdgeOperation(); });
+        connect(edgeOperationDialog_, &EdgeOperationDialog::cancelRequested, this,
+                [this]() { cancelEdgeOperation(); });
+    }
+    const Result<Object> body = document_.objectById(selectedEdge_.bodyId);
+    edgeOperationDialog_->configure(EdgeOperationDialogKind::Fillet);
+    edgeOperationDialog_->setTarget(body.isOk() ? QString::fromStdString(body.value().name)
+                                                : QString::fromStdString(selectedEdge_.bodyId),
+                                    QString::fromStdString(selectedEdge_.bodyId), 1);
+    edgeOperationDialog_->show();
+    edgeOperationDialog_->raise();
+    edgeOperationDialog_->activateWindow();
+    onEdgeOperationParametersChanged();
+}
+
+void MainWindow::onEdgeOperationParametersChanged() {
+    if (!viewer_ || !edgeOperationDialog_ || !edgeOperationDialog_->isVisible()) {
+        return;
+    }
+    if (!edgeOperationDialog_->previewEnabled() ||
+        selectionKind_ != SelectionKind::BodyEdge) {
+        viewer_->scene().hideExtrudePreview();
+        return;
+    }
+
+    kernel::EvaluatedGeometry geometry;
+    QString failureReason;
+    if (edgeOperationDialog_->kind() == EdgeOperationDialogKind::Chamfer) {
+        ChamferParameters parameters;
+        parameters.targetBodyId = selectedEdge_.bodyId;
+        parameters.edgeIds = {selectedEdge_.edgeId};
+        parameters.distance = edgeOperationDialog_->value();
+        if (!buildChamferResult(parameters, geometry, &failureReason)) {
+            viewer_->scene().hideExtrudePreview();
+            return;
+        }
+    } else {
+        FilletParameters parameters;
+        parameters.targetBodyId = selectedEdge_.bodyId;
+        parameters.edgeIds = {selectedEdge_.edgeId};
+        parameters.radius = edgeOperationDialog_->value();
+        if (!buildFilletResult(parameters, geometry, &failureReason)) {
+            viewer_->scene().hideExtrudePreview();
+            return;
+        }
+    }
+    viewer_->scene().showExtrudePreview(geometry.previewMesh);
+}
+
+void MainWindow::applyEdgeOperation() {
+    if (!viewer_ || !edgeOperationDialog_ || selectionKind_ != SelectionKind::BodyEdge) {
+        return;
+    }
+    Object* target = document_.mutableObjectById(selectedEdge_.bodyId);
+    if (!target || target->type != ObjectType::Body) {
+        statusBar()->showMessage(tr("Target body is missing."), 5000);
+        return;
+    }
+
+    kernel::EvaluatedGeometry geometry;
+    QString failureReason;
+    Feature feature;
+    feature.targetObjectId = selectedEdge_.bodyId;
+    feature.modifiedBodyId = selectedEdge_.bodyId;
+
+    if (edgeOperationDialog_->kind() == EdgeOperationDialogKind::Chamfer) {
+        ChamferParameters parameters;
+        parameters.targetBodyId = selectedEdge_.bodyId;
+        parameters.edgeIds = {selectedEdge_.edgeId};
+        parameters.distance = edgeOperationDialog_->value();
+        if (!buildChamferResult(parameters, geometry, &failureReason)) {
+            QMessageBox::warning(this, tr("Chamfer Failed"),
+                                 failureReason.isEmpty()
+                                     ? tr("OCCT chamfer failed.")
+                                     : failureReason);
+            return;
+        }
+        feature.name = "Chamfer " + std::to_string(chamferCount_ + 1);
+        feature.type = FeatureType::Chamfer;
+        feature.chamfer = parameters;
+        ++chamferCount_;
+    } else {
+        FilletParameters parameters;
+        parameters.targetBodyId = selectedEdge_.bodyId;
+        parameters.edgeIds = {selectedEdge_.edgeId};
+        parameters.radius = edgeOperationDialog_->value();
+        if (!buildFilletResult(parameters, geometry, &failureReason)) {
+            QMessageBox::warning(this, tr("Fillet Failed"),
+                                 failureReason.isEmpty()
+                                     ? tr("OCCT fillet failed.")
+                                     : failureReason);
+            return;
+        }
+        feature.name = "Fillet " + std::to_string(filletCount_ + 1);
+        feature.type = FeatureType::Fillet;
+        feature.fillet = parameters;
+        ++filletCount_;
+    }
+
+    feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
+    bodyShapes_[target->id] = geometry.shape;
+    bodyMeshes_[target->id] = geometry.previewMesh;
+    viewer_->scene().addOrUpdateObjectMesh(*target, geometry.previewMesh);
+    refreshBodyFaces(target->id);
+    refreshBodyEdges(target->id);
+    document_.addFeature(feature);
+
+    viewer_->scene().hideExtrudePreview();
+    edgeOperationDialog_->hide();
+    selectBody(target->id);
+    markDirty();
+    statusBar()->showMessage(tr("%1 updated").arg(QString::fromStdString(target->name)), 5000);
+}
+
+void MainWindow::cancelEdgeOperation() {
+    if (viewer_) {
+        viewer_->scene().hideExtrudePreview();
+    }
+    if (edgeOperationDialog_) {
+        edgeOperationDialog_->hide();
+    }
+    statusBar()->showMessage(tr("Edge operation cancelled"), 3000);
+}
+
+bool MainWindow::buildChamferResult(const ChamferParameters& parameters,
+                                    kernel::EvaluatedGeometry& outGeometry,
+                                    QString* failureReason) {
+    if (!kOcctBackendAvailable) {
+        if (failureReason) {
+            *failureReason = tr("Chamfer requires OCCT backend.");
+        }
+        return false;
+    }
+    if (!evaluator_ || !kernel_ || !chamferParametersValid(parameters)) {
+        if (failureReason) {
+            *failureReason = tr("Chamfer parameters are invalid.");
+        }
+        return false;
+    }
+    const auto shapeIt = bodyShapes_.find(parameters.targetBodyId);
+    if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
+        if (failureReason) {
+            *failureReason = tr("Target body has no OCCT shape.");
+        }
+        return false;
+    }
+    const Result<kernel::ShapeBounds> bounds = kernel_->boundingBox(shapeIt->second);
+    if (!bounds.isOk()) {
+        if (failureReason) {
+            *failureReason = QString::fromStdString(bounds.error().message);
+        }
+        return false;
+    }
+    if (parameters.distance > std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
+        if (failureReason) {
+            *failureReason = tr("Chamfer distance is too large for the target body.");
+        }
+        return false;
+    }
+
+    const Result<kernel::EvaluatedGeometry> evaluated =
+        evaluator_->evaluateChamfer(shapeIt->second, parameters);
+    if (!evaluated.isOk() || !evaluated.value().isValid ||
+        evaluated.value().previewMesh.isEmpty()) {
+        if (failureReason) {
+            *failureReason = evaluated.isOk()
+                                 ? QString::fromStdString(evaluated.value().message)
+                                 : QString::fromStdString(evaluated.error().message);
+        }
+        return false;
+    }
+    outGeometry = evaluated.value();
+    return true;
+}
+
+bool MainWindow::buildFilletResult(const FilletParameters& parameters,
+                                   kernel::EvaluatedGeometry& outGeometry,
+                                   QString* failureReason) {
+    if (!kOcctBackendAvailable) {
+        if (failureReason) {
+            *failureReason = tr("Fillet requires OCCT backend.");
+        }
+        return false;
+    }
+    if (!evaluator_ || !kernel_ || !filletParametersValid(parameters)) {
+        if (failureReason) {
+            *failureReason = tr("Fillet parameters are invalid.");
+        }
+        return false;
+    }
+    const auto shapeIt = bodyShapes_.find(parameters.targetBodyId);
+    if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
+        if (failureReason) {
+            *failureReason = tr("Target body has no OCCT shape.");
+        }
+        return false;
+    }
+    const Result<kernel::ShapeBounds> bounds = kernel_->boundingBox(shapeIt->second);
+    if (!bounds.isOk()) {
+        if (failureReason) {
+            *failureReason = QString::fromStdString(bounds.error().message);
+        }
+        return false;
+    }
+    if (parameters.radius > std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
+        if (failureReason) {
+            *failureReason = tr("Fillet radius is too large for the target body.");
+        }
+        return false;
+    }
+
+    const Result<kernel::EvaluatedGeometry> evaluated =
+        evaluator_->evaluateFillet(shapeIt->second, parameters);
+    if (!evaluated.isOk() || !evaluated.value().isValid ||
+        evaluated.value().previewMesh.isEmpty()) {
+        if (failureReason) {
+            *failureReason = evaluated.isOk()
+                                 ? QString::fromStdString(evaluated.value().message)
+                                 : QString::fromStdString(evaluated.error().message);
+        }
+        return false;
+    }
+    outGeometry = evaluated.value();
+    return true;
+}
+
+bool MainWindow::replayEdgeOperationFeature(const Feature& feature, QString* failureReason) {
+    if (feature.suppressed) {
+        return true;
+    }
+    kernel::EvaluatedGeometry geometry;
+    std::string targetBodyId;
+    if (feature.type == FeatureType::Chamfer) {
+        targetBodyId = feature.chamfer.targetBodyId;
+        if (!buildChamferResult(feature.chamfer, geometry, failureReason)) {
+            return false;
+        }
+    } else if (feature.type == FeatureType::Fillet) {
+        targetBodyId = feature.fillet.targetBodyId;
+        if (!buildFilletResult(feature.fillet, geometry, failureReason)) {
+            return false;
+        }
+    } else {
+        return true;
+    }
+
+    Object* target = document_.mutableObjectById(targetBodyId);
+    if (!target || target->type != ObjectType::Body) {
+        if (failureReason) {
+            *failureReason = tr("Edge operation references a missing target body.");
+        }
+        return false;
+    }
+    bodyShapes_[target->id] = geometry.shape;
+    bodyMeshes_[target->id] = geometry.previewMesh;
+    if (viewer_) {
+        viewer_->scene().addOrUpdateObjectMesh(*target, geometry.previewMesh);
+    }
+    refreshBodyFaces(target->id);
+    refreshBodyEdges(target->id);
+    return true;
+}
+
 void MainWindow::updatePlaneBadge() {
     if (!planeBadge_) {
         return;
@@ -3042,6 +3662,7 @@ void MainWindow::rebuildUiFromDocument() {
     bodyShapes_.clear();
     bodyMeshes_.clear();
     bodyFaces_.clear();
+    bodyEdges_.clear();
     for (const Object& object : document_.objects()) {
         // Shapes are never serialized; every load re-evaluates the
         // primitive descriptors through the kernel. Extruded bodies are
@@ -3066,17 +3687,26 @@ void MainWindow::rebuildUiFromDocument() {
         }
     }
     for (const Feature& feature : document_.features()) {
-        if (feature.type != FeatureType::ExtrudeCut) {
-            continue;
-        }
         QString failureReason;
-        if (!replayExtrudeCutFeature(feature, &failureReason)) {
-            qWarning("CADNext: cut feature %s replay failed: %s",
-                     feature.id.c_str(), failureReason.toUtf8().constData());
-            statusBar()->showMessage(
-                tr("Cut feature replay failed for %1 (%2)")
-                    .arg(QString::fromStdString(feature.name), failureReason),
-                8000);
+        if (feature.type == FeatureType::ExtrudeCut) {
+            if (!replayExtrudeCutFeature(feature, &failureReason)) {
+                qWarning("CADNext: cut feature %s replay failed: %s",
+                         feature.id.c_str(), failureReason.toUtf8().constData());
+                statusBar()->showMessage(
+                    tr("Cut feature replay failed for %1 (%2)")
+                        .arg(QString::fromStdString(feature.name), failureReason),
+                    8000);
+            }
+        } else if (feature.type == FeatureType::Chamfer ||
+                   feature.type == FeatureType::Fillet) {
+            if (!replayEdgeOperationFeature(feature, &failureReason)) {
+                qWarning("CADNext: edge feature %s replay failed: %s",
+                         feature.id.c_str(), failureReason.toUtf8().constData());
+                statusBar()->showMessage(
+                    tr("Edge feature replay failed for %1 (%2)")
+                        .arg(QString::fromStdString(feature.name), failureReason),
+                    8000);
+            }
         }
     }
     // Re-attach face-based references against the rebuilt bodies (found
@@ -3109,6 +3739,8 @@ void MainWindow::rebuildUiFromDocument() {
     deriveCountersFromDocument();
     refreshPropertyPanel();
     updateExtrudeActionEnabled();
+    updateFaceActionsEnabled();
+    updateEdgeActionsEnabled();
 }
 
 void MainWindow::deriveCountersFromDocument() {
@@ -3126,6 +3758,8 @@ void MainWindow::deriveCountersFromDocument() {
     extrudeCount_ = 0;
     cutCount_ = 0;
     facePlaneCount_ = 0;
+    chamferCount_ = 0;
+    filletCount_ = 0;
 
     for (const WorkPlane& plane : document_.workPlanes()) {
         // facePlaneCount_ is the highest used "faceplane-N" number, so new
@@ -3142,6 +3776,10 @@ void MainWindow::deriveCountersFromDocument() {
             ++extrudeCount_;
         } else if (feature.type == FeatureType::ExtrudeCut) {
             ++cutCount_;
+        } else if (feature.type == FeatureType::Chamfer) {
+            ++chamferCount_;
+        } else if (feature.type == FeatureType::Fillet) {
+            ++filletCount_;
         }
     }
 
@@ -3192,7 +3830,7 @@ void MainWindow::updateWindowTitle() {
     const QString base = currentFilePath_.isEmpty()
                              ? QString::fromStdString(document_.name())
                              : QFileInfo(currentFilePath_).fileName();
-    setWindowTitle(QStringLiteral("%1%2 — CADNext 0.8")
+    setWindowTitle(QStringLiteral("%1%2 — CADNext 0.9")
                        .arg(base, dirty_ ? QStringLiteral("*") : QString()));
 }
 
@@ -3252,6 +3890,8 @@ void MainWindow::createMenus() {
     QMenu* partMenu = menuBar()->addMenu(tr("&Part"));
     partMenu->addAction(toolBar_->extrudeAction());
     partMenu->addAction(toolBar_->cutExtrudeAction());
+    partMenu->addAction(toolBar_->chamferAction());
+    partMenu->addAction(toolBar_->filletAction());
     partMenu->addSeparator();
     partMenu->addAction(toolBar_->createSketchOnFaceAction());
     partMenu->addAction(toolBar_->workPlaneFromFaceAction());

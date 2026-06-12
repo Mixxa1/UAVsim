@@ -2,6 +2,7 @@
 
 #include "cadnext/WorkPlane.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -303,6 +304,25 @@ std::string vectorJson(const Vector3& v) {
            ", \"z\": " + numberText(v.z) + " }";
 }
 
+std::string stringArrayJson(const std::vector<std::string>& values, int indentSpaces) {
+    const std::string indent(static_cast<size_t>(std::max(indentSpaces, 0)), ' ');
+    const std::string itemIndent(static_cast<size_t>(std::max(indentSpaces + 2, 0)), ' ');
+    if (values.empty()) {
+        return "[]";
+    }
+    std::ostringstream out;
+    out << "[\n";
+    for (size_t i = 0; i < values.size(); ++i) {
+        out << itemIndent << "\"" << escapeString(values[i]) << "\"";
+        if (i + 1 < values.size()) {
+            out << ",";
+        }
+        out << "\n";
+    }
+    out << indent << "]";
+    return out.str();
+}
+
 const char* objectTypeName(ObjectType type) {
     switch (type) {
     case ObjectType::Body: return "Body";
@@ -385,6 +405,19 @@ SketchReference sketchReferenceFromJson(const JsonValue* value, SketchPlane fall
     reference.vAxis = vectorFromJson(value->member("vAxis"));
     reference.normal = vectorFromJson(value->member("normal"));
     return reference;
+}
+
+std::vector<std::string> stringVectorFromJson(const JsonValue* value) {
+    std::vector<std::string> out;
+    if (!value || !value->isArray()) {
+        return out;
+    }
+    for (const JsonValue& item : value->arrayItems) {
+        if (item.type == JsonValue::Type::String) {
+            out.push_back(item.stringValue);
+        }
+    }
+    return out;
 }
 
 Result<Document> parseError(const std::string& message) {
@@ -575,6 +608,30 @@ std::string DocumentSerializer::toJson(const Document& document) {
                 << ",\n";
             out << "          \"limitObjectId\": \""
                 << escapeString(feature.extrudeCut.limitObjectId) << "\"\n";
+            out << "        },\n";
+        }
+        if (feature.type == FeatureType::Chamfer) {
+            out << "        \"modifiedBodyId\": \"" << escapeString(feature.modifiedBodyId)
+                << "\",\n";
+            out << "        \"chamfer\": {\n";
+            out << "          \"targetBodyId\": \""
+                << escapeString(feature.chamfer.targetBodyId) << "\",\n";
+            out << "          \"edgeIds\": " << stringArrayJson(feature.chamfer.edgeIds, 10)
+                << ",\n";
+            out << "          \"mode\": \"" << chamferModeName(feature.chamfer.mode)
+                << "\",\n";
+            out << "          \"distance\": " << numberText(feature.chamfer.distance) << "\n";
+            out << "        },\n";
+        }
+        if (feature.type == FeatureType::Fillet) {
+            out << "        \"modifiedBodyId\": \"" << escapeString(feature.modifiedBodyId)
+                << "\",\n";
+            out << "        \"fillet\": {\n";
+            out << "          \"targetBodyId\": \""
+                << escapeString(feature.fillet.targetBodyId) << "\",\n";
+            out << "          \"edgeIds\": " << stringArrayJson(feature.fillet.edgeIds, 10)
+                << ",\n";
+            out << "          \"radius\": " << numberText(feature.fillet.radius) << "\n";
             out << "        },\n";
         }
         out << "        \"suppressed\": " << (feature.suppressed ? "true" : "false") << "\n";
@@ -802,6 +859,20 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                     cutDirectionFromName(cut->stringOr("direction", "Positive"));
                 feature.extrudeCut.distance = cut->numberOr("distance", 1.0);
                 feature.extrudeCut.limitObjectId = cut->stringOr("limitObjectId", "");
+            }
+            if (const JsonValue* chamfer = featureValue.member("chamfer");
+                chamfer && chamfer->isObject()) {
+                feature.chamfer.targetBodyId = chamfer->stringOr("targetBodyId", "");
+                feature.chamfer.edgeIds = stringVectorFromJson(chamfer->member("edgeIds"));
+                feature.chamfer.mode =
+                    chamferModeFromName(chamfer->stringOr("mode", "EqualDistance"));
+                feature.chamfer.distance = chamfer->numberOr("distance", 0.1);
+            }
+            if (const JsonValue* fillet = featureValue.member("fillet");
+                fillet && fillet->isObject()) {
+                feature.fillet.targetBodyId = fillet->stringOr("targetBodyId", "");
+                feature.fillet.edgeIds = stringVectorFromJson(fillet->member("edgeIds"));
+                feature.fillet.radius = fillet->numberOr("radius", 0.1);
             }
             document.addFeature(std::move(feature));
         }

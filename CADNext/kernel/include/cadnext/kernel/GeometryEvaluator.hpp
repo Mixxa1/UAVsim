@@ -3,8 +3,10 @@
 #include <memory>
 #include <string>
 
+#include "cadnext/Chamfer.hpp"
 #include "cadnext/Extrude.hpp"
 #include "cadnext/ExtrudeCut.hpp"
+#include "cadnext/Fillet.hpp"
 #include "cadnext/Object.hpp"
 #include "cadnext/Result.hpp"
 #include "cadnext/Sketch.hpp"
@@ -68,6 +70,14 @@ public:
         const cadnext::SketchReference& reference,
         const cadnext::SketchProfile& profile,
         const cadnext::CutSpan& span);
+
+    cadnext::Result<EvaluatedGeometry> evaluateChamfer(
+        const ShapeHandle& targetShape,
+        const cadnext::ChamferParameters& parameters);
+
+    cadnext::Result<EvaluatedGeometry> evaluateFillet(
+        const ShapeHandle& targetShape,
+        const cadnext::FilletParameters& parameters);
 
 private:
     // Shared mesh-extraction tail: validates the shape and fills

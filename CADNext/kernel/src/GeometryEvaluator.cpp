@@ -226,6 +226,52 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateExtrudeCut(
     return finishShapeEvaluation(std::move(geometry));
 }
 
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateChamfer(
+    const ShapeHandle& targetShape,
+    const cadnext::ChamferParameters& parameters) {
+    if (targetShape.isNull()) {
+        return usageError("Chamfer target shape handle is null");
+    }
+    if (!cadnext::chamferParametersValid(parameters)) {
+        return usageError("Chamfer parameters are invalid");
+    }
+    const cadnext::Result<ShapeHandle> result =
+        kernel_.chamferEdges(targetShape, parameters.edgeIds, parameters.distance);
+    if (!result.isOk()) {
+        if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
+            return cadnext::Result<EvaluatedGeometry>::ok(
+                backendlessResult(result.error().message));
+        }
+        return cadnext::Result<EvaluatedGeometry>::fail(result.error());
+    }
+    EvaluatedGeometry geometry;
+    geometry.shape = result.value();
+    return finishShapeEvaluation(std::move(geometry));
+}
+
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateFillet(
+    const ShapeHandle& targetShape,
+    const cadnext::FilletParameters& parameters) {
+    if (targetShape.isNull()) {
+        return usageError("Fillet target shape handle is null");
+    }
+    if (!cadnext::filletParametersValid(parameters)) {
+        return usageError("Fillet parameters are invalid");
+    }
+    const cadnext::Result<ShapeHandle> result =
+        kernel_.filletEdges(targetShape, parameters.edgeIds, parameters.radius);
+    if (!result.isOk()) {
+        if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
+            return cadnext::Result<EvaluatedGeometry>::ok(
+                backendlessResult(result.error().message));
+        }
+        return cadnext::Result<EvaluatedGeometry>::fail(result.error());
+    }
+    EvaluatedGeometry geometry;
+    geometry.shape = result.value();
+    return finishShapeEvaluation(std::move(geometry));
+}
+
 cadnext::Result<EvaluatedGeometry> GeometryEvaluator::finishShapeEvaluation(
     EvaluatedGeometry geometry) {
     if (!kernel_.isShapeValid(geometry.shape)) {

@@ -9,8 +9,10 @@ add_library(cadnext_core
     src/ViewportPolicy.cpp
     src/WorkPlane.cpp
     src/SketchProfile.cpp
+    src/Chamfer.cpp
     src/Extrude.cpp
     src/ExtrudeCut.cpp
+    src/Fillet.cpp
     src/Feature.cpp
     src/Material.cpp
     src/Transform.cpp

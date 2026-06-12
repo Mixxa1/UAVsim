@@ -5,6 +5,7 @@
 #include "cadnext/Object.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/WorkPlane.hpp"
+#include "cadnext/kernel/EdgeAnalyzer.hpp"
 #include "cadnext/kernel/FaceAnalyzer.hpp"
 
 class QDoubleSpinBox;
@@ -33,6 +34,7 @@ public:
     // Selected body face (CADNext 0.8): read-only face data — kind, plane
     // frame, size and whether a sketch can be created on it.
     void showBodyFace(const QString& bodyName, const kernel::FaceReference& face);
+    void showBodyEdge(const QString& bodyName, const kernel::EdgeReference& edge);
     void clearObject();
 
 signals:

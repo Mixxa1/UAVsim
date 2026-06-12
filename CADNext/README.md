@@ -52,8 +52,84 @@ CADNext строится как отдельный CAD-компонент:
 - CADNext 0.5: Sketch Workspace v1.
 - CADNext 0.6: Extrude + Custom Profiles v1 — done.
 - CADNext 0.7: Stable Custom Profiles and Extrude Cut v1 — done.
-- CADNext 0.8: Work Planes on Body Faces / Sketch on Face — current.
-- CADNext 0.9: Bridge/export into UAVsim.
+- CADNext 0.8: Work Planes on Body Faces / Sketch on Face — done.
+- CADNext 0.9: Edge Selection + Chamfer / Fillet v1 — current.
+- CADNext 1.0: Bridge/export into UAVsim.
+
+## CADNext 0.9 — Edge Selection + Chamfer / Fillet v1
+
+Workflow цели этапа:
+
+```text
+Create body / Extrude body
+→ select body edge
+→ edge highlights independently from the body
+→ Chamfer or Fillet
+→ preview
+→ Apply updates the OCCT body
+```
+
+Implemented:
+
+- body edge analysis через OCCT (`EdgeAnalyzer`):
+  - `TopExp_Explorer` по `TopAbs_EDGE`;
+  - `BRepAdaptor_Curve` classification:
+    Line / Circle / Ellipse / BSpline / Other;
+  - finite start/end/center/length fields;
+  - sampled curve polyline for viewport picking and highlight;
+  - `isChamferable` / `isFilletable` for finite non-degenerate edges;
+- stable-ish edge id v1:
+  `edge-<index>-s<startHash>-e<endHash>-l<lengthHash>`;
+- edge picking layered over body/face picking:
+  the body hit point resolves to the nearest edge inside a body-scale
+  tolerance; if no edge is close enough, the existing face/body fallback
+  remains unchanged;
+- selected edge highlight is a bright thick line only on the edge;
+- Property Panel for selected edge: Body, Edge ID, Kind, Length,
+  Chamferable, Filletable, Start, End, Center;
+- toolbar/menu/context actions:
+  - `Chamfer`;
+  - `Fillet`;
+  - `Chamfer Edge`;
+  - `Fillet Edge`;
+- Chamfer v1:
+  - equal-distance only;
+  - `BRepFilletAPI_MakeChamfer`;
+  - one selected edge in the GUI v1, API stores `edgeIds` vector;
+- Fillet v1:
+  - constant radius only;
+  - `BRepFilletAPI_MakeFillet`;
+  - one selected edge in the GUI v1, API stores `edgeIds` vector;
+- preview uses a transient result mesh and never commits the target body
+  before Apply;
+- Apply validates parameters, re-resolves edge ids against the current
+  `ShapeHandle`, runs OCCT, validates the resulting shape, updates the
+  display mesh, clears edge selection and records a Feature;
+- save/load stores Chamfer/Fillet feature metadata:
+  - Chamfer: `targetBodyId`, `edgeIds`, `mode`, `distance`;
+  - Fillet: `targetBodyId`, `edgeIds`, `radius`;
+  - features replay after load when OCCT is available.
+
+Not implemented yet (осознанно за рамками 0.9):
+
+- variable radius fillet;
+- multi-radius fillet;
+- face fillet;
+- full edge chain propagation / tangent chain selection;
+- setback chamfer;
+- draft angle;
+- mesh-based chamfer/fillet;
+- robust topological naming.
+
+CADNext 0.9 uses stable-ish edge ids for the current evaluated body state.
+Full robust topological naming is planned later.
+
+Full robust regeneration of chamfer/fillet after earlier topology changes is TODO.
+If edge ids no longer resolve during replay, the feature is skipped and the
+document keeps the last successfully rebuilt body state from earlier features.
+Raw OCCT shape internals, preview meshes and edge highlight state are never
+serialized. Chamfer/Fillet require an OCCT-enabled build; procedural builds
+do not fake the operation.
 
 ## CADNext 0.8 — Work Planes on Body Faces / Sketch on Face
 

@@ -47,6 +47,17 @@ QString faceKindText(kernel::FaceKind kind) {
     return QStringLiteral("Other");
 }
 
+QString edgeKindText(kernel::EdgeKind kind) {
+    switch (kind) {
+    case kernel::EdgeKind::Line: return QStringLiteral("Line");
+    case kernel::EdgeKind::Circle: return QStringLiteral("Circle");
+    case kernel::EdgeKind::Ellipse: return QStringLiteral("Ellipse");
+    case kernel::EdgeKind::BSpline: return QStringLiteral("BSpline");
+    case kernel::EdgeKind::Other: break;
+    }
+    return QStringLiteral("Other");
+}
+
 QString vectorText(const Vector3& v) {
     return QStringLiteral("%1, %2, %3")
         .arg(v.x, 0, 'f', 3)
@@ -402,6 +413,40 @@ void PropertyPanel::showBodyFace(const QString& bodyName, const kernel::FaceRefe
             .arg(face.height, 0, 'f', 3)
             .arg(face.area, 0, 'f', 3)
             .arg(face.isSketchable ? tr("Yes") : tr("No")));
+
+    setObjectRowsVisible(false);
+    hideDimensionRows();
+
+    updating_ = false;
+    setEnabled(true);
+}
+
+void PropertyPanel::showBodyEdge(const QString& bodyName, const kernel::EdgeReference& edge) {
+    updating_ = true;
+    mode_ = Mode::None;
+
+    currentObjectId_.clear();
+    currentSketchId_.clear();
+    currentName_.clear();
+    currentKind_ = PrimitiveKind::None;
+
+    idLabel_->setText(QString::fromStdString(edge.edgeId));
+    nameEdit_->setText(bodyName);
+    nameEdit_->setEnabled(false);
+    typeLabel_->setText(tr("Body Edge"));
+    kindLabel_->setText(edgeKindText(edge.kind));
+    detailsLabel_->setText(
+        tr("Body: %1\nEdge ID: %2\nKind: %3\nLength: %4\nChamferable: %5\n"
+           "Filletable: %6\nStart: %7\nEnd: %8\nCenter: %9")
+            .arg(bodyName)
+            .arg(QString::fromStdString(edge.edgeId))
+            .arg(edgeKindText(edge.kind))
+            .arg(edge.length, 0, 'f', 3)
+            .arg(edge.isChamferable ? tr("Yes") : tr("No"))
+            .arg(edge.isFilletable ? tr("Yes") : tr("No"))
+            .arg(vectorText(edge.start))
+            .arg(vectorText(edge.end))
+            .arg(vectorText(edge.center)));
 
     setObjectRowsVisible(false);
     hideDimensionRows();

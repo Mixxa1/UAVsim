@@ -429,6 +429,9 @@ SceneGraph::SceneGraph() {
     bodyFacesSwitch_->addChild(bodyFacesRoot_);
     root_->addChild(bodyFacesSwitch_);
 
+    bodyEdgeHighlightRoot_ = new SoSeparator;
+    root_->addChild(bodyEdgeHighlightRoot_);
+
     // Work planes render after the document so their depth-write-free
     // fill blends over bodies instead of occluding them.
     workPlaneRoot_ = new SoSeparator;
@@ -539,6 +542,7 @@ void SceneGraph::removeObjectNode(const std::string& objectId) {
         selectedWorkPlaneId_.clear();
     }
     removeBodyFaces(objectId);
+    removeBodyEdges(objectId);
 }
 
 void SceneGraph::clearObjectNodes() {
@@ -558,6 +562,7 @@ void SceneGraph::clearObjectNodes() {
     hoveredWorkPlaneId_.clear();
     selectedWorkPlaneId_.clear();
     clearBodyFaces();
+    clearBodyEdges();
 }
 
 bool SceneGraph::hasObjectNode(const std::string& objectId) const {
@@ -921,6 +926,7 @@ const SbColor kFaceHoverFill(0.30f, 0.60f, 0.88f);
 const SbColor kFaceSelectedFill(0.90f, 0.62f, 0.18f);
 const SbColor kFaceSelectedOutline(1.0f, 0.82f, 0.30f);
 const SbColor kFaceHoverOutline(0.70f, 0.88f, 1.0f);
+const SbColor kEdgeSelectedColor(1.0f, 0.78f, 0.20f);
 constexpr float kFaceFillIdleTransparency = 1.0f;
 constexpr float kFaceFillHoverTransparency = 0.85f;
 constexpr float kFaceFillSelectedTransparency = 0.62f;
@@ -931,6 +937,10 @@ constexpr double kFaceOverlayLift = 0.0035;
 
 std::string bodyFaceKey(const std::string& bodyId, const std::string& faceId) {
     return bodyId + "\n" + faceId;
+}
+
+std::string bodyEdgeKey(const std::string& bodyId, const std::string& edgeId) {
+    return bodyId + "\n" + edgeId;
 }
 
 } // namespace
@@ -1119,6 +1129,98 @@ void SceneGraph::clearBodyFaces() {
     bodyFaceReferences_.clear();
     hoveredBodyFaceKey_.clear();
     selectedBodyFaceKey_.clear();
+}
+
+void SceneGraph::setBodyEdges(const std::string& bodyId,
+                              const std::vector<kernel::EdgeReference>& edges) {
+    bodyEdgeReferences_[bodyId] = edges;
+    const std::string keyPrefix = bodyId + "\n";
+    if (!selectedBodyEdgeKey_.empty() && selectedBodyEdgeKey_.rfind(keyPrefix, 0) == 0) {
+        const std::string edgeId = selectedBodyEdgeKey_.substr(keyPrefix.size());
+        highlightBodyEdge(bodyId, edgeId);
+    }
+}
+
+void SceneGraph::removeBodyEdges(const std::string& bodyId) {
+    bodyEdgeReferences_.erase(bodyId);
+    const std::string keyPrefix = bodyId + "\n";
+    if (!selectedBodyEdgeKey_.empty() && selectedBodyEdgeKey_.rfind(keyPrefix, 0) == 0) {
+        clearBodyEdgeHighlight();
+    }
+}
+
+void SceneGraph::clearBodyEdges() {
+    bodyEdgeReferences_.clear();
+    clearBodyEdgeHighlight();
+}
+
+void SceneGraph::highlightBodyEdge(const std::string& bodyId, const std::string& edgeId) {
+    clearBodyEdgeHighlight();
+    if (bodyId.empty() || edgeId.empty()) {
+        return;
+    }
+    const auto bodyIt = bodyEdgeReferences_.find(bodyId);
+    if (bodyIt == bodyEdgeReferences_.end()) {
+        return;
+    }
+
+    const kernel::EdgeReference* edge = nullptr;
+    for (const kernel::EdgeReference& candidate : bodyIt->second) {
+        if (candidate.edgeId == edgeId) {
+            edge = &candidate;
+            break;
+        }
+    }
+    if (!edge) {
+        return;
+    }
+
+    std::vector<cadnext::Vector3> points = edge->previewPolyline;
+    if (points.size() < 2) {
+        points = {edge->start, edge->end};
+    }
+    if (points.size() < 2) {
+        return;
+    }
+
+    auto* node = new SoSeparator;
+    node->addChild(unpickableStyle());
+    node->addChild(noDepthWrite());
+
+    auto* lightModel = new SoLightModel;
+    lightModel->model = SoLightModel::BASE_COLOR;
+    node->addChild(lightModel);
+
+    auto* color = new SoBaseColor;
+    color->rgb = kEdgeSelectedColor;
+    node->addChild(color);
+
+    auto* style = new SoDrawStyle;
+    style->lineWidth = 5.0f;
+    node->addChild(style);
+
+    auto* coords = new SoCoordinate3;
+    coords->point.setNum(static_cast<int>(points.size()));
+    for (size_t i = 0; i < points.size(); ++i) {
+        coords->point.set1Value(static_cast<int>(i), toSb(points[i]));
+    }
+    node->addChild(coords);
+
+    auto* lines = new SoLineSet;
+    lines->numVertices.set1Value(0, static_cast<int>(points.size()));
+    node->addChild(lines);
+
+    bodyEdgeHighlightRoot_->addChild(node);
+    bodyEdgeHighlightNode_ = node;
+    selectedBodyEdgeKey_ = bodyEdgeKey(bodyId, edgeId);
+}
+
+void SceneGraph::clearBodyEdgeHighlight() {
+    if (bodyEdgeHighlightNode_) {
+        bodyEdgeHighlightRoot_->removeChild(bodyEdgeHighlightNode_);
+        bodyEdgeHighlightNode_ = nullptr;
+    }
+    selectedBodyEdgeKey_.clear();
 }
 
 void SceneGraph::setBodyFacesVisible(bool visible) {
@@ -1802,6 +1904,11 @@ ViewportPickTarget SceneGraph::pickTargetForPickedPoint(const SoPickedPoint* pic
     if (!path) {
         return {};
     }
+    const auto attachWorldPoint = [picked](ViewportPickTarget& target) {
+        const SbVec3f point = picked->getPoint();
+        target.worldPoint = {point[0], point[1], point[2]};
+        target.hasWorldPoint = true;
+    };
     for (int i = path->getLength() - 1; i >= 0; --i) {
         const SoNode* node = path->getNode(i);
         if (!node->isOfType(SoIndexedFaceSet::getClassTypeId())) {
@@ -1815,6 +1922,7 @@ ViewportPickTarget SceneGraph::pickTargetForPickedPoint(const SoPickedPoint* pic
         ViewportPickTarget target;
         target.objectId = meshIt->second.objectId;
         target.faceLookupAttempted = true;
+        attachWorldPoint(target);
 
         const auto resolveFromPoint = [&]() {
             const std::string faceId =
@@ -1844,6 +1952,7 @@ ViewportPickTarget SceneGraph::pickTargetForPickedPoint(const SoPickedPoint* pic
         return target;
     }
     ViewportPickTarget target = pickTargetForPath(path);
+    attachWorldPoint(target);
     if (target.isBody() && !target.isBodyFace()) {
         target.faceLookupAttempted = true;
         const std::string faceId = resolveBodyFaceFromPoint(target.objectId, picked->getPoint());

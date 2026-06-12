@@ -8,15 +8,18 @@
 
 #include <unordered_map>
 
+#include "cadnext/Chamfer.hpp"
 #include "cadnext/CommandStack.hpp"
 #include "cadnext/Document.hpp"
 #include "cadnext/Extrude.hpp"
 #include "cadnext/ExtrudeCut.hpp"
+#include "cadnext/Fillet.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchInput.hpp"
 #include "cadnext/SketchProfile.hpp"
 #include "cadnext/ViewBoundsPolicy.hpp"
 #include "cadnext/WorkPlane.hpp"
+#include "cadnext/kernel/EdgeAnalyzer.hpp"
 #include "cadnext/kernel/FaceAnalyzer.hpp"
 #include "cadnext/kernel/ShapeHandle.hpp"
 #include "cadnext/kernel/GeometryEvaluator.hpp"
@@ -31,6 +34,7 @@ class QLabel;
 namespace cadnext::gui {
 
 class CutExtrudeDialog;
+class EdgeOperationDialog;
 class ExtrudeDialog;
 class ProjectTree;
 class PropertyPanel;
@@ -56,7 +60,7 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
-    enum class SelectionKind { None, WorkPlane, Body, Sketch, Entity, BodyFace };
+    enum class SelectionKind { None, WorkPlane, Body, Sketch, Entity, BodyFace, BodyEdge };
 
     // Selected body face (CADNext 0.8). Valid only while selectionKind_
     // is BodyFace.
@@ -65,10 +69,16 @@ private:
         std::string faceId;
     };
 
+    struct BodyEdgeSelection {
+        std::string bodyId;
+        std::string edgeId;
+    };
+
     // Selection.
     void selectWorkPlane(const std::string& planeId);
     void selectBody(const std::string& objectId);
     void selectBodyFace(const std::string& bodyId, const std::string& faceId);
+    void selectBodyEdge(const std::string& bodyId, const std::string& edgeId);
     void selectSketch(const std::string& sketchId);
     void selectEntity(const std::string& sketchId, const std::string& entityId);
     void clearSelection();
@@ -164,6 +174,29 @@ private:
     // refresh their resolved plane; unresolved ids keep the saved plane.
     void resolveFaceReferencesAfterLoad();
 
+    // Edge workflow (0.9 Edge Selection + Chamfer / Fillet v1).
+    void refreshBodyEdges(const std::string& bodyId);
+    const kernel::EdgeReference* findBodyEdge(const std::string& bodyId,
+                                              const std::string& edgeId) const;
+    const kernel::EdgeReference* nearestBodyEdge(const std::string& bodyId,
+                                                 const Vector3& worldPoint) const;
+    const kernel::EdgeReference* edgeFromPickTarget(
+        const viewer::ViewportPickTarget& target) const;
+    void updateEdgeActionsEnabled();
+    void showEdgeActionPalette(bool contextClick);
+    void openChamferDialog();
+    void openFilletDialog();
+    void onEdgeOperationParametersChanged();
+    void applyEdgeOperation();
+    void cancelEdgeOperation();
+    bool buildChamferResult(const ChamferParameters& parameters,
+                            kernel::EvaluatedGeometry& outGeometry,
+                            QString* failureReason);
+    bool buildFilletResult(const FilletParameters& parameters,
+                           kernel::EvaluatedGeometry& outGeometry,
+                           QString* failureReason);
+    bool replayEdgeOperationFeature(const Feature& feature, QString* failureReason);
+
     // Sketch2D plane identity badge (viewport overlay).
     void updatePlaneBadge();
 
@@ -220,6 +253,7 @@ private:
     std::string selectedId_;       // body id or sketch id (entity id in Entity kind)
     std::string selectedSketchId_; // owner sketch id in Entity kind
     BodyFaceSelection selectedFace_;
+    BodyEdgeSelection selectedEdge_;
     std::string highlightedEntitySketch_;
     std::string highlightedEntityId_;
     std::string hoveredWorkPlaneId_;
@@ -249,6 +283,8 @@ private:
 
     // FaceAnalyzer output per body (0.8); derived data, mirrors bodyShapes_.
     std::unordered_map<std::string, std::vector<kernel::FaceReference>> bodyFaces_;
+    std::unordered_map<std::string, std::vector<kernel::EdgeReference>> bodyEdges_;
+    EdgeOperationDialog* edgeOperationDialog_ = nullptr;
 
     ToolBar* toolBar_ = nullptr;
     SketchToolBar* sketchToolBar_ = nullptr;
@@ -279,6 +315,8 @@ private:
     int extrudeCount_ = 0;
     int cutCount_ = 0;
     int facePlaneCount_ = 0;
+    int chamferCount_ = 0;
+    int filletCount_ = 0;
 };
 
 } // namespace cadnext::gui

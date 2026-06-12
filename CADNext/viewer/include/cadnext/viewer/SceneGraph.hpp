@@ -10,6 +10,7 @@
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchProfile.hpp"
 #include "cadnext/WorkPlane.hpp"
+#include "cadnext/kernel/EdgeAnalyzer.hpp"
 #include "cadnext/kernel/FaceAnalyzer.hpp"
 #include "cadnext/kernel/TriangleMesh.hpp"
 
@@ -41,17 +42,21 @@ struct ViewportPickTarget {
     std::string entityId;
     std::string profileId;
     std::string faceId;
+    std::string edgeId;
+    cadnext::Vector3 worldPoint;
     int triangleIndex = -1;
     bool faceLookupAttempted = false;
+    bool hasWorldPoint = false;
 
     bool isBody() const { return !objectId.empty(); }
     bool isBodyFace() const { return !faceId.empty(); }
+    bool isBodyEdge() const { return !edgeId.empty(); }
     bool isWorkPlane() const { return !workPlaneId.empty(); }
     bool isSketchEntity() const { return !entityId.empty(); }
     bool isProfile() const { return !profileId.empty(); }
     bool isEmpty() const {
         return objectId.empty() && workPlaneId.empty() && entityId.empty() &&
-               profileId.empty() && faceId.empty();
+               profileId.empty() && faceId.empty() && edgeId.empty();
     }
 };
 
@@ -136,6 +141,17 @@ public:
     void setBodyFacesVisible(bool visible);
     void setHoveredBodyFace(const std::string& bodyId, const std::string& faceId);
     void setSelectedBodyFace(const std::string& bodyId, const std::string& faceId);
+
+    // --- Body edge highlight (CADNext 0.9 Edge Selection) ----------------
+    // Edge references are transient derived data from the current BRep
+    // state. The selected edge is drawn as one bright unpickable polyline;
+    // it does not select or tint the whole body.
+    void setBodyEdges(const std::string& bodyId,
+                      const std::vector<kernel::EdgeReference>& edges);
+    void removeBodyEdges(const std::string& bodyId);
+    void clearBodyEdges();
+    void highlightBodyEdge(const std::string& bodyId, const std::string& edgeId);
+    void clearBodyEdgeHighlight();
 
     // --- Helper visibility (ViewportPolicy application) -------------------
     // World grid + axes; hidden in Sketch2D so no huge 3D axes cross the
@@ -266,16 +282,20 @@ private:
     // Body face overlays, keyed by "bodyId\nfaceId".
     SoSwitch* bodyFacesSwitch_ = nullptr;
     SoSeparator* bodyFacesRoot_ = nullptr;
+    SoSeparator* bodyEdgeHighlightRoot_ = nullptr;
+    SoSeparator* bodyEdgeHighlightNode_ = nullptr;
     std::unordered_map<std::string, SoSeparator*> bodyFaceGroups_; // per body
     std::unordered_map<const SoSeparator*, std::pair<std::string, std::string>>
         nodeToBodyFace_;
     std::unordered_map<std::string, SoMaterial*> faceFillMaterials_;
     std::unordered_map<std::string, SoSwitch*> faceOutlineSwitches_;
+    std::unordered_map<std::string, std::vector<kernel::EdgeReference>> bodyEdgeReferences_;
     std::string hoveredWorkPlaneId_;
     std::string selectedWorkPlaneId_;
     std::string selectedProfileId_;
     std::string hoveredBodyFaceKey_;
     std::string selectedBodyFaceKey_;
+    std::string selectedBodyEdgeKey_;
     bool bodiesDimmed_ = false;
 };
 
