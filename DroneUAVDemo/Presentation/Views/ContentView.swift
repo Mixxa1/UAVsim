@@ -774,11 +774,6 @@ private struct KeyBindingsSheetHost: View {
     }
 }
 
-private enum AppWorkspaceMode {
-    case simulation
-    case designWorkshop
-}
-
 struct ContentView: View {
     @StateObject private var appShell = AppShellViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
@@ -788,8 +783,6 @@ struct ContentView: View {
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
-    @State private var workspaceMode: AppWorkspaceMode = .simulation
-    @StateObject private var cadWorkshopViewModel = CADWorkshopViewModel()
 
     private var selectedLanguage: AppLanguage {
         AppLanguage(rawValue: appLanguageRawValue) ?? .system
@@ -805,14 +798,8 @@ struct ContentView: View {
     var body: some View {
         Group {
             if let viewModel = appShell.activeSimulation {
-                if workspaceMode == .designWorkshop {
-                    DesignWorkshopWorkspaceView(viewModel: cadWorkshopViewModel) {
-                        workspaceMode = .simulation
-                    }
-                } else {
-                    SimulationViewModelObserver(viewModel: viewModel) { observedViewModel in
-                        simulationWorkspace(observedViewModel)
-                    }
+                SimulationViewModelObserver(viewModel: viewModel) { observedViewModel in
+                    simulationWorkspace(observedViewModel)
                 }
             } else {
                 startScreen
@@ -876,8 +863,7 @@ struct ContentView: View {
         }
         .onChange(of: appShell.activeSimulation == nil) { _, isNil in
             if isNil {
-                workspaceMode = .simulation
-                cadWorkshopViewModel.resetDocument()
+                appShell.refreshProjects()
             }
         }
     }
@@ -1371,13 +1357,6 @@ struct ContentView: View {
                 viewModel.setToolPanelVisible(true)
             }
 
-            Button {
-                workspaceMode = .designWorkshop
-            } label: {
-                headerUtilityButtonLabel(systemImage: "wrench.and.screwdriver")
-            }
-            .buttonStyle(.plain)
-            .help(String(localized: "cad.workspace.open"))
         }
     }
 
