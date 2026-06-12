@@ -133,6 +133,9 @@ private:
     void onCutParametersChanged();
     void applyCutExtrude();
     void cancelCutExtrude();
+    std::string preferredCutTargetBodyId(const Sketch& sketch) const;
+    CutDirection defaultCutDirectionForSketch(const Sketch& sketch,
+                                              const std::string& targetBodyId) const;
     bool computeCutSpanForParameters(const ExtrudeCutParameters& parameters,
                                      const SketchReference& reference,
                                      CutSpan& outSpan, QString* failureReason);

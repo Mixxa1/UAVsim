@@ -9,17 +9,17 @@ final class CADNextLauncherService {
     static let shared = CADNextLauncherService()
 
     private static let buildCommand = """
-    cmake -S CADNext -B CADNext/build-gui -DCADNEXT_BUILD_APP=ON -DCADNEXT_WITH_QT=ON -DCADNEXT_WITH_COIN3D=ON
-    cmake --build CADNext/build-gui
+    cmake -S CADNext -B CADNext/build-gui-occt -DCADNEXT_BUILD_APP=ON -DCADNEXT_WITH_QT=ON -DCADNEXT_WITH_COIN3D=ON -DCADNEXT_WITH_OCCT=ON
+    cmake --build CADNext/build-gui-occt
     """
 
     /// Относительные пути к собранному бинарнику внутри репозитория.
-    /// build-gui — основная актуальная сборка (CADNext 0.6 quick fix:
-    /// именно её пересобирают чаще всего, поэтому она идёт первой);
-    /// build-gui-occt — запасной кандидат.
+    /// build-gui-occt — основная CAD-сборка: Sketch on Face и Cut
+    /// Extrude требуют OCCT BRep backend. build-gui остаётся запасным
+    /// viewer-only вариантом без boolean cut.
     private static let relativeExecutablePaths = [
-        "CADNext/build-gui/app/cadnext_app",
-        "CADNext/build-gui-occt/app/cadnext_app"
+        "CADNext/build-gui-occt/app/cadnext_app",
+        "CADNext/build-gui/app/cadnext_app"
     ]
 
     func openCADNext() {

@@ -34,6 +34,9 @@ public:
     void setTargetBodies(const QList<CutBodyItem>& bodies, const QString& selectedId);
     void setProfiles(const QList<ExtrudeProfileItem>& profiles, const QString& selectedId);
     void setLimitObjects(const QList<CutBodyItem>& objects, const QString& selectedId);
+    void setDepthMode(cadnext::CutDepthMode mode);
+    void setDirection(cadnext::CutDirection direction);
+    void setDistance(double distance);
 
     QString targetBodyId() const;
     QString selectedProfileId() const;

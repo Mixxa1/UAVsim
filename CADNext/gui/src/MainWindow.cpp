@@ -1803,6 +1803,45 @@ const Feature* MainWindow::extrudeFeatureForBody(const std::string& objectId) co
     return nullptr;
 }
 
+std::string MainWindow::preferredCutTargetBodyId(const Sketch& sketch) const {
+    const SketchReference reference = sketch.reference.sourceId.empty()
+                                          ? canonicalSketchReference(sketch.plane)
+                                          : sketch.reference;
+    if (!reference.sourceBodyId.empty() &&
+        bodyShapes_.find(reference.sourceBodyId) != bodyShapes_.end()) {
+        return reference.sourceBodyId;
+    }
+    if (selectionKind_ == SelectionKind::Body &&
+        bodyShapes_.find(selectedId_) != bodyShapes_.end()) {
+        return selectedId_;
+    }
+    if (selectionKind_ == SelectionKind::BodyFace &&
+        bodyShapes_.find(selectedFace_.bodyId) != bodyShapes_.end()) {
+        return selectedFace_.bodyId;
+    }
+    for (const Object& object : document_.objects()) {
+        if (object.type == ObjectType::Body &&
+            bodyShapes_.find(object.id) != bodyShapes_.end()) {
+            return object.id;
+        }
+    }
+    return {};
+}
+
+CutDirection MainWindow::defaultCutDirectionForSketch(
+    const Sketch& sketch, const std::string& targetBodyId) const {
+    const SketchReference reference = sketch.reference.sourceId.empty()
+                                          ? canonicalSketchReference(sketch.plane)
+                                          : sketch.reference;
+    if (reference.type == SketchReferenceType::BodyFace &&
+        !reference.sourceBodyId.empty() && reference.sourceBodyId == targetBodyId) {
+        // Body-face normals point outward. A cut started from that face
+        // should default into the owning body, not out into empty space.
+        return CutDirection::Negative;
+    }
+    return CutDirection::Positive;
+}
+
 void MainWindow::openCutExtrudeDialog() {
     if (!viewer_) {
         return;
@@ -1830,7 +1869,8 @@ void MainWindow::openCutExtrudeDialog() {
     }
 
     QList<CutBodyItem> bodies;
-    QString selectedBody;
+    const std::string preferredBodyId = preferredCutTargetBodyId(*sketch);
+    QString selectedBody = QString::fromStdString(preferredBodyId);
     for (const Object& object : document_.objects()) {
         if (object.type != ObjectType::Body) {
             continue;
@@ -1840,9 +1880,6 @@ void MainWindow::openCutExtrudeDialog() {
         }
         bodies.append({QString::fromStdString(object.id),
                        QString::fromStdString(object.name)});
-        if (selectionKind_ == SelectionKind::Body && selectedId_ == object.id) {
-            selectedBody = QString::fromStdString(object.id);
-        }
     }
     if (bodies.empty()) {
         statusBar()->showMessage(tr("Select target body for cut."), 5000);
@@ -1898,6 +1935,8 @@ void MainWindow::openCutExtrudeDialog() {
     cutDialog_->setTargetBodies(bodies, selectedBody);
     cutDialog_->setProfiles(profiles, selectedProfile);
     cutDialog_->setLimitObjects(bodies, selectedLimit);
+    cutDialog_->setDirection(defaultCutDirectionForSketch(
+        *sketch, cutDialog_->targetBodyId().toStdString()));
     cutDialog_->show();
     cutDialog_->raise();
     cutDialog_->activateWindow();

@@ -156,6 +156,50 @@ void CutExtrudeDialog::setLimitObjects(const QList<CutBodyItem>& objects,
     updating_ = false;
 }
 
+void CutExtrudeDialog::setDepthMode(cadnext::CutDepthMode mode) {
+    const bool wasUpdating = updating_;
+    updating_ = true;
+    switch (mode) {
+    case cadnext::CutDepthMode::ThroughAll:
+        depthModeCombo_->setCurrentIndex(1);
+        break;
+    case cadnext::CutDepthMode::ToObject:
+        depthModeCombo_->setCurrentIndex(2);
+        break;
+    case cadnext::CutDepthMode::Distance:
+        depthModeCombo_->setCurrentIndex(0);
+        break;
+    }
+    updating_ = wasUpdating;
+    updateFieldEnablement();
+}
+
+void CutExtrudeDialog::setDirection(cadnext::CutDirection direction) {
+    const bool wasUpdating = updating_;
+    updating_ = true;
+    switch (direction) {
+    case cadnext::CutDirection::Negative:
+        directionCombo_->setCurrentIndex(1);
+        break;
+    case cadnext::CutDirection::Symmetric:
+        directionCombo_->setCurrentIndex(2);
+        break;
+    case cadnext::CutDirection::Positive:
+        directionCombo_->setCurrentIndex(0);
+        break;
+    }
+    updating_ = wasUpdating;
+    updateFieldEnablement();
+}
+
+void CutExtrudeDialog::setDistance(double distance) {
+    const bool wasUpdating = updating_;
+    updating_ = true;
+    distanceSpin_->setValue(distance);
+    updating_ = wasUpdating;
+    updateFieldEnablement();
+}
+
 QString CutExtrudeDialog::targetBodyId() const {
     return targetCombo_->currentData().toString();
 }

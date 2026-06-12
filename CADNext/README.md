@@ -106,6 +106,9 @@ Implemented:
   хранится в локальных face u/v;
 - Extrude / Cut Extrude от face-based sketch работают через существующий
   OCCT pipeline без отдельной логики (top face cut, side face cut);
+- Cut Extrude требует OCCT BRep backend. DroneUAVDemo launcher поэтому
+  предпочитает `CADNext/build-gui-occt/app/cadnext_app`; procedural
+  `build-gui` остается fallback без boolean cut;
 - save/load: `SketchReference` типа `BodyFace` (`sourceBodyId`,
   `sourceFaceId`, resolved plane, `displayName`) и массив `workPlanes`
   в `.cadnext`; при load faceId ре-резолвится по пересобранным телам.
