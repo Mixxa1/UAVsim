@@ -50,6 +50,45 @@ int main() {
     stack.redo(document);
     assert(!document.objectById("obj-box").isOk());
 
+    cadnext::Object extrudedBody;
+    extrudedBody.id = "obj-extrude";
+    extrudedBody.name = "Extruded Body";
+    extrudedBody.type = cadnext::ObjectType::Body;
+
+    cadnext::Feature extrudeFeature;
+    extrudeFeature.id = "feature-extrude";
+    extrudeFeature.name = "Extrude";
+    extrudeFeature.type = cadnext::FeatureType::Extrude;
+    extrudeFeature.createdBodyId = extrudedBody.id;
+    extrudeFeature.targetObjectId = extrudedBody.id;
+
+    stack.push(std::make_unique<cadnext::AddObjectWithFeatureCommand>(
+                   extrudedBody, extrudeFeature),
+               document);
+    assert(document.objectById("obj-extrude").isOk());
+    assert(document.featureById("feature-extrude").isOk());
+    stack.undo(document);
+    assert(!document.objectById("obj-extrude").isOk());
+    assert(!document.featureById("feature-extrude").isOk());
+    stack.redo(document);
+    assert(document.objectById("obj-extrude").isOk());
+    assert(document.featureById("feature-extrude").isOk());
+
+    cadnext::Feature cutFeature;
+    cutFeature.id = "feature-cut";
+    cutFeature.name = "Cut";
+    cutFeature.type = cadnext::FeatureType::ExtrudeCut;
+    cutFeature.targetObjectId = "obj-extrude";
+    cutFeature.modifiedBodyId = "obj-extrude";
+
+    stack.push(std::make_unique<cadnext::AddFeatureCommand>(cutFeature), document);
+    assert(document.featureById("feature-cut").isOk());
+    stack.undo(document);
+    assert(!document.featureById("feature-cut").isOk());
+    assert(document.objectById("obj-extrude").isOk());
+    stack.redo(document);
+    assert(document.featureById("feature-cut").isOk());
+
     // Undo/redo on an empty stack are no-ops.
     stack.clear();
     assert(!stack.canUndo());

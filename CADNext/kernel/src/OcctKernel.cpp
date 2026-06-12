@@ -34,6 +34,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
@@ -82,6 +83,27 @@ double edgeLength(const TopoDS_Edge& edge) {
     BRepGProp::LinearProperties(edge, properties);
     const double length = properties.Mass();
     return std::isfinite(length) ? length : 0.0;
+}
+
+double faceArea(const TopoDS_Face& face) {
+    GProp_GProps properties;
+    BRepGProp::SurfaceProperties(face, properties);
+    const double area = properties.Mass();
+    return std::isfinite(area) ? area : 0.0;
+}
+
+TopoDS_Face largestAdjacentFace(const TopTools_ListOfShape& faces) {
+    TopoDS_Face best;
+    double bestArea = -1.0;
+    for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
+        const TopoDS_Face face = TopoDS::Face(it.Value());
+        const double area = faceArea(face);
+        if (area > bestArea) {
+            best = face;
+            bestArea = area;
+        }
+    }
+    return best;
 }
 
 std::string edgeIdForTopoEdge(int index, const TopoDS_Edge& edge) {
@@ -408,7 +430,10 @@ cadnext::Result<ShapeHandle> OcctKernel::chamferEdges(
 
         BRepFilletAPI_MakeChamfer chamfer(*targetShape);
         for (const TopoDS_Edge& edge : edges.value()) {
-            if (mode == cadnext::ChamferMode::DistanceAngle) {
+            const bool defaultAngle =
+                mode == cadnext::ChamferMode::DistanceAngle &&
+                std::abs(angleDeg - 45.0) <= 1.0e-9;
+            if (mode == cadnext::ChamferMode::DistanceAngle && !defaultAngle) {
                 const Standard_Integer index = edgeFaceMap.FindIndex(edge);
                 if (index == 0 || edgeFaceMap(index).IsEmpty()) {
                     return cadnext::Result<ShapeHandle>::fail({
@@ -416,7 +441,13 @@ cadnext::Result<ShapeHandle> OcctKernel::chamferEdges(
                         "Chamfer edge has no adjacent reference face"
                     });
                 }
-                const TopoDS_Face face = TopoDS::Face(edgeFaceMap(index).First());
+                const TopoDS_Face face = largestAdjacentFace(edgeFaceMap(index));
+                if (face.IsNull()) {
+                    return cadnext::Result<ShapeHandle>::fail({
+                        cadnext::ErrorCode::NotFound,
+                        "Chamfer edge has no usable adjacent reference face"
+                    });
+                }
                 chamfer.AddDA(distance, angleDeg * M_PI / 180.0, edge, face);
             } else {
                 chamfer.Add(distance, edge);

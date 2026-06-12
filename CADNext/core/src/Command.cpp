@@ -46,6 +46,44 @@ std::string AddSketchEntityCommand::name() const {
     return "Add " + entity_.name;
 }
 
+AddFeatureCommand::AddFeatureCommand(Feature feature)
+    : feature_(std::move(feature)) {}
+
+void AddFeatureCommand::undo(Document& document) {
+    document.removeFeature(feature_.id);
+}
+
+void AddFeatureCommand::redo(Document& document) {
+    if (!document.featureById(feature_.id).isOk()) {
+        document.addFeature(feature_);
+    }
+}
+
+std::string AddFeatureCommand::name() const {
+    return "Add " + feature_.name;
+}
+
+AddObjectWithFeatureCommand::AddObjectWithFeatureCommand(Object object, Feature feature)
+    : object_(std::move(object)), feature_(std::move(feature)) {}
+
+void AddObjectWithFeatureCommand::undo(Document& document) {
+    document.removeFeature(feature_.id);
+    document.removeObject(object_.id);
+}
+
+void AddObjectWithFeatureCommand::redo(Document& document) {
+    if (!document.objectById(object_.id).isOk()) {
+        document.addObject(object_);
+    }
+    if (!document.featureById(feature_.id).isOk()) {
+        document.addFeature(feature_);
+    }
+}
+
+std::string AddObjectWithFeatureCommand::name() const {
+    return "Add " + object_.name;
+}
+
 RenameSketchEntityCommand::RenameSketchEntityCommand(std::string sketchId, std::string entityId,
                                                      std::string oldName, std::string newName)
     : sketchId_(std::move(sketchId)),

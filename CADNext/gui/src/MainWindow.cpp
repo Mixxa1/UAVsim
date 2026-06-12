@@ -91,6 +91,14 @@ QString mmQText(double modelLength) {
     return QString::fromStdString(formatMillimeters(modelLength));
 }
 
+double suggestedEdgeOperationValueMm(const kernel::EdgeReference& edge) {
+    const double edgeLengthMm = toMillimeters(edge.length);
+    if (!std::isfinite(edgeLengthMm) || edgeLengthMm <= 0.0) {
+        return 10.0;
+    }
+    return std::clamp(edgeLengthMm * 0.05, 1.0, 100.0);
+}
+
 int maxNumberSuffix(const std::string& id, const char* prefix, int current) {
     if (id.rfind(prefix, 0) == 0) {
         const int number = std::atoi(id.c_str() + std::strlen(prefix));
@@ -183,6 +191,21 @@ double boundsDiagonal(const kernel::ShapeBounds& bounds) {
     const double dy = bounds.max.y - bounds.min.y;
     const double dz = bounds.max.z - bounds.min.z;
     return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+double shortestPositiveBoundsExtent(const kernel::ShapeBounds& bounds) {
+    const std::array<double, 3> extents = {
+        bounds.max.x - bounds.min.x,
+        bounds.max.y - bounds.min.y,
+        bounds.max.z - bounds.min.z,
+    };
+    double shortest = std::numeric_limits<double>::infinity();
+    for (double extent : extents) {
+        if (std::isfinite(extent) && extent > 1.0e-9) {
+            shortest = std::min(shortest, extent);
+        }
+    }
+    return std::isfinite(shortest) ? shortest : 0.0;
 }
 
 Vector3 add(Vector3 a, Vector3 b) {
@@ -2207,7 +2230,6 @@ void MainWindow::applyExtrude() {
     body.type = ObjectType::Body;
     body.name = "Тело выдавливания " + std::to_string(extrudeCount_ + 1);
     body.primitive.kind = PrimitiveKind::None;
-    document_.addObject(body);
     if (!shape.isNull()) {
         bodyShapes_[body.id] = shape;
     }
@@ -2223,7 +2245,8 @@ void MainWindow::applyExtrude() {
     feature.targetObjectId = body.id;
     feature.createdBodyId = body.id;
     feature.extrude = parameters;
-    document_.addFeature(feature);
+    commandStack_.push(
+        std::make_unique<AddObjectWithFeatureCommand>(body, feature), document_);
     ++extrudeCount_;
 
     {
@@ -2236,6 +2259,7 @@ void MainWindow::applyExtrude() {
     extrudeDialog_->hide();
     selectBody(body.id);
     markDirty();
+    updateUndoRedoActions();
     statusBar()->showMessage(tr("%1 создано из %2")
                                  .arg(QString::fromStdString(body.name),
                                       QString::fromStdString(sketch.value().name)),
@@ -2629,13 +2653,14 @@ void MainWindow::applyCutExtrude() {
     feature.targetObjectId = targetBodyId;
     feature.modifiedBodyId = targetBodyId;
     feature.extrudeCut = parameters;
-    document_.addFeature(feature);
+    commandStack_.push(std::make_unique<AddFeatureCommand>(feature), document_);
     ++cutCount_;
 
     viewer_->scene().hideExtrudePreview();
     cutDialog_->hide();
     selectBody(targetBodyId);
     markDirty();
+    updateUndoRedoActions();
     statusBar()->showMessage(
         tr("Вырез применён к %1 (%2)")
             .arg(QString::fromStdString(target->name), cutDepthModeText(parameters.depthMode)),
@@ -3197,6 +3222,7 @@ void MainWindow::openChamferDialog() {
     edgeOperationDialog_->setTarget(body.isOk() ? QString::fromStdString(body.value().name)
                                                 : QString::fromStdString(selectedEdge_.bodyId),
                                     QString::fromStdString(selectedEdge_.bodyId), 1);
+    edgeOperationDialog_->setValueMm(suggestedEdgeOperationValueMm(*edge));
     edgeOperationDialog_->show();
     edgeOperationDialog_->raise();
     edgeOperationDialog_->activateWindow();
@@ -3233,6 +3259,7 @@ void MainWindow::openFilletDialog() {
     edgeOperationDialog_->setTarget(body.isOk() ? QString::fromStdString(body.value().name)
                                                 : QString::fromStdString(selectedEdge_.bodyId),
                                     QString::fromStdString(selectedEdge_.bodyId), 1);
+    edgeOperationDialog_->setValueMm(suggestedEdgeOperationValueMm(*edge));
     edgeOperationDialog_->show();
     edgeOperationDialog_->raise();
     edgeOperationDialog_->activateWindow();
@@ -3357,12 +3384,13 @@ void MainWindow::applyEdgeOperation() {
     viewer_->scene().addOrUpdateObjectMesh(*target, geometry.previewMesh);
     refreshBodyFaces(target->id);
     refreshBodyEdges(target->id);
-    document_.addFeature(feature);
+    commandStack_.push(std::make_unique<AddFeatureCommand>(feature), document_);
 
     viewer_->scene().hideExtrudePreview();
     edgeOperationDialog_->hide();
     selectBody(target->id);
     markDirty();
+    updateUndoRedoActions();
     statusBar()->showMessage(tr("Тело обновлено. Выберите следующее ребро."), 5000);
 }
 
@@ -3415,8 +3443,11 @@ bool MainWindow::buildChamferResult(const ChamferParameters& parameters,
         }
         return false;
     }
-    if (fromMillimeters(parameters.distanceMm) >
-        std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
+    double maxDistance = shortestPositiveBoundsExtent(bounds.value());
+    if (maxDistance <= 0.0 || !std::isfinite(maxDistance)) {
+        maxDistance = std::max(boundsDiagonal(bounds.value()), 1.0e-6);
+    }
+    if (fromMillimeters(parameters.distanceMm) >= maxDistance) {
         if (failureReason) {
             *failureReason = tr("Фаска слишком велика для этого тела. Уменьшите расстояние.");
         }
@@ -3481,8 +3512,11 @@ bool MainWindow::buildFilletResult(const FilletParameters& parameters,
         }
         return false;
     }
-    if (fromMillimeters(parameters.radiusMm) >
-        std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
+    double maxRadius = shortestPositiveBoundsExtent(bounds.value());
+    if (maxRadius <= 0.0 || !std::isfinite(maxRadius)) {
+        maxRadius = std::max(boundsDiagonal(bounds.value()), 1.0e-6);
+    }
+    if (fromMillimeters(parameters.radiusMm) >= maxRadius) {
         if (failureReason) {
             *failureReason =
                 tr("Слишком большой радиус для этого тела. Уменьшите радиус.");

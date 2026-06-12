@@ -928,8 +928,8 @@ const SbColor kFaceSelectedOutline(1.0f, 0.82f, 0.30f);
 const SbColor kFaceHoverOutline(0.70f, 0.88f, 1.0f);
 const SbColor kEdgeSelectedColor(1.0f, 0.78f, 0.20f);
 constexpr float kFaceFillIdleTransparency = 1.0f;
-constexpr float kFaceFillHoverTransparency = 0.85f;
-constexpr float kFaceFillSelectedTransparency = 0.62f;
+constexpr float kFaceFillHoverTransparency = 0.94f;
+constexpr float kFaceFillSelectedTransparency = 0.90f;
 
 // Overlay geometry is lifted along the per-vertex normals so the proxy
 // renders (and ray-picks) just above the coincident body surface.

@@ -29,10 +29,11 @@ public:
 
     void configure(EdgeOperationDialogKind kind);
     void setTarget(const QString& bodyName, const QString& bodyId, int edgeCount);
+    void setValueMm(double valueMm);
     QString targetBodyId() const;
     // Distance (chamfer) or radius (fillet) in millimeters.
-    double valueMm() const;
-    double angleDeg() const;
+    double valueMm();
+    double angleDeg();
     cadnext::ChamferMode chamferMode() const;
     bool previewEnabled() const;
     EdgeOperationDialogKind kind() const;
@@ -43,6 +44,7 @@ signals:
     void cancelRequested();
 
 private:
+    void commitPendingEdits();
     void updateLabels();
     void updateModeRows();
 

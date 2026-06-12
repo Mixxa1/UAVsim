@@ -3,6 +3,7 @@
 #include "cadnext/kernel/GeometryEvaluator.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 
+#include <algorithm>
 #include <cassert>
 
 int main() {
@@ -34,6 +35,23 @@ int main() {
     const auto rebuiltEdges =
         analyzer.edgesForBody("body-1", evaluated.value().shape);
     assert(!rebuiltEdges.empty());
+    const auto longest = std::max_element(
+        rebuiltEdges.begin(), rebuiltEdges.end(),
+        [](const cadnext::kernel::EdgeReference& a,
+           const cadnext::kernel::EdgeReference& b) {
+            return a.length < b.length;
+        });
+    assert(longest != rebuiltEdges.end());
+
+    cadnext::ChamferParameters second = parameters;
+    second.edgeIds = {longest->edgeId};
+    second.distanceMm = 25.0;
+    const auto secondEvaluated = evaluator.evaluateChamfer(evaluated.value().shape, second);
+    assert(secondEvaluated.isOk());
+    assert(secondEvaluated.value().isValid);
+    assert(!secondEvaluated.value().shape.isNull());
+    assert(!secondEvaluated.value().previewMesh.isEmpty());
+    assert(kernel.isShapeValid(secondEvaluated.value().shape));
 
     parameters.angleDeg = 0.0;
     assert(!cadnext::chamferParametersValid(parameters));

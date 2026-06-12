@@ -86,7 +86,10 @@ EdgeOperationDialog::EdgeOperationDialog(QWidget* parent)
     connect(valueSpin_, &QDoubleSpinBox::valueChanged, this, emitChanged);
     connect(angleSpin_, &QDoubleSpinBox::valueChanged, this, emitChanged);
     connect(previewCheck_, &QCheckBox::toggled, this, emitChanged);
-    connect(applyButton_, &QPushButton::clicked, this, [this]() { emit applyRequested(); });
+    connect(applyButton_, &QPushButton::clicked, this, [this]() {
+        commitPendingEdits();
+        emit applyRequested();
+    });
     connect(cancelButton_, &QPushButton::clicked, this, &QDialog::reject);
     connect(this, &QDialog::rejected, this, [this]() { emit cancelRequested(); });
 
@@ -97,6 +100,7 @@ void EdgeOperationDialog::configure(EdgeOperationDialogKind kind) {
     updating_ = true;
     kind_ = kind;
     modeCombo_->setCurrentIndex(0); // "Расстояние и угол" is the default
+    valueSpin_->setValue(kDefaultValueMm);
     angleSpin_->setValue(kDefaultAngleDeg);
     updateLabels();
     updateModeRows();
@@ -113,15 +117,23 @@ void EdgeOperationDialog::setTarget(const QString& bodyName, const QString& body
     updating_ = false;
 }
 
+void EdgeOperationDialog::setValueMm(double valueMm) {
+    updating_ = true;
+    valueSpin_->setValue(valueMm);
+    updating_ = false;
+}
+
 QString EdgeOperationDialog::targetBodyId() const {
     return targetBodyId_;
 }
 
-double EdgeOperationDialog::valueMm() const {
+double EdgeOperationDialog::valueMm() {
+    commitPendingEdits();
     return valueSpin_->value();
 }
 
-double EdgeOperationDialog::angleDeg() const {
+double EdgeOperationDialog::angleDeg() {
+    commitPendingEdits();
     return angleSpin_->value();
 }
 
@@ -136,6 +148,11 @@ bool EdgeOperationDialog::previewEnabled() const {
 
 EdgeOperationDialogKind EdgeOperationDialog::kind() const {
     return kind_;
+}
+
+void EdgeOperationDialog::commitPendingEdits() {
+    valueSpin_->interpretText();
+    angleSpin_->interpretText();
 }
 
 void EdgeOperationDialog::updateLabels() {
