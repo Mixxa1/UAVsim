@@ -158,6 +158,156 @@ double boundsDiagonal(const kernel::ShapeBounds& bounds) {
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+Vector3 add(Vector3 a, Vector3 b) {
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+Vector3 scale(Vector3 v, double factor) {
+    return {v.x * factor, v.y * factor, v.z * factor};
+}
+
+Vector3 transformPoint(const Vector3& point, const Transform& transform) {
+    Vector3 p{point.x * transform.scale.x,
+              point.y * transform.scale.y,
+              point.z * transform.scale.z};
+
+    const double rx = transform.rotationEuler.x * M_PI / 180.0;
+    const double ry = transform.rotationEuler.y * M_PI / 180.0;
+    const double rz = transform.rotationEuler.z * M_PI / 180.0;
+
+    const double cosX = std::cos(rx);
+    const double sinX = std::sin(rx);
+    p = {p.x, p.y * cosX - p.z * sinX, p.y * sinX + p.z * cosX};
+
+    const double cosY = std::cos(ry);
+    const double sinY = std::sin(ry);
+    p = {p.x * cosY + p.z * sinY, p.y, -p.x * sinY + p.z * cosY};
+
+    const double cosZ = std::cos(rz);
+    const double sinZ = std::sin(rz);
+    p = {p.x * cosZ - p.y * sinZ, p.x * sinZ + p.y * cosZ, p.z};
+
+    return add(p, transform.position);
+}
+
+void includeTransformedBox(ViewBounds& bounds,
+                           const Transform& transform,
+                           const Vector3& min,
+                           const Vector3& max) {
+    const std::array<Vector3, 8> corners = {
+        Vector3{min.x, min.y, min.z},
+        Vector3{max.x, min.y, min.z},
+        Vector3{min.x, max.y, min.z},
+        Vector3{max.x, max.y, min.z},
+        Vector3{min.x, min.y, max.z},
+        Vector3{max.x, min.y, max.z},
+        Vector3{min.x, max.y, max.z},
+        Vector3{max.x, max.y, max.z},
+    };
+    for (const Vector3& corner : corners) {
+        bounds.include(transformPoint(corner, transform));
+    }
+}
+
+ViewBounds primitiveObjectBounds(const Object& object) {
+    ViewBounds bounds;
+    if (object.type != ObjectType::Body) {
+        return bounds;
+    }
+    const PrimitiveParameters& params = object.primitive;
+    switch (params.kind) {
+    case PrimitiveKind::Box:
+        includeTransformedBox(bounds, object.transform,
+                              {-params.width * 0.5, -params.depth * 0.5,
+                               -params.height * 0.5},
+                              {params.width * 0.5, params.depth * 0.5,
+                               params.height * 0.5});
+        break;
+    case PrimitiveKind::Cylinder:
+    case PrimitiveKind::Cone:
+        includeTransformedBox(bounds, object.transform,
+                              {-params.radius, -params.radius, -params.height * 0.5},
+                              {params.radius, params.radius, params.height * 0.5});
+        break;
+    case PrimitiveKind::Sphere:
+        includeTransformedBox(bounds, object.transform,
+                              {-params.radius, -params.radius, -params.radius},
+                              {params.radius, params.radius, params.radius});
+        break;
+    case PrimitiveKind::None:
+        break;
+    }
+    return bounds;
+}
+
+ViewBounds meshBounds(const kernel::TriangleMesh& mesh, const Transform& transform) {
+    ViewBounds bounds;
+    for (const kernel::MeshVertex& vertex : mesh.vertices) {
+        bounds.include(transformPoint({vertex.x, vertex.y, vertex.z}, transform));
+    }
+    return bounds;
+}
+
+SketchReference resolvedReference(const Sketch& sketch) {
+    return sketch.reference.sourceId.empty()
+               ? canonicalSketchReference(sketch.plane)
+               : sketch.reference;
+}
+
+ViewBounds sketchEntityBounds(const Sketch& sketch, const SketchEntity& entity) {
+    const SketchReference reference = resolvedReference(sketch);
+    ViewBounds bounds;
+    const auto includePoint = [&bounds, &reference](SketchPoint2D point) {
+        bounds.include(sketchPointToWorld(point, reference));
+    };
+    switch (entity.type) {
+    case SketchEntityType::Line:
+        includePoint(entity.line.start);
+        includePoint(entity.line.end);
+        break;
+    case SketchEntityType::Rectangle: {
+        const SketchRectangle& rect = entity.rectangle;
+        includePoint(rect.origin);
+        includePoint({rect.origin.u + rect.width, rect.origin.v});
+        includePoint({rect.origin.u, rect.origin.v + rect.height});
+        includePoint({rect.origin.u + rect.width, rect.origin.v + rect.height});
+        break;
+    }
+    case SketchEntityType::Circle: {
+        const SketchCircle& circle = entity.circle;
+        includePoint({circle.center.u - circle.radius, circle.center.v});
+        includePoint({circle.center.u + circle.radius, circle.center.v});
+        includePoint({circle.center.u, circle.center.v - circle.radius});
+        includePoint({circle.center.u, circle.center.v + circle.radius});
+        break;
+    }
+    }
+    return bounds;
+}
+
+ViewBounds sketchProfileBounds(const Sketch& sketch, const SketchProfile& profile) {
+    const SketchReference reference = resolvedReference(sketch);
+    ViewBounds bounds;
+    for (const SketchPoint2D& point : profile.outerLoop) {
+        bounds.include(sketchPointToWorld(point, reference));
+    }
+    return bounds;
+}
+
+ViewBounds faceReferenceBounds(const kernel::FaceReference& face) {
+    if (!face.previewMesh.vertices.empty()) {
+        return meshBounds(face.previewMesh, Transform{});
+    }
+    ViewBounds bounds;
+    const Vector3 halfU = scale(face.uAxis, face.width * 0.5);
+    const Vector3 halfV = scale(face.vAxis, face.height * 0.5);
+    bounds.include(add(add(face.origin, scale(halfU, -1.0)), scale(halfV, -1.0)));
+    bounds.include(add(add(face.origin, halfU), scale(halfV, -1.0)));
+    bounds.include(add(add(face.origin, halfU), halfV));
+    bounds.include(add(add(face.origin, scale(halfU, -1.0)), halfV));
+    return bounds;
+}
+
 QString cutDepthModeText(CutDepthMode mode) {
     switch (mode) {
     case CutDepthMode::Distance: return QObject::tr("Distance");
@@ -226,13 +376,18 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { normalToSelectedFace(); });
     connect(toolBar_->deleteSelectedAction(), &QAction::triggered, this,
             [this]() { deleteSelected(); });
+    toolBar_->fitSelectionAction()->setShortcut(QKeySequence(Qt::Key_F));
+    connect(toolBar_->fitSelectionAction(), &QAction::triggered, this,
+            [this]() { fitSelection(); });
     connect(toolBar_->fitViewAction(), &QAction::triggered, this, [this]() {
         if (viewer_) {
+            refreshCameraNavigationContext();
             viewer_->fitView();
         }
     });
     connect(toolBar_->resetCameraAction(), &QAction::triggered, this, [this]() {
         if (viewer_) {
+            refreshCameraNavigationContext();
             viewer_->resetCamera();
         }
     });
@@ -588,6 +743,7 @@ void MainWindow::syncViewportSelection() {
     updateExtrudeActionEnabled();
     updateFaceActionsEnabled();
     updateModeStatusLabel();
+    refreshCameraNavigationContext();
 }
 
 void MainWindow::refreshPropertyPanel() {
@@ -640,6 +796,169 @@ void MainWindow::refreshPropertyPanel() {
         break;
     }
     propertyPanel_->clearObject();
+}
+
+SelectionState MainWindow::cameraSelectionState() const {
+    SelectionState selection;
+    if (activeSketchId_ && !selectedProfileId_.empty()) {
+        selection.kind = cadnext::SelectionKind::SketchProfile;
+        selection.sketchId = *activeSketchId_;
+        selection.profileId = selectedProfileId_;
+        return selection;
+    }
+
+    switch (selectionKind_) {
+    case SelectionKind::Body:
+        selection.kind = cadnext::SelectionKind::Body;
+        selection.bodyId = selectedId_;
+        break;
+    case SelectionKind::BodyFace:
+        selection.kind = cadnext::SelectionKind::BodyFace;
+        selection.bodyId = selectedFace_.bodyId;
+        selection.faceId = selectedFace_.faceId;
+        break;
+    case SelectionKind::Sketch:
+        selection.kind = cadnext::SelectionKind::Sketch;
+        selection.sketchId = selectedId_;
+        break;
+    case SelectionKind::Entity:
+        selection.kind = cadnext::SelectionKind::SketchEntity;
+        selection.sketchId = selectedSketchId_;
+        selection.entityId = selectedId_;
+        break;
+    case SelectionKind::WorkPlane:
+    case SelectionKind::None:
+        break;
+    }
+    return selection;
+}
+
+ViewBoundsScene MainWindow::cameraBoundsScene() const {
+    ViewBoundsScene scene;
+    scene.defaultGridBounds = defaultGridViewBounds();
+
+    for (const Object& object : document_.objects()) {
+        if (object.type == ObjectType::ReferencePlane) {
+            ViewBoundsEntry entry;
+            entry.kind = ViewGeometryKind::HelperPlane;
+            entry.bodyId = object.id;
+            entry.debugName = object.name;
+            entry.bounds = primitiveObjectBounds(object);
+            scene.entries.push_back(std::move(entry));
+            continue;
+        }
+        if (object.type != ObjectType::Body) {
+            continue;
+        }
+        ViewBounds bounds;
+        if (const auto meshIt = bodyMeshes_.find(object.id); meshIt != bodyMeshes_.end()) {
+            bounds = meshBounds(meshIt->second, object.transform);
+        }
+        if (!bounds.valid) {
+            bounds = primitiveObjectBounds(object);
+        }
+        if (!bounds.valid) {
+            continue;
+        }
+        ViewBoundsEntry entry;
+        entry.kind = ViewGeometryKind::Body;
+        entry.bodyId = object.id;
+        entry.debugName = object.name;
+        entry.bounds = bounds;
+        scene.entries.push_back(std::move(entry));
+    }
+
+    for (const auto& bodyEntry : bodyFaces_) {
+        for (const kernel::FaceReference& face : bodyEntry.second) {
+            ViewBounds bounds = faceReferenceBounds(face);
+            if (!bounds.valid) {
+                continue;
+            }
+            ViewBoundsEntry entry;
+            entry.kind = ViewGeometryKind::BodyFace;
+            entry.bodyId = face.bodyId;
+            entry.faceId = face.faceId;
+            entry.debugName = face.faceId;
+            entry.bounds = bounds;
+            scene.entries.push_back(std::move(entry));
+        }
+    }
+
+    for (const Sketch& sketch : document_.sketches()) {
+        ViewBounds sketchBounds;
+        for (const SketchEntity& entity : sketch.entities) {
+            ViewBounds bounds = sketchEntityBounds(sketch, entity);
+            sketchBounds.include(bounds);
+            if (bounds.valid) {
+                ViewBoundsEntry entry;
+                entry.kind = ViewGeometryKind::SketchEntity;
+                entry.sketchId = sketch.id;
+                entry.entityId = entity.id;
+                entry.debugName = entity.name;
+                entry.bounds = bounds;
+                scene.entries.push_back(std::move(entry));
+            }
+        }
+
+        const std::vector<SketchProfile> profiles = SketchProfileDetector().detect(sketch);
+        for (const SketchProfile& profile : profiles) {
+            ViewBounds bounds = sketchProfileBounds(sketch, profile);
+            if (!bounds.valid) {
+                continue;
+            }
+            ViewBoundsEntry entry;
+            entry.kind = ViewGeometryKind::SketchProfile;
+            entry.sketchId = sketch.id;
+            entry.profileId = profile.id;
+            entry.debugName = profile.id;
+            entry.bounds = bounds;
+            scene.entries.push_back(std::move(entry));
+        }
+
+        if (sketchBounds.valid) {
+            ViewBoundsEntry entry;
+            entry.kind = activeSketchId_ && *activeSketchId_ == sketch.id
+                             ? ViewGeometryKind::ActiveSketch
+                             : ViewGeometryKind::CommittedSketch;
+            entry.sketchId = sketch.id;
+            entry.debugName = sketch.name;
+            entry.bounds = sketchBounds;
+            scene.entries.push_back(std::move(entry));
+        }
+    }
+
+    for (const WorkPlane& plane : document_.workPlanes()) {
+        ViewBounds bounds;
+        const Vector3 halfU = scale(plane.uAxis, plane.width * 0.5);
+        const Vector3 halfV = scale(plane.vAxis, plane.height * 0.5);
+        bounds.include(add(add(plane.origin, scale(halfU, -1.0)), scale(halfV, -1.0)));
+        bounds.include(add(add(plane.origin, halfU), halfV));
+        if (bounds.valid) {
+            ViewBoundsEntry entry;
+            entry.kind = ViewGeometryKind::HelperPlane;
+            entry.debugName = plane.name;
+            entry.bounds = bounds;
+            scene.entries.push_back(std::move(entry));
+        }
+    }
+
+    return scene;
+}
+
+void MainWindow::refreshCameraNavigationContext() {
+    if (!viewer_) {
+        return;
+    }
+    viewer_->setCameraBoundsScene(cameraBoundsScene());
+    viewer_->focusSelection(cameraSelectionState());
+}
+
+void MainWindow::fitSelection() {
+    if (!viewer_) {
+        return;
+    }
+    viewer_->setCameraBoundsScene(cameraBoundsScene());
+    viewer_->frameSelection(cameraSelectionState());
 }
 
 std::optional<WorkPlane> MainWindow::workPlaneById(const std::string& planeId) const {
@@ -2895,6 +3214,10 @@ void MainWindow::createMenus() {
     partMenu->addAction(toolBar_->normalToFaceAction());
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    viewMenu->addAction(toolBar_->fitSelectionAction());
+    viewMenu->addAction(toolBar_->fitViewAction());
+    viewMenu->addAction(toolBar_->resetCameraAction());
+    viewMenu->addSeparator();
     viewMenu->addAction(treeDock_->toggleViewAction());
     viewMenu->addAction(propertyDock_->toggleViewAction());
 }

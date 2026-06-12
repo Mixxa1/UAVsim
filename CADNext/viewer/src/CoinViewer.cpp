@@ -23,6 +23,7 @@
 
 #include <QEvent>
 #include <QNativeGestureEvent>
+#include <QtLogging>
 #include <QWheelEvent>
 #include <QWidget>
 
@@ -33,6 +34,7 @@ namespace {
 const SbVec3f kDefaultCameraPosition(9.0f, -9.0f, 7.0f);
 const SbVec3f kSceneCenter(0.0f, 0.0f, 0.0f);
 const SbVec3f kWorldUp(0.0f, 0.0f, 1.0f);
+constexpr float kDefaultGridFitRadius = 5.7f;
 
 // A press/release pair further apart than this is treated as a drag
 // (camera navigation), not a pick click.
@@ -44,6 +46,38 @@ constexpr float kMaxOrthoViewHeight = 500.0f;
 
 SbVec3f toSb(const Vector3& v) {
     return {static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z)};
+}
+
+Vector3 fromSb(const SbVec3f& v) {
+    return {v[0], v[1], v[2]};
+}
+
+float dot(const SbVec3f& a, const SbVec3f& b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+SbVec3f cameraForward(SoCamera* camera) {
+    SbVec3f forward;
+    camera->orientation.getValue().multVec(SbVec3f(0.0f, 0.0f, -1.0f), forward);
+    if (forward.normalize() == 0.0f) {
+        return SbVec3f(0.0f, 0.0f, -1.0f);
+    }
+    return forward;
+}
+
+void applyClipPlanes(SoCamera* camera,
+                     const CameraNavigationOptions& options,
+                     double distance,
+                     double radius) {
+    const double safeDistance = std::max(distance, options.minDistance);
+    const double safeRadius = std::max(radius, options.minDistance);
+    const double nearCandidate = std::max(0.0005, safeDistance - safeRadius * 2.5);
+    const double nearDistance = std::min(nearCandidate, safeDistance * 0.05);
+    const double farDistance = std::max({safeDistance + safeRadius * 6.0,
+                                         safeDistance * 8.0,
+                                         options.minDistance * 100.0});
+    camera->nearDistance = static_cast<float>(std::max(0.0005, nearDistance));
+    camera->farDistance = static_cast<float>(std::min(options.maxDistance * 2.0, farDistance));
 }
 
 } // namespace
@@ -67,6 +101,9 @@ public:
     std::function<void()> sketchCancelHandler;
     bool sketchInputActive = false;
     bool freeOrbitEnabled = true;
+    CameraNavigationOptions navigationOptions;
+    SbVec3f orbitPivot = kSceneCenter;
+    double orbitRadius = kDefaultGridFitRadius;
     SketchReference sketchReference;
 
     // --- Sketch2D trackpad navigation (called by the gesture filter) ----
@@ -108,6 +145,28 @@ public:
                            right * (dxPx * (perPixelOld - perPixelNew)) +
                            up * (dyPx * (perPixelOld - perPixelNew));
         ortho->height = newHeight;
+    }
+
+    void zoomPerspectiveAt(double factor) {
+        SoCamera* camera = getCamera();
+        if (!camera || !camera->isOfType(SoPerspectiveCamera::getClassTypeId())) {
+            return;
+        }
+        factor = std::clamp(factor, 0.25, 4.0);
+        const SbVec3f forward = cameraForward(camera);
+        const SbVec3f position = camera->position.getValue();
+        const SbVec3f toPivot = orbitPivot - position;
+        double distance = std::fabs(static_cast<double>(dot(toPivot, forward)));
+        if (distance < navigationOptions.minDistance) {
+            distance = std::max(static_cast<double>(toPivot.length()),
+                                navigationOptions.minDistance);
+        }
+        const double newDistance = std::clamp(distance / factor,
+                                             navigationOptions.minDistance,
+                                             navigationOptions.maxDistance);
+        camera->position = orbitPivot - forward * static_cast<float>(newDistance);
+        camera->focalDistance = static_cast<float>(newDistance);
+        applyClipPlanes(camera, navigationOptions, newDistance, orbitRadius);
     }
 
 protected:
@@ -300,11 +359,9 @@ private:
 };
 
 // Qt event filter on the viewer's GL widget for Sketch2D trackpad
-// navigation: two-finger scroll pans along the plane U/V, pinch zooms at
-// the cursor, and a plain mouse wheel zooms too. The events are consumed
-// so SoQt's default wheel-dolly/orbit can never knock the camera off the
-// plane normal. Inactive in Free3D, where the examiner viewer keeps its
-// standard navigation.
+// navigation. In Sketch2D, two-finger scroll pans along the plane U/V and
+// zoom is orthographic at the cursor. In Free3D, wheel/pinch zooms toward
+// the current CAD pivot so it cannot get stuck orbiting the world origin.
 class SketchNavigationFilter : public QObject {
 public:
     explicit SketchNavigationFilter(PickableExaminerViewer* viewer)
@@ -315,27 +372,41 @@ public:
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override {
         auto* widget = qobject_cast<QWidget*>(watched);
-        if (!sketch2DActive || !widget) {
+        if (!widget) {
             return QObject::eventFilter(watched, event);
         }
         if (event->type() == QEvent::Wheel) {
             const auto* wheel = static_cast<QWheelEvent*>(event);
-            const QPoint pixels = wheel->pixelDelta();
-            if (!pixels.isNull()) {
-                // Trackpad two-finger scroll: pan.
-                viewer_->panOrthoByWheel(pixels.x(), pixels.y());
+            if (sketch2DActive) {
+                const QPoint pixels = wheel->pixelDelta();
+                if (!pixels.isNull()) {
+                    // Trackpad two-finger scroll: pan.
+                    viewer_->panOrthoByWheel(pixels.x(), pixels.y());
+                } else {
+                    // Discrete mouse wheel: zoom around the cursor.
+                    const double steps = wheel->angleDelta().y() / 120.0;
+                    viewer_->zoomOrthoAt(std::pow(1.12, steps), wheel->position(),
+                                         widget->size());
+                }
             } else {
-                // Discrete mouse wheel: zoom around the cursor.
-                const double steps = wheel->angleDelta().y() / 120.0;
-                viewer_->zoomOrthoAt(std::pow(1.12, steps), wheel->position(), widget->size());
+                const QPoint pixels = wheel->pixelDelta();
+                const double steps = !pixels.isNull()
+                                         ? static_cast<double>(pixels.y()) / 100.0
+                                         : static_cast<double>(wheel->angleDelta().y()) / 120.0;
+                viewer_->zoomPerspectiveAt(std::pow(viewer_->navigationOptions.zoomSpeed,
+                                                     steps));
             }
             return true;
         }
         if (event->type() == QEvent::NativeGesture) {
             const auto* gesture = static_cast<QNativeGestureEvent*>(event);
             if (gesture->gestureType() == Qt::ZoomNativeGesture) {
-                viewer_->zoomOrthoAt(1.0 + gesture->value(), gesture->position(),
-                                     widget->size());
+                if (sketch2DActive) {
+                    viewer_->zoomOrthoAt(1.0 + gesture->value(), gesture->position(),
+                                         widget->size());
+                } else {
+                    viewer_->zoomPerspectiveAt(1.0 + gesture->value());
+                }
                 return true;
             }
         }
@@ -348,6 +419,9 @@ private:
 
 CoinViewer::CoinViewer(QWidget* parent)
     : scene_(std::make_unique<SceneGraph>()) {
+    cameraBounds_.defaultGridBounds = defaultGridViewBounds();
+    orbitPivot_ = cameraBounds_.defaultGridBounds.center();
+
     viewerRoot_ = new SoSeparator;
     viewerRoot_->ref();
 
@@ -366,6 +440,9 @@ CoinViewer::CoinViewer(QWidget* parent)
     viewer_->setHeadlight(TRUE);
     viewer_->setDecoration(FALSE);
     viewer_->setBackgroundColor(SbColor(0.13f, 0.14f, 0.17f));
+    viewer_->navigationOptions = navigationOptions_;
+    viewer_->orbitPivot = toSb(orbitPivot_);
+    viewer_->orbitRadius = cameraBounds_.defaultGridBounds.radius();
     // Blended (not screen-door) transparency so the faint plane fills
     // read as a light tint over the bodies.
     viewer_->setTransparencyType(SoGLRenderAction::SORTED_OBJECT_BLEND);
@@ -512,14 +589,68 @@ void CoinViewer::fitWorkPlane(const std::string& planeId) {
     }
 }
 
+void CoinViewer::setCameraBoundsScene(const ViewBoundsScene& scene) {
+    cameraBounds_ = scene;
+    if (!cameraBounds_.defaultGridBounds.valid) {
+        cameraBounds_.defaultGridBounds = defaultGridViewBounds();
+    }
+}
+
+void CoinViewer::setOrbitPivot(const cadnext::Vector3& pivot) {
+    orbitPivot_ = pivot;
+    viewer_->orbitPivot = toSb(pivot);
+    if (camera_) {
+        const SbVec3f position = camera_->position.getValue();
+        const double distance = std::max(static_cast<double>((position - toSb(pivot)).length()),
+                                         navigationOptions_.minDistance);
+        camera_->focalDistance = static_cast<float>(distance);
+    }
+    qInfo("[Camera] OrbitPivot=(%.4f, %.4f, %.4f)",
+          pivot.x, pivot.y, pivot.z);
+}
+
+void CoinViewer::focusSelection(const SelectionState& selection) {
+    lastSelection_ = selection;
+    const CameraFocusTarget target = cameraFocusTargetForSelection(cameraBounds_, selection);
+    if (!target.valid) {
+        return;
+    }
+    setOrbitPivot(target.center);
+    viewer_->orbitRadius = target.radius;
+    if (viewMode_ != ViewMode::Sketch2D) {
+        focusCameraTarget(target);
+    }
+}
+
+void CoinViewer::frameSelection(const SelectionState& selection) {
+    lastSelection_ = selection;
+    const CameraFocusTarget target = cameraFocusTargetForSelection(cameraBounds_, selection);
+    if (!target.valid) {
+        fitView();
+        return;
+    }
+    qInfo("[Camera] FitSelection kind=%s center=(%.4f, %.4f, %.4f) radius=%.4f",
+          target.kind.c_str(), target.center.x, target.center.y, target.center.z,
+          target.radius);
+    frameCameraTarget(target, false);
+}
+
 void CoinViewer::fitView() {
-    switch (policy_.fitTarget(scene_->objectsRoot()->getNumChildren() > 0)) {
+    const CameraFocusTarget target = cameraFitAllTarget(cameraBounds_, lastSelection_);
+    if (!target.valid) {
+        return;
+    }
+    qInfo("[Camera] FitAll bounds=(%.4f, %.4f, %.4f)-(%.4f, %.4f, %.4f)",
+          target.bounds.min.x, target.bounds.min.y, target.bounds.min.z,
+          target.bounds.max.x, target.bounds.max.y, target.bounds.max.z);
+
+    switch (policy_.fitTarget(target.kind != "DefaultGrid")) {
     case ViewportFitTarget::ActiveSketchPlane:
-        camera_->viewAll(scene_->sketchPlaneRoot(), viewer_->getViewportRegion());
+        frameCameraTarget(target, false);
         return;
     case ViewportFitTarget::Bodies:
         // Bodies plus committed sketches; helper planes/axes are excluded.
-        camera_->viewAll(scene_->documentRoot(), viewer_->getViewportRegion());
+        frameCameraTarget(target, false);
         return;
     case ViewportFitTarget::SelectedPlane:
         if (SoSeparator* node = scene_->workPlaneNode(policy_.selectedWorkPlane())) {
@@ -530,15 +661,22 @@ void CoinViewer::fitView() {
     case ViewportFitTarget::WholeScene:
         break;
     }
-    camera_->viewAll(viewerRoot_, viewer_->getViewportRegion());
+    frameCameraTarget(target, false);
 }
 
 void CoinViewer::resetCamera() {
     if (viewMode_ == ViewMode::Sketch2D) {
         return;
     }
-    applyDefaultCameraPose();
-    camera_->viewAll(viewerRoot_, viewer_->getViewportRegion());
+    CameraFocusTarget target = cameraFocusTargetForSelection(cameraBounds_, lastSelection_);
+    if (!target.valid) {
+        target = cameraFitAllTarget(cameraBounds_, lastSelection_);
+    }
+    if (!target.valid) {
+        applyDefaultCameraPose();
+        return;
+    }
+    frameCameraTarget(target, true);
 }
 
 void CoinViewer::applyDefaultCameraPose() {
@@ -547,6 +685,91 @@ void CoinViewer::applyDefaultCameraPose() {
     camera_->nearDistance = 0.05f;
     camera_->farDistance = 1000.0f;
     camera_->focalDistance = (kDefaultCameraPosition - kSceneCenter).length();
+    setOrbitPivot(fromSb(kSceneCenter));
+    viewer_->orbitRadius = kDefaultGridFitRadius;
+}
+
+void CoinViewer::applyIsometricCameraPose(const Vector3& center, double distance) {
+    SbVec3f direction = kDefaultCameraPosition - kSceneCenter;
+    if (direction.normalize() == 0.0f) {
+        direction = SbVec3f(0.55f, -0.55f, 0.45f);
+        direction.normalize();
+    }
+    const SbVec3f sbCenter = toSb(center);
+    camera_->position = sbCenter + direction * static_cast<float>(distance);
+    camera_->pointAt(sbCenter, kWorldUp);
+    camera_->focalDistance = static_cast<float>(distance);
+}
+
+void CoinViewer::frameCameraTarget(const CameraFocusTarget& target, bool isometric) {
+    if (!target.valid || !camera_) {
+        return;
+    }
+    const double paddedRadius =
+        std::max(target.radius * navigationOptions_.fitPadding, navigationOptions_.minDistance);
+    double distance = paddedRadius * 2.5;
+
+    if (camera_->isOfType(SoPerspectiveCamera::getClassTypeId())) {
+        auto* perspective = static_cast<SoPerspectiveCamera*>(camera_);
+        const double verticalFov = perspective->heightAngle.getValue();
+        const double fov = std::clamp(verticalFov, 0.1, 2.8);
+        distance = paddedRadius / std::sin(fov * 0.5);
+    } else if (camera_->isOfType(SoOrthographicCamera::getClassTypeId())) {
+        auto* ortho = static_cast<SoOrthographicCamera*>(camera_);
+        const SbVec2s pixels = viewer_->getViewportRegion().getViewportSizePixels();
+        const double aspect = pixels[1] > 0
+                                  ? std::max(0.1, static_cast<double>(pixels[0]) /
+                                                     static_cast<double>(pixels[1]))
+                                  : 1.0;
+        const double width = std::max(target.bounds.max.x - target.bounds.min.x,
+                                      target.bounds.max.y - target.bounds.min.y);
+        const double height = std::max({target.bounds.max.z - target.bounds.min.z,
+                                        target.bounds.max.y - target.bounds.min.y,
+                                        target.bounds.max.x - target.bounds.min.x});
+        ortho->height = static_cast<float>(
+            std::clamp(std::max(height, width / aspect) * navigationOptions_.fitPadding,
+                       static_cast<double>(kMinOrthoViewHeight),
+                       static_cast<double>(kMaxOrthoViewHeight)));
+    }
+
+    distance = std::clamp(distance, navigationOptions_.minDistance,
+                          navigationOptions_.maxDistance);
+    if (isometric) {
+        applyIsometricCameraPose(target.center, distance);
+    } else {
+        const SbVec3f forward = cameraForward(camera_);
+        camera_->position = toSb(target.center) - forward * static_cast<float>(distance);
+        camera_->focalDistance = static_cast<float>(distance);
+    }
+    setOrbitPivot(target.center);
+    viewer_->orbitRadius = target.radius;
+    updateClipping(distance, target.radius);
+}
+
+void CoinViewer::focusCameraTarget(const CameraFocusTarget& target) {
+    if (!target.valid || !camera_) {
+        return;
+    }
+    const SbVec3f forward = cameraForward(camera_);
+    const SbVec3f position = camera_->position.getValue();
+    double distance = std::fabs(static_cast<double>(dot(toSb(target.center) - position,
+                                                       forward)));
+    if (distance < navigationOptions_.minDistance) {
+        distance = std::max(static_cast<double>((position - toSb(target.center)).length()),
+                            target.radius * navigationOptions_.fitPadding);
+    }
+    distance = std::clamp(distance, navigationOptions_.minDistance,
+                          navigationOptions_.maxDistance);
+    camera_->position = toSb(target.center) - forward * static_cast<float>(distance);
+    camera_->focalDistance = static_cast<float>(distance);
+    updateClipping(distance, target.radius);
+}
+
+void CoinViewer::updateClipping(double distance, double radius) {
+    if (!camera_) {
+        return;
+    }
+    applyClipPlanes(camera_, navigationOptions_, distance, radius);
 }
 
 void CoinViewer::replaceCamera(bool orthographic) {

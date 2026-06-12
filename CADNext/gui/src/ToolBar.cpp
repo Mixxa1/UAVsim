@@ -31,6 +31,7 @@ ToolBar::ToolBar(QWidget* parent)
     addSeparator();
     deleteSelectedAction_ = addAction(tr("Delete Selected"));
     addSeparator();
+    fitSelectionAction_ = addAction(tr("Fit Selection"));
     fitViewAction_ = addAction(tr("Fit View"));
     resetCameraAction_ = addAction(tr("Reset Camera"));
 }

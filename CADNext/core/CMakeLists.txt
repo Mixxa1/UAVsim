@@ -4,6 +4,7 @@ add_library(cadnext_core
     src/Object.cpp
     src/Sketch.cpp
     src/SketchInput.cpp
+    src/ViewBoundsPolicy.cpp
     src/ViewportPolicy.cpp
     src/WorkPlane.cpp
     src/SketchProfile.cpp

@@ -23,6 +23,7 @@ public:
     QAction* workPlaneFromFaceAction() const { return workPlaneFromFaceAction_; }
     QAction* normalToFaceAction() const { return normalToFaceAction_; }
     QAction* deleteSelectedAction() const { return deleteSelectedAction_; }
+    QAction* fitSelectionAction() const { return fitSelectionAction_; }
     QAction* fitViewAction() const { return fitViewAction_; }
     QAction* resetCameraAction() const { return resetCameraAction_; }
 
@@ -37,6 +38,7 @@ private:
     QAction* workPlaneFromFaceAction_ = nullptr;
     QAction* normalToFaceAction_ = nullptr;
     QAction* deleteSelectedAction_ = nullptr;
+    QAction* fitSelectionAction_ = nullptr;
     QAction* fitViewAction_ = nullptr;
     QAction* resetCameraAction_ = nullptr;
 };

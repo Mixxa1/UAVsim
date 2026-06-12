@@ -15,6 +15,7 @@
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchInput.hpp"
 #include "cadnext/SketchProfile.hpp"
+#include "cadnext/ViewBoundsPolicy.hpp"
 #include "cadnext/WorkPlane.hpp"
 #include "cadnext/kernel/FaceAnalyzer.hpp"
 #include "cadnext/kernel/ShapeHandle.hpp"
@@ -74,6 +75,10 @@ private:
     void syncTreeSelection();
     void syncViewportSelection();
     void refreshPropertyPanel();
+    SelectionState cameraSelectionState() const;
+    ViewBoundsScene cameraBoundsScene() const;
+    void refreshCameraNavigationContext();
+    void fitSelection();
     std::optional<WorkPlane> workPlaneById(const std::string& planeId) const;
     WorkPlane workPlaneForSketch(const Sketch& sketch) const;
     void addCanonicalWorkPlanesToTree();

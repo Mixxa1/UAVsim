@@ -4,7 +4,9 @@
 #include <memory>
 #include <string>
 
+#include "cadnext/Selection.hpp"
 #include "cadnext/Sketch.hpp"
+#include "cadnext/ViewBoundsPolicy.hpp"
 #include "cadnext/ViewportPolicy.hpp"
 #include "cadnext/WorkPlane.hpp"
 #include "cadnext/viewer/SceneGraph.hpp"
@@ -87,6 +89,11 @@ public:
     // Frames the given canonical work plane without changing orientation.
     void fitWorkPlane(const std::string& planeId);
 
+    void setCameraBoundsScene(const ViewBoundsScene& scene);
+    void setOrbitPivot(const cadnext::Vector3& pivot);
+    void focusSelection(const SelectionState& selection);
+    void frameSelection(const SelectionState& selection);
+
     // Re-frames per ViewportPolicy: the active sketch plane in Sketch2D,
     // otherwise bodies+sketches, falling back to the selected plane and
     // then the whole scene. Helper grid/axes never inflate the fit.
@@ -96,6 +103,10 @@ public:
 
 private:
     void applyDefaultCameraPose();
+    void applyIsometricCameraPose(const Vector3& center, double distance);
+    void frameCameraTarget(const CameraFocusTarget& target, bool isometric);
+    void focusCameraTarget(const CameraFocusTarget& target);
+    void updateClipping(double distance, double radius);
     void replaceCamera(bool orthographic);
     // Applies the ViewportPolicy visibility/navigation state to the scene.
     void applyHelperVisibility();
@@ -106,6 +117,10 @@ private:
     PickableExaminerViewer* viewer_ = nullptr;
     SketchNavigationFilter* gestureFilter_ = nullptr;
     ViewportPolicy policy_;
+    CameraNavigationOptions navigationOptions_;
+    ViewBoundsScene cameraBounds_;
+    SelectionState lastSelection_;
+    Vector3 orbitPivot_;
     ViewMode viewMode_ = ViewMode::Free3D;
 };
 
