@@ -12,6 +12,7 @@
 #ifdef CADNEXT_WITH_OCCT
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -19,6 +20,7 @@
 #include <Poly_Triangulation.hxx>
 #include <Standard_Failure.hxx>
 #include <TopAbs_Orientation.hxx>
+#include <TopAbs_State.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
@@ -292,6 +294,22 @@ double meshArea(const TriangleMesh& mesh) {
     return area;
 }
 
+bool pointIsInsideShape(const TopoDS_Shape& shape, const cadnext::Vector3& point,
+                        double tolerance) {
+    BRepClass3d_SolidClassifier classifier(shape);
+    classifier.Perform(gp_Pnt(point.x, point.y, point.z), tolerance);
+    return classifier.State() == TopAbs_IN;
+}
+
+bool normalPointsIntoShape(const TopoDS_Shape& shape, const cadnext::Vector3& origin,
+                           const cadnext::Vector3& normal, double diagonal) {
+    const double offset = std::max(diagonal * 1.0e-5, 1.0e-6);
+    const cadnext::Vector3 probe{origin.x + normal.x * offset,
+                                 origin.y + normal.y * offset,
+                                 origin.z + normal.z * offset};
+    return pointIsInsideShape(shape, probe, std::max(offset * 0.1, 1.0e-7));
+}
+
 } // namespace
 
 std::vector<FaceReference> FaceAnalyzer::planarFacesForBody(const std::string& bodyId,
@@ -381,6 +399,12 @@ std::vector<FaceReference> FaceAnalyzer::planarFacesForBody(const std::string& b
                 reference.uAxis = uAxis;
                 reference.vAxis = vAxis;
                 reference.normal = normal;
+                if (normalPointsIntoShape(*topoShape, reference.origin, reference.normal,
+                                          diagonal)) {
+                    reference.normal = {-reference.normal.x, -reference.normal.y,
+                                        -reference.normal.z};
+                    reference.vAxis = cross(reference.normal, reference.uAxis);
+                }
                 reference.width = std::max(uMax - uMin, 1.0e-6);
                 reference.height = std::max(vMax - vMin, 1.0e-6);
                 reference.isSketchable = true;

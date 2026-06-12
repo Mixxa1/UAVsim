@@ -6,9 +6,11 @@
 //   box -> side face -> circle sketch  -> Cut Distance    -> pocket
 //   box -> top face -> rectangle sketch -> Extrude         -> boss on face
 
+#include "cadnext/Chamfer.hpp"
 #include "cadnext/ExtrudeCut.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchProfile.hpp"
+#include "cadnext/kernel/EdgeAnalyzer.hpp"
 #include "cadnext/kernel/FaceAnalyzer.hpp"
 #include "cadnext/kernel/GeometryEvaluator.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
@@ -23,6 +25,7 @@ namespace {
 using cadnext::SketchPoint2D;
 using cadnext::SketchReference;
 using cadnext::Vector3;
+using cadnext::kernel::EdgeReference;
 using cadnext::kernel::FaceReference;
 
 double dot(const Vector3& a, const Vector3& b) {
@@ -54,6 +57,41 @@ const FaceReference* faceWithNormal(const std::vector<FaceReference>& faces,
     return nullptr;
 }
 
+const FaceReference* chamferFace(const std::vector<FaceReference>& faces) {
+    const FaceReference* best = nullptr;
+    double bestArea = 0.0;
+    for (const FaceReference& face : faces) {
+        if (!face.isSketchable) {
+            continue;
+        }
+        const bool diagonalInYZ = std::fabs(face.normal.y) > 0.45 &&
+                                  std::fabs(face.normal.z) > 0.45 &&
+                                  std::fabs(face.normal.x) < 0.1;
+        if (diagonalInYZ && face.area > bestArea) {
+            best = &face;
+            bestArea = face.area;
+        }
+    }
+    return best;
+}
+
+const EdgeReference* nearestEdge(const std::vector<EdgeReference>& edges,
+                                 const Vector3& targetCenter) {
+    const EdgeReference* best = nullptr;
+    double bestDistance2 = 1.0e300;
+    for (const EdgeReference& edge : edges) {
+        const double dx = edge.center.x - targetCenter.x;
+        const double dy = edge.center.y - targetCenter.y;
+        const double dz = edge.center.z - targetCenter.z;
+        const double distance2 = dx * dx + dy * dy + dz * dz;
+        if (distance2 < bestDistance2) {
+            best = &edge;
+            bestDistance2 = distance2;
+        }
+    }
+    return best;
+}
+
 cadnext::SketchProfile rectangleProfile(double halfU, double halfV) {
     cadnext::SketchProfile profile;
     profile.id = "profile-rect";
@@ -66,7 +104,8 @@ cadnext::SketchProfile rectangleProfile(double halfU, double halfV) {
     return profile;
 }
 
-cadnext::SketchProfile circleProfile(double radius) {
+cadnext::SketchProfile circleProfile(double radius,
+                                     SketchPoint2D center = {0.0, 0.0}) {
     cadnext::SketchProfile profile;
     profile.id = "profile-circle";
     profile.sketchId = "sketch-test";
@@ -74,7 +113,8 @@ cadnext::SketchProfile circleProfile(double radius) {
     constexpr int kSegments = 48;
     for (int i = 0; i < kSegments; ++i) {
         const double angle = 2.0 * M_PI * static_cast<double>(i) / kSegments;
-        profile.outerLoop.push_back({radius * std::cos(angle), radius * std::sin(angle)});
+        profile.outerLoop.push_back({center.u + radius * std::cos(angle),
+                                     center.v + radius * std::sin(angle)});
     }
     profile.area = M_PI * radius * radius;
     profile.isClosed = true;
@@ -133,6 +173,7 @@ int main() {
     assert(kernel.isAvailable());
     cadnext::kernel::GeometryEvaluator evaluator(kernel);
     cadnext::kernel::FaceAnalyzer analyzer(kernel);
+    cadnext::kernel::EdgeAnalyzer edgeAnalyzer(kernel);
 
     // Unit box centered on the origin: x/y/z all span [-0.5, 0.5].
     const auto box = kernel.makeBox({1.0, 1.0, 1.0});
@@ -237,6 +278,57 @@ int main() {
         const double expected = 1.0 - M_PI * 0.2 * 0.2 * 0.3;
         const double volume = meshVolume(cut.value().previewMesh);
         assert(std::fabs(volume - expected) < 0.02);
+    }
+
+    // --- Sketch + Cut Distance from a freshly created chamfer face -------
+    {
+        const std::vector<EdgeReference> boxEdges =
+            edgeAnalyzer.edgesForBody("body-box", box.value());
+        const EdgeReference* topFrontEdge =
+            nearestEdge(boxEdges, {0.0, -0.5, 0.5});
+        assert(topFrontEdge);
+
+        cadnext::ChamferParameters chamferParameters;
+        chamferParameters.targetBodyId = "body-box";
+        chamferParameters.edgeIds = {topFrontEdge->edgeId};
+        chamferParameters.mode = cadnext::ChamferMode::DistanceAngle;
+        chamferParameters.distanceMm = 100.0;
+        chamferParameters.angleDeg = 45.0;
+        const auto chamfered =
+            evaluator.evaluateChamfer(box.value(), chamferParameters);
+        assert(chamfered.isOk());
+        assert(chamfered.value().isValid);
+        assert(kernel.isShapeValid(chamfered.value().shape));
+
+        const std::vector<FaceReference> chamferedFaces =
+            analyzer.planarFacesForBody("body-box", chamfered.value().shape);
+        const FaceReference* slopedFace = chamferFace(chamferedFaces);
+        assert(slopedFace);
+        const SketchReference chamferReference = referenceFromFace(*slopedFace);
+
+        cadnext::ExtrudeCutParameters parameters;
+        parameters.targetBodyId = "body-box";
+        parameters.sketchId = "sketch-test";
+        parameters.profileId = "profile-circle";
+        parameters.depthMode = cadnext::CutDepthMode::Distance;
+        parameters.direction = cadnext::CutDirection::Negative; // into the chamfered body
+        parameters.distance = 0.35;
+
+        const cadnext::Result<cadnext::CutSpan> span =
+            cadnext::computeCutSpan(parameters, cadnext::CutExtents{});
+        assert(span.isOk());
+
+        const double beforeVolume = std::fabs(meshVolume(chamfered.value().previewMesh));
+        const auto cut = evaluator.evaluateExtrudeCut(
+            chamfered.value().shape, chamferReference, circleProfile(0.04, {0.0, 0.055}),
+            span.value());
+        assert(cut.isOk());
+        assert(cut.value().isValid);
+        assert(!cut.value().previewMesh.isEmpty());
+        assert(kernel.isShapeValid(cut.value().shape));
+
+        const double afterVolume = std::fabs(meshVolume(cut.value().previewMesh));
+        assert(afterVolume < beforeVolume - 1.0e-4);
     }
 
     return 0;

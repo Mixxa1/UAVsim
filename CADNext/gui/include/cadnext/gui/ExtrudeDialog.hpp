@@ -32,7 +32,7 @@ public:
     void setProfiles(const QList<ExtrudeProfileItem>& profiles, const QString& selectedId);
 
     QString selectedProfileId() const;
-    double distance() const;
+    double distance();
     cadnext::ExtrudeDirection direction() const;
     bool previewEnabled() const;
 
@@ -45,6 +45,8 @@ signals:
     void cancelRequested();
 
 private:
+    void commitPendingEdits();
+
     QComboBox* profileCombo_ = nullptr;
     QComboBox* operationCombo_ = nullptr;
     QComboBox* depthModeCombo_ = nullptr;

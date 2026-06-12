@@ -92,7 +92,10 @@ CutExtrudeDialog::CutExtrudeDialog(QWidget* parent)
     connect(limitCombo_, &QComboBox::currentIndexChanged, this, emitChanged);
     connect(previewCheck_, &QCheckBox::toggled, this, emitChanged);
 
-    connect(applyButton_, &QPushButton::clicked, this, [this]() { emit applyRequested(); });
+    connect(applyButton_, &QPushButton::clicked, this, [this]() {
+        commitPendingEdits();
+        emit applyRequested();
+    });
     connect(cancelButton_, &QPushButton::clicked, this, &QDialog::reject);
     connect(this, &QDialog::rejected, this, [this]() { emit cancelRequested(); });
 
@@ -231,13 +234,18 @@ cadnext::CutDirection CutExtrudeDialog::direction() const {
     }
 }
 
-double CutExtrudeDialog::distance() const {
+double CutExtrudeDialog::distance() {
+    commitPendingEdits();
     // The spin box edits millimeters; the model works in model units.
     return cadnext::fromMillimeters(distanceSpin_->value());
 }
 
 bool CutExtrudeDialog::previewEnabled() const {
     return previewCheck_->isChecked();
+}
+
+void CutExtrudeDialog::commitPendingEdits() {
+    distanceSpin_->interpretText();
 }
 
 } // namespace cadnext::gui

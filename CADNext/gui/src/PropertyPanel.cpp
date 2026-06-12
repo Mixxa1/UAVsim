@@ -59,6 +59,37 @@ QString sketchEntityTypeText(SketchEntityType type) {
     return QStringLiteral("—");
 }
 
+QString sketchReferenceLabel(const Sketch& sketch) {
+    const SketchReference& reference = sketch.reference;
+    if (reference.sourceId.empty() || reference.type == SketchReferenceType::CanonicalPlane) {
+        return QString::fromUtf8(sketchPlaneName(sketch.plane));
+    }
+    if (!reference.displayName.empty()) {
+        return QString::fromStdString(reference.displayName);
+    }
+    if (reference.type == SketchReferenceType::BodyFace) {
+        return QStringLiteral("Грань тела");
+    }
+    if (reference.type == SketchReferenceType::WorkPlane) {
+        return QStringLiteral("Рабочая плоскость");
+    }
+    return QString::fromUtf8(sketchPlaneName(sketch.plane));
+}
+
+QString sketchReferenceKindText(const Sketch& sketch) {
+    const SketchReference& reference = sketch.reference;
+    if (reference.sourceId.empty() || reference.type == SketchReferenceType::CanonicalPlane) {
+        return QString::fromUtf8(sketchPlaneName(sketch.plane));
+    }
+    if (reference.type == SketchReferenceType::BodyFace) {
+        return QStringLiteral("Грань тела");
+    }
+    if (reference.type == SketchReferenceType::WorkPlane) {
+        return QStringLiteral("Рабочая плоскость");
+    }
+    return QString::fromUtf8(sketchPlaneName(sketch.plane));
+}
+
 QString faceKindText(kernel::FaceKind kind) {
     switch (kind) {
     case kernel::FaceKind::Planar: return QStringLiteral("Плоская");
@@ -359,9 +390,9 @@ void PropertyPanel::showSketch(const Sketch& sketch) {
     nameEdit_->setText(currentName_);
     nameEdit_->setEnabled(true);
     typeLabel_->setText(tr("Эскиз"));
-    kindLabel_->setText(QString::fromUtf8(sketchPlaneName(sketch.plane)));
+    kindLabel_->setText(sketchReferenceKindText(sketch));
     detailsLabel_->setText(tr("Плоскость: %1\nЭлементов: %2")
-                               .arg(QString::fromUtf8(sketchPlaneName(sketch.plane)))
+                               .arg(sketchReferenceLabel(sketch))
                                .arg(sketch.entities.size()));
 
     setObjectRowsVisible(false);
