@@ -8,6 +8,7 @@
 #include <limits>
 
 #include <QCloseEvent>
+#include <QDateTime>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -25,6 +26,8 @@
 #include "cadnext/DocumentSerializer.hpp"
 #include "cadnext/SketchMeasure.hpp"
 #include "cadnext/Units.hpp"
+#include "cadnext/bridge/UAVPartFormat.hpp"
+#include "cadnext/bridge/UAVPartWriter.hpp"
 #include "cadnext/gui/CutExtrudeDialog.hpp"
 #include "cadnext/gui/EdgeOperationDialog.hpp"
 #include "cadnext/gui/ExtrudeDialog.hpp"
@@ -3682,6 +3685,209 @@ void MainWindow::onPrimitiveEdited(const QString& objectId,
 
 // --- File handling -----------------------------------------------------------
 
+namespace {
+
+// UI-форматирование результатов сохранения детали: масса в килограммах,
+// габариты в миллиметрах (внутри файла — только метры и килограммы).
+QString formatPartMassKg(double massKg) {
+    int decimals = 2;
+    if (massKg < 0.1) decimals = 3;
+    if (massKg < 0.01) decimals = 4;
+    return QString::number(massKg, 'f', decimals);
+}
+
+QString formatPartDimensionMm(double meters) {
+    const double mm = toMillimeters(meters);
+    QString text = QString::number(mm, 'f', 1);
+    if (text.endsWith(QStringLiteral(".0"))) {
+        text.chop(2);
+    }
+    return text;
+}
+
+} // namespace
+
+std::string MainWindow::partBodyIdForSave() const {
+    if (selectionKind_ == SelectionKind::Body) {
+        return selectedId_;
+    }
+    if (selectionKind_ == SelectionKind::BodyFace) {
+        return selectedFace_.bodyId;
+    }
+    if (selectionKind_ == SelectionKind::BodyEdge) {
+        return selectedEdge_.bodyId;
+    }
+    // Без явного выбора деталь однозначна только в документе с
+    // единственным телом.
+    const Object* onlyBody = nullptr;
+    for (const Object& object : document_.objects()) {
+        if (object.type != ObjectType::Body) {
+            continue;
+        }
+        if (onlyBody) {
+            return {};
+        }
+        onlyBody = &object;
+    }
+    return onlyBody ? onlyBody->id : std::string{};
+}
+
+void MainWindow::savePart() {
+    const std::string bodyId = partBodyIdForSave();
+    if (bodyId.empty()) {
+        QMessageBox::information(this, tr("Сохранение детали"),
+                                 tr("Выберите тело детали в дереве проекта или в 3D-виде."));
+        return;
+    }
+    const auto remembered = partFilePaths_.find(bodyId);
+    if (remembered == partFilePaths_.end()) {
+        savePartAs();
+        return;
+    }
+    writePartForBody(bodyId, remembered->second);
+}
+
+void MainWindow::savePartAs() {
+    const std::string bodyId = partBodyIdForSave();
+    if (bodyId.empty()) {
+        QMessageBox::information(this, tr("Сохранение детали"),
+                                 tr("Выберите тело детали в дереве проекта или в 3D-виде."));
+        return;
+    }
+    const Result<Object> object = document_.objectById(bodyId);
+    if (!object.isOk()) {
+        return;
+    }
+    QString suggested = QString::fromStdString(object.value().name);
+    if (suggested.isEmpty()) {
+        suggested = QStringLiteral("part");
+    }
+    suggested += QStringLiteral(".uavpart");
+    QString path = QFileDialog::getSaveFileName(this, tr("Сохранить деталь как .uavpart"),
+                                                suggested, tr("Детали БЛА (*.uavpart)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!path.endsWith(QStringLiteral(".uavpart"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".uavpart");
+    }
+    writePartForBody(bodyId, path);
+}
+
+bool MainWindow::writePartForBody(const std::string& bodyId, const QString& path) {
+    const Result<Object> objectResult = document_.objectById(bodyId);
+    if (!objectResult.isOk()) {
+        QMessageBox::warning(this, tr("Не удалось сохранить деталь"),
+                             tr("Деталь не найдена в документе."));
+        return false;
+    }
+    const Object& object = objectResult.value();
+
+    // Масса считается только по точной BRep-геометрии тела; preview-меш
+    // никогда не используется как замена.
+    const auto shapeIt = bodyShapes_.find(bodyId);
+    if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
+        QMessageBox::warning(
+            this, tr("Не удалось сохранить деталь"),
+            tr("Невозможно сохранить деталь: не удалось рассчитать массу по точной "
+               "геометрии (отсутствует точная геометрия детали)."));
+        return false;
+    }
+    const Result<kernel::ShapeMassProperties> volumeProps =
+        kernel_->volumeProperties(shapeIt->second);
+    const Result<kernel::ShapeBounds> bounds = kernel_->boundingBox(shapeIt->second);
+    if (!volumeProps.isOk() || !bounds.isOk()) {
+        QMessageBox::warning(
+            this, tr("Не удалось сохранить деталь"),
+            tr("Невозможно сохранить деталь: не удалось рассчитать массу по точной "
+               "геометрии детали.\n%1")
+                .arg(QString::fromStdString(volumeProps.isOk() ? bounds.error().message
+                                                               : volumeProps.error().message)));
+        return false;
+    }
+
+    bridge::UAVPartDescriptor descriptor;
+    descriptor.manifest.id = object.id;
+    descriptor.manifest.name = object.name;
+    descriptor.manifest.displayName = object.name;
+    const QString nowIso =
+        QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    descriptor.manifest.createdAt = nowIso.toStdString();
+    descriptor.manifest.modifiedAt = nowIso.toStdString();
+
+    // Выбор материала появится в следующих патчах; пока — безопасный
+    // материал по умолчанию (валидатор добавит предупреждение).
+    descriptor.material = bridge::uavpartDefaultMaterial();
+
+    descriptor.mass.volumeM3 = volumeProps.value().volumeM3;
+    descriptor.mass.densityKgPerM3 = descriptor.material.densityKgPerM3;
+    descriptor.mass.massKg = descriptor.mass.volumeM3 * descriptor.mass.densityKgPerM3;
+    descriptor.mass.centerOfMass = volumeProps.value().centerOfMass;
+    descriptor.mass.boundingBoxMin = bounds.value().min;
+    descriptor.mass.boundingBoxMax = bounds.value().max;
+    descriptor.mass.calculationMethod = bridge::kMassCalculationExact;
+    descriptor.mass.valid = true;
+
+    for (const AttachmentPoint& point : object.attachmentPoints) {
+        bridge::UAVPartAttachmentPoint exported;
+        exported.id = point.id;
+        exported.name = point.name;
+        exported.role = bridge::uavpartAttachmentRoleName(point.role);
+        exported.localPosition = point.localPosition;
+        exported.localRotation = point.localRotation;
+        exported.isSystem = point.isSystem;
+        exported.isEnabled = point.isEnabled;
+        descriptor.attachmentPoints.push_back(std::move(exported));
+    }
+
+    const bridge::UAVPartWriter writer;
+    const Result<bridge::UAVPartWriteResult> written =
+        writer.writePart(path.toStdString(), descriptor);
+    if (!written.isOk()) {
+        QMessageBox::warning(this, tr("Не удалось сохранить деталь"),
+                             QString::fromStdString(written.error().message));
+        return false;
+    }
+
+    partFilePaths_[bodyId] = path;
+
+    const bridge::UAVPartWriteResult& result = written.value();
+    const bridge::UAVPartMassProperties& mass = result.part.mass;
+    QString summary = tr("Деталь сохранена: %1").arg(QFileInfo(path).fileName());
+    summary += tr("\nМасса: %1 кг").arg(formatPartMassKg(mass.massKg));
+    summary += tr("\nГабариты: %1 × %2 × %3 мм")
+                   .arg(formatPartDimensionMm(mass.boundingWidth),
+                        formatPartDimensionMm(mass.boundingDepth),
+                        formatPartDimensionMm(mass.boundingHeight));
+    if (result.part.manifest.simulationReady) {
+        summary += tr("\nСтатус: готова к тестированию на БЛА");
+    } else {
+        summary += tr("\nСтатус: пока не готова к тестированию на БЛА");
+    }
+    // Причины неготовности и предупреждения валидации; тексты могут
+    // совпадать (точка крепления), поэтому дубликаты не повторяются.
+    QStringList details;
+    for (const std::string& issue : result.part.manifest.readinessIssues) {
+        const QString text = QString::fromStdString(bridge::uavpartReadinessIssueText(issue));
+        if (!details.contains(text)) {
+            details.append(text);
+        }
+    }
+    for (const std::string& warning : result.validation.warnings) {
+        const QString text = QString::fromStdString(warning);
+        if (!details.contains(text)) {
+            details.append(text);
+        }
+    }
+    for (const QString& detail : details) {
+        summary += QStringLiteral("\n— ") + detail;
+    }
+    QMessageBox::information(this, tr("Сохранение детали"), summary);
+    statusBar()->showMessage(
+        tr("Деталь сохранена: %1").arg(QFileInfo(path).fileName()), 5000);
+    return true;
+}
+
 void MainWindow::newDocument() {
     if (viewer_) {
         viewer_->stopCameraMotion("newDocument");
@@ -4031,6 +4237,10 @@ void MainWindow::createMenus() {
     partMenu->addAction(toolBar_->createSketchOnFaceAction());
     partMenu->addAction(toolBar_->workPlaneFromFaceAction());
     partMenu->addAction(toolBar_->normalToFaceAction());
+    partMenu->addSeparator();
+    partMenu->addAction(tr("Сохранить деталь"), this, [this]() { savePart(); });
+    partMenu->addAction(tr("Сохранить деталь как .uavpart…"), this,
+                        [this]() { savePartAs(); });
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&Вид"));
     viewMenu->addAction(toolBar_->fitSelectionAction());

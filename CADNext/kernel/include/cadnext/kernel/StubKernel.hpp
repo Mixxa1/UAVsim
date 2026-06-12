@@ -30,6 +30,7 @@ public:
                                              const std::vector<std::string>& edgeIds,
                                              double radius) override;
     cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) override;
+    cadnext::Result<ShapeMassProperties> volumeProperties(const ShapeHandle& shape) override;
     bool isShapeValid(const ShapeHandle& shape) const override;
 
 private:

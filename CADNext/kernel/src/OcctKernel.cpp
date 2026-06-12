@@ -581,6 +581,40 @@ cadnext::Result<ShapeBounds> OcctKernel::boundingBox(const ShapeHandle& shape) {
     }
 }
 
+cadnext::Result<ShapeMassProperties> OcctKernel::volumeProperties(const ShapeHandle& shape) {
+    const TopoDS_Shape* topoShape = findShape(shape);
+    if (!topoShape || topoShape->IsNull()) {
+        return cadnext::Result<ShapeMassProperties>::fail({
+            cadnext::ErrorCode::ShapeInvalid,
+            "Volume properties require a valid shape handle"
+        });
+    }
+    try {
+        GProp_GProps properties;
+        BRepGProp::VolumeProperties(*topoShape, properties);
+        const double volume = properties.Mass();
+        if (!std::isfinite(volume) || volume <= 0.0) {
+            return cadnext::Result<ShapeMassProperties>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed,
+                 "Shape volume is not finite and positive"});
+        }
+        ShapeMassProperties result;
+        result.volumeM3 = volume;
+        result.centerOfMass = toVector(properties.CentreOfMass());
+        if (!std::isfinite(result.centerOfMass.x) || !std::isfinite(result.centerOfMass.y) ||
+            !std::isfinite(result.centerOfMass.z)) {
+            return cadnext::Result<ShapeMassProperties>::fail(
+                {cadnext::ErrorCode::KernelOperationFailed,
+                 "Shape center of mass is not finite"});
+        }
+        return cadnext::Result<ShapeMassProperties>::ok(result);
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeMassProperties>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT volume properties failed: ") + failure.GetMessageString()});
+    }
+}
+
 bool OcctKernel::isShapeValid(const ShapeHandle& shape) const {
     const TopoDS_Shape* topoShape = findShape(shape);
     if (!topoShape || topoShape->IsNull()) {
@@ -656,6 +690,13 @@ cadnext::Result<ShapeBounds> OcctKernel::boundingBox(const ShapeHandle&) {
     return cadnext::Result<ShapeBounds>::fail({
         cadnext::ErrorCode::KernelUnavailable,
         "Shape bounds require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
+    });
+}
+
+cadnext::Result<ShapeMassProperties> OcctKernel::volumeProperties(const ShapeHandle&) {
+    return cadnext::Result<ShapeMassProperties>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Volume properties require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
     });
 }
 

@@ -93,6 +93,13 @@ cadnext::Result<ShapeBounds> StubKernel::boundingBox(const ShapeHandle&) {
     });
 }
 
+cadnext::Result<ShapeMassProperties> StubKernel::volumeProperties(const ShapeHandle&) {
+    return cadnext::Result<ShapeMassProperties>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Volume properties require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
+    });
+}
+
 bool StubKernel::isShapeValid(const ShapeHandle& shape) const {
     return !shape.isNull();
 }

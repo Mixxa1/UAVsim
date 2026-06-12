@@ -34,6 +34,7 @@ target_include_directories(cadnext_gui
 target_link_libraries(cadnext_gui
     PUBLIC
         cadnext_core
+        cadnext_bridge
         cadnext_viewer
         Qt6::Core
         Qt6::Gui

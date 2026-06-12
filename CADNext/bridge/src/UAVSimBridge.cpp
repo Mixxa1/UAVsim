@@ -1,36 +1,8 @@
 #include "cadnext/bridge/UAVSimBridge.hpp"
 
+#include "cadnext/bridge/UAVPartFormat.hpp"
+
 namespace cadnext::bridge {
-
-namespace {
-
-std::string roleName(AttachmentRole role) {
-    switch (role) {
-    case AttachmentRole::Frame:
-        return "frame";
-    case AttachmentRole::Wing:
-        return "wing";
-    case AttachmentRole::Payload:
-        return "payload";
-    case AttachmentRole::Camera:
-        return "camera";
-    case AttachmentRole::Sensor:
-        return "sensor";
-    case AttachmentRole::LandingGear:
-        return "landingGear";
-    case AttachmentRole::Motor:
-        return "motor";
-    case AttachmentRole::Battery:
-        return "battery";
-    case AttachmentRole::Antenna:
-        return "antenna";
-    case AttachmentRole::Generic:
-        return "generic";
-    }
-    return "generic";
-}
-
-} // namespace
 
 ExportPackage UAVSimBridge::makeExportPackage(const Document& document) const {
     ExportPackage package;
@@ -42,7 +14,7 @@ ExportPackage UAVSimBridge::makeExportPackage(const Document& document) const {
             package.attachments.push_back(AttachmentExport{
                 point.id,
                 point.name,
-                roleName(point.role),
+                uavpartAttachmentRoleName(point.role),
                 point.localPosition,
                 point.localRotation
             });

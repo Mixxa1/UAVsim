@@ -43,6 +43,15 @@ struct ShapeBounds {
     cadnext::Vector3 max;
 };
 
+// Exact volume properties of a solid BRep shape. Volume is in model
+// units cubed (1 unit = 1 m, so m³); the center of mass is in the
+// shape's own modeling frame. The UAVPart exporter multiplies the
+// volume by the material density — never a preview-mesh estimate.
+struct ShapeMassProperties {
+    double volumeM3 = 0.0;
+    cadnext::Vector3 centerOfMass;
+};
+
 // Extruded sketch profiles (CADNext 0.6). The loop is the closed planar
 // outer boundary in world coordinates (last point != first point);
 // `extrusion` is the world vector from the base face to the top face.
@@ -105,6 +114,11 @@ public:
     ) = 0;
 
     virtual cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) = 0;
+
+    // Exact volume + center of mass via the BRep kernel (BRepGProp in
+    // OCCT builds). Fails with KernelUnavailable when no exact geometry
+    // backend exists — callers must not substitute a mesh estimate.
+    virtual cadnext::Result<ShapeMassProperties> volumeProperties(const ShapeHandle& shape) = 0;
 
     virtual bool isShapeValid(const ShapeHandle& shape) const = 0;
 };

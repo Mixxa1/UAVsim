@@ -25,6 +25,15 @@ target_link_libraries(cadnext_test_bridge_export
         cadnext_bridge
 )
 
+add_executable(cadnext_test_uavpart_format
+    test_uavpart_format.cpp
+)
+
+target_link_libraries(cadnext_test_uavpart_format
+    PRIVATE
+        cadnext_bridge
+)
+
 add_executable(cadnext_test_primitive_object
     test_primitive_object.cpp
 )
@@ -432,6 +441,7 @@ add_test(NAME cadnext_test_custom_profile_stability
 add_test(NAME cadnext_test_document COMMAND cadnext_test_document)
 add_test(NAME cadnext_test_stub_kernel COMMAND cadnext_test_stub_kernel)
 add_test(NAME cadnext_test_bridge_export COMMAND cadnext_test_bridge_export)
+add_test(NAME cadnext_test_uavpart_format COMMAND cadnext_test_uavpart_format)
 add_test(NAME cadnext_test_primitive_object COMMAND cadnext_test_primitive_object)
 add_test(NAME cadnext_test_document_editing COMMAND cadnext_test_document_editing)
 add_test(NAME cadnext_test_document_serialization COMMAND cadnext_test_document_serialization)
@@ -575,6 +585,15 @@ if(CADNEXT_WITH_OCCT)
             cadnext_kernel
     )
 
+    add_executable(cadnext_test_occt_mass_properties
+        test_occt_mass_properties.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_mass_properties
+        PRIVATE
+            cadnext_kernel
+    )
+
     add_test(NAME cadnext_test_occt_kernel_primitives
              COMMAND cadnext_test_occt_kernel_primitives)
     add_test(NAME cadnext_test_occt_mesh_extractor
@@ -605,4 +624,6 @@ if(CADNEXT_WITH_OCCT)
              COMMAND cadnext_test_occt_fillet_after_cut)
     add_test(NAME cadnext_test_occt_edge_reanalysis_after_topology_change
              COMMAND cadnext_test_occt_edge_reanalysis_after_topology_change)
+    add_test(NAME cadnext_test_occt_mass_properties
+             COMMAND cadnext_test_occt_mass_properties)
 endif()

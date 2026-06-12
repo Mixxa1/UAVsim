@@ -220,6 +220,13 @@ private:
     void onTransformEdited(const QString& objectId, const Transform& transform);
     void onPrimitiveEdited(const QString& objectId, const PrimitiveParameters& parameters);
 
+    // UAVPart export (UAVPart v1): сохранение выбранного тела в один
+    // бинарный .uavpart с расчётом массы по точной BRep-геометрии.
+    void savePart();
+    void savePartAs();
+    std::string partBodyIdForSave() const;
+    bool writePartForBody(const std::string& bodyId, const QString& path);
+
     // File handling.
     void newDocument();
     void openDocument();
@@ -300,6 +307,10 @@ private:
 
     QString currentFilePath_;
     bool dirty_ = false;
+
+    // Последний путь сохранения .uavpart для каждого тела ("Сохранить
+    // деталь" пишет туда же без диалога; не сериализуется).
+    std::unordered_map<std::string, QString> partFilePaths_;
 
     int nextObjectNumber_ = 1;
     int boxCount_ = 0;
