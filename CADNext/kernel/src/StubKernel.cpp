@@ -70,7 +70,7 @@ cadnext::Result<ShapeHandle> StubKernel::booleanCommon(const ShapeHandle& a, con
 
 cadnext::Result<ShapeHandle> StubKernel::chamferEdges(const ShapeHandle&,
                                                       const std::vector<std::string>&,
-                                                      double) {
+                                                      double, cadnext::ChamferMode, double) {
     return cadnext::Result<ShapeHandle>::fail({
         cadnext::ErrorCode::KernelUnavailable,
         "Chamfer requires OCCT backend"

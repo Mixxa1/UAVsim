@@ -23,7 +23,9 @@ public:
     cadnext::Result<ShapeHandle> booleanCommon(const ShapeHandle& a, const ShapeHandle& b) override;
     cadnext::Result<ShapeHandle> chamferEdges(const ShapeHandle& target,
                                               const std::vector<std::string>& edgeIds,
-                                              double distance) override;
+                                              double distance,
+                                              cadnext::ChamferMode mode,
+                                              double angleDeg) override;
     cadnext::Result<ShapeHandle> filletEdges(const ShapeHandle& target,
                                              const std::vector<std::string>& edgeIds,
                                              double radius) override;

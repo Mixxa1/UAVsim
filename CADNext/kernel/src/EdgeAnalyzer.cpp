@@ -8,6 +8,7 @@
 #ifdef CADNEXT_WITH_OCCT
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepGProp.hxx>
+#include <BRep_Tool.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
@@ -193,7 +194,23 @@ std::vector<EdgeReference> EdgeAnalyzer::edgesForBody(const std::string& bodyId,
         TopTools_IndexedMapOfShape edgeMap;
         TopExp::MapShapes(*topoShape, TopAbs_EDGE, edgeMap);
         for (int i = 1; i <= edgeMap.Extent(); ++i) {
-            edges.push_back(edgeReferenceFor(bodyId, i - 1, TopoDS::Edge(edgeMap(i))));
+            const TopoDS_Edge edge = TopoDS::Edge(edgeMap(i));
+            // Skip edges chamfer/fillet can never operate on (degenerated
+            // edges, edges without a 3D curve); one broken edge must not
+            // hide the rest of the body's edges. The map index stays the
+            // id index either way so kernel-side resolution agrees.
+            try {
+                if (BRep_Tool::Degenerated(edge)) {
+                    continue;
+                }
+                Standard_Real first = 0.0;
+                Standard_Real last = 0.0;
+                if (BRep_Tool::Curve(edge, first, last).IsNull()) {
+                    continue;
+                }
+                edges.push_back(edgeReferenceFor(bodyId, i - 1, edge));
+            } catch (const Standard_Failure&) {
+            }
         }
     } catch (const Standard_Failure&) {
         edges.clear();

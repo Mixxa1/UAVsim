@@ -23,6 +23,8 @@
 #include <QtLogging>
 
 #include "cadnext/DocumentSerializer.hpp"
+#include "cadnext/SketchMeasure.hpp"
+#include "cadnext/Units.hpp"
 #include "cadnext/gui/CutExtrudeDialog.hpp"
 #include "cadnext/gui/EdgeOperationDialog.hpp"
 #include "cadnext/gui/ExtrudeDialog.hpp"
@@ -56,22 +58,37 @@ double sanitize(double value, double fallback, double minimum = -1.0e12) {
     return std::max(value, minimum);
 }
 
+QString primitiveKindText(PrimitiveKind kind) {
+    switch (kind) {
+    case PrimitiveKind::Box: return QObject::tr("Брусок");
+    case PrimitiveKind::Cylinder: return QObject::tr("Цилиндр");
+    case PrimitiveKind::Sphere: return QObject::tr("Сфера");
+    case PrimitiveKind::Cone: return QObject::tr("Конус");
+    case PrimitiveKind::None: break;
+    }
+    return QObject::tr("Тело");
+}
+
 QString treeTypeText(const Object& object) {
     if (object.type == ObjectType::ReferencePlane) {
-        return QObject::tr("Reference Plane");
+        return QObject::tr("Опорная плоскость");
     }
-    return QString::fromUtf8(primitiveKindName(object.primitive.kind));
+    return primitiveKindText(object.primitive.kind);
 }
 
 QString workPlaneTypeText(const WorkPlane& plane) {
     switch (plane.kind) {
-    case WorkPlaneKind::XY: return QObject::tr("Canonical XY");
-    case WorkPlaneKind::XZ: return QObject::tr("Canonical XZ");
-    case WorkPlaneKind::YZ: return QObject::tr("Canonical YZ");
-    case WorkPlaneKind::ObjectPlane: return QObject::tr("Reference Plane");
-    case WorkPlaneKind::FacePlane: return QObject::tr("Face Plane");
+    case WorkPlaneKind::XY: return QObject::tr("Базовая XY");
+    case WorkPlaneKind::XZ: return QObject::tr("Базовая XZ");
+    case WorkPlaneKind::YZ: return QObject::tr("Базовая YZ");
+    case WorkPlaneKind::ObjectPlane: return QObject::tr("Опорная плоскость");
+    case WorkPlaneKind::FacePlane: return QObject::tr("Плоскость по грани");
     }
-    return QObject::tr("Work Plane");
+    return QObject::tr("Рабочая плоскость");
+}
+
+QString mmQText(double modelLength) {
+    return QString::fromStdString(formatMillimeters(modelLength));
 }
 
 int maxNumberSuffix(const std::string& id, const char* prefix, int current) {
@@ -84,12 +101,21 @@ int maxNumberSuffix(const std::string& id, const char* prefix, int current) {
 
 QString profileKindText(cadnext::SketchProfileKind kind) {
     switch (kind) {
-    case cadnext::SketchProfileKind::Rectangle: return QObject::tr("Rectangle");
-    case cadnext::SketchProfileKind::Circle: return QObject::tr("Circle");
-    case cadnext::SketchProfileKind::Polygon: return QObject::tr("Polygon");
+    case cadnext::SketchProfileKind::Rectangle: return QObject::tr("Прямоугольник");
+    case cadnext::SketchProfileKind::Circle: return QObject::tr("Окружность");
+    case cadnext::SketchProfileKind::Polygon: return QObject::tr("Многоугольник");
     case cadnext::SketchProfileKind::Unsupported: break;
     }
-    return QObject::tr("Profile");
+    return QObject::tr("Профиль");
+}
+
+QString sketchEntityTypeText(cadnext::SketchEntityType type) {
+    switch (type) {
+    case cadnext::SketchEntityType::Line: return QObject::tr("Линия");
+    case cadnext::SketchEntityType::Rectangle: return QObject::tr("Прямоугольник");
+    case cadnext::SketchEntityType::Circle: return QObject::tr("Окружность");
+    }
+    return QObject::tr("Элемент эскиза");
 }
 
 const cadnext::SketchProfile* profileById(const std::vector<cadnext::SketchProfile>& profiles,
@@ -369,11 +395,11 @@ kernel::EdgeReference transformedEdgeReference(const kernel::EdgeReference& edge
 
 QString cutDepthModeText(CutDepthMode mode) {
     switch (mode) {
-    case CutDepthMode::Distance: return QObject::tr("Distance");
-    case CutDepthMode::ThroughAll: return QObject::tr("Through All");
-    case CutDepthMode::ToObject: return QObject::tr("To Object");
+    case CutDepthMode::Distance: return QObject::tr("на расстояние");
+    case CutDepthMode::ThroughAll: return QObject::tr("сквозь всё");
+    case CutDepthMode::ToObject: return QObject::tr("до объекта");
     }
-    return QObject::tr("Distance");
+    return QObject::tr("на расстояние");
 }
 
 } // namespace
@@ -397,7 +423,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     projectTree_ = new ProjectTree(this);
     addCanonicalWorkPlanesToTree();
-    treeDock_ = new QDockWidget(tr("Project"), this);
+    treeDock_ = new QDockWidget(tr("Проект"), this);
     treeDock_->setWidget(projectTree_);
     treeDock_->setFeatures(QDockWidget::DockWidgetMovable);
     addDockWidget(Qt::LeftDockWidgetArea, treeDock_);
@@ -405,7 +431,7 @@ MainWindow::MainWindow(QWidget* parent)
     // Properties live in a right-side inspector dock (CAD layout: tree |
     // viewport | inspector) so they no longer cost viewport height.
     propertyPanel_ = new PropertyPanel(this);
-    propertyDock_ = new QDockWidget(tr("Properties"), this);
+    propertyDock_ = new QDockWidget(tr("Свойства"), this);
     propertyDock_->setWidget(propertyPanel_);
     propertyDock_->setFeatures(QDockWidget::DockWidgetMovable |
                                QDockWidget::DockWidgetClosable);
@@ -525,16 +551,16 @@ MainWindow::MainWindow(QWidget* parent)
                 onPrimitiveEdited(objectId, parameters);
             });
 
-    statusBar()->showMessage(tr("Free3D: select body, work plane or sketch"));
+    statusBar()->showMessage(tr("3D-вид: выберите тело, плоскость или эскиз"));
     modeStatusLabel_ = new QLabel(this);
     statusBar()->addPermanentWidget(modeStatusLabel_);
     updateModeStatusLabel();
 #ifdef CADNEXT_WITH_OCCT
     statusBar()->addPermanentWidget(
-        new QLabel(tr("Geometry backend: OCCT BRep evaluation"), this));
+        new QLabel(tr("Геометрическое ядро: OCCT BRep"), this));
 #else
     statusBar()->addPermanentWidget(
-        new QLabel(tr("Geometry backend: Procedural viewer primitives"), this));
+        new QLabel(tr("Геометрия просмотра: процедурные примитивы"), this));
 #endif
 
     updateWindowTitle();
@@ -583,8 +609,6 @@ void MainWindow::initializeViewport() {
             // Face picking layers on top of body picking: the click
             // selects the face; the owning body stays reachable through
             // the tree (and is reported in the property panel).
-            qInfo("[FacePick] body=%s triangle=%d faceId=%s",
-                  target.objectId.c_str(), target.triangleIndex, target.faceId.c_str());
             selectBodyFace(target.objectId, target.faceId);
             showFaceActionPalette(contextClick);
         } else if (target.isBody()) {
@@ -593,12 +617,10 @@ void MainWindow::initializeViewport() {
                 showEdgeActionPalette(contextClick);
                 return;
             }
-            if (target.faceLookupAttempted) {
-                qInfo("[FacePick] fallback Body selection: body=%s triangle=%d has no faceId",
-                      target.objectId.c_str(), target.triangleIndex);
-            } else if (!kOcctBackendAvailable &&
-                       bodyFaces_.find(target.objectId) == bodyFaces_.end()) {
-                statusBar()->showMessage(tr("Face picking requires OCCT backend"), 5000);
+            if (!kOcctBackendAvailable &&
+                bodyFaces_.find(target.objectId) == bodyFaces_.end()) {
+                statusBar()->showMessage(
+                    tr("Выбор граней требует ядра OCCT"), 5000);
             }
             selectBody(target.objectId);
         } else {
@@ -612,10 +634,10 @@ void MainWindow::initializeViewport() {
             QAction* extrude = nullptr;
             QAction* cutExtrude = nullptr;
             if (toolBar_->extrudeAction()->isEnabled()) {
-                extrude = menu.addAction(tr("Extrude"));
+                extrude = menu.addAction(tr("Выдавить"));
             }
             if (toolBar_->cutExtrudeAction()->isEnabled()) {
-                cutExtrude = menu.addAction(tr("Cut Extrude"));
+                cutExtrude = menu.addAction(tr("Вырезать выдавливанием"));
             }
             QAction* chosen = menu.exec(QCursor::pos());
             if (chosen == extrude) {
@@ -644,7 +666,7 @@ void MainWindow::initializeViewport() {
     viewer_->setSketchPointCallback([this](double u, double v) { onSketchPoint(u, v); });
     viewer_->setSketchMoveCallback([this](double u, double v) { onSketchMove(u, v); });
     viewer_->setSketchMissCallback([this]() {
-        statusBar()->showMessage(tr("Cursor is not over the active sketch plane"), 3000);
+        statusBar()->showMessage(tr("Курсор вне активной плоскости эскиза"), 3000);
     });
     viewer_->setSketchCancelCallback([this]() { handleEscapeKey(); });
 }
@@ -701,16 +723,11 @@ void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& fa
     syncViewportSelection();
     refreshPropertyPanel();
     if (const kernel::FaceReference* face = findBodyFace(bodyId, faceId)) {
-        qInfo("[FacePick] selected BodyFace body=%s face=%s sketchable=%s",
-              bodyId.c_str(), faceId.c_str(), face->isSketchable ? "true" : "false");
         statusBar()->showMessage(
             face->isSketchable
-                ? tr("Planar face selected — Sketch on Face / Work Plane from Face available")
-                : tr("Face selected — not planar, sketches need a planar face"),
+                ? tr("Выбрана плоская грань: доступен эскиз или плоскость по грани")
+                : tr("Выбрана грань: не плоская, эскизу нужна плоская грань"),
             5000);
-    } else {
-        qInfo("[FacePick] selected BodyFace body=%s face=%s but FaceReference was not found",
-              bodyId.c_str(), faceId.c_str());
     }
 }
 
@@ -730,8 +747,8 @@ void MainWindow::selectBodyEdge(const std::string& bodyId, const std::string& ed
     if (const kernel::EdgeReference* edge = findBodyEdge(bodyId, edgeId)) {
         statusBar()->showMessage(
             (edge->isChamferable || edge->isFilletable)
-                ? tr("Body edge selected — Chamfer / Fillet available")
-                : tr("Body edge selected"),
+                ? tr("Выбрано ребро: доступны фаска и скругление")
+                : tr("Выбрано ребро тела"),
             5000);
     }
 }
@@ -1203,20 +1220,20 @@ void MainWindow::addPrimitiveObject(PrimitiveKind kind) {
 
     switch (kind) {
     case PrimitiveKind::Box:
-        object.name = "Box " + std::to_string(++boxCount_);
+        object.name = "Брусок " + std::to_string(++boxCount_);
         object.primitive.width = 1.0;
         object.primitive.depth = 1.0;
         object.primitive.height = 1.0;
         object.transform.position = nextSpawnPosition(object.primitive.height * 0.5);
         break;
     case PrimitiveKind::Cylinder:
-        object.name = "Cylinder " + std::to_string(++cylinderCount_);
+        object.name = "Цилиндр " + std::to_string(++cylinderCount_);
         object.primitive.radius = 0.5;
         object.primitive.height = 1.2;
         object.transform.position = nextSpawnPosition(object.primitive.height * 0.5);
         break;
     case PrimitiveKind::Sphere:
-        object.name = "Sphere " + std::to_string(++sphereCount_);
+        object.name = "Сфера " + std::to_string(++sphereCount_);
         object.primitive.radius = 0.6;
         object.transform.position = nextSpawnPosition(object.primitive.radius);
         break;
@@ -1236,7 +1253,7 @@ void MainWindow::addReferencePlane() {
     Object object;
     object.id = "object-" + std::to_string(nextObjectNumber_++);
     object.type = ObjectType::ReferencePlane;
-    object.name = "Plane " + std::to_string(++planeCount_);
+    object.name = "Плоскость " + std::to_string(++planeCount_);
     object.primitive.width = 2.0;
     object.primitive.height = 2.0;
     object.transform.position = nextSpawnPosition(0.0);
@@ -1296,8 +1313,8 @@ void MainWindow::buildObjectVisual(const Object& object) {
             qWarning("CADNext: OCCT evaluation failed for %s: %s", object.name.c_str(),
                      reason.toUtf8().constData());
             statusBar()->showMessage(
-                tr("OCCT evaluation failed for %1 — using procedural fallback (%2)")
-                    .arg(QString::fromStdString(object.name), reason),
+                tr("OCCT не смог вычислить %1 — используется процедурное отображение")
+                    .arg(QString::fromStdString(object.name)),
                 8000);
         }
 #endif
@@ -1329,7 +1346,7 @@ void MainWindow::deleteSelected() {
         const std::optional<WorkPlane> plane = workPlaneById(selectedId_);
         if (!plane || (plane->kind != WorkPlaneKind::ObjectPlane &&
                        plane->kind != WorkPlaneKind::FacePlane)) {
-            statusBar()->showMessage(tr("Canonical work planes cannot be deleted"), 3000);
+            statusBar()->showMessage(tr("Базовые рабочие плоскости нельзя удалить"), 3000);
             break;
         }
         const std::string planeId = selectedId_;
@@ -1370,11 +1387,11 @@ void MainWindow::deleteSelected() {
     }
     case SelectionKind::BodyFace:
         statusBar()->showMessage(
-            tr("Faces cannot be deleted — delete the body instead"), 3000);
+            tr("Грань нельзя удалить — удалите тело целиком"), 3000);
         break;
     case SelectionKind::BodyEdge:
         statusBar()->showMessage(
-            tr("Edges cannot be deleted — apply Chamfer / Fillet or delete the body"), 3000);
+            tr("Ребро нельзя удалить — примените фаску/скругление или удалите тело"), 3000);
         break;
     case SelectionKind::Sketch: {
         const std::string sketchId = selectedId_;
@@ -1455,9 +1472,9 @@ void MainWindow::enterSketchOnReference(const SketchReference& reference) {
         label = sketchPlaneName(sketch.plane);
     } else if (label.empty()) {
         const std::optional<WorkPlane> plane = workPlaneById(reference.sourceId);
-        label = plane ? plane->name : "Plane";
+        label = plane ? plane->name : "Плоскость";
     }
-    sketch.name = "Sketch " + label + " " + std::to_string(nextSketchNumber_);
+    sketch.name = "Эскиз " + label + " " + std::to_string(nextSketchNumber_);
     ++nextSketchNumber_;
     sketch.reference = reference;
 
@@ -1501,8 +1518,8 @@ void MainWindow::enterSketchMode(const std::string& sketchId) {
     updateModeStatusLabel();
     updatePlaneBadge();
     statusBar()->showMessage(
-        tr("Sketch2D (%1): pick Line / Rectangle / Circle and click on the plane; "
-           "Esc cancels, Exit Sketch finishes")
+        tr("Эскиз 2D (%1): выберите Линию / Прямоугольник / Окружность и кликните по "
+           "плоскости; Esc — отмена, «Выйти из эскиза» — завершение")
             .arg(QString::fromStdString(sketch.value().name)));
 }
 
@@ -1529,7 +1546,7 @@ void MainWindow::exitSketchMode() {
     sketchToolBar_->setEnterSketchEnabled(selectionKind_ == SelectionKind::Sketch);
     updateModeStatusLabel();
     updatePlaneBadge();
-    statusBar()->showMessage(tr("Free3D: select body, work plane or sketch"));
+    statusBar()->showMessage(tr("3D-вид: выберите тело, плоскость или эскиз"));
 }
 
 void MainWindow::setSketchTool(SketchTool tool) {
@@ -1557,12 +1574,12 @@ void MainWindow::cancelSketchTool() {
         // armed. A second Esc then drops back to Select.
         sketchInput_.resetPending();
         clearPendingSketchVisuals();
-        statusBar()->showMessage(tr("Cancelled — %1").arg(sketchToolPrompt()));
+        statusBar()->showMessage(tr("Отменено — %1").arg(sketchToolPrompt()));
         return;
     }
     setSketchTool(SketchTool::Select);
     sketchToolBar_->checkSelectTool();
-    statusBar()->showMessage(tr("Sketch tool cancelled"), 3000);
+    statusBar()->showMessage(tr("Инструмент эскиза отменён"), 3000);
 }
 
 void MainWindow::handleEscapeKey() {
@@ -1572,28 +1589,23 @@ void MainWindow::handleEscapeKey() {
     viewer_->setNavigationEnabled(true);
 
     if (activeSketchId_ && sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
-        qInfo("[Camera] Escape cancelPendingSketch");
         cancelSketchTool();
-        qInfo("[Camera] Escape keepNavigationEnabled mode=Sketch2D");
         return;
     }
 
     if (viewer_->hasCameraMotion()) {
-        qInfo("[Camera] Escape stopInertia");
         viewer_->stopCameraMotion("escape");
         return;
     }
 
     if (activeSketchId_) {
-        qInfo("[Camera] Escape keepNavigationEnabled mode=Sketch2D");
         setSketchTool(SketchTool::Select);
         sketchToolBar_->checkSelectTool();
         viewer_->clearNavigationInputState();
-        statusBar()->showMessage(tr("Sketch tool cancelled"), 3000);
+        statusBar()->showMessage(tr("Инструмент эскиза отменён"), 3000);
         return;
     }
 
-    qInfo("[Camera] Escape keepNavigationEnabled mode=Free3D");
     viewer_->clearNavigationInputState();
 }
 
@@ -1618,15 +1630,16 @@ void MainWindow::onSketchPoint(double u, double v) {
         switch (sketchInput_.activeTool) {
         case SketchTool::Line:
             statusBar()->showMessage(
-                tr("Line: first point set — click second point (Esc cancels)"));
+                tr("Линия: первая точка задана — кликните вторую (Esc — отмена)"));
             break;
         case SketchTool::Rectangle:
             statusBar()->showMessage(
-                tr("Rectangle: first corner set — click opposite corner (Esc cancels)"));
+                tr("Прямоугольник: первый угол задан — кликните противоположный "
+                   "(Esc — отмена)"));
             break;
         case SketchTool::Circle:
             statusBar()->showMessage(
-                tr("Circle: center set — click radius point (Esc cancels)"));
+                tr("Окружность: центр задан — кликните точку радиуса (Esc — отмена)"));
             break;
         case SketchTool::Select:
             break;
@@ -1643,12 +1656,12 @@ void MainWindow::onSketchPoint(double u, double v) {
     case SketchTool::Line: {
         if (std::fabs(point.u - first.u) < kMinSketchExtent &&
             std::fabs(point.v - first.v) < kMinSketchExtent) {
-            statusBar()->showMessage(tr("Zero-length line ignored — click a different point"),
-                                     3000);
+            statusBar()->showMessage(
+                tr("Линия нулевой длины пропущена — кликните другую точку"), 3000);
             return;
         }
         entity.type = SketchEntityType::Line;
-        entity.name = "Line " + std::to_string(++lineCount_);
+        entity.name = "Линия " + std::to_string(++lineCount_);
         entity.line.start = first;
         entity.line.end = point;
         break;
@@ -1657,12 +1670,12 @@ void MainWindow::onSketchPoint(double u, double v) {
         const double width = std::fabs(point.u - first.u);
         const double height = std::fabs(point.v - first.v);
         if (width < kMinSketchExtent || height < kMinSketchExtent) {
-            statusBar()->showMessage(tr("Degenerate rectangle ignored — click a different corner"),
-                                     3000);
+            statusBar()->showMessage(
+                tr("Вырожденный прямоугольник пропущен — кликните другой угол"), 3000);
             return;
         }
         entity.type = SketchEntityType::Rectangle;
-        entity.name = "Rectangle " + std::to_string(++rectangleCount_);
+        entity.name = "Прямоугольник " + std::to_string(++rectangleCount_);
         entity.rectangle.origin = {std::min(first.u, point.u), std::min(first.v, point.v)};
         entity.rectangle.width = width;
         entity.rectangle.height = height;
@@ -1671,12 +1684,12 @@ void MainWindow::onSketchPoint(double u, double v) {
     case SketchTool::Circle: {
         const double radius = std::hypot(point.u - first.u, point.v - first.v);
         if (radius < kMinSketchExtent) {
-            statusBar()->showMessage(tr("Zero-radius circle ignored — click a different point"),
-                                     3000);
+            statusBar()->showMessage(
+                tr("Окружность нулевого радиуса пропущена — кликните другую точку"), 3000);
             return;
         }
         entity.type = SketchEntityType::Circle;
-        entity.name = "Circle " + std::to_string(++circleCount_);
+        entity.name = "Окружность " + std::to_string(++circleCount_);
         entity.circle.center = first;
         entity.circle.radius = radius;
         break;
@@ -1718,6 +1731,29 @@ void MainWindow::onSketchMove(double u, double v) {
     }
     if (sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
         updateSketchPreview(snapped);
+        // Live dimension readout (mm) while the second point is dragged.
+        if (sketchInput_.firstPoint) {
+            const SketchPoint2D first = *sketchInput_.firstPoint;
+            switch (sketchInput_.activeTool) {
+            case SketchTool::Line:
+                statusBar()->showMessage(
+                    tr("Линия: длина %1").arg(mmQText(sketchLineLength(first, snapped))));
+                break;
+            case SketchTool::Rectangle:
+                statusBar()->showMessage(
+                    tr("Прямоугольник: ширина %1, высота %2")
+                        .arg(mmQText(std::fabs(snapped.u - first.u)),
+                             mmQText(std::fabs(snapped.v - first.v))));
+                break;
+            case SketchTool::Circle:
+                statusBar()->showMessage(
+                    tr("Окружность: радиус %1")
+                        .arg(mmQText(sketchLineLength(first, snapped))));
+                break;
+            case SketchTool::Select:
+                break;
+            }
+        }
     }
 }
 
@@ -1754,21 +1790,26 @@ void MainWindow::clearPendingSketchVisuals() {
 void MainWindow::onSnapToggled(bool enabled) {
     sketchInput_.options.snapToGrid = enabled;
     updateModeStatusLabel();
-    statusBar()->showMessage(enabled ? tr("Snap to grid: ON") : tr("Snap to grid: OFF"), 3000);
+    statusBar()->showMessage(enabled ? tr("Привязка к сетке: ВКЛ")
+                                     : tr("Привязка к сетке: ВЫКЛ"),
+                             3000);
 }
 
 void MainWindow::onShowGridToggled(bool visible) {
     sketchInput_.options.showSketchGrid = visible;
     refreshSketchPlaneVisual();
-    statusBar()->showMessage(visible ? tr("Sketch grid: shown") : tr("Sketch grid: hidden"),
+    statusBar()->showMessage(visible ? tr("Сетка эскиза: показана")
+                                     : tr("Сетка эскиза: скрыта"),
                              3000);
 }
 
-void MainWindow::onGridStepChanged(double step) {
-    if (!std::isfinite(step) || step <= 0.0) {
+void MainWindow::onGridStepChanged(double stepMm) {
+    if (!std::isfinite(stepMm) || stepMm <= 0.0) {
         return; // the spinbox range already prevents this
     }
-    sketchInput_.options.gridStep = std::max(step, kMinSketchGridStep);
+    // The toolbar spin box edits millimeters; the input model keeps the
+    // step in model units.
+    sketchInput_.options.gridStep = std::max(fromMillimeters(stepMm), kMinSketchGridStep);
     refreshSketchPlaneVisual();
     updateModeStatusLabel();
 }
@@ -1800,22 +1841,21 @@ void MainWindow::updateModeStatusLabel() {
     if (activeSketchId_) {
         const Result<Sketch> sketch = document_.sketchById(*activeSketchId_);
         const QString sketchName = sketch.isOk() ? QString::fromStdString(sketch.value().name)
-                                                 : tr("Sketch");
+                                                 : tr("Эскиз");
         const QString plane = activeSketchPlane_
                                   ? QString::fromStdString(activeSketchPlane_->name)
-                                  : tr("plane");
+                                  : tr("плоскость");
         modeStatusLabel_->setText(
             sketchInput_.options.snapToGrid
-                ? tr("Sketch2D: %1, Plane %2, Snap ON, Grid %3")
-                      .arg(sketchName, plane)
-                      .arg(sketchInput_.options.gridStep, 0, 'f', 3)
-                : tr("Sketch2D: %1, Plane %2, Snap OFF").arg(sketchName, plane));
+                ? tr("Эскиз 2D: %1, плоскость %2, привязка ВКЛ, сетка %3")
+                      .arg(sketchName, plane, mmQText(sketchInput_.options.gridStep))
+                : tr("Эскиз 2D: %1, плоскость %2, привязка ВЫКЛ").arg(sketchName, plane));
         return;
     }
     if (selectionKind_ == SelectionKind::WorkPlane) {
         if (const std::optional<WorkPlane> plane = workPlaneById(selectedId_)) {
             modeStatusLabel_->setText(
-                tr("Selected plane: %1 — Create Sketch or Normal to Plane")
+                tr("Выбрана плоскость: %1 — «Создать эскиз» или «Нормально к плоскости»")
                     .arg(QString::fromStdString(plane->name)));
             return;
         }
@@ -1825,32 +1865,32 @@ void MainWindow::updateModeStatusLabel() {
             findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
         modeStatusLabel_->setText(
             face && face->isSketchable
-                ? tr("Selected face: planar — Sketch on Face or Work Plane from Face")
-                : tr("Selected face: not planar"));
+                ? tr("Выбрана плоская грань: доступен эскиз или плоскость по грани")
+                : tr("Выбрана грань: не плоская"));
         return;
     }
     if (selectionKind_ == SelectionKind::BodyEdge) {
         modeStatusLabel_->setText(
             kOcctBackendAvailable
-                ? tr("Selected edge: Chamfer / Fillet available")
-                : tr("Selected edge: Chamfer / Fillet require OCCT backend"));
+                ? tr("Выбрано ребро: доступны фаска и скругление")
+                : tr("Выбрано ребро: фаска и скругление требуют ядра OCCT"));
         return;
     }
-    modeStatusLabel_->setText(tr("Free3D: select body, work plane or sketch"));
+    modeStatusLabel_->setText(tr("3D-вид: выберите тело, плоскость или эскиз"));
 }
 
 QString MainWindow::sketchToolPrompt() const {
     switch (sketchInput_.activeTool) {
     case SketchTool::Line:
-        return tr("Line: click first point");
+        return tr("Линия: кликните первую точку");
     case SketchTool::Rectangle:
-        return tr("Rectangle: click first corner");
+        return tr("Прямоугольник: кликните первый угол");
     case SketchTool::Circle:
-        return tr("Circle: click center");
+        return tr("Окружность: кликните центр");
     case SketchTool::Select:
         break;
     }
-    return tr("Select: click an entity on the plane");
+    return tr("Выбор: кликните элемент на плоскости");
 }
 
 // --- Work plane view helpers ------------------------------------------------
@@ -1880,12 +1920,12 @@ void MainWindow::showPlaneActionPalette(bool contextClick) {
         return;
     }
     QMenu menu(this);
-    QAction* createSketch = menu.addAction(tr("Create Sketch"));
-    QAction* normalView = menu.addAction(tr("Normal to Plane"));
-    QAction* fitPlane = menu.addAction(tr("Fit Plane"));
+    QAction* createSketch = menu.addAction(tr("Создать эскиз"));
+    QAction* normalView = menu.addAction(tr("Нормально к плоскости"));
+    QAction* fitPlane = menu.addAction(tr("Вписать плоскость"));
     const bool othersHidden = viewer_->otherWorkPlanesHidden();
-    QAction* hideOthers = menu.addAction(othersHidden ? tr("Show Other Planes")
-                                                      : tr("Hide Other Planes"));
+    QAction* hideOthers = menu.addAction(othersHidden ? tr("Показать другие плоскости")
+                                                      : tr("Скрыть другие плоскости"));
     QAction* chosen = menu.exec(QCursor::pos());
     if (chosen == createSketch) {
         createSketchFromSelectedPlane();
@@ -1895,8 +1935,8 @@ void MainWindow::showPlaneActionPalette(bool contextClick) {
         viewer_->fitWorkPlane(selectedId_);
     } else if (chosen == hideOthers) {
         viewer_->setOtherWorkPlanesHidden(!othersHidden);
-        statusBar()->showMessage(othersHidden ? tr("All work planes shown")
-                                              : tr("Other work planes hidden"),
+        statusBar()->showMessage(othersHidden ? tr("Все рабочие плоскости показаны")
+                                              : tr("Другие рабочие плоскости скрыты"),
                                  3000);
     }
 }
@@ -1908,7 +1948,7 @@ void MainWindow::addSketchEntity(SketchEntity entity) {
     const std::string sketchId = *activeSketchId_;
     const QString entityId = QString::fromStdString(entity.id);
     const QString entityName = QString::fromStdString(entity.name);
-    const QString entityType = QString::fromUtf8(sketchEntityTypeName(entity.type));
+    const QString entityType = sketchEntityTypeText(entity.type);
 
     commandStack_.push(std::make_unique<AddSketchEntityCommand>(sketchId, std::move(entity)),
                        document_);
@@ -1961,7 +2001,7 @@ void MainWindow::selectProfile(const std::string& profileId) {
     viewer_->scene().setSelectedProfile(profileId);
     updateExtrudeActionEnabled();
     if (const SketchProfile* profile = profileById(activeProfiles_, profileId)) {
-        statusBar()->showMessage(tr("Profile selected: %1 (area %2) — Extrude is available")
+        statusBar()->showMessage(tr("Выбран профиль: %1 (площадь %2) — доступно выдавливание")
                                      .arg(profileKindText(profile->kind))
                                      .arg(profile->area, 0, 'f', 3));
     }
@@ -2032,7 +2072,7 @@ void MainWindow::openExtrudeDialog() {
     const std::optional<Sketch> sketch = sketchForExtrude();
     if (!sketch) {
         statusBar()->showMessage(
-            tr("Select a sketch with a closed profile to extrude"), 5000);
+            tr("Выберите эскиз с замкнутым профилем для выдавливания"), 5000);
         return;
     }
 
@@ -2045,8 +2085,8 @@ void MainWindow::openExtrudeDialog() {
     if (dialogProfiles_.empty()) {
         statusBar()->showMessage(
             selectionKind_ == SelectionKind::Entity
-                ? tr("Selected sketch entity is not a closed profile.")
-                : tr("Sketch has no closed profile to extrude"),
+                ? tr("Выбранный элемент эскиза не образует замкнутый профиль.")
+                : tr("В эскизе нет замкнутого профиля для выдавливания"),
             5000);
         return;
     }
@@ -2078,10 +2118,10 @@ void MainWindow::openExtrudeDialog() {
                 label = QString::fromStdString(entity->name);
             }
         } else if (profile.kind == SketchProfileKind::Polygon) {
-            label = tr("Polygon Profile (%1 lines)")
+            label = tr("Профиль-многоугольник (%1 линий)")
                         .arg(profile.sourceEntityIds.size());
         }
-        label += tr(" — area %1").arg(profile.area, 0, 'f', 3);
+        label += tr(" — площадь %1").arg(profile.area, 0, 'f', 3);
         items.append({QString::fromStdString(profile.id), label});
         if (profile.id == selectedProfileId_) {
             selected = QString::fromStdString(profile.id);
@@ -2093,7 +2133,8 @@ void MainWindow::openExtrudeDialog() {
     extrudeDialog_->activateWindow();
     onExtrudeParametersChanged();
     statusBar()->showMessage(
-        tr("Extrude: pick profile, distance and direction — Apply creates a new body"));
+        tr("Выдавливание: выберите профиль, расстояние и направление — "
+           "«Применить» создаст новое тело"));
 }
 
 void MainWindow::onExtrudeParametersChanged() {
@@ -2134,7 +2175,8 @@ void MainWindow::applyExtrude() {
     const SketchProfile* profile = profileById(dialogProfiles_, profileId);
     const Result<Sketch> sketch = document_.sketchById(extrudeSketchId_);
     if (!profile || !profile->isValid || !sketch.isOk()) {
-        statusBar()->showMessage(tr("Selected sketch entity is not a closed profile."), 5000);
+        statusBar()->showMessage(
+            tr("Выбранный элемент эскиза не образует замкнутый профиль."), 5000);
         return;
     }
 
@@ -2144,7 +2186,7 @@ void MainWindow::applyExtrude() {
     parameters.direction = extrudeDialog_->direction();
     parameters.distance = extrudeDialog_->distance();
     if (!extrudeParametersValid(parameters)) {
-        statusBar()->showMessage(tr("Extrude distance must be greater than zero"), 5000);
+        statusBar()->showMessage(tr("Расстояние выдавливания должно быть больше нуля"), 5000);
         return;
     }
 
@@ -2153,10 +2195,8 @@ void MainWindow::applyExtrude() {
     kernel::ShapeHandle shape;
     if (!buildExtrudeMesh(sketch.value(), *profile, parameters, mesh, &failureReason,
                           &shape)) {
-        QMessageBox::warning(this, tr("Extrude Failed"),
-                             failureReason.isEmpty()
-                                 ? tr("The profile could not be extruded.")
-                                 : failureReason);
+        QMessageBox::warning(this, tr("Выдавливание не выполнено"),
+                             tr("Не удалось выдавить профиль. Измените параметры."));
         return;
     }
 
@@ -2165,7 +2205,7 @@ void MainWindow::applyExtrude() {
     Object body;
     body.id = "object-" + std::to_string(nextObjectNumber_++);
     body.type = ObjectType::Body;
-    body.name = "Extrude Body " + std::to_string(extrudeCount_ + 1);
+    body.name = "Тело выдавливания " + std::to_string(extrudeCount_ + 1);
     body.primitive.kind = PrimitiveKind::None;
     document_.addObject(body);
     if (!shape.isNull()) {
@@ -2178,7 +2218,7 @@ void MainWindow::applyExtrude() {
 
     Feature feature;
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
-    feature.name = "Extrude " + std::to_string(extrudeCount_ + 1);
+    feature.name = "Выдавливание " + std::to_string(extrudeCount_ + 1);
     feature.type = FeatureType::Extrude;
     feature.targetObjectId = body.id;
     feature.createdBodyId = body.id;
@@ -2189,14 +2229,14 @@ void MainWindow::applyExtrude() {
     {
         const QSignalBlocker blocker(projectTree_);
         projectTree_->addBodyItem(QString::fromStdString(body.id),
-                                  QString::fromStdString(body.name), tr("Extrude"));
+                                  QString::fromStdString(body.name), tr("Выдавливание"));
     }
 
     viewer_->scene().hideExtrudePreview();
     extrudeDialog_->hide();
     selectBody(body.id);
     markDirty();
-    statusBar()->showMessage(tr("%1 created from %2")
+    statusBar()->showMessage(tr("%1 создано из %2")
                                  .arg(QString::fromStdString(body.name),
                                       QString::fromStdString(sketch.value().name)),
                              5000);
@@ -2209,7 +2249,7 @@ void MainWindow::cancelExtrude() {
     if (extrudeDialog_) {
         extrudeDialog_->hide();
     }
-    statusBar()->showMessage(tr("Extrude cancelled"), 3000);
+    statusBar()->showMessage(tr("Выдавливание отменено"), 3000);
 }
 
 bool MainWindow::buildExtrudeMesh(const Sketch& sketch, const SketchProfile& profile,
@@ -2367,13 +2407,13 @@ void MainWindow::openCutExtrudeDialog() {
         return;
     }
     if (!kOcctBackendAvailable) {
-        statusBar()->showMessage(tr("Cut Extrude requires OCCT backend."), 6000);
+        statusBar()->showMessage(tr("Вырез выдавливанием требует ядра OCCT."), 6000);
         return;
     }
 
     const std::optional<Sketch> sketch = sketchForExtrude();
     if (!sketch) {
-        statusBar()->showMessage(tr("Select a closed sketch profile."), 5000);
+        statusBar()->showMessage(tr("Выберите замкнутый профиль эскиза."), 5000);
         return;
     }
 
@@ -2384,7 +2424,7 @@ void MainWindow::openCutExtrudeDialog() {
         }
     }
     if (cutDialogProfiles_.empty()) {
-        statusBar()->showMessage(tr("Select a closed sketch profile."), 5000);
+        statusBar()->showMessage(tr("Выберите замкнутый профиль эскиза."), 5000);
         return;
     }
 
@@ -2402,7 +2442,7 @@ void MainWindow::openCutExtrudeDialog() {
                        QString::fromStdString(object.name)});
     }
     if (bodies.empty()) {
-        statusBar()->showMessage(tr("Select target body for cut."), 5000);
+        statusBar()->showMessage(tr("Выберите целевое тело для выреза."), 5000);
         return;
     }
     if (selectedBody.isEmpty()) {
@@ -2433,9 +2473,9 @@ void MainWindow::openCutExtrudeDialog() {
                 label = QString::fromStdString(entity->name);
             }
         } else if (profile.kind == SketchProfileKind::Polygon) {
-            label = tr("Polygon Profile (%1 lines)").arg(profile.sourceEntityIds.size());
+            label = tr("Профиль-многоугольник (%1 линий)").arg(profile.sourceEntityIds.size());
         }
-        label += tr(" — area %1").arg(profile.area, 0, 'f', 3);
+        label += tr(" — площадь %1").arg(profile.area, 0, 'f', 3);
         profiles.append({QString::fromStdString(profile.id), label});
         if (profile.id == selectedProfileId_) {
             selectedProfile = QString::fromStdString(profile.id);
@@ -2462,7 +2502,8 @@ void MainWindow::openCutExtrudeDialog() {
     cutDialog_->activateWindow();
     onCutParametersChanged();
     statusBar()->showMessage(
-        tr("Cut Extrude: choose target, profile and depth mode — Apply modifies the body"));
+        tr("Вырез выдавливанием: выберите тело, профиль и режим глубины — "
+           "«Применить» изменит тело"));
 }
 
 void MainWindow::onCutParametersChanged() {
@@ -2514,14 +2555,14 @@ void MainWindow::applyCutExtrude() {
         return;
     }
     if (!kOcctBackendAvailable) {
-        statusBar()->showMessage(tr("Cut Extrude requires OCCT backend."), 6000);
+        statusBar()->showMessage(tr("Вырез выдавливанием требует ядра OCCT."), 6000);
         return;
     }
 
     const std::string targetBodyId = cutDialog_->targetBodyId().toStdString();
     Object* target = document_.mutableObjectById(targetBodyId);
     if (!target || target->type != ObjectType::Body) {
-        statusBar()->showMessage(tr("Select target body for cut."), 5000);
+        statusBar()->showMessage(tr("Выберите целевое тело для выреза."), 5000);
         return;
     }
 
@@ -2529,7 +2570,7 @@ void MainWindow::applyCutExtrude() {
     const SketchProfile* profile = profileById(cutDialogProfiles_, profileId);
     const Result<Sketch> sketch = document_.sketchById(cutSketchId_);
     if (!profile || !profile->isValid || !sketch.isOk()) {
-        statusBar()->showMessage(tr("Select a closed sketch profile."), 5000);
+        statusBar()->showMessage(tr("Выберите замкнутый профиль эскиза."), 5000);
         return;
     }
 
@@ -2542,7 +2583,7 @@ void MainWindow::applyCutExtrude() {
     parameters.distance = cutDialog_->distance();
     parameters.limitObjectId = cutDialog_->limitObjectId().toStdString();
     if (!extrudeCutParametersValid(parameters)) {
-        statusBar()->showMessage(tr("Cut parameters are invalid."), 5000);
+        statusBar()->showMessage(tr("Параметры выреза некорректны."), 5000);
         return;
     }
 
@@ -2552,17 +2593,17 @@ void MainWindow::applyCutExtrude() {
     CutSpan span;
     QString failureReason;
     if (!computeCutSpanForParameters(parameters, reference, span, &failureReason)) {
-        QMessageBox::warning(this, tr("Cut Extrude Failed"),
+        QMessageBox::warning(this, tr("Вырез не выполнен"),
                              failureReason.isEmpty()
-                                 ? tr("The cut extent could not be computed.")
+                                 ? tr("Не удалось вычислить границы выреза.")
                                  : failureReason);
         return;
     }
 
     const auto targetShapeIt = bodyShapes_.find(targetBodyId);
     if (targetShapeIt == bodyShapes_.end() || targetShapeIt->second.isNull()) {
-        QMessageBox::warning(this, tr("Cut Extrude Failed"),
-                             tr("Target body has no OCCT shape."));
+        QMessageBox::warning(this, tr("Вырез не выполнен"),
+                             tr("У целевого тела нет формы OCCT."));
         return;
     }
 
@@ -2570,11 +2611,8 @@ void MainWindow::applyCutExtrude() {
         evaluator_->evaluateExtrudeCut(targetShapeIt->second, reference, *profile, span);
     if (!evaluated.isOk() || !evaluated.value().isValid ||
         evaluated.value().previewMesh.isEmpty()) {
-        const QString reason = evaluated.isOk()
-                                   ? QString::fromStdString(evaluated.value().message)
-                                   : QString::fromStdString(evaluated.error().message);
-        QMessageBox::warning(this, tr("Cut Extrude Failed"),
-                             reason.isEmpty() ? tr("OCCT boolean cut failed.") : reason);
+        QMessageBox::warning(this, tr("Вырез не выполнен"),
+                             tr("Не удалось построить вырез. Измените параметры."));
         return;
     }
 
@@ -2586,7 +2624,7 @@ void MainWindow::applyCutExtrude() {
 
     Feature feature;
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
-    feature.name = "Cut Extrude " + std::to_string(cutCount_ + 1);
+    feature.name = "Вырез выдавливанием " + std::to_string(cutCount_ + 1);
     feature.type = FeatureType::ExtrudeCut;
     feature.targetObjectId = targetBodyId;
     feature.modifiedBodyId = targetBodyId;
@@ -2599,7 +2637,7 @@ void MainWindow::applyCutExtrude() {
     selectBody(targetBodyId);
     markDirty();
     statusBar()->showMessage(
-        tr("%1 cut applied (%2)")
+        tr("Вырез применён к %1 (%2)")
             .arg(QString::fromStdString(target->name), cutDepthModeText(parameters.depthMode)),
         5000);
 }
@@ -2611,7 +2649,7 @@ void MainWindow::cancelCutExtrude() {
     if (cutDialog_) {
         cutDialog_->hide();
     }
-    statusBar()->showMessage(tr("Cut Extrude cancelled"), 3000);
+    statusBar()->showMessage(tr("Вырез выдавливанием отменён"), 3000);
 }
 
 bool MainWindow::computeCutSpanForParameters(const ExtrudeCutParameters& parameters,
@@ -2620,13 +2658,13 @@ bool MainWindow::computeCutSpanForParameters(const ExtrudeCutParameters& paramet
                                              QString* failureReason) {
     if (!kernel_) {
         if (failureReason) {
-            *failureReason = tr("Geometry kernel is not available.");
+            *failureReason = tr("Геометрическое ядро недоступно.");
         }
         return false;
     }
     if (!extrudeCutParametersValid(parameters)) {
         if (failureReason) {
-            *failureReason = tr("Cut parameters are invalid.");
+            *failureReason = tr("Параметры выреза некорректны.");
         }
         return false;
     }
@@ -2634,7 +2672,7 @@ bool MainWindow::computeCutSpanForParameters(const ExtrudeCutParameters& paramet
     const auto targetIt = bodyShapes_.find(parameters.targetBodyId);
     if (targetIt == bodyShapes_.end() || targetIt->second.isNull()) {
         if (failureReason) {
-            *failureReason = tr("Target body has no OCCT shape.");
+            *failureReason = tr("У целевого тела нет формы OCCT.");
         }
         return false;
     }
@@ -2654,14 +2692,14 @@ bool MainWindow::computeCutSpanForParameters(const ExtrudeCutParameters& paramet
     if (parameters.depthMode == CutDepthMode::ToObject) {
         if (parameters.limitObjectId == parameters.targetBodyId) {
             if (failureReason) {
-                *failureReason = tr("Limit object must be different from the target body.");
+                *failureReason = tr("Объект-ограничитель должен отличаться от целевого тела.");
             }
             return false;
         }
         const auto limitIt = bodyShapes_.find(parameters.limitObjectId);
         if (limitIt == bodyShapes_.end() || limitIt->second.isNull()) {
             if (failureReason) {
-                *failureReason = tr("Limit object has no OCCT shape.");
+                *failureReason = tr("У объекта-ограничителя нет формы OCCT.");
             }
             return false;
         }
@@ -2694,7 +2732,7 @@ bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failur
     }
     if (!kOcctBackendAvailable) {
         if (failureReason) {
-            *failureReason = tr("Cut Extrude requires OCCT backend.");
+            *failureReason = tr("Вырез выдавливанием требует ядра OCCT.");
         }
         return false;
     }
@@ -2702,7 +2740,7 @@ bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failur
     Object* target = document_.mutableObjectById(feature.extrudeCut.targetBodyId);
     if (!target || target->type != ObjectType::Body) {
         if (failureReason) {
-            *failureReason = tr("Cut feature references a missing target body.");
+            *failureReason = tr("Вырез ссылается на отсутствующее целевое тело.");
         }
         return false;
     }
@@ -2718,7 +2756,7 @@ bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failur
         profileByIdOrLegacy(profiles, feature.extrudeCut.profileId, sketch.value());
     if (!profile || !profile->isValid) {
         if (failureReason) {
-            *failureReason = tr("Cut feature references a missing or invalid profile.");
+            *failureReason = tr("Вырез ссылается на отсутствующий или некорректный профиль.");
         }
         return false;
     }
@@ -2733,7 +2771,7 @@ bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failur
     const auto targetShapeIt = bodyShapes_.find(feature.extrudeCut.targetBodyId);
     if (targetShapeIt == bodyShapes_.end() || targetShapeIt->second.isNull()) {
         if (failureReason) {
-            *failureReason = tr("Target body has no OCCT shape.");
+            *failureReason = tr("У целевого тела нет формы OCCT.");
         }
         return false;
     }
@@ -2772,10 +2810,9 @@ void MainWindow::refreshBodyFaces(const std::string& bodyId) {
                 kernel::planarFacesForMesh(bodyId, meshIt->second);
             viewer_->scene().setBodyFaces(bodyId, faces);
             bodyFaces_[bodyId] = std::move(faces);
-            if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId &&
-                !findBodyFace(bodyId, selectedFace_.faceId)) {
-                clearSelection();
-            }
+        if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId) {
+            clearSelection();
+        }
             updateFaceActionsEnabled();
             return;
         }
@@ -2789,9 +2826,9 @@ void MainWindow::refreshBodyFaces(const std::string& bodyId) {
         analyzer.planarFacesForBody(bodyId, shapeIt->second);
     viewer_->scene().setBodyFaces(bodyId, faces);
     bodyFaces_[bodyId] = std::move(faces);
-    // The shape changed, so the selected face id may no longer exist.
-    if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId &&
-        !findBodyFace(bodyId, selectedFace_.faceId)) {
+    // The shape changed, so every face id from the previous topology is
+    // stale even if a rebuilt face happens to hash to the same string.
+    if (selectionKind_ == SelectionKind::BodyFace && selectedFace_.bodyId == bodyId) {
         clearSelection();
     }
     updateFaceActionsEnabled();
@@ -2823,19 +2860,19 @@ SketchReference MainWindow::sketchReferenceFromFace(const kernel::FaceReference&
     reference.normal = face.normal;
     const Result<Object> body = document_.objectById(face.bodyId);
     reference.displayName =
-        "Face of " + (body.isOk() ? body.value().name : face.bodyId);
+        "Грань " + (body.isOk() ? body.value().name : face.bodyId);
     return reference;
 }
 
 void MainWindow::createSketchOnSelectedFace() {
     if (selectionKind_ != SelectionKind::BodyFace) {
-        statusBar()->showMessage(tr("Select a planar body face first."), 5000);
+        statusBar()->showMessage(tr("Сначала выберите плоскую грань тела."), 5000);
         return;
     }
     const kernel::FaceReference* face =
         findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
     if (!face || !face->isSketchable) {
-        statusBar()->showMessage(tr("Sketches need a planar face."), 5000);
+        statusBar()->showMessage(tr("Эскизу нужна плоская грань."), 5000);
         return;
     }
     enterSketchOnReference(sketchReferenceFromFace(*face));
@@ -2843,20 +2880,20 @@ void MainWindow::createSketchOnSelectedFace() {
 
 void MainWindow::createWorkPlaneFromSelectedFace() {
     if (!viewer_ || selectionKind_ != SelectionKind::BodyFace) {
-        statusBar()->showMessage(tr("Select a planar body face first."), 5000);
+        statusBar()->showMessage(tr("Сначала выберите плоскую грань тела."), 5000);
         return;
     }
     const kernel::FaceReference* face =
         findBodyFace(selectedFace_.bodyId, selectedFace_.faceId);
     if (!face || !face->isSketchable) {
-        statusBar()->showMessage(tr("Work planes need a planar face."), 5000);
+        statusBar()->showMessage(tr("Рабочей плоскости нужна плоская грань."), 5000);
         return;
     }
 
     WorkPlane plane;
     ++facePlaneCount_;
     plane.id = "faceplane-" + std::to_string(facePlaneCount_);
-    plane.name = "Plane from Face " + std::to_string(facePlaneCount_);
+    plane.name = "Плоскость по грани " + std::to_string(facePlaneCount_);
     plane.kind = WorkPlaneKind::FacePlane;
     plane.origin = face->origin;
     plane.uAxis = face->uAxis;
@@ -2877,9 +2914,10 @@ void MainWindow::createWorkPlaneFromSelectedFace() {
     }
     markDirty();
     selectWorkPlane(plane.id);
-    statusBar()->showMessage(tr("%1 created — Create Sketch or Normal to Plane")
-                                 .arg(QString::fromStdString(plane.name)),
-                             5000);
+    statusBar()->showMessage(
+        tr("%1 создана — «Создать эскиз» или «Нормально к плоскости»")
+            .arg(QString::fromStdString(plane.name)),
+        5000);
 }
 
 void MainWindow::normalToSelectedFace() {
@@ -2893,7 +2931,7 @@ void MainWindow::normalToSelectedFace() {
     }
     WorkPlane plane;
     plane.id = face->faceId;
-    plane.name = "Face";
+    plane.name = "Грань";
     plane.kind = WorkPlaneKind::FacePlane;
     plane.origin = face->origin;
     plane.uAxis = face->uAxis;
@@ -2929,11 +2967,12 @@ void MainWindow::showFaceActionPalette(bool contextClick) {
     QAction* createPlane = nullptr;
     QAction* normalView = nullptr;
     if (face->isSketchable) {
-        createSketch = menu.addAction(tr("Create Sketch"));
-        createPlane = menu.addAction(tr("Create Work Plane"));
-        normalView = menu.addAction(tr("Normal to Face"));
+        createSketch = menu.addAction(tr("Создать эскиз"));
+        createPlane = menu.addAction(tr("Создать рабочую плоскость"));
+        normalView = menu.addAction(tr("Нормально к грани"));
     } else {
-        menu.addAction(tr("Face is not planar — no sketch actions"))->setEnabled(false);
+        menu.addAction(tr("Грань не плоская — действия эскиза недоступны"))
+            ->setEnabled(false);
     }
     QAction* chosen = menu.exec(QCursor::pos());
     if (chosen && chosen == createSketch) {
@@ -3020,8 +3059,9 @@ void MainWindow::refreshBodyEdges(const std::string& bodyId) {
     }
     viewer_->scene().setBodyEdges(bodyId, edges);
     bodyEdges_[bodyId] = std::move(edges);
-    if (selectionKind_ == SelectionKind::BodyEdge && selectedEdge_.bodyId == bodyId &&
-        !findBodyEdge(bodyId, selectedEdge_.edgeId)) {
+    // The shape changed, so every edge id from the previous topology is
+    // stale even if a rebuilt edge happens to hash to the same string.
+    if (selectionKind_ == SelectionKind::BodyEdge && selectedEdge_.bodyId == bodyId) {
         clearSelection();
     }
     updateEdgeActionsEnabled();
@@ -3111,12 +3151,12 @@ void MainWindow::showEdgeActionPalette(bool contextClick) {
     QAction* chamfer = nullptr;
     QAction* fillet = nullptr;
     if (!kOcctBackendAvailable) {
-        menu.addAction(tr("Chamfer requires OCCT backend"))->setEnabled(false);
-        menu.addAction(tr("Fillet requires OCCT backend"))->setEnabled(false);
+        menu.addAction(tr("Фаска требует ядра OCCT"))->setEnabled(false);
+        menu.addAction(tr("Скругление требует ядра OCCT"))->setEnabled(false);
     } else {
-        chamfer = menu.addAction(tr("Chamfer Edge"));
+        chamfer = menu.addAction(tr("Фаска ребра"));
         chamfer->setEnabled(edge->isChamferable);
-        fillet = menu.addAction(tr("Fillet Edge"));
+        fillet = menu.addAction(tr("Скругление ребра"));
         fillet->setEnabled(edge->isFilletable);
     }
     QAction* chosen = menu.exec(QCursor::pos());
@@ -3129,17 +3169,18 @@ void MainWindow::showEdgeActionPalette(bool contextClick) {
 
 void MainWindow::openChamferDialog() {
     if (selectionKind_ != SelectionKind::BodyEdge) {
-        statusBar()->showMessage(tr("Select a body edge first."), 5000);
+        statusBar()->showMessage(tr("Сначала выберите ребро тела."), 5000);
         return;
     }
     const kernel::EdgeReference* edge =
         findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
     if (!edge || !edge->isChamferable) {
-        statusBar()->showMessage(tr("Selected edge cannot be chamfered."), 5000);
+        statusBar()->showMessage(
+            tr("Выбранное ребро больше не актуально. Выберите ребро заново."), 6000);
         return;
     }
     if (!kOcctBackendAvailable) {
-        statusBar()->showMessage(tr("Chamfer requires OCCT backend."), 6000);
+        statusBar()->showMessage(tr("Фаска требует ядра OCCT."), 6000);
         return;
     }
     if (!edgeOperationDialog_) {
@@ -3164,17 +3205,18 @@ void MainWindow::openChamferDialog() {
 
 void MainWindow::openFilletDialog() {
     if (selectionKind_ != SelectionKind::BodyEdge) {
-        statusBar()->showMessage(tr("Select a body edge first."), 5000);
+        statusBar()->showMessage(tr("Сначала выберите ребро тела."), 5000);
         return;
     }
     const kernel::EdgeReference* edge =
         findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId);
     if (!edge || !edge->isFilletable) {
-        statusBar()->showMessage(tr("Selected edge cannot be filleted."), 5000);
+        statusBar()->showMessage(
+            tr("Выбранное ребро больше не актуально. Выберите ребро заново."), 6000);
         return;
     }
     if (!kOcctBackendAvailable) {
-        statusBar()->showMessage(tr("Fillet requires OCCT backend."), 6000);
+        statusBar()->showMessage(tr("Скругление требует ядра OCCT."), 6000);
         return;
     }
     if (!edgeOperationDialog_) {
@@ -3201,8 +3243,11 @@ void MainWindow::onEdgeOperationParametersChanged() {
     if (!viewer_ || !edgeOperationDialog_ || !edgeOperationDialog_->isVisible()) {
         return;
     }
+    // The preview must never run on a stale edge: re-resolve the selection
+    // against the current edge map before every evaluation.
     if (!edgeOperationDialog_->previewEnabled() ||
-        selectionKind_ != SelectionKind::BodyEdge) {
+        selectionKind_ != SelectionKind::BodyEdge ||
+        !findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId)) {
         viewer_->scene().hideExtrudePreview();
         return;
     }
@@ -3213,7 +3258,9 @@ void MainWindow::onEdgeOperationParametersChanged() {
         ChamferParameters parameters;
         parameters.targetBodyId = selectedEdge_.bodyId;
         parameters.edgeIds = {selectedEdge_.edgeId};
-        parameters.distance = edgeOperationDialog_->value();
+        parameters.mode = edgeOperationDialog_->chamferMode();
+        parameters.distanceMm = edgeOperationDialog_->valueMm();
+        parameters.angleDeg = edgeOperationDialog_->angleDeg();
         if (!buildChamferResult(parameters, geometry, &failureReason)) {
             viewer_->scene().hideExtrudePreview();
             return;
@@ -3222,7 +3269,7 @@ void MainWindow::onEdgeOperationParametersChanged() {
         FilletParameters parameters;
         parameters.targetBodyId = selectedEdge_.bodyId;
         parameters.edgeIds = {selectedEdge_.edgeId};
-        parameters.radius = edgeOperationDialog_->value();
+        parameters.radiusMm = edgeOperationDialog_->valueMm();
         if (!buildFilletResult(parameters, geometry, &failureReason)) {
             viewer_->scene().hideExtrudePreview();
             return;
@@ -3232,12 +3279,22 @@ void MainWindow::onEdgeOperationParametersChanged() {
 }
 
 void MainWindow::applyEdgeOperation() {
-    if (!viewer_ || !edgeOperationDialog_ || selectionKind_ != SelectionKind::BodyEdge) {
+    if (!viewer_ || !edgeOperationDialog_) {
+        return;
+    }
+    // Re-resolve the selected edge against the current topology right
+    // before applying: any previous operation may have invalidated it.
+    if (selectionKind_ != SelectionKind::BodyEdge ||
+        !findBodyEdge(selectedEdge_.bodyId, selectedEdge_.edgeId)) {
+        viewer_->scene().hideExtrudePreview();
+        statusBar()->showMessage(
+            tr("Выбранное ребро больше не актуально. Выберите ребро заново."), 6000);
         return;
     }
     Object* target = document_.mutableObjectById(selectedEdge_.bodyId);
     if (!target || target->type != ObjectType::Body) {
-        statusBar()->showMessage(tr("Target body is missing."), 5000);
+        viewer_->scene().hideExtrudePreview();
+        statusBar()->showMessage(tr("Целевое тело отсутствует."), 5000);
         return;
     }
 
@@ -3251,15 +3308,22 @@ void MainWindow::applyEdgeOperation() {
         ChamferParameters parameters;
         parameters.targetBodyId = selectedEdge_.bodyId;
         parameters.edgeIds = {selectedEdge_.edgeId};
-        parameters.distance = edgeOperationDialog_->value();
+        parameters.mode = edgeOperationDialog_->chamferMode();
+        parameters.distanceMm = edgeOperationDialog_->valueMm();
+        parameters.angleDeg = edgeOperationDialog_->angleDeg();
         if (!buildChamferResult(parameters, geometry, &failureReason)) {
-            QMessageBox::warning(this, tr("Chamfer Failed"),
-                                 failureReason.isEmpty()
-                                     ? tr("OCCT chamfer failed.")
-                                     : failureReason);
+            // The body stays in its last valid state; only the preview is
+            // dropped and the user gets one short message.
+            viewer_->scene().hideExtrudePreview();
+            QMessageBox::warning(
+                this, tr("Фаска"),
+                failureReason.isEmpty()
+                    ? tr("Не удалось построить фаску. Измените параметры или "
+                         "выберите другое ребро.")
+                    : failureReason);
             return;
         }
-        feature.name = "Chamfer " + std::to_string(chamferCount_ + 1);
+        feature.name = "Фаска " + std::to_string(chamferCount_ + 1);
         feature.type = FeatureType::Chamfer;
         feature.chamfer = parameters;
         ++chamferCount_;
@@ -3267,20 +3331,26 @@ void MainWindow::applyEdgeOperation() {
         FilletParameters parameters;
         parameters.targetBodyId = selectedEdge_.bodyId;
         parameters.edgeIds = {selectedEdge_.edgeId};
-        parameters.radius = edgeOperationDialog_->value();
+        parameters.radiusMm = edgeOperationDialog_->valueMm();
         if (!buildFilletResult(parameters, geometry, &failureReason)) {
-            QMessageBox::warning(this, tr("Fillet Failed"),
-                                 failureReason.isEmpty()
-                                     ? tr("OCCT fillet failed.")
-                                     : failureReason);
+            viewer_->scene().hideExtrudePreview();
+            QMessageBox::warning(
+                this, tr("Скругление"),
+                failureReason.isEmpty()
+                    ? tr("Не удалось построить скругление. Уменьшите радиус или "
+                         "выберите другое ребро.")
+                    : failureReason);
             return;
         }
-        feature.name = "Fillet " + std::to_string(filletCount_ + 1);
+        feature.name = "Скругление " + std::to_string(filletCount_ + 1);
         feature.type = FeatureType::Fillet;
         feature.fillet = parameters;
         ++filletCount_;
     }
 
+    // Success: replace the body shape, then rebuild every piece of derived
+    // state (mesh, face/edge maps, highlights, selection, command
+    // availability) so no stale references survive the topology change.
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
     bodyShapes_[target->id] = geometry.shape;
     bodyMeshes_[target->id] = geometry.previewMesh;
@@ -3293,7 +3363,7 @@ void MainWindow::applyEdgeOperation() {
     edgeOperationDialog_->hide();
     selectBody(target->id);
     markDirty();
-    statusBar()->showMessage(tr("%1 updated").arg(QString::fromStdString(target->name)), 5000);
+    statusBar()->showMessage(tr("Тело обновлено. Выберите следующее ребро."), 5000);
 }
 
 void MainWindow::cancelEdgeOperation() {
@@ -3303,7 +3373,7 @@ void MainWindow::cancelEdgeOperation() {
     if (edgeOperationDialog_) {
         edgeOperationDialog_->hide();
     }
-    statusBar()->showMessage(tr("Edge operation cancelled"), 3000);
+    statusBar()->showMessage(tr("Операция над ребром отменена"), 3000);
 }
 
 bool MainWindow::buildChamferResult(const ChamferParameters& parameters,
@@ -3311,33 +3381,44 @@ bool MainWindow::buildChamferResult(const ChamferParameters& parameters,
                                     QString* failureReason) {
     if (!kOcctBackendAvailable) {
         if (failureReason) {
-            *failureReason = tr("Chamfer requires OCCT backend.");
+            *failureReason = tr("Фаска требует ядра OCCT.");
         }
         return false;
     }
     if (!evaluator_ || !kernel_ || !chamferParametersValid(parameters)) {
         if (failureReason) {
-            *failureReason = tr("Chamfer parameters are invalid.");
+            *failureReason = tr("Параметры фаски некорректны. Проверьте расстояние и угол.");
         }
         return false;
     }
     const auto shapeIt = bodyShapes_.find(parameters.targetBodyId);
     if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
         if (failureReason) {
-            *failureReason = tr("Target body has no OCCT shape.");
+            *failureReason = tr("У целевого тела нет формы OCCT.");
         }
         return false;
+    }
+    for (const std::string& edgeId : parameters.edgeIds) {
+        if (!findBodyEdge(parameters.targetBodyId, edgeId)) {
+            if (failureReason) {
+                *failureReason =
+                    tr("Выбранное ребро больше не актуально. Выберите ребро заново.");
+            }
+            return false;
+        }
     }
     const Result<kernel::ShapeBounds> bounds = kernel_->boundingBox(shapeIt->second);
     if (!bounds.isOk()) {
         if (failureReason) {
-            *failureReason = QString::fromStdString(bounds.error().message);
+            *failureReason = tr("Не удалось построить фаску. Измените параметры или "
+                                "выберите другое ребро.");
         }
         return false;
     }
-    if (parameters.distance > std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
+    if (fromMillimeters(parameters.distanceMm) >
+        std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
         if (failureReason) {
-            *failureReason = tr("Chamfer distance is too large for the target body.");
+            *failureReason = tr("Фаска слишком велика для этого тела. Уменьшите расстояние.");
         }
         return false;
     }
@@ -3347,9 +3428,13 @@ bool MainWindow::buildChamferResult(const ChamferParameters& parameters,
     if (!evaluated.isOk() || !evaluated.value().isValid ||
         evaluated.value().previewMesh.isEmpty()) {
         if (failureReason) {
-            *failureReason = evaluated.isOk()
-                                 ? QString::fromStdString(evaluated.value().message)
-                                 : QString::fromStdString(evaluated.error().message);
+            // Detailed kernel diagnostics stay in the Result; the user only
+            // ever sees one short actionable message.
+            *failureReason =
+                !evaluated.isOk() && evaluated.error().code == ErrorCode::NotFound
+                    ? tr("Выбранное ребро больше не актуально. Выберите ребро заново.")
+                    : tr("Не удалось построить фаску. Измените параметры или "
+                         "выберите другое ребро.");
         }
         return false;
     }
@@ -3362,33 +3447,45 @@ bool MainWindow::buildFilletResult(const FilletParameters& parameters,
                                    QString* failureReason) {
     if (!kOcctBackendAvailable) {
         if (failureReason) {
-            *failureReason = tr("Fillet requires OCCT backend.");
+            *failureReason = tr("Скругление требует ядра OCCT.");
         }
         return false;
     }
     if (!evaluator_ || !kernel_ || !filletParametersValid(parameters)) {
         if (failureReason) {
-            *failureReason = tr("Fillet parameters are invalid.");
+            *failureReason = tr("Параметры скругления некорректны. Проверьте радиус.");
         }
         return false;
     }
     const auto shapeIt = bodyShapes_.find(parameters.targetBodyId);
     if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) {
         if (failureReason) {
-            *failureReason = tr("Target body has no OCCT shape.");
+            *failureReason = tr("У целевого тела нет формы OCCT.");
         }
         return false;
+    }
+    for (const std::string& edgeId : parameters.edgeIds) {
+        if (!findBodyEdge(parameters.targetBodyId, edgeId)) {
+            if (failureReason) {
+                *failureReason =
+                    tr("Выбранное ребро больше не актуально. Выберите ребро заново.");
+            }
+            return false;
+        }
     }
     const Result<kernel::ShapeBounds> bounds = kernel_->boundingBox(shapeIt->second);
     if (!bounds.isOk()) {
         if (failureReason) {
-            *failureReason = QString::fromStdString(bounds.error().message);
+            *failureReason = tr("Не удалось построить скругление. Уменьшите радиус или "
+                                "выберите другое ребро.");
         }
         return false;
     }
-    if (parameters.radius > std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
+    if (fromMillimeters(parameters.radiusMm) >
+        std::max(boundsDiagonal(bounds.value()), 1.0e-6)) {
         if (failureReason) {
-            *failureReason = tr("Fillet radius is too large for the target body.");
+            *failureReason =
+                tr("Слишком большой радиус для этого тела. Уменьшите радиус.");
         }
         return false;
     }
@@ -3398,9 +3495,11 @@ bool MainWindow::buildFilletResult(const FilletParameters& parameters,
     if (!evaluated.isOk() || !evaluated.value().isValid ||
         evaluated.value().previewMesh.isEmpty()) {
         if (failureReason) {
-            *failureReason = evaluated.isOk()
-                                 ? QString::fromStdString(evaluated.value().message)
-                                 : QString::fromStdString(evaluated.error().message);
+            *failureReason =
+                !evaluated.isOk() && evaluated.error().code == ErrorCode::NotFound
+                    ? tr("Выбранное ребро больше не актуально. Выберите ребро заново.")
+                    : tr("Не удалось построить скругление. Уменьшите радиус или "
+                         "выберите другое ребро.");
         }
         return false;
     }
@@ -3431,7 +3530,7 @@ bool MainWindow::replayEdgeOperationFeature(const Feature& feature, QString* fai
     Object* target = document_.mutableObjectById(targetBodyId);
     if (!target || target->type != ObjectType::Body) {
         if (failureReason) {
-            *failureReason = tr("Edge operation references a missing target body.");
+            *failureReason = tr("Операция над ребром ссылается на отсутствующее тело.");
         }
         return false;
     }
@@ -3456,7 +3555,7 @@ void MainWindow::updatePlaneBadge() {
     const QString plane = QString::fromStdString(activeSketchPlane_->name);
     const QString uAxis = QString::fromUtf8(dominantWorldAxisName(activeSketchPlane_->uAxis));
     const QString vAxis = QString::fromUtf8(dominantWorldAxisName(activeSketchPlane_->vAxis));
-    planeBadge_->setText(tr("Sketch2D — Plane %1\nU: %2    V: %3")
+    planeBadge_->setText(tr("Эскиз 2D — плоскость %1\nU: %2    V: %3")
                              .arg(plane, uAxis, vAxis));
     planeBadge_->adjustSize();
     planeBadge_->show();
@@ -3575,14 +3674,14 @@ void MainWindow::openDocument() {
         return;
     }
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Open CADNext Document"), QString(),
-        tr("CADNext Documents (*.cadnext);;All Files (*)"));
+        this, tr("Открыть документ CADNext"), QString(),
+        tr("Документы CADNext (*.cadnext);;Все файлы (*)"));
     if (path.isEmpty()) {
         return;
     }
     const Result<Document> loaded = DocumentSerializer::loadFromFile(path.toStdString());
     if (!loaded.isOk()) {
-        QMessageBox::warning(this, tr("Open Failed"),
+        QMessageBox::warning(this, tr("Не удалось открыть"),
                              QString::fromStdString(loaded.error().message));
         return;
     }
@@ -3601,7 +3700,7 @@ bool MainWindow::saveDocument() {
     const Result<bool> saved =
         DocumentSerializer::saveToFile(document_, currentFilePath_.toStdString());
     if (!saved.isOk()) {
-        QMessageBox::warning(this, tr("Save Failed"),
+        QMessageBox::warning(this, tr("Не удалось сохранить"),
                              QString::fromStdString(saved.error().message));
         return false;
     }
@@ -3611,8 +3710,8 @@ bool MainWindow::saveDocument() {
 
 bool MainWindow::saveDocumentAs() {
     QString path = QFileDialog::getSaveFileName(
-        this, tr("Save CADNext Document"), QStringLiteral("untitled.cadnext"),
-        tr("CADNext Documents (*.cadnext)"));
+        this, tr("Сохранить документ CADNext"), QStringLiteral("untitled.cadnext"),
+        tr("Документы CADNext (*.cadnext)"));
     if (path.isEmpty()) {
         return false;
     }
@@ -3628,8 +3727,8 @@ bool MainWindow::maybeSave() {
         return true;
     }
     const QMessageBox::StandardButton choice = QMessageBox::warning(
-        this, tr("Unsaved Changes"),
-        tr("The document has unsaved changes.\nDo you want to save them?"),
+        this, tr("Несохранённые изменения"),
+        tr("В документе есть несохранённые изменения.\nСохранить их?"),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
     switch (choice) {
     case QMessageBox::Save:
@@ -3683,7 +3782,7 @@ void MainWindow::rebuildUiFromDocument() {
         } else {
             projectTree_->addBodyItem(QString::fromStdString(object.id),
                                       QString::fromStdString(object.name),
-                                      extrudeFeature ? tr("Extrude") : treeTypeText(object));
+                                      extrudeFeature ? tr("Выдавливание") : treeTypeText(object));
         }
     }
     for (const Feature& feature : document_.features()) {
@@ -3693,7 +3792,7 @@ void MainWindow::rebuildUiFromDocument() {
                 qWarning("CADNext: cut feature %s replay failed: %s",
                          feature.id.c_str(), failureReason.toUtf8().constData());
                 statusBar()->showMessage(
-                    tr("Cut feature replay failed for %1 (%2)")
+                    tr("Не удалось воспроизвести вырез %1 (%2)")
                         .arg(QString::fromStdString(feature.name), failureReason),
                     8000);
             }
@@ -3703,7 +3802,7 @@ void MainWindow::rebuildUiFromDocument() {
                 qWarning("CADNext: edge feature %s replay failed: %s",
                          feature.id.c_str(), failureReason.toUtf8().constData());
                 statusBar()->showMessage(
-                    tr("Edge feature replay failed for %1 (%2)")
+                    tr("Не удалось воспроизвести операцию %1 (%2)")
                         .arg(QString::fromStdString(feature.name), failureReason),
                     8000);
             }
@@ -3733,7 +3832,7 @@ void MainWindow::rebuildUiFromDocument() {
             projectTree_->addEntityItem(QString::fromStdString(sketch.id),
                                         QString::fromStdString(entity.id),
                                         QString::fromStdString(entity.name),
-                                        QString::fromUtf8(sketchEntityTypeName(entity.type)));
+                                        sketchEntityTypeText(entity.type));
         }
     }
     deriveCountersFromDocument();
@@ -3830,7 +3929,7 @@ void MainWindow::updateWindowTitle() {
     const QString base = currentFilePath_.isEmpty()
                              ? QString::fromStdString(document_.name())
                              : QFileInfo(currentFilePath_).fileName();
-    setWindowTitle(QStringLiteral("%1%2 — CADNext 0.9")
+    setWindowTitle(QStringLiteral("%1%2 — CADNext 0.9.x")
                        .arg(base, dirty_ ? QStringLiteral("*") : QString()));
 }
 
@@ -3873,21 +3972,23 @@ void MainWindow::updateUndoRedoActions() {
 // --- Menus --------------------------------------------------------------------
 
 void MainWindow::createMenus() {
-    QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
-    fileMenu->addAction(tr("&New"), QKeySequence::New, this, [this]() { newDocument(); });
-    fileMenu->addAction(tr("&Open…"), QKeySequence::Open, this, [this]() { openDocument(); });
+    QMenu* fileMenu = menuBar()->addMenu(tr("&Файл"));
+    fileMenu->addAction(tr("&Новый"), QKeySequence::New, this, [this]() { newDocument(); });
+    fileMenu->addAction(tr("&Открыть…"), QKeySequence::Open, this,
+                        [this]() { openDocument(); });
     fileMenu->addSeparator();
-    fileMenu->addAction(tr("&Save"), QKeySequence::Save, this, [this]() { saveDocument(); });
-    fileMenu->addAction(tr("Save &As…"), QKeySequence::SaveAs, this,
+    fileMenu->addAction(tr("&Сохранить"), QKeySequence::Save, this,
+                        [this]() { saveDocument(); });
+    fileMenu->addAction(tr("Сохранить &как…"), QKeySequence::SaveAs, this,
                         [this]() { saveDocumentAs(); });
 
-    QMenu* editMenu = menuBar()->addMenu(tr("&Edit"));
-    undoAction_ = editMenu->addAction(tr("&Undo"), QKeySequence::Undo, this,
+    QMenu* editMenu = menuBar()->addMenu(tr("&Правка"));
+    undoAction_ = editMenu->addAction(tr("&Отменить"), QKeySequence::Undo, this,
                                       [this]() { undo(); });
-    redoAction_ = editMenu->addAction(tr("&Redo"), QKeySequence::Redo, this,
+    redoAction_ = editMenu->addAction(tr("&Повторить"), QKeySequence::Redo, this,
                                       [this]() { redo(); });
 
-    QMenu* partMenu = menuBar()->addMenu(tr("&Part"));
+    QMenu* partMenu = menuBar()->addMenu(tr("&Деталь"));
     partMenu->addAction(toolBar_->extrudeAction());
     partMenu->addAction(toolBar_->cutExtrudeAction());
     partMenu->addAction(toolBar_->chamferAction());
@@ -3897,7 +3998,7 @@ void MainWindow::createMenus() {
     partMenu->addAction(toolBar_->workPlaneFromFaceAction());
     partMenu->addAction(toolBar_->normalToFaceAction());
 
-    QMenu* viewMenu = menuBar()->addMenu(tr("&View"));
+    QMenu* viewMenu = menuBar()->addMenu(tr("&Вид"));
     viewMenu->addAction(toolBar_->fitSelectionAction());
     viewMenu->addAction(toolBar_->fitViewAction());
     viewMenu->addAction(toolBar_->resetCameraAction());

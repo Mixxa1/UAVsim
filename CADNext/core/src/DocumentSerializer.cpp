@@ -1,5 +1,6 @@
 #include "cadnext/DocumentSerializer.hpp"
 
+#include "cadnext/Units.hpp"
 #include "cadnext/WorkPlane.hpp"
 
 #include <algorithm>
@@ -620,7 +621,9 @@ std::string DocumentSerializer::toJson(const Document& document) {
                 << ",\n";
             out << "          \"mode\": \"" << chamferModeName(feature.chamfer.mode)
                 << "\",\n";
-            out << "          \"distance\": " << numberText(feature.chamfer.distance) << "\n";
+            out << "          \"distanceMm\": " << numberText(feature.chamfer.distanceMm)
+                << ",\n";
+            out << "          \"angleDeg\": " << numberText(feature.chamfer.angleDeg) << "\n";
             out << "        },\n";
         }
         if (feature.type == FeatureType::Fillet) {
@@ -631,7 +634,7 @@ std::string DocumentSerializer::toJson(const Document& document) {
                 << escapeString(feature.fillet.targetBodyId) << "\",\n";
             out << "          \"edgeIds\": " << stringArrayJson(feature.fillet.edgeIds, 10)
                 << ",\n";
-            out << "          \"radius\": " << numberText(feature.fillet.radius) << "\n";
+            out << "          \"radiusMm\": " << numberText(feature.fillet.radiusMm) << "\n";
             out << "        },\n";
         }
         out << "        \"suppressed\": " << (feature.suppressed ? "true" : "false") << "\n";
@@ -866,13 +869,26 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                 feature.chamfer.edgeIds = stringVectorFromJson(chamfer->member("edgeIds"));
                 feature.chamfer.mode =
                     chamferModeFromName(chamfer->stringOr("mode", "EqualDistance"));
-                feature.chamfer.distance = chamfer->numberOr("distance", 0.1);
+                // Pre-0.9.x files stored "distance" in model units (and had
+                // no angle); current files store millimeters + degrees.
+                if (chamfer->member("distanceMm")) {
+                    feature.chamfer.distanceMm = chamfer->numberOr("distanceMm", 1.0);
+                } else {
+                    feature.chamfer.distanceMm =
+                        toMillimeters(chamfer->numberOr("distance", 0.001));
+                }
+                feature.chamfer.angleDeg = chamfer->numberOr("angleDeg", 45.0);
             }
             if (const JsonValue* fillet = featureValue.member("fillet");
                 fillet && fillet->isObject()) {
                 feature.fillet.targetBodyId = fillet->stringOr("targetBodyId", "");
                 feature.fillet.edgeIds = stringVectorFromJson(fillet->member("edgeIds"));
-                feature.fillet.radius = fillet->numberOr("radius", 0.1);
+                if (fillet->member("radiusMm")) {
+                    feature.fillet.radiusMm = fillet->numberOr("radiusMm", 1.0);
+                } else {
+                    feature.fillet.radiusMm =
+                        toMillimeters(fillet->numberOr("radius", 0.001));
+                }
             }
             document.addFeature(std::move(feature));
         }

@@ -13,8 +13,10 @@ namespace cadnext::gui {
 
 namespace {
 
-constexpr double kMinValue = 0.001;
-constexpr double kMaxValue = 1.0e6;
+constexpr double kMinValueMm = 0.01;
+constexpr double kMaxValueMm = 1.0e6;
+constexpr double kDefaultValueMm = 1.0;
+constexpr double kDefaultAngleDeg = 45.0;
 
 } // namespace
 
@@ -26,26 +28,38 @@ EdgeOperationDialog::EdgeOperationDialog(QWidget* parent)
     auto* form = new QFormLayout;
 
     targetLabel_ = new QLabel(this);
-    form->addRow(tr("Target body"), targetLabel_);
+    form->addRow(tr("Целевое тело"), targetLabel_);
 
     edgeCountLabel_ = new QLabel(this);
-    form->addRow(tr("Edges"), edgeCountLabel_);
+    form->addRow(tr("Ребра"), edgeCountLabel_);
 
     modeCombo_ = new QComboBox(this);
-    modeCombo_->addItem(tr("Equal distance"));
-    modeCombo_->setEnabled(false);
-    form->addRow(tr("Mode"), modeCombo_);
+    modeCombo_->addItem(tr("Расстояние и угол"));
+    modeCombo_->addItem(tr("Равные отступы"));
+    modeLabel_ = new QLabel(tr("Режим"), this);
+    form->addRow(modeLabel_, modeCombo_);
 
     valueSpin_ = new QDoubleSpinBox(this);
-    valueSpin_->setRange(kMinValue, kMaxValue);
+    valueSpin_->setRange(kMinValueMm, kMaxValueMm);
     valueSpin_->setDecimals(3);
-    valueSpin_->setSingleStep(0.05);
-    valueSpin_->setValue(0.1);
+    valueSpin_->setSingleStep(1.0);
+    valueSpin_->setValue(kDefaultValueMm);
+    valueSpin_->setSuffix(tr(" мм"));
     valueSpin_->setKeyboardTracking(false);
     valueLabel_ = new QLabel(this);
     form->addRow(valueLabel_, valueSpin_);
 
-    previewCheck_ = new QCheckBox(tr("Preview"), this);
+    angleSpin_ = new QDoubleSpinBox(this);
+    angleSpin_->setRange(1.0, 89.0);
+    angleSpin_->setDecimals(1);
+    angleSpin_->setSingleStep(5.0);
+    angleSpin_->setValue(kDefaultAngleDeg);
+    angleSpin_->setSuffix(tr(" °"));
+    angleSpin_->setKeyboardTracking(false);
+    angleLabel_ = new QLabel(tr("Угол, °"), this);
+    form->addRow(angleLabel_, angleSpin_);
+
+    previewCheck_ = new QCheckBox(tr("Предпросмотр"), this);
     previewCheck_->setChecked(true);
     form->addRow(QString(), previewCheck_);
 
@@ -53,9 +67,9 @@ EdgeOperationDialog::EdgeOperationDialog(QWidget* parent)
 
     auto* buttons = new QHBoxLayout;
     buttons->addStretch();
-    applyButton_ = new QPushButton(tr("Apply"), this);
+    applyButton_ = new QPushButton(tr("Применить"), this);
     applyButton_->setDefault(true);
-    cancelButton_ = new QPushButton(tr("Cancel"), this);
+    cancelButton_ = new QPushButton(tr("Отмена"), this);
     buttons->addWidget(applyButton_);
     buttons->addWidget(cancelButton_);
     layout->addLayout(buttons);
@@ -65,7 +79,12 @@ EdgeOperationDialog::EdgeOperationDialog(QWidget* parent)
             emit parametersChanged();
         }
     };
+    connect(modeCombo_, &QComboBox::currentIndexChanged, this, [this, emitChanged]() {
+        updateModeRows();
+        emitChanged();
+    });
     connect(valueSpin_, &QDoubleSpinBox::valueChanged, this, emitChanged);
+    connect(angleSpin_, &QDoubleSpinBox::valueChanged, this, emitChanged);
     connect(previewCheck_, &QCheckBox::toggled, this, emitChanged);
     connect(applyButton_, &QPushButton::clicked, this, [this]() { emit applyRequested(); });
     connect(cancelButton_, &QPushButton::clicked, this, &QDialog::reject);
@@ -77,7 +96,10 @@ EdgeOperationDialog::EdgeOperationDialog(QWidget* parent)
 void EdgeOperationDialog::configure(EdgeOperationDialogKind kind) {
     updating_ = true;
     kind_ = kind;
+    modeCombo_->setCurrentIndex(0); // "Расстояние и угол" is the default
+    angleSpin_->setValue(kDefaultAngleDeg);
     updateLabels();
+    updateModeRows();
     updating_ = false;
 }
 
@@ -95,8 +117,17 @@ QString EdgeOperationDialog::targetBodyId() const {
     return targetBodyId_;
 }
 
-double EdgeOperationDialog::value() const {
+double EdgeOperationDialog::valueMm() const {
     return valueSpin_->value();
+}
+
+double EdgeOperationDialog::angleDeg() const {
+    return angleSpin_->value();
+}
+
+cadnext::ChamferMode EdgeOperationDialog::chamferMode() const {
+    return modeCombo_->currentIndex() == 1 ? cadnext::ChamferMode::EqualDistance
+                                           : cadnext::ChamferMode::DistanceAngle;
 }
 
 bool EdgeOperationDialog::previewEnabled() const {
@@ -109,14 +140,24 @@ EdgeOperationDialogKind EdgeOperationDialog::kind() const {
 
 void EdgeOperationDialog::updateLabels() {
     if (kind_ == EdgeOperationDialogKind::Chamfer) {
-        setWindowTitle(tr("Chamfer"));
-        valueLabel_->setText(tr("Distance"));
-        valueSpin_->setToolTip(tr("Equal chamfer distance"));
+        setWindowTitle(tr("Фаска"));
+        valueLabel_->setText(tr("Расстояние, мм"));
+        valueSpin_->setToolTip(tr("Линейный размер фаски в миллиметрах"));
         return;
     }
-    setWindowTitle(tr("Fillet"));
-    valueLabel_->setText(tr("Radius"));
-    valueSpin_->setToolTip(tr("Fillet radius"));
+    setWindowTitle(tr("Скругление"));
+    valueLabel_->setText(tr("Радиус, мм"));
+    valueSpin_->setToolTip(tr("Радиус скругления в миллиметрах"));
+}
+
+void EdgeOperationDialog::updateModeRows() {
+    const bool chamfer = kind_ == EdgeOperationDialogKind::Chamfer;
+    modeLabel_->setVisible(chamfer);
+    modeCombo_->setVisible(chamfer);
+    const bool angle = chamfer && chamferMode() == cadnext::ChamferMode::DistanceAngle;
+    angleLabel_->setVisible(chamfer);
+    angleSpin_->setVisible(chamfer);
+    angleSpin_->setEnabled(angle);
 }
 
 } // namespace cadnext::gui

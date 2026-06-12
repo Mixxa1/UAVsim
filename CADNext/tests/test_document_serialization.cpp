@@ -123,7 +123,9 @@ int main() {
     chamfer.modifiedBodyId = "object-1";
     chamfer.chamfer.targetBodyId = "object-1";
     chamfer.chamfer.edgeIds = {"edge-0-saaa-eaaa-laaa"};
-    chamfer.chamfer.distance = 0.125;
+    chamfer.chamfer.mode = cadnext::ChamferMode::DistanceAngle;
+    chamfer.chamfer.distanceMm = 12.5;
+    chamfer.chamfer.angleDeg = 30.0;
     edgeOps.addFeature(chamfer);
 
     cadnext::Feature fillet;
@@ -134,7 +136,7 @@ int main() {
     fillet.modifiedBodyId = "object-1";
     fillet.fillet.targetBodyId = "object-1";
     fillet.fillet.edgeIds = {"edge-1-sbbb-ebbb-lbbb"};
-    fillet.fillet.radius = 0.25;
+    fillet.fillet.radiusMm = 25.0;
     edgeOps.addFeature(fillet);
 
     const std::string edgeJson = cadnext::DocumentSerializer::toJson(edgeOps);
@@ -147,12 +149,35 @@ int main() {
     assert(edgeRoundtrip.value().features()[0].chamfer.edgeIds.size() == 1);
     assert(edgeRoundtrip.value().features()[0].chamfer.edgeIds[0] ==
            "edge-0-saaa-eaaa-laaa");
-    assert(nearlyEqual(edgeRoundtrip.value().features()[0].chamfer.distance, 0.125));
+    assert(edgeRoundtrip.value().features()[0].chamfer.mode ==
+           cadnext::ChamferMode::DistanceAngle);
+    assert(nearlyEqual(edgeRoundtrip.value().features()[0].chamfer.distanceMm, 12.5));
+    assert(nearlyEqual(edgeRoundtrip.value().features()[0].chamfer.angleDeg, 30.0));
     assert(edgeRoundtrip.value().features()[1].type == cadnext::FeatureType::Fillet);
     assert(edgeRoundtrip.value().features()[1].fillet.edgeIds.size() == 1);
     assert(edgeRoundtrip.value().features()[1].fillet.edgeIds[0] ==
            "edge-1-sbbb-ebbb-lbbb");
-    assert(nearlyEqual(edgeRoundtrip.value().features()[1].fillet.radius, 0.25));
+    assert(nearlyEqual(edgeRoundtrip.value().features()[1].fillet.radiusMm, 25.0));
+
+    // Legacy pre-0.9.x files stored "distance"/"radius" in model units;
+    // they load as millimeters.
+    const std::string legacyJson =
+        "{\"format\": \"cadnext\", \"version\": 1, \"document\": {\"name\": \"L\","
+        " \"objects\": [], \"workPlanes\": [], \"sketches\": [], \"features\": ["
+        "  {\"id\": \"feature-1\", \"name\": \"Chamfer 1\", \"type\": \"Chamfer\","
+        "   \"targetObjectId\": \"object-1\", \"chamfer\": {\"targetBodyId\": \"object-1\","
+        "   \"edgeIds\": [\"edge-0\"], \"mode\": \"EqualDistance\", \"distance\": 0.125},"
+        "   \"suppressed\": false},"
+        "  {\"id\": \"feature-2\", \"name\": \"Fillet 1\", \"type\": \"Fillet\","
+        "   \"targetObjectId\": \"object-1\", \"fillet\": {\"targetBodyId\": \"object-1\","
+        "   \"edgeIds\": [\"edge-1\"], \"radius\": 0.25}, \"suppressed\": false}"
+        "]}}";
+    const auto legacy = cadnext::DocumentSerializer::fromJson(legacyJson);
+    assert(legacy.isOk());
+    assert(legacy.value().features().size() == 2);
+    assert(legacy.value().features()[0].chamfer.mode == cadnext::ChamferMode::EqualDistance);
+    assert(nearlyEqual(legacy.value().features()[0].chamfer.distanceMm, 125.0));
+    assert(nearlyEqual(legacy.value().features()[1].fillet.radiusMm, 250.0));
 
     return 0;
 }

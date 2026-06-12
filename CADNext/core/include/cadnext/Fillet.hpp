@@ -8,7 +8,10 @@ namespace cadnext {
 struct FilletParameters {
     std::string targetBodyId;
     std::vector<std::string> edgeIds;
-    double radius = 0.1;
+
+    // User-facing unit: millimeters. Conversion to model units happens
+    // once, in the geometry evaluator.
+    double radiusMm = 1.0;
 };
 
 bool filletParametersValid(const FilletParameters& parameters);

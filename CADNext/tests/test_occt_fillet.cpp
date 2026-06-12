@@ -17,10 +17,10 @@ int main() {
     cadnext::FilletParameters parameters;
     parameters.targetBodyId = "body-1";
     parameters.edgeIds = {edges.front().edgeId};
-    parameters.radius = 0.1;
+    parameters.radiusMm = 100.0;
     assert(cadnext::filletParametersValid(parameters));
 
-    const auto direct = kernel.filletEdges(box.value(), parameters.edgeIds, parameters.radius);
+    const auto direct = kernel.filletEdges(box.value(), parameters.edgeIds, 0.1);
     assert(direct.isOk());
     assert(!direct.value().isNull());
     assert(kernel.isShapeValid(direct.value()));
@@ -32,7 +32,7 @@ int main() {
     assert(!evaluated.value().shape.isNull());
     assert(!evaluated.value().previewMesh.isEmpty());
 
-    parameters.radius = 0.0;
+    parameters.radiusMm = 0.0;
     assert(!cadnext::filletParametersValid(parameters));
 
     return 0;

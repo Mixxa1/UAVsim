@@ -3,6 +3,8 @@
 #include <QDialog>
 #include <QString>
 
+#include "cadnext/Chamfer.hpp"
+
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
@@ -16,6 +18,9 @@ enum class EdgeOperationDialogKind {
     Fillet
 };
 
+// Chamfer / Fillet dialog. All linear values are entered in millimeters,
+// the chamfer angle in degrees; the chamfer additionally offers the
+// distance+angle (default) and equal-distance modes.
 class EdgeOperationDialog : public QDialog {
     Q_OBJECT
 
@@ -25,7 +30,10 @@ public:
     void configure(EdgeOperationDialogKind kind);
     void setTarget(const QString& bodyName, const QString& bodyId, int edgeCount);
     QString targetBodyId() const;
-    double value() const;
+    // Distance (chamfer) or radius (fillet) in millimeters.
+    double valueMm() const;
+    double angleDeg() const;
+    cadnext::ChamferMode chamferMode() const;
     bool previewEnabled() const;
     EdgeOperationDialogKind kind() const;
 
@@ -36,13 +44,17 @@ signals:
 
 private:
     void updateLabels();
+    void updateModeRows();
 
     EdgeOperationDialogKind kind_ = EdgeOperationDialogKind::Chamfer;
     QLabel* targetLabel_ = nullptr;
     QLabel* edgeCountLabel_ = nullptr;
     QLabel* valueLabel_ = nullptr;
+    QLabel* modeLabel_ = nullptr;
+    QLabel* angleLabel_ = nullptr;
     QComboBox* modeCombo_ = nullptr;
     QDoubleSpinBox* valueSpin_ = nullptr;
+    QDoubleSpinBox* angleSpin_ = nullptr;
     QCheckBox* previewCheck_ = nullptr;
     QPushButton* applyButton_ = nullptr;
     QPushButton* cancelButton_ = nullptr;

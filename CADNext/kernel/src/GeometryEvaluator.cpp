@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "cadnext/Units.hpp"
+
 namespace cadnext::kernel {
 
 namespace {
@@ -235,8 +237,12 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateChamfer(
     if (!cadnext::chamferParametersValid(parameters)) {
         return usageError("Chamfer parameters are invalid");
     }
+    // Parameters carry user units (mm / degrees); the kernel works in
+    // model units. This is the single conversion point.
     const cadnext::Result<ShapeHandle> result =
-        kernel_.chamferEdges(targetShape, parameters.edgeIds, parameters.distance);
+        kernel_.chamferEdges(targetShape, parameters.edgeIds,
+                             cadnext::fromMillimeters(parameters.distanceMm),
+                             parameters.mode, parameters.angleDeg);
     if (!result.isOk()) {
         if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
             return cadnext::Result<EvaluatedGeometry>::ok(
@@ -259,7 +265,8 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateFillet(
         return usageError("Fillet parameters are invalid");
     }
     const cadnext::Result<ShapeHandle> result =
-        kernel_.filletEdges(targetShape, parameters.edgeIds, parameters.radius);
+        kernel_.filletEdges(targetShape, parameters.edgeIds,
+                            cadnext::fromMillimeters(parameters.radiusMm));
     if (!result.isOk()) {
         if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
             return cadnext::Result<EvaluatedGeometry>::ok(
