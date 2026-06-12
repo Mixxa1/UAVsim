@@ -4,30 +4,31 @@
 #include <QDoubleSpinBox>
 
 #include "cadnext/SketchInput.hpp"
+#include "cadnext/Units.hpp"
 
 namespace cadnext::gui {
 
 SketchToolBar::SketchToolBar(QWidget* parent)
-    : QToolBar(tr("Sketch Toolbar"), parent) {
+    : QToolBar(tr("Панель эскиза"), parent) {
     setMovable(false);
     setToolButtonStyle(Qt::ToolButtonTextOnly);
 
-    newSketchXYAction_ = addAction(tr("New Sketch XY"));
-    newSketchXZAction_ = addAction(tr("New Sketch XZ"));
-    newSketchYZAction_ = addAction(tr("New Sketch YZ"));
+    newSketchXYAction_ = addAction(tr("Новый эскиз XY"));
+    newSketchXZAction_ = addAction(tr("Новый эскиз XZ"));
+    newSketchYZAction_ = addAction(tr("Новый эскиз YZ"));
     addSeparator();
-    createSketchAction_ = addAction(tr("Create Sketch"));
-    enterSketchAction_ = addAction(tr("Enter Sketch"));
-    exitSketchAction_ = addAction(tr("Exit Sketch"));
+    createSketchAction_ = addAction(tr("Создать эскиз"));
+    enterSketchAction_ = addAction(tr("Войти в эскиз"));
+    exitSketchAction_ = addAction(tr("Выйти из эскиза"));
     addSeparator();
 
     toolGroup_ = new QActionGroup(this);
     toolGroup_->setExclusive(true);
 
-    selectToolAction_ = addAction(tr("Select"));
-    lineToolAction_ = addAction(tr("Line"));
-    rectangleToolAction_ = addAction(tr("Rectangle"));
-    circleToolAction_ = addAction(tr("Circle"));
+    selectToolAction_ = addAction(tr("Выбор"));
+    lineToolAction_ = addAction(tr("Линия"));
+    rectangleToolAction_ = addAction(tr("Прямоугольник"));
+    circleToolAction_ = addAction(tr("Окружность"));
     for (QAction* action :
          {selectToolAction_, lineToolAction_, rectangleToolAction_, circleToolAction_}) {
         action->setCheckable(true);
@@ -37,23 +38,26 @@ SketchToolBar::SketchToolBar(QWidget* parent)
     addSeparator();
 
     // Snap/grid controls. Defaults must match SketchInputOptions.
-    snapGridAction_ = addAction(tr("Snap Grid"));
+    snapGridAction_ = addAction(tr("Привязка к сетке"));
     snapGridAction_->setCheckable(true);
     snapGridAction_->setChecked(true);
-    snapGridAction_->setToolTip(tr("Snap sketch input to the grid"));
+    snapGridAction_->setToolTip(tr("Привязывать ввод эскиза к сетке"));
 
-    showGridAction_ = addAction(tr("Show Grid"));
+    showGridAction_ = addAction(tr("Показать сетку"));
     showGridAction_->setCheckable(true);
     showGridAction_->setChecked(true);
-    showGridAction_->setToolTip(tr("Show the sketch plane grid"));
+    showGridAction_->setToolTip(tr("Показывать сетку плоскости эскиза"));
 
+    // The spin box edits the grid step in millimeters; the model keeps it
+    // in model units (see MainWindow::onGridStepChanged).
     gridStepSpinBox_ = new QDoubleSpinBox(this);
-    gridStepSpinBox_->setRange(kMinSketchGridStep, 100.0);
-    gridStepSpinBox_->setDecimals(3);
-    gridStepSpinBox_->setSingleStep(0.1);
-    gridStepSpinBox_->setValue(0.1);
-    gridStepSpinBox_->setPrefix(tr("Grid: "));
-    gridStepSpinBox_->setToolTip(tr("Grid step used for snapping and the sketch grid"));
+    gridStepSpinBox_->setRange(toMillimeters(kMinSketchGridStep), 100000.0);
+    gridStepSpinBox_->setDecimals(1);
+    gridStepSpinBox_->setSingleStep(10.0);
+    gridStepSpinBox_->setValue(100.0);
+    gridStepSpinBox_->setPrefix(tr("Сетка: "));
+    gridStepSpinBox_->setSuffix(tr(" мм"));
+    gridStepSpinBox_->setToolTip(tr("Шаг сетки для привязки и сетки эскиза"));
     addWidget(gridStepSpinBox_);
 
     setSketchModeActive(false);

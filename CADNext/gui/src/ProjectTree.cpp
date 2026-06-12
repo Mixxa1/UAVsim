@@ -11,7 +11,7 @@ constexpr int kSketchRole = Qt::UserRole + 2;
 ProjectTree::ProjectTree(QWidget* parent)
     : QTreeWidget(parent) {
     setColumnCount(2);
-    setHeaderLabels({tr("Object"), tr("Type")});
+    setHeaderLabels({tr("Объект"), tr("Тип")});
     setSelectionMode(QAbstractItemView::SingleSelection);
     setSelectionBehavior(QAbstractItemView::SelectRows);
 
@@ -55,17 +55,17 @@ void ProjectTree::clearAll() {
     clear();
 
     workPlanesGroup_ = new QTreeWidgetItem(this);
-    workPlanesGroup_->setText(0, tr("Work Planes"));
+    workPlanesGroup_->setText(0, tr("Рабочие плоскости"));
     workPlanesGroup_->setData(0, kKindRole, GroupKind);
     workPlanesGroup_->setFlags(Qt::ItemIsEnabled);
 
     bodiesGroup_ = new QTreeWidgetItem(this);
-    bodiesGroup_->setText(0, tr("Bodies"));
+    bodiesGroup_->setText(0, tr("Тела"));
     bodiesGroup_->setData(0, kKindRole, GroupKind);
     bodiesGroup_->setFlags(Qt::ItemIsEnabled);
 
     sketchesGroup_ = new QTreeWidgetItem(this);
-    sketchesGroup_->setText(0, tr("Sketches"));
+    sketchesGroup_->setText(0, tr("Эскизы"));
     sketchesGroup_->setData(0, kKindRole, GroupKind);
     sketchesGroup_->setFlags(Qt::ItemIsEnabled);
 
@@ -131,7 +131,7 @@ void ProjectTree::setCurrentBody(const QString& objectId) {
 void ProjectTree::addSketchItem(const QString& sketchId, const QString& name) {
     auto* item = new QTreeWidgetItem(sketchesGroup_);
     item->setText(0, name);
-    item->setText(1, tr("Sketch"));
+    item->setText(1, tr("Эскиз"));
     item->setData(0, kKindRole, SketchKind);
     item->setData(0, kIdRole, sketchId);
     sketchesGroup_->setExpanded(true);

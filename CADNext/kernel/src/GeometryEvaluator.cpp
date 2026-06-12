@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "cadnext/Units.hpp"
+
 namespace cadnext::kernel {
 
 namespace {
@@ -221,6 +223,57 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateExtrudeCut(
         return cadnext::Result<EvaluatedGeometry>::fail(result.error());
     }
 
+    EvaluatedGeometry geometry;
+    geometry.shape = result.value();
+    return finishShapeEvaluation(std::move(geometry));
+}
+
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateChamfer(
+    const ShapeHandle& targetShape,
+    const cadnext::ChamferParameters& parameters) {
+    if (targetShape.isNull()) {
+        return usageError("Chamfer target shape handle is null");
+    }
+    if (!cadnext::chamferParametersValid(parameters)) {
+        return usageError("Chamfer parameters are invalid");
+    }
+    // Parameters carry user units (mm / degrees); the kernel works in
+    // model units. This is the single conversion point.
+    const cadnext::Result<ShapeHandle> result =
+        kernel_.chamferEdges(targetShape, parameters.edgeIds,
+                             cadnext::fromMillimeters(parameters.distanceMm),
+                             parameters.mode, parameters.angleDeg);
+    if (!result.isOk()) {
+        if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
+            return cadnext::Result<EvaluatedGeometry>::ok(
+                backendlessResult(result.error().message));
+        }
+        return cadnext::Result<EvaluatedGeometry>::fail(result.error());
+    }
+    EvaluatedGeometry geometry;
+    geometry.shape = result.value();
+    return finishShapeEvaluation(std::move(geometry));
+}
+
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateFillet(
+    const ShapeHandle& targetShape,
+    const cadnext::FilletParameters& parameters) {
+    if (targetShape.isNull()) {
+        return usageError("Fillet target shape handle is null");
+    }
+    if (!cadnext::filletParametersValid(parameters)) {
+        return usageError("Fillet parameters are invalid");
+    }
+    const cadnext::Result<ShapeHandle> result =
+        kernel_.filletEdges(targetShape, parameters.edgeIds,
+                            cadnext::fromMillimeters(parameters.radiusMm));
+    if (!result.isOk()) {
+        if (result.error().code == cadnext::ErrorCode::KernelUnavailable) {
+            return cadnext::Result<EvaluatedGeometry>::ok(
+                backendlessResult(result.error().message));
+        }
+        return cadnext::Result<EvaluatedGeometry>::fail(result.error());
+    }
     EvaluatedGeometry geometry;
     geometry.shape = result.value();
     return finishShapeEvaluation(std::move(geometry));

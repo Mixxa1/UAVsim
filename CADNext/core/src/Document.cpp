@@ -123,6 +123,27 @@ const std::vector<WorkPlane>& Document::workPlanes() const { return workPlanes_;
 
 void Document::addFeature(Feature feature) { features_.push_back(std::move(feature)); }
 
+bool Document::removeFeature(const std::string& featureId) {
+    auto it = std::find_if(features_.begin(), features_.end(), [&](const Feature& feature) {
+        return feature.id == featureId;
+    });
+    if (it == features_.end()) {
+        return false;
+    }
+    features_.erase(it);
+    return true;
+}
+
+Result<Feature> Document::featureById(const std::string& featureId) const {
+    auto it = std::find_if(features_.begin(), features_.end(), [&](const Feature& feature) {
+        return feature.id == featureId;
+    });
+    if (it == features_.end()) {
+        return Result<Feature>::fail({ErrorCode::NotFound, "Feature not found: " + featureId});
+    }
+    return Result<Feature>::ok(*it);
+}
+
 const std::vector<Object>& Document::objects() const { return objects_; }
 
 const std::vector<Feature>& Document::features() const { return features_; }

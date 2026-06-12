@@ -19,6 +19,8 @@ public:
     QAction* addPlaneAction() const { return addPlaneAction_; }
     QAction* extrudeAction() const { return extrudeAction_; }
     QAction* cutExtrudeAction() const { return cutExtrudeAction_; }
+    QAction* chamferAction() const { return chamferAction_; }
+    QAction* filletAction() const { return filletAction_; }
     QAction* createSketchOnFaceAction() const { return createSketchOnFaceAction_; }
     QAction* workPlaneFromFaceAction() const { return workPlaneFromFaceAction_; }
     QAction* normalToFaceAction() const { return normalToFaceAction_; }
@@ -34,6 +36,8 @@ private:
     QAction* addPlaneAction_ = nullptr;
     QAction* extrudeAction_ = nullptr;
     QAction* cutExtrudeAction_ = nullptr;
+    QAction* chamferAction_ = nullptr;
+    QAction* filletAction_ = nullptr;
     QAction* createSketchOnFaceAction_ = nullptr;
     QAction* workPlaneFromFaceAction_ = nullptr;
     QAction* normalToFaceAction_ = nullptr;

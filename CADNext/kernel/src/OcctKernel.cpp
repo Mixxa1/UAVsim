@@ -1,30 +1,51 @@
 #include "cadnext/kernel/OcctKernel.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <set>
 #include <string>
+#include <vector>
 
 #ifdef CADNEXT_WITH_OCCT
 #include <unordered_map>
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepBndLib.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepFilletAPI_MakeChamfer.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <Bnd_Box.hxx>
+#include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
+
+#include "cadnext/kernel/EdgeAnalyzer.hpp"
 #endif
 
 namespace cadnext::kernel {
@@ -52,6 +73,109 @@ bool isPositiveFinite(double value) {
 } // namespace
 
 #ifdef CADNEXT_WITH_OCCT
+
+cadnext::Vector3 toVector(const gp_Pnt& point) {
+    return {point.X(), point.Y(), point.Z()};
+}
+
+double edgeLength(const TopoDS_Edge& edge) {
+    GProp_GProps properties;
+    BRepGProp::LinearProperties(edge, properties);
+    const double length = properties.Mass();
+    return std::isfinite(length) ? length : 0.0;
+}
+
+double faceArea(const TopoDS_Face& face) {
+    GProp_GProps properties;
+    BRepGProp::SurfaceProperties(face, properties);
+    const double area = properties.Mass();
+    return std::isfinite(area) ? area : 0.0;
+}
+
+TopoDS_Face largestAdjacentFace(const TopTools_ListOfShape& faces) {
+    TopoDS_Face best;
+    double bestArea = -1.0;
+    for (TopTools_ListIteratorOfListOfShape it(faces); it.More(); it.Next()) {
+        const TopoDS_Face face = TopoDS::Face(it.Value());
+        const double area = faceArea(face);
+        if (area > bestArea) {
+            best = face;
+            bestArea = area;
+        }
+    }
+    return best;
+}
+
+std::string edgeIdForTopoEdge(int index, const TopoDS_Edge& edge) {
+    BRepAdaptor_Curve curve(edge);
+    cadnext::Vector3 start;
+    cadnext::Vector3 end;
+    const double first = curve.FirstParameter();
+    const double last = curve.LastParameter();
+    if (std::isfinite(first)) {
+        start = toVector(curve.Value(first));
+    }
+    if (std::isfinite(last)) {
+        end = toVector(curve.Value(last));
+    }
+    return makeEdgeId(index, start, end, edgeLength(edge));
+}
+
+// Edges chamfer/fillet can never operate on: degenerated edges (sphere
+// poles, cone apexes) and edges without a 3D curve. EdgeAnalyzer skips
+// them with the same predicate so ids and indices stay aligned.
+bool isOperableEdge(const TopoDS_Edge& edge) {
+    if (BRep_Tool::Degenerated(edge)) {
+        return false;
+    }
+    Standard_Real first = 0.0;
+    Standard_Real last = 0.0;
+    return !BRep_Tool::Curve(edge, first, last).IsNull();
+}
+
+cadnext::Result<std::vector<TopoDS_Edge>> resolveEdgesById(
+    const TopoDS_Shape& shape,
+    const std::vector<std::string>& edgeIds
+) {
+    if (edgeIds.empty()) {
+        return cadnext::Result<std::vector<TopoDS_Edge>>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "At least one edge id is required"
+        });
+    }
+    std::set<std::string> requested(edgeIds.begin(), edgeIds.end());
+    if (requested.empty() || requested.find("") != requested.end()) {
+        return cadnext::Result<std::vector<TopoDS_Edge>>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Edge ids must be non-empty"
+        });
+    }
+
+    std::vector<TopoDS_Edge> edges;
+    TopTools_IndexedMapOfShape edgeMap;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edgeMap);
+    for (int i = 1; i <= edgeMap.Extent(); ++i) {
+        const TopoDS_Edge edge = TopoDS::Edge(edgeMap(i));
+        try {
+            if (!isOperableEdge(edge)) {
+                continue;
+            }
+            const std::string id = edgeIdForTopoEdge(i - 1, edge);
+            if (requested.find(id) != requested.end()) {
+                edges.push_back(edge);
+            }
+        } catch (const Standard_Failure&) {
+            // One broken edge must not abort resolution of the others.
+        }
+    }
+    if (edges.size() != requested.size()) {
+        return cadnext::Result<std::vector<TopoDS_Edge>>::fail({
+            cadnext::ErrorCode::NotFound,
+            "One or more selected edge ids no longer resolve on the target body"
+        });
+    }
+    return cadnext::Result<std::vector<TopoDS_Edge>>::ok(std::move(edges));
+}
 
 struct OcctKernel::Impl {
     std::unordered_map<std::string, TopoDS_Shape> shapes;
@@ -262,6 +386,168 @@ cadnext::Result<ShapeHandle> OcctKernel::booleanCut(const ShapeHandle& target,
     }
 }
 
+cadnext::Result<ShapeHandle> OcctKernel::chamferEdges(
+    const ShapeHandle& target,
+    const std::vector<std::string>& edgeIds,
+    double distance,
+    cadnext::ChamferMode mode,
+    double angleDeg
+) {
+    if (!isPositiveFinite(distance)) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Chamfer distance must be finite and positive"
+        });
+    }
+    if (mode == cadnext::ChamferMode::DistanceAngle &&
+        (!std::isfinite(angleDeg) || angleDeg <= 0.0 || angleDeg >= 90.0)) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Chamfer angle must be in (0, 90) degrees"
+        });
+    }
+    const TopoDS_Shape* targetShape = findShape(target);
+    if (!targetShape || targetShape->IsNull()) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::ShapeInvalid,
+            "Chamfer requires a valid target shape"
+        });
+    }
+    try {
+        const cadnext::Result<std::vector<TopoDS_Edge>> edges =
+            resolveEdgesById(*targetShape, edgeIds);
+        if (!edges.isOk()) {
+            return cadnext::Result<ShapeHandle>::fail(edges.error());
+        }
+
+        // Distance+angle chamfers are measured on a reference face, so map
+        // every edge to its adjacent faces up front.
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
+        if (mode == cadnext::ChamferMode::DistanceAngle) {
+            TopExp::MapShapesAndAncestors(*targetShape, TopAbs_EDGE, TopAbs_FACE,
+                                          edgeFaceMap);
+        }
+
+        BRepFilletAPI_MakeChamfer chamfer(*targetShape);
+        for (const TopoDS_Edge& edge : edges.value()) {
+            const bool defaultAngle =
+                mode == cadnext::ChamferMode::DistanceAngle &&
+                std::abs(angleDeg - 45.0) <= 1.0e-9;
+            if (mode == cadnext::ChamferMode::DistanceAngle && !defaultAngle) {
+                const Standard_Integer index = edgeFaceMap.FindIndex(edge);
+                if (index == 0 || edgeFaceMap(index).IsEmpty()) {
+                    return cadnext::Result<ShapeHandle>::fail({
+                        cadnext::ErrorCode::NotFound,
+                        "Chamfer edge has no adjacent reference face"
+                    });
+                }
+                const TopoDS_Face face = largestAdjacentFace(edgeFaceMap(index));
+                if (face.IsNull()) {
+                    return cadnext::Result<ShapeHandle>::fail({
+                        cadnext::ErrorCode::NotFound,
+                        "Chamfer edge has no usable adjacent reference face"
+                    });
+                }
+                chamfer.AddDA(distance, angleDeg * M_PI / 180.0, edge, face);
+            } else {
+                chamfer.Add(distance, edge);
+            }
+        }
+        chamfer.Build();
+        if (!chamfer.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail({
+                cadnext::ErrorCode::KernelOperationFailed,
+                "OCCT chamfer failed"
+            });
+        }
+        const TopoDS_Shape result = chamfer.Shape();
+        if (result.IsNull()) {
+            return cadnext::Result<ShapeHandle>::fail({
+                cadnext::ErrorCode::KernelOperationFailed,
+                "OCCT chamfer produced an empty shape"
+            });
+        }
+        const BRepCheck_Analyzer analyzer(result);
+        if (analyzer.IsValid() != Standard_True) {
+            return cadnext::Result<ShapeHandle>::fail({
+                cadnext::ErrorCode::ShapeInvalid,
+                "OCCT chamfer produced an invalid shape"
+            });
+        }
+        return cadnext::Result<ShapeHandle>::ok(impl_->store(result, "occt-chamfer"));
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT chamfer failed: ") + failure.GetMessageString()});
+    } catch (const std::exception& exception) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT chamfer failed: ") + exception.what()});
+    }
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::filletEdges(
+    const ShapeHandle& target,
+    const std::vector<std::string>& edgeIds,
+    double radius
+) {
+    if (!isPositiveFinite(radius)) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::InvalidArgument,
+            "Fillet radius must be finite and positive"
+        });
+    }
+    const TopoDS_Shape* targetShape = findShape(target);
+    if (!targetShape || targetShape->IsNull()) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::ShapeInvalid,
+            "Fillet requires a valid target shape"
+        });
+    }
+    try {
+        const cadnext::Result<std::vector<TopoDS_Edge>> edges =
+            resolveEdgesById(*targetShape, edgeIds);
+        if (!edges.isOk()) {
+            return cadnext::Result<ShapeHandle>::fail(edges.error());
+        }
+
+        BRepFilletAPI_MakeFillet fillet(*targetShape);
+        for (const TopoDS_Edge& edge : edges.value()) {
+            fillet.Add(radius, edge);
+        }
+        fillet.Build();
+        if (!fillet.IsDone()) {
+            return cadnext::Result<ShapeHandle>::fail({
+                cadnext::ErrorCode::KernelOperationFailed,
+                "OCCT fillet failed"
+            });
+        }
+        const TopoDS_Shape result = fillet.Shape();
+        if (result.IsNull()) {
+            return cadnext::Result<ShapeHandle>::fail({
+                cadnext::ErrorCode::KernelOperationFailed,
+                "OCCT fillet produced an empty shape"
+            });
+        }
+        const BRepCheck_Analyzer analyzer(result);
+        if (analyzer.IsValid() != Standard_True) {
+            return cadnext::Result<ShapeHandle>::fail({
+                cadnext::ErrorCode::ShapeInvalid,
+                "OCCT fillet produced an invalid shape"
+            });
+        }
+        return cadnext::Result<ShapeHandle>::ok(impl_->store(result, "occt-fillet"));
+    } catch (const Standard_Failure& failure) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT fillet failed: ") + failure.GetMessageString()});
+    } catch (const std::exception& exception) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::KernelOperationFailed,
+             std::string("OCCT fillet failed: ") + exception.what()});
+    }
+}
+
 cadnext::Result<ShapeBounds> OcctKernel::boundingBox(const ShapeHandle& shape) {
     const TopoDS_Shape* topoShape = findShape(shape);
     if (!topoShape || topoShape->IsNull()) {
@@ -346,6 +632,24 @@ cadnext::Result<ShapeHandle> OcctKernel::makeExtrudedCircle(const ExtrudedCircle
 
 cadnext::Result<ShapeHandle> OcctKernel::booleanCut(const ShapeHandle&, const ShapeHandle&) {
     return unavailable("OCCT boolean cut");
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::chamferEdges(
+    const ShapeHandle&,
+    const std::vector<std::string>&,
+    double,
+    cadnext::ChamferMode,
+    double
+) {
+    return unavailable("Chamfer");
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::filletEdges(
+    const ShapeHandle&,
+    const std::vector<std::string>&,
+    double
+) {
+    return unavailable("Fillet");
 }
 
 cadnext::Result<ShapeBounds> OcctKernel::boundingBox(const ShapeHandle&) {

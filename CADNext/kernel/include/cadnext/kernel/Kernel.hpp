@@ -1,7 +1,9 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
+#include "cadnext/Chamfer.hpp"
 #include "cadnext/Result.hpp"
 #include "cadnext/Vector3.hpp"
 #include "cadnext/kernel/ShapeHandle.hpp"
@@ -84,6 +86,22 @@ public:
     virtual cadnext::Result<ShapeHandle> booleanCommon(
         const ShapeHandle& a,
         const ShapeHandle& b
+    ) = 0;
+
+    // `distance` is in model units; `angleDeg` is only used in
+    // ChamferMode::DistanceAngle (measured from the reference face).
+    virtual cadnext::Result<ShapeHandle> chamferEdges(
+        const ShapeHandle& target,
+        const std::vector<std::string>& edgeIds,
+        double distance,
+        cadnext::ChamferMode mode,
+        double angleDeg
+    ) = 0;
+
+    virtual cadnext::Result<ShapeHandle> filletEdges(
+        const ShapeHandle& target,
+        const std::vector<std::string>& edgeIds,
+        double radius
     ) = 0;
 
     virtual cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) = 0;

@@ -19,6 +19,7 @@ struct CameraNavigationOptions {
 enum class ViewGeometryKind {
     Body,
     BodyFace,
+    BodyEdge,
     Sketch,
     SketchEntity,
     SketchProfile,
@@ -50,6 +51,7 @@ struct ViewBoundsEntry {
     std::string sketchId;
     std::string entityId;
     std::string profileId;
+    std::string edgeId;
     std::string debugName;
 };
 

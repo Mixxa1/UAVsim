@@ -4,6 +4,7 @@ add_library(cadnext_kernel
     src/StubKernel.cpp
     src/OcctKernel.cpp
     src/GeometryEvaluator.cpp
+    src/EdgeAnalyzer.cpp
     src/FaceAnalyzer.cpp
     src/ExtrudeMesh.cpp
     src/MeshExtractor.cpp
@@ -49,5 +50,6 @@ if(CADNEXT_WITH_OCCT)
             TKPrim
             TKMesh
             TKBO
+            TKFillet
     )
 endif()

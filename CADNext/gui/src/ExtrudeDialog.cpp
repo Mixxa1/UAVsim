@@ -8,53 +8,56 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include "cadnext/Units.hpp"
+
 namespace cadnext::gui {
 
 namespace {
 
-constexpr double kMinDistance = 0.001;
-constexpr double kMaxDistance = 1.0e6;
+constexpr double kMinDistanceMm = 0.01;
+constexpr double kMaxDistanceMm = 1.0e9;
 
 } // namespace
 
 ExtrudeDialog::ExtrudeDialog(QWidget* parent)
     : QDialog(parent) {
-    setWindowTitle(tr("Extrude"));
+    setWindowTitle(tr("Выдавливание"));
     setModal(false);
 
     auto* layout = new QVBoxLayout(this);
     auto* form = new QFormLayout;
 
     profileCombo_ = new QComboBox(this);
-    form->addRow(tr("Profile"), profileCombo_);
+    form->addRow(tr("Тело / профиль"), profileCombo_);
 
     // Fixed in v1; disabled selectors keep the layout stable for later
     // stages (Cut / Through All / ...).
     operationCombo_ = new QComboBox(this);
-    operationCombo_->addItem(tr("New Body"));
+    operationCombo_->addItem(tr("Новое тело"));
     operationCombo_->setEnabled(false);
-    form->addRow(tr("Operation"), operationCombo_);
+    form->addRow(tr("Операция"), operationCombo_);
 
     depthModeCombo_ = new QComboBox(this);
-    depthModeCombo_->addItem(tr("Distance"));
+    depthModeCombo_->addItem(tr("На расстояние"));
     depthModeCombo_->setEnabled(false);
-    form->addRow(tr("Depth mode"), depthModeCombo_);
+    form->addRow(tr("Режим глубины"), depthModeCombo_);
 
     distanceSpin_ = new QDoubleSpinBox(this);
-    distanceSpin_->setRange(kMinDistance, kMaxDistance);
+    distanceSpin_->setRange(kMinDistanceMm, kMaxDistanceMm);
     distanceSpin_->setDecimals(3);
-    distanceSpin_->setSingleStep(0.1);
-    distanceSpin_->setValue(1.0);
+    distanceSpin_->setSingleStep(10.0);
+    distanceSpin_->setValue(1000.0);
+    distanceSpin_->setSuffix(tr(" мм"));
     distanceSpin_->setKeyboardTracking(false);
-    form->addRow(tr("Distance"), distanceSpin_);
+    form->addRow(tr("Расстояние, мм"), distanceSpin_);
 
     directionCombo_ = new QComboBox(this);
-    directionCombo_->addItem(tr("Positive"));
-    directionCombo_->addItem(tr("Negative"));
-    directionCombo_->addItem(tr("Symmetric"));
-    form->addRow(tr("Direction"), directionCombo_);
+    directionCombo_->addItem(tr("Положительное"));
+    directionCombo_->addItem(tr("Отрицательное"));
+    directionCombo_->addItem(tr("Симметрично"));
+    form->addRow(tr("Направление"), directionCombo_);
 
-    previewCheck_ = new QCheckBox(tr("Preview"), this);
+    previewCheck_ = new QCheckBox(tr("Предпросмотр"), this);
     previewCheck_->setChecked(true);
     form->addRow(QString(), previewCheck_);
 
@@ -62,9 +65,9 @@ ExtrudeDialog::ExtrudeDialog(QWidget* parent)
 
     auto* buttons = new QHBoxLayout;
     buttons->addStretch();
-    applyButton_ = new QPushButton(tr("Apply"), this);
+    applyButton_ = new QPushButton(tr("Применить"), this);
     applyButton_->setDefault(true);
-    cancelButton_ = new QPushButton(tr("Cancel"), this);
+    cancelButton_ = new QPushButton(tr("Отмена"), this);
     buttons->addWidget(applyButton_);
     buttons->addWidget(cancelButton_);
     layout->addLayout(buttons);
@@ -79,7 +82,10 @@ ExtrudeDialog::ExtrudeDialog(QWidget* parent)
     connect(directionCombo_, &QComboBox::currentIndexChanged, this, emitChanged);
     connect(previewCheck_, &QCheckBox::toggled, this, emitChanged);
 
-    connect(applyButton_, &QPushButton::clicked, this, [this]() { emit applyRequested(); });
+    connect(applyButton_, &QPushButton::clicked, this, [this]() {
+        commitPendingEdits();
+        emit applyRequested();
+    });
     connect(cancelButton_, &QPushButton::clicked, this, &QDialog::reject);
     connect(this, &QDialog::rejected, this, [this]() { emit cancelRequested(); });
 }
@@ -104,8 +110,10 @@ QString ExtrudeDialog::selectedProfileId() const {
     return profileCombo_->currentData().toString();
 }
 
-double ExtrudeDialog::distance() const {
-    return distanceSpin_->value();
+double ExtrudeDialog::distance() {
+    commitPendingEdits();
+    // The spin box edits millimeters; the model works in model units.
+    return cadnext::fromMillimeters(distanceSpin_->value());
 }
 
 cadnext::ExtrudeDirection ExtrudeDialog::direction() const {
@@ -118,6 +126,10 @@ cadnext::ExtrudeDirection ExtrudeDialog::direction() const {
 
 bool ExtrudeDialog::previewEnabled() const {
     return previewCheck_->isChecked();
+}
+
+void ExtrudeDialog::commitPendingEdits() {
+    distanceSpin_->interpretText();
 }
 
 } // namespace cadnext::gui

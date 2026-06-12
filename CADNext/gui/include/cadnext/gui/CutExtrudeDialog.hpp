@@ -43,7 +43,7 @@ public:
     QString limitObjectId() const;
     cadnext::CutDepthMode depthMode() const;
     cadnext::CutDirection direction() const;
-    double distance() const;
+    double distance();
     bool previewEnabled() const;
 
 signals:
@@ -52,6 +52,7 @@ signals:
     void cancelRequested();
 
 private:
+    void commitPendingEdits();
     void updateFieldEnablement();
     void selectComboId(QComboBox* combo, const QString& selectedId);
 

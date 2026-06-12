@@ -47,6 +47,8 @@ public:
     const std::vector<WorkPlane>& workPlanes() const;
 
     void addFeature(Feature feature);
+    bool removeFeature(const std::string& id);
+    Result<Feature> featureById(const std::string& id) const;
     const std::vector<Object>& objects() const;
     const std::vector<Feature>& features() const;
 
