@@ -1,4 +1,5 @@
 add_library(cadnext_core
+    src/CameraNavigationState.cpp
     src/Document.cpp
     src/DocumentSerializer.cpp
     src/Object.cpp

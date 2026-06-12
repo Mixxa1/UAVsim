@@ -573,7 +573,7 @@ void MainWindow::initializeViewport() {
     viewer_->setSketchMissCallback([this]() {
         statusBar()->showMessage(tr("Cursor is not over the active sketch plane"), 3000);
     });
-    viewer_->setSketchCancelCallback([this]() { cancelSketchTool(); });
+    viewer_->setSketchCancelCallback([this]() { handleEscapeKey(); });
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -1407,6 +1407,38 @@ void MainWindow::cancelSketchTool() {
     setSketchTool(SketchTool::Select);
     sketchToolBar_->checkSelectTool();
     statusBar()->showMessage(tr("Sketch tool cancelled"), 3000);
+}
+
+void MainWindow::handleEscapeKey() {
+    if (!viewer_) {
+        return;
+    }
+    viewer_->setNavigationEnabled(true);
+
+    if (activeSketchId_ && sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
+        qInfo("[Camera] Escape cancelPendingSketch");
+        cancelSketchTool();
+        qInfo("[Camera] Escape keepNavigationEnabled mode=Sketch2D");
+        return;
+    }
+
+    if (viewer_->hasCameraMotion()) {
+        qInfo("[Camera] Escape stopInertia");
+        viewer_->stopCameraMotion("escape");
+        return;
+    }
+
+    if (activeSketchId_) {
+        qInfo("[Camera] Escape keepNavigationEnabled mode=Sketch2D");
+        setSketchTool(SketchTool::Select);
+        sketchToolBar_->checkSelectTool();
+        viewer_->clearNavigationInputState();
+        statusBar()->showMessage(tr("Sketch tool cancelled"), 3000);
+        return;
+    }
+
+    qInfo("[Camera] Escape keepNavigationEnabled mode=Free3D");
+    viewer_->clearNavigationInputState();
 }
 
 void MainWindow::onSketchPoint(double u, double v) {
@@ -2898,6 +2930,10 @@ void MainWindow::onPrimitiveEdited(const QString& objectId,
 // --- File handling -----------------------------------------------------------
 
 void MainWindow::newDocument() {
+    if (viewer_) {
+        viewer_->stopCameraMotion("newDocument");
+        viewer_->clearNavigationInputState();
+    }
     if (!maybeSave()) {
         return;
     }
@@ -2911,6 +2947,10 @@ void MainWindow::newDocument() {
 }
 
 void MainWindow::openDocument() {
+    if (viewer_) {
+        viewer_->stopCameraMotion("openDocument");
+        viewer_->clearNavigationInputState();
+    }
     if (!maybeSave()) {
         return;
     }
@@ -2982,6 +3022,10 @@ bool MainWindow::maybeSave() {
 }
 
 void MainWindow::rebuildUiFromDocument() {
+    if (viewer_) {
+        viewer_->stopCameraMotion("rebuildDocument");
+        viewer_->clearNavigationInputState();
+    }
     exitSketchMode();
     clearSelection();
     {

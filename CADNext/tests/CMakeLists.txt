@@ -169,6 +169,24 @@ target_link_libraries(cadnext_test_sketch2d_view_state
         cadnext_core
 )
 
+add_executable(cadnext_test_camera_navigation_state
+    test_camera_navigation_state.cpp
+)
+
+target_link_libraries(cadnext_test_camera_navigation_state
+    PRIVATE
+        cadnext_core
+)
+
+add_executable(cadnext_test_escape_navigation_policy
+    test_escape_navigation_policy.cpp
+)
+
+target_link_libraries(cadnext_test_escape_navigation_policy
+    PRIVATE
+        cadnext_core
+)
+
 add_executable(cadnext_test_view_bounds_policy
     test_view_bounds_policy.cpp
 )
@@ -312,6 +330,10 @@ add_test(NAME cadnext_test_sketch_reference_projection
 add_test(NAME cadnext_test_workplane_visibility_policy
          COMMAND cadnext_test_workplane_visibility_policy)
 add_test(NAME cadnext_test_sketch2d_view_state COMMAND cadnext_test_sketch2d_view_state)
+add_test(NAME cadnext_test_camera_navigation_state
+         COMMAND cadnext_test_camera_navigation_state)
+add_test(NAME cadnext_test_escape_navigation_policy
+         COMMAND cadnext_test_escape_navigation_policy)
 add_test(NAME cadnext_test_view_bounds_policy COMMAND cadnext_test_view_bounds_policy)
 add_test(NAME cadnext_test_camera_focus_target COMMAND cadnext_test_camera_focus_target)
 add_test(NAME cadnext_test_sketch_reference_mapping

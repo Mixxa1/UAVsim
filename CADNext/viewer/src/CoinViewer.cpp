@@ -101,6 +101,7 @@ public:
     std::function<void()> sketchCancelHandler;
     bool sketchInputActive = false;
     bool freeOrbitEnabled = true;
+    bool navigationEnabled = true;
     CameraNavigationOptions navigationOptions;
     SbVec3f orbitPivot = kSceneCenter;
     double orbitRadius = kDefaultGridFitRadius;
@@ -169,15 +170,45 @@ public:
         applyClipPlanes(camera, navigationOptions, newDistance, orbitRadius);
     }
 
+    void clearNavigationInputState() {
+        leftButtonDown_ = false;
+        dragged_ = false;
+        pressPosition_ = SbVec2s(-1, -1);
+        lastDragPosition_ = SbVec2s(-1, -1);
+        if (QWidget* glWidget = getGLWidget()) {
+            glWidget->releaseMouse();
+            glWidget->releaseKeyboard();
+        }
+        if (QWidget* widget = getWidget()) {
+            widget->releaseMouse();
+            widget->releaseKeyboard();
+        }
+    }
+
+    bool navigationInputActive() const {
+        return leftButtonDown_ || dragged_;
+    }
+
+    void stopCameraMotion(bool animationEnabledAfterStop) {
+        stopAnimating();
+        setAnimationEnabled(FALSE);
+        setAnimationEnabled(animationEnabledAfterStop ? TRUE : FALSE);
+        clearNavigationInputState();
+    }
+
 protected:
     SbBool processSoEvent(const SoEvent* event) override {
+        if (!navigationEnabled) {
+            return TRUE;
+        }
         if (event->isOfType(SoKeyboardEvent::getClassTypeId())) {
             const auto* keyEvent = static_cast<const SoKeyboardEvent*>(event);
             if (keyEvent->getKey() == SoKeyboardEvent::ESCAPE &&
-                keyEvent->getState() == SoButtonEvent::DOWN && sketchInputActive) {
+                keyEvent->getState() == SoButtonEvent::DOWN) {
                 if (sketchCancelHandler) {
                     sketchCancelHandler();
                 }
+                clearNavigationInputState();
                 return TRUE; // do not let SoQt toggle viewing/arrow mode
             }
         } else if (event->isOfType(SoMouseButtonEvent::getClassTypeId())) {
@@ -375,6 +406,9 @@ protected:
         if (!widget) {
             return QObject::eventFilter(watched, event);
         }
+        if (!viewer_->navigationEnabled) {
+            return true;
+        }
         if (event->type() == QEvent::Wheel) {
             const auto* wheel = static_cast<QWheelEvent*>(event);
             if (sketch2DActive) {
@@ -453,6 +487,7 @@ CoinViewer::CoinViewer(QWidget* parent)
     }
 
     applyDefaultCameraPose();
+    applyNavigationState("init");
 }
 
 CoinViewer::~CoinViewer() {
@@ -511,6 +546,7 @@ void CoinViewer::setSketchInputMode(bool active, const SketchReference& referenc
 }
 
 void CoinViewer::setViewNormalToPlane(const WorkPlane& plane) {
+    stopCameraMotion("normalToPlane");
     const SbVec3f origin(static_cast<float>(plane.origin.x),
                          static_cast<float>(plane.origin.y),
                          static_cast<float>(plane.origin.z));
@@ -534,12 +570,16 @@ void CoinViewer::setViewNormalToPlane(const WorkPlane& plane) {
 }
 
 void CoinViewer::enterSketch2DView(const WorkPlane& plane, double gridStep, bool showGrid) {
+    navigationState_.enterSketch2D();
+    stopViewerCameraMotion("enterSketch2D");
+    qInfo("[Camera] enterSketch2D navigation=panZoomOnly");
     viewMode_ = ViewMode::Sketch2D;
     policy_.enterSketch2D(sketchReferenceFromWorkPlane(plane));
     replaceCamera(true);
     // Hides the world grid/axes and every work plane frame, and disables
     // orbit — Sketch2D shows only the active sketch plane helper.
     applyHelperVisibility();
+    applyNavigationState("enterSketch2D");
     scene_->setBodiesDimmed(true);
     scene_->showSketchPlane(plane, gridStep, showGrid);
     setViewNormalToPlane(plane);
@@ -552,6 +592,9 @@ void CoinViewer::exitSketch2DView() {
     if (viewMode_ == ViewMode::Free3D) {
         return;
     }
+    navigationState_.exitSketch2D();
+    stopViewerCameraMotion("exitSketch2D");
+    qInfo("[Camera] exitSketch2D navigation=freeOrbit");
     viewMode_ = ViewMode::Free3D;
     policy_.exitSketch2D();
     viewer_->sketchInputActive = false;
@@ -559,6 +602,7 @@ void CoinViewer::exitSketch2DView() {
     scene_->hideSketchPlane();
     replaceCamera(false);
     applyHelperVisibility();
+    applyNavigationState("exitSketch2D");
     applyDefaultCameraPose();
     camera_->viewAll(viewerRoot_, viewer_->getViewportRegion());
 }
@@ -584,6 +628,7 @@ bool CoinViewer::otherWorkPlanesHidden() const {
 }
 
 void CoinViewer::fitWorkPlane(const std::string& planeId) {
+    stopCameraMotion("fitWorkPlane");
     if (SoSeparator* node = scene_->workPlaneNode(planeId)) {
         camera_->viewAll(node, viewer_->getViewportRegion());
     }
@@ -623,6 +668,7 @@ void CoinViewer::focusSelection(const SelectionState& selection) {
 }
 
 void CoinViewer::frameSelection(const SelectionState& selection) {
+    stopCameraMotion("fitSelection");
     lastSelection_ = selection;
     const CameraFocusTarget target = cameraFocusTargetForSelection(cameraBounds_, selection);
     if (!target.valid) {
@@ -636,6 +682,7 @@ void CoinViewer::frameSelection(const SelectionState& selection) {
 }
 
 void CoinViewer::fitView() {
+    stopCameraMotion("fitView");
     const CameraFocusTarget target = cameraFitAllTarget(cameraBounds_, lastSelection_);
     if (!target.valid) {
         return;
@@ -665,7 +712,9 @@ void CoinViewer::fitView() {
 }
 
 void CoinViewer::resetCamera() {
+    stopCameraMotion("resetCamera");
     if (viewMode_ == ViewMode::Sketch2D) {
+        fitView();
         return;
     }
     CameraFocusTarget target = cameraFocusTargetForSelection(cameraBounds_, lastSelection_);
@@ -772,6 +821,50 @@ void CoinViewer::updateClipping(double distance, double radius) {
     applyClipPlanes(camera_, navigationOptions_, distance, radius);
 }
 
+void CoinViewer::stopViewerCameraMotion(const char* reason) {
+    qInfo("[Camera] stopCameraMotion reason=%s", reason ? reason : "unspecified");
+    if (viewer_) {
+        viewer_->stopCameraMotion(navigationState_.inertiaEnabled());
+    }
+}
+
+void CoinViewer::stopCameraMotion(const char* reason) {
+    navigationState_.stopCameraMotion();
+    stopViewerCameraMotion(reason);
+}
+
+void CoinViewer::clearNavigationInputState() {
+    if (viewer_) {
+        viewer_->clearNavigationInputState();
+    }
+}
+
+bool CoinViewer::hasCameraMotion() const {
+    return viewer_ &&
+           (viewer_->isAnimating() || viewer_->navigationInputActive() ||
+            navigationState_.cameraMotionActive());
+}
+
+bool CoinViewer::isNavigationEnabled() const {
+    return navigationState_.navigationEnabled();
+}
+
+void CoinViewer::setNavigationEnabled(bool enabled) {
+    navigationState_.setNavigationEnabled(enabled);
+    applyNavigationState(enabled ? "enableNavigation" : "disableNavigation");
+}
+
+void CoinViewer::applyNavigationState(const char* /*reason*/) {
+    if (!viewer_) {
+        return;
+    }
+    viewer_->navigationEnabled = navigationState_.navigationEnabled();
+    viewer_->freeOrbitEnabled = policy_.orbitEnabled() && navigationState_.orbitEnabled();
+    viewer_->setAnimationEnabled(navigationState_.inertiaEnabled() ? TRUE : FALSE);
+    gestureFilter_->sketch2DActive = policy_.inSketch2D() &&
+                                     navigationState_.mode() == NavigationMode::Sketch2D;
+}
+
 void CoinViewer::replaceCamera(bool orthographic) {
     SoCamera* newCamera = orthographic ? static_cast<SoCamera*>(new SoOrthographicCamera)
                                        : static_cast<SoCamera*>(new SoPerspectiveCamera);
@@ -787,8 +880,7 @@ void CoinViewer::applyHelperVisibility() {
         const std::string planeId = canonicalWorkPlaneId(plane);
         scene_->setWorkPlaneVisible(planeId, policy_.workPlaneVisible(planeId));
     }
-    viewer_->freeOrbitEnabled = policy_.orbitEnabled();
-    gestureFilter_->sketch2DActive = policy_.inSketch2D();
+    applyNavigationState("helperVisibility");
 }
 
 } // namespace cadnext::viewer

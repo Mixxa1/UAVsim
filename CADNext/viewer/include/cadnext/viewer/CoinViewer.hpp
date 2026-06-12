@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "cadnext/CameraNavigationState.hpp"
 #include "cadnext/Selection.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/ViewBoundsPolicy.hpp"
@@ -93,6 +94,11 @@ public:
     void setOrbitPivot(const cadnext::Vector3& pivot);
     void focusSelection(const SelectionState& selection);
     void frameSelection(const SelectionState& selection);
+    void stopCameraMotion(const char* reason = "unspecified");
+    void clearNavigationInputState();
+    bool hasCameraMotion() const;
+    bool isNavigationEnabled() const;
+    void setNavigationEnabled(bool enabled);
 
     // Re-frames per ViewportPolicy: the active sketch plane in Sketch2D,
     // otherwise bodies+sketches, falling back to the selected plane and
@@ -107,6 +113,8 @@ private:
     void frameCameraTarget(const CameraFocusTarget& target, bool isometric);
     void focusCameraTarget(const CameraFocusTarget& target);
     void updateClipping(double distance, double radius);
+    void stopViewerCameraMotion(const char* reason);
+    void applyNavigationState(const char* reason);
     void replaceCamera(bool orthographic);
     // Applies the ViewportPolicy visibility/navigation state to the scene.
     void applyHelperVisibility();
@@ -117,6 +125,7 @@ private:
     PickableExaminerViewer* viewer_ = nullptr;
     SketchNavigationFilter* gestureFilter_ = nullptr;
     ViewportPolicy policy_;
+    CameraNavigationState navigationState_;
     CameraNavigationOptions navigationOptions_;
     ViewBoundsScene cameraBounds_;
     SelectionState lastSelection_;

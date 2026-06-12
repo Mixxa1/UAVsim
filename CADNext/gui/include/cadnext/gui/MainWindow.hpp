@@ -108,6 +108,7 @@ private:
     void onSketchPoint(double u, double v);
     void onSketchMove(double u, double v);
     void cancelSketchTool();
+    void handleEscapeKey();
     void addSketchEntity(SketchEntity entity);
 
     // Extrude workflow (0.6): profile detection/selection + dialog.
