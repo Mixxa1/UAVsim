@@ -4458,7 +4458,25 @@ void MainWindow::openUAVPart() {
                              QString::fromStdString(loaded.error().message));
         return;
     }
-    UAVPartPreviewPanel panel(loaded.value(), path, this);
+    // Priority 2: if no VisualMesh but ExactGeometry exists, build triangulation
+    // for the preview. This happens before the dialog opens so the panel gets
+    // the mesh without needing kernel access itself.
+    std::optional<kernel::TriangleMesh> previewMesh;
+    const bridge::UAVPartDescriptor& partDesc = loaded.value().part;
+    if (!partDesc.visualMesh.valid && partDesc.exactGeometry.valid
+            && kernel_ && evaluator_) {
+        const auto imported = kernel_->importBRep(partDesc.exactGeometry.payload);
+        if (imported.isOk()) {
+            const auto evaluated = evaluator_->evaluateShape(imported.value());
+            if (evaluated.isOk() && evaluated.value().isValid
+                    && !evaluated.value().previewMesh.isEmpty()) {
+                previewMesh = evaluated.value().previewMesh;
+            }
+        }
+    }
+
+    UAVPartPreviewPanel panel(loaded.value(), path,
+                              previewMesh ? &*previewMesh : nullptr, this);
     panel.exec();
     if (panel.requestedAction() == UAVPartPreviewPanel::Action::OpenForEditing) {
         openPartForEditing(loaded.value(), path);
