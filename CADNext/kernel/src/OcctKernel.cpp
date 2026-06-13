@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -21,8 +22,10 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRep_Builder.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepTools.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -628,6 +631,48 @@ bool OcctKernel::isShapeValid(const ShapeHandle& shape) const {
     }
 }
 
+cadnext::Result<std::vector<std::uint8_t>> OcctKernel::exportBRep(const ShapeHandle& handle) {
+    const TopoDS_Shape* shape = findShape(handle);
+    if (!shape || shape->IsNull()) {
+        return cadnext::Result<std::vector<std::uint8_t>>::fail(
+            {cadnext::ErrorCode::ShapeInvalid, "Shape not found for BRep export"});
+    }
+    try {
+        std::ostringstream oss;
+        BRepTools::Write(*shape, oss);
+        const std::string text = oss.str();
+        return cadnext::Result<std::vector<std::uint8_t>>::ok(
+            std::vector<std::uint8_t>(text.begin(), text.end()));
+    } catch (const Standard_Failure& e) {
+        return cadnext::Result<std::vector<std::uint8_t>>::fail(
+            {cadnext::ErrorCode::SerializationFailed,
+             std::string("BRep export failed: ") + e.GetMessageString()});
+    }
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::importBRep(const std::vector<std::uint8_t>& brepData) {
+    if (brepData.empty()) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::InvalidArgument, "BRep payload is empty"});
+    }
+    try {
+        const std::string brepText(brepData.begin(), brepData.end());
+        std::istringstream iss(brepText);
+        BRep_Builder builder;
+        TopoDS_Shape shape;
+        BRepTools::Read(shape, iss, builder);
+        if (shape.IsNull()) {
+            return cadnext::Result<ShapeHandle>::fail(
+                {cadnext::ErrorCode::SerializationFailed, "Imported BRep shape is null"});
+        }
+        return cadnext::Result<ShapeHandle>::ok(impl_->store(shape, "occt-imported"));
+    } catch (const Standard_Failure& e) {
+        return cadnext::Result<ShapeHandle>::fail(
+            {cadnext::ErrorCode::SerializationFailed,
+             std::string("BRep import failed: ") + e.GetMessageString()});
+    }
+}
+
 const TopoDS_Shape* OcctKernel::findShape(const ShapeHandle& handle) const {
     if (handle.isNull()) {
         return nullptr;
@@ -698,6 +743,17 @@ cadnext::Result<ShapeMassProperties> OcctKernel::volumeProperties(const ShapeHan
         cadnext::ErrorCode::KernelUnavailable,
         "Volume properties require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
     });
+}
+
+cadnext::Result<std::vector<std::uint8_t>> OcctKernel::exportBRep(const ShapeHandle&) {
+    return cadnext::Result<std::vector<std::uint8_t>>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "BRep export requires an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
+    });
+}
+
+cadnext::Result<ShapeHandle> OcctKernel::importBRep(const std::vector<std::uint8_t>&) {
+    return unavailable("OCCT BRep import");
 }
 
 bool OcctKernel::isShapeValid(const ShapeHandle&) const {

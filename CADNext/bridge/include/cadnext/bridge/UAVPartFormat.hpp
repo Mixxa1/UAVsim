@@ -145,6 +145,28 @@ struct UAVPartCompatibility {
     std::vector<std::string> warnings;
 };
 
+// Visual mesh stored in the .uavpart for 3D preview (UAVPart v1.3+).
+// vertices: packed float triples [x0,y0,z0, x1,y1,z1, ...]
+// indices:  triangle index triples [a0,b0,c0, a1,b1,c1, ...]
+struct UAVPartVisualMesh {
+    std::vector<float> vertices;
+    std::vector<std::uint32_t> indices;
+    Vector3 boundingBoxMin;
+    Vector3 boundingBoxMax;
+    std::string source;
+    bool valid = false;
+};
+
+// Exact BRep geometry stored in the .uavpart (UAVPart v1.3+).
+// geometryKernel == "opencascade", representation == "brep_ascii":
+//   payload is the ASCII output of BRepTools::Write.
+struct UAVPartExactGeometry {
+    std::vector<std::uint8_t> payload;
+    std::string geometryKernel;
+    std::string representation;
+    bool valid = false;
+};
+
 // Полное содержимое детали в памяти: вход writer'а и выход reader'а.
 struct UAVPartDescriptor {
     UAVPartManifest manifest;
@@ -153,6 +175,8 @@ struct UAVPartDescriptor {
     std::vector<UAVPartAttachmentPoint> attachmentPoints;
     UAVPartSimulationProxy simulationProxy;
     UAVPartCompatibility compatibility;
+    UAVPartVisualMesh visualMesh;
+    UAVPartExactGeometry exactGeometry;
 };
 
 struct UAVPartValidationResult {

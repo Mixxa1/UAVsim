@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "cadnext/AttachmentPoint.hpp"
 #include "cadnext/Object.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchProfile.hpp"
@@ -28,13 +29,15 @@ class SoPickedPoint;
 class SoSeparator;
 class SoSwitch;
 class SoTransform;
+class SoTranslation;
 
 namespace cadnext::viewer {
 
 // What a viewport click resolved to: a body, a body face, a sketch
-// entity, a sketch profile region, or nothing. Face picks carry both the
-// face id and the owning body id (objectId), so body picking keeps
-// working underneath face picking.
+// entity, a sketch profile region, an attachment point marker, or nothing.
+// Face picks carry both the face id and the owning body id (objectId), so
+// body picking keeps working underneath face picking. Attachment point
+// picks carry both the point id and the owning body id (objectId).
 struct ViewportPickTarget {
     std::string objectId;
     std::string workPlaneId;
@@ -43,6 +46,7 @@ struct ViewportPickTarget {
     std::string profileId;
     std::string faceId;
     std::string edgeId;
+    std::string attachmentPointId;
     cadnext::Vector3 worldPoint;
     int triangleIndex = -1;
     bool faceLookupAttempted = false;
@@ -54,9 +58,11 @@ struct ViewportPickTarget {
     bool isWorkPlane() const { return !workPlaneId.empty(); }
     bool isSketchEntity() const { return !entityId.empty(); }
     bool isProfile() const { return !profileId.empty(); }
+    bool isAttachmentPoint() const { return !attachmentPointId.empty(); }
     bool isEmpty() const {
         return objectId.empty() && workPlaneId.empty() && entityId.empty() &&
-               profileId.empty() && faceId.empty() && edgeId.empty();
+               profileId.empty() && faceId.empty() && edgeId.empty() &&
+               attachmentPointId.empty();
     }
 };
 
@@ -152,6 +158,22 @@ public:
     void clearBodyEdges();
     void highlightBodyEdge(const std::string& bodyId, const std::string& edgeId);
     void clearBodyEdgeHighlight();
+
+    // --- Attachment point markers (UAVPart v1.1) --------------------------
+    // Small sphere markers at each attachment point's local position inside
+    // the body node so they track body transforms automatically. The
+    // selected point is highlighted in yellow. Markers are pickable and
+    // resolve to a ViewportPickTarget with attachmentPointId set.
+    // The preview is a transient world-space sphere shown while the
+    // attachment point tool is active and the cursor hovers a body face.
+    void addOrUpdateAttachmentPointMarkers(const std::string& bodyId,
+                                           const std::vector<AttachmentPoint>& points);
+    void removeAttachmentPointMarkers(const std::string& bodyId);
+    void clearAttachmentPointMarkers();
+    void setSelectedAttachmentPoint(const std::string& bodyId, const std::string& pointId);
+    void clearSelectedAttachmentPoint();
+    void showAttachmentPointPreview(const Vector3& worldPos);
+    void hideAttachmentPointPreview();
 
     // --- Helper visibility (ViewportPolicy application) -------------------
     // World grid + axes; hidden in Sketch2D so no huge 3D axes cross the
@@ -297,6 +319,18 @@ private:
     std::string selectedBodyFaceKey_;
     std::string selectedBodyEdgeKey_;
     bool bodiesDimmed_ = false;
+
+    // Attachment point markers: one SoSeparator per body (added as a child
+    // of the body node so local positions are in body space). The preview
+    // node lives in world space and is repositioned on hover.
+    std::unordered_map<std::string, SoSeparator*> attachmentMarkerGroups_;
+    std::unordered_map<const SoSeparator*, std::pair<std::string, std::string>>
+        nodeToAttachmentPoint_; // marker sep → {bodyId, pointId}
+    SoSeparator* attachmentPreviewRoot_ = nullptr;
+    SoSeparator* attachmentPreviewNode_ = nullptr;
+    SoTranslation* attachmentPreviewTranslation_ = nullptr;
+    std::string selectedAttachmentBodyId_;
+    std::string selectedAttachmentPointId_;
 };
 
 } // namespace cadnext::viewer

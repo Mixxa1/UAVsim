@@ -1,0 +1,13 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/misha/UAVsim/CADNext/build/cmake_install.cmake",
+		"/Users/misha/UAVsim/CADNext/build/core/cmake_install.cmake",
+		"/Users/misha/UAVsim/CADNext/build/kernel/cmake_install.cmake",
+		"/Users/misha/UAVsim/CADNext/build/bridge/cmake_install.cmake",
+		"/Users/misha/UAVsim/CADNext/build/viewer/cmake_install.cmake",
+		"/Users/misha/UAVsim/CADNext/build/gui/cmake_install.cmake",
+		"/Users/misha/UAVsim/CADNext/build/tests/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

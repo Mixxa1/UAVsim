@@ -244,6 +244,28 @@ Result<UAVPartReadResult> UAVPartReader::readFullPart(const std::string& path) c
     }
     result.part.compatibility = compatibility.value();
 
+    // Optional sections (v1.3+): decoded in degraded mode — errors are
+    // silently ignored so files without these sections remain openable.
+    const std::optional<std::string> visualMeshPayload =
+        sectionPayload(file, UAVPartSectionType::VisualMesh);
+    if (visualMeshPayload) {
+        UAVPartVisualMesh mesh;
+        std::string decodeError;
+        if (sections::decodeVisualMesh(*visualMeshPayload, mesh, decodeError)) {
+            result.part.visualMesh = std::move(mesh);
+        }
+    }
+
+    const std::optional<std::string> exactGeoPayload =
+        sectionPayload(file, UAVPartSectionType::ExactGeometry);
+    if (exactGeoPayload) {
+        UAVPartExactGeometry geo;
+        std::string decodeError;
+        if (sections::decodeExactGeometry(*exactGeoPayload, geo, decodeError)) {
+            result.part.exactGeometry = std::move(geo);
+        }
+    }
+
     return Result<UAVPartReadResult>::ok(std::move(result));
 }
 

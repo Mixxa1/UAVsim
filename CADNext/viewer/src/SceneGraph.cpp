@@ -450,6 +450,12 @@ SceneGraph::SceneGraph() {
     extrudePreviewRoot_ = new SoSeparator;
     root_->addChild(extrudePreviewRoot_);
 
+    // Attachment point preview: world-space node for the transient hover
+    // marker (shown only while the attachment point tool is active).
+    attachmentPreviewRoot_ = new SoSeparator;
+    attachmentPreviewRoot_->addChild(unpickableStyle());
+    root_->addChild(attachmentPreviewRoot_);
+
     // Always last in the root so transient input visuals render after the
     // sketch plane helper; unpickable so the cursor/preview never swallow
     // tool clicks or selection picks.
@@ -543,6 +549,20 @@ void SceneGraph::removeObjectNode(const std::string& objectId) {
     }
     removeBodyFaces(objectId);
     removeBodyEdges(objectId);
+    // Attachment markers are children of the body node, so Coin drops them
+    // automatically, but we still need to clean up the lookup maps.
+    auto amIt = attachmentMarkerGroups_.find(objectId);
+    if (amIt != attachmentMarkerGroups_.end()) {
+        for (auto it = nodeToAttachmentPoint_.begin();
+             it != nodeToAttachmentPoint_.end();) {
+            if (it->second.first == objectId) {
+                it = nodeToAttachmentPoint_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        attachmentMarkerGroups_.erase(amIt);
+    }
 }
 
 void SceneGraph::clearObjectNodes() {
@@ -563,6 +583,8 @@ void SceneGraph::clearObjectNodes() {
     selectedWorkPlaneId_.clear();
     clearBodyFaces();
     clearBodyEdges();
+    attachmentMarkerGroups_.clear();
+    nodeToAttachmentPoint_.clear();
 }
 
 bool SceneGraph::hasObjectNode(const std::string& objectId) const {
@@ -1974,6 +1996,14 @@ ViewportPickTarget SceneGraph::pickTargetForPath(const SoPath* path) const {
             continue;
         }
         const auto* node = static_cast<const SoSeparator*>(rawNode);
+        // Attachment point markers win over body picks (they are children of
+        // the body node but should resolve before the body itself does).
+        auto apIt = nodeToAttachmentPoint_.find(node);
+        if (apIt != nodeToAttachmentPoint_.end()) {
+            target.objectId = apIt->second.first;
+            target.attachmentPointId = apIt->second.second;
+            return target;
+        }
         auto entityIt = nodeToSketchEntity_.find(node);
         if (entityIt != nodeToSketchEntity_.end()) {
             target.sketchId = entityIt->second.first;
@@ -2005,6 +2035,161 @@ ViewportPickTarget SceneGraph::pickTargetForPath(const SoPath* path) const {
         }
     }
     return target;
+}
+
+// --- Attachment point markers -------------------------------------------------
+
+namespace {
+
+SbColor attachmentMarkerColor(AttachmentRole role, bool disabled, bool selected) {
+    if (selected) {
+        return SbColor(1.0f, 0.85f, 0.15f); // bright yellow
+    }
+    if (disabled) {
+        return SbColor(0.30f, 0.30f, 0.30f); // dark gray
+    }
+    switch (role) {
+    case AttachmentRole::Payload:     return SbColor(0.95f, 0.55f, 0.15f); // amber
+    case AttachmentRole::Camera:      return SbColor(0.25f, 0.75f, 0.95f); // cyan
+    case AttachmentRole::Sensor:      return SbColor(0.25f, 0.85f, 0.35f); // green
+    case AttachmentRole::Frame:       return SbColor(0.75f, 0.40f, 0.90f); // purple
+    case AttachmentRole::Wing:        return SbColor(0.90f, 0.70f, 0.30f); // gold
+    case AttachmentRole::LandingGear: return SbColor(0.55f, 0.80f, 0.55f); // soft green
+    case AttachmentRole::Motor:       return SbColor(0.95f, 0.35f, 0.35f); // red
+    case AttachmentRole::Battery:     return SbColor(0.35f, 0.65f, 0.95f); // blue
+    case AttachmentRole::Antenna:     return SbColor(0.90f, 0.90f, 0.35f); // yellow-green
+    case AttachmentRole::Generic:     return SbColor(0.75f, 0.75f, 0.75f); // light gray
+    }
+    return SbColor(0.75f, 0.75f, 0.75f);
+}
+
+SoSeparator* buildAttachmentMarkerNode(const AttachmentPoint& point, bool selected) {
+    auto* sep = new SoSeparator;
+
+    auto* trans = new SoTranslation;
+    trans->translation = SbVec3f(static_cast<float>(point.localPosition.x),
+                                 static_cast<float>(point.localPosition.y),
+                                 static_cast<float>(point.localPosition.z));
+    sep->addChild(trans);
+
+    auto* lm = new SoLightModel;
+    lm->model = SoLightModel::BASE_COLOR;
+    sep->addChild(lm);
+
+    const SbColor color = attachmentMarkerColor(point.role, !point.isEnabled, selected);
+    auto* mat = new SoBaseColor;
+    mat->rgb = color;
+    sep->addChild(mat);
+
+    auto* sphere = new SoSphere;
+    sphere->radius = selected ? 0.016f : 0.012f;
+    sep->addChild(sphere);
+
+    return sep;
+}
+
+} // namespace
+
+void SceneGraph::addOrUpdateAttachmentPointMarkers(
+    const std::string& bodyId, const std::vector<AttachmentPoint>& points) {
+    removeAttachmentPointMarkers(bodyId);
+
+    auto bodyIt = objectNodes_.find(bodyId);
+    if (bodyIt == objectNodes_.end()) {
+        return;
+    }
+    if (points.empty()) {
+        return;
+    }
+
+    auto* group = new SoSeparator;
+    for (const AttachmentPoint& point : points) {
+        const bool selected =
+            (selectedAttachmentBodyId_ == bodyId && selectedAttachmentPointId_ == point.id);
+        auto* markerNode = buildAttachmentMarkerNode(point, selected);
+        nodeToAttachmentPoint_[markerNode] = {bodyId, point.id};
+        group->addChild(markerNode);
+    }
+
+    bodyIt->second->addChild(group);
+    attachmentMarkerGroups_[bodyId] = group;
+}
+
+void SceneGraph::removeAttachmentPointMarkers(const std::string& bodyId) {
+    auto groupIt = attachmentMarkerGroups_.find(bodyId);
+    if (groupIt == attachmentMarkerGroups_.end()) {
+        return;
+    }
+    for (auto it = nodeToAttachmentPoint_.begin(); it != nodeToAttachmentPoint_.end();) {
+        if (it->second.first == bodyId) {
+            it = nodeToAttachmentPoint_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    auto bodyIt = objectNodes_.find(bodyId);
+    if (bodyIt != objectNodes_.end()) {
+        bodyIt->second->removeChild(groupIt->second);
+    }
+    attachmentMarkerGroups_.erase(groupIt);
+}
+
+void SceneGraph::clearAttachmentPointMarkers() {
+    for (const auto& entry : attachmentMarkerGroups_) {
+        auto bodyIt = objectNodes_.find(entry.first);
+        if (bodyIt != objectNodes_.end()) {
+            bodyIt->second->removeChild(entry.second);
+        }
+    }
+    attachmentMarkerGroups_.clear();
+    nodeToAttachmentPoint_.clear();
+    selectedAttachmentBodyId_.clear();
+    selectedAttachmentPointId_.clear();
+}
+
+void SceneGraph::setSelectedAttachmentPoint(const std::string& bodyId,
+                                             const std::string& pointId) {
+    selectedAttachmentBodyId_ = bodyId;
+    selectedAttachmentPointId_ = pointId;
+}
+
+void SceneGraph::clearSelectedAttachmentPoint() {
+    selectedAttachmentBodyId_.clear();
+    selectedAttachmentPointId_.clear();
+}
+
+void SceneGraph::showAttachmentPointPreview(const Vector3& worldPos) {
+    if (!attachmentPreviewNode_) {
+        attachmentPreviewNode_ = new SoSeparator;
+        attachmentPreviewTranslation_ = new SoTranslation;
+        attachmentPreviewNode_->addChild(attachmentPreviewTranslation_);
+
+        auto* lm = new SoLightModel;
+        lm->model = SoLightModel::BASE_COLOR;
+        attachmentPreviewNode_->addChild(lm);
+
+        auto* mat = new SoBaseColor;
+        mat->rgb = SbColor(0.20f, 0.85f, 1.0f);
+        attachmentPreviewNode_->addChild(mat);
+
+        auto* sphere = new SoSphere;
+        sphere->radius = 0.014f;
+        attachmentPreviewNode_->addChild(sphere);
+
+        attachmentPreviewRoot_->addChild(attachmentPreviewNode_);
+    }
+    attachmentPreviewTranslation_->translation =
+        SbVec3f(static_cast<float>(worldPos.x),
+                static_cast<float>(worldPos.y),
+                static_cast<float>(worldPos.z));
+}
+
+void SceneGraph::hideAttachmentPointPreview() {
+    if (attachmentPreviewNode_) {
+        attachmentPreviewRoot_->removeChild(attachmentPreviewNode_);
+        attachmentPreviewNode_ = nullptr;
+        attachmentPreviewTranslation_ = nullptr;
+    }
 }
 
 } // namespace cadnext::viewer

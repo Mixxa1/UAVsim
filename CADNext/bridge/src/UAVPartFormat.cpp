@@ -141,6 +141,8 @@ void uavpartFinalizeDescriptor(UAVPartDescriptor& descriptor) {
     manifest.formatVersion = kUAVPartFormatVersion;
     manifest.massComputed = massValid;
     manifest.attachmentPointsDefined = hasEnabledAttachment;
+    manifest.geometryStored = descriptor.exactGeometry.valid;
+    manifest.visualMeshStored = descriptor.visualMesh.valid;
     manifest.readinessIssues.clear();
     if (!massValid) {
         manifest.readinessIssues.push_back(kIssueMassNotComputed);

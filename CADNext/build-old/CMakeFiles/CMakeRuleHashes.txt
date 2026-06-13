@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+d0833ff6b0d8c03deb356f340d8b3408 gui/.qt/rcc/qrc_cadnext_gui.cpp
+ff8dd23564b50cd4d3ec9d3b4b9fbc0a gui/CMakeFiles/cadnext_gui_autogen
+7de9665282d190c0ad6605ccca5de875 gui/cadnext_gui_autogen/timestamp

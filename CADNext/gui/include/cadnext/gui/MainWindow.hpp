@@ -8,6 +8,8 @@
 
 #include <unordered_map>
 
+#include "cadnext/AttachmentPoint.hpp"
+#include "cadnext/bridge/UAVPartFormat.hpp"
 #include "cadnext/Chamfer.hpp"
 #include "cadnext/CommandStack.hpp"
 #include "cadnext/Document.hpp"
@@ -60,7 +62,9 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
-    enum class SelectionKind { None, WorkPlane, Body, Sketch, Entity, BodyFace, BodyEdge };
+    enum class SelectionKind {
+        None, WorkPlane, Body, Sketch, Entity, BodyFace, BodyEdge, AttachmentPoint
+    };
 
     // Selected body face (CADNext 0.8). Valid only while selectionKind_
     // is BodyFace.
@@ -72,6 +76,11 @@ private:
     struct BodyEdgeSelection {
         std::string bodyId;
         std::string edgeId;
+    };
+
+    struct AttachmentPointSelection {
+        std::string bodyId;
+        std::string pointId;
     };
 
     // Selection.
@@ -227,9 +236,41 @@ private:
     std::string partBodyIdForSave() const;
     bool writePartForBody(const std::string& bodyId, const QString& path);
 
+    // UAVPart v1.1 — инструмент точек крепления.
+    // Активация: кнопка на тулбаре переводит окно в режим attachmentPoint.
+    // Деактивация: Esc, повторное нажатие или начало другой операции.
+    void enterAttachmentPointTool();
+    void exitAttachmentPointTool();
+    void selectAttachmentPoint(const std::string& bodyId, const std::string& pointId);
+    void clearAttachmentPointSelection();
+    // Открывает диалог создания/редактирования после клика по поверхности.
+    void openCreateAttachmentDialog(const std::string& bodyId,
+                                    const Vector3& worldPoint);
+    // Открывает диалог редактирования существующей точки.
+    void openEditAttachmentDialog(const std::string& bodyId,
+                                  const std::string& pointId);
+    // Добавляет новую точку в модель и обновляет viewport.
+    void commitNewAttachmentPoint(const std::string& bodyId,
+                                   const AttachmentPoint& point);
+    // Обновляет поля существующей точки (имя, роль, enabled).
+    void updateAttachmentPoint(const std::string& bodyId,
+                                const std::string& pointId,
+                                const std::string& name,
+                                AttachmentRole role,
+                                bool isEnabled);
+    // Удаляет пользовательскую точку крепления.
+    void deleteAttachmentPoint(const std::string& bodyId,
+                                const std::string& pointId);
+    // Перестраивает маркеры точек крепления для тела.
+    void refreshAttachmentPointMarkers(const std::string& bodyId);
+    // Обновляет строку статуса детали (масса, габариты, точки крепления).
+    void updatePartStatusDisplay(const std::string& bodyId);
+
     // File handling.
     void newDocument();
-    void openDocument();
+    void openDocument();   // открывает .cadnext как CAD-документ
+    void openUAVPart();    // открывает .uavpart через UAVPartReader → PreviewPanel
+    void openPartForEditing(const bridge::UAVPartReadResult& result, const QString& filePath);
     bool saveDocument();
     bool saveDocumentAs();
     bool maybeSave();
@@ -261,6 +302,8 @@ private:
     std::string selectedSketchId_; // owner sketch id in Entity kind
     BodyFaceSelection selectedFace_;
     BodyEdgeSelection selectedEdge_;
+    AttachmentPointSelection selectedAttachmentPoint_;
+    bool attachmentPointToolActive_ = false;
     std::string highlightedEntitySketch_;
     std::string highlightedEntityId_;
     std::string hoveredWorkPlaneId_;
@@ -303,6 +346,7 @@ private:
     QAction* undoAction_ = nullptr;
     QAction* redoAction_ = nullptr;
     QLabel* modeStatusLabel_ = nullptr;
+    QLabel* partStatusLabel_ = nullptr;
     QLabel* planeBadge_ = nullptr;
 
     QString currentFilePath_;

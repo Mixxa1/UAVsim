@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <random>
 
 #include <QCloseEvent>
 #include <QDateTime>
@@ -27,7 +28,10 @@
 #include "cadnext/SketchMeasure.hpp"
 #include "cadnext/Units.hpp"
 #include "cadnext/bridge/UAVPartFormat.hpp"
+#include "cadnext/bridge/UAVPartReader.hpp"
 #include "cadnext/bridge/UAVPartWriter.hpp"
+#include "cadnext/gui/AttachmentPointDialog.hpp"
+#include "cadnext/gui/UAVPartPreviewPanel.hpp"
 #include "cadnext/gui/CutExtrudeDialog.hpp"
 #include "cadnext/gui/EdgeOperationDialog.hpp"
 #include "cadnext/gui/ExtrudeDialog.hpp"
@@ -45,6 +49,68 @@ namespace {
 constexpr double kMinScale = 0.001;
 constexpr double kMinDimension = 0.001;
 constexpr double kMinSketchExtent = 1.0e-6;
+
+std::string generatePointId() {
+    static std::mt19937_64 gen(std::random_device{}());
+    std::uniform_int_distribution<std::uint64_t> dis;
+    const std::uint64_t a = dis(gen);
+    const std::uint64_t b = dis(gen);
+    char buf[37];
+    std::snprintf(buf, sizeof(buf),
+                  "%08x-%04x-%04x-%04x-%012llx",
+                  static_cast<unsigned>((a >> 32) & 0xFFFFFFFF),
+                  static_cast<unsigned>((a >> 16) & 0xFFFF),
+                  static_cast<unsigned>(a & 0xFFFF),
+                  static_cast<unsigned>((b >> 48) & 0xFFFF),
+                  static_cast<unsigned long long>(b & 0x0000FFFFFFFFFFFFull));
+    return buf;
+}
+
+// Инвертированное преобразование: мировая точка → локальные координаты тела.
+// Применяется для хранения localPosition в системе координат тела.
+Vector3 worldToLocal(const Vector3& world, const Transform& t) {
+    // Translate
+    Vector3 p{world.x - t.position.x,
+              world.y - t.position.y,
+              world.z - t.position.z};
+
+    // Inverse rotation: Z → Y → X (обратный порядок, обратные углы)
+    const double rz = -t.rotationEuler.z * M_PI / 180.0;
+    const double ry = -t.rotationEuler.y * M_PI / 180.0;
+    const double rx = -t.rotationEuler.x * M_PI / 180.0;
+
+    const double cosZ = std::cos(rz);
+    const double sinZ = std::sin(rz);
+    p = {p.x * cosZ - p.y * sinZ, p.x * sinZ + p.y * cosZ, p.z};
+
+    const double cosY = std::cos(ry);
+    const double sinY = std::sin(ry);
+    p = {p.x * cosY + p.z * sinY, p.y, -p.x * sinY + p.z * cosY};
+
+    const double cosX = std::cos(rx);
+    const double sinX = std::sin(rx);
+    p = {p.x, p.y * cosX - p.z * sinX, p.y * sinX + p.z * cosX};
+
+    // Inverse scale
+    const double sx = std::abs(t.scale.x) > kMinScale ? t.scale.x : 1.0;
+    const double sy = std::abs(t.scale.y) > kMinScale ? t.scale.y : 1.0;
+    const double sz = std::abs(t.scale.z) > kMinScale ? t.scale.z : 1.0;
+    return {p.x / sx, p.y / sy, p.z / sz};
+}
+
+// Следующее свободное имя точки крепления ("mount_point_01", _02, ...).
+std::string nextAttachmentPointName(const std::vector<AttachmentPoint>& existing) {
+    int max = 0;
+    for (const AttachmentPoint& ap : existing) {
+        if (ap.name.rfind("mount_point_", 0) == 0) {
+            const int n = std::atoi(ap.name.c_str() + 12);
+            max = std::max(max, n);
+        }
+    }
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "mount_point_%02d", max + 1);
+    return buf;
+}
 
 // Cut Extrude runs through the OCCT boolean pipeline only — there is no
 // procedural mesh-boolean fallback by design.
@@ -489,6 +555,14 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { createWorkPlaneFromSelectedFace(); });
     connect(toolBar_->normalToFaceAction(), &QAction::triggered, this,
             [this]() { normalToSelectedFace(); });
+    connect(toolBar_->addAttachmentPointAction(), &QAction::toggled, this,
+            [this](bool checked) {
+                if (checked) {
+                    enterAttachmentPointTool();
+                } else {
+                    exitAttachmentPointTool();
+                }
+            });
     connect(toolBar_->deleteSelectedAction(), &QAction::triggered, this,
             [this]() { deleteSelected(); });
     toolBar_->fitSelectionAction()->setShortcut(QKeySequence(Qt::Key_F));
@@ -581,6 +655,11 @@ MainWindow::MainWindow(QWidget* parent)
     modeStatusLabel_ = new QLabel(this);
     statusBar()->addPermanentWidget(modeStatusLabel_);
     updateModeStatusLabel();
+
+    partStatusLabel_ = new QLabel(this);
+    partStatusLabel_->setStyleSheet(
+        QStringLiteral("color: #90c0e8; padding: 0 8px;"));
+    statusBar()->addPermanentWidget(partStatusLabel_);
 #ifdef CADNEXT_WITH_OCCT
     statusBar()->addPermanentWidget(
         new QLabel(tr("Геометрическое ядро: OCCT BRep"), this));
@@ -618,7 +697,33 @@ void MainWindow::initializeViewport() {
     selection_ = std::make_unique<viewer::SelectionController>(viewer_->scene());
 
     viewer_->setPickCallback([this](const viewer::ViewportPickTarget& target, bool contextClick) {
-        if (target.isSketchEntity()) {
+        // Attachment point tool mode: face clicks create new points;
+        // clicking on existing markers (isAttachmentPoint) is handled below
+        // in the normal path so the user can always select a marker.
+        if (attachmentPointToolActive_ && !target.isAttachmentPoint()) {
+            if (target.isBodyFace() || target.isBody()) {
+                if (!target.hasWorldPoint) {
+                    statusBar()->showMessage(
+                        tr("Выберите точку на поверхности детали"), 4000);
+                    return;
+                }
+                openCreateAttachmentDialog(target.objectId, target.worldPoint);
+            } else if (!target.isEmpty()) {
+                statusBar()->showMessage(
+                    tr("Точка крепления может быть добавлена только на CAD-деталь"), 4000);
+            } else {
+                statusBar()->showMessage(
+                    tr("Выберите точку на поверхности детали"), 4000);
+            }
+            return;
+        }
+
+        if (target.isAttachmentPoint()) {
+            selectAttachmentPoint(target.objectId, target.attachmentPointId);
+            if (contextClick) {
+                openEditAttachmentDialog(target.objectId, target.attachmentPointId);
+            }
+        } else if (target.isSketchEntity()) {
             selectEntity(target.sketchId, target.entityId);
         } else if (target.isProfile()) {
             // Click inside a detected closed region selects the profile.
@@ -674,6 +779,15 @@ void MainWindow::initializeViewport() {
         }
     });
     viewer_->setHoverCallback([this](const viewer::ViewportPickTarget& target) {
+        // Attachment point tool: show/hide hover preview on body surface.
+        if (attachmentPointToolActive_) {
+            if ((target.isBodyFace() || target.isBody()) && target.hasWorldPoint) {
+                viewer_->scene().showAttachmentPointPreview(target.worldPoint);
+            } else {
+                viewer_->scene().hideAttachmentPointPreview();
+            }
+        }
+
         const std::string nextPlane =
             target.isWorkPlane() ? target.workPlaneId : std::string();
         if (nextPlane != hoveredWorkPlaneId_) {
@@ -725,6 +839,7 @@ void MainWindow::selectBody(const std::string& objectId) {
     if (selectionKind_ == SelectionKind::Body && selectedId_ == objectId) {
         return;
     }
+    clearAttachmentPointSelection();
     selectionKind_ = SelectionKind::Body;
     selectedId_ = objectId;
     selectedSketchId_.clear();
@@ -733,6 +848,7 @@ void MainWindow::selectBody(const std::string& objectId) {
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
+    updatePartStatusDisplay(objectId);
 }
 
 void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& faceId) {
@@ -740,6 +856,7 @@ void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& fa
         selectedFace_.faceId == faceId) {
         return;
     }
+    clearAttachmentPointSelection();
     selectionKind_ = SelectionKind::BodyFace;
     selectedId_ = bodyId; // the owning body, so body-based actions keep working
     selectedSketchId_.clear();
@@ -748,6 +865,7 @@ void MainWindow::selectBodyFace(const std::string& bodyId, const std::string& fa
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
+    updatePartStatusDisplay(bodyId);
     if (const kernel::FaceReference* face = findBodyFace(bodyId, faceId)) {
         statusBar()->showMessage(
             face->isSketchable
@@ -814,6 +932,7 @@ void MainWindow::clearSelection() {
     if (selectionKind_ == SelectionKind::None) {
         return;
     }
+    clearAttachmentPointSelection();
     selectionKind_ = SelectionKind::None;
     selectedId_.clear();
     selectedSketchId_.clear();
@@ -822,6 +941,7 @@ void MainWindow::clearSelection() {
     syncTreeSelection();
     syncViewportSelection();
     refreshPropertyPanel();
+    updatePartStatusDisplay({});
 }
 
 void MainWindow::syncTreeSelection() {
@@ -840,6 +960,11 @@ void MainWindow::syncTreeSelection() {
     case SelectionKind::BodyEdge:
         // Edges have no tree rows; highlight the owning body instead.
         projectTree_->setCurrentBody(QString::fromStdString(selectedEdge_.bodyId));
+        break;
+    case SelectionKind::AttachmentPoint:
+        // Attachment points have no tree rows; highlight the owning body.
+        projectTree_->setCurrentBody(
+            QString::fromStdString(selectedAttachmentPoint_.bodyId));
         break;
     case SelectionKind::Sketch:
         projectTree_->setCurrentSketch(QString::fromStdString(selectedId_));
@@ -961,6 +1086,18 @@ void MainWindow::refreshPropertyPanel() {
         }
         break;
     }
+    case SelectionKind::AttachmentPoint:
+        // Attachment point details shown in the status bar; property panel
+        // shows the owning body.
+        if (!selectedAttachmentPoint_.bodyId.empty()) {
+            const Result<Object> body =
+                document_.objectById(selectedAttachmentPoint_.bodyId);
+            if (body.isOk()) {
+                propertyPanel_->showObject(body.value());
+                return;
+            }
+        }
+        break;
     case SelectionKind::None:
         break;
     }
@@ -999,6 +1136,10 @@ SelectionState MainWindow::cameraSelectionState() const {
         selection.kind = cadnext::SelectionKind::SketchEntity;
         selection.sketchId = selectedSketchId_;
         selection.entityId = selectedId_;
+        break;
+    case SelectionKind::AttachmentPoint:
+        selection.kind = cadnext::SelectionKind::Body;
+        selection.bodyId = selectedAttachmentPoint_.bodyId;
         break;
     case SelectionKind::WorkPlane:
     case SelectionKind::None:
@@ -1327,6 +1468,7 @@ void MainWindow::buildObjectVisual(const Object& object) {
             viewer_->scene().addOrUpdateObjectMesh(object, evaluated.value().previewMesh);
             refreshBodyFaces(object.id);
             refreshBodyEdges(object.id);
+            refreshAttachmentPointMarkers(object.id);
             return;
         }
 #ifdef CADNEXT_WITH_OCCT
@@ -1358,6 +1500,7 @@ void MainWindow::buildObjectVisual(const Object& object) {
     } else {
         viewer_->scene().addObjectNode(object);
     }
+    refreshAttachmentPointMarkers(object.id);
 }
 
 Vector3 MainWindow::nextSpawnPosition(double groundOffset) const {
@@ -1418,6 +1561,13 @@ void MainWindow::deleteSelected() {
     case SelectionKind::BodyEdge:
         statusBar()->showMessage(
             tr("Ребро нельзя удалить — примените фаску/скругление или удалите тело"), 3000);
+        break;
+    case SelectionKind::AttachmentPoint:
+        if (!selectedAttachmentPoint_.bodyId.empty() &&
+            !selectedAttachmentPoint_.pointId.empty()) {
+            deleteAttachmentPoint(selectedAttachmentPoint_.bodyId,
+                                  selectedAttachmentPoint_.pointId);
+        }
         break;
     case SelectionKind::Sketch: {
         const std::string sketchId = selectedId_;
@@ -1613,6 +1763,11 @@ void MainWindow::handleEscapeKey() {
         return;
     }
     viewer_->setNavigationEnabled(true);
+
+    if (attachmentPointToolActive_) {
+        exitAttachmentPointTool();
+        return;
+    }
 
     if (activeSketchId_ && sketchInput_.phase == SketchInputPhase::WaitingSecondPoint) {
         cancelSketchTool();
@@ -1900,6 +2055,11 @@ void MainWindow::updateModeStatusLabel() {
             kOcctBackendAvailable
                 ? tr("Выбрано ребро: доступны фаска и скругление")
                 : tr("Выбрано ребро: фаска и скругление требуют ядра OCCT"));
+        return;
+    }
+    if (attachmentPointToolActive_) {
+        modeStatusLabel_->setText(
+            tr("Инструмент точки крепления: нажмите на поверхность детали — Esc для отмены"));
         return;
     }
     modeStatusLabel_->setText(tr("3D-вид: выберите тело, плоскость или эскиз"));
@@ -2348,6 +2508,7 @@ void MainWindow::buildExtrudedBodyVisual(const Object& object, const Feature& fe
         viewer_->scene().addOrUpdateObjectMesh(object, mesh);
         refreshBodyFaces(object.id);
         refreshBodyEdges(object.id);
+        refreshAttachmentPointMarkers(object.id);
     } else {
         qWarning("CADNext: extrude regeneration failed for %s: %s", object.name.c_str(),
                  failureReason.toUtf8().constData());
@@ -2648,6 +2809,7 @@ void MainWindow::applyCutExtrude() {
     viewer_->scene().addOrUpdateObjectMesh(*target, evaluated.value().previewMesh);
     refreshBodyFaces(targetBodyId);
     refreshBodyEdges(targetBodyId);
+    refreshAttachmentPointMarkers(targetBodyId);
 
     Feature feature;
     feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
@@ -2821,6 +2983,7 @@ bool MainWindow::replayExtrudeCutFeature(const Feature& feature, QString* failur
     }
     refreshBodyFaces(target->id);
     refreshBodyEdges(target->id);
+    refreshAttachmentPointMarkers(target->id);
     return true;
 }
 
@@ -3387,6 +3550,7 @@ void MainWindow::applyEdgeOperation() {
     viewer_->scene().addOrUpdateObjectMesh(*target, geometry.previewMesh);
     refreshBodyFaces(target->id);
     refreshBodyEdges(target->id);
+    refreshAttachmentPointMarkers(target->id);
     commandStack_.push(std::make_unique<AddFeatureCommand>(feature), document_);
 
     viewer_->scene().hideExtrudePreview();
@@ -3578,6 +3742,7 @@ bool MainWindow::replayEdgeOperationFeature(const Feature& feature, QString* fai
     }
     refreshBodyFaces(target->id);
     refreshBodyEdges(target->id);
+    refreshAttachmentPointMarkers(target->id);
     return true;
 }
 
@@ -3707,6 +3872,313 @@ QString formatPartDimensionMm(double meters) {
 
 } // namespace
 
+// --- Attachment point tool (UAVPart v1.1) ------------------------------------
+
+void MainWindow::enterAttachmentPointTool() {
+    if (!viewer_) {
+        return;
+    }
+    attachmentPointToolActive_ = true;
+    if (!toolBar_->addAttachmentPointAction()->isChecked()) {
+        toolBar_->addAttachmentPointAction()->setChecked(true);
+    }
+    updateModeStatusLabel();
+    statusBar()->showMessage(
+        tr("Инструмент точки крепления: нажмите на поверхность детали"), 0);
+}
+
+void MainWindow::exitAttachmentPointTool() {
+    if (!attachmentPointToolActive_) {
+        return;
+    }
+    attachmentPointToolActive_ = false;
+    if (toolBar_->addAttachmentPointAction()->isChecked()) {
+        toolBar_->addAttachmentPointAction()->setChecked(false);
+    }
+    if (viewer_) {
+        viewer_->scene().hideAttachmentPointPreview();
+    }
+    updateModeStatusLabel();
+    statusBar()->showMessage(
+        tr("Режим точки крепления завершён"), 3000);
+}
+
+void MainWindow::selectAttachmentPoint(const std::string& bodyId,
+                                        const std::string& pointId) {
+    selectedAttachmentPoint_ = {bodyId, pointId};
+    selectionKind_ = SelectionKind::AttachmentPoint;
+    selectedId_ = bodyId;
+
+    if (viewer_) {
+        viewer_->scene().setSelectedAttachmentPoint(bodyId, pointId);
+        refreshAttachmentPointMarkers(bodyId);
+    }
+
+    // Show point properties in the property panel area via status bar.
+    const Result<Object> objectResult = document_.objectById(bodyId);
+    if (!objectResult.isOk()) {
+        return;
+    }
+    for (const AttachmentPoint& ap : objectResult.value().attachmentPoints) {
+        if (ap.id == pointId) {
+            const QString roleName = [&]() {
+                switch (ap.role) {
+                case AttachmentRole::Payload:     return tr("Полезная нагрузка");
+                case AttachmentRole::Camera:      return tr("Камера");
+                case AttachmentRole::Sensor:      return tr("Датчик");
+                case AttachmentRole::Generic:     return tr("Универсальная");
+                case AttachmentRole::Frame:       return tr("Рама");
+                case AttachmentRole::Wing:        return tr("Крыло");
+                case AttachmentRole::LandingGear: return tr("Шасси");
+                case AttachmentRole::Motor:       return tr("Мотор");
+                case AttachmentRole::Battery:     return tr("Батарея");
+                case AttachmentRole::Antenna:     return tr("Антенна");
+                }
+                return tr("Универсальная");
+            }();
+            statusBar()->showMessage(
+                tr("Точка крепления: «%1» (%2)%3  — двойной клик для редактирования")
+                    .arg(QString::fromStdString(ap.name),
+                         roleName,
+                         ap.isEnabled ? QString() : tr(" [откл.]")),
+                0);
+            break;
+        }
+    }
+    updatePartStatusDisplay(bodyId);
+}
+
+void MainWindow::clearAttachmentPointSelection() {
+    if (!selectedAttachmentPoint_.bodyId.empty()) {
+        const std::string bodyId = selectedAttachmentPoint_.bodyId;
+        selectedAttachmentPoint_ = {};
+        if (viewer_) {
+            viewer_->scene().clearSelectedAttachmentPoint();
+            refreshAttachmentPointMarkers(bodyId);
+        }
+    }
+}
+
+void MainWindow::openCreateAttachmentDialog(const std::string& bodyId,
+                                             const Vector3& worldPoint) {
+    const Result<Object> objectResult = document_.objectById(bodyId);
+    if (!objectResult.isOk()) {
+        statusBar()->showMessage(
+            tr("Точка крепления может быть добавлена только на CAD-деталь"), 4000);
+        return;
+    }
+    const Object& object = objectResult.value();
+
+    AttachmentPointDialog::Data initial;
+    initial.name = nextAttachmentPointName(object.attachmentPoints);
+    initial.role = AttachmentRole::Payload;
+    initial.isEnabled = true;
+
+    AttachmentPointDialog dialog(initial, false, false, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const AttachmentPointDialog::Data d = dialog.data();
+
+    AttachmentPoint ap;
+    ap.id = generatePointId();
+    ap.name = d.name;
+    ap.role = d.role;
+    ap.isEnabled = d.isEnabled;
+    ap.isSystem = false;
+    ap.localPosition = worldToLocal(worldPoint, object.transform);
+    ap.localRotation = {0.0, 0.0, 0.0};
+
+    commitNewAttachmentPoint(bodyId, ap);
+}
+
+void MainWindow::openEditAttachmentDialog(const std::string& bodyId,
+                                           const std::string& pointId) {
+    const Result<Object> objectResult = document_.objectById(bodyId);
+    if (!objectResult.isOk()) {
+        return;
+    }
+    const Object& object = objectResult.value();
+    const AttachmentPoint* found = nullptr;
+    for (const AttachmentPoint& ap : object.attachmentPoints) {
+        if (ap.id == pointId) {
+            found = &ap;
+            break;
+        }
+    }
+    if (!found) {
+        return;
+    }
+
+    AttachmentPointDialog::Data initial;
+    initial.name = found->name;
+    initial.role = found->role;
+    initial.isEnabled = found->isEnabled;
+
+    AttachmentPointDialog dialog(initial, /*isEdit=*/true, found->isSystem, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    if (dialog.deleteRequested()) {
+        deleteAttachmentPoint(bodyId, pointId);
+        return;
+    }
+    const AttachmentPointDialog::Data d = dialog.data();
+    updateAttachmentPoint(bodyId, pointId, d.name, d.role, d.isEnabled);
+}
+
+void MainWindow::commitNewAttachmentPoint(const std::string& bodyId,
+                                           const AttachmentPoint& point) {
+    Object* object = document_.mutableObjectById(bodyId);
+    if (!object) {
+        return;
+    }
+    object->attachmentPoints.push_back(point);
+    markDirty();
+    refreshAttachmentPointMarkers(bodyId);
+    selectAttachmentPoint(bodyId, point.id);
+    updatePartStatusDisplay(bodyId);
+    statusBar()->showMessage(
+        tr("Точка крепления «%1» добавлена")
+            .arg(QString::fromStdString(point.name)), 4000);
+}
+
+void MainWindow::updateAttachmentPoint(const std::string& bodyId,
+                                        const std::string& pointId,
+                                        const std::string& name,
+                                        AttachmentRole role,
+                                        bool isEnabled) {
+    Object* object = document_.mutableObjectById(bodyId);
+    if (!object) {
+        return;
+    }
+    for (AttachmentPoint& ap : object->attachmentPoints) {
+        if (ap.id == pointId) {
+            ap.name = name;
+            ap.role = role;
+            ap.isEnabled = isEnabled;
+            break;
+        }
+    }
+    markDirty();
+    refreshAttachmentPointMarkers(bodyId);
+    updatePartStatusDisplay(bodyId);
+    statusBar()->showMessage(
+        tr("Точка крепления «%1» обновлена")
+            .arg(QString::fromStdString(name)), 3000);
+}
+
+void MainWindow::deleteAttachmentPoint(const std::string& bodyId,
+                                        const std::string& pointId) {
+    Object* object = document_.mutableObjectById(bodyId);
+    if (!object) {
+        return;
+    }
+    // Системные точки удалять нельзя.
+    for (const AttachmentPoint& ap : object->attachmentPoints) {
+        if (ap.id == pointId && ap.isSystem) {
+            QMessageBox::information(this, tr("Удаление точки крепления"),
+                                     tr("Системную точку крепления нельзя удалить."));
+            return;
+        }
+    }
+    auto& pts = object->attachmentPoints;
+    pts.erase(std::remove_if(pts.begin(), pts.end(),
+                              [&pointId](const AttachmentPoint& ap) {
+                                  return ap.id == pointId;
+                              }),
+              pts.end());
+    markDirty();
+    clearAttachmentPointSelection();
+    refreshAttachmentPointMarkers(bodyId);
+    updatePartStatusDisplay(bodyId);
+    statusBar()->showMessage(tr("Точка крепления удалена"), 3000);
+}
+
+void MainWindow::refreshAttachmentPointMarkers(const std::string& bodyId) {
+    if (!viewer_) {
+        return;
+    }
+    const Result<Object> objectResult = document_.objectById(bodyId);
+    if (!objectResult.isOk()) {
+        viewer_->scene().removeAttachmentPointMarkers(bodyId);
+        return;
+    }
+    viewer_->scene().addOrUpdateAttachmentPointMarkers(bodyId,
+                                                        objectResult.value().attachmentPoints);
+}
+
+void MainWindow::updatePartStatusDisplay(const std::string& bodyId) {
+    if (!partStatusLabel_) {
+        return;
+    }
+    if (bodyId.empty()) {
+        partStatusLabel_->setText(QString());
+        return;
+    }
+    const Result<Object> objectResult = document_.objectById(bodyId);
+    if (!objectResult.isOk()) {
+        partStatusLabel_->setText(QString());
+        return;
+    }
+    const Object& object = objectResult.value();
+
+    // Count enabled attachment points.
+    int enabledPoints = 0;
+    for (const AttachmentPoint& ap : object.attachmentPoints) {
+        if (ap.isEnabled) {
+            ++enabledPoints;
+        }
+    }
+
+    // Try to get mass from BRep geometry.
+    const auto shapeIt = bodyShapes_.find(bodyId);
+    QString massText;
+    QString dimText;
+    if (shapeIt != bodyShapes_.end() && !shapeIt->second.isNull()) {
+        const Result<kernel::ShapeMassProperties> vp = kernel_->volumeProperties(shapeIt->second);
+        if (vp.isOk()) {
+            constexpr double kDefaultDensity = 1050.0; // ABS
+            const double mass = vp.value().volumeM3 * kDefaultDensity;
+            massText = tr("Масса: %1 кг")
+                           .arg(QString::number(mass, 'f', 3));
+        }
+        const Result<kernel::ShapeBounds> bb = kernel_->boundingBox(shapeIt->second);
+        if (bb.isOk()) {
+            const double w = toMillimeters(bb.value().max.x - bb.value().min.x);
+            const double d = toMillimeters(bb.value().max.y - bb.value().min.y);
+            const double h = toMillimeters(bb.value().max.z - bb.value().min.z);
+            dimText = tr("Габариты: %1 × %2 × %3 мм")
+                          .arg(QString::number(w, 'f', 1),
+                               QString::number(d, 'f', 1),
+                               QString::number(h, 'f', 1));
+        }
+    }
+    if (massText.isEmpty()) {
+        massText = tr("Масса: не рассчитана");
+    }
+
+    const QString pointsText =
+        tr("Точки крепления: %1").arg(enabledPoints);
+
+    QString statusText;
+    if (enabledPoints > 0 && !massText.contains(tr("не рассчитана"))) {
+        statusText = tr("Статус: готова к тестированию на БЛА");
+    } else if (enabledPoints == 0) {
+        statusText = tr("Статус: добавьте точку крепления");
+    } else {
+        statusText = tr("Статус: масса не рассчитана");
+    }
+
+    QStringList parts;
+    parts << massText;
+    if (!dimText.isEmpty()) {
+        parts << dimText;
+    }
+    parts << pointsText << statusText;
+    partStatusLabel_->setText(parts.join(QStringLiteral("  |  ")));
+}
+
 std::string MainWindow::partBodyIdForSave() const {
     if (selectionKind_ == SelectionKind::Body) {
         return selectedId_;
@@ -3716,6 +4188,9 @@ std::string MainWindow::partBodyIdForSave() const {
     }
     if (selectionKind_ == SelectionKind::BodyEdge) {
         return selectedEdge_.bodyId;
+    }
+    if (selectionKind_ == SelectionKind::AttachmentPoint) {
+        return selectedAttachmentPoint_.bodyId;
     }
     // Без явного выбора деталь однозначна только в документе с
     // единственным телом.
@@ -3840,6 +4315,41 @@ bool MainWindow::writePartForBody(const std::string& bodyId, const QString& path
         descriptor.attachmentPoints.push_back(std::move(exported));
     }
 
+    // VisualMesh — упакованная preview-сетка из bodyMeshes_.
+    const auto meshIt = bodyMeshes_.find(bodyId);
+    if (meshIt != bodyMeshes_.end() && !meshIt->second.isEmpty()) {
+        const kernel::TriangleMesh& sourceMesh = meshIt->second;
+        bridge::UAVPartVisualMesh visualMesh;
+        visualMesh.source = "occt_triangulation";
+        visualMesh.vertices.reserve(sourceMesh.vertices.size() * 3);
+        for (const kernel::MeshVertex& v : sourceMesh.vertices) {
+            visualMesh.vertices.push_back(static_cast<float>(v.x));
+            visualMesh.vertices.push_back(static_cast<float>(v.y));
+            visualMesh.vertices.push_back(static_cast<float>(v.z));
+        }
+        visualMesh.indices.reserve(sourceMesh.triangles.size() * 3);
+        for (const kernel::MeshTriangle& t : sourceMesh.triangles) {
+            visualMesh.indices.push_back(t.a);
+            visualMesh.indices.push_back(t.b);
+            visualMesh.indices.push_back(t.c);
+        }
+        visualMesh.boundingBoxMin = bounds.value().min;
+        visualMesh.boundingBoxMax = bounds.value().max;
+        visualMesh.valid = true;
+        descriptor.visualMesh = std::move(visualMesh);
+    }
+
+    // ExactGeometry — BRep-байты из OCCT.
+    const Result<std::vector<std::uint8_t>> brepBytes = kernel_->exportBRep(shapeIt->second);
+    if (brepBytes.isOk() && !brepBytes.value().empty()) {
+        bridge::UAVPartExactGeometry exactGeo;
+        exactGeo.payload = brepBytes.value();
+        exactGeo.geometryKernel = "opencascade";
+        exactGeo.representation = "brep_ascii";
+        exactGeo.valid = true;
+        descriptor.exactGeometry = std::move(exactGeo);
+    }
+
     const bridge::UAVPartWriter writer;
     const Result<bridge::UAVPartWriteResult> written =
         writer.writePart(path.toStdString(), descriptor);
@@ -3931,6 +4441,97 @@ void MainWindow::openDocument() {
     rebuildUiFromDocument();
     setClean();
     updateUndoRedoActions();
+}
+
+void MainWindow::openUAVPart() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Открыть деталь"), QString(),
+        tr("Детали UAV (*.uavpart);;Все файлы (*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    bridge::UAVPartReader reader;
+    const Result<bridge::UAVPartReadResult> loaded =
+        reader.readFullPart(path.toStdString());
+    if (!loaded.isOk()) {
+        QMessageBox::warning(this, tr("Ошибка открытия детали"),
+                             QString::fromStdString(loaded.error().message));
+        return;
+    }
+    UAVPartPreviewPanel panel(loaded.value(), path, this);
+    panel.exec();
+    if (panel.requestedAction() == UAVPartPreviewPanel::Action::OpenForEditing) {
+        openPartForEditing(loaded.value(), path);
+    } else {
+        statusBar()->showMessage(
+            tr("Деталь открыта: %1").arg(QFileInfo(path).fileName()), 5000);
+    }
+}
+
+void MainWindow::openPartForEditing(const bridge::UAVPartReadResult& result,
+                                    const QString& filePath) {
+    if (!viewer_ || !kernel_) {
+        return;
+    }
+    const bridge::UAVPartDescriptor& part = result.part;
+    if (!part.exactGeometry.valid || part.exactGeometry.payload.empty()) {
+        QMessageBox::warning(this, tr("Открытие детали для редактирования"),
+                             tr("В файле отсутствует точная геометрия."));
+        return;
+    }
+
+    const cadnext::Result<kernel::ShapeHandle> importedShape =
+        kernel_->importBRep(part.exactGeometry.payload);
+    if (!importedShape.isOk()) {
+        QMessageBox::warning(this, tr("Ошибка импорта геометрии"),
+                             QString::fromStdString(importedShape.error().message));
+        return;
+    }
+
+    Object object;
+    object.id = "object-" + std::to_string(nextObjectNumber_++);
+    object.type = ObjectType::Body;
+    const std::string partName = part.manifest.displayName.empty()
+        ? part.manifest.name : part.manifest.displayName;
+    object.name = partName.empty() ? tr("Импортированная деталь").toStdString() : partName;
+    object.primitive.kind = PrimitiveKind::Box;
+    object.primitive.width = std::max(part.mass.boundingWidth, 0.1);
+    object.primitive.height = std::max(part.mass.boundingHeight, 0.1);
+    object.primitive.depth = std::max(part.mass.boundingDepth, 0.1);
+
+    document_.addObject(object);
+
+    if (evaluator_) {
+        const cadnext::Result<kernel::EvaluatedGeometry> evaluated =
+            evaluator_->evaluateShape(importedShape.value());
+        if (evaluated.isOk() && evaluated.value().isValid &&
+            !evaluated.value().previewMesh.isEmpty()) {
+            bodyShapes_[object.id] = importedShape.value();
+            bodyMeshes_[object.id] = evaluated.value().previewMesh;
+            viewer_->scene().addOrUpdateObjectMesh(object, evaluated.value().previewMesh);
+            refreshBodyFaces(object.id);
+            refreshBodyEdges(object.id);
+        } else {
+            bodyShapes_[object.id] = importedShape.value();
+            viewer_->scene().addObjectNode(object);
+        }
+    } else {
+        bodyShapes_[object.id] = importedShape.value();
+        viewer_->scene().addObjectNode(object);
+    }
+    refreshAttachmentPointMarkers(object.id);
+
+    {
+        const QSignalBlocker blocker(projectTree_);
+        projectTree_->addBodyItem(QString::fromStdString(object.id),
+                                  QString::fromStdString(object.name),
+                                  treeTypeText(object));
+    }
+    selectBody(object.id);
+    markDirty();
+
+    statusBar()->showMessage(
+        tr("Деталь импортирована: %1").arg(QFileInfo(filePath).fileName()), 5000);
 }
 
 bool MainWindow::saveDocument() {
@@ -4214,12 +4815,13 @@ void MainWindow::updateUndoRedoActions() {
 void MainWindow::createMenus() {
     QMenu* fileMenu = menuBar()->addMenu(tr("&Файл"));
     fileMenu->addAction(tr("&Новый"), QKeySequence::New, this, [this]() { newDocument(); });
-    fileMenu->addAction(tr("&Открыть…"), QKeySequence::Open, this,
+    fileMenu->addAction(tr("Открыть CAD-документ…"), QKeySequence::Open, this,
                         [this]() { openDocument(); });
+    fileMenu->addAction(tr("Открыть деталь…"), this, [this]() { openUAVPart(); });
     fileMenu->addSeparator();
-    fileMenu->addAction(tr("&Сохранить"), QKeySequence::Save, this,
+    fileMenu->addAction(tr("Сохранить CAD-документ"), QKeySequence::Save, this,
                         [this]() { saveDocument(); });
-    fileMenu->addAction(tr("Сохранить &как…"), QKeySequence::SaveAs, this,
+    fileMenu->addAction(tr("Сохранить CAD-документ как…"), QKeySequence::SaveAs, this,
                         [this]() { saveDocumentAs(); });
 
     QMenu* editMenu = menuBar()->addMenu(tr("&Правка"));
@@ -4237,6 +4839,8 @@ void MainWindow::createMenus() {
     partMenu->addAction(toolBar_->createSketchOnFaceAction());
     partMenu->addAction(toolBar_->workPlaneFromFaceAction());
     partMenu->addAction(toolBar_->normalToFaceAction());
+    partMenu->addSeparator();
+    partMenu->addAction(toolBar_->addAttachmentPointAction());
     partMenu->addSeparator();
     partMenu->addAction(tr("Сохранить деталь"), this, [this]() { savePart(); });
     partMenu->addAction(tr("Сохранить деталь как .uavpart…"), this,

@@ -28,4 +28,11 @@ bool decodeSimulationProxy(const std::string& payload, UAVPartSimulationProxy& o
 bool decodeCompatibility(const std::string& payload, UAVPartCompatibility& out,
                          std::string& error);
 
+std::string encodeVisualMesh(const UAVPartVisualMesh& mesh);
+std::string encodeExactGeometry(const UAVPartExactGeometry& geo);
+
+bool decodeVisualMesh(const std::string& payload, UAVPartVisualMesh& out, std::string& error);
+bool decodeExactGeometry(const std::string& payload, UAVPartExactGeometry& out,
+                         std::string& error);
+
 } // namespace cadnext::bridge::sections

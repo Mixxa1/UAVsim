@@ -40,26 +40,33 @@ std::vector<std::uint8_t> serializePart(const UAVPartDescriptor& descriptor) {
         UAVPartSectionType type;
         std::string payload;
     };
-    // UAVPart v1: ExactGeometry и VisualMesh не записываются (placeholder
-    // без fake-данных; статус отражён в манифесте).
-    const PendingSection pending[] = {
-        {UAVPartSectionType::Manifest, sections::encodeManifest(descriptor.manifest)},
-        {UAVPartSectionType::Material, sections::encodeMaterial(descriptor.material)},
-        {UAVPartSectionType::MassProperties,
-         sections::encodeMassProperties(descriptor.mass)},
-        {UAVPartSectionType::AttachmentPoints,
-         sections::encodeAttachmentPoints(descriptor.attachmentPoints)},
-        {UAVPartSectionType::SimulationProxy,
-         sections::encodeSimulationProxy(descriptor.simulationProxy)},
-        {UAVPartSectionType::Compatibility,
-         sections::encodeCompatibility(descriptor.compatibility)},
-    };
+    std::vector<PendingSection> pending;
+    pending.push_back({UAVPartSectionType::Manifest,
+                       sections::encodeManifest(descriptor.manifest)});
+    pending.push_back({UAVPartSectionType::Material,
+                       sections::encodeMaterial(descriptor.material)});
+    pending.push_back({UAVPartSectionType::MassProperties,
+                       sections::encodeMassProperties(descriptor.mass)});
+    pending.push_back({UAVPartSectionType::AttachmentPoints,
+                       sections::encodeAttachmentPoints(descriptor.attachmentPoints)});
+    pending.push_back({UAVPartSectionType::SimulationProxy,
+                       sections::encodeSimulationProxy(descriptor.simulationProxy)});
+    pending.push_back({UAVPartSectionType::Compatibility,
+                       sections::encodeCompatibility(descriptor.compatibility)});
+    if (descriptor.visualMesh.valid) {
+        pending.push_back({UAVPartSectionType::VisualMesh,
+                           sections::encodeVisualMesh(descriptor.visualMesh)});
+    }
+    if (descriptor.exactGeometry.valid) {
+        pending.push_back({UAVPartSectionType::ExactGeometry,
+                           sections::encodeExactGeometry(descriptor.exactGeometry)});
+    }
 
     UAVPartHeader header;
     std::memcpy(header.magic, kUAVPartMagic, sizeof(header.magic));
     header.formatVersion = kUAVPartFormatVersion;
     header.writerVersion = UAVPartWriter::kWriterVersion;
-    header.sectionCount = static_cast<std::uint32_t>(std::size(pending));
+    header.sectionCount = static_cast<std::uint32_t>(pending.size());
 
     std::vector<std::uint8_t> bytes(kUAVPartHeaderSize, 0);
     std::vector<UAVPartSectionEntry> entries;

@@ -120,6 +120,14 @@ public:
     // backend exists — callers must not substitute a mesh estimate.
     virtual cadnext::Result<ShapeMassProperties> volumeProperties(const ShapeHandle& shape) = 0;
 
+    // Serialize the shape's exact BRep to a byte array.
+    // OCCT builds use BRepTools::Write ASCII format.
+    virtual cadnext::Result<std::vector<std::uint8_t>> exportBRep(const ShapeHandle& shape) = 0;
+
+    // Deserialize a BRep byte array and register it as a new shape.
+    // OCCT builds parse BRepTools::Write ASCII via BRepTools::Read.
+    virtual cadnext::Result<ShapeHandle> importBRep(const std::vector<std::uint8_t>& brepData) = 0;
+
     virtual bool isShapeValid(const ShapeHandle& shape) const = 0;
 };
 

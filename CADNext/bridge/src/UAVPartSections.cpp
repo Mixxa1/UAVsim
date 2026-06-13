@@ -268,4 +268,96 @@ bool decodeCompatibility(const std::string& payload, UAVPartCompatibility& out,
     return true;
 }
 
+std::string encodeVisualMesh(const UAVPartVisualMesh& mesh) {
+    using json::JsonValue;
+    JsonValue object = JsonValue::makeObject();
+    object.set("source", JsonValue::makeString(mesh.source));
+    object.set("bbMin", vectorToJson(mesh.boundingBoxMin));
+    object.set("bbMax", vectorToJson(mesh.boundingBoxMax));
+    object.set("valid", JsonValue::makeBool(mesh.valid));
+
+    JsonValue verts = JsonValue::makeArray();
+    verts.arrayItems.reserve(mesh.vertices.size());
+    for (float v : mesh.vertices) {
+        verts.arrayItems.push_back(JsonValue::makeNumber(static_cast<double>(v)));
+    }
+    object.set("verts", std::move(verts));
+
+    JsonValue idx = JsonValue::makeArray();
+    idx.arrayItems.reserve(mesh.indices.size());
+    for (std::uint32_t i : mesh.indices) {
+        idx.arrayItems.push_back(JsonValue::makeNumber(static_cast<double>(i)));
+    }
+    object.set("idx", std::move(idx));
+
+    return object.serialize();
+}
+
+bool decodeVisualMesh(const std::string& payload, UAVPartVisualMesh& out, std::string& error) {
+    using json::JsonValue;
+    JsonValue root;
+    if (!parseObjectPayload(payload, root, error)) {
+        return false;
+    }
+    out.source = root.stringOr("source", "");
+    out.valid = root.boolOr("valid", false);
+    out.boundingBoxMin = vectorFromJson(root.member("bbMin"));
+    out.boundingBoxMax = vectorFromJson(root.member("bbMax"));
+
+    const JsonValue* verts = root.member("verts");
+    if (!verts || !verts->isArray()) {
+        error = "VisualMesh: missing vertices array";
+        return false;
+    }
+    out.vertices.reserve(verts->arrayItems.size());
+    for (const JsonValue& v : verts->arrayItems) {
+        if (v.type == JsonValue::Type::Number) {
+            out.vertices.push_back(static_cast<float>(v.numberValue));
+        }
+    }
+
+    const JsonValue* idx = root.member("idx");
+    if (!idx || !idx->isArray()) {
+        error = "VisualMesh: missing indices array";
+        return false;
+    }
+    out.indices.reserve(idx->arrayItems.size());
+    for (const JsonValue& i : idx->arrayItems) {
+        if (i.type == JsonValue::Type::Number) {
+            out.indices.push_back(static_cast<std::uint32_t>(i.numberValue));
+        }
+    }
+    return true;
+}
+
+std::string encodeExactGeometry(const UAVPartExactGeometry& geo) {
+    using json::JsonValue;
+    JsonValue object = JsonValue::makeObject();
+    object.set("geometryKernel", JsonValue::makeString(geo.geometryKernel));
+    object.set("representation", JsonValue::makeString(geo.representation));
+    object.set("valid", JsonValue::makeBool(geo.valid));
+    object.set("brepData",
+               JsonValue::makeString(std::string(geo.payload.begin(), geo.payload.end())));
+    return object.serialize();
+}
+
+bool decodeExactGeometry(const std::string& payload, UAVPartExactGeometry& out,
+                         std::string& error) {
+    using json::JsonValue;
+    JsonValue root;
+    if (!parseObjectPayload(payload, root, error)) {
+        return false;
+    }
+    out.geometryKernel = root.stringOr("geometryKernel", "");
+    out.representation = root.stringOr("representation", "");
+    out.valid = root.boolOr("valid", false);
+    const std::string brepData = root.stringOr("brepData", "");
+    if (brepData.empty() && out.valid) {
+        error = "ExactGeometry: brepData is empty";
+        return false;
+    }
+    out.payload = std::vector<std::uint8_t>(brepData.begin(), brepData.end());
+    return true;
+}
+
 } // namespace cadnext::bridge::sections

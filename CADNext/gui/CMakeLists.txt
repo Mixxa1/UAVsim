@@ -7,6 +7,9 @@ set(CMAKE_AUTOMOC ON)
 # Headers are listed so AUTOMOC picks up Q_OBJECT classes living under
 # include/ (AUTOMOC only auto-discovers headers next to their sources).
 add_library(cadnext_gui
+    include/cadnext/gui/AttachmentPointDialog.hpp
+    include/cadnext/gui/CADPartLibraryService.hpp
+    include/cadnext/gui/FilePreviewAssets.hpp
     include/cadnext/gui/CutExtrudeDialog.hpp
     include/cadnext/gui/EdgeOperationDialog.hpp
     include/cadnext/gui/ExtrudeDialog.hpp
@@ -15,6 +18,10 @@ add_library(cadnext_gui
     include/cadnext/gui/PropertyPanel.hpp
     include/cadnext/gui/SketchToolBar.hpp
     include/cadnext/gui/ToolBar.hpp
+    include/cadnext/gui/UAVPartPreviewPanel.hpp
+    src/AttachmentPointDialog.cpp
+    src/CADPartLibraryService.cpp
+    src/FilePreviewAssets.cpp
     src/CutExtrudeDialog.cpp
     src/EdgeOperationDialog.cpp
     src/ExtrudeDialog.cpp
@@ -23,6 +30,7 @@ add_library(cadnext_gui
     src/PropertyPanel.cpp
     src/SketchToolBar.cpp
     src/ToolBar.cpp
+    src/UAVPartPreviewPanel.cpp
     src/WorkbenchHost.cpp
 )
 

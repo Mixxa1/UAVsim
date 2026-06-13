@@ -1,0 +1,649 @@
+Start testing: Jun 13 01:34 MSK
+----------------------------------------------------------
+1/43 Testing: cadnext_test_sketch_model
+1/43 Test: cadnext_test_sketch_model
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_model"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_model" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_model" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_model" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/43 Testing: cadnext_test_units_mm_format
+2/43 Test: cadnext_test_units_mm_format
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_units_mm_format"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_units_mm_format" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_units_mm_format" end time: Jun 13 01:34 MSK
+"cadnext_test_units_mm_format" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/43 Testing: cadnext_test_sketch_dimension_measurements
+3/43 Test: cadnext_test_sketch_dimension_measurements
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_dimension_measurements"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_dimension_measurements" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_dimension_measurements" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_dimension_measurements" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/43 Testing: cadnext_test_sketch_snap
+4/43 Test: cadnext_test_sketch_snap
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_snap"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_snap" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_snap" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_snap" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/43 Testing: cadnext_test_sketch_plane_mapping
+5/43 Test: cadnext_test_sketch_plane_mapping
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_plane_mapping"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_plane_mapping" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_plane_mapping" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_plane_mapping" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/43 Testing: cadnext_test_sketch_reference_projection
+6/43 Test: cadnext_test_sketch_reference_projection
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_reference_projection"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_reference_projection" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_reference_projection" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_reference_projection" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/43 Testing: cadnext_test_workplane_visibility_policy
+7/43 Test: cadnext_test_workplane_visibility_policy
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_workplane_visibility_policy"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_workplane_visibility_policy" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_workplane_visibility_policy" end time: Jun 13 01:34 MSK
+"cadnext_test_workplane_visibility_policy" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/43 Testing: cadnext_test_sketch2d_view_state
+8/43 Test: cadnext_test_sketch2d_view_state
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch2d_view_state"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch2d_view_state" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch2d_view_state" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch2d_view_state" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/43 Testing: cadnext_test_camera_navigation_state
+9/43 Test: cadnext_test_camera_navigation_state
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_camera_navigation_state"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_camera_navigation_state" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_camera_navigation_state" end time: Jun 13 01:34 MSK
+"cadnext_test_camera_navigation_state" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/43 Testing: cadnext_test_escape_navigation_policy
+10/43 Test: cadnext_test_escape_navigation_policy
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_escape_navigation_policy"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_escape_navigation_policy" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_escape_navigation_policy" end time: Jun 13 01:34 MSK
+"cadnext_test_escape_navigation_policy" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/43 Testing: cadnext_test_view_bounds_policy
+11/43 Test: cadnext_test_view_bounds_policy
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_view_bounds_policy"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_view_bounds_policy" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_view_bounds_policy" end time: Jun 13 01:34 MSK
+"cadnext_test_view_bounds_policy" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/43 Testing: cadnext_test_camera_focus_target
+12/43 Test: cadnext_test_camera_focus_target
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_camera_focus_target"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_camera_focus_target" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_camera_focus_target" end time: Jun 13 01:34 MSK
+"cadnext_test_camera_focus_target" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/43 Testing: cadnext_test_sketch_reference_mapping
+13/43 Test: cadnext_test_sketch_reference_mapping
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_reference_mapping"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_reference_mapping" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_reference_mapping" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_reference_mapping" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/43 Testing: cadnext_test_extrude_parameters
+14/43 Test: cadnext_test_extrude_parameters
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_extrude_parameters"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_extrude_parameters" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_extrude_parameters" end time: Jun 13 01:34 MSK
+"cadnext_test_extrude_parameters" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/43 Testing: cadnext_test_extrude_direction
+15/43 Test: cadnext_test_extrude_direction
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_extrude_direction"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_extrude_direction" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_extrude_direction" end time: Jun 13 01:34 MSK
+"cadnext_test_extrude_direction" time elapsed: 00:00:00
+----------------------------------------------------------
+
+16/43 Testing: cadnext_test_extrude_serialization
+16/43 Test: cadnext_test_extrude_serialization
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_extrude_serialization"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_extrude_serialization" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_extrude_serialization" end time: Jun 13 01:34 MSK
+"cadnext_test_extrude_serialization" time elapsed: 00:00:00
+----------------------------------------------------------
+
+17/43 Testing: cadnext_test_extrude_cut_parameters
+17/43 Test: cadnext_test_extrude_cut_parameters
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_extrude_cut_parameters"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_extrude_cut_parameters" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_extrude_cut_parameters" end time: Jun 13 01:34 MSK
+"cadnext_test_extrude_cut_parameters" time elapsed: 00:00:00
+----------------------------------------------------------
+
+18/43 Testing: cadnext_test_extrude_cut_depth_modes
+18/43 Test: cadnext_test_extrude_cut_depth_modes
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_extrude_cut_depth_modes"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_extrude_cut_depth_modes" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_extrude_cut_depth_modes" end time: Jun 13 01:34 MSK
+"cadnext_test_extrude_cut_depth_modes" time elapsed: 00:00:00
+----------------------------------------------------------
+
+19/43 Testing: cadnext_test_chamfer_parameters
+19/43 Test: cadnext_test_chamfer_parameters
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_chamfer_parameters"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_chamfer_parameters" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_chamfer_parameters" end time: Jun 13 01:34 MSK
+"cadnext_test_chamfer_parameters" time elapsed: 00:00:00
+----------------------------------------------------------
+
+20/43 Testing: cadnext_test_fillet_parameters
+20/43 Test: cadnext_test_fillet_parameters
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_fillet_parameters"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_fillet_parameters" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_fillet_parameters" end time: Jun 13 01:34 MSK
+"cadnext_test_fillet_parameters" time elapsed: 00:00:00
+----------------------------------------------------------
+
+21/43 Testing: cadnext_test_face_reference
+21/43 Test: cadnext_test_face_reference
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_face_reference"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_face_reference" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_face_reference" end time: Jun 13 01:34 MSK
+"cadnext_test_face_reference" time elapsed: 00:00:00
+----------------------------------------------------------
+
+22/43 Testing: cadnext_test_edge_reference
+22/43 Test: cadnext_test_edge_reference
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_edge_reference"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_edge_reference" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_edge_reference" end time: Jun 13 01:34 MSK
+"cadnext_test_edge_reference" time elapsed: 00:00:00
+----------------------------------------------------------
+
+23/43 Testing: cadnext_test_edge_reference_refresh
+23/43 Test: cadnext_test_edge_reference_refresh
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_edge_reference_refresh"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_edge_reference_refresh" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_edge_reference_refresh" end time: Jun 13 01:34 MSK
+"cadnext_test_edge_reference_refresh" time elapsed: 00:00:00
+----------------------------------------------------------
+
+24/43 Testing: cadnext_test_face_mesh_ownership
+24/43 Test: cadnext_test_face_mesh_ownership
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_face_mesh_ownership"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_face_mesh_ownership" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_face_mesh_ownership" end time: Jun 13 01:34 MSK
+"cadnext_test_face_mesh_ownership" time elapsed: 00:00:00
+----------------------------------------------------------
+
+25/43 Testing: cadnext_test_procedural_prism_face_ids
+25/43 Test: cadnext_test_procedural_prism_face_ids
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_procedural_prism_face_ids"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_procedural_prism_face_ids" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_procedural_prism_face_ids" end time: Jun 13 01:34 MSK
+"cadnext_test_procedural_prism_face_ids" time elapsed: 00:00:00
+----------------------------------------------------------
+
+26/43 Testing: cadnext_test_face_sketch_reference
+26/43 Test: cadnext_test_face_sketch_reference
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_face_sketch_reference"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_face_sketch_reference" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_face_sketch_reference" end time: Jun 13 01:34 MSK
+"cadnext_test_face_sketch_reference" time elapsed: 00:00:00
+----------------------------------------------------------
+
+27/43 Testing: cadnext_test_face_selection_resolution
+27/43 Test: cadnext_test_face_selection_resolution
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_face_selection_resolution"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_face_selection_resolution" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_face_selection_resolution" end time: Jun 13 01:34 MSK
+"cadnext_test_face_selection_resolution" time elapsed: 00:00:00
+----------------------------------------------------------
+
+28/43 Testing: cadnext_test_body_face_selection_state
+28/43 Test: cadnext_test_body_face_selection_state
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_body_face_selection_state"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_body_face_selection_state" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_body_face_selection_state" end time: Jun 13 01:34 MSK
+"cadnext_test_body_face_selection_state" time elapsed: 00:00:00
+----------------------------------------------------------
+
+29/43 Testing: cadnext_test_face_workplane_serialization
+29/43 Test: cadnext_test_face_workplane_serialization
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_face_workplane_serialization"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_face_workplane_serialization" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_face_workplane_serialization" end time: Jun 13 01:34 MSK
+"cadnext_test_face_workplane_serialization" time elapsed: 00:00:00
+----------------------------------------------------------
+
+30/43 Testing: cadnext_test_workplane_model
+30/43 Test: cadnext_test_workplane_model
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_workplane_model"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_workplane_model" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_workplane_model" end time: Jun 13 01:34 MSK
+"cadnext_test_workplane_model" time elapsed: 00:00:00
+----------------------------------------------------------
+
+31/43 Testing: cadnext_test_sketch_reference
+31/43 Test: cadnext_test_sketch_reference
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_reference"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_reference" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_reference" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_reference" time elapsed: 00:00:00
+----------------------------------------------------------
+
+32/43 Testing: cadnext_test_sketch_serialization
+32/43 Test: cadnext_test_sketch_serialization
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_serialization"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_serialization" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_serialization" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_serialization" time elapsed: 00:00:00
+----------------------------------------------------------
+
+33/43 Testing: cadnext_test_sketch_profile_detector
+33/43 Test: cadnext_test_sketch_profile_detector
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_sketch_profile_detector"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_sketch_profile_detector" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_sketch_profile_detector" end time: Jun 13 01:34 MSK
+"cadnext_test_sketch_profile_detector" time elapsed: 00:00:00
+----------------------------------------------------------
+
+34/43 Testing: cadnext_test_custom_profile_stability
+34/43 Test: cadnext_test_custom_profile_stability
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_custom_profile_stability"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_custom_profile_stability" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_custom_profile_stability" end time: Jun 13 01:34 MSK
+"cadnext_test_custom_profile_stability" time elapsed: 00:00:00
+----------------------------------------------------------
+
+35/43 Testing: cadnext_test_document
+35/43 Test: cadnext_test_document
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_document"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_document" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_document" end time: Jun 13 01:34 MSK
+"cadnext_test_document" time elapsed: 00:00:00
+----------------------------------------------------------
+
+36/43 Testing: cadnext_test_stub_kernel
+36/43 Test: cadnext_test_stub_kernel
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_stub_kernel"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_stub_kernel" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_stub_kernel" end time: Jun 13 01:34 MSK
+"cadnext_test_stub_kernel" time elapsed: 00:00:00
+----------------------------------------------------------
+
+37/43 Testing: cadnext_test_bridge_export
+37/43 Test: cadnext_test_bridge_export
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_bridge_export"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_bridge_export" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_bridge_export" end time: Jun 13 01:34 MSK
+"cadnext_test_bridge_export" time elapsed: 00:00:00
+----------------------------------------------------------
+
+38/43 Testing: cadnext_test_uavpart_format
+38/43 Test: cadnext_test_uavpart_format
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_uavpart_format"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_uavpart_format" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+test_uavpart_format: OK
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_uavpart_format" end time: Jun 13 01:34 MSK
+"cadnext_test_uavpart_format" time elapsed: 00:00:00
+----------------------------------------------------------
+
+39/43 Testing: cadnext_test_primitive_object
+39/43 Test: cadnext_test_primitive_object
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_primitive_object"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_primitive_object" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_primitive_object" end time: Jun 13 01:34 MSK
+"cadnext_test_primitive_object" time elapsed: 00:00:00
+----------------------------------------------------------
+
+40/43 Testing: cadnext_test_document_editing
+40/43 Test: cadnext_test_document_editing
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_document_editing"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_document_editing" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_document_editing" end time: Jun 13 01:34 MSK
+"cadnext_test_document_editing" time elapsed: 00:00:00
+----------------------------------------------------------
+
+41/43 Testing: cadnext_test_document_serialization
+41/43 Test: cadnext_test_document_serialization
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_document_serialization"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_document_serialization" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_document_serialization" end time: Jun 13 01:34 MSK
+"cadnext_test_document_serialization" time elapsed: 00:00:00
+----------------------------------------------------------
+
+42/43 Testing: cadnext_test_command_stack
+42/43 Test: cadnext_test_command_stack
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_command_stack"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_command_stack" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_command_stack" end time: Jun 13 01:34 MSK
+"cadnext_test_command_stack" time elapsed: 00:00:00
+----------------------------------------------------------
+
+43/43 Testing: cadnext_test_geometry_evaluator_fallback
+43/43 Test: cadnext_test_geometry_evaluator_fallback
+Command: "/Users/misha/UAVsim/CADNext/build/tests/cadnext_test_geometry_evaluator_fallback"
+Directory: /Users/misha/UAVsim/CADNext/build/tests
+"cadnext_test_geometry_evaluator_fallback" start time: Jun 13 01:34 MSK
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"cadnext_test_geometry_evaluator_fallback" end time: Jun 13 01:34 MSK
+"cadnext_test_geometry_evaluator_fallback" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Jun 13 01:34 MSK

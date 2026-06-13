@@ -279,6 +279,12 @@ cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateFillet(
     return finishShapeEvaluation(std::move(geometry));
 }
 
+cadnext::Result<EvaluatedGeometry> GeometryEvaluator::evaluateShape(const ShapeHandle& shape) {
+    EvaluatedGeometry geometry;
+    geometry.shape = shape;
+    return finishShapeEvaluation(std::move(geometry));
+}
+
 cadnext::Result<EvaluatedGeometry> GeometryEvaluator::finishShapeEvaluation(
     EvaluatedGeometry geometry) {
     if (!kernel_.isShapeValid(geometry.shape)) {
