@@ -17,7 +17,7 @@ class UAVPartPreviewPanel : public QDialog {
     Q_OBJECT
 
 public:
-    enum class Action { None, OpenForEditing };
+    enum class Action { None, OpenForEditing, TestOnUAV };
 
     // Priority-ordered preview modes (highest = best):
     //   MeshPreview      — real 3D mesh from VisualMesh section

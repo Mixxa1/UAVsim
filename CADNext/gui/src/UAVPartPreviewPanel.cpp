@@ -1,6 +1,8 @@
 #include "cadnext/gui/UAVPartPreviewPanel.hpp"
 #include "cadnext/gui/CADPartLibraryService.hpp"
 #include "cadnext/gui/FilePreviewAssets.hpp"
+#include "cadnext/gui/UAVPayloadCompatibilityChecker.hpp"
+#include "cadnext/gui/UAVSelectionDialog.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -511,21 +513,37 @@ UAVPartPreviewPanel::UAVPartPreviewPanel(const bridge::UAVPartReadResult& result
     root->addWidget(makeSep());
 
     auto* addToLibBtn    = new QPushButton(tr("Добавить в библиотеку деталей"));
+    auto* testOnUAVBtn   = new QPushButton(tr("Тестировать на БЛА"));
     auto* openForEditBtn = new QPushButton(tr("Открыть для редактирования"));
     auto* closeBtn       = new QPushButton(tr("Закрыть"));
 
+    // Preflight: determine whether "Тестировать на БЛА" can be enabled.
+    const UAVPartPreflightData preflightData =
+        UAVPayloadCompatibilityChecker::buildPreflightData(part);
+    const bool canTest = preflightData.preflightError.empty();
+    testOnUAVBtn->setEnabled(canTest);
+    if (!canTest) {
+        testOnUAVBtn->setToolTip(
+            tr("Недоступно: %1")
+                .arg(QString::fromStdString(preflightData.preflightError)));
+    }
+
     const bool canEdit = manifest.geometryStored && part.exactGeometry.valid;
     openForEditBtn->setEnabled(canEdit);
-    openForEditBtn->setDefault(canEdit);
     if (!canEdit) {
         openForEditBtn->setToolTip(
             tr("Недоступно: в файле отсутствует точная CAD-геометрия."));
     }
-    closeBtn->setDefault(!canEdit);
+
+    // Default button priority: test > edit > close.
+    testOnUAVBtn->setDefault(canTest);
+    if (!canTest) openForEditBtn->setDefault(canEdit);
+    if (!canTest && !canEdit) closeBtn->setDefault(true);
 
     auto* btnRow = new QHBoxLayout;
     btnRow->addWidget(addToLibBtn);
     btnRow->addStretch();
+    btnRow->addWidget(testOnUAVBtn);
     btnRow->addWidget(openForEditBtn);
     btnRow->addWidget(closeBtn);
     root->addLayout(btnRow);
@@ -535,6 +553,13 @@ UAVPartPreviewPanel::UAVPartPreviewPanel(const bridge::UAVPartReadResult& result
         requestedAction_ = Action::OpenForEditing;
         accept();
     });
+
+    // Capture by value so the lambda is safe after the constructor returns.
+    connect(testOnUAVBtn, &QPushButton::clicked, this,
+            [this, preflightData, displayName]() {
+                UAVSelectionDialog dlg(preflightData, displayName, this);
+                dlg.exec();
+            });
     connect(addToLibBtn, &QPushButton::clicked, this, [this, filePath]() {
         CADPartLibraryService::instance().addPart(filePath);
         QMessageBox::information(this, tr("Библиотека деталей"),
