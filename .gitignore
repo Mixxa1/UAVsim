@@ -1,11 +1,8 @@
-# macOS
-.DS_Store
-
 # Xcode / Swift build artifacts
 DerivedData/
 .DerivedData/
+xcuserdata/
 *.xcuserstate
-*.xcuserdata/
 *.moved-aside
 *.xccheckout
 *.xcscmblueprint
@@ -16,11 +13,69 @@ DerivedData/
 .swift-module-cache/
 
 # Local derived data variants
-.deriveddata-*
+.deriveddata-*/
 .codex-derived-data/
 
-# CADNext local CMake build artifacts
-CADNext/build/
-CADNext/build-gui/
-CADNext/build-occt/
-CADNext/build-gui-occt/
+
+# CMake / CADNext build artifacts
+build/
+build-*/
+cmake-build-*/
+out/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Ninja / native build artifacts
+.ninja_deps
+.ninja_log
+*.ninja
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.app
+*.bin
+
+# macOS / Finder
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+
+# IDEs
+*.pro.user
+*.pro.user.*
+CMakeLists.txt.user
+.idea/
+.vscode/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs / temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
