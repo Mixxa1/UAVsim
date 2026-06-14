@@ -1,1 +1,0 @@
-/Library/Developer/CommandLineTools/usr/bin/c++ -g -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cadnext_test_document_serialization.dir/test_document_serialization.cpp.o -o cadnext_test_document_serialization  ../core/libcadnext_core.a

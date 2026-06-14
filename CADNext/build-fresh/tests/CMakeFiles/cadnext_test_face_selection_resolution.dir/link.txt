@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cadnext_test_face_selection_resolution.dir/test_face_selection_resolution.cpp.o -o cadnext_test_face_selection_resolution  ../core/libcadnext_core.a
