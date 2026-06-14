@@ -16,6 +16,7 @@ xcuserdata/
 .deriveddata-*/
 .codex-derived-data/
 
+<<<<<<< HEAD
 
 # CMake / CADNext build artifacts
 build/
@@ -82,3 +83,16 @@ env/
 *.bak
 *.swp
 *.swo
+
+# CADNext local CMake build artifacts
+CADNext/build/
+CADNext/build-gui/
+CADNext/build-occt/
+CADNext/build-gui-occt/
+
+# CADNext local CMake build directories
+CADNext/build/
+CADNext/build-*/
+CADNext/cmake-build-*/
+CADNext/out/
+>>>>>>> eb5bedc9 (Ignore CADNext local build directories)
