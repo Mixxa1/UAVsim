@@ -232,6 +232,7 @@
 		100000000000000000000368 /* MountedCADPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000367 /* MountedCADPayload.swift */; };
 		10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000369 /* SimulationLaunchConfiguration.swift */; };
 		10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036B /* CADPayloadHandoffService.swift */; };
+		10000000000000000000036E /* OnlineSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036D /* OnlineSessionModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -463,6 +464,7 @@
 		100000000000000000000367 /* MountedCADPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountedCADPayload.swift; sourceTree = "<group>"; };
 		100000000000000000000369 /* SimulationLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationLaunchConfiguration.swift; sourceTree = "<group>"; };
 		10000000000000000000036B /* CADPayloadHandoffService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADPayloadHandoffService.swift; sourceTree = "<group>"; };
+		10000000000000000000036D /* OnlineSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineSessionModels.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -527,6 +529,7 @@
 				1000000000000000000002B8 /* FixedWingAssistMode.swift */,
 				100000000000000000000110 /* DroneModelProfile.swift */,
 				100000000000000000000367 /* MountedCADPayload.swift */,
+				10000000000000000000036D /* OnlineSessionModels.swift */,
 				10000000000000000000013D /* PayloadConfiguration.swift */,
 				10000000000000000000013F /* PayloadCapabilityCheck.swift */,
 				10000000000000000000013E /* PayloadState.swift */,
@@ -1116,6 +1119,7 @@
 				100000000000000000000368 /* MountedCADPayload.swift in Sources */,
 				10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */,
 				10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */,
+				10000000000000000000036E /* OnlineSessionModels.swift in Sources */,
 				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

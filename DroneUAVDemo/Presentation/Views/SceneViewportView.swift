@@ -74,6 +74,13 @@ struct SceneViewportView: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
+                if let badgeText = viewModel.onlineSessionBadgeText {
+                    OnlineSessionBadgeView(
+                        badgeText: badgeText,
+                        detailText: viewModel.onlineSessionDetailText
+                    )
+                }
+
                 if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
                     TerrainMapOverlayView(
                         snapshot: viewModel.terrainMapSnapshot,
@@ -93,6 +100,31 @@ struct SceneViewportView: View {
             .padding(.trailing, 12)
         }
         .background(Color.black)
+    }
+}
+
+private struct OnlineSessionBadgeView: View {
+    let badgeText: String
+    let detailText: String?
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(badgeText)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textPrimary)
+            if let detailText, !detailText.isEmpty {
+                Text(detailText)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(GroundControlPalette.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+        )
     }
 }
 

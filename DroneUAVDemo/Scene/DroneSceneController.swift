@@ -66,6 +66,7 @@ final class DroneSceneController {
     private let payloadDropCameraController = PayloadDropCameraController()
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
+    private let spectatorCameraNode = SCNNode()
 
     private let sunLightNode: SCNNode
     private let gridNode: SCNNode
@@ -196,12 +197,15 @@ final class DroneSceneController {
         configureCameraNode(payloadDropCameraController.cameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(orbitCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(topCameraNode, fov: initialProfile.cameraPreset.fpvFov)
+        configureCameraNode(spectatorCameraNode, fov: initialProfile.cameraPreset.fpvFov)
 
         followRigNode.name = "followRigNode"
         followRigNode.addChildNode(followCameraNode)
         scene.rootNode.addChildNode(followRigNode)
         scene.rootNode.addChildNode(orbitCameraNode)
         scene.rootNode.addChildNode(topCameraNode)
+        spectatorCameraNode.name = "spectatorCameraNode"
+        scene.rootNode.addChildNode(spectatorCameraNode)
 
         fpvPresentationRootNode.name = "fpvPresentationRootNode"
         fpvYawNode.name = "fpvYawMount"
@@ -285,6 +289,8 @@ final class DroneSceneController {
             return topCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
+        case .spectatorFree:
+            return spectatorCameraNode
         }
     }
 
@@ -800,7 +806,7 @@ final class DroneSceneController {
         case .fpv:
             fpvLookAngles.x = (fpvLookAngles.x + yawDelta).clamped(to: -0.9...0.9)
             fpvLookAngles.y = (fpvLookAngles.y + pitchDelta).clamped(to: -0.7...0.7)
-        case .follow, .orbit, .top, .payload:
+        case .follow, .orbit, .top, .payload, .spectatorFree:
             return
         }
     }
@@ -819,6 +825,8 @@ final class DroneSceneController {
         case .top:
             topLookAngles = .zero
         case .payload:
+            return
+        case .spectatorFree:
             return
         }
     }
@@ -840,7 +848,7 @@ final class DroneSceneController {
             orbitLookAngles = .zero
         case .top:
             topLookAngles = .zero
-        case .free, .follow, .fpv, .payload:
+        case .free, .follow, .fpv, .payload, .spectatorFree:
             break
         }
     }
@@ -913,6 +921,22 @@ final class DroneSceneController {
         fpvPitchNode.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
         fpvPitchNode.simdPosition = .zero
         payloadDropCameraController.reset()
+    }
+
+    func updateSpectatorCamera(_ spectator: SpectatorCameraState, fov: Float) {
+        let safePosition = SIMD3<Float>(
+            spectator.position.x.isFinite ? spectator.position.x : 0.0,
+            spectator.position.y.isFinite ? spectator.position.y : 2.0,
+            spectator.position.z.isFinite ? spectator.position.z : 0.0
+        )
+        spectatorCameraNode.simdPosition = safePosition
+        spectatorCameraNode.eulerAngles = SCNVector3(
+            spectator.pitch.isFinite ? -spectator.pitch : 0.0,
+            spectator.yaw.isFinite ? spectator.yaw : 0.0,
+            0.0
+        )
+        spectatorCameraNode.camera?.fieldOfView = CGFloat(fov.clamped(to: 30.0...110.0))
+        spectatorCameraNode.camera?.zNear = 0.02
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
@@ -1440,9 +1464,11 @@ final class DroneSceneController {
         fpvCameraNode.camera?.fieldOfView = fov
         topCameraNode.camera?.fieldOfView = fov
         freeCameraNode.camera?.fieldOfView = fov
+        spectatorCameraNode.camera?.fieldOfView = fov
         fpvCameraNode.camera?.zNear = CGFloat(max(0.015, settings.fpv.nearClip.clamped(to: 0.005...0.25)))
         topCameraNode.camera?.zNear = 0.03
         freeCameraNode.camera?.zNear = 0.01
+        spectatorCameraNode.camera?.zNear = 0.02
         payloadDropCameraController.updateCameraProperties(fov: Float(fov), zNear: 0.025)
         if settings.mode == .payload,
            deltaTime <= 0.0001,

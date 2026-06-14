@@ -542,6 +542,10 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isMissionReplayRecording: Bool = false
     @Published private(set) var lastMissionReplaySession: MissionReplaySession?
     @Published private(set) var lastMissionReport: MissionReport?
+    @Published var onlineSessionState: OnlineSessionState?
+    @Published var isOnlineTrialActive: Bool
+    @Published var localOnlineRole: OnlineParticipantRole?
+    @Published private(set) var spectatorCameraState: SpectatorCameraState?
 
     let bindingsViewModel: BindingsViewModel
     let compassViewModel: CompassViewModel
@@ -557,11 +561,68 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var availableCameraModes: [CameraMode] {
+        if localOnlineRole == .spectator {
+            return [.spectatorFree]
+        }
+
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
             modes.append(.payload)
         }
+        if cameraConfiguration.mode == .spectatorFree {
+            modes.append(.spectatorFree)
+        }
         return modes
+    }
+
+    var hasLocalFlightAuthority: Bool {
+        guard isOnlineTrialActive else {
+            return true
+        }
+        guard let session = onlineSessionState,
+              let localParticipant = session.localParticipant else {
+            return false
+        }
+        return localParticipant.isHost && localParticipant.role == .flight
+    }
+
+    var isLocalOnlineHost: Bool {
+        guard isOnlineTrialActive else {
+            return true
+        }
+        return onlineSessionState?.localParticipant?.isHost == true
+    }
+
+    var onlineSessionBadgeText: String? {
+        guard let session = onlineSessionState else {
+            return nil
+        }
+        if session.mode == .server {
+            return NSLocalizedString("online.badge.server_unavailable", comment: "")
+        }
+        guard let local = session.localParticipant else {
+            return nil
+        }
+        let side = local.isHost
+            ? NSLocalizedString("online.badge.lan_host", comment: "")
+            : NSLocalizedString("online.badge.lan_client", comment: "")
+        let role = local.role == .flight
+            ? NSLocalizedString("online.role.flight.badge", comment: "")
+            : NSLocalizedString("online.badge.spectator", comment: "")
+        return "\(side) · \(role)"
+    }
+
+    var onlineSessionDetailText: String? {
+        guard let session = onlineSessionState else {
+            return nil
+        }
+        if localOnlineRole == .spectator {
+            return NSLocalizedString("online.spectator.no_control", comment: "")
+        }
+        if case let .failed(message) = session.connectionState {
+            return message
+        }
+        return nil
     }
 
     var missionStatusLabels: [String] {
@@ -741,6 +802,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var resolvedInputState: ResolvedControlState = .neutral
+    private var cameraModeBeforeSpectator: CameraMode = .follow
     private var autoFlightGoal: SIMD3<Float>?
     private var autoFlightGoalIndex: Int = 0
     private var returnHomeStage: ReturnHomeStage = .idle
@@ -1251,6 +1313,10 @@ final class DroneSimulationViewModel: ObservableObject {
         self.isCompassVisible = false
         self.payloadCameraStatus = .inactive
         self.isPayloadCameraAutoSwitchEnabled = false
+        self.onlineSessionState = nil
+        self.isOnlineTrialActive = false
+        self.localOnlineRole = nil
+        self.spectatorCameraState = nil
         self.telemetry = .zero
         self.cachedDiagnostics = .zero
 
@@ -1304,35 +1370,127 @@ final class DroneSimulationViewModel: ObservableObject {
         remoteInputProvider.ingestRemotePacket(packet)
     }
 
+    func startLANHost(displayName: String) {
+        let name = sanitizedParticipantName(displayName)
+        let participant = OnlineParticipant(
+            id: UUID(),
+            displayName: name,
+            role: .flight,
+            isHost: true,
+            isLocal: true
+        )
+        onlineSessionState = OnlineSessionState(
+            mode: .lan,
+            connectionState: .hosting,
+            localParticipant: participant,
+            participants: [participant],
+            hostAddress: nil,
+            port: OnlineSessionState.defaultPort
+        )
+        isOnlineTrialActive = true
+        localOnlineRole = .flight
+        leaveSpectatorCameraMode()
+        ensureSimulationRunning()
+    }
+
+    func joinLANSession(host: String, displayName: String, role requestedRole: OnlineParticipantRole) {
+        let name = sanitizedParticipantName(displayName)
+        let hostAddress = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedRole: OnlineParticipantRole = requestedRole == .flight ? .spectator : requestedRole
+        let connectionState: OnlineSessionConnectionState = requestedRole == .flight
+            ? .failed("Flight role pending / unavailable")
+            : .joining
+        let participant = OnlineParticipant(
+            id: UUID(),
+            displayName: name,
+            role: resolvedRole,
+            isHost: false,
+            isLocal: true
+        )
+        onlineSessionState = OnlineSessionState(
+            mode: .lan,
+            connectionState: connectionState,
+            localParticipant: participant,
+            participants: [participant],
+            hostAddress: hostAddress.isEmpty ? nil : hostAddress,
+            port: OnlineSessionState.defaultPort
+        )
+        isOnlineTrialActive = true
+        setLocalOnlineRole(resolvedRole)
+        ensureSimulationRunning()
+    }
+
+    func leaveOnlineSession() {
+        onlineSessionState = nil
+        isOnlineTrialActive = false
+        localOnlineRole = nil
+        leaveSpectatorCameraMode()
+        keyboardInputService.setInputProcessingMode(.flight)
+        keyboardInputService.resetTransientState()
+        inputManager.reset()
+    }
+
+    func setLocalOnlineRole(_ role: OnlineParticipantRole) {
+        localOnlineRole = role
+        if var session = onlineSessionState,
+           var localParticipant = session.localParticipant {
+            localParticipant.role = role
+            session.localParticipant = localParticipant
+            session.participants = session.participants.map { participant in
+                participant.isLocal ? localParticipant : participant
+            }
+            onlineSessionState = session
+        }
+
+        switch role {
+        case .flight:
+            leaveSpectatorCameraMode()
+            keyboardInputService.setInputProcessingMode(.flight)
+        case .spectator:
+            enterSpectatorCameraMode()
+            keyboardInputService.setInputProcessingMode(.spectator)
+        }
+        keyboardInputService.resetTransientState()
+        inputManager.reset()
+    }
+
     func setX(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.x = value }, markManual: true, fixedWingManualOverrideAxes: .all)
     }
 
     func setY(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.y = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setZ(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.z = value }, markManual: true, fixedWingManualOverrideAxes: .all)
     }
 
     func setRoll(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.roll = value }, markManual: true, fixedWingManualOverrideAxes: .turn)
     }
 
     func setPitch(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.pitch = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setYaw(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.yaw = value }, markManual: true, fixedWingManualOverrideAxes: .turn)
     }
 
     func setThrottle(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         updateControlValues({ $0.throttle = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setPayloadType(_ type: PayloadType) {
+        guard hasLocalFlightAuthority else { return }
         guard payloadDraftConfiguration.payloadType != type else {
             return
         }
@@ -1350,6 +1508,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadMass(_ value: Double) {
+        guard hasLocalFlightAuthority else { return }
         let clamped = Float(max(0.0, min(value, 5000.0)))
         guard abs(payloadDraftConfiguration.payloadMass - clamped) > 0.0001 else {
             return
@@ -1363,6 +1522,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadCustomName(_ value: String) {
+        guard hasLocalFlightAuthority else { return }
         guard payloadDraftConfiguration.customName != value else {
             return
         }
@@ -1375,6 +1535,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func attachPayload() {
+        guard hasLocalFlightAuthority else {
+            payloadStatusMessageKey = "online.spectator.no_control"
+            return
+        }
         let capabilityCheck = PayloadController.capabilityCheck(
             for: payloadDraftConfiguration,
             profile: activeUAVProfile
@@ -1405,6 +1569,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func removePayload() {
+        guard hasLocalFlightAuthority else {
+            payloadStatusMessageKey = "online.spectator.no_control"
+            return
+        }
         guard installedPayloadConfiguration != nil || payloadState == .attached else {
             return
         }
@@ -1430,6 +1598,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func releasePayload() {
+        guard hasLocalFlightAuthority else {
+            payloadStatusMessageKey = "online.spectator.no_control"
+            return
+        }
         guard installedPayloadConfiguration != nil, payloadState == .attached else {
             payloadStatusMessageKey = "payload.message.no_payload_attached"
             refreshPayloadRuntimeState()
@@ -1472,6 +1644,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func arm() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         guard physicalState.permitsRearm, !damageState.isFlightCritical else {
             return
@@ -1489,6 +1664,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func disarm(forceEmergency: Bool = false, preserveCrashDynamics: Bool = false) {
+        guard hasLocalFlightAuthority || forceEmergency else {
+            return
+        }
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_disarmed")
         isArmed = false
@@ -1519,6 +1697,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func reset() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         clearMissionPlan()
         clearTargetMarker()
@@ -1679,6 +1860,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func takeoff() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         guard isArmed else {
             return
@@ -1715,6 +1899,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func land() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_landing")
@@ -1740,6 +1927,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func hover() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_hover")
@@ -1758,6 +1948,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func activateAutoPath() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_auto_path")
         guard fixedWingAutonomousRouteExecutionEnabled else {
@@ -1786,6 +1979,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func activateReturnHome(reason: String = "user_requested_return_home") {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_return_home")
         guard fixedWingAutonomousRouteExecutionEnabled else {
@@ -1804,6 +2000,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func activateEmergencyStop() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_emergency_stop")
@@ -1848,10 +2047,16 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func togglePayloadPanel() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         isPayloadPanelVisible.toggle()
     }
 
     func setPayloadPanelVisible(_ visible: Bool) {
+        guard hasLocalFlightAuthority || !visible else {
+            return
+        }
         isPayloadPanelVisible = visible
     }
 
@@ -1878,6 +2083,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func openMissionMap() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         refreshTerrainMapSnapshot(recordTrail: false)
         workingTacticalMissionDraft = committedTacticalMissionDraft
         tacticalMapMode = .waypoint
@@ -1900,11 +2108,17 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func cancelMissionPlanningChanges() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         workingTacticalMissionDraft = committedTacticalMissionDraft
         refreshTacticalMapState()
     }
 
     func setTacticalMapMode(_ mode: TacticalMapMode) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard tacticalMapMode != mode else {
             return
         }
@@ -1914,6 +2128,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handleTacticalMapTap(at planarPosition: SIMD2<Float>) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -1947,6 +2164,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalLaunchMode(_ launchMode: LaunchMode) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -1962,6 +2182,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalLaunchHeading(_ headingDegrees: Float) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -1977,6 +2200,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func clearTacticalLaunchObject() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -1991,6 +2217,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func removeLastTacticalWaypoint() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -2005,6 +2234,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func clearTacticalRoute() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -2019,6 +2251,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func clearTacticalZones() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -2036,6 +2271,9 @@ final class DroneSimulationViewModel: ObservableObject {
         type: MissionZoneType,
         radius: Float
     ) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -2053,6 +2291,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalMinimumAltitude(_ altitudeMeters: Float) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         updateWorkingMissionConstraints { constraints in
             constraints.altitude.minimumMeters = max(0.0, altitudeMeters)
             constraints.altitude.maximumMeters = max(
@@ -2063,6 +2304,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalMaximumAltitude(_ altitudeMeters: Float) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         updateWorkingMissionConstraints { constraints in
             constraints.altitude.maximumMeters = max(0.0, altitudeMeters)
             constraints.altitude.minimumMeters = min(
@@ -2073,6 +2317,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalMinimumSpeed(_ speedMetersPerSecond: Float) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         updateWorkingMissionConstraints { constraints in
             constraints.speed.minimumMetersPerSecond = max(0.0, speedMetersPerSecond)
             constraints.speed.maximumMetersPerSecond = max(
@@ -2083,6 +2330,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalMaximumSpeed(_ speedMetersPerSecond: Float) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         updateWorkingMissionConstraints { constraints in
             constraints.speed.maximumMetersPerSecond = max(0.1, speedMetersPerSecond)
             constraints.speed.minimumMetersPerSecond = min(
@@ -2093,6 +2343,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func saveTacticalMissionDraft() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard tacticalMapState.draftStatus.canSave else {
             refreshTacticalMapState()
             return
@@ -2107,6 +2360,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private func updateWorkingMissionConstraints(
         _ update: (inout MissionConstraints) -> Void
     ) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -2121,6 +2377,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func prepareMission() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -2169,6 +2428,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func startMissionExecution() {
+        guard hasLocalFlightAuthority else {
+            refreshMissionStatus()
+            return
+        }
         recordMissionEvents([
             missionEventMapper.missionStartRequestedEvent(
                 plan: currentMissionPlan,
@@ -2248,6 +2511,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func pauseMissionExecution() {
+        guard hasLocalFlightAuthority else {
+            refreshMissionStatus()
+            return
+        }
         guard missionExecutionState.canPause else {
             refreshMissionStatus()
             return
@@ -2269,6 +2536,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func resumeMissionExecution() {
+        guard hasLocalFlightAuthority else {
+            refreshMissionStatus()
+            return
+        }
         refreshMissionStatus()
 
         guard missionExecutionState.canResume else {
@@ -2332,6 +2603,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func abortMissionExecution() {
+        guard hasLocalFlightAuthority else {
+            refreshMissionStatus()
+            return
+        }
         guard missionExecutionState.canAbort else {
             refreshMissionStatus()
             return
@@ -2424,6 +2699,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTargetMarker(at planarPosition: SIMD2<Float>) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard !missionExecutionState.isMissionActive else {
             refreshMissionStatus()
             return
@@ -2443,6 +2721,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func clearTargetMarker() {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard activeRouteTargetSource != .mission else {
             refreshMissionStatus()
             return
@@ -2552,6 +2833,10 @@ final class DroneSimulationViewModel: ObservableObject {
     // MARK: - Camera
 
     func setCameraMode(_ mode: CameraMode) {
+        if localOnlineRole == .spectator, mode != .spectatorFree {
+            return
+        }
+
         let oldMode = cameraConfiguration.mode
         guard oldMode != mode else {
             refreshPayloadCameraStatus()
@@ -2574,6 +2859,11 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func cycleCameraMode() {
+        if localOnlineRole == .spectator {
+            setCameraMode(.spectatorFree)
+            return
+        }
+
         let oldMode = cameraConfiguration.mode
         if oldMode == .payload {
             payloadCameraController.leavePayloadViewManually()
@@ -2628,6 +2918,9 @@ final class DroneSimulationViewModel: ObservableObject {
     func setCameraZoomSensitivity(_ value: Double) { cameraConfiguration.free.zoomSensitivity = Float(value).clamped(to: 0.2...3.0) }
 
     func setFlightControlMode(_ mode: FlightControlMode) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         flightControlMode = mode
     }
 
@@ -2766,6 +3059,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
+        if localOnlineRole == .spectator, cameraConfiguration.mode == .spectatorFree {
+            applySpectatorLook(deltaX: deltaX, deltaY: deltaY)
+            return
+        }
         guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             return
         }
@@ -2783,6 +3080,115 @@ final class DroneSimulationViewModel: ObservableObject {
             atTime: time,
             isActive: cameraMode == .payload
         )
+        if cameraMode == .spectatorFree,
+           let spectatorCameraState {
+            sceneController.updateSpectatorCamera(spectatorCameraState, fov: cameraConfiguration.fov)
+        }
+    }
+
+    private func enterSpectatorCameraMode() {
+        if cameraConfiguration.mode != .spectatorFree {
+            cameraModeBeforeSpectator = cameraConfiguration.mode == .payload ? .follow : cameraConfiguration.mode
+        }
+        if spectatorCameraState == nil {
+            spectatorCameraState = SpectatorCameraState.initial(near: finiteVector(state.position, fallback: lastFiniteState.position))
+        }
+        let previousMode = cameraConfiguration.mode
+        cameraConfiguration.mode = .spectatorFree
+        syncCameraSystem(from: previousMode)
+    }
+
+    private func leaveSpectatorCameraMode() {
+        guard cameraConfiguration.mode == .spectatorFree else {
+            spectatorCameraState = nil
+            return
+        }
+        let previousMode = cameraConfiguration.mode
+        let restoreMode = cameraModeBeforeSpectator == .spectatorFree ? .follow : cameraModeBeforeSpectator
+        spectatorCameraState = nil
+        cameraConfiguration.mode = restoreMode
+        syncCameraSystem(from: previousMode)
+    }
+
+    private func applySpectatorLook(deltaX: Float, deltaY: Float) {
+        guard var spectator = spectatorCameraState else {
+            spectatorCameraState = SpectatorCameraState.initial(near: finiteVector(state.position, fallback: lastFiniteState.position))
+            return
+        }
+        let yawSign: Float = cameraConfiguration.invertLookX ? -1.0 : 1.0
+        let pitchSign: Float = cameraConfiguration.invertLookY ? -1.0 : 1.0
+        spectator.yaw += deltaX * spectator.mouseSensitivity * yawSign
+        spectator.pitch = (spectator.pitch - deltaY * spectator.mouseSensitivity * pitchSign)
+            .clamped(to: Float(-85.0).degreesToRadians...Float(85.0).degreesToRadians)
+        spectator.yaw = finiteFloat(spectator.yaw, fallback: 0.0)
+        spectator.pitch = finiteFloat(spectator.pitch, fallback: -0.25)
+        spectatorCameraState = clampedSpectatorCameraState(spectator)
+    }
+
+    private func updateSpectatorCameraMovement(
+        deltaTime: Float,
+        controlState: ResolvedControlState
+    ) {
+        guard localOnlineRole == .spectator,
+              cameraConfiguration.mode == .spectatorFree else {
+            return
+        }
+        guard deltaTime > 0.0 else {
+            if let spectatorCameraState {
+                sceneController.updateSpectatorCamera(spectatorCameraState, fov: cameraConfiguration.fov)
+            }
+            return
+        }
+
+        var spectator = spectatorCameraState ?? SpectatorCameraState.initial(near: finiteVector(state.position, fallback: lastFiniteState.position))
+        let yaw = finiteFloat(spectator.yaw, fallback: 0.0)
+        let pitch = finiteFloat(spectator.pitch, fallback: -0.25)
+        let forward = simd_normalize(
+            SIMD3<Float>(
+                sin(yaw) * cos(pitch),
+                sin(pitch),
+                -cos(yaw) * cos(pitch)
+            )
+        )
+        let right = simd_normalize(SIMD3<Float>(cos(yaw), 0.0, sin(yaw)))
+        let moveIntent = forward * Float(controlState.pitch) + right * Float(controlState.roll)
+        if simd_length_squared(moveIntent) > 0.0001 {
+            let direction = simd_normalize(moveIntent)
+            let speed = spectator.moveSpeed * (controlState.boostMode ? spectator.fastMoveMultiplier : 1.0)
+            spectator.position += direction * speed * deltaTime
+        }
+        spectator.yaw = yaw
+        spectator.pitch = pitch.clamped(to: Float(-85.0).degreesToRadians...Float(85.0).degreesToRadians)
+        spectator = clampedSpectatorCameraState(spectator)
+        spectatorCameraState = spectator
+        sceneController.updateSpectatorCamera(spectator, fov: cameraConfiguration.fov)
+    }
+
+    private func clampedSpectatorCameraState(_ state: SpectatorCameraState) -> SpectatorCameraState {
+        var next = state
+        let fallback = SpectatorCameraState.initial(near: finiteVector(self.state.position, fallback: lastFiniteState.position))
+        next.position = finiteVector(next.position, fallback: fallback.position)
+        let halfExtent = max(terrain.worldHalfExtent + 12.0, hardWorldBoundsRadius + 12.0)
+        let maxAltitude = max(20.0, terrain.maxFlightAltitude + 20.0)
+        next.position.x = next.position.x.clamped(to: -halfExtent...halfExtent)
+        next.position.y = next.position.y.clamped(to: 0.25...maxAltitude)
+        next.position.z = next.position.z.clamped(to: -halfExtent...halfExtent)
+        next.yaw = finiteFloat(next.yaw, fallback: fallback.yaw)
+        next.pitch = finiteFloat(next.pitch, fallback: fallback.pitch)
+            .clamped(to: Float(-85.0).degreesToRadians...Float(85.0).degreesToRadians)
+        next.moveSpeed = finiteFloat(next.moveSpeed, fallback: 10.0).clamped(to: 1.0...40.0)
+        next.fastMoveMultiplier = finiteFloat(next.fastMoveMultiplier, fallback: 2.5).clamped(to: 1.0...6.0)
+        next.mouseSensitivity = finiteFloat(next.mouseSensitivity, fallback: 0.003).clamped(to: 0.0005...0.02)
+        return next
+    }
+
+    private func finiteFloat(_ value: Float, fallback: Float) -> Float {
+        value.isFinite ? value : fallback
+    }
+
+    private func sanitizedParticipantName(_ displayName: String) -> String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Operator" : trimmed
     }
 
     func setActiveCameraDistance(_ value: Double) {
@@ -2794,6 +3200,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadCameraAutoSwitchEnabled(_ enabled: Bool) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard isPayloadCameraAutoSwitchEnabled != enabled else {
             return
         }
@@ -2802,7 +3211,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var supportsDistanceControl: Bool {
-        cameraConfiguration.mode != .fpv && cameraConfiguration.mode != .payload
+        cameraConfiguration.mode != .fpv && cameraConfiguration.mode != .payload && cameraConfiguration.mode != .spectatorFree
     }
 
     var activeCameraDistance: Double {
@@ -2822,6 +3231,8 @@ final class DroneSimulationViewModel: ObservableObject {
         case .fpv:
             return 0.0...0.0
         case .payload:
+            return 0.0...0.0
+        case .spectatorFree:
             return 0.0...0.0
         }
     }
@@ -3176,12 +3587,12 @@ final class DroneSimulationViewModel: ObservableObject {
                 using: controllerResolvedControlState(from: controllerSnapshot),
                 deltaTime: 0.0
             )
-            processInputActions(
-                using: resolvedInput.applyingInteractionMode(
-                    controllerInteractionMode,
-                    controllerSnapshot: controllerSnapshot
-                )
+            let interactionAwareInput = resolvedInput.applyingInteractionMode(
+                controllerInteractionMode,
+                controllerSnapshot: controllerSnapshot
             )
+            processInputActions(using: interactionAwareInput)
+            updateSpectatorCameraMovement(deltaTime: 0.0, controlState: interactionAwareInput)
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
             refreshCompassOverlay()
@@ -3216,6 +3627,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         processInputActions(using: interactionAwareInput)
         applyContinuousCameraLook(deltaTime: dt, controlState: interactionAwareInput)
+        updateSpectatorCameraMovement(deltaTime: dt, controlState: interactionAwareInput)
 
         guard isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
@@ -3245,10 +3657,34 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        if isOnlineTrialActive && !isLocalOnlineHost {
+            refreshFlightControlDiagnostics()
+            sceneController.applyWeatherVisual(weather)
+            sceneController.update(
+                with: state,
+                camera: cameraConfiguration,
+                damage: damageState,
+                thermal: thermalState,
+                diagnosticMode: diagnosticMode,
+                deltaTime: dt
+            )
+            if let spectatorCameraState {
+                sceneController.updateSpectatorCamera(spectatorCameraState, fov: cameraConfiguration.fov)
+            }
+            refreshCompassOverlay()
+            refreshPayloadCameraStatus()
+            syncPayloadLifecycleEvents()
+            return
+        }
+
         collisionCooldown = max(0.0, collisionCooldown - dt)
         decayFixedWingAssistOverrideTimers(deltaTime: dt)
 
-        applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
+        if hasLocalFlightAuthority {
+            applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
+        } else {
+            manualYawIntent = 0.0
+        }
         updateMissionReplayLifecycle()
         updateAutopilotTargets(deltaTime: dt)
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
@@ -4095,6 +4531,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         for action in controlState.actions {
+            if localOnlineRole == .spectator, spectatorBlockedAction(action) {
+                continue
+            }
             switch action {
             case .requestHover:
                 hover()
@@ -4160,6 +4599,25 @@ final class DroneSimulationViewModel: ObservableObject {
                  .uiFocusUp, .uiFocusDown, .uiFocusLeft, .uiFocusRight:
                 break
             }
+        }
+    }
+
+    private func spectatorBlockedAction(_ action: InputAction) -> Bool {
+        switch action {
+        case .requestHover, .requestReset, .dropPayload, .armAircraft, .disarmAircraft,
+             .selectFreeCamera, .selectChaseCamera, .selectOrbitCamera, .selectFPVCamera,
+             .selectTopCamera, .selectPayloadCamera, .toggleFPV, .toggleTopView,
+             .cycleCameraMode, .zoomInCamera, .zoomOutCamera, .resetCameraOrientation,
+             .returnHome, .pauseMission, .resumeMission:
+            return true
+        case .toggleMissionMap, .togglePayloadPanel:
+            return true
+        case .toggleTerrainMap, .toggleCompassOverlay, .toggleThermalOverlay,
+             .toggleDamageOverlay, .toggleControlPanel, .toggleToolPanel,
+             .toggleTelemetryHUD, .toggleControllerCursor, .openControllerHub,
+             .uiSectionPrevious, .uiSectionNext, .uiPrimary, .uiSecondary,
+             .uiFocusUp, .uiFocusDown, .uiFocusLeft, .uiFocusRight:
+            return false
         }
     }
 
@@ -4249,7 +4707,7 @@ final class DroneSimulationViewModel: ObservableObject {
             cameraConfiguration.setCameraDistance(cameraConfiguration.cameraDistance + sign * zoomStep)
         case .fpv:
             cameraConfiguration.fov = (cameraConfiguration.fov + sign * 1.2).clamped(to: 30.0...110.0)
-        case .payload:
+        case .payload, .spectatorFree:
             return
         }
     }
@@ -8599,6 +9057,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setFixedWingAutoAdvanceEnabled(_ enabled: Bool) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard isFixedWingAssistEnabled else {
             return
         }
@@ -8632,6 +9093,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func activateFixedWingAssist(_ assistMode: FixedWingAssistMode) {
+        guard hasLocalFlightAuthority else {
+            return
+        }
         guard isFixedWingAssistEnabled else {
             return
         }

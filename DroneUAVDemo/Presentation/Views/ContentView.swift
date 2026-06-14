@@ -55,6 +55,13 @@ private enum PendingExitAction {
     case returnToMenu
 }
 
+private enum OnlineStartScreen {
+    case main
+    case onlineHome
+    case lan
+    case server
+}
+
 @MainActor
 private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var activeSimulation: DroneSimulationViewModel?
@@ -135,6 +142,28 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 message: error.localizedDescription
             )
         }
+    }
+
+    func launchLANHost(displayName: String) {
+        let projectID = projectStorage.createProjectID()
+        let vm = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectID,
+            initialProjectName: NSLocalizedString("online.trials.title", comment: "")
+        )
+        vm.startLANHost(displayName: displayName)
+        activeSimulation = vm
+    }
+
+    func joinLANSession(host: String, displayName: String, role: OnlineParticipantRole) {
+        let projectID = projectStorage.createProjectID()
+        let vm = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectID,
+            initialProjectName: NSLocalizedString("online.lan.title", comment: "")
+        )
+        vm.joinLANSession(host: host, displayName: displayName, role: role)
+        activeSimulation = vm
     }
 
     func openProject(_ summary: ProjectRecordSummary) {
@@ -828,6 +857,10 @@ struct ContentView: View {
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
+    @State private var onlineStartScreen: OnlineStartScreen = .main
+    @State private var onlineDisplayName: String = "Operator"
+    @State private var onlineHostAddress: String = ""
+    @State private var onlineRole: OnlineParticipantRole = .spectator
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -974,84 +1007,245 @@ struct ContentView: View {
                 )
                 .ignoresSafeArea()
 
-                VStack(spacing: 20) {
-                    Text("menu.title")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-
-                    Button {
-                        nameDraft = projectDefaultName()
-                        nameDialogMode = .create
-                    } label: {
-                        VStack(spacing: 14) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 44, weight: .bold))
-                            Text("menu.create_project")
-                                .font(.headline)
-                        }
-                        .frame(width: 280, height: 220)
-                        .foregroundStyle(.white)
-                        .background(
-                            RoundedRectangle(cornerRadius: 22)
-                                .stroke(Color.white.opacity(0.65), lineWidth: 2)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 22)
-                                        .fill(Color.white.opacity(0.08))
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    if let recent = appShell.visibleProjects.first {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("menu.recent_project")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.75))
-                            Text(recent.name)
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(1)
-                            Text(formattedDate(recent.modifiedAt))
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.68))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    }
-
-                    Button {
-                        startScreenReplayLibrary.refresh()
-                        isReplayCenterPresented = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "archivebox")
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("Самописец")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .foregroundStyle(.white.opacity(0.88))
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .onChange(of: isReplayCenterPresented) { _, new in
-                        guard new else { return }
-                        isReplayCenterPresented = false
-                        ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
-                    }
+                if onlineStartScreen == .main {
+                    mainStartActions
+                } else {
+                    onlineTrialsPanel
                 }
-                .frame(maxWidth: 760)
-                .padding(.horizontal, 20)
             }
         }
         .frame(minWidth: 1200, minHeight: 820)
+    }
+
+    private var mainStartActions: some View {
+        VStack(spacing: 20) {
+            Text("menu.title")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+
+            Button {
+                nameDraft = projectDefaultName()
+                nameDialogMode = .create
+            } label: {
+                VStack(spacing: 14) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 44, weight: .bold))
+                    Text("menu.create_project")
+                        .font(.headline)
+                }
+                .frame(width: 280, height: 220)
+                .foregroundStyle(.white)
+                .background(
+                    RoundedRectangle(cornerRadius: 22)
+                        .stroke(Color.white.opacity(0.65), lineWidth: 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 22)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                onlineStartScreen = .onlineHome
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "network")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("online.menu.multi_simulation")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.90))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
+            if let recent = appShell.visibleProjects.first {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("menu.recent_project")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                    Text(recent.name)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .lineLimit(1)
+                    Text(formattedDate(recent.modifiedAt))
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.68))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            }
+
+            Button {
+                startScreenReplayLibrary.refresh()
+                isReplayCenterPresented = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "archivebox")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Самописец")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white.opacity(0.88))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .onChange(of: isReplayCenterPresented) { _, new in
+                guard new else { return }
+                isReplayCenterPresented = false
+                ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
+            }
+        }
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 20)
+    }
+
+    private var onlineTrialsPanel: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Button {
+                onlineStartScreen = onlineStartScreen == .onlineHome ? .main : .onlineHome
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.left")
+                    Text("common.back")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+            }
+            .buttonStyle(.plain)
+
+            Text("online.trials.title")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(.white)
+
+            switch onlineStartScreen {
+            case .main:
+                EmptyView()
+            case .onlineHome:
+                onlineTrialsModeCards
+            case .lan:
+                lanOnlineTrialsView
+            case .server:
+                serverUnavailableView
+            }
+        }
+        .frame(width: 520, alignment: .leading)
+        .padding(.horizontal, 20)
+    }
+
+    private var lanOnlineTrialsView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            onlineTrialsModeCards
+
+            Text("online.lan.title")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .padding(.top, 6)
+
+            TextField(String(localized: "online.participant_name"), text: $onlineDisplayName)
+                .textFieldStyle(.roundedBorder)
+
+            TextField(String(localized: "online.host_address"), text: $onlineHostAddress)
+                .textFieldStyle(.roundedBorder)
+
+            Picker("online.role", selection: $onlineRole) {
+                Text("online.role.flight").tag(OnlineParticipantRole.flight)
+                Text("online.role.spectator").tag(OnlineParticipantRole.spectator)
+            }
+            .pickerStyle(.segmented)
+
+            HStack(spacing: 12) {
+                Button("online.lan.create") {
+                    appShell.launchLANHost(displayName: onlineDisplayName)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("online.lan.join") {
+                    appShell.joinLANSession(
+                        host: onlineHostAddress,
+                        displayName: onlineDisplayName,
+                        role: onlineRole
+                    )
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private var serverUnavailableView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            onlineTrialsModeCards
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("online.mode.server")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text("online.server.unavailable")
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.76))
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+            )
+        }
+    }
+
+    private var onlineTrialsModeCards: some View {
+        HStack(spacing: 12) {
+            onlineModeCard(titleKey: "online.mode.lan", subtitleKey: "online.mode.lan.subtitle", systemImage: "network") {
+                onlineStartScreen = .lan
+            }
+            onlineModeCard(titleKey: "online.mode.server", subtitleKey: "online.mode.server.subtitle", systemImage: "cloud") {
+                onlineStartScreen = .server
+            }
+        }
+    }
+
+    private func onlineModeCard(
+        titleKey: LocalizedStringKey,
+        subtitleKey: LocalizedStringKey,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.title2.weight(.semibold))
+                Text(titleKey)
+                    .font(.headline)
+                Text(subtitleKey)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+            .foregroundStyle(.white)
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func simulationWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
@@ -1360,6 +1554,16 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help("Бортовой самописец")
+
+            if viewModel.isOnlineTrialActive {
+                Button {
+                    viewModel.leaveOnlineSession()
+                } label: {
+                    headerUtilityButtonLabel(systemImage: "network.slash")
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "online.disconnect"))
+            }
 
             Button {
                 viewModel.setBindingsPanelVisible(true)
