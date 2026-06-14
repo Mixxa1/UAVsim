@@ -24,6 +24,7 @@ public:
     QAction* createSketchOnFaceAction() const { return createSketchOnFaceAction_; }
     QAction* workPlaneFromFaceAction() const { return workPlaneFromFaceAction_; }
     QAction* normalToFaceAction() const { return normalToFaceAction_; }
+    QAction* addAttachmentPointAction() const { return addAttachmentPointAction_; }
     QAction* deleteSelectedAction() const { return deleteSelectedAction_; }
     QAction* fitSelectionAction() const { return fitSelectionAction_; }
     QAction* fitViewAction() const { return fitViewAction_; }
@@ -41,6 +42,7 @@ private:
     QAction* createSketchOnFaceAction_ = nullptr;
     QAction* workPlaneFromFaceAction_ = nullptr;
     QAction* normalToFaceAction_ = nullptr;
+    QAction* addAttachmentPointAction_ = nullptr;
     QAction* deleteSelectedAction_ = nullptr;
     QAction* fitSelectionAction_ = nullptr;
     QAction* fitViewAction_ = nullptr;

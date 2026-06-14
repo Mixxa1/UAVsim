@@ -8,6 +8,7 @@ struct PayloadView: View {
     let massModel: VehicleMassModel
     let statusMessageKey: String?
     let activeUAVProfile: UAVProfile?
+    let mountedCADPayload: MountedCADPayload?
 
     let onTypeChange: (PayloadType) -> Void
     let onMassChange: (Double) -> Void
@@ -178,9 +179,48 @@ struct PayloadView: View {
                     .padding(.vertical, 9)
                     .background(messageBackground(for: messageKey))
             }
+
+            if let mountedCADPayload {
+                cadPayloadStatusBlock(mountedCADPayload)
+            }
         }
         .padding(14)
         .background(chromePanel(accent: statusTint.opacity(0.48)))
+    }
+
+    private func cadPayloadStatusBlock(_ payload: MountedCADPayload) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("cad.payload.runtime.name")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.cyan.opacity(0.90))
+            Text(payload.partName)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(2)
+            Text("\(String(localized: "cad.payload.runtime.mass")): \(massText(Float(payload.massKg)))")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.70))
+            Text("\(String(localized: "cad.payload.runtime.mount_point")): \(payload.uavMountPointName ?? payload.uavMountPointID)")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.70))
+            Text("\(String(localized: "cad.payload.runtime.attachment_point")): \(payload.payloadAttachmentPointName ?? payload.payloadAttachmentPointID)")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.58))
+
+            ForEach(payload.runtimeWarningKeys(maxPayloadMass: activeUAVProfile?.payloadDataResolution.maxPayloadMass), id: \.self) { warningKey in
+                Text(LocalizedStringKey(warningKey))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(GroundControlPalette.warning)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Color.cyan.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.cyan.opacity(0.24), lineWidth: 1.0)
+        )
     }
 
     private var selectionConsole: some View {

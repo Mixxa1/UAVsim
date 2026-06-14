@@ -1,0 +1,7 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+<qresource prefix="/cadnext">
+    <file>uavpart_file_preview.png</file>
+    <file>cadnext_file_preview.png</file>
+</qresource>
+</RCC>

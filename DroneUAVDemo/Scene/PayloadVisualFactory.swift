@@ -157,3 +157,93 @@ enum PayloadVisualFactory {
         return SCNNode(geometry: geometry)
     }
 }
+
+enum CADPayloadVisualFactory {
+    static func build(payload: MountedCADPayload) -> SCNNode {
+        let root = SCNNode()
+        root.name = "CADPayloadNode"
+        root.simdPosition = payload.localPositionOnUAV.simdFloat
+        root.simdOrientation = payload.localRotationOnUAV.quaternion
+
+        let material = material(previewColor: payload.materialPreviewColor)
+        if let mesh = payload.visualMesh, mesh.isRenderable, let geometry = geometry(from: mesh, material: material) {
+            root.addChildNode(SCNNode(geometry: geometry))
+        } else {
+            let bounds = SCNBox(
+                width: CGFloat(max(payload.boundingWidth, 0.001)),
+                height: CGFloat(max(payload.boundingHeight, 0.001)),
+                length: CGFloat(max(payload.boundingDepth, 0.001)),
+                chamferRadius: CGFloat(max(0.001, min(payload.boundingWidth, payload.boundingHeight, payload.boundingDepth) * 0.015))
+            )
+            bounds.firstMaterial = material
+            let boundsNode = SCNNode(geometry: bounds)
+            let center = (payload.boundingBoxMin.simdFloat + payload.boundingBoxMax.simdFloat) * 0.5
+            boundsNode.simdPosition = center
+            root.addChildNode(boundsNode)
+        }
+
+        return root
+    }
+
+    private static func geometry(from mesh: MountedCADPayload.VisualMesh, material: SCNMaterial) -> SCNGeometry? {
+        let vertexCount = mesh.vertices.count / 3
+        guard vertexCount > 0 else {
+            return nil
+        }
+
+        var vertices: [SCNVector3] = []
+        vertices.reserveCapacity(vertexCount)
+        for index in 0..<vertexCount {
+            vertices.append(
+                SCNVector3(
+                    Float(mesh.vertices[index * 3 + 0]),
+                    Float(mesh.vertices[index * 3 + 1]),
+                    Float(mesh.vertices[index * 3 + 2])
+                )
+            )
+        }
+
+        let indices = mesh.indices
+        let source = SCNGeometrySource(vertices: vertices)
+        let indexData = indices.withUnsafeBufferPointer { buffer in
+            Data(buffer: buffer)
+        }
+        let element = SCNGeometryElement(
+            data: indexData,
+            primitiveType: .triangles,
+            primitiveCount: indices.count / 3,
+            bytesPerIndex: MemoryLayout<UInt32>.stride
+        )
+        let geometry = SCNGeometry(sources: [source], elements: [element])
+        geometry.materials = [material]
+        return geometry
+    }
+
+    private static func material(previewColor: String) -> SCNMaterial {
+        let color = nsColor(from: previewColor) ?? NSColor(calibratedRed: 0.56, green: 0.64, blue: 0.72, alpha: 1.0)
+        let material = SCNMaterial()
+        material.diffuse.contents = color
+        material.specular.contents = NSColor(calibratedWhite: 0.82, alpha: 1.0)
+        material.roughness.contents = 0.48
+        material.metalness.contents = 0.16
+        material.lightingModel = .physicallyBased
+        return material
+    }
+
+    private static func nsColor(from hex: String) -> NSColor? {
+        guard hex.count == 7, hex.first == "#" else {
+            return nil
+        }
+        let scanner = Scanner(string: String(hex.dropFirst()))
+        var value: UInt64 = 0
+        guard scanner.scanHexInt64(&value) else {
+            return nil
+        }
+        return NSColor(
+            calibratedRed: CGFloat((value >> 16) & 0xff) / 255.0,
+            green: CGFloat((value >> 8) & 0xff) / 255.0,
+            blue: CGFloat(value & 0xff) / 255.0,
+            alpha: 1.0
+        )
+    }
+}

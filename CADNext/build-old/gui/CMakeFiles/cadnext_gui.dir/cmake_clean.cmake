@@ -1,0 +1,43 @@
+file(REMOVE_RECURSE
+  ".qt/rcc/qrc_cadnext_gui.cpp"
+  "CMakeFiles/cadnext_gui_autogen.dir/AutogenUsed.txt"
+  "CMakeFiles/cadnext_gui_autogen.dir/ParseCache.txt"
+  "cadnext_gui_autogen"
+  "CMakeFiles/cadnext_gui.dir/.qt/rcc/qrc_cadnext_gui.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/.qt/rcc/qrc_cadnext_gui.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/cadnext_gui_autogen/mocs_compilation.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/cadnext_gui_autogen/mocs_compilation.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/AttachmentPointDialog.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/AttachmentPointDialog.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/CADPartLibraryService.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/CADPartLibraryService.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/CutExtrudeDialog.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/CutExtrudeDialog.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/EdgeOperationDialog.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/EdgeOperationDialog.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/ExtrudeDialog.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/ExtrudeDialog.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/FilePreviewAssets.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/FilePreviewAssets.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/MainWindow.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/MainWindow.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/ProjectTree.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/ProjectTree.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/PropertyPanel.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/PropertyPanel.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/SketchToolBar.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/SketchToolBar.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/ToolBar.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/ToolBar.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/UAVPartPreviewPanel.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/UAVPartPreviewPanel.cpp.o.d"
+  "CMakeFiles/cadnext_gui.dir/src/WorkbenchHost.cpp.o"
+  "CMakeFiles/cadnext_gui.dir/src/WorkbenchHost.cpp.o.d"
+  "libcadnext_gui.a"
+  "libcadnext_gui.pdb"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/cadnext_gui.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

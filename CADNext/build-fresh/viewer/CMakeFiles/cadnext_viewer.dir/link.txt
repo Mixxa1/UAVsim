@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcadnext_viewer.a CMakeFiles/cadnext_viewer.dir/src/CoinViewer.cpp.o CMakeFiles/cadnext_viewer.dir/src/SceneGraph.cpp.o CMakeFiles/cadnext_viewer.dir/src/SelectionController.cpp.o
+/usr/bin/ranlib libcadnext_viewer.a

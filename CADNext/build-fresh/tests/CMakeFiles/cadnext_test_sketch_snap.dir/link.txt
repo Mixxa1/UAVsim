@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cadnext_test_sketch_snap.dir/test_sketch_snap.cpp.o -o cadnext_test_sketch_snap  ../core/libcadnext_core.a

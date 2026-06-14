@@ -65,6 +65,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     @Published var globalAlert: TelemetryExportAlert?
 
     private let projectStorage: ProjectStorageManaging
+    private let cadPayloadHandoffService = CADPayloadHandoffService()
     private weak var window: NSWindow?
     private weak var forwardedWindowDelegate: (any NSWindowDelegate)?
     private var pendingExitAction: PendingExitAction?
@@ -188,6 +189,22 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         }
     }
 
+    func pollCADPayloadHandoff() {
+        guard let result = cadPayloadHandoffService.consumePendingLaunchConfiguration() else {
+            return
+        }
+
+        switch result {
+        case let .success(configuration):
+            launchCADPayloadSimulation(configuration)
+        case let .failure(error):
+            globalAlert = TelemetryExportAlert(
+                titleKey: "cad.mount_editor.launch_failed",
+                message: error.localizedDescription
+            )
+        }
+    }
+
     func duplicateActiveProject(name: String) {
         guard let vm = activeSimulation else { return }
         switch vm.duplicateCurrentProject(newName: name) {
@@ -264,6 +281,35 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             allowWindowClose = true
             window?.performClose(nil)
         }
+    }
+
+    private func launchCADPayloadSimulation(_ configuration: SimulationLaunchConfiguration) {
+        let repository = LIPODroneModelRepository(abstractParameters: .default)
+        let canonicalID = LIPODroneModelRepository.canonicalModelID(configuration.selectedUAVProfile)
+        guard let runtimeProfile = repository.allProfiles.first(where: { $0.id == canonicalID }) else {
+            globalAlert = TelemetryExportAlert(
+                titleKey: "cad.mount_editor.launch_failed",
+                message: NSLocalizedString("payload.message.select_uav", comment: "")
+            )
+            return
+        }
+
+        if let errorKey = configuration.validationError(activeUAVProfile: runtimeProfile.resolvedUAVProfile) {
+            globalAlert = TelemetryExportAlert(
+                titleKey: "cad.mount_editor.launch_failed",
+                message: NSLocalizedString(errorKey, comment: "")
+            )
+            return
+        }
+
+        let projectID = projectStorage.createProjectID()
+        let payloadName = configuration.mountedCADPayload?.partName ?? NSLocalizedString("cad.payload.runtime.name", comment: "")
+        activeSimulation = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectID,
+            initialProjectName: payloadName,
+            launchConfiguration: configuration
+        )
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -783,6 +829,7 @@ struct ContentView: View {
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
+    private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     private var selectedLanguage: AppLanguage {
         AppLanguage(rawValue: appLanguageRawValue) ?? .system
@@ -865,6 +912,9 @@ struct ContentView: View {
             if isNil {
                 appShell.refreshProjects()
             }
+        }
+        .onReceive(cadPayloadHandoffTimer) { _ in
+            appShell.pollCADPayloadHandoff()
         }
     }
 
@@ -1389,6 +1439,7 @@ struct ContentView: View {
                         massModel: viewModel.vehicleMassModel,
                         statusMessageKey: viewModel.payloadStatusMessageKey,
                         activeUAVProfile: viewModel.activeUAVProfile,
+                        mountedCADPayload: viewModel.mountedCADPayload,
                         onTypeChange: viewModel.setPayloadType,
                         onMassChange: viewModel.setPayloadMass,
                         onCustomNameChange: viewModel.setPayloadCustomName,

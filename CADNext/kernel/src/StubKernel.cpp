@@ -93,6 +93,27 @@ cadnext::Result<ShapeBounds> StubKernel::boundingBox(const ShapeHandle&) {
     });
 }
 
+cadnext::Result<ShapeMassProperties> StubKernel::volumeProperties(const ShapeHandle&) {
+    return cadnext::Result<ShapeMassProperties>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "Volume properties require an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
+    });
+}
+
+cadnext::Result<std::vector<std::uint8_t>> StubKernel::exportBRep(const ShapeHandle&) {
+    return cadnext::Result<std::vector<std::uint8_t>>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "BRep export requires OCCT backend"
+    });
+}
+
+cadnext::Result<ShapeHandle> StubKernel::importBRep(const std::vector<std::uint8_t>&) {
+    return cadnext::Result<ShapeHandle>::fail({
+        cadnext::ErrorCode::KernelUnavailable,
+        "BRep import requires OCCT backend"
+    });
+}
+
 bool StubKernel::isShapeValid(const ShapeHandle& shape) const {
     return !shape.isNull();
 }

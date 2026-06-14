@@ -508,6 +508,8 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var payloadCapabilityCheck: PayloadCapabilityCheck
     @Published private(set) var vehicleMassModel: VehicleMassModel
     @Published private(set) var payloadStatusMessageKey: String?
+    @Published private(set) var simulationLaunchConfiguration: SimulationLaunchConfiguration?
+    @Published private(set) var mountedCADPayload: MountedCADPayload?
     @Published private(set) var lastPayloadImpact: TerrainMapPayloadImpact?
     @Published private(set) var signalState: UAVSignalState
     @Published private(set) var signalCountdownSecondsRemaining: Int
@@ -1028,7 +1030,8 @@ final class DroneSimulationViewModel: ObservableObject {
         payloadCameraController: PayloadCameraController = PayloadCameraController(),
         remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
-        initialProjectName: String? = nil
+        initialProjectName: String? = nil,
+        launchConfiguration: SimulationLaunchConfiguration? = nil
     ) {
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
@@ -1073,12 +1076,18 @@ final class DroneSimulationViewModel: ObservableObject {
         self.abstractParameters = abstract
         let repository = LIPODroneModelRepository(abstractParameters: abstract)
         let models = repository.allProfiles
-        let selectedProfile = repository.defaultProfile
+        let requestedProfileID = launchConfiguration?.selectedUAVProfile
+        let selectedProfile = requestedProfileID.flatMap { requestedID in
+            let canonicalID = LIPODroneModelRepository.canonicalModelID(requestedID)
+            return models.first { $0.id == canonicalID }
+        } ?? repository.defaultProfile
         let initialActiveUAVProfile = Self.resolveActiveUAVProfile(for: selectedProfile, abstractParameters: abstract)
         self.selectedDroneProfile = selectedProfile
         self.activeUAVProfile = initialActiveUAVProfile
         self.availableDroneProfiles = models
         self.uavCatalogFilterState = UAVFilterState()
+        self.simulationLaunchConfiguration = launchConfiguration
+        self.mountedCADPayload = launchConfiguration?.mountedCADPayload
 
         self.sceneController = DroneSceneController(initialProfile: selectedProfile)
 
@@ -1183,9 +1192,32 @@ final class DroneSimulationViewModel: ObservableObject {
         self.selectedCameraPreset = .pilot
         self.isArmed = false
         self.physicalState = initialState.physicalState
-        let initialPayloadConfiguration = PayloadController.defaultConfiguration()
+        let initialPayloadConfiguration: PayloadConfiguration
+        let initialInstalledPayloadConfiguration: PayloadConfiguration?
+        let initialPayloadState: PayloadState
+        let initialPayloadStatusMessageKey: String?
+        if let mountedPayload = launchConfiguration?.mountedCADPayload,
+           launchConfiguration?.launchSource == .cadPayloadTest,
+           launchConfiguration?.initialPayloadState == .mounted {
+            initialPayloadConfiguration = PayloadConfiguration(
+                payloadType: .custom,
+                customName: mountedPayload.partName,
+                payloadMass: Float(mountedPayload.massKg),
+                visualPreset: .customModule,
+                isAttached: true
+            )
+            initialInstalledPayloadConfiguration = initialPayloadConfiguration
+            initialPayloadState = .attached
+            initialPayloadStatusMessageKey = "cad.payload.runtime.mounted"
+        } else {
+            initialPayloadConfiguration = PayloadController.defaultConfiguration()
+            initialInstalledPayloadConfiguration = nil
+            initialPayloadState = .noPayload
+            initialPayloadStatusMessageKey = nil
+        }
         self.payloadDraftConfiguration = initialPayloadConfiguration
-        self.payloadState = .noPayload
+        self.payloadState = initialPayloadState
+        self.installedPayloadConfiguration = initialInstalledPayloadConfiguration
         self.payloadMountState = initialActiveUAVProfile == nil ? .unavailable : .ready
         self.payloadCapabilityCheck = PayloadController.capabilityCheck(
             for: initialPayloadConfiguration,
@@ -1194,10 +1226,10 @@ final class DroneSimulationViewModel: ObservableObject {
         self.vehicleMassModel = PayloadController.massModel(
             for: selectedProfile,
             uavProfile: initialActiveUAVProfile,
-            installedPayload: nil,
-            payloadState: .noPayload
+            installedPayload: initialInstalledPayloadConfiguration,
+            payloadState: initialPayloadState
         )
-        self.payloadStatusMessageKey = nil
+        self.payloadStatusMessageKey = initialPayloadStatusMessageKey
         self.lastPayloadImpact = nil
         self.signalState = .normal
         self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
@@ -1235,6 +1267,9 @@ final class DroneSimulationViewModel: ObservableObject {
             diagnosticMode: diagnosticMode,
             deltaTime: 0.0
         )
+        if let mountedCADPayload {
+            sceneController.attachMountedCADPayload(mountedCADPayload)
+        }
         refreshPayloadCameraStatus()
 
         homePosition = currentSpawnPoint()
@@ -1358,6 +1393,8 @@ final class DroneSimulationViewModel: ObservableObject {
         payloadCameraController.clearTracking()
         sceneController.setPayloadCameraFocusReleaseID(nil)
         installedPayloadConfiguration = attachedConfiguration
+        mountedCADPayload = nil
+        simulationLaunchConfiguration = nil
         payloadDraftConfiguration = attachedConfiguration
         payloadState = .attached
         payloadStatusMessageKey = "payload.message.attached"
@@ -1374,6 +1411,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         activePayloadReleaseID = nil
         installedPayloadConfiguration = nil
+        mountedCADPayload = nil
+        simulationLaunchConfiguration = nil
         releasedPayloadConfiguration = nil
         payloadDraftConfiguration.isAttached = false
         payloadState = .removed
@@ -5400,7 +5439,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func buildWarnings() -> [String] {
         let fleetWarningStatus = currentFleetStatusSnapshot()
-        return DroneWarningBuilder(
+        var output = DroneWarningBuilder(
             isArmed: isArmed,
             physicalState: physicalState,
             collisionAnalysis: collisionAnalysis,
@@ -5415,6 +5454,12 @@ final class DroneSimulationViewModel: ObservableObject {
             fleetStatus: fleetWarningStatus,
             mode: mode
         ).build()
+        if let mountedCADPayload {
+            output.append(contentsOf: mountedCADPayload.runtimeWarningKeys(
+                maxPayloadMass: activeUAVProfile?.payloadDataResolution.maxPayloadMass
+            ))
+        }
+        return Array(NSOrderedSet(array: output)) as? [String] ?? output
     }
 
     private func buildTelemetryMetadata() -> TelemetrySessionMetadata {
@@ -5986,6 +6031,8 @@ final class DroneSimulationViewModel: ObservableObject {
         activePayloadReleaseID = nil
         releasedPayloadConfiguration = nil
         installedPayloadConfiguration = nil
+        mountedCADPayload = nil
+        simulationLaunchConfiguration = nil
         payloadDraftConfiguration = PayloadController.defaultConfiguration()
         payloadDraftConfiguration.isAttached = false
         payloadState = .noPayload

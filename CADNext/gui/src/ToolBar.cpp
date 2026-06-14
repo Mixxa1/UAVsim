@@ -33,6 +33,10 @@ ToolBar::ToolBar(QWidget* parent)
     normalToFaceAction_ = addAction(tr("Нормально к грани"));
     normalToFaceAction_->setEnabled(false);
     addSeparator();
+    // UAVPart v1.1: adds an attachment point to the selected body.
+    addAttachmentPointAction_ = addAction(tr("Добавить точку крепления"));
+    addAttachmentPointAction_->setCheckable(true);
+    addSeparator();
     deleteSelectedAction_ = addAction(tr("Удалить выбранное"));
     addSeparator();
     fitSelectionAction_ = addAction(tr("Приблизить к выбранному"));

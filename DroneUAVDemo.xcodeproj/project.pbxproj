@@ -227,6 +227,11 @@
 		100000000000000000000358 /* CADAttachmentImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000035C /* CADAttachmentImport.swift */; };
 		100000000000000000000359 /* CADMassPropertiesImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000035D /* CADMassPropertiesImport.swift */; };
 		100000000000000000000360 /* CADNextLauncherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000361 /* CADNextLauncherService.swift */; };
+		100000000000000000000362 /* uavpart_icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000364 /* uavpart_icon.icns */; };
+		100000000000000000000363 /* cadnext_icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000365 /* cadnext_icon.icns */; };
+		100000000000000000000368 /* MountedCADPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000367 /* MountedCADPayload.swift */; };
+		10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000369 /* SimulationLaunchConfiguration.swift */; };
+		10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036B /* CADPayloadHandoffService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -452,6 +457,12 @@
 		10000000000000000000035C /* CADAttachmentImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADAttachmentImport.swift; sourceTree = "<group>"; };
 		10000000000000000000035D /* CADMassPropertiesImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADMassPropertiesImport.swift; sourceTree = "<group>"; };
 		100000000000000000000361 /* CADNextLauncherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADNextLauncherService.swift; sourceTree = "<group>"; };
+		100000000000000000000364 /* uavpart_icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = uavpart_icon.icns; sourceTree = "<group>"; };
+		100000000000000000000365 /* cadnext_icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = cadnext_icon.icns; sourceTree = "<group>"; };
+		100000000000000000000366 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		100000000000000000000367 /* MountedCADPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountedCADPayload.swift; sourceTree = "<group>"; };
+		100000000000000000000369 /* SimulationLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationLaunchConfiguration.swift; sourceTree = "<group>"; };
+		10000000000000000000036B /* CADPayloadHandoffService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADPayloadHandoffService.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -515,6 +526,7 @@
 				100000000000000000000106 /* DroneFlightMode.swift */,
 				1000000000000000000002B8 /* FixedWingAssistMode.swift */,
 				100000000000000000000110 /* DroneModelProfile.swift */,
+				100000000000000000000367 /* MountedCADPayload.swift */,
 				10000000000000000000013D /* PayloadConfiguration.swift */,
 				10000000000000000000013F /* PayloadCapabilityCheck.swift */,
 				10000000000000000000013E /* PayloadState.swift */,
@@ -523,6 +535,7 @@
 				10000000000000000000013C /* PayloadType.swift */,
 				10000000000000000000013B /* PayloadVisualPreset.swift */,
 				100000000000000000000155 /* PayloadCameraController.swift */,
+				100000000000000000000369 /* SimulationLaunchConfiguration.swift */,
 				100000000000000000000156 /* FlightControlRouting.swift */,
 				100000000000000000000162 /* MapViewportState.swift */,
 				100000000000000000000163 /* MissionConstraints.swift */,
@@ -761,6 +774,7 @@
 				1000000000000000000002F4 /* ReplayVideoExportService.swift */,
 				10000000000000000000034D /* LegalAgreementService.swift */,
 				100000000000000000000361 /* CADNextLauncherService.swift */,
+				10000000000000000000036B /* CADPayloadHandoffService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -783,6 +797,9 @@
 				10000000000000000000012B /* Assets.xcassets */,
 				100000000000000000000126 /* Localizable.strings */,
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
+				100000000000000000000364 /* uavpart_icon.icns */,
+				100000000000000000000365 /* cadnext_icon.icns */,
+				100000000000000000000366 /* Info.plist */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -868,6 +885,8 @@
 				100000000000000000000225 /* Localizable.strings in Resources */,
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
+				100000000000000000000362 /* uavpart_icon.icns in Resources */,
+				100000000000000000000363 /* cadnext_icon.icns in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1094,6 +1113,9 @@
 				100000000000000000000357 /* CADModelImportDescriptor.swift in Sources */,
 				100000000000000000000358 /* CADAttachmentImport.swift in Sources */,
 				100000000000000000000359 /* CADMassPropertiesImport.swift in Sources */,
+				100000000000000000000368 /* MountedCADPayload.swift in Sources */,
+				10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */,
+				10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */,
 				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1136,9 +1158,8 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = DroneUAVDemo;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DroneUAVDemo/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1158,9 +1179,8 @@
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = DroneUAVDemo;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = DroneUAVDemo/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

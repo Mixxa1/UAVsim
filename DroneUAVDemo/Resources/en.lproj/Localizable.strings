@@ -1974,3 +1974,18 @@
 "cadnext.alert.notFound.title" = "CADNext executable was not found";
 "cadnext.alert.notFound.message" = "Searched paths:\n%@\n\nBuild it with:\n%@";
 "cadnext.alert.launchFailed.title" = "Failed to launch CADNext";
+
+"cad.mount_editor.confirm_and_launch" = "Confirm and launch simulation";
+"cad.mount_editor.launch_prepared" = "Mount prepared";
+"cad.mount_editor.launch_failed" = "Failed to launch simulation";
+"cad.mount_editor.invalid_transform" = "Part position error: attachment points do not match";
+"cad.mount_editor.limited_confirm_title" = "Limited compatibility";
+"cad.mount_editor.limited_confirm_message" = "The part has compatibility warnings. Continue launching the simulation?";
+"cad.payload.runtime.name" = "CAD part";
+"cad.payload.runtime.mounted" = "Mounted";
+"cad.payload.runtime.mass" = "Payload mass";
+"cad.payload.runtime.mount_point" = "Mount point";
+"cad.payload.runtime.attachment_point" = "Part attachment point";
+"cad.payload.runtime.high_mass_warning" = "High payload mass";
+"cad.payload.runtime.com_warning" = "Payload shifts center of mass";
+"cad.payload.runtime.visual_missing" = "Payload 3D model is unavailable, using bounds proxy";

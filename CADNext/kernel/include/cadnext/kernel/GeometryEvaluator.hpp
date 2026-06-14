@@ -79,6 +79,10 @@ public:
         const ShapeHandle& targetShape,
         const cadnext::FilletParameters& parameters);
 
+    // Generate a preview mesh from a shape handle already registered in the
+    // kernel. Used for imported BRep shapes (openPartForEditing workflow).
+    cadnext::Result<EvaluatedGeometry> evaluateShape(const ShapeHandle& shape);
+
 private:
     // Shared mesh-extraction tail: validates the shape and fills
     // previewMesh/isValid/message.

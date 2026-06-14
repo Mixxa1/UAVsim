@@ -3,6 +3,13 @@ add_library(cadnext_bridge
     src/ExportPackage.cpp
     src/AttachmentExport.cpp
     src/MassPropertiesExport.cpp
+    src/UAVPartFormat.cpp
+    src/UAVPartJson.cpp
+    src/UAVPartSections.cpp
+    src/UAVPartBinary.cpp
+    src/UAVPartWriter.cpp
+    src/UAVPartReader.cpp
+    src/UAVPartValidator.cpp
 )
 
 target_include_directories(cadnext_bridge
