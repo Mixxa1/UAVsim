@@ -1969,3 +1969,18 @@
 "cadnext.alert.notFound.title" = "Исполняемый файл CADNext не найден";
 "cadnext.alert.notFound.message" = "Проверенные пути:\n%@\n\nСоберите его командой:\n%@";
 "cadnext.alert.launchFailed.title" = "Не удалось запустить CADNext";
+
+"cad.mount_editor.confirm_and_launch" = "Подтвердить и запустить симуляцию";
+"cad.mount_editor.launch_prepared" = "Крепление подготовлено";
+"cad.mount_editor.launch_failed" = "Не удалось запустить симуляцию";
+"cad.mount_editor.invalid_transform" = "Ошибка положения детали: точки крепления не совпадают";
+"cad.mount_editor.limited_confirm_title" = "Ограниченная совместимость";
+"cad.mount_editor.limited_confirm_message" = "Деталь имеет предупреждения совместимости. Продолжить запуск симуляции?";
+"cad.payload.runtime.name" = "CAD-деталь";
+"cad.payload.runtime.mounted" = "Установлена";
+"cad.payload.runtime.mass" = "Масса полезной нагрузки";
+"cad.payload.runtime.mount_point" = "Точка крепления";
+"cad.payload.runtime.attachment_point" = "Точка детали";
+"cad.payload.runtime.high_mass_warning" = "Высокая масса полезной нагрузки";
+"cad.payload.runtime.com_warning" = "Полезная нагрузка смещает центр масс";
+"cad.payload.runtime.visual_missing" = "3D-модель полезной нагрузки недоступна, используется габаритный proxy";

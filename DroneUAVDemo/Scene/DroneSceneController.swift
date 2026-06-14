@@ -606,6 +606,23 @@ final class DroneSceneController {
         applyPayloadFPVPresentation()
     }
 
+    func attachMountedCADPayload(_ payload: MountedCADPayload) {
+        removePayloadVisual()
+        let node = CADPayloadVisualFactory.build(payload: payload)
+        let mountCoordinateRoot = payloadMountNode.parent ?? visualRootNode
+        mountCoordinateRoot.addChildNode(node)
+        payloadVisualNode = node
+        activePayloadConfiguration = PayloadConfiguration(
+            payloadType: .custom,
+            customName: payload.partName,
+            payloadMass: Float(payload.massKg),
+            visualPreset: .customModule,
+            isAttached: true
+        )
+        installFPVPayloadPresentation(from: node)
+        applyPayloadFPVPresentation()
+    }
+
     func removePayloadVisual() {
         payloadVisualNode?.removeFromParentNode()
         payloadVisualNode = nil
@@ -871,6 +888,7 @@ final class DroneSceneController {
         fpvObstructionHidingActive = false
         fpvPresentationActive = false
         payloadVisualNode = nil
+        activePayloadConfiguration = nil
         resetFPVPayloadPresentation()
 
         scene.rootNode.addChildNode(droneNode)

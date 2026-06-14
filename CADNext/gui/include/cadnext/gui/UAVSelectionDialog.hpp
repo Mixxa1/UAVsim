@@ -26,6 +26,7 @@ public:
     explicit UAVSelectionDialog(const UAVPartPreflightData& partData,
                                 const QString& partDisplayName,
                                 QWidget* parent = nullptr);
+    bool launchPrepared() const { return launchPrepared_; }
 
 private:
     void rebuildList();
@@ -36,6 +37,7 @@ private:
     std::vector<UAVPayloadCompatibilityResult> results_;
     FilterMode filter_         = FilterMode::all;
     int currentUAVIndex_       = -1;
+    bool launchPrepared_       = false;
 
     QListWidget* uavList_     = nullptr;
     QPushButton* continueBtn_ = nullptr;

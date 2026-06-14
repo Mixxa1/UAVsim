@@ -43,13 +43,20 @@ struct UAVPartPreflightData {
 
     // Extended fields populated for the Mount Editor.
     std::string partId;
+    std::string partFilePath;
     std::string partDisplayName;
     UAVVec3 partCenterOfMass;
+    UAVVec3 partBoundingBoxMin;
+    UAVVec3 partBoundingBoxMax;
+    double dragPenalty = 0.0;
+    double structuralRating = 1.0;
+    std::string materialId;
     std::vector<bridge::UAVPartAttachmentPoint> attachmentPoints; // enabled only
     std::vector<float>    meshVertices;  // packed float triples, empty when no mesh
     std::vector<uint32_t> meshIndices;   // triangle index triples
     bool hasMesh = false;
     std::string materialPreviewColor;    // "#RRGGBB" or ""
+    bridge::UAVPartSimulationProxy collisionProxy;
 };
 
 class UAVPayloadCompatibilityChecker {

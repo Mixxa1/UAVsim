@@ -518,8 +518,9 @@ UAVPartPreviewPanel::UAVPartPreviewPanel(const bridge::UAVPartReadResult& result
     auto* closeBtn       = new QPushButton(tr("Закрыть"));
 
     // Preflight: determine whether "Тестировать на БЛА" can be enabled.
-    const UAVPartPreflightData preflightData =
+    UAVPartPreflightData preflightData =
         UAVPayloadCompatibilityChecker::buildPreflightData(part);
+    preflightData.partFilePath = filePath.toStdString();
     const bool canTest = preflightData.preflightError.empty();
     testOnUAVBtn->setEnabled(canTest);
     if (!canTest) {
@@ -557,8 +558,22 @@ UAVPartPreviewPanel::UAVPartPreviewPanel(const bridge::UAVPartReadResult& result
     // Capture by value so the lambda is safe after the constructor returns.
     connect(testOnUAVBtn, &QPushButton::clicked, this,
             [this, preflightData, displayName]() {
-                UAVSelectionDialog dlg(preflightData, displayName, this);
-                dlg.exec();
+                // Variant B: hide the .uavpart window for the duration of the
+                // UAV-selection → Mount Editor wizard; only one step visible at a time.
+                QWidget* win = window();
+                win->hide();
+
+                UAVSelectionDialog dlg(preflightData, displayName, nullptr);
+                const int flowResult = dlg.exec();
+                if (flowResult == QDialog::Accepted && dlg.launchPrepared()) {
+                    requestedAction_ = Action::TestOnUAV;
+                    accept();
+                    return;
+                }
+
+                win->show();
+                win->raise();
+                win->activateWindow();
             });
     connect(addToLibBtn, &QPushButton::clicked, this, [this, filePath]() {
         CADPartLibraryService::instance().addPart(filePath);

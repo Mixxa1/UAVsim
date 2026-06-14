@@ -24,6 +24,7 @@ add_library(cadnext_gui
     include/cadnext/gui/UAVMountPairValidator.hpp
     include/cadnext/gui/UAVPartPreviewPanel.hpp
     include/cadnext/gui/UAVPayloadCompatibilityChecker.hpp
+    include/cadnext/gui/UAVPayloadMountFlow.hpp
     include/cadnext/gui/UAVSelectionDialog.hpp
     src/AttachmentPointDialog.cpp
     src/CADPartLibraryService.cpp

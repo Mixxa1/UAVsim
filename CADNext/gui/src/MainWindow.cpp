@@ -98,6 +98,33 @@ Vector3 worldToLocal(const Vector3& world, const Transform& t) {
     return {p.x / sx, p.y / sy, p.z / sz};
 }
 
+Vector3 normalizedOrZero(Vector3 v) {
+    const double len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (len <= 1.0e-12 || !std::isfinite(len)) {
+        return {};
+    }
+    return {v.x / len, v.y / len, v.z / len};
+}
+
+Vector3 eulerXYZFromYDirection(Vector3 direction) {
+    direction = normalizedOrZero(direction);
+    if (std::abs(direction.x) <= 1.0e-12 &&
+        std::abs(direction.y) <= 1.0e-12 &&
+        std::abs(direction.z) <= 1.0e-12) {
+        return {};
+    }
+
+    const double rx = std::asin(std::clamp(direction.z, -1.0, 1.0));
+    const double cosRx = std::cos(rx);
+    double rz = 0.0;
+    if (std::abs(cosRx) > 1.0e-9) {
+        rz = std::atan2(-direction.x, direction.y);
+    }
+
+    constexpr double kRadiansToDegrees = 180.0 / M_PI;
+    return {rx * kRadiansToDegrees, 0.0, rz * kRadiansToDegrees};
+}
+
 // Следующее свободное имя точки крепления ("mount_point_01", _02, ...).
 std::string nextAttachmentPointName(const std::vector<AttachmentPoint>& existing) {
     int max = 0;
@@ -707,7 +734,7 @@ void MainWindow::initializeViewport() {
                         tr("Выберите точку на поверхности детали"), 4000);
                     return;
                 }
-                openCreateAttachmentDialog(target.objectId, target.worldPoint);
+                openCreateAttachmentDialog(target.objectId, target.worldPoint, target.faceId);
             } else if (!target.isEmpty()) {
                 statusBar()->showMessage(
                     tr("Точка крепления может быть добавлена только на CAD-деталь"), 4000);
@@ -3960,7 +3987,8 @@ void MainWindow::clearAttachmentPointSelection() {
 }
 
 void MainWindow::openCreateAttachmentDialog(const std::string& bodyId,
-                                             const Vector3& worldPoint) {
+                                             const Vector3& worldPoint,
+                                             const std::string& faceId) {
     const Result<Object> objectResult = document_.objectById(bodyId);
     if (!objectResult.isOk()) {
         statusBar()->showMessage(
@@ -3987,7 +4015,12 @@ void MainWindow::openCreateAttachmentDialog(const std::string& bodyId,
     ap.isEnabled = d.isEnabled;
     ap.isSystem = false;
     ap.localPosition = worldToLocal(worldPoint, object.transform);
-    ap.localRotation = {0.0, 0.0, 0.0};
+    if (const kernel::FaceReference* face = findBodyFace(bodyId, faceId)) {
+        ap.localRotation = eulerXYZFromYDirection(
+            {-face->normal.x, -face->normal.y, -face->normal.z});
+    } else {
+        ap.localRotation = {0.0, 0.0, 0.0};
+    }
 
     commitNewAttachmentPoint(bodyId, ap);
 }

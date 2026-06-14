@@ -1,7 +1,7 @@
 import Foundation
 import simd
 
-struct CodableVector3D: Codable, Equatable {
+struct CodableVector3D: Codable, Equatable, Hashable {
     let x: Double
     let y: Double
     let z: Double

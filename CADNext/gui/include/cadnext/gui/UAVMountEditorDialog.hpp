@@ -18,8 +18,6 @@ class SoSeparator;
 namespace cadnext::gui {
 
 // Result produced when the user confirms a mount configuration.
-// Stored in memory only — does not start simulation and does not create a
-// runtime MountedCADPayload.
 struct MountEditorResult {
     std::string partId;
     std::string uavId;
@@ -27,7 +25,12 @@ struct MountEditorResult {
     std::string uavMountPointId;
     double translateX = 0.0, translateY = 0.0, translateZ = 0.0; // metres
     double rotateX    = 0.0, rotateY    = 0.0, rotateZ    = 0.0; // degrees
+    double finalRotationAxisX = 0.0;
+    double finalRotationAxisY = 1.0;
+    double finalRotationAxisZ = 0.0;
+    double finalRotationAngleRad = 0.0;
     bool isValid = false;
+    std::string handoffPath;
     std::string timestamp; // ISO 8601
 };
 
@@ -46,24 +49,29 @@ public:
     ~UAVMountEditorDialog() override;
 
     std::optional<MountEditorResult> result() const { return result_; }
+    bool wentBack() const { return wentBack_; }
 
 private:
     void rebuildMarkersScene();
     void rebuildGhostPreview();
+    void rebuildDebugOverlay();
     void runValidation();
     void onConfirm();
 
     UAVPartPreflightData  partData_;
     UAVCatalogPreviewItem uav_;
+    UAVPayloadCompatibilityResult compat_;
 
     int selectedPartPtIdx_ = -1;
     int selectedUAVPtIdx_  = -1;
+    bool wentBack_         = false;
     std::optional<MountEditorResult> result_;
 
     SoQtExaminerViewer* viewer_      = nullptr;
     SoSeparator*        sceneRoot_   = nullptr;
     SoSeparator*        markersRoot_ = nullptr;
     SoSeparator*        ghostRoot_   = nullptr;
+    SoSeparator*        debugRoot_   = nullptr;
 
     QListWidget*    partPtList_  = nullptr;
     QListWidget*    uavPtList_   = nullptr;

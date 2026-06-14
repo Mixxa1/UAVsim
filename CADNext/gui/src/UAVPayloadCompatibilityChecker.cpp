@@ -18,6 +18,16 @@ UAVPartPreflightData UAVPayloadCompatibilityChecker::buildPreflightData(
     data.boundingWidth  = mass.boundingWidth;
     data.boundingHeight = mass.boundingHeight;
     data.boundingDepth  = mass.boundingDepth;
+    data.partBoundingBoxMin = {
+        mass.boundingBoxMin.x,
+        mass.boundingBoxMin.y,
+        mass.boundingBoxMin.z
+    };
+    data.partBoundingBoxMax = {
+        mass.boundingBoxMax.x,
+        mass.boundingBoxMax.y,
+        mass.boundingBoxMax.z
+    };
     data.boundsValid    = mass.valid
                        && mass.boundingWidth  > 0.0
                        && mass.boundingHeight > 0.0
@@ -32,6 +42,10 @@ UAVPartPreflightData UAVPayloadCompatibilityChecker::buildPreflightData(
         part.mass.centerOfMass.y,
         part.mass.centerOfMass.z
     };
+    data.dragPenalty = part.mass.dragPenalty;
+    data.structuralRating = part.mass.structuralRating;
+    data.materialId = part.material.materialId;
+    data.collisionProxy = part.simulationProxy;
 
     for (const auto& pt : part.attachmentPoints) {
         if (pt.isEnabled) {

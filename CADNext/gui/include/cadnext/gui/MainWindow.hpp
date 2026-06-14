@@ -245,7 +245,8 @@ private:
     void clearAttachmentPointSelection();
     // Открывает диалог создания/редактирования после клика по поверхности.
     void openCreateAttachmentDialog(const std::string& bodyId,
-                                    const Vector3& worldPoint);
+                                    const Vector3& worldPoint,
+                                    const std::string& faceId = {});
     // Открывает диалог редактирования существующей точки.
     void openEditAttachmentDialog(const std::string& bodyId,
                                   const std::string& pointId);

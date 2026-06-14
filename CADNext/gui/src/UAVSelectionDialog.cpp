@@ -251,7 +251,7 @@ UAVSelectionDialog::UAVSelectionDialog(const UAVPartPreflightData& partData,
         auto* btnRow = new QHBoxLayout;
         btnRow->setSpacing(8);
 
-        auto* backBtn  = new QPushButton(tr("Назад"));
+        auto* backBtn  = new QPushButton(tr("Назад к детали"));
         continueBtn_   = new QPushButton(tr("Продолжить"));
         auto* closeBtn = new QPushButton(tr("Закрыть"));
 
@@ -273,8 +273,22 @@ UAVSelectionDialog::UAVSelectionDialog(const UAVPartPreflightData& partData,
             const auto& cat = UAVCatalogPreviewProvider::catalog();
             const auto& selectedUAV = cat[static_cast<std::size_t>(currentUAVIndex_)];
             const auto& result      = results_[static_cast<std::size_t>(currentUAVIndex_)];
-            UAVMountEditorDialog dlg(partData_, selectedUAV, result, this);
+
+            // Variant B window flow: hide UAV-selection while Mount Editor is active.
+            hide();
+            UAVMountEditorDialog dlg(partData_, selectedUAV, result, nullptr);
             dlg.exec();
+
+            if (dlg.wentBack()) {
+                // "Назад" in Mount Editor → return here (no duplicate window).
+                show();
+            } else if (dlg.result().has_value()) {
+                launchPrepared_ = true;
+                accept();
+            } else {
+                // Closed Mount Editor → cancel this step and return to .uavpart preview.
+                reject();
+            }
         });
     }
 

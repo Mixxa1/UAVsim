@@ -15,8 +15,9 @@ struct UAVMountPointPreview {
     std::string id;
     std::string name;
     std::string role; // "payload", "camera", "sensor", "generic"
-    UAVVec3 localPosition;         // body-frame, metres (Y = up)
-    UAVVec3 localRotation;         // Euler angles, degrees
+    UAVVec3 localPosition;                      // body-frame, metres (Y = up)
+    UAVVec3 localRotation;                      // Euler angles, degrees
+    UAVVec3 mountNormal = {0.0, -1.0, 0.0};    // unit vector pointing away from mount surface
     bool isEnabled = true;
     std::optional<double> maxPayloadMassKg;
     std::optional<double> maxWidthM;
