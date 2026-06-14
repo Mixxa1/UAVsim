@@ -22,6 +22,9 @@ build/
 build-*/
 cmake-build-*/
 out/
+CADNext/build*/
+CADNext/cmake-build-*/
+CADNext/out/
 
 # CMake generated files
 CMakeFiles/
