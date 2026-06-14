@@ -50,19 +50,6 @@ struct SimulationLaunchConfiguration: Codable, Hashable {
             return "cad.mount_editor.invalid_transform"
         }
 
-        if let resolution = activeUAVProfile?.payloadDataResolution {
-            if let maxPayloadMass = resolution.maxPayloadMass,
-               mountedCADPayload.massKg > Double(maxPayloadMass) + 0.0001 {
-                return "payload.message.payload_limit_exceeded"
-            }
-            if let baseMass = resolution.baseMass,
-               let batteryMass = resolution.batteryMass,
-               let maxTakeoffMass = resolution.maxTakeoffMass,
-               Double(baseMass + batteryMass) + mountedCADPayload.massKg > Double(maxTakeoffMass) + 0.0001 {
-                return "payload.message.takeoff_limit_exceeded"
-            }
-        }
-
         return nil
     }
 }

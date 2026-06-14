@@ -29,8 +29,10 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
     items.reserve(15);
 
     // ── 1. DJI Matrice 350 RTK ────────────────────────────────────────────────
-    // Model: body center y=0.02; undercarriage bottom ≈ y=-0.053; gimbal bay
-    // center y=-0.08 z=0.03; landing leg crossbar y=-0.19.
+    // Body: placed(0,0.02,0) size(0.22,0.07,0.16); front face z=0.08
+    // Gimbal bay: placed(0,-0.08,0.03) size(0.12,0.07,0.10) → bottom y=-0.115
+    // Lower arm: placed(0,-0.03,-0.01) size(0.17,0.045,0.14) → bottom y=-0.053
+    // Accent top: placed(0,0.06,-0.01) size(0.15,0.10,0.10) → top y=0.11
     {
         UAVCatalogPreviewItem i;
         i.id = "dji-matrice-350-rtk";
@@ -43,16 +45,21 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 9.2;
         i.hasVerifiedData  = true;
         i.mountPoints = {
-            // Below undercarriage, above landing legs: y≈-0.09
-            mp("mp-1", "Нижний разъём полезной нагрузки",  "payload",  0.00, -0.09,  0.00),
-            // Above battery box top (y≈0.11): top accessory port
-            mp("mp-2", "Верхний разъём аксессуаров",       "payload",  0.00,  0.12,  0.00, 0.0, 1.0, 0.0),
+            mp("mp-1", "Нижний разъём полезной нагрузки",  "payload",  0.00, -0.115,  0.03),
+            mp("mp-2", "Верхний разъём аксессуаров",       "payload",  0.00,  0.12,   0.00, 0.0, 1.0, 0.0),
+            // Same gimbal bay port accepting camera gimbals (no role mismatch warning)
+            mp("mp-3", "Нижний подвес камеры",             "camera",   0.00, -0.115,  0.04),
+            // Front face of body: forward-looking sensor/LiDAR port
+            mp("mp-4", "Передний датчик",                  "sensor",   0.00, -0.090,  0.09, 0.0, 0.0, 1.0),
+            mp("mp-5", "Общая точка крепления",            "generic",  0.00, -0.053,  0.00),
         };
         items.push_back(std::move(i));
     }
 
     // ── 2. DJI FlyCart 30 ─────────────────────────────────────────────────────
-    // Model: cargo box center y=-0.14, bottom y=-0.21; landing legs y=-0.34.
+    // Body: placed(0,0.04,0) size(0.46,0.16,0.32); front face z=0.16
+    // Cargo arm: placed(0,-0.14,0) size(0.30,0.14,0.28) → bottom y=-0.21
+    // Accent top: placed(0,0.14,-0.02) size(0.36,0.12,0.24) → top y=0.20
     {
         UAVCatalogPreviewItem i;
         i.id = "dji-flycart-30";
@@ -65,15 +72,22 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 95.0;
         i.hasVerifiedData  = true;
         i.mountPoints = {
-            mp("mp-1", "Грузовой отсек (основной)",        "payload",  0.00, -0.24,  0.00),
-            mp("mp-2", "Грузовой отсек (дополнительный)",  "payload",  0.15, -0.22,  0.00),
+            mp("mp-1", "Грузовой отсек (основной)",        "payload",  0.00, -0.21,  0.00),
+            mp("mp-2", "Грузовой отсек (дополнительный)",  "payload",  0.15, -0.21,  0.00),
             mp("mp-3", "Верхняя точка крепления",          "generic",  0.00,  0.22,  0.00, 0.0, 1.0, 0.0),
+            // Forward collision-avoidance / inspection sensor
+            mp("mp-4", "Передний сенсор",                  "sensor",   0.00, -0.040,  0.17, 0.0, 0.0, 1.0),
+            // Camera aimed at cargo (delivery verification)
+            mp("mp-5", "Нижняя камера",                    "camera",   0.00, -0.210,  0.06),
         };
         items.push_back(std::move(i));
     }
 
     // ── 3. DJI Mavic 4 Pro ───────────────────────────────────────────────────
-    // Model: gimbal sphere at y=-0.040 z=0.090.
+    // Body: placed(0,0.012,0) size(0.19,0.050,0.12) → bottom y=-0.013
+    // Accent rear: placed(0,-0.010,0.082) size(0.08,0.032,0.05) → bottom y=-0.026
+    // Gimbal sphere: scaledSphere(0,-0.040,0.090, 0.026, 1,0.85,1.05)
+    //   → bottom y = -0.040 - 0.026*0.85 = -0.062
     {
         UAVCatalogPreviewItem i;
         i.id = "dji-mavic-4-pro";
@@ -86,13 +100,19 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 1.15;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Разъём камеры (нижний)", "sensor",  0.0, -0.042,  0.090),
+            mp("mp-1", "Разъём камеры (нижний)", "sensor",  0.00, -0.042,  0.090),
+            // Bottom of gimbal sphere: camera role
+            mp("mp-2", "Подвес камеры",          "camera",  0.00, -0.062,  0.090),
+            // Bottom-rear body: generic structural point
+            mp("mp-3", "Общая точка",            "generic", 0.00, -0.026, -0.040),
         };
         items.push_back(std::move(i));
     }
 
     // ── 4. DJI Neo ────────────────────────────────────────────────────────────
-    // Model: body bottom y=-0.017; camera shroud center y=-0.016 z=0.050.
+    // Body: placed(0,0,0) size(0.11,0.034,0.085) → bottom y=-0.017; top y=0.017
+    // Accent top: placed(0,0.022,-0.01) size(0.07,0.020,0.05) → top y=0.032
+    // Camera shroud: placed(0,-0.016,0.050) size(0.055,0.022,0.038) → bottom y=-0.027
     {
         UAVCatalogPreviewItem i;
         i.id = "dji-neo";
@@ -105,14 +125,19 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 0.155;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Нижняя камера", "sensor",  0.0, -0.020,  0.048),
+            mp("mp-1", "Нижняя камера",   "sensor",  0.00, -0.020,  0.048),
+            // Bottom of camera shroud: camera role
+            mp("mp-2", "Камера (фронт)",  "camera",  0.00, -0.027,  0.050),
+            // Top of body: generic upward accessory
+            mp("mp-3", "Общая точка",     "generic", 0.00,  0.033, -0.010, 0.0, 1.0, 0.0),
         };
         items.push_back(std::move(i));
     }
 
     // ── 5. DJI Phantom 3 Standard ─────────────────────────────────────────────
-    // Model: body sphere y=0.02 r=0.085 sy=0.48 → bottom y=-0.021.
-    // Gimbal box center y=-0.080 z=0.075.
+    // Body sphere: scaledSphere(0,0.02,0, 0.085, 1.05,0.48,1) → bottom y≈-0.021
+    // Gimbal box: placed(0,-0.080,0.075) size(0.060,0.032,0.040) → bottom y=-0.096
+    // Upper shell: placed(0,0.056,-0.015) size(0.12,0.032,0.09) → top y=0.072
     {
         UAVCatalogPreviewItem i;
         i.id = "dji-phantom-3-standard";
@@ -125,14 +150,20 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 1.35;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Разъём подвеса", "sensor",  0.0, -0.082,  0.075),
+            mp("mp-1", "Разъём подвеса",  "sensor",  0.00, -0.096,  0.075),
+            // Same gimbal port: camera role
+            mp("mp-2", "Камера подвеса",  "camera",  0.00, -0.096,  0.080),
+            // Under body sphere: generic accessory point
+            mp("mp-3", "Общая точка",     "generic", 0.00, -0.022,  0.000),
         };
         items.push_back(std::move(i));
     }
 
     // ── 6. Freefly Alta X ─────────────────────────────────────────────────────
-    // Model: center disc top y=0.055; carbon frame bottom y=-0.065;
-    // lower accent plate bottom y=-0.150; landing legs y=-0.28.
+    // Disc: placed(0,0.04,0) r=0.16, h=0.03
+    // Carbon frame: placed(0,-0.01,0) size(0.18,0.11,0.18) → front z=0.09
+    // Accent plate: placed(0,-0.13,0) size(0.22,0.04,0.22) → bottom y=-0.150
+    // Landing crossbars at y=-0.28
     {
         UAVCatalogPreviewItem i;
         i.id = "freefly-alta-x";
@@ -145,16 +176,21 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 34.86;
         i.hasVerifiedData  = true;
         i.mountPoints = {
-            mp("mp-1", "Нижний подвес",          "payload",  0.0, -0.16,  0.00),
-            mp("mp-2", "Верхний подвес",          "payload",  0.0,  0.10,  0.00, 0.0, 1.0, 0.0),
-            mp("mp-3", "Общая точка крепления",   "generic",  0.0, -0.05,  0.00),
+            mp("mp-1", "Нижний подвес",          "payload",  0.00, -0.16,  0.00),
+            mp("mp-2", "Верхний подвес",          "payload",  0.00,  0.10,  0.00, 0.0, 1.0, 0.0),
+            mp("mp-3", "Общая точка крепления",   "generic",  0.00, -0.05,  0.00),
+            // Under accent plate: cinema camera gimbal mount
+            mp("mp-4", "Нижняя камера",           "camera",   0.00, -0.150, 0.00),
+            // Front face of carbon frame: forward-looking sensor
+            mp("mp-5", "Передний сенсор",         "sensor",   0.00, -0.010, 0.09, 0.0, 0.0, 1.0),
         };
         items.push_back(std::move(i));
     }
 
     // ── 7. Griff 30 ───────────────────────────────────────────────────────────
-    // Model: carbon frame bottom y=-0.06; lower plate bottom y=-0.165;
-    // landing leg crossbar y=-0.30.
+    // Carbon frame: placed(0,0,0) size(0.22,0.12,0.22) → front z=0.11; bottom y=-0.06
+    // Lower plate: placed(0,-0.14,0) size(0.26,0.05,0.26) → bottom y=-0.165; front z=0.13
+    // Landing crossbars at y=-0.30
     {
         UAVCatalogPreviewItem i;
         i.id = "griff-30";
@@ -167,15 +203,20 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 48.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Грузовой подвес",       "payload",  0.0, -0.19,  0.00),
-            mp("mp-2", "Общая точка крепления",  "generic",  0.0, -0.06,  0.00),
+            mp("mp-1", "Грузовой подвес",        "payload",  0.00, -0.190, 0.00),
+            mp("mp-2", "Общая точка крепления",  "generic",  0.00, -0.060, 0.00),
+            // Under lower plate: camera gimbal mount
+            mp("mp-3", "Нижняя камера",          "camera",   0.00, -0.165, 0.00),
+            // Front face of body: forward sensor
+            mp("mp-4", "Передний сенсор",        "sensor",   0.00,  0.000, 0.12, 0.0, 0.0, 1.0),
         };
         items.push_back(std::move(i));
     }
 
     // ── 8. Griff 60 ───────────────────────────────────────────────────────────
-    // Model: frame bottom y=-0.07; lower plate bottom y=-0.24;
-    // landing leg crossbar y=-0.38.
+    // Carbon frame: placed(0,0.02,0) size(0.30,0.18,0.30) → front z=0.15; bottom y=-0.07
+    // Lower plate: placed(0,-0.20,0) size(0.34,0.08,0.34) → bottom y=-0.240; front z=0.17
+    // Landing crossbars at y=-0.38
     {
         UAVCatalogPreviewItem i;
         i.id = "griff-60";
@@ -188,16 +229,21 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 92.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Грузовой подвес (основной)",  "payload",  0.00, -0.28,  0.00),
-            mp("mp-2", "Грузовой подвес (боковой)",   "payload",  0.25, -0.25,  0.00),
-            mp("mp-3", "Общая точка крепления",        "generic",  0.00, -0.09,  0.00),
+            mp("mp-1", "Грузовой подвес (основной)",  "payload",  0.00, -0.280, 0.00),
+            mp("mp-2", "Грузовой подвес (боковой)",   "payload",  0.25, -0.250, 0.00),
+            mp("mp-3", "Общая точка крепления",        "generic",  0.00, -0.090, 0.00),
+            // Under lower plate: cinema/survey camera mount
+            mp("mp-4", "Нижняя камера",                "camera",   0.00, -0.240, 0.00),
+            // Front face of carbon frame: forward sensor
+            mp("mp-5", "Передний сенсор",              "sensor",   0.00,  0.020, 0.16, 0.0, 0.0, 1.0),
         };
         items.push_back(std::move(i));
     }
 
     // ── 9. Avidrone 490TL ─────────────────────────────────────────────────────
-    // Model: fuselage bottom y=-0.08; cargo pod center y=-0.15 z=0.04,
-    // bottom y=-0.20; landing leg crossbar y=-0.24.
+    // Fuselage: placed(0,-0.02,0) size(0.20,0.12,0.92) → nose z=0.46; bottom y=-0.08
+    // Cargo pod: placed(0,-0.15,0.04) size(0.18,0.10,0.28) → bottom y=-0.200
+    // Landing crossbars at y=-0.24
     {
         UAVCatalogPreviewItem i;
         i.id = "avidrone-490tl";
@@ -210,15 +256,19 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 57.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Грузовой отсек",       "payload",  0.0, -0.22,  0.04),
-            mp("mp-2", "Общая точка крепления", "generic",  0.0, -0.02,  0.00),
+            mp("mp-1", "Грузовой отсек",         "payload",  0.00, -0.200,  0.04),
+            mp("mp-2", "Общая точка крепления",   "generic",  0.00, -0.020,  0.00),
+            // Cargo pod accepting camera payloads
+            mp("mp-3", "Нижняя камера",           "camera",   0.00, -0.200,  0.05),
+            // Nose of fuselage: forward sensor
+            mp("mp-4", "Носовой датчик",          "sensor",   0.00, -0.020,  0.47, 0.0, 0.0, 1.0),
         };
         items.push_back(std::move(i));
     }
 
     // ── 10. WingtraOne GEN II ─────────────────────────────────────────────────
-    // Model: hCyl fuselage r=0.036; sensor module 0.11×0.05×0.24
-    // center y=-0.035 z=0.05, bottom y=-0.060.
+    // hCyl fuselage: placed(0,0,0) r=0.036, len=0.78 → bottom y=-0.036
+    // Sensor module: placed(0,-0.035,0.05) size(0.11,0.05,0.24) → bottom y=-0.060
     {
         UAVCatalogPreviewItem i;
         i.id = "wingtraone-gen-ii";
@@ -231,14 +281,18 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 4.5;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Сенсорный отсек", "sensor",  0.0, -0.062,  0.05),
+            mp("mp-1", "Сенсорный отсек",          "sensor",  0.00, -0.062,  0.050),
+            // Same module accepting cameras (RGB, multispectral)
+            mp("mp-2", "Камера (сенсорный отсек)",  "camera",  0.00, -0.062,  0.055),
+            // Bottom of fuselage: generic structural point
+            mp("mp-3", "Общая точка крепления",     "generic", 0.00, -0.036,  0.000),
         };
         items.push_back(std::move(i));
     }
 
     // ── 11. Quantum Systems Trinity Pro ───────────────────────────────────────
-    // Model: hCyl r=0.050; nose pod 0.16×0.08×0.34 center y=-0.03 z=0.12,
-    // bottom y=-0.070.
+    // hCyl fuselage: placed(0,0,0) r=0.050 → bottom y=-0.050
+    // Nose pod: placed(0,-0.03,0.12) size(0.16,0.08,0.34) → bottom y=-0.070; front z=0.29
     {
         UAVCatalogPreviewItem i;
         i.id = "quantum-systems-trinity-pro";
@@ -251,16 +305,21 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 5.75;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Сенсорный отсек",       "sensor",   0.0, -0.072,  0.12),
-            mp("mp-2", "Общая точка крепления",  "generic",  0.0,  0.00,   0.00),
+            mp("mp-1", "Сенсорный отсек",        "sensor",  0.00, -0.072,  0.12),
+            mp("mp-2", "Общая точка крепления",   "generic", 0.00,  0.000,  0.00),
+            // Nose pod camera mount (same bay, camera role)
+            mp("mp-3", "Камера (носовой отсек)",  "camera",  0.00, -0.072,  0.12),
+            // Near nose-tip: forward-pointing sensor port
+            mp("mp-4", "Датчик (передний)",       "sensor",  0.00, -0.030,  0.30, 0.0, 0.0, 1.0),
         };
         items.push_back(std::move(i));
     }
 
     // ── 12. MQ-9B SkyGuardian ─────────────────────────────────────────────────
-    // Model: hCyl(0,0,0,1.52,0.060) → fuselage bottom y=-0.060;
-    // wing: 2.80m span at y=0.032, thickness 0.022 → wing bottom y=0.021;
-    // sensor sphere at y=-0.085 z=0.34 (protrudes below fuselage).
+    // hCyl fuselage: r=0.060 → bottom y=-0.060
+    // Wing: placed(0,0.032,0.02) size(2.80,0.022,0.28) → bottom y=0.021
+    // Sensor sphere: scaledSphere(0,-0.085,0.34, 0.055, 1,0.92,1)
+    //   → bottom y = -0.085 - 0.055*0.92 = -0.136
     {
         UAVCatalogPreviewItem i;
         i.id = "mq-9b-skyguardian";
@@ -273,22 +332,22 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 5670.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            // Under sensor sphere / forward fuselage
-            mp("mp-1", "Нижний разъём (нос)",        "payload",  0.00, -0.088,  0.30),
-            // Right wing bottom at mid-span (wing bottom y≈0.021)
-            mp("mp-2", "Правый пилон (крыло)",        "payload",  0.60,  0.018,  0.00),
-            // Left wing bottom at mid-span
-            mp("mp-3", "Левый пилон (крыло)",         "payload", -0.60,  0.018,  0.00),
-            // Under fuselage center
-            mp("mp-4", "Нижний разъём (центр)",       "generic",  0.00, -0.065,  0.00),
+            mp("mp-1", "Нижний разъём (нос)",      "payload",  0.00, -0.088,  0.30),
+            mp("mp-2", "Правый пилон (крыло)",      "payload",  0.60,  0.018,  0.00),
+            mp("mp-3", "Левый пилон (крыло)",       "payload", -0.60,  0.018,  0.00),
+            mp("mp-4", "Нижний разъём (центр)",     "generic",  0.00, -0.065,  0.00),
+            // Bottom of sensor ball: multi-spectral/SAR sensor
+            mp("mp-5", "Нижний датчик (сфера)",     "sensor",   0.00, -0.136,  0.34),
+            // EO/IR camera turret
+            mp("mp-6", "Камера (турель)",            "camera",   0.00, -0.136,  0.35),
         };
         items.push_back(std::move(i));
     }
 
     // ── 13. Hermes 900 ────────────────────────────────────────────────────────
-    // Model: hCyl(0,0,0,1.12,0.050) → fuselage bottom y=-0.050;
-    // sensor sphere r=0.042 at y=-0.06 z=0.28 (protrudes below fuselage);
-    // sensor box 0.12×0.05×0.08 at y=-0.07 z=0.06.
+    // hCyl fuselage: r=0.050 → bottom y=-0.050
+    // Sensor sphere: placed(0,-0.06,0.28) r=0.042 → bottom y=-0.102
+    // Sensor box: placed(0,-0.07,0.06) size(0.12,0.05,0.08) → bottom y=-0.095
     {
         UAVCatalogPreviewItem i;
         i.id = "hermes-900";
@@ -301,18 +360,18 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 1180.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            // Under fuselage center
-            mp("mp-1", "Основная точка крепления",  "payload",  0.00, -0.055,  0.00),
-            // At sensor ball center
-            mp("mp-2", "Сенсорный отсек",           "sensor",   0.00, -0.062,  0.28),
-            mp("mp-3", "Общая точка крепления",      "generic",  0.00,  0.00,   0.00),
+            mp("mp-1", "Основная точка крепления", "payload",  0.00, -0.055,  0.00),
+            mp("mp-2", "Сенсорный отсек",          "sensor",   0.00, -0.062,  0.28),
+            mp("mp-3", "Общая точка крепления",     "generic",  0.00,  0.000,  0.00),
+            // Bottom of sensor sphere: EO/IR camera turret
+            mp("mp-4", "Камера (нижняя сфера)",     "camera",   0.00, -0.102,  0.28),
         };
         items.push_back(std::move(i));
     }
 
     // ── 14. FT5 Łoś ──────────────────────────────────────────────────────────
-    // Model: hCyl(0,0,0,0.86,0.045) → fuselage bottom y=-0.045;
-    // nose sensor box 0.12×0.05×0.10 center y=-0.06 z=0.10, bottom y=-0.085.
+    // hCyl fuselage: r=0.045 → bottom y=-0.045; nose cap z=0.43
+    // Nose sensor box: placed(0,-0.06,0.10) size(0.12,0.05,0.10) → bottom y=-0.085
     {
         UAVCatalogPreviewItem i;
         i.id = "ft5-los";
@@ -325,15 +384,19 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 120.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Основная точка крепления",  "payload",  0.0, -0.050,  0.00),
-            mp("mp-2", "Сенсорный отсек (нос)",     "sensor",   0.0, -0.085,  0.10),
+            mp("mp-1", "Основная точка крепления", "payload",  0.00, -0.050,  0.00),
+            mp("mp-2", "Сенсорный отсек (нос)",    "sensor",   0.00, -0.085,  0.10),
+            // Same nose bay accepting cameras
+            mp("mp-3", "Камера (нос)",              "camera",   0.00, -0.085,  0.11),
+            // Bottom of fuselage: generic attachment
+            mp("mp-4", "Общая точка крепления",     "generic",  0.00, -0.045,  0.00),
         };
         items.push_back(std::move(i));
     }
 
     // ── 15. FlyEye ────────────────────────────────────────────────────────────
-    // Model: hCyl(0,0,0,0.58,0.030) → fuselage bottom y=-0.030;
-    // nose box 0.08×0.04×0.07 center y=-0.045 z=0.10, bottom y=-0.065.
+    // hCyl fuselage: r=0.030 → bottom y=-0.030; nose cap z=0.29
+    // Nose box: placed(0,-0.045,0.10) size(0.08,0.04,0.07) → bottom y=-0.065
     {
         UAVCatalogPreviewItem i;
         i.id = "flyeye";
@@ -346,7 +409,11 @@ std::vector<UAVCatalogPreviewItem> buildCatalog()
         i.maxTakeoffMassKg = 12.0;
         i.hasVerifiedData  = false;
         i.mountPoints = {
-            mp("mp-1", "Сенсорный отсек", "sensor",  0.0, -0.050,  0.10),
+            mp("mp-1", "Сенсорный отсек",        "sensor",  0.00, -0.050,  0.10),
+            // Nose box bottom: camera mount
+            mp("mp-2", "Камера (нос)",            "camera",  0.00, -0.065,  0.10),
+            // Bottom of fuselage: generic
+            mp("mp-3", "Общая точка крепления",   "generic", 0.00, -0.030,  0.00),
         };
         items.push_back(std::move(i));
     }
