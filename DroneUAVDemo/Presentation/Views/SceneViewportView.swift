@@ -23,7 +23,9 @@ struct SceneViewportView: View {
             )
             .ignoresSafeArea()
 
-            if !viewModel.isParametersPanelVisible || viewModel.isCompactTelemetryHUDEnabled {
+            if viewModel.isSpectatorMode {
+                EmptyView()
+            } else if !viewModel.isParametersPanelVisible || viewModel.isCompactTelemetryHUDEnabled {
                 CompactTelemetryHUDView(
                     telemetry: viewModel.telemetry,
                     warningKeys: viewModel.warnings
@@ -67,64 +69,34 @@ struct SceneViewportView: View {
             }
         }
         .overlay(alignment: .top) {
-            if viewModel.isCompassVisible {
+            if !viewModel.isSpectatorMode, viewModel.isCompassVisible {
                 CompassOverlayView(viewModel: viewModel.compassViewModel)
                     .padding(.top, 12)
             }
         }
         .overlay(alignment: .topTrailing) {
-            VStack(alignment: .trailing, spacing: 10) {
-                if let badgeText = viewModel.onlineSessionBadgeText {
-                    OnlineSessionBadgeView(
-                        badgeText: badgeText,
-                        detailText: viewModel.onlineSessionDetailText
-                    )
-                }
+            if !viewModel.isSpectatorMode {
+                VStack(alignment: .trailing, spacing: 10) {
+                    if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
+                        TerrainMapOverlayView(
+                            snapshot: viewModel.terrainMapSnapshot,
+                            telemetry: viewModel.telemetry,
+                            targetMarker: viewModel.targetMarkerState,
+                            dropZone: viewModel.missionPlanState.dropZone,
+                            onSelectTarget: { viewModel.setTargetMarker(at: $0) },
+                            onClearTarget: { viewModel.clearTargetMarker() }
+                        )
+                    }
 
-                if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
-                    TerrainMapOverlayView(
-                        snapshot: viewModel.terrainMapSnapshot,
-                        telemetry: viewModel.telemetry,
-                        targetMarker: viewModel.targetMarkerState,
-                        dropZone: viewModel.missionPlanState.dropZone,
-                        onSelectTarget: { viewModel.setTargetMarker(at: $0) },
-                        onClearTarget: { viewModel.clearTargetMarker() }
-                    )
+                    if viewModel.cameraConfiguration.mode == .payload, viewModel.payloadCameraStatus.isActive {
+                        PayloadCameraStatusOverlayView(status: viewModel.payloadCameraStatus)
+                    }
                 }
-
-                if viewModel.cameraConfiguration.mode == .payload, viewModel.payloadCameraStatus.isActive {
-                    PayloadCameraStatusOverlayView(status: viewModel.payloadCameraStatus)
-                }
+                .padding(.top, 12)
+                .padding(.trailing, 12)
             }
-            .padding(.top, 12)
-            .padding(.trailing, 12)
         }
         .background(Color.black)
-    }
-}
-
-private struct OnlineSessionBadgeView: View {
-    let badgeText: String
-    let detailText: String?
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Text(badgeText)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(GroundControlPalette.textPrimary)
-            if let detailText, !detailText.isEmpty {
-                Text(detailText)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(GroundControlPalette.textSecondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(GroundControlPalette.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
-        )
     }
 }
 

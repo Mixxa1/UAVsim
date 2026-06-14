@@ -152,6 +152,7 @@ final class DroneSceneController {
     private var orbitLookAngles = SIMD2<Float>(repeating: 0.0)  // yaw, pitch
     private var fpvLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
     private var topLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
+    private var spectatorLookAngles = SIMD2<Float>(repeating: 0.0) // yaw, pitch
 
     private var orbitAngle: Float = 0.0
     private var activeProfile: DroneModelProfile
@@ -204,7 +205,6 @@ final class DroneSceneController {
         scene.rootNode.addChildNode(followRigNode)
         scene.rootNode.addChildNode(orbitCameraNode)
         scene.rootNode.addChildNode(topCameraNode)
-        spectatorCameraNode.name = "spectatorCameraNode"
         scene.rootNode.addChildNode(spectatorCameraNode)
 
         fpvPresentationRootNode.name = "fpvPresentationRootNode"
@@ -289,7 +289,7 @@ final class DroneSceneController {
             return topCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
-        case .spectatorFree:
+        case .spectator:
             return spectatorCameraNode
         }
     }
@@ -806,7 +806,7 @@ final class DroneSceneController {
         case .fpv:
             fpvLookAngles.x = (fpvLookAngles.x + yawDelta).clamped(to: -0.9...0.9)
             fpvLookAngles.y = (fpvLookAngles.y + pitchDelta).clamped(to: -0.7...0.7)
-        case .follow, .orbit, .top, .payload, .spectatorFree:
+        case .follow, .orbit, .top, .payload, .spectator:
             return
         }
     }
@@ -826,8 +826,9 @@ final class DroneSceneController {
             topLookAngles = .zero
         case .payload:
             return
-        case .spectatorFree:
-            return
+        case .spectator:
+            spectatorLookAngles = .zero
+            spectatorCameraNode.eulerAngles = SCNVector3Zero
         }
     }
 
@@ -848,7 +849,7 @@ final class DroneSceneController {
             orbitLookAngles = .zero
         case .top:
             topLookAngles = .zero
-        case .free, .follow, .fpv, .payload, .spectatorFree:
+        case .free, .follow, .fpv, .payload, .spectator:
             break
         }
     }
@@ -867,6 +868,69 @@ final class DroneSceneController {
     func dollyFreeCamera(by step: Float) {
         let forward = simd_normalize(simd_act(freeCameraNode.simdOrientation, SIMD3<Float>(0, 0, -1)))
         freeCameraNode.simdPosition += forward * step
+    }
+
+    func configureSpectatorRuntime(camera: CameraConfiguration) {
+        droneNode.isHidden = true
+        droneNode.opacity = 0.0
+        visualRootNode.isHidden = true
+        fpvPresentationActive = false
+        fpvObstructionHidingActive = false
+        spectatorLookAngles = SIMD2<Float>(0.0, -0.18)
+        spectatorCameraNode.camera?.fieldOfView = CGFloat(camera.fov)
+        spectatorCameraNode.camera?.zNear = 0.01
+        spectatorCameraNode.simdPosition = SIMD3<Float>(0.0, 5.2, 12.0)
+        spectatorCameraNode.eulerAngles = SCNVector3(
+            CGFloat(spectatorLookAngles.y),
+            CGFloat(spectatorLookAngles.x),
+            0.0
+        )
+    }
+
+    func updateSpectatorRuntime(camera: CameraConfiguration) {
+        spectatorCameraNode.camera?.fieldOfView = CGFloat(camera.fov)
+        spectatorCameraNode.camera?.zNear = 0.01
+        droneNode.isHidden = true
+        visualRootNode.isHidden = true
+    }
+
+    func applySpectatorLook(
+        yawDeltaDeg: Float,
+        pitchDeltaDeg: Float,
+        invertX: Bool,
+        invertY: Bool
+    ) {
+        let yawSign: Float = invertX ? -1.0 : 1.0
+        let pitchSign: Float = invertY ? -1.0 : 1.0
+        spectatorLookAngles.x += yawDeltaDeg.degreesToRadians * yawSign
+        spectatorLookAngles.y = (spectatorLookAngles.y + pitchDeltaDeg.degreesToRadians * pitchSign)
+            .clamped(to: -1.45...1.45)
+        spectatorCameraNode.eulerAngles = SCNVector3(
+            CGFloat(spectatorLookAngles.y),
+            CGFloat(spectatorLookAngles.x),
+            0.0
+        )
+    }
+
+    func moveSpectatorCamera(
+        forward: Float,
+        strafe: Float,
+        deltaTime: Float,
+        speed: Float
+    ) {
+        guard deltaTime > 0.0 else {
+            return
+        }
+
+        let forwardVector = simd_normalize(simd_act(spectatorCameraNode.simdOrientation, SIMD3<Float>(0.0, 0.0, -1.0)))
+        let rightVector = simd_normalize(simd_act(spectatorCameraNode.simdOrientation, SIMD3<Float>(1.0, 0.0, 0.0)))
+        let desiredMotion = forwardVector * forward + rightVector * strafe
+        let length = simd_length(desiredMotion)
+        guard length > 0.001 else {
+            return
+        }
+
+        spectatorCameraNode.simdPosition += (desiredMotion / length) * max(0.0, speed) * deltaTime
     }
 
     func setDroneProfile(_ profile: DroneModelProfile) {
@@ -921,22 +985,6 @@ final class DroneSceneController {
         fpvPitchNode.eulerAngles = SCNVector3(0.0, 0.0, 0.0)
         fpvPitchNode.simdPosition = .zero
         payloadDropCameraController.reset()
-    }
-
-    func updateSpectatorCamera(_ spectator: SpectatorCameraState, fov: Float) {
-        let safePosition = SIMD3<Float>(
-            spectator.position.x.isFinite ? spectator.position.x : 0.0,
-            spectator.position.y.isFinite ? spectator.position.y : 2.0,
-            spectator.position.z.isFinite ? spectator.position.z : 0.0
-        )
-        spectatorCameraNode.simdPosition = safePosition
-        spectatorCameraNode.eulerAngles = SCNVector3(
-            spectator.pitch.isFinite ? -spectator.pitch : 0.0,
-            spectator.yaw.isFinite ? spectator.yaw : 0.0,
-            0.0
-        )
-        spectatorCameraNode.camera?.fieldOfView = CGFloat(fov.clamped(to: 30.0...110.0))
-        spectatorCameraNode.camera?.zNear = 0.02
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
@@ -1468,7 +1516,7 @@ final class DroneSceneController {
         fpvCameraNode.camera?.zNear = CGFloat(max(0.015, settings.fpv.nearClip.clamped(to: 0.005...0.25)))
         topCameraNode.camera?.zNear = 0.03
         freeCameraNode.camera?.zNear = 0.01
-        spectatorCameraNode.camera?.zNear = 0.02
+        spectatorCameraNode.camera?.zNear = 0.01
         payloadDropCameraController.updateCameraProperties(fov: Float(fov), zNear: 0.025)
         if settings.mode == .payload,
            deltaTime <= 0.0001,

@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SceneKit
 import SwiftUI
 
@@ -21,8 +22,21 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate {
 
 private final class FocusableSCNView: SCNView {
     var onLookDelta: ((Float, Float) -> Void)?
+    var usesUnboundedMouseLook: Bool = false {
+        didSet {
+            if usesUnboundedMouseLook {
+                window?.acceptsMouseMovedEvents = true
+                captureMouseLookIfPossible()
+            } else {
+                releaseMouseLook()
+            }
+        }
+    }
 
     private var lastDragPoint: NSPoint?
+    private var trackingArea: NSTrackingArea?
+    private var isMouseLookCaptured = false
+    private var isCursorHidden = false
     private static let suppressedSceneControlKeyCodes: Set<UInt16> = [37, 38] // L / J
 
     override var acceptsFirstResponder: Bool { true }
@@ -30,24 +44,77 @@ private final class FocusableSCNView: SCNView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.makeFirstResponder(self)
+        window?.acceptsMouseMovedEvents = true
+        if window == nil {
+            releaseMouseLook()
+        } else if usesUnboundedMouseLook {
+            captureMouseLookIfPossible()
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if usesUnboundedMouseLook {
+            captureMouseLookIfPossible()
+        }
+        super.mouseEntered(with: event)
     }
 
     override func mouseDown(with event: NSEvent) {
+        if usesUnboundedMouseLook {
+            captureMouseLookIfPossible()
+            return
+        }
         lastDragPoint = event.locationInWindow
         super.mouseDown(with: event)
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        if usesUnboundedMouseLook {
+            captureMouseLookIfPossible()
+            return
+        }
         lastDragPoint = event.locationInWindow
         super.rightMouseDown(with: event)
     }
 
+    override func mouseMoved(with event: NSEvent) {
+        guard usesUnboundedMouseLook, isMouseLookCaptured else {
+            super.mouseMoved(with: event)
+            return
+        }
+        handleUnboundedLook(event)
+    }
+
     override func mouseDragged(with event: NSEvent) {
+        if usesUnboundedMouseLook {
+            handleUnboundedLook(event)
+            return
+        }
         handleLookDrag(event)
         super.mouseDragged(with: event)
     }
 
     override func rightMouseDragged(with event: NSEvent) {
+        if usesUnboundedMouseLook {
+            handleUnboundedLook(event)
+            return
+        }
         handleLookDrag(event)
         super.rightMouseDragged(with: event)
     }
@@ -63,6 +130,10 @@ private final class FocusableSCNView: SCNView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if usesUnboundedMouseLook, event.keyCode == 53 {
+            releaseMouseLook()
+            return
+        }
         guard !Self.suppressedSceneControlKeyCodes.contains(event.keyCode) else {
             return
         }
@@ -90,6 +161,48 @@ private final class FocusableSCNView: SCNView {
 
         onLookDelta?(dx, -dy)
     }
+
+    private func handleUnboundedLook(_ event: NSEvent) {
+        let dx = Float(event.deltaX)
+        let dy = Float(event.deltaY)
+        guard abs(dx) > 0.01 || abs(dy) > 0.01 else {
+            return
+        }
+
+        onLookDelta?(dx, -dy)
+    }
+
+    private func captureMouseLookIfPossible() {
+        guard usesUnboundedMouseLook, !isMouseLookCaptured, window != nil else {
+            return
+        }
+
+        window?.makeFirstResponder(self)
+        if CGAssociateMouseAndMouseCursorPosition(0) == .success {
+            isMouseLookCaptured = true
+            if !isCursorHidden {
+                NSCursor.hide()
+                isCursorHidden = true
+            }
+        }
+    }
+
+    private func releaseMouseLook() {
+        guard isMouseLookCaptured || isCursorHidden else {
+            return
+        }
+
+        _ = CGAssociateMouseAndMouseCursorPosition(1)
+        isMouseLookCaptured = false
+        if isCursorHidden {
+            NSCursor.unhide()
+            isCursorHidden = false
+        }
+    }
+
+    deinit {
+        releaseMouseLook()
+    }
 }
 
 struct DroneSceneViewRepresentable: NSViewRepresentable {
@@ -116,7 +229,8 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.backgroundColor = .black
         view.isPlaying = true
         view.delegate = context.coordinator
-        view.onLookDelta = cameraMode == .fpv ? onLookDelta : nil
+        view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
+        view.usesUnboundedMouseLook = cameraMode == .spectator
 
         configureCameraControl(on: view)
 
@@ -136,7 +250,8 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         context.coordinator.onRenderFrame = onRenderFrame
         view.pointOfView = pointOfView
         if let view = view as? FocusableSCNView {
-            view.onLookDelta = cameraMode == .fpv ? onLookDelta : nil
+            view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
+            view.usesUnboundedMouseLook = cameraMode == .spectator
         }
         configureCameraControl(on: view)
     }

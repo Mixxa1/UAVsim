@@ -232,7 +232,8 @@
 		100000000000000000000368 /* MountedCADPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000367 /* MountedCADPayload.swift */; };
 		10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000369 /* SimulationLaunchConfiguration.swift */; };
 		10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036B /* CADPayloadHandoffService.swift */; };
-		10000000000000000000036E /* OnlineSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036D /* OnlineSessionModels.swift */; };
+		100000000000000000000370 /* OnlineTrialModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000371 /* OnlineTrialModels.swift */; };
+		100000000000000000000372 /* P2PSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000373 /* P2PSessionModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -464,7 +465,8 @@
 		100000000000000000000367 /* MountedCADPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountedCADPayload.swift; sourceTree = "<group>"; };
 		100000000000000000000369 /* SimulationLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationLaunchConfiguration.swift; sourceTree = "<group>"; };
 		10000000000000000000036B /* CADPayloadHandoffService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADPayloadHandoffService.swift; sourceTree = "<group>"; };
-		10000000000000000000036D /* OnlineSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineSessionModels.swift; sourceTree = "<group>"; };
+		100000000000000000000371 /* OnlineTrialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialModels.swift; sourceTree = "<group>"; };
+		100000000000000000000373 /* P2PSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = P2PSessionModels.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -514,9 +516,10 @@
 		};
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
-			children = (
-				10000000000000000000035E /* CADBridge */,
-				100000000000000000000121 /* AppLanguage.swift */,
+				children = (
+					10000000000000000000035E /* CADBridge */,
+					100000000000000000000374 /* OnlineTrials */,
+					100000000000000000000121 /* AppLanguage.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
 				100000000000000000000113 /* CameraConfiguration.swift */,
@@ -529,7 +532,6 @@
 				1000000000000000000002B8 /* FixedWingAssistMode.swift */,
 				100000000000000000000110 /* DroneModelProfile.swift */,
 				100000000000000000000367 /* MountedCADPayload.swift */,
-				10000000000000000000036D /* OnlineSessionModels.swift */,
 				10000000000000000000013D /* PayloadConfiguration.swift */,
 				10000000000000000000013F /* PayloadCapabilityCheck.swift */,
 				10000000000000000000013E /* PayloadState.swift */,
@@ -784,11 +786,12 @@
 		};
 		100000000000000000000019 /* Remote */ = {
 			isa = PBXGroup;
-			children = (
-				1000000000000000000001A7 /* NetworkRemoteHost.swift */,
-				1000000000000000000001A5 /* MockRemoteTransport.swift */,
-				1000000000000000000001A3 /* RemoteControlPacket.swift */,
-				1000000000000000000001A6 /* RemotePacketDecoder.swift */,
+				children = (
+					1000000000000000000001A7 /* NetworkRemoteHost.swift */,
+					1000000000000000000001A5 /* MockRemoteTransport.swift */,
+					100000000000000000000373 /* P2PSessionModels.swift */,
+					1000000000000000000001A3 /* RemoteControlPacket.swift */,
+					1000000000000000000001A6 /* RemotePacketDecoder.swift */,
 				1000000000000000000001A4 /* RemoteTransport.swift */,
 			);
 			path = Remote;
@@ -807,17 +810,25 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		10000000000000000000035E /* CADBridge */ = {
-			isa = PBXGroup;
-			children = (
-				10000000000000000000035A /* CADExternalModelReference.swift */,
+			10000000000000000000035E /* CADBridge */ = {
+				isa = PBXGroup;
+				children = (
+					10000000000000000000035A /* CADExternalModelReference.swift */,
 				10000000000000000000035B /* CADModelImportDescriptor.swift */,
 				10000000000000000000035C /* CADAttachmentImport.swift */,
 				10000000000000000000035D /* CADMassPropertiesImport.swift */,
 			);
-			path = CADBridge;
-			sourceTree = "<group>";
-		};
+				path = CADBridge;
+				sourceTree = "<group>";
+			};
+			100000000000000000000374 /* OnlineTrials */ = {
+				isa = PBXGroup;
+				children = (
+					100000000000000000000371 /* OnlineTrialModels.swift */,
+				);
+				path = OnlineTrials;
+				sourceTree = "<group>";
+			};
 		C6CCCC242F87BA77008CAEB7 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -1116,11 +1127,12 @@
 				100000000000000000000357 /* CADModelImportDescriptor.swift in Sources */,
 				100000000000000000000358 /* CADAttachmentImport.swift in Sources */,
 				100000000000000000000359 /* CADMassPropertiesImport.swift in Sources */,
-				100000000000000000000368 /* MountedCADPayload.swift in Sources */,
-				10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */,
-				10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */,
-				10000000000000000000036E /* OnlineSessionModels.swift in Sources */,
-				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
+					100000000000000000000368 /* MountedCADPayload.swift in Sources */,
+					10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */,
+					10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */,
+					100000000000000000000370 /* OnlineTrialModels.swift in Sources */,
+					100000000000000000000372 /* P2PSessionModels.swift in Sources */,
+					1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
