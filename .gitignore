@@ -22,7 +22,15 @@ build-*/
 cmake-build-*/
 out/
 
+# CADNext local CMake build artifacts
 CADNext/build/
+CADNext/build-gui/
+CADNext/build-occt/
+CADNext/build-gui-occt/
+
+# CADNext local CMake build directories
+CADNext/build/
+CADNext/build*/
 CADNext/build-*/
 CADNext/cmake-build-*/
 CADNext/out/
