@@ -9,6 +9,8 @@ struct OnlineTrialRuntimeOverlay: View {
     var trialPhase: LANTrialPhase = .running
     var participantCount: Int = 1
     var staleCount: Int = 0
+    var damageState: OnlineVehicleDamageState = OnlineVehicleDamageState()
+    var recentCollisionEvents: [OnlineCollisionEvent] = []
     var onEndTrial: (() -> Void)? = nil
     var onLeaveTrial: (() -> Void)? = nil
 
@@ -24,6 +26,18 @@ struct OnlineTrialRuntimeOverlay: View {
     private var vehicleIDText: String { shortID(context?.localVehicleID) }
     private var vehicleCount: Int { fleetState?.vehicles.count ?? 0 }
     private var remoteCount: Int { remoteStates.count }
+
+    private var lastCollisionEvent: OnlineCollisionEvent? { recentCollisionEvents.last }
+
+    private var localVehicleDamageRecord: OnlineVehicleDamageRecord? {
+        guard let vid = context?.localVehicleID else { return nil }
+        return damageState.record(for: vid)
+    }
+
+    private var localVehicleIsAffected: Bool {
+        guard let vid = context?.localVehicleID else { return false }
+        return damageState.isControlDisabled(vehicleID: vid)
+    }
 
     private var localAuthorityText: String {
         guard let ctx = context else { return "—" }
@@ -75,6 +89,8 @@ struct OnlineTrialRuntimeOverlay: View {
 
             statusSection
             separator
+
+            collisionEventSection
 
             actionButtons
         }
@@ -174,6 +190,67 @@ struct OnlineTrialRuntimeOverlay: View {
         }
         if let onLeaveTrial {
             overlayButton("Выйти", systemImage: "arrow.left", isDestructive: false, action: onLeaveTrial)
+        }
+    }
+
+    private var localDamageLabel: String {
+        switch localVehicleDamageRecord?.operationalState {
+        case .disabled: return "LOCAL UAV DISABLED"
+        case .crashed:  return "LOCAL UAV CRASHED"
+        default:        return "LOCAL UAV DAMAGED"
+        }
+    }
+
+    @ViewBuilder
+    private var collisionEventSection: some View {
+        if localVehicleIsAffected {
+            Text(localDamageLabel)
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundStyle(Color(red: 1.0, green: 0.25, blue: 0.25))
+                .padding(.vertical, 2)
+            separator
+        }
+
+        if let event = lastCollisionEvent {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Events")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                HStack(spacing: 4) {
+                    Text(event.severity.rawValue.uppercased())
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(severityColor(event.severity))
+                    Text("→")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                    Text(event.result.rawValue.uppercased())
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(resultColor(event.result))
+                }
+                Text(event.participants.map(\.displayName).joined(separator: " × "))
+                    .font(.system(size: 8, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .lineLimit(1)
+            }
+            separator
+        }
+    }
+
+    private func severityColor(_ severity: OnlineCollisionSeverity) -> Color {
+        switch severity {
+        case .contact:  return GroundControlPalette.textSecondary
+        case .minor:    return GroundControlPalette.warning
+        case .major:    return Color(red: 1.0, green: 0.55, blue: 0.2)
+        case .critical: return Color(red: 1.0, green: 0.25, blue: 0.25)
+        }
+    }
+
+    private func resultColor(_ result: OnlineCollisionResult) -> Color {
+        switch result {
+        case .ignored:  return GroundControlPalette.textSecondary
+        case .damaged:  return GroundControlPalette.warning
+        case .disabled: return Color(red: 1.0, green: 0.55, blue: 0.2)
+        case .crashed:  return Color(red: 1.0, green: 0.25, blue: 0.25)
         }
     }
 

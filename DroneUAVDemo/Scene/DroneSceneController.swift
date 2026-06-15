@@ -407,6 +407,51 @@ final class DroneSceneController {
         }
     }
 
+    // P2P v1.2: update ghost visual damage state — called after collision events are applied.
+    func applyOnlineVehicleDamageState(_ damageState: OnlineVehicleDamageState) {
+        for child in onlineTrialPlaceholderRootNode.childNodes {
+            guard let name = child.name,
+                  name.hasPrefix("online_trial_vehicle_"),
+                  let uuidString = name.components(separatedBy: "online_trial_vehicle_").last,
+                  let vehicleID = UUID(uuidString: uuidString) else { continue }
+
+            let opState = damageState.record(for: vehicleID)?.operationalState ?? .normal
+            applyDamageVisual(to: child, operationalState: opState)
+        }
+    }
+
+    private func applyDamageVisual(to node: SCNNode, operationalState: OnlineVehicleOperationalState) {
+        let labelNodeName = "damage_label"
+        node.childNodes.filter { $0.name == labelNodeName }.forEach { $0.removeFromParentNode() }
+
+        switch operationalState {
+        case .normal:
+            break
+        case .damaged:
+            node.opacity = min(node.opacity, 0.85)
+            addDamageLabel("DAMAGED", color: NSColor(red: 1.0, green: 0.75, blue: 0.0, alpha: 1.0), to: node, name: labelNodeName)
+        case .disabled:
+            node.opacity = min(node.opacity, 0.55)
+            addDamageLabel("DISABLED", color: NSColor(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0), to: node, name: labelNodeName)
+        case .crashed:
+            node.opacity = min(node.opacity, 0.45)
+            addDamageLabel("CRASHED", color: NSColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0), to: node, name: labelNodeName)
+        }
+    }
+
+    private func addDamageLabel(_ text: String, color: NSColor, to parent: SCNNode, name: String) {
+        let textGeometry = SCNText(string: text, extrusionDepth: 0)
+        textGeometry.font = NSFont.systemFont(ofSize: 0.15, weight: .bold)
+        textGeometry.firstMaterial?.diffuse.contents = color
+        textGeometry.firstMaterial?.isDoubleSided = true
+
+        let labelNode = SCNNode(geometry: textGeometry)
+        labelNode.name = name
+        labelNode.position = SCNVector3(0, 0.6, 0)
+        labelNode.scale = SCNVector3(1, 1, 1)
+        parent.addChildNode(labelNode)
+    }
+
     private func onlineTrialVehicleNodeName(for vehicleID: UUID) -> String {
         "online_trial_vehicle_\(vehicleID.uuidString)"
     }

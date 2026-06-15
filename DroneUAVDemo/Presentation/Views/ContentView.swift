@@ -957,6 +957,9 @@ struct ContentView: View {
                         .onReceive(lanSessionViewModel.$remoteSnapshotState) { snapshotState in
                             observedViewModel.applyOnlineRemoteSnapshotState(snapshotState)
                         }
+                        .onReceive(lanSessionViewModel.$onlineDamageState) { damageState in
+                            observedViewModel.applyOnlineDamageState(damageState)
+                        }
                 }
             } else {
                 startScreen
@@ -1244,6 +1247,7 @@ struct ContentView: View {
                         SceneViewportView(
                             viewModel: viewModel,
                             trialPhase: lanSessionViewModel.state.trialPhase,
+                            collisionEvents: lanSessionViewModel.collisionEvents,
                             onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
                             onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
                         )
@@ -1320,6 +1324,7 @@ struct ContentView: View {
             SceneViewportView(
                 viewModel: viewModel,
                 trialPhase: lanSessionViewModel.state.trialPhase,
+                collisionEvents: lanSessionViewModel.collisionEvents,
                 onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
                 onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
             )

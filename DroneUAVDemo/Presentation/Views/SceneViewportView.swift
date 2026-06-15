@@ -4,6 +4,7 @@ import simd
 struct SceneViewportView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
     var trialPhase: LANTrialPhase = .running
+    var collisionEvents: [OnlineCollisionEvent] = []
     var onEndTrial: (() -> Void)? = nil
     var onLeaveTrial: (() -> Void)? = nil
     @StateObject private var tabObserver = TabKeyObserver()
@@ -90,6 +91,8 @@ struct SceneViewportView: View {
                         trialPhase: trialPhase,
                         participantCount: viewModel.onlineTrialContext?.launchDescriptor.assignments.count ?? 1,
                         staleCount: viewModel.onlineTrialStaleRemoteCount,
+                        damageState: viewModel.onlineDamageState,
+                        recentCollisionEvents: collisionEvents,
                         onEndTrial: onEndTrial,
                         onLeaveTrial: onLeaveTrial
                     )

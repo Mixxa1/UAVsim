@@ -468,6 +468,9 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
     @Published private(set) var onlineFleetState: OnlineTrialFleetState?
     @Published private(set) var onlineAuthorityRegistry: OnlineObjectAuthorityRegistry?
+    // P2P v1.2: replicated collision events can revoke local vehicle control authority
+    // by setting disabled/crashed state.
+    @Published private(set) var onlineDamageState = OnlineVehicleDamageState()
     @Published private(set) var onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
     @Published private(set) var onlineInterpolatedRemoteStates: [OnlineVehicleInterpolatedState] = []
     private var onlineInterpolationStore = OnlineVehicleInterpolationStore()
@@ -582,7 +585,25 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var canControlLocalVehicle: Bool {
-        LANRuntimeRolePolicy.canControlVehicle(context: onlineRuntimeContext)
+        guard LANRuntimeRolePolicy.canControlVehicle(context: onlineRuntimeContext) else { return false }
+        // P2P v1.2: collision damage state can revoke local vehicle authority.
+        if let vehicleID = onlineRuntimeContext?.localVehicleID,
+           onlineDamageState.isControlDisabled(vehicleID: vehicleID) {
+            return false
+        }
+        return true
+    }
+
+    func applyOnlineDamageState(_ damageState: OnlineVehicleDamageState) {
+        guard onlineRuntimeContext != nil else { return }
+        onlineDamageState = damageState
+        sceneController.applyOnlineVehicleDamageState(damageState)
+        // If local UAV has become disabled/crashed, disarm immediately.
+        if let vehicleID = onlineRuntimeContext?.localVehicleID,
+           damageState.isControlDisabled(vehicleID: vehicleID),
+           isArmed {
+            disarm(forceEmergency: true, preserveCrashDynamics: false)
+        }
     }
 
     func canUseControlModule(_ module: ControlModule) -> Bool {
@@ -1378,6 +1399,7 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.configureOnlineTrialPlaceholders(nil)
         onlineFleetState = nil
         onlineAuthorityRegistry = nil
+        onlineDamageState = OnlineVehicleDamageState()
         onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
         onlineInterpolationStore = OnlineVehicleInterpolationStore()
         onlineInterpolatedRemoteStates = []
