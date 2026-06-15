@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cadnext_test_view_bounds_policy.dir/test_view_bounds_policy.cpp.o -o cadnext_test_view_bounds_policy  ../core/libcadnext_core.a

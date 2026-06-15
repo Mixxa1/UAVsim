@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cadnext_test_document_editing.dir/test_document_editing.cpp.o -o cadnext_test_document_editing  ../core/libcadnext_core.a

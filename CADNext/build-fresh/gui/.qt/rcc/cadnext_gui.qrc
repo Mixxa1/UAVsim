@@ -1,7 +1,0 @@
-<RCC>
-  <qresource prefix="/cadnext">
-    <file alias="uavpart_file_preview.png">/Users/misha/UAVsim/CADNext/gui/resources/uavpart_file_preview.png</file>
-    <file alias="cadnext_file_preview.png">/Users/misha/UAVsim/CADNext/gui/resources/cadnext_file_preview.png</file>
-  </qresource>
-</RCC>
-
