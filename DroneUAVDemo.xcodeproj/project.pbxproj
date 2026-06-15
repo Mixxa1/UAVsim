@@ -234,6 +234,11 @@
 		10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036B /* CADPayloadHandoffService.swift */; };
 		100000000000000000000370 /* OnlineTrialModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000371 /* OnlineTrialModels.swift */; };
 		100000000000000000000372 /* P2PSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000373 /* P2PSessionModels.swift */; };
+		100000000000000000000375 /* LANSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000376 /* LANSessionModels.swift */; };
+		100000000000000000000377 /* LANRuntimeRolePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000378 /* LANRuntimeRolePolicy.swift */; };
+		100000000000000000000379 /* LANSessionMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037A /* LANSessionMessage.swift */; };
+		10000000000000000000037B /* LANSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037C /* LANSessionViewModel.swift */; };
+		10000000000000000000037D /* LANOnlineTrialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037E /* LANOnlineTrialsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -467,6 +472,11 @@
 		10000000000000000000036B /* CADPayloadHandoffService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADPayloadHandoffService.swift; sourceTree = "<group>"; };
 		100000000000000000000371 /* OnlineTrialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialModels.swift; sourceTree = "<group>"; };
 		100000000000000000000373 /* P2PSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = P2PSessionModels.swift; sourceTree = "<group>"; };
+		100000000000000000000376 /* LANSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionModels.swift; sourceTree = "<group>"; };
+		100000000000000000000378 /* LANRuntimeRolePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANRuntimeRolePolicy.swift; sourceTree = "<group>"; };
+		10000000000000000000037A /* LANSessionMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionMessage.swift; sourceTree = "<group>"; };
+		10000000000000000000037C /* LANSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionViewModel.swift; sourceTree = "<group>"; };
+		10000000000000000000037E /* LANOnlineTrialsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANOnlineTrialsView.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -519,6 +529,7 @@
 				children = (
 					10000000000000000000035E /* CADBridge */,
 					100000000000000000000374 /* OnlineTrials */,
+					10000000000000000000037F /* Networking */,
 					100000000000000000000121 /* AppLanguage.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
@@ -707,6 +718,7 @@
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
+				10000000000000000000037E /* LANOnlineTrialsView.swift */,
 				100000000000000000000197 /* MissionDebriefView.swift */,
 				100000000000000000000159 /* MissionMapView.swift */,
 				10000000000000000000016F /* MissionDraftPanel.swift */,
@@ -744,6 +756,7 @@
 				100000000000000000000153 /* CompassViewModel.swift */,
 				1000000000000000000002AE /* BindingsViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
+				10000000000000000000037C /* LANSessionViewModel.swift */,
 				1000000000000000000002D3 /* ReplayLibraryViewModel.swift */,
 				10000000000000000000034F /* LegalAgreementViewModel.swift */,
 			);
@@ -790,6 +803,7 @@
 					1000000000000000000001A7 /* NetworkRemoteHost.swift */,
 					1000000000000000000001A5 /* MockRemoteTransport.swift */,
 					100000000000000000000373 /* P2PSessionModels.swift */,
+					10000000000000000000037A /* LANSessionMessage.swift */,
 					1000000000000000000001A3 /* RemoteControlPacket.swift */,
 					1000000000000000000001A6 /* RemotePacketDecoder.swift */,
 				1000000000000000000001A4 /* RemoteTransport.swift */,
@@ -827,6 +841,15 @@
 					100000000000000000000371 /* OnlineTrialModels.swift */,
 				);
 				path = OnlineTrials;
+				sourceTree = "<group>";
+			};
+			10000000000000000000037F /* Networking */ = {
+				isa = PBXGroup;
+				children = (
+					100000000000000000000376 /* LANSessionModels.swift */,
+					100000000000000000000378 /* LANRuntimeRolePolicy.swift */,
+				);
+				path = Networking;
 				sourceTree = "<group>";
 			};
 		C6CCCC242F87BA77008CAEB7 /* Frameworks */ = {
@@ -1132,6 +1155,11 @@
 					10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */,
 					100000000000000000000370 /* OnlineTrialModels.swift in Sources */,
 					100000000000000000000372 /* P2PSessionModels.swift in Sources */,
+					100000000000000000000375 /* LANSessionModels.swift in Sources */,
+					100000000000000000000377 /* LANRuntimeRolePolicy.swift in Sources */,
+					100000000000000000000379 /* LANSessionMessage.swift in Sources */,
+					10000000000000000000037B /* LANSessionViewModel.swift in Sources */,
+					10000000000000000000037D /* LANOnlineTrialsView.swift in Sources */,
 					1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

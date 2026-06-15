@@ -56,8 +56,7 @@ private enum PendingExitAction {
 }
 
 private enum OnlineTrialScreen {
-    case entryMode
-    case lanLobby
+    case onlineTrials
 }
 
 @MainActor
@@ -876,7 +875,6 @@ struct ContentView: View {
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
     @State private var onlineTrialScreen: OnlineTrialScreen?
-    @State private var selectedOnlineTrialRole: OnlineTrialRole = .pilot
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -1025,10 +1023,10 @@ struct ContentView: View {
 
                 Group {
                     switch onlineTrialScreen {
-                    case .entryMode:
-                        onlineTrialEntryScreen
-                    case .lanLobby:
-                        lanLobbyScreen
+                    case .onlineTrials:
+                        LANOnlineTrialsView {
+                            onlineTrialScreen = nil
+                        }
                     case .none:
                         startScreenActions
                     }
@@ -1090,7 +1088,7 @@ struct ContentView: View {
 
             HStack(spacing: 12) {
                 startMenuButton(title: "Мульти-испытания", systemImage: "network") {
-                    onlineTrialScreen = .entryMode
+                    onlineTrialScreen = .onlineTrials
                 }
 
                 startMenuButton(title: "Самописец", systemImage: "archivebox") {
@@ -1128,135 +1126,6 @@ struct ContentView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-
-    private var onlineTrialEntryScreen: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            onlineTrialBackButton {
-                onlineTrialScreen = nil
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Онлайн-испытания")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Выберите локальный LAN flow или будущий серверный режим.")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.68))
-            }
-
-            HStack(spacing: 14) {
-                onlineTrialModeCard(
-                    title: "LAN",
-                    subtitle: "Создать или подключиться в локальной сети",
-                    systemImage: "antenna.radiowaves.left.and.right",
-                    isDisabled: false
-                ) {
-                    onlineTrialScreen = .lanLobby
-                }
-
-                onlineTrialModeCard(
-                    title: "Server",
-                    subtitle: "Будет добавлено позже",
-                    systemImage: "server.rack",
-                    isDisabled: true
-                ) {}
-            }
-        }
-        .frame(maxWidth: 720, alignment: .leading)
-    }
-
-    private var lanLobbyScreen: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            onlineTrialBackButton {
-                onlineTrialScreen = .entryMode
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("LAN-сессия")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Выберите роль перед созданием или подключением.")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.68))
-            }
-
-            Picker("Роль", selection: $selectedOnlineTrialRole) {
-                Text("Полет").tag(OnlineTrialRole.pilot)
-                Text("Наблюдатель").tag(OnlineTrialRole.spectator)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 360)
-
-            HStack(spacing: 14) {
-                onlineTrialModeCard(
-                    title: "Создать LAN-сессию",
-                    subtitle: selectedOnlineTrialRole == .pilot ? "Host + свой UAVInstance" : "Host observer без control authority",
-                    systemImage: "plus.circle"
-                ) {
-                    appShell.launchLANSession(role: selectedOnlineTrialRole, isHost: true)
-                }
-
-                onlineTrialModeCard(
-                    title: "Подключиться к LAN-сессии",
-                    subtitle: selectedOnlineTrialRole == .pilot ? "Client + свой UAVInstance" : "Spectator без UAV",
-                    systemImage: "arrow.triangle.branch"
-                ) {
-                    appShell.launchLANSession(role: selectedOnlineTrialRole, isHost: false)
-                }
-            }
-        }
-        .frame(maxWidth: 720, alignment: .leading)
-    }
-
-    private func onlineTrialBackButton(action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.left")
-                Text("Назад")
-            }
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.white.opacity(0.82))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func onlineTrialModeCard(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        isDisabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(isDisabled ? .white.opacity(0.35) : .white)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(title)
-                        .font(.headline)
-                        .foregroundStyle(isDisabled ? .white.opacity(0.42) : .white)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(isDisabled ? 0.34 : 0.68))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(width: 250, height: 158, alignment: .topLeading)
-            .padding(16)
-            .background(Color.white.opacity(isDisabled ? 0.045 : 0.10), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(isDisabled ? 0.12 : 0.30), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
     }
 
     @ViewBuilder
