@@ -173,6 +173,52 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         )
     }
 
+    func launchLANTrial(
+        descriptor: LANTrialLaunchDescriptor,
+        localParticipant lanParticipant: LANParticipant
+    ) {
+        let role = onlineTrialRole(for: lanParticipant.role)
+        let runtimeContext = OnlineTrialRuntimeContext(
+            launchDescriptor: descriptor,
+            localParticipant: lanParticipant
+        )
+        let runMode = SimulationRunMode.lanMode(role: role, isHost: lanParticipant.isHost)
+        let hostName = descriptor.assignments
+            .first { $0.participantID == descriptor.hostParticipantID }?
+            .participantName ?? "LAN Host"
+        let session = OnlineTrialSessionConfig(
+            sessionID: descriptor.id,
+            hostDisplayName: hostName
+        )
+        let participant = LocalOnlineParticipant(
+            id: lanParticipant.id,
+            displayName: lanParticipant.displayName,
+            role: role,
+            controlledUAVID: runtimeContext.localVehicleID,
+            isHost: lanParticipant.isHost
+        )
+        let projectName: String
+        switch (lanParticipant.isHost, lanParticipant.role) {
+        case (true, .pilot):
+            projectName = "LAN Trial - Host Pilot"
+        case (false, .pilot):
+            projectName = "LAN Trial - Pilot"
+        case (_, .spectator):
+            projectName = "LAN Trial - Spectator"
+        }
+
+        activeSimulation?.stopRuntimeForExit()
+        activeSimulation = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectStorage.createProjectID(),
+            initialProjectName: projectName,
+            simulationRunMode: runMode,
+            onlineSessionConfig: session,
+            localOnlineParticipant: participant,
+            onlineRuntimeContext: runtimeContext
+        )
+    }
+
     func openProject(_ summary: ProjectRecordSummary) {
         let vm = DroneSimulationViewModel(
             projectStorage: projectStorage,
@@ -188,6 +234,15 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 titleKey: "project.open.failure",
                 message: error.localizedDescription
             )
+        }
+    }
+
+    private func onlineTrialRole(for role: LANParticipantRole) -> OnlineTrialRole {
+        switch role {
+        case .pilot:
+            return .pilot
+        case .spectator:
+            return .spectator
         }
     }
 
@@ -1019,9 +1074,18 @@ struct ContentView: View {
 
                 Group {
                     if isOnlineTrialsPresented {
-                        LANOnlineTrialsView {
-                            isOnlineTrialsPresented = false
-                        }
+                        LANOnlineTrialsView(
+                            onClose: {
+                                isOnlineTrialsPresented = false
+                            },
+                            onLaunchTrial: { descriptor, participant in
+                                isOnlineTrialsPresented = false
+                                appShell.launchLANTrial(
+                                    descriptor: descriptor,
+                                    localParticipant: participant
+                                )
+                            }
+                        )
                     } else {
                         startScreenActions
                     }
@@ -1135,7 +1199,7 @@ struct ContentView: View {
                     viewModel.handleControllerUICancel()
                 }
             ) {
-                ZStack {
+                ZStack(alignment: .topLeading) {
                     VStack(spacing: 0) {
                     simulationHeader(viewModel)
 
@@ -1189,6 +1253,12 @@ struct ContentView: View {
                             }
                         )
                     }
+
+                    if let runtimeContext = viewModel.onlineRuntimeContext {
+                        onlineRuntimeBanner(runtimeContext)
+                            .padding(.top, viewModel.isToolPanelVisible ? 132 : 84)
+                            .padding(.leading, 16)
+                    }
                 }
             }
             .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
@@ -1234,16 +1304,20 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             HStack(spacing: 10) {
-                Text("Spectator")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
-                    )
+                if let runtimeContext = viewModel.onlineRuntimeContext {
+                    onlineRuntimeBanner(runtimeContext)
+                } else {
+                    Text("Spectator")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        )
+                }
 
                 Button {
                     appShell.requestReturnToMenu()
@@ -1269,6 +1343,40 @@ struct ContentView: View {
         }
         .background(Color.black)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func onlineRuntimeBanner(_ context: OnlineTrialRuntimeContext) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Image(systemName: context.isSpectator ? "eye" : "airplane")
+                Text("LAN Trial Runtime")
+            }
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+
+            Text(onlineRuntimeSubtitle(context))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.70))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.24), lineWidth: 1)
+        )
+    }
+
+    private func onlineRuntimeSubtitle(_ context: OnlineTrialRuntimeContext) -> String {
+        if context.isSpectator {
+            return "Режим наблюдателя: управление БЛА отключено"
+        }
+
+        if let vehicleID = context.localVehicleID {
+            return "Vehicle \(vehicleID.uuidString.prefix(8))"
+        }
+
+        return "Пилот без назначенного аппарата"
     }
 
     @ViewBuilder

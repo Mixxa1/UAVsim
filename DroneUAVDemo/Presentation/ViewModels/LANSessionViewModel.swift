@@ -8,6 +8,8 @@ final class LANSessionViewModel: ObservableObject {
     @Published var displayName: String = "Участник"
     @Published var joinAddress: String = "127.0.0.1"
     @Published var portText: String = "7777"
+    @Published var launchDescriptor: LANTrialLaunchDescriptor?
+    @Published var shouldOpenTrialRuntime: Bool = false
 
     private let transport: LANSessionTransport
 
@@ -38,6 +40,25 @@ final class LANSessionViewModel: ObservableObject {
         }
     }
 
+    var hasPilotParticipants: Bool {
+        state.participants.contains { $0.role == .pilot }
+    }
+
+    var canLaunchTrial: Bool {
+        guard state.localParticipant?.isHost == true,
+              hasPilotParticipants,
+              state.trialPhase == .lobby else {
+            return false
+        }
+
+        switch state.connectionState {
+        case .hosting, .connected:
+            return true
+        case .idle, .joining, .disconnected, .failed:
+            return false
+        }
+    }
+
     func createHostSession() {
         guard let port = resolvedPort() else {
             fail(message: "Порт должен быть числом от 1 до 65535.")
@@ -55,12 +76,15 @@ final class LANSessionViewModel: ObservableObject {
 
         state.mode = .host
         state.connectionState = .hosting
+        state.trialPhase = .lobby
         state.localParticipant = host
         state.participants = [host]
         state.config = config
         state.joinAddress = "0.0.0.0"
         state.port = port
         state.lastErrorMessage = nil
+        launchDescriptor = nil
+        shouldOpenTrialRuntime = false
 
         do {
             try transport.startHost(port: port)
@@ -85,12 +109,15 @@ final class LANSessionViewModel: ObservableObject {
 
         state.mode = .client
         state.connectionState = .joining
+        state.trialPhase = .lobby
         state.localParticipant = participant
         state.participants = [participant]
         state.config = nil
         state.joinAddress = joinAddress
         state.port = port
         state.lastErrorMessage = nil
+        launchDescriptor = nil
+        shouldOpenTrialRuntime = false
 
         do {
             try transport.connect(to: joinAddress, port: port)
@@ -141,7 +168,61 @@ final class LANSessionViewModel: ObservableObject {
         }
 
         transport.stop()
+        launchDescriptor = nil
+        shouldOpenTrialRuntime = false
         state = .idle
+    }
+
+    func launchTrial() {
+        guard state.localParticipant?.isHost == true else { return }
+        guard canLaunchTrial else {
+            if !hasPilotParticipants {
+                state.lastErrorMessage = "Нужен хотя бы один участник с ролью Полет."
+            }
+            return
+        }
+        guard let host = state.localParticipant,
+              let config = state.config else {
+            state.connectionState = .failed
+            state.lastErrorMessage = "LAN-сессия не готова к запуску."
+            return
+        }
+
+        var nextSpawnIndex = 0
+        let assignments = state.participants.map { participant in
+            let isPilot = participant.role == .pilot
+            let assignment = LANVehicleAssignment(
+                participantID: participant.id,
+                participantName: participant.displayName,
+                role: participant.role,
+                vehicleID: isPilot ? UUID() : nil,
+                vehicleProfileID: isPilot ? "abstract_uav" : nil,
+                spawnIndex: isPilot ? nextSpawnIndex : nil
+            )
+            if isPilot {
+                nextSpawnIndex += 1
+            }
+            return assignment
+        }
+
+        let descriptor = LANTrialLaunchDescriptor(
+            hostParticipantID: host.id,
+            sessionConfig: config,
+            assignments: assignments
+        )
+
+        state.trialPhase = .launching
+        applyLaunchDescriptor(descriptor)
+
+        let message = LANSessionMessage(
+            type: .trialLaunch,
+            senderID: host.id,
+            trialLaunch: descriptor
+        )
+        transport.send(message)
+
+        shouldOpenTrialRuntime = true
+        state.trialPhase = .running
     }
 
     func applyReceivedMessage(_ message: LANSessionMessage) {
@@ -187,7 +268,14 @@ final class LANSessionViewModel: ObservableObject {
         case .heartbeat:
             updateLastSeen(for: message.senderID)
 
-        case .welcome, .participantList, .sessionConfig:
+        case .trialStarted:
+            break
+
+        case .trialEnded:
+            state.trialPhase = .ended
+            shouldOpenTrialRuntime = false
+
+        case .welcome, .participantList, .sessionConfig, .trialLaunch:
             break
         }
     }
@@ -207,12 +295,24 @@ final class LANSessionViewModel: ObservableObject {
         case .sessionConfig:
             state.config = message.config
 
+        case .trialLaunch:
+            guard let descriptor = message.trialLaunch else { return }
+            applyLaunchDescriptor(descriptor)
+            state.connectionState = .connected
+            state.trialPhase = .running
+            state.lastErrorMessage = nil
+            shouldOpenTrialRuntime = true
+
+        case .trialEnded:
+            state.trialPhase = .ended
+            shouldOpenTrialRuntime = false
+
         case .disconnect:
             if message.participant?.isHost == true || message.senderID == state.config?.hostParticipantID {
                 state.connectionState = .disconnected
             }
 
-        case .hello, .roleSelected, .heartbeat:
+        case .hello, .roleSelected, .heartbeat, .trialStarted:
             break
         }
     }
@@ -239,6 +339,25 @@ final class LANSessionViewModel: ObservableObject {
     private func updateLastSeen(for participantID: UUID) {
         guard let index = state.participants.firstIndex(where: { $0.id == participantID }) else { return }
         state.participants[index].lastSeenTime = Date()
+    }
+
+    private func applyLaunchDescriptor(_ descriptor: LANTrialLaunchDescriptor) {
+        launchDescriptor = descriptor
+        state.config = descriptor.sessionConfig
+
+        for assignment in descriptor.assignments {
+            guard let index = state.participants.firstIndex(where: { $0.id == assignment.participantID }) else {
+                continue
+            }
+            state.participants[index].assignedVehicleID = assignment.vehicleID
+        }
+
+        if var local = state.localParticipant,
+           let assignment = descriptor.assignment(for: local.id) {
+            local.assignedVehicleID = assignment.vehicleID
+            state.localParticipant = local
+            upsertParticipant(local)
+        }
     }
 
     private func resolvedPort() -> UInt16? {

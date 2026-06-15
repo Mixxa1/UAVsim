@@ -60,10 +60,10 @@ final class NetworkLANSessionTransport: LANSessionTransport {
     }
 
     func send(_ message: LANSessionMessage) {
-        queue.async { [weak self] in
-            guard let self, let payload = self.encodedPayload(for: message) else { return }
+        queue.async {
+            guard let payload = self.encodedPayload(for: message) else { return }
 
-            if let clientConnection {
+            if let clientConnection = self.clientConnection {
                 self.send(payload, on: clientConnection)
             } else {
                 self.connections.forEach { self.send(payload, on: $0) }

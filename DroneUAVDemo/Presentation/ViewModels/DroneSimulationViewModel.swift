@@ -465,6 +465,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var simulationRunMode: SimulationRunMode
     @Published private(set) var onlineSessionConfig: OnlineTrialSessionConfig?
     @Published private(set) var localOnlineParticipant: LocalOnlineParticipant?
+    @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -1049,7 +1050,8 @@ final class DroneSimulationViewModel: ObservableObject {
         launchConfiguration: SimulationLaunchConfiguration? = nil,
         simulationRunMode: SimulationRunMode = .singlePlayer,
         onlineSessionConfig: OnlineTrialSessionConfig? = nil,
-        localOnlineParticipant: LocalOnlineParticipant? = nil
+        localOnlineParticipant: LocalOnlineParticipant? = nil,
+        onlineRuntimeContext: OnlineTrialRuntimeContext? = nil
     ) {
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
@@ -1057,6 +1059,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.simulationRunMode = simulationRunMode
         self.onlineSessionConfig = onlineSessionConfig
         self.localOnlineParticipant = localOnlineParticipant
+        self.onlineRuntimeContext = onlineRuntimeContext
         let gameControllerInputProvider = GameControllerInputProvider(
             settingsStore: controllerSettingsStore
         )

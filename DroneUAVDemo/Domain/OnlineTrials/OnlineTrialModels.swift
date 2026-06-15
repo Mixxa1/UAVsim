@@ -95,3 +95,57 @@ struct LocalOnlineParticipant: Identifiable, Hashable {
         self.isHost = isHost
     }
 }
+
+struct LANVehicleAssignment: Identifiable, Codable, Equatable {
+    var id: UUID
+    var participantID: UUID
+    var participantName: String
+    var role: LANParticipantRole
+    var vehicleID: UUID?
+    var vehicleProfileID: String?
+    var spawnIndex: Int?
+
+    init(
+        id: UUID = UUID(),
+        participantID: UUID,
+        participantName: String,
+        role: LANParticipantRole,
+        vehicleID: UUID?,
+        vehicleProfileID: String?,
+        spawnIndex: Int?
+    ) {
+        self.id = id
+        self.participantID = participantID
+        self.participantName = participantName
+        self.role = role
+        self.vehicleID = vehicleID
+        self.vehicleProfileID = vehicleProfileID
+        self.spawnIndex = spawnIndex
+    }
+}
+
+struct LANTrialLaunchDescriptor: Codable, Equatable {
+    var id: UUID
+    var hostParticipantID: UUID
+    var sessionConfig: LANSessionConfig
+    var assignments: [LANVehicleAssignment]
+    var launchedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        hostParticipantID: UUID,
+        sessionConfig: LANSessionConfig,
+        assignments: [LANVehicleAssignment],
+        launchedAt: Date = Date()
+    ) {
+        self.id = id
+        self.hostParticipantID = hostParticipantID
+        self.sessionConfig = sessionConfig
+        self.assignments = assignments
+        self.launchedAt = launchedAt
+    }
+
+    func assignment(for participantID: UUID) -> LANVehicleAssignment? {
+        assignments.first { $0.participantID == participantID }
+    }
+}

@@ -241,6 +241,7 @@
 		10000000000000000000037C /* LANOnlineTrialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037D /* LANOnlineTrialsView.swift */; };
 		100000000000000000000382 /* OnlineTrialModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000381 /* OnlineTrialModels.swift */; };
 		100000000000000000000384 /* P2PSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000383 /* P2PSessionModels.swift */; };
+		100000000000000000000386 /* OnlineTrialRuntimeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000385 /* OnlineTrialRuntimeContext.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -481,6 +482,7 @@
 		10000000000000000000037D /* LANOnlineTrialsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANOnlineTrialsView.swift; sourceTree = "<group>"; };
 		100000000000000000000381 /* OnlineTrialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialModels.swift; sourceTree = "<group>"; };
 		100000000000000000000383 /* P2PSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = P2PSessionModels.swift; sourceTree = "<group>"; };
+		100000000000000000000385 /* OnlineTrialRuntimeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialRuntimeContext.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -854,6 +856,7 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000381 /* OnlineTrialModels.swift */,
+				100000000000000000000385 /* OnlineTrialRuntimeContext.swift */,
 			);
 			path = OnlineTrials;
 			sourceTree = "<group>";
@@ -1168,6 +1171,7 @@
 				10000000000000000000037C /* LANOnlineTrialsView.swift in Sources */,
 				100000000000000000000382 /* OnlineTrialModels.swift in Sources */,
 				100000000000000000000384 /* P2PSessionModels.swift in Sources */,
+				100000000000000000000386 /* OnlineTrialRuntimeContext.swift in Sources */,
 				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

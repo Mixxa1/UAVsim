@@ -30,6 +30,13 @@ enum LANConnectionState: String, Codable, Equatable {
     case failed
 }
 
+enum LANTrialPhase: String, Codable, Equatable {
+    case lobby
+    case launching
+    case running
+    case ended
+}
+
 struct LANParticipant: Identifiable, Codable, Equatable {
     var id: UUID
     var displayName: String
@@ -82,6 +89,7 @@ struct LANSessionConfig: Codable, Equatable {
 struct LANSessionState: Codable, Equatable {
     var mode: LANSessionMode?
     var connectionState: LANConnectionState
+    var trialPhase: LANTrialPhase
     var localParticipant: LANParticipant?
     var participants: [LANParticipant]
     var config: LANSessionConfig?
@@ -92,6 +100,7 @@ struct LANSessionState: Codable, Equatable {
     static let idle = LANSessionState(
         mode: nil,
         connectionState: .idle,
+        trialPhase: .lobby,
         localParticipant: nil,
         participants: [],
         config: nil,

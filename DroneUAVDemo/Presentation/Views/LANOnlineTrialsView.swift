@@ -2,8 +2,18 @@ import SwiftUI
 
 struct LANOnlineTrialsView: View {
     @StateObject private var viewModel = LANSessionViewModel()
+    @State private var didRequestRuntimeOpen = false
 
     let onClose: () -> Void
+    let onLaunchTrial: ((LANTrialLaunchDescriptor, LANParticipant) -> Void)?
+
+    init(
+        onClose: @escaping () -> Void,
+        onLaunchTrial: ((LANTrialLaunchDescriptor, LANParticipant) -> Void)? = nil
+    ) {
+        self.onClose = onClose
+        self.onLaunchTrial = onLaunchTrial
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -60,6 +70,9 @@ struct LANOnlineTrialsView: View {
             }
         }
         .frame(maxWidth: 840, alignment: .leading)
+        .onChange(of: viewModel.shouldOpenTrialRuntime) { _, shouldOpen in
+            requestRuntimeOpenIfNeeded(shouldOpen: shouldOpen)
+        }
     }
 
     private var lanSetupPanel: some View {
@@ -156,6 +169,7 @@ struct LANOnlineTrialsView: View {
                 compactMetric("Адрес", connectionAddressText)
                 compactMetric("Порт", "\(viewModel.state.port)")
                 compactMetric("Режим", viewModel.state.mode?.rawValue.uppercased() ?? "-")
+                compactMetric("Фаза", viewModel.state.trialPhase.rawValue.uppercased())
             }
 
             if let config = viewModel.state.config {
@@ -191,6 +205,12 @@ struct LANOnlineTrialsView: View {
                 }
             }
 
+            if viewModel.state.localParticipant?.isHost == true,
+               viewModel.isSessionActive,
+               viewModel.state.trialPhase == .lobby {
+                launchControlPanel
+            }
+
             Button {
                 viewModel.leaveSession()
             } label: {
@@ -213,6 +233,36 @@ struct LANOnlineTrialsView: View {
         case .none:
             return "-"
         }
+    }
+
+    private var launchControlPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            formLabel("Запуск")
+            Text("Пилотам будут назначены аппараты. Наблюдатели войдут без БЛА.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !viewModel.hasPilotParticipants {
+                HStack(spacing: 7) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("Нужен хотя бы один участник с ролью Полет.")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(red: 1.0, green: 0.70, blue: 0.38))
+            }
+
+            Button {
+                viewModel.launchTrial()
+            } label: {
+                actionLabel("Запустить испытание", systemImage: "play.circle")
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canLaunchTrial)
+            .opacity(viewModel.canLaunchTrial ? 1.0 : 0.42)
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func entryModePanel(
@@ -393,5 +443,17 @@ struct LANOnlineTrialsView: View {
     private func panelStroke(cornerRadius: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: cornerRadius)
             .stroke(Color.white.opacity(0.16), lineWidth: 1)
+    }
+
+    private func requestRuntimeOpenIfNeeded(shouldOpen: Bool) {
+        guard shouldOpen,
+              !didRequestRuntimeOpen,
+              let descriptor = viewModel.launchDescriptor,
+              let participant = viewModel.state.localParticipant else {
+            return
+        }
+
+        didRequestRuntimeOpen = true
+        onLaunchTrial?(descriptor, participant)
     }
 }
