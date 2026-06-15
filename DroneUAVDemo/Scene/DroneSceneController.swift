@@ -79,6 +79,8 @@ final class DroneSceneController {
     private let missionWaypointCaptureNode = SCNNode()
     private let launchAssetNode = SCNNode()
     private let onlineTrialPlaceholderRootNode = SCNNode()
+    // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
+    private var replicaProfileCache: [UUID: String] = [:]
 
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
@@ -304,19 +306,25 @@ final class DroneSceneController {
 
     func configureOnlineTrialPlaceholders(_ fleetState: OnlineTrialFleetState?) {
         onlineTrialPlaceholderRootNode.childNodes.forEach { $0.removeFromParentNode() }
+        replicaProfileCache.removeAll()
         droneNode.isHidden = fleetState?.isSpectator ?? false
 
         guard let fleetState else {
             return
         }
 
-        // P2P 0.9: use ghost nodes instead of simple markers
+        // v1.5: build remote replicas using each participant's actual UAV profile.
         for slot in fleetState.remoteVehicles {
+            replicaProfileCache[slot.vehicleID] = slot.vehicleProfileID
+            #if DEBUG
+            print("[LAN] replica slot participant=\(slot.participantName) vehicle=\(slot.vehicleID.uuidString.prefix(8)) profile=\(slot.vehicleProfileID)")
+            #endif
             onlineTrialPlaceholderRootNode.addChildNode(
                 OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
                     vehicleID: slot.vehicleID,
                     participantName: slot.participantName,
-                    spawnIndex: slot.spawnIndex
+                    spawnIndex: slot.spawnIndex,
+                    vehicleProfileID: slot.vehicleProfileID
                 )
             )
         }
@@ -341,10 +349,12 @@ final class DroneSceneController {
             if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
                 node = existing
             } else {
+                let cachedProfileID = replicaProfileCache[snapshot.vehicleID]
                 node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
                     vehicleID: snapshot.vehicleID,
                     participantName: snapshot.participantName,
-                    spawnIndex: index
+                    spawnIndex: index,
+                    vehicleProfileID: cachedProfileID
                 )
                 onlineTrialPlaceholderRootNode.addChildNode(node)
             }
@@ -381,10 +391,13 @@ final class DroneSceneController {
             if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
                 node = existing
             } else {
+                // v1.5: use cached profileID so late-arriving snapshots still build the right visual.
+                let cachedProfileID = replicaProfileCache[state.vehicleID]
                 node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
                     vehicleID: state.vehicleID,
                     participantName: state.participantName,
-                    spawnIndex: nil
+                    spawnIndex: nil,
+                    vehicleProfileID: cachedProfileID
                 )
                 onlineTrialPlaceholderRootNode.addChildNode(node)
             }
@@ -401,8 +414,8 @@ final class DroneSceneController {
                     Float(state.pose.yaw)
                 )
             )
-            // P2P v1.0: fade ghost when snapshot is aging — hides silently at store expiry (>2s).
-            node.opacity = state.sourceSnapshotAge > 1.0 ? 0.30 : 1.0
+            // P2P v1.0: fade replica when snapshot is aging — hides silently at store expiry (>2s).
+            node.opacity = state.sourceSnapshotAge > 1.0 ? 0.30 : 0.88
             node.isHidden = false
         }
     }

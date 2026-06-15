@@ -53,26 +53,31 @@ struct LANOnlineTrialsView: View {
                     .foregroundStyle(.white.opacity(0.68))
             }
 
-            HStack(spacing: 12) {
-                entryModePanel(
-                    title: "LAN",
-                    subtitle: "Локальная сеть",
-                    systemImage: "network",
-                    isActive: true,
-                    isDisabled: false
-                )
-
-                entryModePanel(
-                    title: "Server",
-                    subtitle: "позже",
-                    systemImage: "server.rack",
-                    isActive: false,
-                    isDisabled: true
-                )
-            }
-
+            // v1.5: left column (mode cards + setup form) and right column (session panel)
+            // share the same HStack so their tops are flush.
             HStack(alignment: .top, spacing: 14) {
-                lanSetupPanel
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        entryModePanel(
+                            title: "LAN",
+                            subtitle: "Локальная сеть",
+                            systemImage: "network",
+                            isActive: true,
+                            isDisabled: false
+                        )
+
+                        entryModePanel(
+                            title: "Server",
+                            subtitle: "позже",
+                            systemImage: "server.rack",
+                            isActive: false,
+                            isDisabled: true
+                        )
+                    }
+
+                    lanSetupPanel
+                }
+                .frame(width: 390, alignment: .topLeading)
 
                 if viewModel.state.connectionState != .idle {
                     sessionStatusPanel
@@ -171,148 +176,164 @@ struct LANOnlineTrialsView: View {
     }
 
     private var sessionStatusPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 0) {
+            // Pinned header — always visible.
             HStack {
                 sectionTitle("Сессия")
                 Spacer()
                 statusBadge(viewModel.state.connectionState)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
 
-            // Passive architecture badge — not a user choice.
-            HStack(spacing: 5) {
-                Image(systemName: "circle.grid.3x3.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.46))
-                Text("LAN P2P · Distributed Authority")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.46))
-            }
+            Divider().overlay(Color.white.opacity(0.12))
 
-            VStack(alignment: .leading, spacing: 7) {
-                formLabel("Соединение")
-                compactMetric("Адрес", connectionAddressText)
-                compactMetric("Порт", "\(viewModel.state.port)")
-                compactMetric("Режим", viewModel.state.mode?.rawValue.uppercased() ?? "-")
-                compactMetric("Фаза", viewModel.state.trialPhase.rawValue.uppercased())
-            }
-
-            if viewModel.state.mode == .host {
-                VStack(alignment: .leading, spacing: 7) {
-                    formLabel("Сетевое подключение")
-                    HStack(spacing: 6) {
-                        Image(systemName: "network")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.52))
-                        Text("Мой IP: ")
-                            .foregroundStyle(.white.opacity(0.52))
-                        Text(localIPAddress)
-                            .foregroundStyle(.white.opacity(0.92))
-                            .textSelection(.enabled)
-                        Text(":\(viewModel.state.port)")
-                            .foregroundStyle(.white.opacity(0.52))
+            // Scrollable content area.
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Passive architecture badge — not a user choice.
+                    HStack(spacing: 5) {
+                        Image(systemName: "circle.grid.3x3.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.46))
+                        Text("LAN P2P · Distributed Authority")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.46))
                     }
-                    .font(.caption.monospacedDigit())
-                    Text("Сообщи этот адрес другим участникам для подключения.")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.44))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
 
-            // P2P v1.3: checklist
-            VStack(alignment: .leading, spacing: 4) {
-                formLabel("Статус")
-                checklistRow("Сессия активна", isOk: viewModel.isSessionActive)
-                checklistRow("Участников: \(viewModel.state.participants.count)", isOk: viewModel.state.participants.count > 0)
-                checklistRow("Фаза: \(viewModel.state.trialPhase.rawValue)", isOk: viewModel.state.trialPhase != .ended)
-                if viewModel.isSessionActive {
-                    checklistRow("Транспорт: OK", isOk: true)
-                    HStack(spacing: 10) {
-                        Button {
-                            viewModel.sendTestPing()
-                        } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        formLabel("Соединение")
+                        compactMetric("Адрес", connectionAddressText)
+                        compactMetric("Порт", "\(viewModel.state.port)")
+                        compactMetric("Режим", viewModel.state.mode?.rawValue.uppercased() ?? "-")
+                        compactMetric("Фаза", viewModel.state.trialPhase.rawValue.uppercased())
+                    }
+
+                    if viewModel.state.mode == .host {
+                        VStack(alignment: .leading, spacing: 7) {
+                            formLabel("Сетевое подключение")
                             HStack(spacing: 6) {
-                                Image(systemName: "antenna.radiowaves.left.and.right")
-                                Text("Тест пинг")
+                                Image(systemName: "network")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.white.opacity(0.52))
+                                Text("Мой IP: ")
+                                    .foregroundStyle(.white.opacity(0.52))
+                                Text(localIPAddress)
+                                    .foregroundStyle(.white.opacity(0.92))
+                                    .textSelection(.enabled)
+                                Text(":\(viewModel.state.port)")
+                                    .foregroundStyle(.white.opacity(0.52))
                             }
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.82))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7)
-                                    .stroke(Color.white.opacity(0.20), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(viewModel.state.mode == .host)
-
-                        if let rtt = viewModel.onlineDiagnostics.lastPingRoundtripMs {
-                            Text(String(format: "%.0f ms", rtt))
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(rtt < 50 ? Color(red: 0.35, green: 0.86, blue: 0.58) : Color(red: 0.95, green: 0.74, blue: 0.35))
+                            .font(.caption.monospacedDigit())
+                            Text("Сообщи этот адрес другим участникам для подключения.")
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.44))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                }
-            }
 
-            if let local = viewModel.state.localParticipant {
-                VStack(alignment: .leading, spacing: 7) {
-                    formLabel("Локальный участник")
-                    participantRow(local, isLocal: true)
-                }
-            }
+                    // P2P v1.3: checklist
+                    VStack(alignment: .leading, spacing: 4) {
+                        formLabel("Статус")
+                        checklistRow("Сессия активна", isOk: viewModel.isSessionActive)
+                        checklistRow("Участников: \(viewModel.state.participants.count)", isOk: viewModel.state.participants.count > 0)
+                        checklistRow("Фаза: \(viewModel.state.trialPhase.rawValue)", isOk: viewModel.state.trialPhase != .ended)
+                        if viewModel.isSessionActive {
+                            checklistRow("Транспорт: OK", isOk: true)
+                            HStack(spacing: 10) {
+                                Button {
+                                    viewModel.sendTestPing()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "antenna.radiowaves.left.and.right")
+                                        Text("Тест пинг")
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.82))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7)
+                                            .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.state.mode == .host)
 
-            VStack(alignment: .leading, spacing: 8) {
-                formLabel("Участники")
-                if viewModel.state.participants.isEmpty {
-                    Text("Список пуст")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.54))
-                } else {
-                    ForEach(viewModel.state.participants) { participant in
-                        participantRow(
-                            participant,
-                            isLocal: participant.id == viewModel.state.localParticipant?.id
-                        )
+                                if let rtt = viewModel.onlineDiagnostics.lastPingRoundtripMs {
+                                    Text(String(format: "%.0f ms", rtt))
+                                        .font(.caption.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(rtt < 50 ? Color(red: 0.35, green: 0.86, blue: 0.58) : Color(red: 0.95, green: 0.74, blue: 0.35))
+                                }
+                            }
+                        }
+                    }
+
+                    if let local = viewModel.state.localParticipant {
+                        VStack(alignment: .leading, spacing: 7) {
+                            formLabel("Локальный участник")
+                            participantRow(local, isLocal: true)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        formLabel("Участники")
+                        if viewModel.state.participants.isEmpty {
+                            Text("Список пуст")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.54))
+                        } else {
+                            ForEach(viewModel.state.participants) { participant in
+                                participantRow(
+                                    participant,
+                                    isLocal: participant.id == viewModel.state.localParticipant?.id
+                                )
+                            }
+                        }
+                    }
+
+                    if viewModel.state.localParticipant?.isHost == true,
+                       viewModel.isSessionActive,
+                       viewModel.state.trialPhase == .lobby {
+                        launchControlPanel
+                    }
+
+                    // P2P v1.3.1: show client waiting state while host hasn't launched yet.
+                    if viewModel.state.mode == .client,
+                       viewModel.isSessionActive,
+                       viewModel.state.trialPhase == .lobby {
+                        clientWaitingPanel
+                    }
+
+                    // P2P v1.3.1: warn client if runtime handoff appears stuck.
+                    if viewModel.state.mode == .client,
+                       viewModel.state.trialPhase == .running,
+                       !viewModel.shouldOpenTrialRuntime {
+                        clientHandoffWarningPanel
+                    }
+
+                    if viewModel.state.trialPhase == .ended {
+                        trialEndedPanel
                     }
                 }
+                .padding(16)
             }
 
-            if viewModel.state.localParticipant?.isHost == true,
-               viewModel.isSessionActive,
-               viewModel.state.trialPhase == .lobby {
-                launchControlPanel
-            }
+            Divider().overlay(Color.white.opacity(0.12))
 
-            // P2P v1.3.1: show client waiting state while host hasn't launched yet.
-            if viewModel.state.mode == .client,
-               viewModel.isSessionActive,
-               viewModel.state.trialPhase == .lobby {
-                clientWaitingPanel
-            }
-
-            // P2P v1.3.1: warn client if runtime handoff appears stuck.
-            if viewModel.state.mode == .client,
-               viewModel.state.trialPhase == .running,
-               !viewModel.shouldOpenTrialRuntime {
-                clientHandoffWarningPanel
-            }
-
-            if viewModel.state.trialPhase == .ended {
-                trialEndedPanel
-            }
-
+            // Pinned footer — always visible regardless of scroll position.
             Button {
                 viewModel.leaveSession()
             } label: {
                 actionLabel("Выйти из сессии", systemImage: "xmark.circle", isDestructive: true)
             }
             .buttonStyle(.plain)
+            .padding(16)
         }
-        .padding(16)
-        .frame(width: 390, alignment: .topLeading)
+        .frame(width: 390)
+        .frame(minHeight: 520, maxHeight: 640)
         .background(panelFill, in: RoundedRectangle(cornerRadius: 12))
         .overlay(panelStroke(cornerRadius: 12))
     }

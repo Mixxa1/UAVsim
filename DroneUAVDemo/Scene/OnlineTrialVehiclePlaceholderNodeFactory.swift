@@ -18,85 +18,51 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
         )
     }
 
-    // P2P 0.9: multicopter ghost — visual-only remote vehicle, not a physics body.
-    static func makeGhostNode(vehicleID: UUID, participantName: String, spawnIndex: Int?) -> SCNNode {
-        let root = SCNNode()
+    // v1.5: remote replica uses the same visual profile as the participant's selected UAV.
+    // Falls back to abstract-uav only when the profileID is unknown.
+    // Opacity 0.88 + cyan tint lets pilots distinguish replica from their own local UAV.
+    static func makeGhostNode(vehicleID: UUID, participantName: String, spawnIndex: Int?, vehicleProfileID: String? = nil) -> SCNNode {
+        let profile = resolveProfile(vehicleProfileID)
+        let visual = DroneModelBuilder.build(profile: profile)
+        let root = visual.rootNode
         root.name = "online_trial_vehicle_\(vehicleID.uuidString)"
+        root.opacity = 0.88
+
         if let spawnIndex {
             root.simdPosition = OnlineTrialSpawnLayout.position(for: spawnIndex)
         }
 
-        let ghostMaterial = SCNMaterial()
-        ghostMaterial.diffuse.contents = NSColor.systemCyan.withAlphaComponent(0.52)
-        ghostMaterial.emission.contents = NSColor.systemCyan.withAlphaComponent(0.18)
-        ghostMaterial.lightingModel = .constant
-        ghostMaterial.isDoubleSided = true
-        ghostMaterial.transparency = 0.52
+        // Tint visual root slightly cyan to distinguish from local UAV.
+        tintNode(visual.visualRootNode, color: NSColor(red: 0.72, green: 0.90, blue: 1.0, alpha: 1.0))
 
-        let noseMaterial = SCNMaterial()
-        noseMaterial.diffuse.contents = NSColor.white.withAlphaComponent(0.82)
-        noseMaterial.lightingModel = .constant
-        noseMaterial.isDoubleSided = true
-
-        func applyGhost(_ node: SCNNode) { node.geometry?.materials = [ghostMaterial] }
-
-        // Central body
-        let body = SCNNode(geometry: SCNBox(width: 0.18, height: 0.055, length: 0.18, chamferRadius: 0.008))
-        body.simdPosition = SIMD3<Float>(0, 0.028, 0)
-        applyGhost(body)
-        root.addChildNode(body)
-
-        // 4 arms (+ config, N/S along +Z/-Z, E/W along +X/-X)
-        let armNS = SCNCapsule(capRadius: 0.011, height: 0.20)
-        let armEW = SCNCapsule(capRadius: 0.011, height: 0.20)
-        armNS.materials = [ghostMaterial]
-        armEW.materials = [ghostMaterial]
-
-        let armN = SCNNode(geometry: armNS)
-        armN.simdPosition = SIMD3<Float>(0, 0.028, 0)
-        armN.eulerAngles.x = .pi / 2.0
-        root.addChildNode(armN)
-
-        let armE = SCNNode(geometry: armEW)
-        armE.simdPosition = SIMD3<Float>(0, 0.028, 0)
-        armE.eulerAngles.z = .pi / 2.0
-        root.addChildNode(armE)
-
-        // 4 rotor discs at arm tips
-        let rotorPositions: [(Float, Float, Float)] = [
-            (0, 0.038, +0.105),
-            (0, 0.038, -0.105),
-            (+0.105, 0.038, 0),
-            (-0.105, 0.038, 0)
-        ]
-        for (rx, ry, rz) in rotorPositions {
-            let disc = SCNCylinder(radius: 0.082, height: 0.005)
-            disc.materials = [ghostMaterial]
-            let discNode = SCNNode(geometry: disc)
-            discNode.simdPosition = SIMD3<Float>(rx, ry, rz)
-            root.addChildNode(discNode)
-        }
-
-        // Nose marker (forward = +Z in local frame)
-        let nose = SCNBox(width: 0.032, height: 0.032, length: 0.048, chamferRadius: 0.003)
-        nose.materials = [noseMaterial]
-        let noseNode = SCNNode(geometry: nose)
-        noseNode.simdPosition = SIMD3<Float>(0, 0.038, +0.115)
-        root.addChildNode(noseNode)
-
-        // Participant label
-        let labelGeo = SCNText(string: participantName, extrusionDepth: 0.01)
-        labelGeo.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
-        labelGeo.alignmentMode = "left"
-        labelGeo.materials = [ghostMaterial.copy() as! SCNMaterial]
-        labelGeo.firstMaterial?.diffuse.contents = NSColor.white.withAlphaComponent(0.86)
-        labelGeo.firstMaterial?.emission.contents = NSColor.systemCyan.withAlphaComponent(0.22)
-        let labelNode = SCNNode(geometry: labelGeo)
-        labelNode.simdPosition = SIMD3<Float>(-0.18, 0.10, 0)
-        labelNode.scale = SCNVector3(0.009, 0.009, 0.009)
-        root.addChildNode(labelNode)
+        // Participant name label above the UAV.
+        let label = makeLabelNode(participantName)
+        label.simdPosition = SIMD3<Float>(0, 0.28, 0)
+        root.addChildNode(label)
 
         return root
+    }
+
+    // Look up a DroneModelProfile by ID; fall back to abstract-uav only when truly unknown.
+    private static let profileRepository = LIPODroneModelRepository()
+    private static func resolveProfile(_ profileID: String?) -> DroneModelProfile {
+        let abstractFallback = LIPODroneModelRepository.abstractProfile(from: AbstractDroneParameters.default)
+        guard let profileID else {
+            #if DEBUG
+            print("[LAN][PROFILE][WARNING] Falling back to abstract replica — profileID is nil")
+            #endif
+            return abstractFallback
+        }
+        if let found = profileRepository.allProfiles.first(where: { $0.id == profileID }) {
+            #if DEBUG
+            print("[LAN][PROFILE] replica factory resolved profileID=\(profileID) → \(found.uiDisplayName)")
+            #endif
+            return found
+        }
+        #if DEBUG
+        print("[LAN][PROFILE][WARNING] Falling back to abstract replica for profileID=\(profileID) — not found in repository")
+        #endif
+        return abstractFallback
     }
 
     private static func makeNode(
@@ -140,13 +106,30 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
         return root
     }
 
+    private static func makeLabelNode(_ text: String) -> SCNNode {
+        let label = SCNNode(geometry: labelGeometry(text))
+        label.name = "online_trial_vehicle_label"
+        label.scale = SCNVector3(0.009, 0.009, 0.009)
+        return label
+    }
+
     private static func labelGeometry(_ text: String) -> SCNText {
         let geometry = SCNText(string: text, extrusionDepth: 0.01)
         geometry.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
         geometry.alignmentMode = "left"
-        geometry.firstMaterial?.diffuse.contents = NSColor.white.withAlphaComponent(0.84)
-        geometry.firstMaterial?.emission.contents = NSColor.white.withAlphaComponent(0.20)
+        geometry.firstMaterial?.diffuse.contents = NSColor.white.withAlphaComponent(0.90)
+        geometry.firstMaterial?.emission.contents = NSColor.systemCyan.withAlphaComponent(0.25)
         geometry.firstMaterial?.lightingModel = .constant
         return geometry
+    }
+
+    // Apply a subtle color tint to all geometry materials in a subtree.
+    private static func tintNode(_ node: SCNNode, color: NSColor) {
+        if let mat = node.geometry?.firstMaterial {
+            if let existing = mat.diffuse.contents as? NSColor {
+                mat.diffuse.contents = existing.blended(withFraction: 0.18, of: color) ?? existing
+            }
+        }
+        node.childNodes.forEach { tintNode($0, color: color) }
     }
 }

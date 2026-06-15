@@ -210,15 +210,12 @@ struct OnlineTrialRuntimeOverlay: View {
                 HStack(spacing: 6) {
                     diagCell("TX", "\(diagnostics.outgoingSnapshotCount)")
                     diagCell("RX", "\(diagnostics.incomingSnapshotCount)")
-                    diagCell("PING", diagnostics.pingLabel)
-                }
-
-                HStack(spacing: 6) {
                     diagCell("GHOSTS", "\(diagnostics.remoteGhostVisibleCount)")
                     if diagnostics.remoteGhostStaleCount > 0 {
                         diagCell("STALE", "\(diagnostics.remoteGhostStaleCount)", color: GroundControlPalette.warning)
                     }
                     diagCell("EVT", "\(diagnostics.sharedEventReceivedCount)")
+                    diagCell("PING", diagnostics.pingLabel)
                 }
             }
             separator

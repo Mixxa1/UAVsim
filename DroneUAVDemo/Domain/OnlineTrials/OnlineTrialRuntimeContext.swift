@@ -41,7 +41,7 @@ extension OnlineTrialRuntimeContext {
                 return nil
             }
 
-            return OnlineTrialVehicleSlot(
+            let slot = OnlineTrialVehicleSlot(
                 vehicleID: vehicleID,
                 participantID: assignment.participantID,
                 participantName: assignment.participantName,
@@ -50,6 +50,10 @@ extension OnlineTrialRuntimeContext {
                 isLocalControlled: assignment.participantID == localParticipant.id,
                 isHostOwned: assignment.participantID == launchDescriptor.hostParticipantID
             )
+            #if DEBUG
+            print("[LAN][PROFILE] slot participant=\(slot.participantName) vehicle=\(slot.vehicleID) profileID=\(slot.vehicleProfileID) isLocal=\(slot.isLocalControlled)")
+            #endif
+            return slot
         }
     }
 

@@ -21,14 +21,19 @@ struct OnlineTrialFleetState: Codable, Equatable {
 }
 
 enum OnlineTrialSpawnLayout {
+    // 2-column grid, 8 m X separation, 8 m Z row depth, centered at ±4 m.
+    // spawnIndex 0 → left front, 1 → right front, 2 → left back, …
     static func position(for spawnIndex: Int) -> SIMD3<Float> {
-        let spacing: Float = 6.0
-        let row = spawnIndex / 4
-        let col = spawnIndex % 4
-        return SIMD3<Float>(
-            Float(col) * spacing - spacing * 1.5,
-            0.0,
-            Float(row) * spacing
-        )
+        let spacingX: Float = 8.0
+        let spacingZ: Float = 8.0
+        let row = spawnIndex / 2
+        let col = spawnIndex % 2
+        let x: Float = col == 0 ? -spacingX * 0.5 : spacingX * 0.5
+        let z: Float = Float(row) * spacingZ
+        return SIMD3<Float>(x, 0.0, z)
+    }
+
+    static func yawRadians(for spawnIndex: Int) -> Float {
+        return 0
     }
 }

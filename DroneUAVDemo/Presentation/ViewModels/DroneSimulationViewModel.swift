@@ -831,6 +831,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private let localCollisionDetector = OnlineLocalCollisionDetector()
     private var recentLocalCollisionPairKeys: [String: TimeInterval] = [:]
     private let localCollisionEventCooldownSeconds: TimeInterval = 2.0
+    // v1.4: grace period prevents spawn-overlap collision events at trial start.
+    private var onlineTrialStartedAt: TimeInterval? = nil
+    private let onlineCollisionGracePeriodSeconds: TimeInterval = 3.0
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var resolvedInputState: ResolvedControlState = .neutral
@@ -1421,6 +1424,7 @@ final class DroneSimulationViewModel: ObservableObject {
         onlineDamageState = OnlineVehicleDamageState()
         onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
         recentLocalCollisionPairKeys = [:]
+        onlineTrialStartedAt = nil
         onlineSharedEventTransport = nil
         onlineInterpolationStore = OnlineVehicleInterpolationStore()
         onlineInterpolatedRemoteStates = []
@@ -1441,6 +1445,10 @@ final class DroneSimulationViewModel: ObservableObject {
         if let sharedEventTransport {
             onlineSharedEventTransport = sharedEventTransport
         }
+
+        // v1.4: reset damage so new trial never inherits a previous DAMAGED state.
+        onlineDamageState = OnlineVehicleDamageState()
+
         let fleetState = OnlineTrialFleetState(
             localParticipantID: context.localParticipant.id,
             localVehicleID: context.localVehicleID,
@@ -1448,6 +1456,19 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         onlineFleetState = fleetState
         sceneController.configureOnlineTrialPlaceholders(fleetState)
+
+        // v1.4: spawn local pilot UAV at its assigned slot position.
+        if let slot = context.localVehicleSlot {
+            let spawnPosition = OnlineTrialSpawnLayout.position(for: slot.spawnIndex)
+            state.position = spawnPosition
+            homePosition = spawnPosition
+            #if DEBUG
+            print("[LAN] online spawn local vehicle=\(slot.vehicleID) spawnIndex=\(slot.spawnIndex) position=\(spawnPosition)")
+            #endif
+        }
+
+        // v1.4: record start time for collision grace period.
+        onlineTrialStartedAt = Date().timeIntervalSince1970
 
         if context.isLocalSpectator {
             isToolPanelVisible = false
@@ -1574,6 +1595,10 @@ final class DroneSimulationViewModel: ObservableObject {
               localSnapshot.vehicleID == localVehicleID,
               !onlineDamageState.isControlDisabled(vehicleID: localVehicleID),
               let sessionID = context.launchDescriptor.id as UUID? else { return }
+
+        // v1.4: skip collision detection during grace period to avoid spawn-overlap false positives.
+        if let startedAt = onlineTrialStartedAt,
+           now - startedAt < onlineCollisionGracePeriodSeconds { return }
 
         let candidates = localCollisionDetector.detect(
             localSnapshot: localSnapshot,

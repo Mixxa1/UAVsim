@@ -1175,6 +1175,13 @@ struct ContentView: View {
 
             HStack(spacing: 12) {
                 startMenuButton(title: "Мульти-испытания", systemImage: "network") {
+                    // v1.5.1: when no project is active the simulation defaults to
+                    // UAVReferenceCatalog.defaultProfileID; pass the same fallback so
+                    // remote replica assignments match the local UAV that will be used.
+                    lanSessionViewModel.updateLocalVehicleProfileID(
+                        appShell.activeSimulation?.selectedDroneProfile.id
+                            ?? UAVReferenceCatalog.defaultProfileID
+                    )
                     isOnlineTrialsPresented = true
                 }
 

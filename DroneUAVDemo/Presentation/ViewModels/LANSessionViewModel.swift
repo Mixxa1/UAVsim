@@ -24,6 +24,9 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
     // P2P v1.3: ping/pong RTT tracking.
     private var pendingPingID: UUID? = nil
     private var pendingPingSentAt: TimeInterval? = nil
+    // v1.5: profile ID of the UAV currently selected in the active simulation.
+    // Set by ContentView before createHostSession / joinSession; passed in hello + assignments.
+    var localVehicleProfileID: String? = nil
 
     init(transport: LANSessionTransport = NetworkLANSessionTransport()) {
         self.transport = transport
@@ -73,6 +76,16 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         }
     }
 
+    // v1.5: called by ContentView whenever the active UAV profile changes.
+    func updateLocalVehicleProfileID(_ profileID: String?) {
+        localVehicleProfileID = profileID
+        if var local = state.localParticipant {
+            local.selectedVehicleProfileID = profileID
+            state.localParticipant = local
+            upsertParticipant(local)
+        }
+    }
+
     func createHostSession() {
         guard let port = resolvedPort() else {
             fail(message: "Порт должен быть числом от 1 до 65535.")
@@ -83,7 +96,8 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             displayName: sanitizedDisplayName(),
             role: selectedRole,
             isHost: true,
-            assignedVehicleID: assignedVehicleID(for: selectedRole)
+            assignedVehicleID: assignedVehicleID(for: selectedRole),
+            selectedVehicleProfileID: localVehicleProfileID
         )
 
         let config = LANSessionConfig.defaultConfig(hostParticipantID: host.id)
@@ -119,7 +133,8 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             displayName: sanitizedDisplayName(),
             role: selectedRole,
             isHost: false,
-            assignedVehicleID: assignedVehicleID(for: selectedRole)
+            assignedVehicleID: assignedVehicleID(for: selectedRole),
+            selectedVehicleProfileID: localVehicleProfileID
         )
 
         state.mode = .client
@@ -215,15 +230,22 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             return
         }
 
+        // v1.5.1: final fallback matches DroneSimulationViewModel's default profile for LAN trials
+        // (repository.defaultProfile = UAVReferenceCatalog.defaultProfileID = "dji-matrice-350-rtk").
+        // Using "abstract-uav" here caused remote replicas to show the small abstract model
+        // while local UAV correctly used the default real model.
+        let defaultFallbackProfileID = localVehicleProfileID ?? UAVReferenceCatalog.defaultProfileID
+
         var nextSpawnIndex = 0
         let assignments = state.participants.map { participant in
             let isPilot = participant.role == .pilot
+            let profileID = participant.selectedVehicleProfileID ?? defaultFallbackProfileID
             let assignment = LANVehicleAssignment(
                 participantID: participant.id,
                 participantName: participant.displayName,
                 role: participant.role,
                 vehicleID: isPilot ? UUID() : nil,
-                vehicleProfileID: isPilot ? "abstract_uav" : nil,
+                vehicleProfileID: isPilot ? profileID : nil,
                 spawnIndex: isPilot ? nextSpawnIndex : nil
             )
             if isPilot {
@@ -239,11 +261,16 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         )
 
         #if DEBUG
-        print("[LAN][HOST] launchTrial: participants=\(state.participants.count) assignments=\(assignments.count)")
+        print("[LAN][PROFILE] launchTrial: localProfileID=\(localVehicleProfileID ?? "nil") fallback=\(defaultFallbackProfileID)")
         for a in assignments {
-            print("[LAN][HOST]   \(a.participantName) role=\(a.role.rawValue) vehicle=\(a.vehicleID?.uuidString.prefix(8) ?? "nil")")
+            print("[LAN][PROFILE] assignment participant=\(a.participantName) participantID=\(a.participantID) profileID=\(a.vehicleProfileID ?? "nil") vehicleID=\(a.vehicleID?.uuidString ?? "nil")")
         }
         #endif
+
+        // v1.4: reset per-trial state so no damage or events carry over from previous trial.
+        sharedEvents = []
+        onlineDamageState = OnlineVehicleDamageState()
+        recentEventPairKeys = [:]
 
         state.trialPhase = .launching
         applyLaunchDescriptor(descriptor)
@@ -381,6 +408,10 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             let localInDescriptor = descriptor.assignment(for: state.localParticipant?.id ?? UUID()) != nil
             print("[LAN][CLIENT] localParticipant in descriptor: \(localInDescriptor)")
             #endif
+            // v1.4: clear per-trial state before entering runtime.
+            sharedEvents = []
+            onlineDamageState = OnlineVehicleDamageState()
+            recentEventPairKeys = [:]
             applyLaunchDescriptor(descriptor)
             state.connectionState = .connected
             state.trialPhase = .running

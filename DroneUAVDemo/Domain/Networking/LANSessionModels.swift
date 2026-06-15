@@ -70,6 +70,9 @@ struct LANParticipant: Identifiable, Codable, Equatable {
     var isHost: Bool
     var assignedVehicleID: UUID?
     var lastSeenTime: Date
+    // v1.5: profileID of the UAV the participant currently has selected.
+    // Sent in hello/roleSelected so host can assign matching visuals.
+    var selectedVehicleProfileID: String?
 
     init(
         id: UUID = UUID(),
@@ -77,7 +80,8 @@ struct LANParticipant: Identifiable, Codable, Equatable {
         role: LANParticipantRole,
         isHost: Bool = false,
         assignedVehicleID: UUID? = nil,
-        lastSeenTime: Date = Date()
+        lastSeenTime: Date = Date(),
+        selectedVehicleProfileID: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -85,6 +89,19 @@ struct LANParticipant: Identifiable, Codable, Equatable {
         self.isHost = isHost
         self.assignedVehicleID = assignedVehicleID
         self.lastSeenTime = lastSeenTime
+        self.selectedVehicleProfileID = selectedVehicleProfileID
+    }
+
+    // Backward-compatible decoding: old messages without selectedVehicleProfileID default to nil.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id                      = try c.decode(UUID.self,                forKey: .id)
+        displayName             = try c.decode(String.self,              forKey: .displayName)
+        role                    = try c.decode(LANParticipantRole.self,  forKey: .role)
+        isHost                  = try c.decode(Bool.self,                forKey: .isHost)
+        assignedVehicleID       = try c.decodeIfPresent(UUID.self,       forKey: .assignedVehicleID)
+        lastSeenTime            = try c.decode(Date.self,                forKey: .lastSeenTime)
+        selectedVehicleProfileID = try c.decodeIfPresent(String.self,   forKey: .selectedVehicleProfileID)
     }
 }
 
