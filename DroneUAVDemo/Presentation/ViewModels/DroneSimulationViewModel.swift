@@ -467,6 +467,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var localOnlineParticipant: LocalOnlineParticipant?
     @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
     @Published private(set) var onlineFleetState: OnlineTrialFleetState?
+    @Published private(set) var onlineAuthorityRegistry: OnlineObjectAuthorityRegistry?
     @Published private(set) var onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
     @Published private(set) var onlineInterpolatedRemoteStates: [OnlineVehicleInterpolatedState] = []
     private var onlineInterpolationStore = OnlineVehicleInterpolationStore()
@@ -570,6 +571,14 @@ final class DroneSimulationViewModel: ObservableObject {
 
     var onlineTrialContext: OnlineTrialRuntimeContext? {
         onlineRuntimeContext
+    }
+
+    var onlineTrialStaleRemoteCount: Int {
+        onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge > 1.0 }.count
+    }
+
+    func hasLocalAuthority(over objectID: UUID) -> Bool {
+        onlineAuthorityRegistry?.hasLocalAuthority(objectID: objectID) ?? true
     }
 
     var canControlLocalVehicle: Bool {
@@ -1368,6 +1377,7 @@ final class DroneSimulationViewModel: ObservableObject {
         inputManager.reset()
         sceneController.configureOnlineTrialPlaceholders(nil)
         onlineFleetState = nil
+        onlineAuthorityRegistry = nil
         onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
         onlineInterpolationStore = OnlineVehicleInterpolationStore()
         onlineInterpolatedRemoteStates = []
@@ -1380,6 +1390,7 @@ final class DroneSimulationViewModel: ObservableObject {
         snapshotTransport: OnlineTrialSnapshotTransport? = nil
     ) {
         onlineRuntimeContext = context
+        onlineAuthorityRegistry = context.makeInitialAuthorityRegistry()
         if let snapshotTransport {
             onlineSnapshotTransport = snapshotTransport
         }
@@ -1433,6 +1444,8 @@ final class DroneSimulationViewModel: ObservableObject {
         let states = onlineInterpolationStore.interpolatedStates(now: now)
         guard states != onlineInterpolatedRemoteStates else { return }
         onlineInterpolatedRemoteStates = states
+        // P2P v1.1: states list contains only remoteReplica vehicles — local vehicle is already
+        // excluded via ignoringLocalVehicleID in apply(). Ghost nodes are visual-only; no physics.
         sceneController.applyOnlineInterpolatedRemoteStates(states)
     }
 
@@ -1462,6 +1475,11 @@ final class DroneSimulationViewModel: ObservableObject {
               let localVehicleID = context.localVehicleID,
               isSimulationRunning,
               now - lastOnlineSnapshotSentAt >= onlineSnapshotSendInterval else {
+            return
+        }
+        // P2P v1.1: only the participant with local object authority publishes
+        // simulation snapshots for that object.
+        guard onlineAuthorityRegistry?.hasLocalAuthority(objectID: localVehicleID) != false else {
             return
         }
 

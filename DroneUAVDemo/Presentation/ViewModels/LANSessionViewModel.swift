@@ -159,6 +159,15 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
         }
     }
 
+    func endTrial() {
+        guard state.localParticipant?.isHost == true else { return }
+        guard let local = state.localParticipant else { return }
+        let message = LANSessionMessage(type: .trialEnded, senderID: local.id)
+        transport.send(message)
+        state.trialPhase = .ended
+        shouldOpenTrialRuntime = false
+    }
+
     func leaveSession() {
         if let local = state.localParticipant {
             let message = LANSessionMessage(

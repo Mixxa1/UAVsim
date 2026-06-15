@@ -17,6 +17,7 @@ struct LANRuntimeRolePolicy {
         role == .pilot || role == nil
     }
 
+    // P2P v1.0: spectators are receive-only participants. They never own vehicle authority.
     static func canControlVehicle(context: OnlineTrialRuntimeContext?) -> Bool {
         guard let context else { return true }
         return context.role == .pilot && context.localVehicleID != nil

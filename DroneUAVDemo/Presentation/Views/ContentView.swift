@@ -1241,7 +1241,12 @@ struct ContentView: View {
                             Divider()
                         }
 
-                        SceneViewportView(viewModel: viewModel)
+                        SceneViewportView(
+                            viewModel: viewModel,
+                            trialPhase: lanSessionViewModel.state.trialPhase,
+                            onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
+                            onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
+                        )
                             .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1312,7 +1317,12 @@ struct ContentView: View {
 
     private func spectatorWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
         ZStack(alignment: .topLeading) {
-            SceneViewportView(viewModel: viewModel)
+            SceneViewportView(
+                viewModel: viewModel,
+                trialPhase: lanSessionViewModel.state.trialPhase,
+                onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
+                onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             HStack(spacing: 10) {

@@ -401,6 +401,8 @@ final class DroneSceneController {
                     Float(state.pose.yaw)
                 )
             )
+            // P2P v1.0: fade ghost when snapshot is aging — hides silently at store expiry (>2s).
+            node.opacity = state.sourceSnapshotAge > 1.0 ? 0.30 : 1.0
             node.isHidden = false
         }
     }

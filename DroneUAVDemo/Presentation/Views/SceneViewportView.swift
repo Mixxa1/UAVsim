@@ -3,6 +3,9 @@ import simd
 
 struct SceneViewportView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
+    var trialPhase: LANTrialPhase = .running
+    var onEndTrial: (() -> Void)? = nil
+    var onLeaveTrial: (() -> Void)? = nil
     @StateObject private var tabObserver = TabKeyObserver()
 
     var body: some View {
@@ -83,7 +86,12 @@ struct SceneViewportView: View {
                         fleetState: viewModel.onlineFleetState,
                         remoteStates: viewModel.onlineInterpolatedRemoteStates,
                         snapshotTargetHz: 10,
-                        isExpanded: tabObserver.isTabHeld
+                        isExpanded: tabObserver.isTabHeld,
+                        trialPhase: trialPhase,
+                        participantCount: viewModel.onlineTrialContext?.launchDescriptor.assignments.count ?? 1,
+                        staleCount: viewModel.onlineTrialStaleRemoteCount,
+                        onEndTrial: onEndTrial,
+                        onLeaveTrial: onLeaveTrial
                     )
                     .animation(.easeInOut(duration: 0.12), value: tabObserver.isTabHeld)
                 }

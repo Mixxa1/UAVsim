@@ -166,22 +166,22 @@ struct LANOnlineTrialsView: View {
                 statusBadge(viewModel.state.connectionState)
             }
 
+            // Passive architecture badge — not a user choice.
+            HStack(spacing: 5) {
+                Image(systemName: "circle.grid.3x3.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.46))
+                Text("LAN P2P · Distributed Authority")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.46))
+            }
+
             VStack(alignment: .leading, spacing: 7) {
                 formLabel("Соединение")
                 compactMetric("Адрес", connectionAddressText)
                 compactMetric("Порт", "\(viewModel.state.port)")
                 compactMetric("Режим", viewModel.state.mode?.rawValue.uppercased() ?? "-")
                 compactMetric("Фаза", viewModel.state.trialPhase.rawValue.uppercased())
-            }
-
-            if let config = viewModel.state.config {
-                VStack(alignment: .leading, spacing: 7) {
-                    formLabel("Конфигурация")
-                    compactMetric("Название", config.sessionName)
-                    compactMetric("Карта", "\(config.mapID), масштаб \(config.mapScale)")
-                    compactMetric("Погода", config.weatherPresetID)
-                    compactMetric("Пилоты", "\(config.maxPilots)")
-                }
             }
 
             if let local = viewModel.state.localParticipant {
@@ -213,10 +213,14 @@ struct LANOnlineTrialsView: View {
                 launchControlPanel
             }
 
+            if viewModel.state.trialPhase == .ended {
+                trialEndedPanel
+            }
+
             Button {
                 viewModel.leaveSession()
             } label: {
-                actionLabel("Выйти", systemImage: "xmark.circle", isDestructive: true)
+                actionLabel("Выйти из сессии", systemImage: "xmark.circle", isDestructive: true)
             }
             .buttonStyle(.plain)
         }
@@ -265,6 +269,30 @@ struct LANOnlineTrialsView: View {
         }
         .padding(10)
         .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: – Ended state panel
+
+    private var trialEndedPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(Color(red: 0.35, green: 0.86, blue: 0.58))
+                Text("Испытание завершено")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+            Text("Нажмите «Выйти из сессии» чтобы вернуться в лобби для нового испытания.")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.54))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(Color(red: 0.10, green: 0.16, blue: 0.12).opacity(0.70), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(red: 0.35, green: 0.86, blue: 0.58).opacity(0.30), lineWidth: 1)
+        )
     }
 
     private func entryModePanel(
