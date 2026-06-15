@@ -22,7 +22,7 @@ build-*/
 cmake-build-*/
 out/
 
-CADNext/build/
+CADNext/build*/
 CADNext/build-*/
 CADNext/cmake-build-*/
 CADNext/out/
