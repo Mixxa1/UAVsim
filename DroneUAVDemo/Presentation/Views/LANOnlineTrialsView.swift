@@ -1,16 +1,18 @@
 import SwiftUI
 
 struct LANOnlineTrialsView: View {
-    @StateObject private var viewModel = LANSessionViewModel()
+    @ObservedObject var viewModel: LANSessionViewModel
     @State private var didRequestRuntimeOpen = false
 
     let onClose: () -> Void
     let onLaunchTrial: ((LANTrialLaunchDescriptor, LANParticipant) -> Void)?
 
     init(
+        viewModel: LANSessionViewModel,
         onClose: @escaping () -> Void,
         onLaunchTrial: ((LANTrialLaunchDescriptor, LANParticipant) -> Void)? = nil
     ) {
+        self.viewModel = viewModel
         self.onClose = onClose
         self.onLaunchTrial = onLaunchTrial
     }

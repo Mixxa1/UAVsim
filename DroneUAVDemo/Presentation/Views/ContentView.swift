@@ -175,7 +175,8 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
 
     func launchLANTrial(
         descriptor: LANTrialLaunchDescriptor,
-        localParticipant lanParticipant: LANParticipant
+        localParticipant lanParticipant: LANParticipant,
+        snapshotTransport: OnlineTrialSnapshotTransport?
     ) {
         let role = onlineTrialRole(for: lanParticipant.role)
         let runtimeContext = OnlineTrialRuntimeContext(
@@ -215,7 +216,8 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             simulationRunMode: runMode,
             onlineSessionConfig: session,
             localOnlineParticipant: participant,
-            onlineRuntimeContext: runtimeContext
+            onlineRuntimeContext: runtimeContext,
+            onlineSnapshotTransport: snapshotTransport
         )
     }
 
@@ -925,6 +927,7 @@ private struct KeyBindingsSheetHost: View {
 
 struct ContentView: View {
     @StateObject private var appShell = AppShellViewModel()
+    @StateObject private var lanSessionViewModel = LANSessionViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
 
     @State private var nameDialogMode: NameDialogMode?
@@ -951,6 +954,9 @@ struct ContentView: View {
             if let viewModel = appShell.activeSimulation {
                 SimulationViewModelObserver(viewModel: viewModel) { observedViewModel in
                     simulationWorkspace(observedViewModel)
+                        .onReceive(lanSessionViewModel.$remoteSnapshotState) { snapshotState in
+                            observedViewModel.applyOnlineRemoteSnapshotState(snapshotState)
+                        }
                 }
             } else {
                 startScreen
@@ -1014,6 +1020,9 @@ struct ContentView: View {
         }
         .onChange(of: appShell.activeSimulation == nil) { _, isNil in
             if isNil {
+                if lanSessionViewModel.state.connectionState != .idle {
+                    lanSessionViewModel.leaveSession()
+                }
                 appShell.refreshProjects()
             }
         }
@@ -1081,6 +1090,7 @@ struct ContentView: View {
                 Group {
                     if isOnlineTrialsPresented {
                         LANOnlineTrialsView(
+                            viewModel: lanSessionViewModel,
                             onClose: {
                                 isOnlineTrialsPresented = false
                             },
@@ -1088,7 +1098,8 @@ struct ContentView: View {
                                 isOnlineTrialsPresented = false
                                 appShell.launchLANTrial(
                                     descriptor: descriptor,
-                                    localParticipant: participant
+                                    localParticipant: participant,
+                                    snapshotTransport: lanSessionViewModel
                                 )
                             }
                         )
@@ -1261,7 +1272,7 @@ struct ContentView: View {
                     }
 
                     if let runtimeContext = viewModel.onlineRuntimeContext {
-                        onlineRuntimeBanner(runtimeContext)
+                        onlineRuntimeBanner(runtimeContext, viewModel: viewModel)
                             .padding(.top, viewModel.isToolPanelVisible ? 132 : 84)
                             .padding(.leading, 16)
                     }
@@ -1311,7 +1322,7 @@ struct ContentView: View {
 
             HStack(spacing: 10) {
                 if let runtimeContext = viewModel.onlineRuntimeContext {
-                    onlineRuntimeBanner(runtimeContext)
+                    onlineRuntimeBanner(runtimeContext, viewModel: viewModel)
                 } else {
                     Text("Spectator")
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -1351,7 +1362,10 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func onlineRuntimeBanner(_ context: OnlineTrialRuntimeContext) -> some View {
+    private func onlineRuntimeBanner(
+        _ context: OnlineTrialRuntimeContext,
+        viewModel: DroneSimulationViewModel
+    ) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
                 Image(systemName: context.isSpectator ? "eye" : "airplane")
@@ -1371,6 +1385,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Участник: \(context.localParticipant.displayName)")
                 Text(onlineRuntimeSubtitle(context))
+                Text(onlineRuntimeSnapshotStatus(context, viewModel: viewModel))
             }
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.white.opacity(0.70))
@@ -1395,6 +1410,17 @@ struct ContentView: View {
         }
 
         return "Пилот без назначенного аппарата"
+    }
+
+    private func onlineRuntimeSnapshotStatus(
+        _ context: OnlineTrialRuntimeContext,
+        viewModel: DroneSimulationViewModel
+    ) -> String {
+        let remoteCount = viewModel.onlineRemoteSnapshotState.snapshots.count
+        if context.isSpectator {
+            return "receiving only | remote: \(remoteCount)"
+        }
+        return "10 Hz target | remote: \(remoteCount)"
     }
 
     @ViewBuilder

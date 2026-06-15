@@ -317,6 +317,52 @@ final class DroneSceneController {
         }
     }
 
+    func applyOnlineVehicleSnapshots(_ snapshotState: OnlineRemoteVehicleSnapshotState) {
+        let snapshots = snapshotState.snapshots
+        let activeNodeNames = Set(snapshots.map { onlineTrialVehicleNodeName(for: $0.vehicleID) })
+
+        for child in onlineTrialPlaceholderRootNode.childNodes {
+            guard let name = child.name,
+                  name.hasPrefix("online_trial_vehicle_"),
+                  !activeNodeNames.contains(name) else {
+                continue
+            }
+            child.removeFromParentNode()
+        }
+
+        for (index, snapshot) in snapshots.enumerated() {
+            let nodeName = onlineTrialVehicleNodeName(for: snapshot.vehicleID)
+            let node: SCNNode
+            if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
+                node = existing
+            } else {
+                node = OnlineTrialVehiclePlaceholderNodeFactory.makeNode(
+                    for: snapshot,
+                    fallbackSpawnIndex: index
+                )
+                onlineTrialPlaceholderRootNode.addChildNode(node)
+            }
+
+            node.position = SCNVector3(
+                Float(snapshot.pose.positionX),
+                Float(snapshot.pose.positionY),
+                Float(snapshot.pose.positionZ)
+            )
+            node.simdOrientation = orientationQuaternion(
+                from: SIMD3<Float>(
+                    Float(snapshot.pose.roll),
+                    Float(snapshot.pose.pitch),
+                    Float(snapshot.pose.yaw)
+                )
+            )
+            node.isHidden = false
+        }
+    }
+
+    private func onlineTrialVehicleNodeName(for vehicleID: UUID) -> String {
+        "online_trial_vehicle_\(vehicleID.uuidString)"
+    }
+
     func currentLaunchSpawnPoint(for asset: LaunchAsset?) -> SIMD3<Float>? {
         guard let asset else {
             return nil

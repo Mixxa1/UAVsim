@@ -3,9 +3,29 @@ import SceneKit
 
 enum OnlineTrialVehiclePlaceholderNodeFactory {
     static func makeNode(for slot: OnlineTrialVehicleSlot) -> SCNNode {
+        makeNode(
+            vehicleID: slot.vehicleID,
+            participantName: slot.participantName,
+            spawnIndex: slot.spawnIndex
+        )
+    }
+
+    static func makeNode(for snapshot: OnlineVehicleStateSnapshot, fallbackSpawnIndex: Int) -> SCNNode {
+        makeNode(
+            vehicleID: snapshot.vehicleID,
+            participantName: snapshot.participantName,
+            spawnIndex: fallbackSpawnIndex
+        )
+    }
+
+    private static func makeNode(
+        vehicleID: UUID,
+        participantName: String,
+        spawnIndex: Int
+    ) -> SCNNode {
         let root = SCNNode()
-        root.name = "online_trial_vehicle_placeholder_\(slot.vehicleID.uuidString)"
-        root.simdPosition = OnlineTrialSpawnLayout.position(for: slot.spawnIndex)
+        root.name = "online_trial_vehicle_\(vehicleID.uuidString)"
+        root.simdPosition = OnlineTrialSpawnLayout.position(for: spawnIndex)
 
         let marker = SCNNode(geometry: SCNPyramid(width: 0.70, height: 0.28, length: 0.92))
         marker.name = "online_trial_vehicle_marker"
@@ -30,7 +50,7 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
         disk.geometry?.firstMaterial?.lightingModel = .constant
         root.addChildNode(disk)
 
-        let label = SCNNode(geometry: labelGeometry(slot.participantName))
+        let label = SCNNode(geometry: labelGeometry(participantName))
         label.name = "online_trial_vehicle_label"
         label.simdPosition = SIMD3<Float>(-0.55, 0.92, 0.0)
         label.scale = SCNVector3(0.010, 0.010, 0.010)

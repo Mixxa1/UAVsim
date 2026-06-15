@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 @MainActor
-final class LANSessionViewModel: ObservableObject {
+final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport {
     @Published var state: LANSessionState = .idle
     @Published var selectedRole: LANParticipantRole = .pilot
     @Published var displayName: String = "Участник"
@@ -10,6 +10,7 @@ final class LANSessionViewModel: ObservableObject {
     @Published var portText: String = "7777"
     @Published var launchDescriptor: LANTrialLaunchDescriptor?
     @Published var shouldOpenTrialRuntime: Bool = false
+    @Published private(set) var remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
 
     private let transport: LANSessionTransport
 
@@ -84,6 +85,7 @@ final class LANSessionViewModel: ObservableObject {
         state.lastErrorMessage = nil
         launchDescriptor = nil
         shouldOpenTrialRuntime = false
+        remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
 
         do {
             try transport.startHost(port: port)
@@ -117,6 +119,7 @@ final class LANSessionViewModel: ObservableObject {
         state.lastErrorMessage = nil
         launchDescriptor = nil
         shouldOpenTrialRuntime = false
+        remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
 
         do {
             try transport.connect(to: joinAddress, port: port)
@@ -169,6 +172,7 @@ final class LANSessionViewModel: ObservableObject {
         transport.stop()
         launchDescriptor = nil
         shouldOpenTrialRuntime = false
+        remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
         state = .idle
     }
 
@@ -217,6 +221,20 @@ final class LANSessionViewModel: ObservableObject {
 
         shouldOpenTrialRuntime = true
         state.trialPhase = .running
+    }
+
+    func sendVehicleSnapshot(_ snapshot: OnlineVehicleStateSnapshot) {
+        guard isSessionActive,
+              let local = state.localParticipant else {
+            return
+        }
+
+        let message = LANSessionMessage(
+            type: .vehicleSnapshot,
+            senderID: local.id,
+            vehicleSnapshot: snapshot
+        )
+        transport.send(message)
     }
 
     func applyReceivedMessage(_ message: LANSessionMessage) {
@@ -269,6 +287,18 @@ final class LANSessionViewModel: ObservableObject {
             state.trialPhase = .ended
             shouldOpenTrialRuntime = false
 
+        case .vehicleSnapshot:
+            guard let snapshot = message.vehicleSnapshot else { return }
+            remoteSnapshotState.apply(snapshot, ignoringLocalVehicleID: nil)
+            remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+            transport.send(message)
+
+        case .vehicleSnapshotBatch:
+            guard let batch = message.vehicleSnapshotBatch else { return }
+            remoteSnapshotState.apply(batch, ignoringLocalVehicleID: nil)
+            remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+            transport.send(message)
+
         case .welcome, .participantList, .sessionConfig, .trialLaunch:
             break
         }
@@ -300,6 +330,22 @@ final class LANSessionViewModel: ObservableObject {
         case .trialEnded:
             state.trialPhase = .ended
             shouldOpenTrialRuntime = false
+
+        case .vehicleSnapshot:
+            guard let snapshot = message.vehicleSnapshot else { return }
+            remoteSnapshotState.apply(
+                snapshot,
+                ignoringLocalVehicleID: localVehicleIDForSnapshotFiltering()
+            )
+            remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+
+        case .vehicleSnapshotBatch:
+            guard let batch = message.vehicleSnapshotBatch else { return }
+            remoteSnapshotState.apply(
+                batch,
+                ignoringLocalVehicleID: localVehicleIDForSnapshotFiltering()
+            )
+            remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
 
         case .disconnect:
             if message.participant?.isHost == true || message.senderID == state.config?.hostParticipantID {
@@ -352,6 +398,11 @@ final class LANSessionViewModel: ObservableObject {
             state.localParticipant = local
             upsertParticipant(local)
         }
+    }
+
+    private func localVehicleIDForSnapshotFiltering() -> UUID? {
+        guard let local = state.localParticipant else { return nil }
+        return launchDescriptor?.assignment(for: local.id)?.vehicleID ?? local.assignedVehicleID
     }
 
     private func resolvedPort() -> UInt16? {

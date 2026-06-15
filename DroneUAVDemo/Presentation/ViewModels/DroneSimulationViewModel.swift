@@ -467,6 +467,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var localOnlineParticipant: LocalOnlineParticipant?
     @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
     @Published private(set) var onlineFleetState: OnlineTrialFleetState?
+    @Published private(set) var onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -776,6 +777,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private var collisionDebugAccumulator: Float = 0.0
     private var lastCollisionDebugEnabled: Bool = false
     private var autosaveAccumulator: Float = 0.0
+    private var onlineSnapshotSequenceNumber: UInt64 = 0
+    private var lastOnlineSnapshotSentAt: TimeInterval = 0
+    private var lastOnlineSnapshotCleanupAt: TimeInterval = 0
+    private let onlineSnapshotSendInterval: TimeInterval = 0.1
+    private weak var onlineSnapshotTransport: OnlineTrialSnapshotTransport?
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var resolvedInputState: ResolvedControlState = .neutral
@@ -1073,7 +1079,8 @@ final class DroneSimulationViewModel: ObservableObject {
         simulationRunMode: SimulationRunMode = .singlePlayer,
         onlineSessionConfig: OnlineTrialSessionConfig? = nil,
         localOnlineParticipant: LocalOnlineParticipant? = nil,
-        onlineRuntimeContext: OnlineTrialRuntimeContext? = nil
+        onlineRuntimeContext: OnlineTrialRuntimeContext? = nil,
+        onlineSnapshotTransport: OnlineTrialSnapshotTransport? = nil
     ) {
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
@@ -1083,6 +1090,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.localOnlineParticipant = localOnlineParticipant
         self.onlineRuntimeContext = onlineRuntimeContext
         self.onlineFleetState = nil
+        self.onlineSnapshotTransport = onlineSnapshotTransport
         let gameControllerInputProvider = GameControllerInputProvider(
             settingsStore: controllerSettingsStore
         )
@@ -1358,11 +1366,19 @@ final class DroneSimulationViewModel: ObservableObject {
         inputManager.reset()
         sceneController.configureOnlineTrialPlaceholders(nil)
         onlineFleetState = nil
+        onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
+        onlineSnapshotTransport = nil
         isSimulationRunning = false
     }
 
-    func configureOnlineTrial(_ context: OnlineTrialRuntimeContext) {
+    func configureOnlineTrial(
+        _ context: OnlineTrialRuntimeContext,
+        snapshotTransport: OnlineTrialSnapshotTransport? = nil
+    ) {
         onlineRuntimeContext = context
+        if let snapshotTransport {
+            onlineSnapshotTransport = snapshotTransport
+        }
         let fleetState = OnlineTrialFleetState(
             localParticipantID: context.localParticipant.id,
             localVehicleID: context.localVehicleID,
@@ -1381,6 +1397,81 @@ final class DroneSimulationViewModel: ObservableObject {
             inputManager.reset()
             keyboardInputService.resetTransientState()
         }
+    }
+
+    func configureOnlineSnapshotTransport(_ transport: OnlineTrialSnapshotTransport?) {
+        onlineSnapshotTransport = transport
+    }
+
+    func applyOnlineRemoteSnapshotState(_ state: OnlineRemoteVehicleSnapshotState) {
+        guard let onlineRuntimeContext else {
+            return
+        }
+
+        var filteredState = OnlineRemoteVehicleSnapshotState()
+        for snapshot in state.snapshots {
+            filteredState.apply(
+                snapshot,
+                ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID
+            )
+        }
+
+        guard onlineRemoteSnapshotState != filteredState else { return }
+
+        onlineRemoteSnapshotState = filteredState
+        sceneController.applyOnlineVehicleSnapshots(filteredState)
+    }
+
+    private func publishOnlineVehicleSnapshotIfNeeded(now: TimeInterval) {
+        guard let context = onlineRuntimeContext,
+              context.role == .pilot,
+              let localVehicleID = context.localVehicleID,
+              isSimulationRunning,
+              now - lastOnlineSnapshotSentAt >= onlineSnapshotSendInterval else {
+            return
+        }
+
+        onlineSnapshotSequenceNumber &+= 1
+        lastOnlineSnapshotSentAt = now
+
+        // P2P 0.8: snapshot publishing mirrors the local pilot vehicle only.
+        // It is not authoritative network physics.
+        let snapshot = OnlineVehicleStateSnapshot(
+            sequenceNumber: onlineSnapshotSequenceNumber,
+            vehicleID: localVehicleID,
+            participantID: context.localParticipant.id,
+            participantName: context.localParticipant.displayName,
+            pose: OnlineVehiclePose(
+                positionX: Double(state.position.x),
+                positionY: Double(state.position.y),
+                positionZ: Double(state.position.z),
+                yaw: Double(state.orientation.z),
+                pitch: Double(state.orientation.y),
+                roll: Double(state.orientation.x)
+            ),
+            kinematics: OnlineVehicleKinematics(
+                velocityX: Double(state.velocity.x),
+                velocityY: Double(state.velocity.y),
+                velocityZ: Double(state.velocity.z),
+                speedMetersPerSecond: Double(simd_length(state.velocity)),
+                altitudeMeters: Double(max(0.0, state.position.y))
+            ),
+            isArmed: isArmed,
+            flightModeLabel: mode.rawValue
+        )
+        onlineSnapshotTransport?.sendVehicleSnapshot(snapshot)
+    }
+
+    private func cleanupOnlineRemoteSnapshotsIfNeeded(now: TimeInterval) {
+        guard onlineRuntimeContext != nil,
+              now - lastOnlineSnapshotCleanupAt >= 0.5 else {
+            return
+        }
+
+        lastOnlineSnapshotCleanupAt = now
+        var snapshotState = onlineRemoteSnapshotState
+        snapshotState.removeStaleSnapshots(olderThan: 2.0)
+        applyOnlineRemoteSnapshotState(snapshotState)
     }
 
     // MARK: - Controls
@@ -3340,6 +3431,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
+        cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
         if isSpectatorMode {
             updateSpectatorRuntime(deltaTime: dt)
             return
@@ -3545,6 +3637,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshCompassOverlay()
         refreshPayloadCameraStatus()
         syncPayloadLifecycleEvents()
+        publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 
         collisionDebugAccumulator += dt
