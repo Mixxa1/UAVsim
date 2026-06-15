@@ -18,6 +18,87 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
         )
     }
 
+    // P2P 0.9: multicopter ghost — visual-only remote vehicle, not a physics body.
+    static func makeGhostNode(vehicleID: UUID, participantName: String, spawnIndex: Int?) -> SCNNode {
+        let root = SCNNode()
+        root.name = "online_trial_vehicle_\(vehicleID.uuidString)"
+        if let spawnIndex {
+            root.simdPosition = OnlineTrialSpawnLayout.position(for: spawnIndex)
+        }
+
+        let ghostMaterial = SCNMaterial()
+        ghostMaterial.diffuse.contents = NSColor.systemCyan.withAlphaComponent(0.52)
+        ghostMaterial.emission.contents = NSColor.systemCyan.withAlphaComponent(0.18)
+        ghostMaterial.lightingModel = .constant
+        ghostMaterial.isDoubleSided = true
+        ghostMaterial.transparency = 0.52
+
+        let noseMaterial = SCNMaterial()
+        noseMaterial.diffuse.contents = NSColor.white.withAlphaComponent(0.82)
+        noseMaterial.lightingModel = .constant
+        noseMaterial.isDoubleSided = true
+
+        func applyGhost(_ node: SCNNode) { node.geometry?.materials = [ghostMaterial] }
+
+        // Central body
+        let body = SCNNode(geometry: SCNBox(width: 0.18, height: 0.055, length: 0.18, chamferRadius: 0.008))
+        body.simdPosition = SIMD3<Float>(0, 0.028, 0)
+        applyGhost(body)
+        root.addChildNode(body)
+
+        // 4 arms (+ config, N/S along +Z/-Z, E/W along +X/-X)
+        let armNS = SCNCapsule(capRadius: 0.011, height: 0.20)
+        let armEW = SCNCapsule(capRadius: 0.011, height: 0.20)
+        armNS.materials = [ghostMaterial]
+        armEW.materials = [ghostMaterial]
+
+        let armN = SCNNode(geometry: armNS)
+        armN.simdPosition = SIMD3<Float>(0, 0.028, 0)
+        armN.eulerAngles.x = .pi / 2.0
+        root.addChildNode(armN)
+
+        let armE = SCNNode(geometry: armEW)
+        armE.simdPosition = SIMD3<Float>(0, 0.028, 0)
+        armE.eulerAngles.z = .pi / 2.0
+        root.addChildNode(armE)
+
+        // 4 rotor discs at arm tips
+        let rotorPositions: [(Float, Float, Float)] = [
+            (0, 0.038, +0.105),
+            (0, 0.038, -0.105),
+            (+0.105, 0.038, 0),
+            (-0.105, 0.038, 0)
+        ]
+        for (rx, ry, rz) in rotorPositions {
+            let disc = SCNCylinder(radius: 0.082, height: 0.005)
+            disc.materials = [ghostMaterial]
+            let discNode = SCNNode(geometry: disc)
+            discNode.simdPosition = SIMD3<Float>(rx, ry, rz)
+            root.addChildNode(discNode)
+        }
+
+        // Nose marker (forward = +Z in local frame)
+        let nose = SCNBox(width: 0.032, height: 0.032, length: 0.048, chamferRadius: 0.003)
+        nose.materials = [noseMaterial]
+        let noseNode = SCNNode(geometry: nose)
+        noseNode.simdPosition = SIMD3<Float>(0, 0.038, +0.115)
+        root.addChildNode(noseNode)
+
+        // Participant label
+        let labelGeo = SCNText(string: participantName, extrusionDepth: 0.01)
+        labelGeo.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        labelGeo.alignmentMode = "left"
+        labelGeo.materials = [ghostMaterial.copy() as! SCNMaterial]
+        labelGeo.firstMaterial?.diffuse.contents = NSColor.white.withAlphaComponent(0.86)
+        labelGeo.firstMaterial?.emission.contents = NSColor.systemCyan.withAlphaComponent(0.22)
+        let labelNode = SCNNode(geometry: labelGeo)
+        labelNode.simdPosition = SIMD3<Float>(-0.18, 0.10, 0)
+        labelNode.scale = SCNVector3(0.009, 0.009, 0.009)
+        root.addChildNode(labelNode)
+
+        return root
+    }
+
     private static func makeNode(
         vehicleID: UUID,
         participantName: String,

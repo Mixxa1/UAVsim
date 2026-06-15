@@ -239,12 +239,14 @@
 		100000000000000000000378 /* NetworkLANSessionTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000379 /* NetworkLANSessionTransport.swift */; };
 		10000000000000000000037A /* LANSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037B /* LANSessionViewModel.swift */; };
 		10000000000000000000037C /* LANOnlineTrialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037D /* LANOnlineTrialsView.swift */; };
+		100000000000000000000394 /* OnlineTrialRuntimeOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000393 /* OnlineTrialRuntimeOverlay.swift */; };
 		100000000000000000000382 /* OnlineTrialModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000381 /* OnlineTrialModels.swift */; };
 		100000000000000000000384 /* P2PSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000383 /* P2PSessionModels.swift */; };
 		100000000000000000000386 /* OnlineTrialRuntimeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000385 /* OnlineTrialRuntimeContext.swift */; };
 		100000000000000000000388 /* OnlineTrialFleetState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000387 /* OnlineTrialFleetState.swift */; };
 		10000000000000000000038A /* OnlineTrialVehiclePlaceholderNodeFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */; };
 		10000000000000000000038C /* OnlineVehicleStateSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */; };
+		100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */; };
 		10000000000000000000038E /* OnlineVehicleSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */; };
 		100000000000000000000390 /* OnlineTrialNetworkBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038F /* OnlineTrialNetworkBridge.swift */; };
 /* End PBXBuildFile section */
@@ -485,6 +487,7 @@
 		100000000000000000000379 /* NetworkLANSessionTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkLANSessionTransport.swift; sourceTree = "<group>"; };
 		10000000000000000000037B /* LANSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionViewModel.swift; sourceTree = "<group>"; };
 		10000000000000000000037D /* LANOnlineTrialsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANOnlineTrialsView.swift; sourceTree = "<group>"; };
+		100000000000000000000393 /* OnlineTrialRuntimeOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialRuntimeOverlay.swift; sourceTree = "<group>"; };
 		100000000000000000000381 /* OnlineTrialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialModels.swift; sourceTree = "<group>"; };
 		100000000000000000000383 /* P2PSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = P2PSessionModels.swift; sourceTree = "<group>"; };
 		100000000000000000000385 /* OnlineTrialRuntimeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialRuntimeContext.swift; sourceTree = "<group>"; };
@@ -492,6 +495,7 @@
 		100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialVehiclePlaceholderNodeFactory.swift; sourceTree = "<group>"; };
 		10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleStateSnapshot.swift; sourceTree = "<group>"; };
 		10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotStore.swift; sourceTree = "<group>"; };
+		100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotInterpolator.swift; sourceTree = "<group>"; };
 		10000000000000000000038F /* OnlineTrialNetworkBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialNetworkBridge.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
@@ -736,6 +740,7 @@
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
 				10000000000000000000037D /* LANOnlineTrialsView.swift */,
+				100000000000000000000393 /* OnlineTrialRuntimeOverlay.swift */,
 				100000000000000000000197 /* MissionDebriefView.swift */,
 				100000000000000000000159 /* MissionMapView.swift */,
 				10000000000000000000016F /* MissionDraftPanel.swift */,
@@ -872,6 +877,7 @@
 				10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */,
 				10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */,
 				10000000000000000000038F /* OnlineTrialNetworkBridge.swift */,
+				100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */,
 			);
 			path = OnlineTrials;
 			sourceTree = "<group>";
@@ -1184,6 +1190,7 @@
 				100000000000000000000378 /* NetworkLANSessionTransport.swift in Sources */,
 				10000000000000000000037A /* LANSessionViewModel.swift in Sources */,
 				10000000000000000000037C /* LANOnlineTrialsView.swift in Sources */,
+				100000000000000000000394 /* OnlineTrialRuntimeOverlay.swift in Sources */,
 				100000000000000000000382 /* OnlineTrialModels.swift in Sources */,
 				100000000000000000000384 /* P2PSessionModels.swift in Sources */,
 				100000000000000000000386 /* OnlineTrialRuntimeContext.swift in Sources */,
@@ -1191,6 +1198,7 @@
 				10000000000000000000038A /* OnlineTrialVehiclePlaceholderNodeFactory.swift in Sources */,
 				10000000000000000000038C /* OnlineVehicleStateSnapshot.swift in Sources */,
 				10000000000000000000038E /* OnlineVehicleSnapshotStore.swift in Sources */,
+				100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */,
 				100000000000000000000390 /* OnlineTrialNetworkBridge.swift in Sources */,
 				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);

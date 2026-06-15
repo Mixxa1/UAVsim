@@ -1271,11 +1271,6 @@ struct ContentView: View {
                         )
                     }
 
-                    if let runtimeContext = viewModel.onlineRuntimeContext {
-                        onlineRuntimeBanner(runtimeContext, viewModel: viewModel)
-                            .padding(.top, viewModel.isToolPanelVisible ? 132 : 84)
-                            .padding(.leading, 16)
-                    }
                 }
             }
             .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
@@ -1340,9 +1335,9 @@ struct ContentView: View {
                     appShell.requestReturnToMenu()
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "xmark")
+                        Image(systemName: "arrow.left")
                             .font(.system(size: 11, weight: .bold))
-                        Text("Выйти в главное меню")
+                        Text("Выйти")
                             .font(.caption.weight(.bold))
                     }
                     .foregroundStyle(.white)
@@ -1366,61 +1361,27 @@ struct ContentView: View {
         _ context: OnlineTrialRuntimeContext,
         viewModel: DroneSimulationViewModel
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 7) {
-                Image(systemName: context.isSpectator ? "eye" : "airplane")
-                Text(context.isSpectator ? "LAN Trial: Наблюдатель" : "LAN Trial: Полет")
-
-                if context.isHost {
-                    Text("HOST / ADMIN")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(GroundControlPalette.warning, in: RoundedRectangle(cornerRadius: 4))
-                }
+        HStack(spacing: 5) {
+            Circle()
+                .fill(GroundControlPalette.success)
+                .frame(width: 6, height: 6)
+            Text(context.isSpectator ? "SPECTATOR" : "PILOT")
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .foregroundStyle(.white)
+                .tracking(0.2)
+            if context.isHost {
+                Text("HOST")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(GroundControlPalette.warning, in: RoundedRectangle(cornerRadius: 3))
             }
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Участник: \(context.localParticipant.displayName)")
-                Text(onlineRuntimeSubtitle(context))
-                Text(onlineRuntimeSnapshotStatus(context, viewModel: viewModel))
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.70))
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.24), lineWidth: 1)
-        )
-    }
-
-    private func onlineRuntimeSubtitle(_ context: OnlineTrialRuntimeContext) -> String {
-        if context.isSpectator {
-            return "Управление БЛА отключено"
-        }
-
-        if let vehicleID = context.localVehicleID {
-            return "Ваш UAV: \(vehicleID.uuidString.prefix(8))"
-        }
-
-        return "Пилот без назначенного аппарата"
-    }
-
-    private func onlineRuntimeSnapshotStatus(
-        _ context: OnlineTrialRuntimeContext,
-        viewModel: DroneSimulationViewModel
-    ) -> String {
-        let remoteCount = viewModel.onlineRemoteSnapshotState.snapshots.count
-        if context.isSpectator {
-            return "receiving only | remote: \(remoteCount)"
-        }
-        return "10 Hz target | remote: \(remoteCount)"
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.60), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -1578,6 +1539,18 @@ struct ContentView: View {
 
     private func simulationHeaderButtons(_ viewModel: DroneSimulationViewModel) -> some View {
         HStack(spacing: 8) {
+            if viewModel.onlineRuntimeContext != nil {
+                Button {
+                    appShell.requestReturnToMenu()
+                } label: {
+                    headerUtilityButtonLabel(systemImage: "house")
+                }
+                .buttonStyle(.plain)
+                .help("Выйти из LAN Trial")
+
+                Divider().frame(height: 20)
+            }
+
             Menu {
                 Button("project.save.action") {
                     appShell.saveActiveProject()

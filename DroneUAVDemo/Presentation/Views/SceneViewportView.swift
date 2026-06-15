@@ -3,6 +3,7 @@ import simd
 
 struct SceneViewportView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
+    @StateObject private var tabObserver = TabKeyObserver()
 
     var body: some View {
         let overlayInset = viewModel.isParametersPanelVisible ? 18.0 : 12.0
@@ -75,8 +76,19 @@ struct SceneViewportView: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            if !viewModel.isSpectatorMode {
-                VStack(alignment: .trailing, spacing: 10) {
+            VStack(alignment: .trailing, spacing: 10) {
+                if viewModel.onlineTrialContext != nil {
+                    OnlineTrialRuntimeOverlay(
+                        context: viewModel.onlineTrialContext,
+                        fleetState: viewModel.onlineFleetState,
+                        remoteStates: viewModel.onlineInterpolatedRemoteStates,
+                        snapshotTargetHz: 10,
+                        isExpanded: tabObserver.isTabHeld
+                    )
+                    .animation(.easeInOut(duration: 0.12), value: tabObserver.isTabHeld)
+                }
+
+                if !viewModel.isSpectatorMode {
                     if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
                         TerrainMapOverlayView(
                             snapshot: viewModel.terrainMapSnapshot,
@@ -92,12 +104,44 @@ struct SceneViewportView: View {
                         PayloadCameraStatusOverlayView(status: viewModel.payloadCameraStatus)
                     }
                 }
-                .padding(.top, 12)
-                .padding(.trailing, 12)
             }
+            .padding(.top, 12)
+            .padding(.trailing, 12)
         }
         .background(Color.black)
+        .onAppear { tabObserver.start(viewModel: viewModel) }
+        .onDisappear { tabObserver.stop() }
     }
+}
+
+// MARK: – Tab-hold key observer for the online detail panel
+
+private final class TabKeyObserver: ObservableObject {
+    @Published var isTabHeld = false
+    private var monitor: Any?
+
+    func start(viewModel: DroneSimulationViewModel) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self, weak viewModel] event in
+            guard let self, viewModel?.onlineTrialContext != nil else { return event }
+            guard event.keyCode == 48 else { return event } // Tab
+            if event.type == .keyDown, !event.isARepeat {
+                self.isTabHeld = true
+                return nil
+            } else if event.type == .keyUp {
+                self.isTabHeld = false
+                return nil
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        isTabHeld = false
+    }
+
+    deinit { stop() }
 }
 
 private struct PayloadCameraStatusOverlayView: View {

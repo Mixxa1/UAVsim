@@ -310,9 +310,14 @@ final class DroneSceneController {
             return
         }
 
+        // P2P 0.9: use ghost nodes instead of simple markers
         for slot in fleetState.remoteVehicles {
             onlineTrialPlaceholderRootNode.addChildNode(
-                OnlineTrialVehiclePlaceholderNodeFactory.makeNode(for: slot)
+                OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
+                    vehicleID: slot.vehicleID,
+                    participantName: slot.participantName,
+                    spawnIndex: slot.spawnIndex
+                )
             )
         }
     }
@@ -336,9 +341,10 @@ final class DroneSceneController {
             if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
                 node = existing
             } else {
-                node = OnlineTrialVehiclePlaceholderNodeFactory.makeNode(
-                    for: snapshot,
-                    fallbackSpawnIndex: index
+                node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
+                    vehicleID: snapshot.vehicleID,
+                    participantName: snapshot.participantName,
+                    spawnIndex: index
                 )
                 onlineTrialPlaceholderRootNode.addChildNode(node)
             }
@@ -353,6 +359,46 @@ final class DroneSceneController {
                     Float(snapshot.pose.roll),
                     Float(snapshot.pose.pitch),
                     Float(snapshot.pose.yaw)
+                )
+            )
+            node.isHidden = false
+        }
+    }
+
+    // P2P 0.9: ghost nodes are visual-only remote vehicles, not physics bodies.
+    // Called per-frame from simulation tick with interpolated states for smooth movement.
+    func applyOnlineInterpolatedRemoteStates(_ states: [OnlineVehicleInterpolatedState]) {
+        let activeNodeNames = Set(states.map { onlineTrialVehicleNodeName(for: $0.vehicleID) })
+
+        for child in onlineTrialPlaceholderRootNode.childNodes {
+            guard let name = child.name, name.hasPrefix("online_trial_vehicle_") else { continue }
+            child.isHidden = !activeNodeNames.contains(name)
+        }
+
+        for state in states {
+            let nodeName = onlineTrialVehicleNodeName(for: state.vehicleID)
+            let node: SCNNode
+            if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
+                node = existing
+            } else {
+                node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
+                    vehicleID: state.vehicleID,
+                    participantName: state.participantName,
+                    spawnIndex: nil
+                )
+                onlineTrialPlaceholderRootNode.addChildNode(node)
+            }
+
+            node.position = SCNVector3(
+                Float(state.pose.positionX),
+                Float(state.pose.positionY),
+                Float(state.pose.positionZ)
+            )
+            node.simdOrientation = orientationQuaternion(
+                from: SIMD3<Float>(
+                    Float(state.pose.roll),
+                    Float(state.pose.pitch),
+                    Float(state.pose.yaw)
                 )
             )
             node.isHidden = false

@@ -468,6 +468,8 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
     @Published private(set) var onlineFleetState: OnlineTrialFleetState?
     @Published private(set) var onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
+    @Published private(set) var onlineInterpolatedRemoteStates: [OnlineVehicleInterpolatedState] = []
+    private var onlineInterpolationStore = OnlineVehicleInterpolationStore()
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -1367,6 +1369,8 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.configureOnlineTrialPlaceholders(nil)
         onlineFleetState = nil
         onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
+        onlineInterpolationStore = OnlineVehicleInterpolationStore()
+        onlineInterpolatedRemoteStates = []
         onlineSnapshotTransport = nil
         isSimulationRunning = false
     }
@@ -1419,8 +1423,38 @@ final class DroneSimulationViewModel: ObservableObject {
         guard onlineRemoteSnapshotState != filteredState else { return }
 
         onlineRemoteSnapshotState = filteredState
-        sceneController.applyOnlineVehicleSnapshots(filteredState)
+        // Feed into interpolation buffer for smooth per-frame updates
+        onlineInterpolationStore.apply(filteredState, ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID)
     }
+
+    private func updateOnlineInterpolatedRemoteStates(now: TimeInterval) {
+        guard onlineRuntimeContext != nil else { return }
+        onlineInterpolationStore.removeStaleSnapshots(olderThan: 2.0, now: now)
+        let states = onlineInterpolationStore.interpolatedStates(now: now)
+        guard states != onlineInterpolatedRemoteStates else { return }
+        onlineInterpolatedRemoteStates = states
+        sceneController.applyOnlineInterpolatedRemoteStates(states)
+    }
+
+    #if DEBUG
+    func injectDebugRemoteSnapshot() {
+        let fakeVehicleID = UUID()
+        let snapshot = OnlineVehicleStateSnapshot(
+            sequenceNumber: 1,
+            vehicleID: fakeVehicleID,
+            participantID: UUID(),
+            participantName: "DEBUG Ghost",
+            timestamp: Date().timeIntervalSince1970,
+            pose: OnlineVehiclePose(positionX: 5.0, positionY: 2.5, positionZ: 5.0, yaw: 0, pitch: 0, roll: 0),
+            kinematics: .zero,
+            isArmed: true,
+            flightModeLabel: "manual"
+        )
+        var state = OnlineRemoteVehicleSnapshotState()
+        state.apply(snapshot, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID)
+        onlineInterpolationStore.apply(state, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID)
+    }
+    #endif
 
     private func publishOnlineVehicleSnapshotIfNeeded(now: TimeInterval) {
         guard let context = onlineRuntimeContext,
@@ -3432,6 +3466,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
         cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
+        updateOnlineInterpolatedRemoteStates(now: now)
         if isSpectatorMode {
             updateSpectatorRuntime(deltaTime: dt)
             return
