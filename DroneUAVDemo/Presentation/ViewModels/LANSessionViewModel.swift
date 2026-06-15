@@ -46,7 +46,6 @@ final class LANSessionViewModel: ObservableObject {
 
     var canLaunchTrial: Bool {
         guard state.localParticipant?.isHost == true,
-              hasPilotParticipants,
               state.trialPhase == .lobby else {
             return false
         }
@@ -175,12 +174,7 @@ final class LANSessionViewModel: ObservableObject {
 
     func launchTrial() {
         guard state.localParticipant?.isHost == true else { return }
-        guard canLaunchTrial else {
-            if !hasPilotParticipants {
-                state.lastErrorMessage = "Нужен хотя бы один участник с ролью Полет."
-            }
-            return
-        }
+        guard canLaunchTrial else { return }
         guard let host = state.localParticipant,
               let config = state.config else {
             state.connectionState = .failed

@@ -245,11 +245,11 @@ struct LANOnlineTrialsView: View {
 
             if !viewModel.hasPilotParticipants {
                 HStack(spacing: 7) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text("Нужен хотя бы один участник с ролью Полет.")
+                    Image(systemName: "eye")
+                    Text("Пилотов нет: испытание откроется в режиме наблюдения.")
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.70, blue: 0.38))
+                .foregroundStyle(Color(red: 0.66, green: 0.82, blue: 1.0))
             }
 
             Button {

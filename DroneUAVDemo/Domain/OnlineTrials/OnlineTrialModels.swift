@@ -149,3 +149,34 @@ struct LANTrialLaunchDescriptor: Codable, Equatable {
         assignments.first { $0.participantID == participantID }
     }
 }
+
+struct OnlineTrialVehicleSlot: Identifiable, Codable, Equatable {
+    var id: UUID
+    var vehicleID: UUID
+    var participantID: UUID
+    var participantName: String
+    var vehicleProfileID: String
+    var spawnIndex: Int
+    var isLocalControlled: Bool
+    var isHostOwned: Bool
+
+    init(
+        id: UUID = UUID(),
+        vehicleID: UUID,
+        participantID: UUID,
+        participantName: String,
+        vehicleProfileID: String,
+        spawnIndex: Int,
+        isLocalControlled: Bool,
+        isHostOwned: Bool
+    ) {
+        self.id = id
+        self.vehicleID = vehicleID
+        self.participantID = participantID
+        self.participantName = participantName
+        self.vehicleProfileID = vehicleProfileID
+        self.spawnIndex = spawnIndex
+        self.isLocalControlled = isLocalControlled
+        self.isHostOwned = isHostOwned
+    }
+}

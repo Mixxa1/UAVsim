@@ -466,6 +466,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var onlineSessionConfig: OnlineTrialSessionConfig?
     @Published private(set) var localOnlineParticipant: LocalOnlineParticipant?
     @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
+    @Published private(set) var onlineFleetState: OnlineTrialFleetState?
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -562,6 +563,27 @@ final class DroneSimulationViewModel: ObservableObject {
 
     var isSpectatorMode: Bool {
         simulationRunMode.isSpectator
+    }
+
+    var onlineTrialContext: OnlineTrialRuntimeContext? {
+        onlineRuntimeContext
+    }
+
+    var canControlLocalVehicle: Bool {
+        LANRuntimeRolePolicy.canControlVehicle(context: onlineRuntimeContext)
+    }
+
+    func canUseControlModule(_ module: ControlModule) -> Bool {
+        guard let onlineRuntimeContext else { return true }
+
+        switch module {
+        case .flightOps, .uavCatalog, .diagnostics:
+            return LANRuntimeRolePolicy.canControlVehicle(context: onlineRuntimeContext)
+        case .scenario:
+            return LANRuntimeRolePolicy.canUseScenarioAdmin(context: onlineRuntimeContext)
+        case .camera:
+            return true
+        }
     }
 
     var shouldPromptBeforeExit: Bool {
@@ -1060,6 +1082,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.onlineSessionConfig = onlineSessionConfig
         self.localOnlineParticipant = localOnlineParticipant
         self.onlineRuntimeContext = onlineRuntimeContext
+        self.onlineFleetState = nil
         let gameControllerInputProvider = GameControllerInputProvider(
             settingsStore: controllerSettingsStore
         )
@@ -1297,6 +1320,9 @@ final class DroneSimulationViewModel: ObservableObject {
         if simulationRunMode.isSpectator {
             sceneController.configureSpectatorRuntime(camera: cameraConfiguration)
         }
+        if let onlineRuntimeContext {
+            configureOnlineTrial(onlineRuntimeContext)
+        }
         refreshPayloadCameraStatus()
 
         homePosition = currentSpawnPoint()
@@ -1330,7 +1356,31 @@ final class DroneSimulationViewModel: ObservableObject {
         simulationTimer = nil
         keyboardInputService.stop()
         inputManager.reset()
+        sceneController.configureOnlineTrialPlaceholders(nil)
+        onlineFleetState = nil
         isSimulationRunning = false
+    }
+
+    func configureOnlineTrial(_ context: OnlineTrialRuntimeContext) {
+        onlineRuntimeContext = context
+        let fleetState = OnlineTrialFleetState(
+            localParticipantID: context.localParticipant.id,
+            localVehicleID: context.localVehicleID,
+            vehicles: context.vehicleSlots
+        )
+        onlineFleetState = fleetState
+        sceneController.configureOnlineTrialPlaceholders(fleetState)
+
+        if context.isLocalSpectator {
+            isToolPanelVisible = false
+            isParametersPanelVisible = false
+            activeControlModule = nil
+            isPayloadPanelVisible = false
+            cameraConfiguration.mode = .spectator
+            sceneController.configureSpectatorRuntime(camera: cameraConfiguration)
+            inputManager.reset()
+            keyboardInputService.resetTransientState()
+        }
     }
 
     // MARK: - Controls
@@ -1340,34 +1390,42 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setX(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.x = value }, markManual: true, fixedWingManualOverrideAxes: .all)
     }
 
     func setY(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.y = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setZ(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.z = value }, markManual: true, fixedWingManualOverrideAxes: .all)
     }
 
     func setRoll(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.roll = value }, markManual: true, fixedWingManualOverrideAxes: .turn)
     }
 
     func setPitch(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.pitch = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setYaw(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.yaw = value }, markManual: true, fixedWingManualOverrideAxes: .turn)
     }
 
     func setThrottle(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.throttle = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setPayloadType(_ type: PayloadType) {
+        guard canControlLocalVehicle else { return }
         guard payloadDraftConfiguration.payloadType != type else {
             return
         }
@@ -1385,6 +1443,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadMass(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         let clamped = Float(max(0.0, min(value, 5000.0)))
         guard abs(payloadDraftConfiguration.payloadMass - clamped) > 0.0001 else {
             return
@@ -1398,6 +1457,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadCustomName(_ value: String) {
+        guard canControlLocalVehicle else { return }
         guard payloadDraftConfiguration.customName != value else {
             return
         }
@@ -1410,6 +1470,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func attachPayload() {
+        guard canControlLocalVehicle else { return }
         let capabilityCheck = PayloadController.capabilityCheck(
             for: payloadDraftConfiguration,
             profile: activeUAVProfile
@@ -1440,6 +1501,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func removePayload() {
+        guard canControlLocalVehicle else { return }
         guard installedPayloadConfiguration != nil || payloadState == .attached else {
             return
         }
@@ -1465,6 +1527,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func releasePayload() {
+        guard canControlLocalVehicle else { return }
         guard installedPayloadConfiguration != nil, payloadState == .attached else {
             payloadStatusMessageKey = "payload.message.no_payload_attached"
             refreshPayloadRuntimeState()
@@ -1507,6 +1570,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func arm() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         guard physicalState.permitsRearm, !damageState.isFlightCritical else {
             return
@@ -1524,6 +1588,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func disarm(forceEmergency: Bool = false, preserveCrashDynamics: Bool = false) {
+        guard canControlLocalVehicle else { return }
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_disarmed")
         isArmed = false
@@ -1714,6 +1779,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func takeoff() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         guard isArmed else {
             return
@@ -1750,6 +1816,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func land() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_landing")
@@ -1775,6 +1842,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func hover() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_hover")
@@ -1858,7 +1926,7 @@ final class DroneSimulationViewModel: ObservableObject {
     func setControlPanelVisible(_ visible: Bool) {
         if visible {
             if activeControlModule == nil {
-                activeControlModule = lastSidebarModule
+                activeControlModule = canUseControlModule(lastSidebarModule) ? lastSidebarModule : .camera
             }
             isParametersPanelVisible = activeControlModule != nil
         } else {
@@ -1867,6 +1935,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setActiveControlModule(_ module: ControlModule?) {
+        if let module, !canUseControlModule(module) {
+            return
+        }
         if let activeControlModule {
             lastSidebarModule = activeControlModule
         }
@@ -1883,10 +1954,12 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func togglePayloadPanel() {
+        guard canControlLocalVehicle else { return }
         isPayloadPanelVisible.toggle()
     }
 
     func setPayloadPanelVisible(_ visible: Bool) {
+        guard canControlLocalVehicle || !visible else { return }
         isPayloadPanelVisible = visible
     }
 
@@ -2506,6 +2579,7 @@ final class DroneSimulationViewModel: ObservableObject {
     // MARK: - Drone models
 
     func selectDroneModel(id: String) {
+        guard canControlLocalVehicle else { return }
         let canonicalID = LIPODroneModelRepository.canonicalModelID(id)
         guard let profile = availableDroneProfiles.first(where: { $0.id == canonicalID }) else {
             return
@@ -3887,6 +3961,9 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float,
         controlState: ResolvedControlState
     ) {
+        guard canControlLocalVehicle else { return }
+        // P2P 0.7: existing DroneState represents the local pilot vehicle only
+        // until multi-state network physics is introduced.
         let inputState = buildFlightInputState(from: controlState)
         let routingContext = buildFlightControlRoutingContext()
         let route = flightControlRouter.route(

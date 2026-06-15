@@ -78,6 +78,7 @@ final class DroneSceneController {
     private let missionDropZoneNode = SCNNode()
     private let missionWaypointCaptureNode = SCNNode()
     private let launchAssetNode = SCNNode()
+    private let onlineTrialPlaceholderRootNode = SCNNode()
 
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
@@ -253,6 +254,9 @@ final class DroneSceneController {
         launchAssetNode.isHidden = true
         scene.rootNode.addChildNode(launchAssetNode)
 
+        onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
+        scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
+
         nearestContactNode.geometry = SCNSphere(radius: 0.14)
         nearestContactNode.geometry?.firstMaterial?.diffuse.contents = NSColor.systemRed.withAlphaComponent(0.82)
         nearestContactNode.isHidden = true
@@ -296,6 +300,21 @@ final class DroneSceneController {
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
         dockSpawnPosition
+    }
+
+    func configureOnlineTrialPlaceholders(_ fleetState: OnlineTrialFleetState?) {
+        onlineTrialPlaceholderRootNode.childNodes.forEach { $0.removeFromParentNode() }
+        droneNode.isHidden = fleetState?.isSpectator ?? false
+
+        guard let fleetState else {
+            return
+        }
+
+        for slot in fleetState.remoteVehicles {
+            onlineTrialPlaceholderRootNode.addChildNode(
+                OnlineTrialVehiclePlaceholderNodeFactory.makeNode(for: slot)
+            )
+        }
     }
 
     func currentLaunchSpawnPoint(for asset: LaunchAsset?) -> SIMD3<Float>? {

@@ -30,3 +30,38 @@ struct OnlineTrialRuntimeContext: Codable, Equatable {
         self.localAssignment = launchDescriptor.assignment(for: localParticipant.id)
     }
 }
+
+extension OnlineTrialRuntimeContext {
+    var vehicleSlots: [OnlineTrialVehicleSlot] {
+        launchDescriptor.assignments.compactMap { assignment in
+            guard assignment.role == .pilot,
+                  let vehicleID = assignment.vehicleID,
+                  let profileID = assignment.vehicleProfileID,
+                  let spawnIndex = assignment.spawnIndex else {
+                return nil
+            }
+
+            return OnlineTrialVehicleSlot(
+                vehicleID: vehicleID,
+                participantID: assignment.participantID,
+                participantName: assignment.participantName,
+                vehicleProfileID: profileID,
+                spawnIndex: spawnIndex,
+                isLocalControlled: assignment.participantID == localParticipant.id,
+                isHostOwned: assignment.participantID == launchDescriptor.hostParticipantID
+            )
+        }
+    }
+
+    var localVehicleSlot: OnlineTrialVehicleSlot? {
+        vehicleSlots.first { $0.isLocalControlled }
+    }
+
+    var isLocalPilot: Bool {
+        role == .pilot
+    }
+
+    var isLocalSpectator: Bool {
+        role == .spectator
+    }
+}

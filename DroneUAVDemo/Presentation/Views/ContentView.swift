@@ -821,19 +821,25 @@ private struct SimulationToolstripView: View {
     private static let selectorButtonWidth: CGFloat = 142
     private static let selectorButtonHeight: CGFloat = 46
 
+    private var visibleModules: [ControlModule] {
+        ControlModule.allCases.filter { viewModel.canUseControlModule($0) }
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(ControlModule.allCases) { module in
+                ForEach(visibleModules) { module in
                     moduleButton(module)
                 }
 
-                PayloadToolbarEntry(
-                    isPresented: viewModel.isPayloadPanelVisible,
-                    payloadState: viewModel.payloadState,
-                    payloadMountState: viewModel.payloadMountState
-                ) {
-                    viewModel.togglePayloadPanel()
+                if viewModel.canControlLocalVehicle {
+                    PayloadToolbarEntry(
+                        isPresented: viewModel.isPayloadPanelVisible,
+                        payloadState: viewModel.payloadState,
+                        payloadMountState: viewModel.payloadMountState
+                    ) {
+                        viewModel.togglePayloadPanel()
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -1346,16 +1352,28 @@ struct ContentView: View {
     }
 
     private func onlineRuntimeBanner(_ context: OnlineTrialRuntimeContext) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
                 Image(systemName: context.isSpectator ? "eye" : "airplane")
-                Text("LAN Trial Runtime")
+                Text(context.isSpectator ? "LAN Trial: Наблюдатель" : "LAN Trial: Полет")
+
+                if context.isHost {
+                    Text("HOST / ADMIN")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(GroundControlPalette.warning, in: RoundedRectangle(cornerRadius: 4))
+                }
             }
             .font(.system(size: 11, weight: .bold, design: .monospaced))
 
-            Text(onlineRuntimeSubtitle(context))
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.70))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Участник: \(context.localParticipant.displayName)")
+                Text(onlineRuntimeSubtitle(context))
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.70))
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
@@ -1369,11 +1387,11 @@ struct ContentView: View {
 
     private func onlineRuntimeSubtitle(_ context: OnlineTrialRuntimeContext) -> String {
         if context.isSpectator {
-            return "Режим наблюдателя: управление БЛА отключено"
+            return "Управление БЛА отключено"
         }
 
         if let vehicleID = context.localVehicleID {
-            return "Vehicle \(vehicleID.uuidString.prefix(8))"
+            return "Ваш UAV: \(vehicleID.uuidString.prefix(8))"
         }
 
         return "Пилот без назначенного аппарата"
