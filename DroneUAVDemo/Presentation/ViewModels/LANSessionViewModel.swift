@@ -13,12 +13,17 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
     @Published private(set) var remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
     @Published private(set) var sharedEvents: [OnlineSharedEvent] = []
     @Published private(set) var onlineDamageState = OnlineVehicleDamageState()
+    // P2P v1.3: runtime diagnostics visible to DroneSimulationViewModel via onReceive.
+    @Published private(set) var onlineDiagnostics = OnlineRuntimeNetworkDiagnostics()
 
     private let transport: LANSessionTransport
     private var sharedEventSequenceNumber: UInt64 = 0
     // P2P v1.2: host deduplication — pairKey → last accepted timestamp.
     private var recentEventPairKeys: [String: TimeInterval] = [:]
     private let sharedEventPairCooldownSeconds: TimeInterval = 2.0
+    // P2P v1.3: ping/pong RTT tracking.
+    private var pendingPingID: UUID? = nil
+    private var pendingPingSentAt: TimeInterval? = nil
 
     init(transport: LANSessionTransport = NetworkLANSessionTransport()) {
         self.transport = transport
@@ -52,8 +57,11 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
     }
 
     var canLaunchTrial: Bool {
+        // P2P v1.3.1: require at least one registered client before launch to prevent
+        // the race where HOST presses launch before the client's .hello is processed.
         guard state.localParticipant?.isHost == true,
-              state.trialPhase == .lobby else {
+              state.trialPhase == .lobby,
+              state.participants.count >= 2 else {
             return false
         }
 
@@ -190,7 +198,10 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
         sharedEvents = []
         onlineDamageState = OnlineVehicleDamageState()
+        onlineDiagnostics = OnlineRuntimeNetworkDiagnostics()
         recentEventPairKeys = [:]
+        pendingPingID = nil
+        pendingPingSentAt = nil
         state = .idle
     }
 
@@ -227,6 +238,13 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             assignments: assignments
         )
 
+        #if DEBUG
+        print("[LAN][HOST] launchTrial: participants=\(state.participants.count) assignments=\(assignments.count)")
+        for a in assignments {
+            print("[LAN][HOST]   \(a.participantName) role=\(a.role.rawValue) vehicle=\(a.vehicleID?.uuidString.prefix(8) ?? "nil")")
+        }
+        #endif
+
         state.trialPhase = .launching
         applyLaunchDescriptor(descriptor)
 
@@ -253,6 +271,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             vehicleSnapshot: snapshot
         )
         transport.send(message)
+        onlineDiagnostics.outgoingSnapshotCount += 1
     }
 
     func applyReceivedMessage(_ message: LANSessionMessage) {
@@ -309,12 +328,14 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             guard let snapshot = message.vehicleSnapshot else { return }
             remoteSnapshotState.apply(snapshot, ignoringLocalVehicleID: nil)
             remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+            onlineDiagnostics.incomingSnapshotCount += 1
             transport.send(message)
 
         case .vehicleSnapshotBatch:
             guard let batch = message.vehicleSnapshotBatch else { return }
             remoteSnapshotState.apply(batch, ignoringLocalVehicleID: nil)
             remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+            onlineDiagnostics.incomingSnapshotCount += batch.snapshots.count
             transport.send(message)
 
         case .sharedEvent:
@@ -322,6 +343,16 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             if let event = message.sharedEvent {
                 acceptAndBroadcastSharedEvent(event)
             }
+
+        case .ping:
+            // Reflect pong back to sender.
+            if let local = state.localParticipant, let pingID = message.pingID {
+                let pong = LANSessionMessage(type: .pong, senderID: local.id, pingID: pingID)
+                transport.send(pong)
+            }
+
+        case .pong:
+            break
 
         case .welcome, .participantList, .sessionConfig, .trialLaunch:
             break
@@ -345,11 +376,19 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
 
         case .trialLaunch:
             guard let descriptor = message.trialLaunch else { return }
+            #if DEBUG
+            print("[LAN][CLIENT] trialLaunch received: assignments=\(descriptor.assignments.count) localID=\(state.localParticipant?.id.uuidString.prefix(8) ?? "nil")")
+            let localInDescriptor = descriptor.assignment(for: state.localParticipant?.id ?? UUID()) != nil
+            print("[LAN][CLIENT] localParticipant in descriptor: \(localInDescriptor)")
+            #endif
             applyLaunchDescriptor(descriptor)
             state.connectionState = .connected
             state.trialPhase = .running
             state.lastErrorMessage = nil
             shouldOpenTrialRuntime = true
+            #if DEBUG
+            print("[LAN][CLIENT] shouldOpenTrialRuntime=true launchDescriptor=\(launchDescriptor != nil)")
+            #endif
 
         case .trialEnded:
             state.trialPhase = .ended
@@ -362,6 +401,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
                 ignoringLocalVehicleID: localVehicleIDForSnapshotFiltering()
             )
             remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+            onlineDiagnostics.incomingSnapshotCount += 1
 
         case .vehicleSnapshotBatch:
             guard let batch = message.vehicleSnapshotBatch else { return }
@@ -370,6 +410,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
                 ignoringLocalVehicleID: localVehicleIDForSnapshotFiltering()
             )
             remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
+            onlineDiagnostics.incomingSnapshotCount += batch.snapshots.count
 
         case .disconnect:
             if message.participant?.isHost == true || message.senderID == state.config?.hostParticipantID {
@@ -381,6 +422,20 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             if let event = message.sharedEvent {
                 applySharedEvent(event)
             }
+
+        case .pong:
+            // P2P v1.3: compute RTT from pending ping.
+            if let pingID = message.pingID, pingID == pendingPingID,
+               let sentAt = pendingPingSentAt {
+                let now = Date().timeIntervalSince1970
+                onlineDiagnostics.lastPongAt = now
+                onlineDiagnostics.lastPingRoundtripMs = (now - sentAt) * 1000.0
+                pendingPingID = nil
+                pendingPingSentAt = nil
+            }
+
+        case .ping:
+            break
 
         case .hello, .roleSelected, .heartbeat, .trialStarted:
             break
@@ -404,6 +459,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         } else {
             state.participants.append(participant)
         }
+        onlineDiagnostics.connectedParticipantCount = state.participants.count
     }
 
     private func updateLastSeen(for participantID: UUID) {
@@ -459,10 +515,29 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
 
     // MARK: – P2P v1.2: Shared Event Relay
 
+    // P2P v1.3: send test ping to measure RTT. No-op if not connected or already waiting for pong.
+    func sendTestPing() {
+        guard isSessionActive, let local = state.localParticipant, pendingPingID == nil else { return }
+        let id = UUID()
+        let now = Date().timeIntervalSince1970
+        pendingPingID = id
+        pendingPingSentAt = now
+        onlineDiagnostics.lastPingAt = now
+        let message = LANSessionMessage(type: .ping, senderID: local.id, pingID: id)
+        transport.send(message)
+    }
+
+    // P2P v1.3: called when the runtime handoff is complete (lobby → runtime transition).
+    func markRuntimeHandoffCompleted() {
+        onlineDiagnostics.lastRuntimeHandoffAt = Date().timeIntervalSince1970
+        onlineDiagnostics.connectedParticipantCount = state.participants.count
+    }
+
     // Owner calls this to submit an event. If local is host, order/broadcast directly.
     // Otherwise, forward to host for ordering.
     func submitSharedEvent(_ event: OnlineSharedEvent) {
         guard isSessionActive, let local = state.localParticipant else { return }
+        onlineDiagnostics.sharedEventSentCount += 1
         if local.isHost {
             acceptAndBroadcastSharedEvent(event)
         } else {
@@ -507,6 +582,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
     // All participants (host + clients) apply accepted shared events.
     func applySharedEvent(_ event: OnlineSharedEvent) {
         guard !sharedEvents.contains(where: { $0.id == event.id }) else { return }
+        onlineDiagnostics.sharedEventReceivedCount += 1
 
         sharedEvents.append(event)
         sharedEvents.sort { ($0.sequenceNumber, $0.emittedAt) < ($1.sequenceNumber, $1.emittedAt) }

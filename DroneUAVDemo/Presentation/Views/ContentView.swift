@@ -929,6 +929,7 @@ private struct KeyBindingsSheetHost: View {
 
 struct ContentView: View {
     @StateObject private var appShell = AppShellViewModel()
+    // P2P v1.3: LANSessionViewModel lifetime must span lobby and runtime — never recreate mid-session.
     @StateObject private var lanSessionViewModel = LANSessionViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
 
@@ -961,6 +962,9 @@ struct ContentView: View {
                         }
                         .onReceive(lanSessionViewModel.$onlineDamageState) { damageState in
                             observedViewModel.applyOnlineDamageState(damageState)
+                        }
+                        .onReceive(lanSessionViewModel.$onlineDiagnostics) { diag in
+                            observedViewModel.applyOnlineDiagnostics(diag)
                         }
                 }
             } else {
@@ -1107,6 +1111,7 @@ struct ContentView: View {
                                     snapshotTransport: lanSessionViewModel,
                                     sharedEventTransport: lanSessionViewModel
                                 )
+                                lanSessionViewModel.markRuntimeHandoffCompleted()
                             }
                         )
                     } else {

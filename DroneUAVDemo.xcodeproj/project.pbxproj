@@ -248,6 +248,7 @@
 		100000000000000000000397 /* OnlineCollisionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000398 /* OnlineCollisionEvent.swift */; };
 		100000000000000000000399 /* OnlineVehicleDamageState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039A /* OnlineVehicleDamageState.swift */; };
 		10000000000000000000039B /* OnlineCollisionArbiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039C /* OnlineCollisionArbiter.swift */; };
+		10000000000000000000039D /* OnlineRuntimeNetworkDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039E /* OnlineRuntimeNetworkDiagnostics.swift */; };
 		10000000000000000000038A /* OnlineTrialVehiclePlaceholderNodeFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */; };
 		10000000000000000000038C /* OnlineVehicleStateSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */; };
 		100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */; };
@@ -500,6 +501,7 @@
 		100000000000000000000398 /* OnlineCollisionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineCollisionEvent.swift; sourceTree = "<group>"; };
 		10000000000000000000039A /* OnlineVehicleDamageState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleDamageState.swift; sourceTree = "<group>"; };
 		10000000000000000000039C /* OnlineCollisionArbiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineCollisionArbiter.swift; sourceTree = "<group>"; };
+		10000000000000000000039E /* OnlineRuntimeNetworkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineRuntimeNetworkDiagnostics.swift; sourceTree = "<group>"; };
 		100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialVehiclePlaceholderNodeFactory.swift; sourceTree = "<group>"; };
 		10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleStateSnapshot.swift; sourceTree = "<group>"; };
 		10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotStore.swift; sourceTree = "<group>"; };
@@ -886,6 +888,7 @@
 				100000000000000000000398 /* OnlineCollisionEvent.swift */,
 				10000000000000000000039A /* OnlineVehicleDamageState.swift */,
 				10000000000000000000039C /* OnlineCollisionArbiter.swift */,
+				10000000000000000000039E /* OnlineRuntimeNetworkDiagnostics.swift */,
 				10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */,
 				10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */,
 				10000000000000000000038F /* OnlineTrialNetworkBridge.swift */,
@@ -1211,6 +1214,7 @@
 				100000000000000000000397 /* OnlineCollisionEvent.swift in Sources */,
 				100000000000000000000399 /* OnlineVehicleDamageState.swift in Sources */,
 				10000000000000000000039B /* OnlineCollisionArbiter.swift in Sources */,
+				10000000000000000000039D /* OnlineRuntimeNetworkDiagnostics.swift in Sources */,
 				10000000000000000000038A /* OnlineTrialVehiclePlaceholderNodeFactory.swift in Sources */,
 				10000000000000000000038C /* OnlineVehicleStateSnapshot.swift in Sources */,
 				10000000000000000000038E /* OnlineVehicleSnapshotStore.swift in Sources */,

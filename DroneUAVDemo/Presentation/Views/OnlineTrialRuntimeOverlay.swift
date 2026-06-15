@@ -11,6 +11,7 @@ struct OnlineTrialRuntimeOverlay: View {
     var staleCount: Int = 0
     var damageState: OnlineVehicleDamageState = OnlineVehicleDamageState()
     var recentSharedEvents: [OnlineSharedEvent] = []
+    var diagnostics: OnlineRuntimeNetworkDiagnostics = OnlineRuntimeNetworkDiagnostics()
     var onEndTrial: (() -> Void)? = nil
     var onLeaveTrial: (() -> Void)? = nil
 
@@ -92,6 +93,8 @@ struct OnlineTrialRuntimeOverlay: View {
 
             collisionEventSection
 
+            diagnosticsSection
+
             actionButtons
         }
         .padding(.horizontal, 11)
@@ -169,17 +172,67 @@ struct OnlineTrialRuntimeOverlay: View {
             } else if ctx.isSpectator {
                 statusLine("Receive-only spectator")
                 if remoteStates.isEmpty {
-                    statusLine("Ожидание pilot snapshots...")
+                    if participantCount < 2 {
+                        statusLine("Ожидание второго участника...")
+                    } else {
+                        statusLine("Spectator connected · нет snapshot")
+                    }
                 } else {
                     statusLine("Наблюдение: \(remoteCount) ghost(s)")
                 }
             } else {
                 if remoteStates.isEmpty {
-                    statusLine("Ожидание других участников...")
+                    if participantCount < 2 {
+                        statusLine("Ожидание второго участника...")
+                    } else {
+                        statusLine("Участник подключён · ожидание snapshot")
+                    }
                 } else {
                     statusLine("Remote: \(remoteCount) ghost(s)")
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var diagnosticsSection: some View {
+        let hasData = diagnostics.outgoingSnapshotCount > 0
+            || diagnostics.incomingSnapshotCount > 0
+            || diagnostics.lastPingRoundtripMs != nil
+        if hasData {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("DIAGNOSTICS")
+                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .tracking(0.8)
+                    .padding(.bottom, 1)
+
+                HStack(spacing: 6) {
+                    diagCell("TX", "\(diagnostics.outgoingSnapshotCount)")
+                    diagCell("RX", "\(diagnostics.incomingSnapshotCount)")
+                    diagCell("PING", diagnostics.pingLabel)
+                }
+
+                HStack(spacing: 6) {
+                    diagCell("GHOSTS", "\(diagnostics.remoteGhostVisibleCount)")
+                    if diagnostics.remoteGhostStaleCount > 0 {
+                        diagCell("STALE", "\(diagnostics.remoteGhostStaleCount)", color: GroundControlPalette.warning)
+                    }
+                    diagCell("EVT", "\(diagnostics.sharedEventReceivedCount)")
+                }
+            }
+            separator
+        }
+    }
+
+    private func diagCell(_ label: String, _ value: String, color: Color = GroundControlPalette.textPrimary) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.system(size: 7, weight: .semibold, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            Text(value)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(color)
         }
     }
 

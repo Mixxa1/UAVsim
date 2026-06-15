@@ -13,6 +13,8 @@ enum LANSessionMessageType: String, Codable {
     case vehicleSnapshot
     case vehicleSnapshotBatch
     case sharedEvent
+    case ping
+    case pong
     case disconnect
 }
 
@@ -28,6 +30,7 @@ struct LANSessionMessage: Codable, Equatable {
     var vehicleSnapshot: OnlineVehicleStateSnapshot?
     var vehicleSnapshotBatch: OnlineVehicleStateSnapshotBatch?
     var sharedEvent: OnlineSharedEvent?
+    var pingID: UUID?
     var text: String?
 
     init(
@@ -42,6 +45,7 @@ struct LANSessionMessage: Codable, Equatable {
         vehicleSnapshot: OnlineVehicleStateSnapshot? = nil,
         vehicleSnapshotBatch: OnlineVehicleStateSnapshotBatch? = nil,
         sharedEvent: OnlineSharedEvent? = nil,
+        pingID: UUID? = nil,
         text: String? = nil
     ) {
         self.id = id
@@ -55,6 +59,7 @@ struct LANSessionMessage: Codable, Equatable {
         self.vehicleSnapshot = vehicleSnapshot
         self.vehicleSnapshotBatch = vehicleSnapshotBatch
         self.sharedEvent = sharedEvent
+        self.pingID = pingID
         self.text = text
     }
 }

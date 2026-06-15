@@ -89,10 +89,11 @@ struct SceneViewportView: View {
                         snapshotTargetHz: 10,
                         isExpanded: tabObserver.isTabHeld,
                         trialPhase: trialPhase,
-                        participantCount: viewModel.onlineTrialContext?.launchDescriptor.assignments.count ?? 1,
+                        participantCount: viewModel.onlineTrialContext?.launchDescriptor.assignments.count ?? 0,
                         staleCount: viewModel.onlineTrialStaleRemoteCount,
                         damageState: viewModel.onlineDamageState,
                         recentSharedEvents: recentSharedEvents,
+                        diagnostics: viewModel.onlineRuntimeDiagnostics,
                         onEndTrial: onEndTrial,
                         onLeaveTrial: onLeaveTrial
                     )

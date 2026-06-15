@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 struct LANOnlineTrialsView: View {
     @ObservedObject var viewModel: LANSessionViewModel
@@ -6,6 +7,13 @@ struct LANOnlineTrialsView: View {
 
     let onClose: () -> Void
     let onLaunchTrial: ((LANTrialLaunchDescriptor, LANParticipant) -> Void)?
+
+    // P2P v1.3: local IPv4 address for display to other participants.
+    private var localIPAddress: String {
+        let all = Host.current().addresses
+        let ipv4 = all.first { $0.contains(".") && !$0.hasPrefix("127.") && !$0.hasPrefix("169.254.") }
+        return ipv4 ?? "неизвестно"
+    }
 
     init(
         viewModel: LANSessionViewModel,
@@ -74,6 +82,10 @@ struct LANOnlineTrialsView: View {
         .frame(maxWidth: 840, alignment: .leading)
         .onChange(of: viewModel.shouldOpenTrialRuntime) { _, shouldOpen in
             requestRuntimeOpenIfNeeded(shouldOpen: shouldOpen)
+        }
+        // P2P v1.3.1: backup in case .onChange misses an already-true value on appear.
+        .onAppear {
+            requestRuntimeOpenIfNeeded(shouldOpen: viewModel.shouldOpenTrialRuntime)
         }
     }
 
@@ -184,6 +196,67 @@ struct LANOnlineTrialsView: View {
                 compactMetric("Фаза", viewModel.state.trialPhase.rawValue.uppercased())
             }
 
+            if viewModel.state.mode == .host {
+                VStack(alignment: .leading, spacing: 7) {
+                    formLabel("Сетевое подключение")
+                    HStack(spacing: 6) {
+                        Image(systemName: "network")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.52))
+                        Text("Мой IP: ")
+                            .foregroundStyle(.white.opacity(0.52))
+                        Text(localIPAddress)
+                            .foregroundStyle(.white.opacity(0.92))
+                            .textSelection(.enabled)
+                        Text(":\(viewModel.state.port)")
+                            .foregroundStyle(.white.opacity(0.52))
+                    }
+                    .font(.caption.monospacedDigit())
+                    Text("Сообщи этот адрес другим участникам для подключения.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.44))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            // P2P v1.3: checklist
+            VStack(alignment: .leading, spacing: 4) {
+                formLabel("Статус")
+                checklistRow("Сессия активна", isOk: viewModel.isSessionActive)
+                checklistRow("Участников: \(viewModel.state.participants.count)", isOk: viewModel.state.participants.count > 0)
+                checklistRow("Фаза: \(viewModel.state.trialPhase.rawValue)", isOk: viewModel.state.trialPhase != .ended)
+                if viewModel.isSessionActive {
+                    checklistRow("Транспорт: OK", isOk: true)
+                    HStack(spacing: 10) {
+                        Button {
+                            viewModel.sendTestPing()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "antenna.radiowaves.left.and.right")
+                                Text("Тест пинг")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7)
+                                    .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(viewModel.state.mode == .host)
+
+                        if let rtt = viewModel.onlineDiagnostics.lastPingRoundtripMs {
+                            Text(String(format: "%.0f ms", rtt))
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(rtt < 50 ? Color(red: 0.35, green: 0.86, blue: 0.58) : Color(red: 0.95, green: 0.74, blue: 0.35))
+                        }
+                    }
+                }
+            }
+
             if let local = viewModel.state.localParticipant {
                 VStack(alignment: .leading, spacing: 7) {
                     formLabel("Локальный участник")
@@ -211,6 +284,20 @@ struct LANOnlineTrialsView: View {
                viewModel.isSessionActive,
                viewModel.state.trialPhase == .lobby {
                 launchControlPanel
+            }
+
+            // P2P v1.3.1: show client waiting state while host hasn't launched yet.
+            if viewModel.state.mode == .client,
+               viewModel.isSessionActive,
+               viewModel.state.trialPhase == .lobby {
+                clientWaitingPanel
+            }
+
+            // P2P v1.3.1: warn client if runtime handoff appears stuck.
+            if viewModel.state.mode == .client,
+               viewModel.state.trialPhase == .running,
+               !viewModel.shouldOpenTrialRuntime {
+                clientHandoffWarningPanel
             }
 
             if viewModel.state.trialPhase == .ended {
@@ -249,6 +336,16 @@ struct LANOnlineTrialsView: View {
                 .foregroundStyle(.white.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
 
+            // P2P v1.3.1: must have ≥2 participants before launch is enabled.
+            if viewModel.state.participants.count < 2 {
+                HStack(spacing: 7) {
+                    Image(systemName: "person.badge.clock")
+                    Text("Ожидание подключения участников...")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(red: 0.95, green: 0.74, blue: 0.35))
+            }
+
             if !viewModel.hasPilotParticipants {
                 HStack(spacing: 7) {
                     Image(systemName: "eye")
@@ -269,6 +366,42 @@ struct LANOnlineTrialsView: View {
         }
         .padding(10)
         .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: – Client waiting panel
+
+    private var clientWaitingPanel: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "clock")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(red: 0.66, green: 0.82, blue: 1.0))
+            Text("Ожидание запуска host...")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(red: 0.66, green: 0.82, blue: 1.0))
+        }
+        .padding(10)
+        .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.blue.opacity(0.28), lineWidth: 1)
+        )
+    }
+
+    private var clientHandoffWarningPanel: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(GroundControlPalette.warning)
+            Text("Runtime handoff не завершён — перезапустите сессию.")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.warning)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(GroundControlPalette.warning.opacity(0.30), lineWidth: 1)
+        )
     }
 
     // MARK: – Ended state panel
@@ -424,6 +557,17 @@ struct LANOnlineTrialsView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func checklistRow(_ label: String, isOk: Bool) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: isOk ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isOk ? Color(red: 0.35, green: 0.86, blue: 0.58) : Color(red: 1.0, green: 0.48, blue: 0.38))
+            Text(label)
+                .foregroundStyle(.white.opacity(0.78))
+        }
+        .font(.caption)
     }
 
     private func statusBadge(_ state: LANConnectionState) -> some View {

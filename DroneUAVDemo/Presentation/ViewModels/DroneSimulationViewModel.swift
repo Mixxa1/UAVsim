@@ -474,6 +474,8 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
     @Published private(set) var onlineInterpolatedRemoteStates: [OnlineVehicleInterpolatedState] = []
     private var onlineInterpolationStore = OnlineVehicleInterpolationStore()
+    // P2P v1.3: diagnostics mirrored from LANSessionViewModel via applyOnlineDiagnostics.
+    @Published private(set) var onlineRuntimeDiagnostics = OnlineRuntimeNetworkDiagnostics()
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -604,6 +606,16 @@ final class DroneSimulationViewModel: ObservableObject {
            isArmed {
             disarm(forceEmergency: true, preserveCrashDynamics: false)
         }
+    }
+
+    // P2P v1.3: mirror LANSessionViewModel diagnostics for display in overlay.
+    // Ghost counts are patched in from the interpolation result — rest comes from session layer.
+    func applyOnlineDiagnostics(_ diagnostics: OnlineRuntimeNetworkDiagnostics) {
+        var merged = diagnostics
+        let staleThreshold = 2.0
+        merged.remoteGhostVisibleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < staleThreshold }.count
+        merged.remoteGhostStaleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge >= staleThreshold }.count
+        onlineRuntimeDiagnostics = merged
     }
 
     func canUseControlModule(_ module: ControlModule) -> Bool {
