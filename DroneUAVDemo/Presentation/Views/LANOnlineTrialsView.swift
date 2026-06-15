@@ -70,6 +70,7 @@ struct LANOnlineTrialsView: View {
                 formLabel("Имя участника")
                 TextField("Участник", text: $viewModel.displayName)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(viewModel.isSessionActive)
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -91,6 +92,8 @@ struct LANOnlineTrialsView: View {
                 actionLabel("Создать LAN-сессию", systemImage: "plus.circle")
             }
             .buttonStyle(.plain)
+            .disabled(viewModel.isSessionActive)
+            .opacity(viewModel.isSessionActive ? 0.42 : 1.0)
 
             Divider()
                 .overlay(Color.white.opacity(0.12))
@@ -100,6 +103,7 @@ struct LANOnlineTrialsView: View {
                     formLabel("IP / адрес")
                     TextField("127.0.0.1", text: $viewModel.joinAddress)
                         .textFieldStyle(.roundedBorder)
+                        .disabled(viewModel.isSessionActive)
                 }
 
                 VStack(alignment: .leading, spacing: 7) {
@@ -107,6 +111,7 @@ struct LANOnlineTrialsView: View {
                     TextField("7777", text: $viewModel.portText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 86)
+                        .disabled(viewModel.isSessionActive)
                 }
             }
 
@@ -116,6 +121,8 @@ struct LANOnlineTrialsView: View {
                 actionLabel("Подключиться", systemImage: "arrow.right.circle")
             }
             .buttonStyle(.plain)
+            .disabled(viewModel.isSessionActive)
+            .opacity(viewModel.isSessionActive ? 0.42 : 1.0)
 
             if let error = viewModel.state.lastErrorMessage {
                 HStack(spacing: 8) {
@@ -142,6 +149,13 @@ struct LANOnlineTrialsView: View {
                 sectionTitle("Сессия")
                 Spacer()
                 statusBadge(viewModel.state.connectionState)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                formLabel("Соединение")
+                compactMetric("Адрес", connectionAddressText)
+                compactMetric("Порт", "\(viewModel.state.port)")
+                compactMetric("Режим", viewModel.state.mode?.rawValue.uppercased() ?? "-")
             }
 
             if let config = viewModel.state.config {
@@ -188,6 +202,17 @@ struct LANOnlineTrialsView: View {
         .frame(width: 390, alignment: .topLeading)
         .background(panelFill, in: RoundedRectangle(cornerRadius: 12))
         .overlay(panelStroke(cornerRadius: 12))
+    }
+
+    private var connectionAddressText: String {
+        switch viewModel.state.mode {
+        case .host:
+            return "0.0.0.0"
+        case .client:
+            return viewModel.state.joinAddress
+        case .none:
+            return "-"
+        }
     }
 
     private func entryModePanel(
@@ -304,9 +329,14 @@ struct LANOnlineTrialsView: View {
                     }
                 }
 
-                Text(participant.role.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.56))
+                HStack(spacing: 8) {
+                    Text(participant.role.displayName)
+                    if let vehicleID = participant.assignedVehicleID {
+                        Text(String(vehicleID.uuidString.prefix(8)))
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.56))
             }
 
             Spacer()

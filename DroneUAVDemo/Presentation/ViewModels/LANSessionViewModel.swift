@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 @MainActor
 final class LANSessionViewModel: ObservableObject {
@@ -8,30 +9,65 @@ final class LANSessionViewModel: ObservableObject {
     @Published var joinAddress: String = "127.0.0.1"
     @Published var portText: String = "7777"
 
+    private let transport: LANSessionTransport
+
+    init(transport: LANSessionTransport = NetworkLANSessionTransport()) {
+        self.transport = transport
+
+        self.transport.onMessage = { [weak self] message in
+            Task { @MainActor [weak self] in
+                self?.applyReceivedMessage(message)
+            }
+        }
+
+        self.transport.onConnectionStateChanged = { [weak self] connectionState, error in
+            Task { @MainActor [weak self] in
+                guard !(self?.state.mode == nil && connectionState == .disconnected) else { return }
+                self?.state.connectionState = connectionState
+                self?.state.lastErrorMessage = error
+            }
+        }
+    }
+
+    var isSessionActive: Bool {
+        switch state.connectionState {
+        case .hosting, .joining, .connected:
+            return true
+        case .idle, .disconnected, .failed:
+            return false
+        }
+    }
+
     func createHostSession() {
         guard let port = resolvedPort() else {
             fail(message: "Порт должен быть числом от 1 до 65535.")
             return
         }
 
-        let participant = LANParticipant(
-            displayName: resolvedDisplayName(),
+        let host = LANParticipant(
+            displayName: sanitizedDisplayName(),
             role: selectedRole,
             isHost: true,
-            assignedVehicleID: selectedRole == .pilot ? UUID() : nil
+            assignedVehicleID: assignedVehicleID(for: selectedRole)
         )
-        let config = LANSessionConfig.defaultConfig(hostParticipantID: participant.id)
 
-        state = LANSessionState(
-            mode: .host,
-            connectionState: .hosting,
-            localParticipant: participant,
-            participants: [participant],
-            config: config,
-            joinAddress: "",
-            port: port,
-            lastErrorMessage: nil
-        )
+        let config = LANSessionConfig.defaultConfig(hostParticipantID: host.id)
+
+        state.mode = .host
+        state.connectionState = .hosting
+        state.localParticipant = host
+        state.participants = [host]
+        state.config = config
+        state.joinAddress = "0.0.0.0"
+        state.port = port
+        state.lastErrorMessage = nil
+
+        do {
+            try transport.startHost(port: port)
+        } catch {
+            state.connectionState = .failed
+            state.lastErrorMessage = error.localizedDescription
+        }
     }
 
     func joinSession() {
@@ -40,71 +76,156 @@ final class LANSessionViewModel: ObservableObject {
             return
         }
 
-        let trimmedAddress = joinAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedAddress.isEmpty else {
-            fail(message: "Введите адрес LAN-сессии.")
-            return
-        }
-
         let participant = LANParticipant(
-            displayName: resolvedDisplayName(),
+            displayName: sanitizedDisplayName(),
             role: selectedRole,
-            assignedVehicleID: selectedRole == .pilot ? UUID() : nil
+            isHost: false,
+            assignedVehicleID: assignedVehicleID(for: selectedRole)
         )
 
-        state = LANSessionState(
-            mode: .client,
-            connectionState: .connected,
-            localParticipant: participant,
-            participants: [participant],
-            config: nil,
-            joinAddress: trimmedAddress,
-            port: port,
-            lastErrorMessage: nil
-        )
+        state.mode = .client
+        state.connectionState = .joining
+        state.localParticipant = participant
+        state.participants = [participant]
+        state.config = nil
+        state.joinAddress = joinAddress
+        state.port = port
+        state.lastErrorMessage = nil
+
+        do {
+            try transport.connect(to: joinAddress, port: port)
+
+            let hello = LANSessionMessage(
+                type: .hello,
+                senderID: participant.id,
+                participant: participant
+            )
+            transport.send(hello)
+        } catch {
+            state.connectionState = .failed
+            state.lastErrorMessage = error.localizedDescription
+        }
     }
 
     func selectRole(_ role: LANParticipantRole) {
         selectedRole = role
 
-        guard var participant = state.localParticipant else { return }
-        participant.role = role
-        participant.assignedVehicleID = role == .pilot ? (participant.assignedVehicleID ?? UUID()) : nil
-        state.localParticipant = participant
+        guard var local = state.localParticipant else { return }
+        local.role = role
+        local.assignedVehicleID = assignedVehicleID(for: role, existingID: local.assignedVehicleID)
+        state.localParticipant = local
+        upsertParticipant(local)
 
-        if let index = state.participants.firstIndex(where: { $0.id == participant.id }) {
-            state.participants[index] = participant
+        guard isSessionActive else { return }
+
+        let message = LANSessionMessage(
+            type: .roleSelected,
+            senderID: local.id,
+            participant: local
+        )
+        transport.send(message)
+
+        if state.mode == .host {
+            broadcastParticipantList()
         }
     }
 
     func leaveSession() {
+        if let local = state.localParticipant {
+            let message = LANSessionMessage(
+                type: .disconnect,
+                senderID: local.id,
+                participant: local
+            )
+            transport.send(message)
+        }
+
+        transport.stop()
         state = .idle
     }
 
     func applyReceivedMessage(_ message: LANSessionMessage) {
+        switch state.mode {
+        case .host:
+            applyHostMessage(message)
+
+        case .client:
+            applyClientMessage(message)
+
+        case .none:
+            break
+        }
+    }
+
+    private func applyHostMessage(_ message: LANSessionMessage) {
+        guard let hostID = state.localParticipant?.id else { return }
+
         switch message.type {
-        case .hello, .welcome, .roleSelected:
-            guard let participant = message.participant else { return }
-            upsertParticipant(participant)
-            if message.type == .welcome, state.localParticipant?.id == participant.id {
-                state.localParticipant = participant
-                selectedRole = participant.role
+        case .hello:
+            if let participant = message.participant {
+                upsertParticipant(participant)
             }
+
+            let welcome = LANSessionMessage(
+                type: .welcome,
+                senderID: hostID,
+                config: state.config
+            )
+            transport.send(welcome)
+            broadcastParticipantList()
+
+        case .roleSelected:
+            if let participant = message.participant {
+                upsertParticipant(participant)
+                broadcastParticipantList()
+            }
+
+        case .disconnect:
+            state.participants.removeAll { $0.id == message.senderID }
+            broadcastParticipantList()
+
+        case .heartbeat:
+            updateLastSeen(for: message.senderID)
+
+        case .welcome, .participantList, .sessionConfig:
+            break
+        }
+    }
+
+    private func applyClientMessage(_ message: LANSessionMessage) {
+        switch message.type {
+        case .welcome:
+            state.config = message.config
+            state.connectionState = .connected
+            state.lastErrorMessage = nil
+
         case .participantList:
-            state.participants = message.participants ?? state.participants
+            if let participants = message.participants {
+                state.participants = participants
+            }
+
         case .sessionConfig:
             state.config = message.config
-        case .heartbeat:
-            guard var participant = message.participant else { return }
-            participant.lastSeenTime = Date(timeIntervalSince1970: message.timestamp)
-            upsertParticipant(participant)
+
         case .disconnect:
-            if let participant = message.participant {
-                state.participants.removeAll { $0.id == participant.id }
-            } else if message.senderID == state.localParticipant?.id {
-                leaveSession()
+            if message.participant?.isHost == true || message.senderID == state.config?.hostParticipantID {
+                state.connectionState = .disconnected
             }
+
+        case .hello, .roleSelected, .heartbeat:
+            break
         }
+    }
+
+    private func broadcastParticipantList() {
+        guard let local = state.localParticipant else { return }
+
+        let message = LANSessionMessage(
+            type: .participantList,
+            senderID: local.id,
+            participants: state.participants
+        )
+        transport.send(message)
     }
 
     private func upsertParticipant(_ participant: LANParticipant) {
@@ -115,27 +236,30 @@ final class LANSessionViewModel: ObservableObject {
         }
     }
 
-    private func resolvedDisplayName() -> String {
+    private func updateLastSeen(for participantID: UUID) {
+        guard let index = state.participants.firstIndex(where: { $0.id == participantID }) else { return }
+        state.participants[index].lastSeenTime = Date()
+    }
+
+    private func resolvedPort() -> UInt16? {
+        guard let value = UInt16(portText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value > 0 else {
+            return nil
+        }
+        return value
+    }
+
+    private func sanitizedDisplayName() -> String {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Участник" : trimmed
     }
 
-    private func resolvedPort() -> UInt16? {
-        let trimmed = portText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = UInt16(trimmed), value > 0 else { return nil }
-        return value
+    private func assignedVehicleID(for role: LANParticipantRole, existingID: UUID? = nil) -> UUID? {
+        role == .pilot ? (existingID ?? UUID()) : nil
     }
 
     private func fail(message: String) {
-        state = LANSessionState(
-            mode: state.mode,
-            connectionState: .failed,
-            localParticipant: state.localParticipant,
-            participants: state.participants,
-            config: state.config,
-            joinAddress: joinAddress,
-            port: UInt16(portText) ?? state.port,
-            lastErrorMessage: message
-        )
+        state.connectionState = .failed
+        state.lastErrorMessage = message
     }
 }

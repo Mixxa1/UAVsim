@@ -55,10 +55,6 @@ private enum PendingExitAction {
     case returnToMenu
 }
 
-private enum OnlineTrialScreen {
-    case onlineTrials
-}
-
 @MainActor
 private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var activeSimulation: DroneSimulationViewModel?
@@ -874,7 +870,7 @@ struct ContentView: View {
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
-    @State private var onlineTrialScreen: OnlineTrialScreen?
+    @State private var isOnlineTrialsPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -1022,12 +1018,11 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
                 Group {
-                    switch onlineTrialScreen {
-                    case .onlineTrials:
+                    if isOnlineTrialsPresented {
                         LANOnlineTrialsView {
-                            onlineTrialScreen = nil
+                            isOnlineTrialsPresented = false
                         }
-                    case .none:
+                    } else {
                         startScreenActions
                     }
                 }
@@ -1088,7 +1083,7 @@ struct ContentView: View {
 
             HStack(spacing: 12) {
                 startMenuButton(title: "Мульти-испытания", systemImage: "network") {
-                    onlineTrialScreen = .onlineTrials
+                    isOnlineTrialsPresented = true
                 }
 
                 startMenuButton(title: "Самописец", systemImage: "archivebox") {
