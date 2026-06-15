@@ -814,6 +814,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private var lastOnlineSnapshotCleanupAt: TimeInterval = 0
     private let onlineSnapshotSendInterval: TimeInterval = 0.1
     private weak var onlineSnapshotTransport: OnlineTrialSnapshotTransport?
+    // P2P v1.2: owner-side collision detection + shared event submission.
+    private weak var onlineSharedEventTransport: OnlineSharedEventTransport?
+    private let localCollisionDetector = OnlineLocalCollisionDetector()
+    private var recentLocalCollisionPairKeys: [String: TimeInterval] = [:]
+    private let localCollisionEventCooldownSeconds: TimeInterval = 2.0
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var resolvedInputState: ResolvedControlState = .neutral
@@ -1112,7 +1117,8 @@ final class DroneSimulationViewModel: ObservableObject {
         onlineSessionConfig: OnlineTrialSessionConfig? = nil,
         localOnlineParticipant: LocalOnlineParticipant? = nil,
         onlineRuntimeContext: OnlineTrialRuntimeContext? = nil,
-        onlineSnapshotTransport: OnlineTrialSnapshotTransport? = nil
+        onlineSnapshotTransport: OnlineTrialSnapshotTransport? = nil,
+        onlineSharedEventTransport: OnlineSharedEventTransport? = nil
     ) {
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
@@ -1123,6 +1129,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.onlineRuntimeContext = onlineRuntimeContext
         self.onlineFleetState = nil
         self.onlineSnapshotTransport = onlineSnapshotTransport
+        self.onlineSharedEventTransport = onlineSharedEventTransport
         let gameControllerInputProvider = GameControllerInputProvider(
             settingsStore: controllerSettingsStore
         )
@@ -1401,6 +1408,8 @@ final class DroneSimulationViewModel: ObservableObject {
         onlineAuthorityRegistry = nil
         onlineDamageState = OnlineVehicleDamageState()
         onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
+        recentLocalCollisionPairKeys = [:]
+        onlineSharedEventTransport = nil
         onlineInterpolationStore = OnlineVehicleInterpolationStore()
         onlineInterpolatedRemoteStates = []
         onlineSnapshotTransport = nil
@@ -1409,12 +1418,16 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func configureOnlineTrial(
         _ context: OnlineTrialRuntimeContext,
-        snapshotTransport: OnlineTrialSnapshotTransport? = nil
+        snapshotTransport: OnlineTrialSnapshotTransport? = nil,
+        sharedEventTransport: OnlineSharedEventTransport? = nil
     ) {
         onlineRuntimeContext = context
         onlineAuthorityRegistry = context.makeInitialAuthorityRegistry()
         if let snapshotTransport {
             onlineSnapshotTransport = snapshotTransport
+        }
+        if let sharedEventTransport {
+            onlineSharedEventTransport = sharedEventTransport
         }
         let fleetState = OnlineTrialFleetState(
             localParticipantID: context.localParticipant.id,
@@ -1534,6 +1547,70 @@ final class DroneSimulationViewModel: ObservableObject {
             flightModeLabel: mode.rawValue
         )
         onlineSnapshotTransport?.sendVehicleSnapshot(snapshot)
+        emitLocalCollisionEventsIfNeeded(localSnapshot: snapshot, now: now)
+    }
+
+    // P2P v1.2: authority owner detects collision against remote replicas and submits
+    // an OnlineSharedEvent. Host does NOT detect collision from snapshots.
+    private func emitLocalCollisionEventsIfNeeded(
+        localSnapshot: OnlineVehicleStateSnapshot,
+        now: TimeInterval
+    ) {
+        guard let context = onlineRuntimeContext,
+              context.localHasVehicleAuthority,
+              let localVehicleID = context.localVehicleID,
+              localSnapshot.vehicleID == localVehicleID,
+              !onlineDamageState.isControlDisabled(vehicleID: localVehicleID),
+              let sessionID = context.launchDescriptor.id as UUID? else { return }
+
+        let candidates = localCollisionDetector.detect(
+            localSnapshot: localSnapshot,
+            remoteStates: onlineInterpolatedRemoteStates
+        )
+
+        for candidate in candidates {
+            let pairKey = [
+                candidate.localVehicleID.uuidString,
+                candidate.remoteVehicleID.uuidString
+            ].sorted().joined(separator: ":")
+
+            if let lastTime = recentLocalCollisionPairKeys[pairKey],
+               now - lastTime < localCollisionEventCooldownSeconds { continue }
+
+            let result = localCollisionDetector.result(for: candidate.relativeSpeedMetersPerSecond)
+            guard result != .ignored else { continue }
+
+            recentLocalCollisionPairKeys[pairKey] = now
+
+            let event = OnlineSharedEvent(
+                sessionID: sessionID,
+                kind: .vehicleCollision,
+                reporterParticipantID: context.localParticipant.id,
+                reporterObjectID: localVehicleID,
+                pairKey: pairKey,
+                positionX: candidate.positionX,
+                positionY: candidate.positionY,
+                positionZ: candidate.positionZ,
+                result: result,
+                participants: [
+                    OnlineSharedEventParticipant(
+                        objectID: candidate.localVehicleID,
+                        objectKind: .vehicle,
+                        ownerParticipantID: context.localParticipant.id,
+                        ownerVehicleID: candidate.localVehicleID,
+                        displayName: context.localParticipant.displayName
+                    ),
+                    OnlineSharedEventParticipant(
+                        objectID: candidate.remoteVehicleID,
+                        objectKind: .vehicle,
+                        ownerParticipantID: candidate.remoteParticipantID,
+                        ownerVehicleID: candidate.remoteVehicleID,
+                        displayName: candidate.remoteParticipantName
+                    )
+                ]
+            )
+            onlineSharedEventTransport?.submitSharedEvent(event)
+        }
     }
 
     private func cleanupOnlineRemoteSnapshotsIfNeeded(now: TimeInterval) {

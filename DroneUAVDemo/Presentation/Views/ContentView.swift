@@ -176,7 +176,8 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     func launchLANTrial(
         descriptor: LANTrialLaunchDescriptor,
         localParticipant lanParticipant: LANParticipant,
-        snapshotTransport: OnlineTrialSnapshotTransport?
+        snapshotTransport: OnlineTrialSnapshotTransport?,
+        sharedEventTransport: OnlineSharedEventTransport? = nil
     ) {
         let role = onlineTrialRole(for: lanParticipant.role)
         let runtimeContext = OnlineTrialRuntimeContext(
@@ -217,7 +218,8 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             onlineSessionConfig: session,
             localOnlineParticipant: participant,
             onlineRuntimeContext: runtimeContext,
-            onlineSnapshotTransport: snapshotTransport
+            onlineSnapshotTransport: snapshotTransport,
+            onlineSharedEventTransport: sharedEventTransport
         )
     }
 
@@ -1102,7 +1104,8 @@ struct ContentView: View {
                                 appShell.launchLANTrial(
                                     descriptor: descriptor,
                                     localParticipant: participant,
-                                    snapshotTransport: lanSessionViewModel
+                                    snapshotTransport: lanSessionViewModel,
+                                    sharedEventTransport: lanSessionViewModel
                                 )
                             }
                         )
@@ -1247,7 +1250,7 @@ struct ContentView: View {
                         SceneViewportView(
                             viewModel: viewModel,
                             trialPhase: lanSessionViewModel.state.trialPhase,
-                            collisionEvents: lanSessionViewModel.collisionEvents,
+                            recentSharedEvents: lanSessionViewModel.sharedEvents,
                             onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
                             onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
                         )
@@ -1324,7 +1327,7 @@ struct ContentView: View {
             SceneViewportView(
                 viewModel: viewModel,
                 trialPhase: lanSessionViewModel.state.trialPhase,
-                collisionEvents: lanSessionViewModel.collisionEvents,
+                recentSharedEvents: lanSessionViewModel.sharedEvents,
                 onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
                 onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
             )

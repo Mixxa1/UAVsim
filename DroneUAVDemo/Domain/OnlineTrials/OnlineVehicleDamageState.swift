@@ -13,7 +13,7 @@ struct OnlineVehicleDamageRecord: Identifiable, Codable, Equatable {
     var participantID: UUID?
     var participantName: String
     var operationalState: OnlineVehicleOperationalState
-    var lastCollisionEventID: UUID?
+    var sourceEventID: UUID?
     var updatedAt: TimeInterval
 
     init(
@@ -22,7 +22,7 @@ struct OnlineVehicleDamageRecord: Identifiable, Codable, Equatable {
         participantID: UUID?,
         participantName: String,
         operationalState: OnlineVehicleOperationalState,
-        lastCollisionEventID: UUID?,
+        sourceEventID: UUID?,
         updatedAt: TimeInterval = Date().timeIntervalSince1970
     ) {
         self.id = id
@@ -30,7 +30,7 @@ struct OnlineVehicleDamageRecord: Identifiable, Codable, Equatable {
         self.participantID = participantID
         self.participantName = participantName
         self.operationalState = operationalState
-        self.lastCollisionEventID = lastCollisionEventID
+        self.sourceEventID = sourceEventID
         self.updatedAt = updatedAt
     }
 
@@ -56,12 +56,12 @@ struct OnlineVehicleDamageState: Codable, Equatable {
     }
 
     mutating func apply(
-        collision event: OnlineCollisionEvent,
+        sharedEvent event: OnlineSharedEvent,
         vehicleSlots: [OnlineTrialVehicleSlot]
     ) {
         let newState: OnlineVehicleOperationalState
         switch event.result {
-        case .ignored:
+        case .none, .ignored, .completed, .failed:
             return
         case .damaged:
             newState = .damaged
@@ -78,7 +78,7 @@ struct OnlineVehicleDamageState: Codable, Equatable {
                 participantID: slot?.participantID,
                 participantName: slot?.participantName ?? "UAV",
                 operationalState: newState,
-                lastCollisionEventID: event.id
+                sourceEventID: event.id
             )
         }
     }

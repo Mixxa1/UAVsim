@@ -1,30 +1,31 @@
 import Foundation
 
-enum OnlineCollisionObjectKind: String, Codable, Equatable, CaseIterable {
-    case vehicle
-    case payload
-    case environment
+// P2P v1.2: Shared Event Replication Core — unified shared event model.
+// Replaces the former OnlineCollisionEvent (host-side detection).
+// Owner-reported events flow: local detect → submitSharedEvent → host relay/order/dedup → all apply.
+
+enum OnlineSharedEventKind: String, Codable, Equatable, CaseIterable {
+    case vehicleCollision
+    case payloadReleased
+    case missionZoneEntered
+    case trialEnded
     case unknown
 }
 
-enum OnlineCollisionSeverity: String, Codable, Equatable, CaseIterable {
-    case contact
-    case minor
-    case major
-    case critical
-}
-
-enum OnlineCollisionResult: String, Codable, Equatable, CaseIterable {
+enum OnlineSharedEventResult: String, Codable, Equatable, CaseIterable {
+    case none
     case ignored
     case damaged
     case disabled
     case crashed
+    case completed
+    case failed
 }
 
-struct OnlineCollisionParticipant: Identifiable, Codable, Equatable {
+struct OnlineSharedEventParticipant: Identifiable, Codable, Equatable {
     var id: UUID
     var objectID: UUID
-    var objectKind: OnlineCollisionObjectKind
+    var objectKind: OnlineReplicatedObjectKind
     var ownerParticipantID: UUID?
     var ownerVehicleID: UUID?
     var displayName: String
@@ -32,7 +33,7 @@ struct OnlineCollisionParticipant: Identifiable, Codable, Equatable {
     init(
         id: UUID = UUID(),
         objectID: UUID,
-        objectKind: OnlineCollisionObjectKind,
+        objectKind: OnlineReplicatedObjectKind,
         ownerParticipantID: UUID?,
         ownerVehicleID: UUID?,
         displayName: String
@@ -46,46 +47,55 @@ struct OnlineCollisionParticipant: Identifiable, Codable, Equatable {
     }
 }
 
-struct OnlineCollisionEvent: Identifiable, Codable, Equatable {
+struct OnlineSharedEvent: Identifiable, Codable, Equatable {
     var id: UUID
     var sessionID: UUID
+    var kind: OnlineSharedEventKind
     var sequenceNumber: UInt64
-    var timestamp: TimeInterval
+    var emittedAt: TimeInterval
+    var orderedAt: TimeInterval?
+    var reporterParticipantID: UUID
+    var reporterObjectID: UUID?
+    var pairKey: String?
     var positionX: Double
     var positionY: Double
     var positionZ: Double
-    var relativeSpeedMetersPerSecond: Double
-    var severity: OnlineCollisionSeverity
-    var result: OnlineCollisionResult
-    var participants: [OnlineCollisionParticipant]
-    var confirmedByHostParticipantID: UUID?
+    var result: OnlineSharedEventResult
+    var participants: [OnlineSharedEventParticipant]
+    var note: String?
 
     init(
         id: UUID = UUID(),
         sessionID: UUID,
-        sequenceNumber: UInt64,
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        kind: OnlineSharedEventKind,
+        sequenceNumber: UInt64 = 0,
+        emittedAt: TimeInterval = Date().timeIntervalSince1970,
+        orderedAt: TimeInterval? = nil,
+        reporterParticipantID: UUID,
+        reporterObjectID: UUID?,
+        pairKey: String?,
         positionX: Double,
         positionY: Double,
         positionZ: Double,
-        relativeSpeedMetersPerSecond: Double,
-        severity: OnlineCollisionSeverity,
-        result: OnlineCollisionResult,
-        participants: [OnlineCollisionParticipant],
-        confirmedByHostParticipantID: UUID?
+        result: OnlineSharedEventResult,
+        participants: [OnlineSharedEventParticipant],
+        note: String? = nil
     ) {
         self.id = id
         self.sessionID = sessionID
+        self.kind = kind
         self.sequenceNumber = sequenceNumber
-        self.timestamp = timestamp
+        self.emittedAt = emittedAt
+        self.orderedAt = orderedAt
+        self.reporterParticipantID = reporterParticipantID
+        self.reporterObjectID = reporterObjectID
+        self.pairKey = pairKey
         self.positionX = positionX
         self.positionY = positionY
         self.positionZ = positionZ
-        self.relativeSpeedMetersPerSecond = relativeSpeedMetersPerSecond
-        self.severity = severity
         self.result = result
         self.participants = participants
-        self.confirmedByHostParticipantID = confirmedByHostParticipantID
+        self.note = note
     }
 
     var affectedVehicleIDs: [UUID] {

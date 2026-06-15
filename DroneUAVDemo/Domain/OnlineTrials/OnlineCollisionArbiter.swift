@@ -1,76 +1,62 @@
 import Foundation
 
-struct OnlineCollisionCandidate: Identifiable, Equatable {
-    var id: UUID = UUID()
-    var vehicleA: OnlineVehicleStateSnapshot
-    var vehicleB: OnlineVehicleStateSnapshot
-    var distanceMeters: Double
-    var relativeSpeedMetersPerSecond: Double
+// P2P v1.2: Local collision detector — called by the authority owner, not the host.
+// Detects proximity between the local pilot's UAV and remote ghost replicas.
+// Owner emits OnlineSharedEvent; host only relays/orders/deduplicates.
+
+struct OnlineLocalCollisionCandidate: Equatable {
+    var localVehicleID: UUID
+    var remoteVehicleID: UUID
+    var remoteParticipantID: UUID
+    var remoteParticipantName: String
     var positionX: Double
     var positionY: Double
     var positionZ: Double
+    var distanceMeters: Double
+    var relativeSpeedMetersPerSecond: Double
 }
 
-struct OnlineCollisionArbiter {
+struct OnlineLocalCollisionDetector {
     var collisionRadiusMeters: Double = 1.2
     var minimumRelativeSpeedMetersPerSecond: Double = 1.0
 
-    func findVehicleCollisionCandidates(
-        snapshots: [OnlineVehicleStateSnapshot]
-    ) -> [OnlineCollisionCandidate] {
-        guard snapshots.count >= 2 else { return [] }
+    func detect(
+        localSnapshot: OnlineVehicleStateSnapshot,
+        remoteStates: [OnlineVehicleInterpolatedState]
+    ) -> [OnlineLocalCollisionCandidate] {
+        remoteStates.compactMap { remote in
+            guard remote.vehicleID != localSnapshot.vehicleID else { return nil }
 
-        var result: [OnlineCollisionCandidate] = []
+            let dx = localSnapshot.pose.positionX - remote.pose.positionX
+            let dy = localSnapshot.pose.positionY - remote.pose.positionY
+            let dz = localSnapshot.pose.positionZ - remote.pose.positionZ
+            let distance = sqrt(dx * dx + dy * dy + dz * dz)
+            guard distance <= collisionRadiusMeters else { return nil }
 
-        for i in 0..<(snapshots.count - 1) {
-            for j in (i + 1)..<snapshots.count {
-                let a = snapshots[i]
-                let b = snapshots[j]
+            let rvx = localSnapshot.kinematics.velocityX - remote.kinematics.velocityX
+            let rvy = localSnapshot.kinematics.velocityY - remote.kinematics.velocityY
+            let rvz = localSnapshot.kinematics.velocityZ - remote.kinematics.velocityZ
+            let relativeSpeed = sqrt(rvx * rvx + rvy * rvy + rvz * rvz)
+            guard relativeSpeed >= minimumRelativeSpeedMetersPerSecond else { return nil }
 
-                let dx = a.pose.positionX - b.pose.positionX
-                let dy = a.pose.positionY - b.pose.positionY
-                let dz = a.pose.positionZ - b.pose.positionZ
-                let distance = sqrt(dx * dx + dy * dy + dz * dz)
-
-                guard distance <= collisionRadiusMeters else { continue }
-
-                let rvx = a.kinematics.velocityX - b.kinematics.velocityX
-                let rvy = a.kinematics.velocityY - b.kinematics.velocityY
-                let rvz = a.kinematics.velocityZ - b.kinematics.velocityZ
-                let relativeSpeed = sqrt(rvx * rvx + rvy * rvy + rvz * rvz)
-
-                guard relativeSpeed >= minimumRelativeSpeedMetersPerSecond else { continue }
-
-                result.append(
-                    OnlineCollisionCandidate(
-                        vehicleA: a,
-                        vehicleB: b,
-                        distanceMeters: distance,
-                        relativeSpeedMetersPerSecond: relativeSpeed,
-                        positionX: (a.pose.positionX + b.pose.positionX) / 2,
-                        positionY: (a.pose.positionY + b.pose.positionY) / 2,
-                        positionZ: (a.pose.positionZ + b.pose.positionZ) / 2
-                    )
-                )
-            }
+            return OnlineLocalCollisionCandidate(
+                localVehicleID: localSnapshot.vehicleID,
+                remoteVehicleID: remote.vehicleID,
+                remoteParticipantID: remote.participantID,
+                remoteParticipantName: remote.participantName,
+                positionX: (localSnapshot.pose.positionX + remote.pose.positionX) / 2,
+                positionY: (localSnapshot.pose.positionY + remote.pose.positionY) / 2,
+                positionZ: (localSnapshot.pose.positionZ + remote.pose.positionZ) / 2,
+                distanceMeters: distance,
+                relativeSpeedMetersPerSecond: relativeSpeed
+            )
         }
-
-        return result
     }
 
-    func severity(for relativeSpeed: Double) -> OnlineCollisionSeverity {
-        if relativeSpeed >= 12 { return .critical }
-        if relativeSpeed >= 6  { return .major }
-        if relativeSpeed >= 2  { return .minor }
-        return .contact
-    }
-
-    func result(for severity: OnlineCollisionSeverity) -> OnlineCollisionResult {
-        switch severity {
-        case .contact:  return .ignored
-        case .minor:    return .damaged
-        case .major:    return .disabled
-        case .critical: return .crashed
-        }
+    func result(for relativeSpeed: Double) -> OnlineSharedEventResult {
+        if relativeSpeed >= 12 { return .crashed }
+        if relativeSpeed >= 6  { return .disabled }
+        if relativeSpeed >= 2  { return .damaged }
+        return .ignored
     }
 }

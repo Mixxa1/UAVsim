@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 @MainActor
-final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport {
+final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport, OnlineSharedEventTransport {
     @Published var state: LANSessionState = .idle
     @Published var selectedRole: LANParticipantRole = .pilot
     @Published var displayName: String = "Участник"
@@ -11,15 +11,14 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
     @Published var launchDescriptor: LANTrialLaunchDescriptor?
     @Published var shouldOpenTrialRuntime: Bool = false
     @Published private(set) var remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
-    @Published private(set) var collisionEvents: [OnlineCollisionEvent] = []
+    @Published private(set) var sharedEvents: [OnlineSharedEvent] = []
     @Published private(set) var onlineDamageState = OnlineVehicleDamageState()
 
     private let transport: LANSessionTransport
-    private let collisionArbiter = OnlineCollisionArbiter()
-    private var collisionEventSequenceNumber: UInt64 = 0
-    // pairKey → last accepted timestamp; prevents duplicate events within cooldown window.
-    private var recentCollisionPairTimestamps: [String: TimeInterval] = [:]
-    private let collisionPairCooldown: TimeInterval = 2.0
+    private var sharedEventSequenceNumber: UInt64 = 0
+    // P2P v1.2: host deduplication — pairKey → last accepted timestamp.
+    private var recentEventPairKeys: [String: TimeInterval] = [:]
+    private let sharedEventPairCooldownSeconds: TimeInterval = 2.0
 
     init(transport: LANSessionTransport = NetworkLANSessionTransport()) {
         self.transport = transport
@@ -189,9 +188,9 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
         launchDescriptor = nil
         shouldOpenTrialRuntime = false
         remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
-        collisionEvents = []
+        sharedEvents = []
         onlineDamageState = OnlineVehicleDamageState()
-        recentCollisionPairTimestamps = [:]
+        recentEventPairKeys = [:]
         state = .idle
     }
 
@@ -311,19 +310,17 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
             remoteSnapshotState.apply(snapshot, ignoringLocalVehicleID: nil)
             remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
             transport.send(message)
-            evaluateHostCollisionArbitrationIfNeeded()
 
         case .vehicleSnapshotBatch:
             guard let batch = message.vehicleSnapshotBatch else { return }
             remoteSnapshotState.apply(batch, ignoringLocalVehicleID: nil)
             remoteSnapshotState.removeStaleSnapshots(olderThan: 2.0)
             transport.send(message)
-            evaluateHostCollisionArbitrationIfNeeded()
 
-        case .collisionEvent:
-            if let event = message.collisionEvent {
-                applyCollisionEvent(event)
-                transport.send(message)
+        case .sharedEvent:
+            // P2P v1.2: host receives owner-reported event, orders/deduplicates, relays to all.
+            if let event = message.sharedEvent {
+                acceptAndBroadcastSharedEvent(event)
             }
 
         case .welcome, .participantList, .sessionConfig, .trialLaunch:
@@ -379,9 +376,10 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
                 state.connectionState = .disconnected
             }
 
-        case .collisionEvent:
-            if let event = message.collisionEvent {
-                applyCollisionEvent(event)
+        case .sharedEvent:
+            // P2P v1.2: clients receive host-ordered events and apply them directly.
+            if let event = message.sharedEvent {
+                applySharedEvent(event)
             }
 
         case .hello, .roleSelected, .heartbeat, .trialStarted:
@@ -459,22 +457,60 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
         state.lastErrorMessage = message
     }
 
-    // MARK: – P2P v1.2: Collision events
+    // MARK: – P2P v1.2: Shared Event Relay
 
-    func sendCollisionEvent(_ event: OnlineCollisionEvent) {
+    // Owner calls this to submit an event. If local is host, order/broadcast directly.
+    // Otherwise, forward to host for ordering.
+    func submitSharedEvent(_ event: OnlineSharedEvent) {
         guard isSessionActive, let local = state.localParticipant else { return }
+        if local.isHost {
+            acceptAndBroadcastSharedEvent(event)
+        } else {
+            let message = LANSessionMessage(
+                type: .sharedEvent,
+                senderID: local.id,
+                sharedEvent: event
+            )
+            transport.send(message)
+        }
+    }
+
+    // Host-only: assigns sequence number, deduplicates, applies locally, and broadcasts.
+    private func acceptAndBroadcastSharedEvent(_ event: OnlineSharedEvent) {
+        guard state.localParticipant?.isHost == true,
+              let hostID = state.localParticipant?.id else { return }
+
+        // Dedup by pairKey + cooldown.
+        let now = Date().timeIntervalSince1970
+        if let key = event.pairKey {
+            if let lastTime = recentEventPairKeys[key], now - lastTime < sharedEventPairCooldownSeconds {
+                return
+            }
+            recentEventPairKeys[key] = now
+        }
+
+        sharedEventSequenceNumber += 1
+        var ordered = event
+        ordered.sequenceNumber = sharedEventSequenceNumber
+        ordered.orderedAt = now
+
+        applySharedEvent(ordered)
+
         let message = LANSessionMessage(
-            type: .collisionEvent,
-            senderID: local.id,
-            collisionEvent: event
+            type: .sharedEvent,
+            senderID: hostID,
+            sharedEvent: ordered
         )
         transport.send(message)
     }
 
-    func applyCollisionEvent(_ event: OnlineCollisionEvent) {
-        guard !collisionEvents.contains(where: { $0.id == event.id }) else { return }
-        collisionEvents.append(event)
-        if collisionEvents.count > 50 { collisionEvents.removeFirst() }
+    // All participants (host + clients) apply accepted shared events.
+    func applySharedEvent(_ event: OnlineSharedEvent) {
+        guard !sharedEvents.contains(where: { $0.id == event.id }) else { return }
+
+        sharedEvents.append(event)
+        sharedEvents.sort { ($0.sequenceNumber, $0.emittedAt) < ($1.sequenceNumber, $1.emittedAt) }
+        if sharedEvents.count > 50 { sharedEvents.removeFirst() }
 
         guard let descriptor = launchDescriptor,
               let localParticipant = state.localParticipant else { return }
@@ -482,71 +518,6 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport 
             launchDescriptor: descriptor,
             localParticipant: localParticipant
         )
-        onlineDamageState.apply(collision: event, vehicleSlots: context.vehicleSlots)
-    }
-
-    // P2P v1.2: host-only arbitration — called on each snapshot batch reception.
-    // No Timer created — triggered by inbound snapshot traffic.
-    func evaluateHostCollisionArbitrationIfNeeded() {
-        guard state.localParticipant?.isHost == true,
-              state.trialPhase == .running,
-              let sessionID = launchDescriptor?.id else { return }
-
-        let snapshots = remoteSnapshotState.snapshots
-        guard snapshots.count >= 2 else { return }
-
-        let candidates = collisionArbiter.findVehicleCollisionCandidates(snapshots: snapshots)
-        let now = Date().timeIntervalSince1970
-
-        for candidate in candidates {
-            let pairKey = [
-                candidate.vehicleA.vehicleID.uuidString,
-                candidate.vehicleB.vehicleID.uuidString
-            ].sorted().joined(separator: ":")
-
-            if let lastTime = recentCollisionPairTimestamps[pairKey],
-               now - lastTime < collisionPairCooldown {
-                continue
-            }
-
-            let severity = collisionArbiter.severity(for: candidate.relativeSpeedMetersPerSecond)
-            let result = collisionArbiter.result(for: severity)
-            guard result != .ignored else { continue }
-
-            recentCollisionPairTimestamps[pairKey] = now
-
-            let hostID = state.localParticipant?.id
-            collisionEventSequenceNumber += 1
-            let event = OnlineCollisionEvent(
-                sessionID: sessionID,
-                sequenceNumber: collisionEventSequenceNumber,
-                positionX: candidate.positionX,
-                positionY: candidate.positionY,
-                positionZ: candidate.positionZ,
-                relativeSpeedMetersPerSecond: candidate.relativeSpeedMetersPerSecond,
-                severity: severity,
-                result: result,
-                participants: [
-                    OnlineCollisionParticipant(
-                        objectID: candidate.vehicleA.vehicleID,
-                        objectKind: .vehicle,
-                        ownerParticipantID: candidate.vehicleA.participantID,
-                        ownerVehicleID: candidate.vehicleA.vehicleID,
-                        displayName: candidate.vehicleA.participantName
-                    ),
-                    OnlineCollisionParticipant(
-                        objectID: candidate.vehicleB.vehicleID,
-                        objectKind: .vehicle,
-                        ownerParticipantID: candidate.vehicleB.participantID,
-                        ownerVehicleID: candidate.vehicleB.vehicleID,
-                        displayName: candidate.vehicleB.participantName
-                    )
-                ],
-                confirmedByHostParticipantID: hostID
-            )
-
-            applyCollisionEvent(event)
-            sendCollisionEvent(event)
-        }
+        onlineDamageState.apply(sharedEvent: event, vehicleSlots: context.vehicleSlots)
     }
 }
