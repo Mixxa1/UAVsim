@@ -2090,3 +2090,11 @@
 "online.runtime.events" = "Events";
 "online.runtime.end_trial" = "End Trial";
 "online.runtime.leave" = "Leave";
+
+"credits.title" = "Third-Party Assets";
+"credits.third_party_assets" = "Third-Party Assets";
+"credits.author" = "Author";
+"credits.license" = "License";
+"credits.source" = "Source";
+"credits.changes" = "Changes";
+"credits.menu" = "Credits";

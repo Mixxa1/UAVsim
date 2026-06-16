@@ -256,6 +256,13 @@
 		100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */; };
 		10000000000000000000038E /* OnlineVehicleSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */; };
 		100000000000000000000390 /* OnlineTrialNetworkBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038F /* OnlineTrialNetworkBridge.swift */; };
+		100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000401 /* PineTreeAssetLoader.swift */; };
+		100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000403 /* GenericGrassMaterialLoader.swift */; };
+		100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000405 /* EnvironmentDebugOptions.swift */; };
+		100000000000000000000406 /* CreditsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000407 /* CreditsView.swift */; };
+		100000000000000000000408 /* Pine_Tree.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000409 /* Pine_Tree.usdz */; };
+		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
+		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -511,6 +518,13 @@
 		10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotStore.swift; sourceTree = "<group>"; };
 		100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotInterpolator.swift; sourceTree = "<group>"; };
 		10000000000000000000038F /* OnlineTrialNetworkBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialNetworkBridge.swift; sourceTree = "<group>"; };
+		100000000000000000000401 /* PineTreeAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PineTreeAssetLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000403 /* GenericGrassMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericGrassMaterialLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000405 /* EnvironmentDebugOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentDebugOptions.swift; sourceTree = "<group>"; };
+		100000000000000000000407 /* CreditsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditsView.swift; sourceTree = "<group>"; };
+		100000000000000000000409 /* Pine_Tree.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Pine_Tree.usdz"; sourceTree = "<group>"; };
+		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
+		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -714,6 +728,9 @@
 				10000000000000000000011C /* EnvironmentObjectFactory.swift */,
 				100000000000000000000160 /* EnvironmentProceduralMaterials.swift */,
 				100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */,
+				100000000000000000000405 /* EnvironmentDebugOptions.swift */,
+				100000000000000000000401 /* PineTreeAssetLoader.swift */,
+				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
 				100000000000000000000142 /* FPVCameraAnchor.swift */,
 				100000000000000000000143 /* PayloadVisualFactory.swift */,
 				100000000000000000000157 /* PayloadDropCameraController.swift */,
@@ -784,6 +801,7 @@
 				1000000000000000000002F6 /* ReplayTimelineEditorView.swift */,
 				100000000000000000000351 /* LegalAgreementView.swift */,
 				100000000000000000000353 /* LegalGateRootView.swift */,
+				100000000000000000000407 /* CreditsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -857,6 +875,9 @@
 				10000000000000000000012B /* Assets.xcassets */,
 				100000000000000000000126 /* Localizable.strings */,
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
+				10000000000000000000040D /* ThirdPartyAssets.json */,
+				100000000000000000000409 /* Pine_Tree.usdz */,
+				10000000000000000000040B /* Generic_grass.usdz */,
 				100000000000000000000364 /* uavpart_icon.icns */,
 				100000000000000000000365 /* cadnext_icon.icns */,
 				100000000000000000000366 /* Info.plist */,
@@ -973,6 +994,9 @@
 				100000000000000000000225 /* Localizable.strings in Resources */,
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
+				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
+				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
+				10000000000000000000040A /* Generic_grass.usdz in Resources */,
 				100000000000000000000362 /* uavpart_icon.icns in Resources */,
 				100000000000000000000363 /* cadnext_icon.icns in Resources */,
 			);
@@ -1042,6 +1066,9 @@
 				100000000000000000000257 /* EnvironmentProceduralMaterials.swift in Sources */,
 				100000000000000000000258 /* EnvironmentProceduralVisualFactory.swift in Sources */,
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
+				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
+				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,
+				100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */,
 				10000000000000000000021E /* DroneFleetModel.swift in Sources */,
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
 				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
@@ -1199,6 +1226,7 @@
 				10000000000000000000034E /* LegalAgreementViewModel.swift in Sources */,
 				100000000000000000000350 /* LegalAgreementView.swift in Sources */,
 				100000000000000000000352 /* LegalGateRootView.swift in Sources */,
+				100000000000000000000406 /* CreditsView.swift in Sources */,
 				100000000000000000000356 /* CADExternalModelReference.swift in Sources */,
 				100000000000000000000357 /* CADModelImportDescriptor.swift in Sources */,
 				100000000000000000000358 /* CADAttachmentImport.swift in Sources */,

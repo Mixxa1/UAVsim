@@ -2085,3 +2085,11 @@
 "online.runtime.events" = "События";
 "online.runtime.end_trial" = "Завершить испытание";
 "online.runtime.leave" = "Выйти";
+
+"credits.title" = "Сторонние ассеты";
+"credits.third_party_assets" = "Сторонние ассеты";
+"credits.author" = "Автор";
+"credits.license" = "Лицензия";
+"credits.source" = "Источник";
+"credits.changes" = "Изменения";
+"credits.menu" = "Авторство";

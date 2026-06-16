@@ -1179,6 +1179,7 @@ final class DroneSceneController {
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
+        EnvironmentObjectFactory.resetDiagnostics()
         let (descriptors, nodesByID) = scenePopulationService.populate(with: terrain)
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
         supportSurfaces = environmentMapDescriptors.compactMap(supportSurfaceDescriptor(for:))
@@ -1195,6 +1196,7 @@ final class DroneSceneController {
             }
         }
 
+        EnvironmentObjectFactory.printDiagnostics()
         applyTerrainVisualStyle(terrain)
         updateDockStationPosition(for: terrain)
         updateWorldBoundsVisual(for: terrain)
@@ -2022,16 +2024,24 @@ final class DroneSceneController {
         scene.lightingEnvironment.contents = backgroundImage
 
         if let geometry = groundNode.geometry {
-            let groundMaterial = (EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset).copy() as? SCNMaterial)
-                ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset)
-            let scenicRepeat = max(10.0, min(28.0, terrain.scenicHalfExtent / 28.0))
-            groundMaterial.diffuse.wrapS = .repeat
-            groundMaterial.diffuse.wrapT = .repeat
-            groundMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(
-                CGFloat(scenicRepeat),
-                CGFloat(scenicRepeat),
-                1.0
-            )
+            let mapSizeMeters = terrain.scenicHalfExtent * 2.0
+            let groundMaterial: SCNMaterial
+            switch terrain.preset {
+            case .field, .forest, .city, .cargoYard:
+                groundMaterial = GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+            case .gridDemo:
+                let proc = (EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset).copy() as? SCNMaterial)
+                    ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset)
+                let scenicRepeat = max(10.0, min(28.0, terrain.scenicHalfExtent / 28.0))
+                proc.diffuse.wrapS = .repeat
+                proc.diffuse.wrapT = .repeat
+                proc.diffuse.contentsTransform = SCNMatrix4MakeScale(
+                    CGFloat(scenicRepeat),
+                    CGFloat(scenicRepeat),
+                    1.0
+                )
+                groundMaterial = proc
+            }
             geometry.materials = [groundMaterial]
         }
 

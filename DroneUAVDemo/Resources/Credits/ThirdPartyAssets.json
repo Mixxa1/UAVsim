@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "id": "pine_tree_evolveduk",
+      "title": "Pine Tree",
+      "author": "evolveduk",
+      "sourceURL": "https://skfb.ly/ouSXM",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as an environment tree visual asset in DroneUAVDemo."
+    },
+    {
+      "id": "generic_grass_aartee",
+      "title": "Generic grass",
+      "author": "Aartee",
+      "sourceURL": "https://skfb.ly/oEZVJ",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as a tiled terrain grass material in DroneUAVDemo."
+    }
+  ]
+}
