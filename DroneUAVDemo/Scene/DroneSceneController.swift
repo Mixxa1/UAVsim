@@ -66,6 +66,7 @@ final class DroneSceneController {
     private let payloadDropCameraController = PayloadDropCameraController()
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
+    private let spectatorCameraNode = SCNNode()
 
     private let sunLightNode: SCNNode
     private let gridNode: SCNNode
@@ -77,6 +78,13 @@ final class DroneSceneController {
     private let missionDropZoneNode = SCNNode()
     private let missionWaypointCaptureNode = SCNNode()
     private let launchAssetNode = SCNNode()
+    private let onlineTrialPlaceholderRootNode = SCNNode()
+    // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
+    private var replicaProfileCache: [UUID: String] = [:]
+    // v1.4.4: timestamp for computing deltaTime inside applyOnlineInterpolatedRemoteStates.
+    private var lastRemoteApplyTime: TimeInterval = 0
+
+    func resetRemoteApplyTime() { lastRemoteApplyTime = 0 }
 
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
@@ -151,6 +159,7 @@ final class DroneSceneController {
     private var orbitLookAngles = SIMD2<Float>(repeating: 0.0)  // yaw, pitch
     private var fpvLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
     private var topLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
+    private var spectatorLookAngles = SIMD2<Float>(repeating: 0.0) // yaw, pitch
 
     private var orbitAngle: Float = 0.0
     private var activeProfile: DroneModelProfile
@@ -196,12 +205,14 @@ final class DroneSceneController {
         configureCameraNode(payloadDropCameraController.cameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(orbitCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(topCameraNode, fov: initialProfile.cameraPreset.fpvFov)
+        configureCameraNode(spectatorCameraNode, fov: initialProfile.cameraPreset.fpvFov)
 
         followRigNode.name = "followRigNode"
         followRigNode.addChildNode(followCameraNode)
         scene.rootNode.addChildNode(followRigNode)
         scene.rootNode.addChildNode(orbitCameraNode)
         scene.rootNode.addChildNode(topCameraNode)
+        scene.rootNode.addChildNode(spectatorCameraNode)
 
         fpvPresentationRootNode.name = "fpvPresentationRootNode"
         fpvYawNode.name = "fpvYawMount"
@@ -249,6 +260,9 @@ final class DroneSceneController {
         launchAssetNode.isHidden = true
         scene.rootNode.addChildNode(launchAssetNode)
 
+        onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
+        scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
+
         nearestContactNode.geometry = SCNSphere(radius: 0.14)
         nearestContactNode.geometry?.firstMaterial?.diffuse.contents = NSColor.systemRed.withAlphaComponent(0.82)
         nearestContactNode.isHidden = true
@@ -285,11 +299,194 @@ final class DroneSceneController {
             return topCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
+        case .spectator:
+            return spectatorCameraNode
         }
     }
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
         dockSpawnPosition
+    }
+
+    func configureOnlineTrialPlaceholders(_ fleetState: OnlineTrialFleetState?) {
+        onlineTrialPlaceholderRootNode.childNodes.forEach { $0.removeFromParentNode() }
+        replicaProfileCache.removeAll()
+        droneNode.isHidden = fleetState?.isSpectator ?? false
+
+        guard let fleetState else {
+            return
+        }
+
+        // v1.5: build remote replicas using each participant's actual UAV profile.
+        for slot in fleetState.remoteVehicles {
+            replicaProfileCache[slot.vehicleID] = slot.vehicleProfileID
+            #if DEBUG
+            print("[LAN] replica slot participant=\(slot.participantName) vehicle=\(slot.vehicleID.uuidString.prefix(8)) profile=\(slot.vehicleProfileID)")
+            #endif
+            onlineTrialPlaceholderRootNode.addChildNode(
+                OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
+                    vehicleID: slot.vehicleID,
+                    participantName: slot.participantName,
+                    spawnIndex: slot.spawnIndex,
+                    vehicleProfileID: slot.vehicleProfileID
+                )
+            )
+        }
+    }
+
+    func applyOnlineVehicleSnapshots(_ snapshotState: OnlineRemoteVehicleSnapshotState) {
+        let snapshots = snapshotState.snapshots
+        let activeNodeNames = Set(snapshots.map { onlineTrialVehicleNodeName(for: $0.vehicleID) })
+
+        for child in onlineTrialPlaceholderRootNode.childNodes {
+            guard let name = child.name,
+                  name.hasPrefix("online_trial_vehicle_"),
+                  !activeNodeNames.contains(name) else {
+                continue
+            }
+            child.removeFromParentNode()
+        }
+
+        for (index, snapshot) in snapshots.enumerated() {
+            let nodeName = onlineTrialVehicleNodeName(for: snapshot.vehicleID)
+            let node: SCNNode
+            if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
+                node = existing
+            } else {
+                let cachedProfileID = replicaProfileCache[snapshot.vehicleID]
+                node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
+                    vehicleID: snapshot.vehicleID,
+                    participantName: snapshot.participantName,
+                    spawnIndex: index,
+                    vehicleProfileID: cachedProfileID
+                )
+                onlineTrialPlaceholderRootNode.addChildNode(node)
+            }
+
+            node.position = SCNVector3(
+                Float(snapshot.pose.positionX),
+                Float(snapshot.pose.positionY),
+                Float(snapshot.pose.positionZ)
+            )
+            node.simdOrientation = orientationQuaternion(
+                from: SIMD3<Float>(
+                    Float(snapshot.pose.roll),
+                    Float(snapshot.pose.pitch),
+                    Float(snapshot.pose.yaw)
+                )
+            )
+            node.isHidden = false
+        }
+    }
+
+    // P2P 0.9: ghost nodes are visual-only remote vehicles, not physics bodies.
+    // Called per-frame from simulation tick with interpolated states for smooth movement.
+    // v1.4.4: position lerp eliminates micro-jitter; if > 20 m away the node snaps to avoid drag.
+    func applyOnlineInterpolatedRemoteStates(_ states: [OnlineVehicleInterpolatedState]) {
+        let now = CACurrentMediaTime()
+        let dt: Float = lastRemoteApplyTime == 0
+            ? 0.016
+            : Float(min(now - lastRemoteApplyTime, 0.1))
+        lastRemoteApplyTime = now
+
+        let activeNodeNames = Set(states.map { onlineTrialVehicleNodeName(for: $0.vehicleID) })
+
+        for child in onlineTrialPlaceholderRootNode.childNodes {
+            guard let name = child.name, name.hasPrefix("online_trial_vehicle_") else { continue }
+            child.isHidden = !activeNodeNames.contains(name)
+        }
+
+        let smoothingRate: Float = 14.0
+        let alpha = min(dt * smoothingRate, 1.0)
+
+        for state in states {
+            let nodeName = onlineTrialVehicleNodeName(for: state.vehicleID)
+            let node: SCNNode
+            if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
+                node = existing
+            } else {
+                let cachedProfileID = replicaProfileCache[state.vehicleID]
+                node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
+                    vehicleID: state.vehicleID,
+                    participantName: state.participantName,
+                    spawnIndex: nil,
+                    vehicleProfileID: cachedProfileID
+                )
+                onlineTrialPlaceholderRootNode.addChildNode(node)
+            }
+
+            let targetPos = SIMD3<Float>(
+                Float(state.pose.positionX),
+                Float(state.pose.positionY),
+                Float(state.pose.positionZ)
+            )
+            let currentPos = node.simdPosition
+            // Snap if the node is far away (first appearance, warp, etc.)
+            if simd_distance(currentPos, targetPos) > 20.0 {
+                node.simdPosition = targetPos
+            } else {
+                node.simdPosition = simd_mix(currentPos, targetPos, SIMD3<Float>(repeating: alpha))
+            }
+
+            node.simdOrientation = orientationQuaternion(
+                from: SIMD3<Float>(
+                    Float(state.pose.roll),
+                    Float(state.pose.pitch),
+                    Float(state.pose.yaw)
+                )
+            )
+            node.opacity = state.sourceSnapshotAge > 1.0 ? 0.30 : 0.88
+            node.isHidden = false
+        }
+    }
+
+    // P2P v1.2: update ghost visual damage state — called after collision events are applied.
+    func applyOnlineVehicleDamageState(_ damageState: OnlineVehicleDamageState) {
+        for child in onlineTrialPlaceholderRootNode.childNodes {
+            guard let name = child.name,
+                  name.hasPrefix("online_trial_vehicle_"),
+                  let uuidString = name.components(separatedBy: "online_trial_vehicle_").last,
+                  let vehicleID = UUID(uuidString: uuidString) else { continue }
+
+            let opState = damageState.record(for: vehicleID)?.operationalState ?? .normal
+            applyDamageVisual(to: child, operationalState: opState)
+        }
+    }
+
+    private func applyDamageVisual(to node: SCNNode, operationalState: OnlineVehicleOperationalState) {
+        let labelNodeName = "damage_label"
+        node.childNodes.filter { $0.name == labelNodeName }.forEach { $0.removeFromParentNode() }
+
+        switch operationalState {
+        case .normal:
+            break
+        case .damaged:
+            node.opacity = min(node.opacity, 0.85)
+            addDamageLabel("DAMAGED", color: NSColor(red: 1.0, green: 0.75, blue: 0.0, alpha: 1.0), to: node, name: labelNodeName)
+        case .disabled:
+            node.opacity = min(node.opacity, 0.55)
+            addDamageLabel("DISABLED", color: NSColor(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0), to: node, name: labelNodeName)
+        case .crashed:
+            node.opacity = min(node.opacity, 0.45)
+            addDamageLabel("CRASHED", color: NSColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0), to: node, name: labelNodeName)
+        }
+    }
+
+    private func addDamageLabel(_ text: String, color: NSColor, to parent: SCNNode, name: String) {
+        let textGeometry = SCNText(string: text, extrusionDepth: 0)
+        textGeometry.font = NSFont.systemFont(ofSize: 0.15, weight: .bold)
+        textGeometry.firstMaterial?.diffuse.contents = color
+        textGeometry.firstMaterial?.isDoubleSided = true
+
+        let labelNode = SCNNode(geometry: textGeometry)
+        labelNode.name = name
+        labelNode.position = SCNVector3(0, 0.6, 0)
+        labelNode.scale = SCNVector3(1, 1, 1)
+        parent.addChildNode(labelNode)
+    }
+
+    private func onlineTrialVehicleNodeName(for vehicleID: UUID) -> String {
+        "online_trial_vehicle_\(vehicleID.uuidString)"
     }
 
     func currentLaunchSpawnPoint(for asset: LaunchAsset?) -> SIMD3<Float>? {
@@ -800,7 +997,7 @@ final class DroneSceneController {
         case .fpv:
             fpvLookAngles.x = (fpvLookAngles.x + yawDelta).clamped(to: -0.9...0.9)
             fpvLookAngles.y = (fpvLookAngles.y + pitchDelta).clamped(to: -0.7...0.7)
-        case .follow, .orbit, .top, .payload:
+        case .follow, .orbit, .top, .payload, .spectator:
             return
         }
     }
@@ -820,6 +1017,9 @@ final class DroneSceneController {
             topLookAngles = .zero
         case .payload:
             return
+        case .spectator:
+            spectatorLookAngles = .zero
+            spectatorCameraNode.eulerAngles = SCNVector3Zero
         }
     }
 
@@ -840,7 +1040,7 @@ final class DroneSceneController {
             orbitLookAngles = .zero
         case .top:
             topLookAngles = .zero
-        case .free, .follow, .fpv, .payload:
+        case .free, .follow, .fpv, .payload, .spectator:
             break
         }
     }
@@ -859,6 +1059,69 @@ final class DroneSceneController {
     func dollyFreeCamera(by step: Float) {
         let forward = simd_normalize(simd_act(freeCameraNode.simdOrientation, SIMD3<Float>(0, 0, -1)))
         freeCameraNode.simdPosition += forward * step
+    }
+
+    func configureSpectatorRuntime(camera: CameraConfiguration) {
+        droneNode.isHidden = true
+        droneNode.opacity = 0.0
+        visualRootNode.isHidden = true
+        fpvPresentationActive = false
+        fpvObstructionHidingActive = false
+        spectatorLookAngles = SIMD2<Float>(0.0, -0.18)
+        spectatorCameraNode.camera?.fieldOfView = CGFloat(camera.fov)
+        spectatorCameraNode.camera?.zNear = 0.01
+        spectatorCameraNode.simdPosition = SIMD3<Float>(0.0, 5.2, 12.0)
+        spectatorCameraNode.eulerAngles = SCNVector3(
+            CGFloat(spectatorLookAngles.y),
+            CGFloat(spectatorLookAngles.x),
+            0.0
+        )
+    }
+
+    func updateSpectatorRuntime(camera: CameraConfiguration) {
+        spectatorCameraNode.camera?.fieldOfView = CGFloat(camera.fov)
+        spectatorCameraNode.camera?.zNear = 0.01
+        droneNode.isHidden = true
+        visualRootNode.isHidden = true
+    }
+
+    func applySpectatorLook(
+        yawDeltaDeg: Float,
+        pitchDeltaDeg: Float,
+        invertX: Bool,
+        invertY: Bool
+    ) {
+        let yawSign: Float = invertX ? -1.0 : 1.0
+        let pitchSign: Float = invertY ? -1.0 : 1.0
+        spectatorLookAngles.x += yawDeltaDeg.degreesToRadians * yawSign
+        spectatorLookAngles.y = (spectatorLookAngles.y + pitchDeltaDeg.degreesToRadians * pitchSign)
+            .clamped(to: -1.45...1.45)
+        spectatorCameraNode.eulerAngles = SCNVector3(
+            CGFloat(spectatorLookAngles.y),
+            CGFloat(spectatorLookAngles.x),
+            0.0
+        )
+    }
+
+    func moveSpectatorCamera(
+        forward: Float,
+        strafe: Float,
+        deltaTime: Float,
+        speed: Float
+    ) {
+        guard deltaTime > 0.0 else {
+            return
+        }
+
+        let forwardVector = simd_normalize(simd_act(spectatorCameraNode.simdOrientation, SIMD3<Float>(0.0, 0.0, -1.0)))
+        let rightVector = simd_normalize(simd_act(spectatorCameraNode.simdOrientation, SIMD3<Float>(1.0, 0.0, 0.0)))
+        let desiredMotion = forwardVector * forward + rightVector * strafe
+        let length = simd_length(desiredMotion)
+        guard length > 0.001 else {
+            return
+        }
+
+        spectatorCameraNode.simdPosition += (desiredMotion / length) * max(0.0, speed) * deltaTime
     }
 
     func setDroneProfile(_ profile: DroneModelProfile) {
@@ -1440,9 +1703,11 @@ final class DroneSceneController {
         fpvCameraNode.camera?.fieldOfView = fov
         topCameraNode.camera?.fieldOfView = fov
         freeCameraNode.camera?.fieldOfView = fov
+        spectatorCameraNode.camera?.fieldOfView = fov
         fpvCameraNode.camera?.zNear = CGFloat(max(0.015, settings.fpv.nearClip.clamped(to: 0.005...0.25)))
         topCameraNode.camera?.zNear = 0.03
         freeCameraNode.camera?.zNear = 0.01
+        spectatorCameraNode.camera?.zNear = 0.01
         payloadDropCameraController.updateCameraProperties(fov: Float(fov), zNear: 0.025)
         if settings.mode == .payload,
            deltaTime <= 0.0001,

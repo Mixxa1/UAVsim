@@ -68,6 +68,7 @@ enum KeyBindingCategory: String, CaseIterable, Identifiable {
 
 enum InputProcessingMode: Equatable {
     case flight
+    case spectator
     case editing
     case bindingCapture
 }
@@ -577,7 +578,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             return event
         }
 
-        guard processingMode == .flight else {
+        guard processingMode == .flight || processingMode == .spectator else {
             return event
         }
 
@@ -599,6 +600,9 @@ final class KeyboardInputService: KeyboardInputProviding {
         var continuousForKey = activeContinuousByKey[event.keyCode] ?? Set<KeyboardCommand>()
 
         for command in commands {
+            if processingMode == .spectator, !isSpectatorCameraCommand(command) {
+                continue
+            }
             if command.isContinuous {
                 activeContinuousCommands.insert(command)
                 continuousForKey.insert(command)
@@ -721,6 +725,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     private func directAction(for event: NSEvent) -> InputAction? {
+        if processingMode == .spectator {
+            return nil
+        }
         if matchesCompassOverlayToggle(event) {
             return .toggleCompassOverlay
         }
@@ -734,6 +741,15 @@ final class KeyboardInputService: KeyboardInputProviding {
             return .disarmAircraft
         }
         return nil
+    }
+
+    private func isSpectatorCameraCommand(_ command: KeyboardCommand) -> Bool {
+        switch command {
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .accelerate:
+            return true
+        default:
+            return command.category != .flight
+        }
     }
 
     private func matchesTerrainMapToggle(_ event: NSEvent) -> Bool {

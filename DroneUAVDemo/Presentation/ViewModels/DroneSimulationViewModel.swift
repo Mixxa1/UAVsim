@@ -462,6 +462,39 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var currentProjectID: String
     @Published private(set) var currentProjectName: String
     @Published private(set) var hasUnsavedChanges: Bool
+    @Published private(set) var simulationRunMode: SimulationRunMode
+    @Published private(set) var onlineSessionConfig: OnlineTrialSessionConfig?
+    @Published private(set) var localOnlineParticipant: LocalOnlineParticipant?
+    @Published private(set) var onlineRuntimeContext: OnlineTrialRuntimeContext?
+    @Published private(set) var onlineFleetState: OnlineTrialFleetState?
+    @Published private(set) var onlineAuthorityRegistry: OnlineObjectAuthorityRegistry?
+    // P2P v1.2: replicated collision events can revoke local vehicle control authority
+    // by setting disabled/crashed state.
+    @Published private(set) var onlineDamageState = OnlineVehicleDamageState()
+    @Published private(set) var onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
+    @Published private(set) var onlineInterpolatedRemoteStates: [OnlineVehicleInterpolatedState] = []
+    private var onlineInterpolationStore = OnlineVehicleInterpolationStore()
+    // P2P v1.3: diagnostics mirrored from LANSessionViewModel via applyOnlineDiagnostics.
+    @Published private(set) var onlineRuntimeDiagnostics = OnlineRuntimeNetworkDiagnostics()
+
+    // v1.4.6: activity-state-driven performance policy
+    @Published private(set) var performancePolicy = RuntimePerformancePolicy.default
+    private var backgroundTickSkipCounter = 0
+    // Window visibility is set by delegate events; combined with input recency → activityState.
+    private var currentVisibilityState: RuntimeVisibilityState = .activeVisible
+    private var lastUserInteractionAt: TimeInterval = 0
+
+    // v1.4.4: Hz/FPS counters for PERF diagnostics; reset each second in tick().
+    private var diagSnapshotOutCount: Int = 0
+    private var diagSnapshotInCount: Int = 0
+    private var diagSceneApplyCount: Int = 0
+    private var diagRenderFrameCount: Int = 0
+    private var diagLastResetTime: TimeInterval = 0
+    private var diagLastComputedHz = (out: 0.0, rx: 0.0, sceneApply: 0.0, renderFPS: 0.0)
+    // Throttle @Published onlineInterpolatedRemoteStates; interval driven by policy.overlayPublishInterval.
+    private var lastRemoteStatesPublishTime: TimeInterval = 0
+    // v1.4.6: time-gated remote scene apply (policy.remoteSceneApplyInterval)
+    private var lastOnlineSceneApplyTime: TimeInterval = 0
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -556,7 +589,146 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.pointOfView(for: cameraConfiguration.mode)
     }
 
+    var isSpectatorMode: Bool {
+        simulationRunMode.isSpectator
+    }
+
+    var onlineTrialContext: OnlineTrialRuntimeContext? {
+        onlineRuntimeContext
+    }
+
+    var onlineTrialStaleRemoteCount: Int {
+        onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge > 1.0 }.count
+    }
+
+    func hasLocalAuthority(over objectID: UUID) -> Bool {
+        onlineAuthorityRegistry?.hasLocalAuthority(objectID: objectID) ?? true
+    }
+
+    var canControlLocalVehicle: Bool {
+        guard LANRuntimeRolePolicy.canControlVehicle(context: onlineRuntimeContext) else { return false }
+        // P2P v1.2: collision damage state can revoke local vehicle authority.
+        if let vehicleID = onlineRuntimeContext?.localVehicleID,
+           onlineDamageState.isControlDisabled(vehicleID: vehicleID) {
+            return false
+        }
+        return true
+    }
+
+    func applyOnlineDamageState(_ damageState: OnlineVehicleDamageState) {
+        guard onlineRuntimeContext != nil else { return }
+        onlineDamageState = damageState
+        sceneController.applyOnlineVehicleDamageState(damageState)
+        // If local UAV has become disabled/crashed, disarm immediately.
+        if let vehicleID = onlineRuntimeContext?.localVehicleID,
+           damageState.isControlDisabled(vehicleID: vehicleID),
+           isArmed {
+            disarm(forceEmergency: true, preserveCrashDynamics: false)
+        }
+    }
+
+    // v1.3+: mirror LANSessionViewModel diagnostics for display in overlay.
+    // Replica counts are patched in from the interpolation result — rest comes from session layer.
+    // All times here use CACurrentMediaTime() (receiver-local clock, same as receivedAtLocalTime).
+    func applyOnlineDiagnostics(_ diagnostics: OnlineRuntimeNetworkDiagnostics) {
+        var merged = diagnostics
+        let now = CACurrentMediaTime()
+        let staleThreshold = 2.0
+        merged.remoteReplicaVisibleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < staleThreshold }.count
+        merged.remoteReplicaStaleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge >= staleThreshold }.count
+        // sourceSnapshotAge = now(render) - receivedAtLocalTime; after clock fix both use CACurrentMediaTime.
+        // Clamp to 0 as safety guard against any transient ordering.
+        merged.remoteVisualLagMs = onlineInterpolatedRemoteStates
+            .max(by: { $0.sourceSnapshotAge < $1.sourceSnapshotAge })
+            .map { max(0, $0.sourceSnapshotAge) * 1000 }
+        // How long ago the last snapshot was received (receiver-local clock).
+        merged.lastSnapshotReceivedAgoMs = onlineInterpolationStore.latestReceivedAt
+            .map { max(0, now - $0) * 1000 }
+        merged.remoteSnapshotBufferDepthMax = onlineInterpolationStore.totalBufferDepth
+        merged.remoteOutOfOrderDropCount = onlineInterpolationStore.outOfOrderDropCount
+        merged.outgoingSnapshotHz = diagLastComputedHz.out
+        merged.incomingSnapshotHz = diagLastComputedHz.rx
+        merged.sceneApplyHz = diagLastComputedHz.sceneApply
+        merged.renderFPS = diagLastComputedHz.renderFPS
+        merged.visibilityStateLabel = performancePolicy.activityState.label
+        merged.windowVisibilityLabel = currentVisibilityState.label
+        merged.sceneIsPlaying = !performancePolicy.stopRendering
+        merged.scenePreferredFPS = performancePolicy.targetRenderFPS
+        onlineRuntimeDiagnostics = merged
+    }
+
+    func applyWindowVisibilityState(_ state: RuntimeVisibilityState) {
+        if state == .activeVisible {
+            noteUserInteraction()   // window becoming key / restored from minimize counts as interaction
+        }
+        currentVisibilityState = state
+        refreshActivityPolicy(now: CACurrentMediaTime())
+    }
+
+    private func noteUserInteraction() {
+        lastUserInteractionAt = CACurrentMediaTime()
+    }
+
+    private func refreshActivityPolicy(now: TimeInterval) {
+        let activity: RuntimeActivityState
+        switch currentVisibilityState {
+        case .minimized:       activity = .minimized
+        case .hidden:          activity = .hidden
+        case .inactiveVisible: activity = .backgroundIdle
+        case .activeVisible:
+            activity = (now - lastUserInteractionAt < 1.0) ? .interacting : .activeIdle
+        }
+        let policy = RuntimePerformancePolicy(activity)
+        guard policy != performancePolicy else { return }
+        performancePolicy = policy
+        backgroundTickSkipCounter = 0
+        if policy.stopRendering {
+            sceneController.resetRemoteApplyTime()
+            lastOnlineSceneApplyTime = 0
+        }
+        #if DEBUG
+        print("[PERF] activity: \(activity.label) (vis=\(currentVisibilityState.label))")
+        #endif
+    }
+
+    private func refreshDiagnosticHz(now: TimeInterval) {
+        guard now - diagLastResetTime >= 1.0 else { return }
+        let elapsed = max(now - diagLastResetTime, 0.001)
+        diagLastComputedHz = (
+            out: Double(diagSnapshotOutCount) / elapsed,
+            rx: Double(diagSnapshotInCount) / elapsed,
+            sceneApply: Double(diagSceneApplyCount) / elapsed,
+            renderFPS: Double(diagRenderFrameCount) / elapsed
+        )
+        diagSnapshotOutCount = 0
+        diagSnapshotInCount = 0
+        diagSceneApplyCount = 0
+        diagRenderFrameCount = 0
+        diagLastResetTime = now
+    }
+
+    func canUseControlModule(_ module: ControlModule) -> Bool {
+        guard let onlineRuntimeContext else { return true }
+
+        switch module {
+        case .flightOps, .uavCatalog, .diagnostics:
+            return LANRuntimeRolePolicy.canControlVehicle(context: onlineRuntimeContext)
+        case .scenario:
+            return LANRuntimeRolePolicy.canUseScenarioAdmin(context: onlineRuntimeContext)
+        case .camera:
+            return true
+        }
+    }
+
+    var shouldPromptBeforeExit: Bool {
+        !simulationRunMode.isOnlineTrial
+    }
+
     var availableCameraModes: [CameraMode] {
+        if isSpectatorMode {
+            return [.spectator]
+        }
+
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
             modes.append(.payload)
@@ -738,6 +910,19 @@ final class DroneSimulationViewModel: ObservableObject {
     private var collisionDebugAccumulator: Float = 0.0
     private var lastCollisionDebugEnabled: Bool = false
     private var autosaveAccumulator: Float = 0.0
+    private var onlineSnapshotSequenceNumber: UInt64 = 0
+    private var lastOnlineSnapshotSentAt: TimeInterval = 0
+    private var lastOnlineSnapshotCleanupAt: TimeInterval = 0
+    private var onlineSnapshotSendInterval: TimeInterval { performancePolicy.snapshotSendInterval }
+    private weak var onlineSnapshotTransport: OnlineTrialSnapshotTransport?
+    // P2P v1.2: owner-side collision detection + shared event submission.
+    private weak var onlineSharedEventTransport: OnlineSharedEventTransport?
+    private let localCollisionDetector = OnlineLocalCollisionDetector()
+    private var recentLocalCollisionPairKeys: [String: TimeInterval] = [:]
+    private let localCollisionEventCooldownSeconds: TimeInterval = 2.0
+    // v1.4: grace period prevents spawn-overlap collision events at trial start.
+    private var onlineTrialStartedAt: TimeInterval? = nil
+    private let onlineCollisionGracePeriodSeconds: TimeInterval = 3.0
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var resolvedInputState: ResolvedControlState = .neutral
@@ -1031,17 +1216,30 @@ final class DroneSimulationViewModel: ObservableObject {
         remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
         initialProjectName: String? = nil,
-        launchConfiguration: SimulationLaunchConfiguration? = nil
+        launchConfiguration: SimulationLaunchConfiguration? = nil,
+        simulationRunMode: SimulationRunMode = .singlePlayer,
+        onlineSessionConfig: OnlineTrialSessionConfig? = nil,
+        localOnlineParticipant: LocalOnlineParticipant? = nil,
+        onlineRuntimeContext: OnlineTrialRuntimeContext? = nil,
+        onlineSnapshotTransport: OnlineTrialSnapshotTransport? = nil,
+        onlineSharedEventTransport: OnlineSharedEventTransport? = nil
     ) {
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
         self.controllerSettingsStore = controllerSettingsStore
+        self.simulationRunMode = simulationRunMode
+        self.onlineSessionConfig = onlineSessionConfig
+        self.localOnlineParticipant = localOnlineParticipant
+        self.onlineRuntimeContext = onlineRuntimeContext
+        self.onlineFleetState = nil
+        self.onlineSnapshotTransport = onlineSnapshotTransport
+        self.onlineSharedEventTransport = onlineSharedEventTransport
         let gameControllerInputProvider = GameControllerInputProvider(
             settingsStore: controllerSettingsStore
         )
         self.controllerUIBridge = ControllerUIBridge(settingsStore: controllerSettingsStore)
         self.gameControllerInputProvider = gameControllerInputProvider
-        let remoteTransport = NetworkRemoteHost(port: remoteHostPort)
+        let remoteTransport: RemoteTransport? = simulationRunMode.isOnlineTrial ? nil : NetworkRemoteHost(port: remoteHostPort)
         let remoteInputProvider = RemoteInputProvider(transport: remoteTransport)
         self.remoteInputProvider = remoteInputProvider
         self.inputManager = InputManager(
@@ -1110,12 +1308,12 @@ final class DroneSimulationViewModel: ObservableObject {
         let createdID = initialProjectID ?? projectStorage.createProjectID()
         self.currentProjectID = createdID
         self.currentProjectName = initialProjectName ?? projectStorage.defaultProjectName()
-        self.hasUnsavedChanges = true
+        self.hasUnsavedChanges = !simulationRunMode.isOnlineTrial
 
         self.weather = .normal
         self.terrain = .default
         self.cameraConfiguration = CameraConfiguration(
-            mode: .follow,
+            mode: simulationRunMode.isSpectator ? .spectator : .follow,
             fov: selectedProfile.cameraPreset.fpvFov,
             sensitivity: 1.0,
             smoothing: 0.72,
@@ -1180,12 +1378,12 @@ final class DroneSimulationViewModel: ObservableObject {
         self.collisionDebugEnabled = false
         self.showBatteryDepletedDialog = false
         self.diagnosticMode = .normal
-        self.isToolPanelVisible = true
+        self.isToolPanelVisible = !simulationRunMode.isSpectator
         self.isParametersPanelVisible = false
         self.activeControlModule = nil
         self.isPayloadPanelVisible = false
         self.isBoundaryBarrierVisible = false
-        self.isCompactTelemetryHUDEnabled = true
+        self.isCompactTelemetryHUDEnabled = !simulationRunMode.isSpectator
         self.telemetryExportAlert = nil
         self.keyBindingSections = []
         self.keyBindingConflicts = []
@@ -1270,6 +1468,12 @@ final class DroneSimulationViewModel: ObservableObject {
         if let mountedCADPayload {
             sceneController.attachMountedCADPayload(mountedCADPayload)
         }
+        if simulationRunMode.isSpectator {
+            sceneController.configureSpectatorRuntime(camera: cameraConfiguration)
+        }
+        if let onlineRuntimeContext {
+            configureOnlineTrial(onlineRuntimeContext)
+        }
         refreshPayloadCameraStatus()
 
         homePosition = currentSpawnPoint()
@@ -1298,6 +1502,280 @@ final class DroneSimulationViewModel: ObservableObject {
         telemetryExporter.finalizeSession()
     }
 
+    func stopRuntimeForExit() {
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+        keyboardInputService.stop()
+        inputManager.reset()
+        sceneController.configureOnlineTrialPlaceholders(nil)
+        onlineFleetState = nil
+        onlineAuthorityRegistry = nil
+        onlineDamageState = OnlineVehicleDamageState()
+        onlineRemoteSnapshotState = OnlineRemoteVehicleSnapshotState()
+        recentLocalCollisionPairKeys = [:]
+        onlineTrialStartedAt = nil
+        onlineSharedEventTransport = nil
+        onlineInterpolationStore = OnlineVehicleInterpolationStore()
+        onlineInterpolatedRemoteStates = []
+        onlineSnapshotTransport = nil
+        isSimulationRunning = false
+    }
+
+    func configureOnlineTrial(
+        _ context: OnlineTrialRuntimeContext,
+        snapshotTransport: OnlineTrialSnapshotTransport? = nil,
+        sharedEventTransport: OnlineSharedEventTransport? = nil
+    ) {
+        onlineRuntimeContext = context
+        onlineAuthorityRegistry = context.makeInitialAuthorityRegistry()
+        if let snapshotTransport {
+            onlineSnapshotTransport = snapshotTransport
+        }
+        if let sharedEventTransport {
+            onlineSharedEventTransport = sharedEventTransport
+        }
+
+        // v1.4: reset damage so new trial never inherits a previous DAMAGED state.
+        onlineDamageState = OnlineVehicleDamageState()
+
+        let fleetState = OnlineTrialFleetState(
+            localParticipantID: context.localParticipant.id,
+            localVehicleID: context.localVehicleID,
+            vehicles: context.vehicleSlots
+        )
+        onlineFleetState = fleetState
+        sceneController.configureOnlineTrialPlaceholders(fleetState)
+
+        // v1.4: spawn local pilot UAV at its assigned slot position.
+        if let slot = context.localVehicleSlot {
+            let spawnPosition = OnlineTrialSpawnLayout.position(for: slot.spawnIndex)
+            state.position = spawnPosition
+            homePosition = spawnPosition
+            #if DEBUG
+            print("[LAN] online spawn local vehicle=\(slot.vehicleID) spawnIndex=\(slot.spawnIndex) position=\(spawnPosition)")
+            #endif
+        }
+
+        // v1.4: record start time for collision grace period.
+        onlineTrialStartedAt = Date().timeIntervalSince1970
+
+        if context.isLocalSpectator {
+            isToolPanelVisible = false
+            isParametersPanelVisible = false
+            activeControlModule = nil
+            isPayloadPanelVisible = false
+            cameraConfiguration.mode = .spectator
+            sceneController.configureSpectatorRuntime(camera: cameraConfiguration)
+            inputManager.reset()
+            keyboardInputService.resetTransientState()
+        }
+    }
+
+    func configureOnlineSnapshotTransport(_ transport: OnlineTrialSnapshotTransport?) {
+        onlineSnapshotTransport = transport
+    }
+
+    func applyOnlineRemoteSnapshotState(_ state: OnlineRemoteVehicleSnapshotState) {
+        guard let onlineRuntimeContext else {
+            return
+        }
+
+        var filteredState = OnlineRemoteVehicleSnapshotState()
+        for snapshot in state.snapshots {
+            filteredState.apply(
+                snapshot,
+                ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID
+            )
+        }
+
+        guard onlineRemoteSnapshotState != filteredState else { return }
+
+        onlineRemoteSnapshotState = filteredState
+        diagSnapshotInCount += filteredState.snapshots.count
+        // Feed into interpolation buffer. Use local receive time so clock skew between sender
+        // and receiver does not corrupt the interpolation timeline (v1.4.3 fix).
+        onlineInterpolationStore.apply(
+            filteredState,
+            ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID,
+            receivedAt: CACurrentMediaTime()
+        )
+    }
+
+    private func updateOnlineInterpolatedRemoteStates(now: TimeInterval) {
+        guard onlineRuntimeContext != nil else { return }
+        onlineInterpolationStore.removeStaleSnapshots(olderThan: 2.0, now: now)
+        let states = onlineInterpolationStore.interpolatedStates(now: now)
+
+        // Rate-gate scene node writes by activity-state-driven remoteSceneApplyInterval.
+        // Skip entirely when rendering is paused.
+        if !performancePolicy.stopRendering,
+           now - lastOnlineSceneApplyTime >= performancePolicy.remoteSceneApplyInterval {
+            sceneController.applyOnlineInterpolatedRemoteStates(states)
+            lastOnlineSceneApplyTime = now
+            diagSceneApplyCount += 1
+        }
+
+        // Throttle @Published update by overlayPublishInterval (min 0.25 s).
+        // Presence changes (UAV appears / disappears) always publish immediately.
+        let presenceChanged = states.isEmpty != onlineInterpolatedRemoteStates.isEmpty
+            || states.count != onlineInterpolatedRemoteStates.count
+        let publishInterval = max(0.25, performancePolicy.overlayPublishInterval)
+        if presenceChanged || now - lastRemoteStatesPublishTime >= publishInterval {
+            lastRemoteStatesPublishTime = now
+            onlineInterpolatedRemoteStates = states
+        }
+    }
+
+    #if DEBUG
+    func injectDebugRemoteSnapshot() {
+        let fakeVehicleID = UUID()
+        let snapshot = OnlineVehicleStateSnapshot(
+            sequenceNumber: 1,
+            vehicleID: fakeVehicleID,
+            participantID: UUID(),
+            participantName: "DEBUG Ghost",
+            timestamp: Date().timeIntervalSince1970,
+            pose: OnlineVehiclePose(positionX: 5.0, positionY: 2.5, positionZ: 5.0, yaw: 0, pitch: 0, roll: 0),
+            kinematics: .zero,
+            isArmed: true,
+            flightModeLabel: "manual"
+        )
+        var state = OnlineRemoteVehicleSnapshotState()
+        state.apply(snapshot, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID)
+        onlineInterpolationStore.apply(state, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID, receivedAt: CACurrentMediaTime())
+    }
+    #endif
+
+    private func publishOnlineVehicleSnapshotIfNeeded(now: TimeInterval) {
+        guard let context = onlineRuntimeContext,
+              context.role == .pilot,
+              let localVehicleID = context.localVehicleID,
+              isSimulationRunning,
+              now - lastOnlineSnapshotSentAt >= onlineSnapshotSendInterval else {
+            return
+        }
+        // P2P v1.1: only the participant with local object authority publishes
+        // simulation snapshots for that object.
+        guard onlineAuthorityRegistry?.hasLocalAuthority(objectID: localVehicleID) != false else {
+            return
+        }
+
+        onlineSnapshotSequenceNumber &+= 1
+        lastOnlineSnapshotSentAt = now
+
+        // P2P 0.8: snapshot publishing mirrors the local pilot vehicle only.
+        // It is not authoritative network physics.
+        let snapshot = OnlineVehicleStateSnapshot(
+            sequenceNumber: onlineSnapshotSequenceNumber,
+            vehicleID: localVehicleID,
+            participantID: context.localParticipant.id,
+            participantName: context.localParticipant.displayName,
+            pose: OnlineVehiclePose(
+                positionX: Double(state.position.x),
+                positionY: Double(state.position.y),
+                positionZ: Double(state.position.z),
+                yaw: Double(state.orientation.z),
+                pitch: Double(state.orientation.y),
+                roll: Double(state.orientation.x)
+            ),
+            kinematics: OnlineVehicleKinematics(
+                velocityX: Double(state.velocity.x),
+                velocityY: Double(state.velocity.y),
+                velocityZ: Double(state.velocity.z),
+                speedMetersPerSecond: Double(simd_length(state.velocity)),
+                altitudeMeters: Double(max(0.0, state.position.y))
+            ),
+            isArmed: isArmed,
+            flightModeLabel: mode.rawValue
+        )
+        onlineSnapshotTransport?.sendVehicleSnapshot(snapshot)
+        diagSnapshotOutCount += 1
+        emitLocalCollisionEventsIfNeeded(localSnapshot: snapshot, now: now)
+    }
+
+    // P2P v1.2: authority owner detects collision against remote replicas and submits
+    // an OnlineSharedEvent. Host does NOT detect collision from snapshots.
+    private func emitLocalCollisionEventsIfNeeded(
+        localSnapshot: OnlineVehicleStateSnapshot,
+        now: TimeInterval
+    ) {
+        guard let context = onlineRuntimeContext,
+              context.localHasVehicleAuthority,
+              let localVehicleID = context.localVehicleID,
+              localSnapshot.vehicleID == localVehicleID,
+              !onlineDamageState.isControlDisabled(vehicleID: localVehicleID),
+              let sessionID = context.launchDescriptor.id as UUID? else { return }
+
+        // v1.4: skip collision detection during grace period to avoid spawn-overlap false positives.
+        if let startedAt = onlineTrialStartedAt,
+           now - startedAt < onlineCollisionGracePeriodSeconds { return }
+
+        // Only collide against replicas with fresh receiver-local snapshot data.
+        // Stale replicas (>350 ms) may be frozen at a position that no longer reflects
+        // the remote UAV's actual location, causing false collision events.
+        let freshRemoteStates = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < 0.35 }
+        let candidates = localCollisionDetector.detect(
+            localSnapshot: localSnapshot,
+            remoteStates: freshRemoteStates
+        )
+
+        for candidate in candidates {
+            let pairKey = [
+                candidate.localVehicleID.uuidString,
+                candidate.remoteVehicleID.uuidString
+            ].sorted().joined(separator: ":")
+
+            if let lastTime = recentLocalCollisionPairKeys[pairKey],
+               now - lastTime < localCollisionEventCooldownSeconds { continue }
+
+            let result = localCollisionDetector.result(for: candidate.relativeSpeedMetersPerSecond)
+            guard result != .ignored else { continue }
+
+            recentLocalCollisionPairKeys[pairKey] = now
+
+            let event = OnlineSharedEvent(
+                sessionID: sessionID,
+                kind: .vehicleCollision,
+                reporterParticipantID: context.localParticipant.id,
+                reporterObjectID: localVehicleID,
+                pairKey: pairKey,
+                positionX: candidate.positionX,
+                positionY: candidate.positionY,
+                positionZ: candidate.positionZ,
+                result: result,
+                participants: [
+                    OnlineSharedEventParticipant(
+                        objectID: candidate.localVehicleID,
+                        objectKind: .vehicle,
+                        ownerParticipantID: context.localParticipant.id,
+                        ownerVehicleID: candidate.localVehicleID,
+                        displayName: context.localParticipant.displayName
+                    ),
+                    OnlineSharedEventParticipant(
+                        objectID: candidate.remoteVehicleID,
+                        objectKind: .vehicle,
+                        ownerParticipantID: candidate.remoteParticipantID,
+                        ownerVehicleID: candidate.remoteVehicleID,
+                        displayName: candidate.remoteParticipantName
+                    )
+                ]
+            )
+            onlineSharedEventTransport?.submitSharedEvent(event)
+        }
+    }
+
+    private func cleanupOnlineRemoteSnapshotsIfNeeded(now: TimeInterval) {
+        guard onlineRuntimeContext != nil,
+              now - lastOnlineSnapshotCleanupAt >= 0.5 else {
+            return
+        }
+
+        lastOnlineSnapshotCleanupAt = now
+        var snapshotState = onlineRemoteSnapshotState
+        snapshotState.removeStaleSnapshots(olderThan: 2.0)
+        applyOnlineRemoteSnapshotState(snapshotState)
+    }
+
     // MARK: - Controls
 
     func injectMockRemotePacket(_ packet: RemoteControlPacket) {
@@ -1305,34 +1783,42 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setX(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.x = value }, markManual: true, fixedWingManualOverrideAxes: .all)
     }
 
     func setY(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.y = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setZ(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.z = value }, markManual: true, fixedWingManualOverrideAxes: .all)
     }
 
     func setRoll(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.roll = value }, markManual: true, fixedWingManualOverrideAxes: .turn)
     }
 
     func setPitch(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.pitch = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setYaw(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.yaw = value }, markManual: true, fixedWingManualOverrideAxes: .turn)
     }
 
     func setThrottle(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         updateControlValues({ $0.throttle = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
     }
 
     func setPayloadType(_ type: PayloadType) {
+        guard canControlLocalVehicle else { return }
         guard payloadDraftConfiguration.payloadType != type else {
             return
         }
@@ -1350,6 +1836,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadMass(_ value: Double) {
+        guard canControlLocalVehicle else { return }
         let clamped = Float(max(0.0, min(value, 5000.0)))
         guard abs(payloadDraftConfiguration.payloadMass - clamped) > 0.0001 else {
             return
@@ -1363,6 +1850,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setPayloadCustomName(_ value: String) {
+        guard canControlLocalVehicle else { return }
         guard payloadDraftConfiguration.customName != value else {
             return
         }
@@ -1375,6 +1863,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func attachPayload() {
+        guard canControlLocalVehicle else { return }
         let capabilityCheck = PayloadController.capabilityCheck(
             for: payloadDraftConfiguration,
             profile: activeUAVProfile
@@ -1405,6 +1894,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func removePayload() {
+        guard canControlLocalVehicle else { return }
         guard installedPayloadConfiguration != nil || payloadState == .attached else {
             return
         }
@@ -1430,6 +1920,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func releasePayload() {
+        guard canControlLocalVehicle else { return }
         guard installedPayloadConfiguration != nil, payloadState == .attached else {
             payloadStatusMessageKey = "payload.message.no_payload_attached"
             refreshPayloadRuntimeState()
@@ -1472,6 +1963,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func arm() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         guard physicalState.permitsRearm, !damageState.isFlightCritical else {
             return
@@ -1489,6 +1981,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func disarm(forceEmergency: Bool = false, preserveCrashDynamics: Bool = false) {
+        guard canControlLocalVehicle else { return }
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_disarmed")
         isArmed = false
@@ -1679,6 +2172,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func takeoff() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         guard isArmed else {
             return
@@ -1715,6 +2209,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func land() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_landing")
@@ -1740,6 +2235,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func hover() {
+        guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_hover")
@@ -1823,7 +2319,7 @@ final class DroneSimulationViewModel: ObservableObject {
     func setControlPanelVisible(_ visible: Bool) {
         if visible {
             if activeControlModule == nil {
-                activeControlModule = lastSidebarModule
+                activeControlModule = canUseControlModule(lastSidebarModule) ? lastSidebarModule : .camera
             }
             isParametersPanelVisible = activeControlModule != nil
         } else {
@@ -1832,6 +2328,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setActiveControlModule(_ module: ControlModule?) {
+        if let module, !canUseControlModule(module) {
+            return
+        }
         if let activeControlModule {
             lastSidebarModule = activeControlModule
         }
@@ -1848,10 +2347,12 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func togglePayloadPanel() {
+        guard canControlLocalVehicle else { return }
         isPayloadPanelVisible.toggle()
     }
 
     func setPayloadPanelVisible(_ visible: Bool) {
+        guard canControlLocalVehicle || !visible else { return }
         isPayloadPanelVisible = visible
     }
 
@@ -2471,6 +2972,7 @@ final class DroneSimulationViewModel: ObservableObject {
     // MARK: - Drone models
 
     func selectDroneModel(id: String) {
+        guard canControlLocalVehicle else { return }
         let canonicalID = LIPODroneModelRepository.canonicalModelID(id)
         guard let profile = availableDroneProfiles.first(where: { $0.id == canonicalID }) else {
             return
@@ -2552,6 +3054,10 @@ final class DroneSimulationViewModel: ObservableObject {
     // MARK: - Camera
 
     func setCameraMode(_ mode: CameraMode) {
+        if isSpectatorMode {
+            guard mode == .spectator else { return }
+        }
+
         let oldMode = cameraConfiguration.mode
         guard oldMode != mode else {
             refreshPayloadCameraStatus()
@@ -2574,6 +3080,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func cycleCameraMode() {
+        guard !isSpectatorMode else {
+            return
+        }
+
         let oldMode = cameraConfiguration.mode
         if oldMode == .payload {
             payloadCameraController.leavePayloadViewManually()
@@ -2766,6 +3276,17 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
+        noteUserInteraction()
+        if isSpectatorMode {
+            sceneController.applySpectatorLook(
+                yawDeltaDeg: deltaX * 0.08 * cameraConfiguration.effectiveLookSensitivity,
+                pitchDeltaDeg: deltaY * 0.08 * cameraConfiguration.effectiveLookSensitivity,
+                invertX: cameraConfiguration.invertLookX,
+                invertY: cameraConfiguration.invertLookY
+            )
+            return
+        }
+
         guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             return
         }
@@ -2779,6 +3300,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handleSceneRenderFrame(atTime time: TimeInterval, cameraMode: CameraMode) {
+        diagRenderFrameCount += 1
         sceneController.updatePayloadCameraForRenderFrame(
             atTime: time,
             isActive: cameraMode == .payload
@@ -2802,7 +3324,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var supportsDistanceControl: Bool {
-        cameraConfiguration.mode != .fpv && cameraConfiguration.mode != .payload
+        cameraConfiguration.mode != .fpv &&
+            cameraConfiguration.mode != .payload &&
+            cameraConfiguration.mode != .spectator
     }
 
     var activeCameraDistance: Double {
@@ -2822,6 +3346,8 @@ final class DroneSimulationViewModel: ObservableObject {
         case .fpv:
             return 0.0...0.0
         case .payload:
+            return 0.0...0.0
+        case .spectator:
             return 0.0...0.0
         }
     }
@@ -3167,10 +3693,43 @@ final class DroneSimulationViewModel: ObservableObject {
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
+
+        // v1.4.6: drive interacting → activeIdle transition (key window, no input for 1 s).
+        // The reverse (activeIdle → interacting) is triggered immediately by noteUserInteraction().
+        if currentVisibilityState == .activeVisible,
+           performancePolicy.activityState == .interacting,
+           now - lastUserInteractionAt >= 1.0 {
+            refreshActivityPolicy(now: now)
+        }
+
+        // v1.4.3+: when throttled, run only 1 in N full ticks. Online work is split:
+        //   • stopRendering=false (inactive): scene interpolation runs on skip ticks too so
+        //     remote replicas stay smooth between 30 Hz full ticks.
+        //   • stopRendering=true (minimized/hidden): skip-ticks do nothing but TX rate-check;
+        //     full tick (5 Hz) handles cleanup, interpolation, and scene apply.
+        if performancePolicy.isThrottled {
+            backgroundTickSkipCounter += 1
+            if backgroundTickSkipCounter < performancePolicy.backgroundTickDivisor {
+                if onlineRuntimeContext != nil {
+                    if !performancePolicy.stopRendering {
+                        cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
+                        updateOnlineInterpolatedRemoteStates(now: now)
+                    }
+                    publishOnlineVehicleSnapshotIfNeeded(now: now)
+                }
+                return
+            }
+            backgroundTickSkipCounter = 0
+        }
+
         guard let lastTimestamp else {
             self.lastTimestamp = now
             let resolvedInput = updateInputPipeline(deltaTime: 0.0)
             let controllerSnapshot = inputManager.snapshot(for: .gameController)
+            if isSpectatorMode {
+                updateSpectatorRuntime(deltaTime: 0.0)
+                return
+            }
             syncControllerInteractionMode()
             processControllerUIInput(
                 using: controllerResolvedControlState(from: controllerSnapshot),
@@ -3205,6 +3764,20 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
+        // Note interaction when UAV is actively flying (armed + moving) so the window
+        // doesn't transition to activeIdle while the pilot's drone is still in flight.
+        if currentVisibilityState == .activeVisible, isArmed, simd_length(state.velocity) > 0.15 {
+            noteUserInteraction()
+        }
+        cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
+        refreshDiagnosticHz(now: now)
+        updateOnlineInterpolatedRemoteStates(now: now)
+        if isSpectatorMode {
+            if !performancePolicy.stopRendering {
+                updateSpectatorRuntime(deltaTime: dt)
+            }
+            return
+        }
         syncControllerInteractionMode()
         processControllerUIInput(
             using: controllerResolvedControlState(from: controllerSnapshot),
@@ -3220,14 +3793,16 @@ final class DroneSimulationViewModel: ObservableObject {
         guard isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
-            sceneController.update(
-                with: state,
-                camera: cameraConfiguration,
-                damage: damageState,
-                thermal: thermalState,
-                diagnosticMode: diagnosticMode,
-                deltaTime: 0.0
-            )
+            if !performancePolicy.stopRendering {
+                sceneController.update(
+                    with: state,
+                    camera: cameraConfiguration,
+                    damage: damageState,
+                    thermal: thermalState,
+                    diagnosticMode: diagnosticMode,
+                    deltaTime: 0.0
+                )
+            }
             refreshCompassOverlay()
             refreshPayloadCameraStatus()
             syncPayloadLifecycleEvents()
@@ -3388,29 +3963,33 @@ final class DroneSimulationViewModel: ObservableObject {
         sampleMissionObservationIfNeeded()
 
         let renderStart = CACurrentMediaTime()
-        sceneController.applyWeatherVisual(weather)
-        sceneController.update(
-            with: state,
-            camera: cameraConfiguration,
-            damage: damageState,
-            thermal: thermalState,
-            diagnosticMode: diagnosticMode,
-            deltaTime: dt
-        )
-        sceneController.updateFleetWingmen(
-            wingmen,
-            profile: selectedDroneProfile,
-            throttle: state.throttle,
-            deltaTime: dt
-        )
+        if !performancePolicy.stopRendering {
+            sceneController.applyWeatherVisual(weather)
+            sceneController.update(
+                with: state,
+                camera: cameraConfiguration,
+                damage: damageState,
+                thermal: thermalState,
+                diagnosticMode: diagnosticMode,
+                deltaTime: dt
+            )
+            sceneController.updateFleetWingmen(
+                wingmen,
+                profile: selectedDroneProfile,
+                throttle: state.throttle,
+                deltaTime: dt
+            )
+        }
         refreshCompassOverlay()
         refreshPayloadCameraStatus()
         syncPayloadLifecycleEvents()
+        publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 
         collisionDebugAccumulator += dt
         let collisionDebugStateChanged = (lastCollisionDebugEnabled != collisionDebugEnabled)
-        if (collisionDebugEnabled && collisionDebugAccumulator > 0.12) || collisionDebugStateChanged {
+        if !performancePolicy.stopRendering,
+           (collisionDebugEnabled && collisionDebugAccumulator > 0.12) || collisionDebugStateChanged {
             sceneController.updateCollisionDebug(risk: collisionAnalysis, enabled: collisionDebugEnabled)
             sceneController.updatePathDebug(
                 path: navigationSnapshot.waypoints,
@@ -3424,7 +4003,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         diagnosticsSamplingAccumulator += dt
-        if diagnosticsSamplingAccumulator >= 0.45 || cachedDiagnostics.activeObjectCount == 0 {
+        if !performancePolicy.stopRendering,
+           diagnosticsSamplingAccumulator >= 0.45 || cachedDiagnostics.activeObjectCount == 0 {
             let sceneStats = sceneController.sceneDiagnostics()
             let nextDiagnostics = SimulationDiagnostics(
                 frameTimeMs: (CACurrentMediaTime() - frameStart) * 1000.0,
@@ -3822,6 +4402,9 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float,
         controlState: ResolvedControlState
     ) {
+        guard canControlLocalVehicle else { return }
+        // P2P 0.7: existing DroneState represents the local pilot vehicle only
+        // until multi-state network physics is introduced.
         let inputState = buildFlightInputState(from: controlState)
         let routingContext = buildFlightControlRoutingContext()
         let route = flightControlRouter.route(
@@ -4250,6 +4833,8 @@ final class DroneSimulationViewModel: ObservableObject {
         case .fpv:
             cameraConfiguration.fov = (cameraConfiguration.fov + sign * 1.2).clamped(to: 30.0...110.0)
         case .payload:
+            return
+        case .spectator:
             return
         }
     }
@@ -5274,6 +5859,23 @@ final class DroneSimulationViewModel: ObservableObject {
         resolvedInputState = inputManager.currentState
         refreshGameControllerPresentation()
         return resolvedInputState
+    }
+
+    private func updateSpectatorRuntime(deltaTime: Float) {
+        guard isSpectatorMode else {
+            return
+        }
+
+        let keyboardSnapshot = keyboardInputService.currentInputSnapshot()
+        let axis = keyboardSnapshot.axisInput
+        let speedMultiplier: Float = axis.speedBoost ? 2.0 : 1.0
+        sceneController.moveSpectatorCamera(
+            forward: axis.forward,
+            strafe: axis.strafe,
+            deltaTime: deltaTime,
+            speed: cameraConfiguration.free.moveSpeed * speedMultiplier
+        )
+        sceneController.updateSpectatorRuntime(camera: cameraConfiguration)
     }
 
     private func controllerResolvedControlState(

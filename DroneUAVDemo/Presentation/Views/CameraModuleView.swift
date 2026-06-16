@@ -352,6 +352,8 @@ struct CameraModuleView: View {
             return "view.2d"
         case .payload:
             return "shippingbox"
+        case .spectator:
+            return "eye"
         }
     }
 

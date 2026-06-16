@@ -3,6 +3,11 @@ import simd
 
 struct SceneViewportView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
+    var trialPhase: LANTrialPhase = .running
+    var recentSharedEvents: [OnlineSharedEvent] = []
+    var onEndTrial: (() -> Void)? = nil
+    var onLeaveTrial: (() -> Void)? = nil
+    @StateObject private var tabObserver = TabKeyObserver()
 
     var body: some View {
         let overlayInset = viewModel.isParametersPanelVisible ? 18.0 : 12.0
@@ -14,6 +19,7 @@ struct SceneViewportView: View {
                 cameraMode: viewModel.cameraConfiguration.mode,
                 cameraSensitivity: viewModel.cameraConfiguration.sensitivity,
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
+                activityState: viewModel.performancePolicy.activityState,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },
@@ -23,7 +29,9 @@ struct SceneViewportView: View {
             )
             .ignoresSafeArea()
 
-            if !viewModel.isParametersPanelVisible || viewModel.isCompactTelemetryHUDEnabled {
+            if viewModel.isSpectatorMode {
+                EmptyView()
+            } else if !viewModel.isParametersPanelVisible || viewModel.isCompactTelemetryHUDEnabled {
                 CompactTelemetryHUDView(
                     telemetry: viewModel.telemetry,
                     warningKeys: viewModel.warnings
@@ -67,33 +75,86 @@ struct SceneViewportView: View {
             }
         }
         .overlay(alignment: .top) {
-            if viewModel.isCompassVisible {
+            if !viewModel.isSpectatorMode, viewModel.isCompassVisible {
                 CompassOverlayView(viewModel: viewModel.compassViewModel)
                     .padding(.top, 12)
             }
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
-                if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
-                    TerrainMapOverlayView(
-                        snapshot: viewModel.terrainMapSnapshot,
-                        telemetry: viewModel.telemetry,
-                        targetMarker: viewModel.targetMarkerState,
-                        dropZone: viewModel.missionPlanState.dropZone,
-                        onSelectTarget: { viewModel.setTargetMarker(at: $0) },
-                        onClearTarget: { viewModel.clearTargetMarker() }
+                if viewModel.onlineTrialContext != nil {
+                    OnlineTrialRuntimeOverlay(
+                        context: viewModel.onlineTrialContext,
+                        fleetState: viewModel.onlineFleetState,
+                        remoteStates: viewModel.onlineInterpolatedRemoteStates,
+                        snapshotTargetHz: 10,
+                        isExpanded: tabObserver.isTabHeld,
+                        trialPhase: trialPhase,
+                        participantCount: viewModel.onlineTrialContext?.launchDescriptor.assignments.count ?? 0,
+                        staleCount: viewModel.onlineTrialStaleRemoteCount,
+                        damageState: viewModel.onlineDamageState,
+                        recentSharedEvents: recentSharedEvents,
+                        diagnostics: viewModel.onlineRuntimeDiagnostics,
+                        onEndTrial: onEndTrial,
+                        onLeaveTrial: onLeaveTrial
                     )
+                    .animation(.easeInOut(duration: 0.12), value: tabObserver.isTabHeld)
                 }
 
-                if viewModel.cameraConfiguration.mode == .payload, viewModel.payloadCameraStatus.isActive {
-                    PayloadCameraStatusOverlayView(status: viewModel.payloadCameraStatus)
+                if !viewModel.isSpectatorMode {
+                    if viewModel.isTerrainMapVisible, !viewModel.isMissionMapVisible {
+                        TerrainMapOverlayView(
+                            snapshot: viewModel.terrainMapSnapshot,
+                            telemetry: viewModel.telemetry,
+                            targetMarker: viewModel.targetMarkerState,
+                            dropZone: viewModel.missionPlanState.dropZone,
+                            onSelectTarget: { viewModel.setTargetMarker(at: $0) },
+                            onClearTarget: { viewModel.clearTargetMarker() }
+                        )
+                    }
+
+                    if viewModel.cameraConfiguration.mode == .payload, viewModel.payloadCameraStatus.isActive {
+                        PayloadCameraStatusOverlayView(status: viewModel.payloadCameraStatus)
+                    }
                 }
             }
             .padding(.top, 12)
             .padding(.trailing, 12)
         }
         .background(Color.black)
+        .onAppear { tabObserver.start(viewModel: viewModel) }
+        .onDisappear { tabObserver.stop() }
     }
+}
+
+// MARK: – Tab-hold key observer for the online detail panel
+
+private final class TabKeyObserver: ObservableObject {
+    @Published var isTabHeld = false
+    private var monitor: Any?
+
+    func start(viewModel: DroneSimulationViewModel) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self, weak viewModel] event in
+            guard let self, viewModel?.onlineTrialContext != nil else { return event }
+            guard event.keyCode == 48 else { return event } // Tab
+            if event.type == .keyDown, !event.isARepeat {
+                self.isTabHeld = true
+                return nil
+            } else if event.type == .keyUp {
+                self.isTabHeld = false
+                return nil
+            }
+            return event
+        }
+    }
+
+    func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        isTabHeld = false
+    }
+
+    deinit { stop() }
 }
 
 private struct PayloadCameraStatusOverlayView: View {

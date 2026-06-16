@@ -41,6 +41,7 @@
 		10000000000000000000021F /* DroneFleetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011F /* DroneFleetManager.swift */; };
 		100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000120 /* DroneSceneViewRepresentable.swift */; };
 		100000000000000000000221 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000121 /* AppLanguage.swift */; };
+		1000000000000000000003A2 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000003A1 /* L10n.swift */; };
 		100000000000000000000222 /* AutoPathPlannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000122 /* AutoPathPlannerService.swift */; };
 		100000000000000000000223 /* AbstractModelEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000123 /* AbstractModelEditorView.swift */; };
 		100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000124 /* CompactTelemetryHUDView.swift */; };
@@ -54,6 +55,7 @@
 		10000000000000000000022D /* UAVDimensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000130 /* UAVDimensions.swift */; };
 		10000000000000000000022E /* UAVProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000131 /* UAVProfile.swift */; };
 		10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000132 /* UAVReferenceCatalog.swift */; };
+		1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039F /* RuntimePerformancePolicy.swift */; };
 		100000000000000000000230 /* UAVVisualPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000133 /* UAVVisualPreset.swift */; };
 		100000000000000000000231 /* UAVVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000134 /* UAVVisualFactory.swift */; };
 		100000000000000000000232 /* UAVFilterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000135 /* UAVFilterState.swift */; };
@@ -232,6 +234,28 @@
 		100000000000000000000368 /* MountedCADPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000367 /* MountedCADPayload.swift */; };
 		10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000369 /* SimulationLaunchConfiguration.swift */; };
 		10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036B /* CADPayloadHandoffService.swift */; };
+		100000000000000000000370 /* LANSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000371 /* LANSessionModels.swift */; };
+		100000000000000000000372 /* LANRuntimeRolePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000373 /* LANRuntimeRolePolicy.swift */; };
+		100000000000000000000374 /* LANSessionMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000375 /* LANSessionMessage.swift */; };
+		100000000000000000000376 /* LANSessionTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000377 /* LANSessionTransport.swift */; };
+		100000000000000000000378 /* NetworkLANSessionTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000379 /* NetworkLANSessionTransport.swift */; };
+		10000000000000000000037A /* LANSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037B /* LANSessionViewModel.swift */; };
+		10000000000000000000037C /* LANOnlineTrialsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000037D /* LANOnlineTrialsView.swift */; };
+		100000000000000000000394 /* OnlineTrialRuntimeOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000393 /* OnlineTrialRuntimeOverlay.swift */; };
+		100000000000000000000382 /* OnlineTrialModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000381 /* OnlineTrialModels.swift */; };
+		100000000000000000000384 /* P2PSessionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000383 /* P2PSessionModels.swift */; };
+		100000000000000000000386 /* OnlineTrialRuntimeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000385 /* OnlineTrialRuntimeContext.swift */; };
+		100000000000000000000388 /* OnlineTrialFleetState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000387 /* OnlineTrialFleetState.swift */; };
+		100000000000000000000395 /* OnlineObjectAuthority.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000396 /* OnlineObjectAuthority.swift */; };
+		100000000000000000000397 /* OnlineCollisionEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000398 /* OnlineCollisionEvent.swift */; };
+		100000000000000000000399 /* OnlineVehicleDamageState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039A /* OnlineVehicleDamageState.swift */; };
+		10000000000000000000039B /* OnlineCollisionArbiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039C /* OnlineCollisionArbiter.swift */; };
+		10000000000000000000039D /* OnlineRuntimeNetworkDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039E /* OnlineRuntimeNetworkDiagnostics.swift */; };
+		10000000000000000000038A /* OnlineTrialVehiclePlaceholderNodeFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */; };
+		10000000000000000000038C /* OnlineVehicleStateSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */; };
+		100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */; };
+		10000000000000000000038E /* OnlineVehicleSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */; };
+		100000000000000000000390 /* OnlineTrialNetworkBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000038F /* OnlineTrialNetworkBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -270,6 +294,7 @@
 		10000000000000000000011F /* DroneFleetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFleetManager.swift; sourceTree = "<group>"; };
 		100000000000000000000120 /* DroneSceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneViewRepresentable.swift; sourceTree = "<group>"; };
 		100000000000000000000121 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		1000000000000000000003A1 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		100000000000000000000122 /* AutoPathPlannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPathPlannerService.swift; sourceTree = "<group>"; };
 		100000000000000000000123 /* AbstractModelEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbstractModelEditorView.swift; sourceTree = "<group>"; };
 		100000000000000000000124 /* CompactTelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactTelemetryHUDView.swift; sourceTree = "<group>"; };
@@ -284,6 +309,7 @@
 		100000000000000000000130 /* UAVDimensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVDimensions.swift; sourceTree = "<group>"; };
 		100000000000000000000131 /* UAVProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVProfile.swift; sourceTree = "<group>"; };
 		100000000000000000000132 /* UAVReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVReferenceCatalog.swift; sourceTree = "<group>"; };
+		10000000000000000000039F /* RuntimePerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimePerformancePolicy.swift; sourceTree = "<group>"; };
 		100000000000000000000133 /* UAVVisualPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualPreset.swift; sourceTree = "<group>"; };
 		100000000000000000000134 /* UAVVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualFactory.swift; sourceTree = "<group>"; };
 		100000000000000000000135 /* UAVFilterState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVFilterState.swift; sourceTree = "<group>"; };
@@ -463,6 +489,28 @@
 		100000000000000000000367 /* MountedCADPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountedCADPayload.swift; sourceTree = "<group>"; };
 		100000000000000000000369 /* SimulationLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationLaunchConfiguration.swift; sourceTree = "<group>"; };
 		10000000000000000000036B /* CADPayloadHandoffService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADPayloadHandoffService.swift; sourceTree = "<group>"; };
+		100000000000000000000371 /* LANSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionModels.swift; sourceTree = "<group>"; };
+		100000000000000000000373 /* LANRuntimeRolePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANRuntimeRolePolicy.swift; sourceTree = "<group>"; };
+		100000000000000000000375 /* LANSessionMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionMessage.swift; sourceTree = "<group>"; };
+		100000000000000000000377 /* LANSessionTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionTransport.swift; sourceTree = "<group>"; };
+		100000000000000000000379 /* NetworkLANSessionTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkLANSessionTransport.swift; sourceTree = "<group>"; };
+		10000000000000000000037B /* LANSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANSessionViewModel.swift; sourceTree = "<group>"; };
+		10000000000000000000037D /* LANOnlineTrialsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANOnlineTrialsView.swift; sourceTree = "<group>"; };
+		100000000000000000000393 /* OnlineTrialRuntimeOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialRuntimeOverlay.swift; sourceTree = "<group>"; };
+		100000000000000000000381 /* OnlineTrialModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialModels.swift; sourceTree = "<group>"; };
+		100000000000000000000383 /* P2PSessionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = P2PSessionModels.swift; sourceTree = "<group>"; };
+		100000000000000000000385 /* OnlineTrialRuntimeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialRuntimeContext.swift; sourceTree = "<group>"; };
+		100000000000000000000387 /* OnlineTrialFleetState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialFleetState.swift; sourceTree = "<group>"; };
+		100000000000000000000396 /* OnlineObjectAuthority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineObjectAuthority.swift; sourceTree = "<group>"; };
+		100000000000000000000398 /* OnlineCollisionEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineCollisionEvent.swift; sourceTree = "<group>"; };
+		10000000000000000000039A /* OnlineVehicleDamageState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleDamageState.swift; sourceTree = "<group>"; };
+		10000000000000000000039C /* OnlineCollisionArbiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineCollisionArbiter.swift; sourceTree = "<group>"; };
+		10000000000000000000039E /* OnlineRuntimeNetworkDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineRuntimeNetworkDiagnostics.swift; sourceTree = "<group>"; };
+		100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialVehiclePlaceholderNodeFactory.swift; sourceTree = "<group>"; };
+		10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleStateSnapshot.swift; sourceTree = "<group>"; };
+		10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotStore.swift; sourceTree = "<group>"; };
+		100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotInterpolator.swift; sourceTree = "<group>"; };
+		10000000000000000000038F /* OnlineTrialNetworkBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialNetworkBridge.swift; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -514,7 +562,10 @@
 			isa = PBXGroup;
 			children = (
 				10000000000000000000035E /* CADBridge */,
+				10000000000000000000037E /* Networking */,
+				100000000000000000000380 /* OnlineTrials */,
 				100000000000000000000121 /* AppLanguage.swift */,
+				1000000000000000000003A1 /* L10n.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
 				100000000000000000000113 /* CameraConfiguration.swift */,
@@ -573,6 +624,7 @@
 				10000000000000000000012F /* UAVPayloadCapabilityMode.swift */,
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
+				10000000000000000000039F /* RuntimePerformancePolicy.swift */,
 				100000000000000000000137 /* UAVSelectionState.swift */,
 				10000000000000000000012E /* UAVSpecConfidence.swift */,
 				100000000000000000000148 /* UAVFlightTuningProfile.swift */,
@@ -668,6 +720,7 @@
 				10000000000000000000010D /* SceneFactory.swift */,
 				10000000000000000000011D /* ScenePopulationService.swift */,
 				100000000000000000000134 /* UAVVisualFactory.swift */,
+				100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */,
 				1000000000000000000002DE /* MissionReplaySceneController.swift */,
 			);
 			path = Scene;
@@ -702,6 +755,8 @@
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
+				10000000000000000000037D /* LANOnlineTrialsView.swift */,
+				100000000000000000000393 /* OnlineTrialRuntimeOverlay.swift */,
 				100000000000000000000197 /* MissionDebriefView.swift */,
 				100000000000000000000159 /* MissionMapView.swift */,
 				10000000000000000000016F /* MissionDraftPanel.swift */,
@@ -739,6 +794,7 @@
 				100000000000000000000153 /* CompassViewModel.swift */,
 				1000000000000000000002AE /* BindingsViewModel.swift */,
 				100000000000000000000105 /* DroneSimulationViewModel.swift */,
+				10000000000000000000037B /* LANSessionViewModel.swift */,
 				1000000000000000000002D3 /* ReplayLibraryViewModel.swift */,
 				10000000000000000000034F /* LegalAgreementViewModel.swift */,
 			);
@@ -783,7 +839,11 @@
 			isa = PBXGroup;
 			children = (
 				1000000000000000000001A7 /* NetworkRemoteHost.swift */,
+				100000000000000000000379 /* NetworkLANSessionTransport.swift */,
 				1000000000000000000001A5 /* MockRemoteTransport.swift */,
+				100000000000000000000383 /* P2PSessionModels.swift */,
+				100000000000000000000375 /* LANSessionMessage.swift */,
+				100000000000000000000377 /* LANSessionTransport.swift */,
 				1000000000000000000001A3 /* RemoteControlPacket.swift */,
 				1000000000000000000001A6 /* RemotePacketDecoder.swift */,
 				1000000000000000000001A4 /* RemoteTransport.swift */,
@@ -813,6 +873,34 @@
 				10000000000000000000035D /* CADMassPropertiesImport.swift */,
 			);
 			path = CADBridge;
+			sourceTree = "<group>";
+		};
+		10000000000000000000037E /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000371 /* LANSessionModels.swift */,
+				100000000000000000000373 /* LANRuntimeRolePolicy.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		100000000000000000000380 /* OnlineTrials */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000381 /* OnlineTrialModels.swift */,
+				100000000000000000000385 /* OnlineTrialRuntimeContext.swift */,
+				100000000000000000000387 /* OnlineTrialFleetState.swift */,
+				100000000000000000000396 /* OnlineObjectAuthority.swift */,
+				100000000000000000000398 /* OnlineCollisionEvent.swift */,
+				10000000000000000000039A /* OnlineVehicleDamageState.swift */,
+				10000000000000000000039C /* OnlineCollisionArbiter.swift */,
+				10000000000000000000039E /* OnlineRuntimeNetworkDiagnostics.swift */,
+				10000000000000000000038B /* OnlineVehicleStateSnapshot.swift */,
+				10000000000000000000038D /* OnlineVehicleSnapshotStore.swift */,
+				10000000000000000000038F /* OnlineTrialNetworkBridge.swift */,
+				100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */,
+			);
+			path = OnlineTrials;
 			sourceTree = "<group>";
 		};
 		C6CCCC242F87BA77008CAEB7 /* Frameworks */ = {
@@ -958,6 +1046,7 @@
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
 				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
 				100000000000000000000221 /* AppLanguage.swift in Sources */,
+				1000000000000000000003A2 /* L10n.swift in Sources */,
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
 				10000000000000000000024F /* AutoNavigationController.swift in Sources */,
 				100000000000000000000223 /* AbstractModelEditorView.swift in Sources */,
@@ -1007,6 +1096,7 @@
 				10000000000000000000022D /* UAVDimensions.swift in Sources */,
 				10000000000000000000022E /* UAVProfile.swift in Sources */,
 				10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */,
+				1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */,
 				100000000000000000000230 /* UAVVisualPreset.swift in Sources */,
 				100000000000000000000231 /* UAVVisualFactory.swift in Sources */,
 				100000000000000000000232 /* UAVFilterState.swift in Sources */,
@@ -1116,6 +1206,28 @@
 				100000000000000000000368 /* MountedCADPayload.swift in Sources */,
 				10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */,
 				10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */,
+				100000000000000000000370 /* LANSessionModels.swift in Sources */,
+				100000000000000000000372 /* LANRuntimeRolePolicy.swift in Sources */,
+				100000000000000000000374 /* LANSessionMessage.swift in Sources */,
+				100000000000000000000376 /* LANSessionTransport.swift in Sources */,
+				100000000000000000000378 /* NetworkLANSessionTransport.swift in Sources */,
+				10000000000000000000037A /* LANSessionViewModel.swift in Sources */,
+				10000000000000000000037C /* LANOnlineTrialsView.swift in Sources */,
+				100000000000000000000394 /* OnlineTrialRuntimeOverlay.swift in Sources */,
+				100000000000000000000382 /* OnlineTrialModels.swift in Sources */,
+				100000000000000000000384 /* P2PSessionModels.swift in Sources */,
+				100000000000000000000386 /* OnlineTrialRuntimeContext.swift in Sources */,
+				100000000000000000000388 /* OnlineTrialFleetState.swift in Sources */,
+				100000000000000000000395 /* OnlineObjectAuthority.swift in Sources */,
+				100000000000000000000397 /* OnlineCollisionEvent.swift in Sources */,
+				100000000000000000000399 /* OnlineVehicleDamageState.swift in Sources */,
+				10000000000000000000039B /* OnlineCollisionArbiter.swift in Sources */,
+				10000000000000000000039D /* OnlineRuntimeNetworkDiagnostics.swift in Sources */,
+				10000000000000000000038A /* OnlineTrialVehiclePlaceholderNodeFactory.swift in Sources */,
+				10000000000000000000038C /* OnlineVehicleStateSnapshot.swift in Sources */,
+				10000000000000000000038E /* OnlineVehicleSnapshotStore.swift in Sources */,
+				100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */,
+				100000000000000000000390 /* OnlineTrialNetworkBridge.swift in Sources */,
 				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

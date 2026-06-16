@@ -70,6 +70,10 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     private weak var forwardedWindowDelegate: (any NSWindowDelegate)?
     private var pendingExitAction: PendingExitAction?
     private var allowWindowClose = false
+    // v1.4.4: debounce inactiveVisible so transient key loss (sheet/dialog) doesn't throttle FPS.
+    private var inactiveDebounceTask: DispatchWorkItem?
+    private var appHideObserver: Any?
+    private var appUnhideObserver: Any?
 
     init(projectStorage: ProjectStorageManaging = ProjectStorageService()) {
         self.projectStorage = projectStorage
@@ -108,6 +112,23 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
 
         self.window = window
         window.delegate = self
+
+        // Subscribe to application-level hide/unhide once (idempotent guard).
+        if appHideObserver == nil {
+            let nc = NotificationCenter.default
+            appHideObserver = nc.addObserver(
+                forName: NSApplication.didHideNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.activeSimulation?.applyWindowVisibilityState(.hidden)
+            }
+            appUnhideObserver = nc.addObserver(
+                forName: NSApplication.didUnhideNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.activeSimulation?.applyWindowVisibilityState(.activeVisible)
+            }
+        }
     }
 
     func refreshProjects() {
@@ -137,6 +158,92 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         }
     }
 
+    func launchLANSession(role: OnlineTrialRole, isHost: Bool) {
+        let runMode = SimulationRunMode.lanMode(role: role, isHost: isHost)
+        let localDisplayName = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackDisplayName = role == .pilot ? "LAN Pilot" : "LAN Spectator"
+        let participantDisplayName = localDisplayName.isEmpty ? fallbackDisplayName : localDisplayName
+        let controlledUAVID = role == .pilot ? UUID() : nil
+        let session = OnlineTrialSessionConfig(
+            hostDisplayName: isHost ? participantDisplayName : "LAN Host"
+        )
+        let participant = LocalOnlineParticipant(
+            displayName: participantDisplayName,
+            role: role,
+            controlledUAVID: controlledUAVID,
+            isHost: isHost
+        )
+        let projectName: String
+        switch (isHost, role) {
+        case (true, .pilot):
+            projectName = "LAN Host - Полет"
+        case (false, .pilot):
+            projectName = "LAN Client - Полет"
+        case (_, .spectator):
+            projectName = "LAN - Наблюдатель"
+        }
+
+        activeSimulation?.stopRuntimeForExit()
+        activeSimulation = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectStorage.createProjectID(),
+            initialProjectName: projectName,
+            simulationRunMode: runMode,
+            onlineSessionConfig: session,
+            localOnlineParticipant: participant
+        )
+    }
+
+    func launchLANTrial(
+        descriptor: LANTrialLaunchDescriptor,
+        localParticipant lanParticipant: LANParticipant,
+        snapshotTransport: OnlineTrialSnapshotTransport?,
+        sharedEventTransport: OnlineSharedEventTransport? = nil
+    ) {
+        let role = onlineTrialRole(for: lanParticipant.role)
+        let runtimeContext = OnlineTrialRuntimeContext(
+            launchDescriptor: descriptor,
+            localParticipant: lanParticipant
+        )
+        let runMode = SimulationRunMode.lanMode(role: role, isHost: lanParticipant.isHost)
+        let hostName = descriptor.assignments
+            .first { $0.participantID == descriptor.hostParticipantID }?
+            .participantName ?? "LAN Host"
+        let session = OnlineTrialSessionConfig(
+            sessionID: descriptor.id,
+            hostDisplayName: hostName
+        )
+        let participant = LocalOnlineParticipant(
+            id: lanParticipant.id,
+            displayName: lanParticipant.displayName,
+            role: role,
+            controlledUAVID: runtimeContext.localVehicleID,
+            isHost: lanParticipant.isHost
+        )
+        let projectName: String
+        switch (lanParticipant.isHost, lanParticipant.role) {
+        case (true, .pilot):
+            projectName = "LAN Trial - Host Pilot"
+        case (false, .pilot):
+            projectName = "LAN Trial - Pilot"
+        case (_, .spectator):
+            projectName = "LAN Trial - Spectator"
+        }
+
+        activeSimulation?.stopRuntimeForExit()
+        activeSimulation = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectStorage.createProjectID(),
+            initialProjectName: projectName,
+            simulationRunMode: runMode,
+            onlineSessionConfig: session,
+            localOnlineParticipant: participant,
+            onlineRuntimeContext: runtimeContext,
+            onlineSnapshotTransport: snapshotTransport,
+            onlineSharedEventTransport: sharedEventTransport
+        )
+    }
+
     func openProject(_ summary: ProjectRecordSummary) {
         let vm = DroneSimulationViewModel(
             projectStorage: projectStorage,
@@ -152,6 +259,15 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 titleKey: "project.open.failure",
                 message: error.localizedDescription
             )
+        }
+    }
+
+    private func onlineTrialRole(for role: LANParticipantRole) -> OnlineTrialRole {
+        switch role {
+        case .pilot:
+            return .pilot
+        case .spectator:
+            return .spectator
         }
     }
 
@@ -242,11 +358,11 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             activeSimulation = nil
             return
         }
-        if vm.hasUnsavedChanges {
+        if vm.shouldPromptBeforeExit, vm.hasUnsavedChanges {
             pendingExitAction = .returnToMenu
             showUnsavedPrompt = true
         } else {
-            activeSimulation = nil
+            clearActiveSimulation()
             refreshProjects()
         }
     }
@@ -275,12 +391,18 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         case .none:
             break
         case .returnToMenu:
-            activeSimulation = nil
+            clearActiveSimulation()
             refreshProjects()
         case .closeWindow:
+            activeSimulation?.stopRuntimeForExit()
             allowWindowClose = true
             window?.performClose(nil)
         }
+    }
+
+    private func clearActiveSimulation() {
+        activeSimulation?.stopRuntimeForExit()
+        activeSimulation = nil
     }
 
     private func launchCADPayloadSimulation(_ configuration: SimulationLaunchConfiguration) {
@@ -318,7 +440,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             return forwardedWindowShouldClose(sender)
         }
 
-        guard let vm = activeSimulation, vm.hasUnsavedChanges else {
+        guard let vm = activeSimulation, vm.shouldPromptBeforeExit, vm.hasUnsavedChanges else {
             return forwardedWindowShouldClose(sender)
         }
 
@@ -361,6 +483,44 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
 
     func windowWillClose(_ notification: Notification) {
         forwardedWindowDelegate?.windowWillClose?(notification)
+    }
+
+    // v1.4.3/v1.4.4: throttle CPU when window is minimized or loses key focus.
+    // v1.4.4: inactiveVisible uses a 0.8 s debounce so transient key loss from sheets/dialogs
+    // within the same window doesn't accidentally throttle the render FPS.
+    func windowDidMiniaturize(_ notification: Notification) {
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
+        activeSimulation?.applyWindowVisibilityState(.minimized)
+        forwardedWindowDelegate?.windowDidMiniaturize?(notification)
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
+        activeSimulation?.applyWindowVisibilityState(.activeVisible)
+        forwardedWindowDelegate?.windowDidDeminiaturize?(notification)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
+        activeSimulation?.applyWindowVisibilityState(.activeVisible)
+        forwardedWindowDelegate?.windowDidBecomeKey?(notification)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        // Debounce: only downgrade to inactiveVisible after 0.8 s of sustained non-key status.
+        // This prevents a sheet or panel opening briefly (e.g. UAV catalog, settings) from
+        // cutting SceneKit FPS in half during normal pilot operations.
+        let task = DispatchWorkItem { [weak self] in
+            self?.inactiveDebounceTask = nil
+            self?.activeSimulation?.applyWindowVisibilityState(.inactiveVisible)
+        }
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: task)
+        forwardedWindowDelegate?.windowDidResignKey?(notification)
     }
 
     func toggleFullscreen() {
@@ -724,19 +884,25 @@ private struct SimulationToolstripView: View {
     private static let selectorButtonWidth: CGFloat = 142
     private static let selectorButtonHeight: CGFloat = 46
 
+    private var visibleModules: [ControlModule] {
+        ControlModule.allCases.filter { viewModel.canUseControlModule($0) }
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(ControlModule.allCases) { module in
+                ForEach(visibleModules) { module in
                     moduleButton(module)
                 }
 
-                PayloadToolbarEntry(
-                    isPresented: viewModel.isPayloadPanelVisible,
-                    payloadState: viewModel.payloadState,
-                    payloadMountState: viewModel.payloadMountState
-                ) {
-                    viewModel.togglePayloadPanel()
+                if viewModel.canControlLocalVehicle {
+                    PayloadToolbarEntry(
+                        isPresented: viewModel.isPayloadPanelVisible,
+                        payloadState: viewModel.payloadState,
+                        payloadMountState: viewModel.payloadMountState
+                    ) {
+                        viewModel.togglePayloadPanel()
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -822,12 +988,15 @@ private struct KeyBindingsSheetHost: View {
 
 struct ContentView: View {
     @StateObject private var appShell = AppShellViewModel()
+    // P2P v1.3: LANSessionViewModel lifetime must span lobby and runtime — never recreate mid-session.
+    @StateObject private var lanSessionViewModel = LANSessionViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
 
     @State private var nameDialogMode: NameDialogMode?
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
+    @State private var isOnlineTrialsPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -847,6 +1016,15 @@ struct ContentView: View {
             if let viewModel = appShell.activeSimulation {
                 SimulationViewModelObserver(viewModel: viewModel) { observedViewModel in
                     simulationWorkspace(observedViewModel)
+                        .onReceive(lanSessionViewModel.$remoteSnapshotState) { snapshotState in
+                            observedViewModel.applyOnlineRemoteSnapshotState(snapshotState)
+                        }
+                        .onReceive(lanSessionViewModel.$onlineDamageState) { damageState in
+                            observedViewModel.applyOnlineDamageState(damageState)
+                        }
+                        .onReceive(lanSessionViewModel.$onlineDiagnostics) { diag in
+                            observedViewModel.applyOnlineDiagnostics(diag)
+                        }
                 }
             } else {
                 startScreen
@@ -910,6 +1088,9 @@ struct ContentView: View {
         }
         .onChange(of: appShell.activeSimulation == nil) { _, isNil in
             if isNil {
+                if lanSessionViewModel.state.connectionState != .idle {
+                    lanSessionViewModel.leaveSession()
+                }
                 appShell.refreshProjects()
             }
         }
@@ -974,77 +1155,26 @@ struct ContentView: View {
                 )
                 .ignoresSafeArea()
 
-                VStack(spacing: 20) {
-                    Text("menu.title")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-
-                    Button {
-                        nameDraft = projectDefaultName()
-                        nameDialogMode = .create
-                    } label: {
-                        VStack(spacing: 14) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 44, weight: .bold))
-                            Text("menu.create_project")
-                                .font(.headline)
-                        }
-                        .frame(width: 280, height: 220)
-                        .foregroundStyle(.white)
-                        .background(
-                            RoundedRectangle(cornerRadius: 22)
-                                .stroke(Color.white.opacity(0.65), lineWidth: 2)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 22)
-                                        .fill(Color.white.opacity(0.08))
+                Group {
+                    if isOnlineTrialsPresented {
+                        LANOnlineTrialsView(
+                            viewModel: lanSessionViewModel,
+                            onClose: {
+                                isOnlineTrialsPresented = false
+                            },
+                            onLaunchTrial: { descriptor, participant in
+                                isOnlineTrialsPresented = false
+                                appShell.launchLANTrial(
+                                    descriptor: descriptor,
+                                    localParticipant: participant,
+                                    snapshotTransport: lanSessionViewModel,
+                                    sharedEventTransport: lanSessionViewModel
                                 )
+                                lanSessionViewModel.markRuntimeHandoffCompleted()
+                            }
                         )
-                    }
-                    .buttonStyle(.plain)
-
-                    if let recent = appShell.visibleProjects.first {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("menu.recent_project")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.75))
-                            Text(recent.name)
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(.white.opacity(0.92))
-                                .lineLimit(1)
-                            Text(formattedDate(recent.modifiedAt))
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.68))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    }
-
-                    Button {
-                        startScreenReplayLibrary.refresh()
-                        isReplayCenterPresented = true
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "archivebox")
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("Самописец")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .foregroundStyle(.white.opacity(0.88))
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.28), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .onChange(of: isReplayCenterPresented) { _, new in
-                        guard new else { return }
-                        isReplayCenterPresented = false
-                        ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
+                    } else {
+                        startScreenActions
                     }
                 }
                 .frame(maxWidth: 760)
@@ -1054,104 +1184,293 @@ struct ContentView: View {
         .frame(minWidth: 1200, minHeight: 820)
     }
 
-    private func simulationWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
-        ControllerInteractionSurface(
-            bridge: viewModel.controllerUIBridge,
-            surfaceID: "simulation-workspace",
-            secondaryAction: {
-                viewModel.handleControllerUICancel()
+    private var startScreenActions: some View {
+        VStack(spacing: 20) {
+            Text("menu.title")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+
+            Button {
+                nameDraft = projectDefaultName()
+                nameDialogMode = .create
+            } label: {
+                VStack(spacing: 14) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 44, weight: .bold))
+                    Text("menu.create_project")
+                        .font(.headline)
+                }
+                .frame(width: 280, height: 220)
+                .foregroundStyle(.white)
+                .background(
+                    RoundedRectangle(cornerRadius: 22)
+                        .stroke(Color.white.opacity(0.65), lineWidth: 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 22)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                )
             }
-        ) {
-            ZStack {
-                VStack(spacing: 0) {
-                simulationHeader(viewModel)
+            .buttonStyle(.plain)
 
-                if viewModel.isToolPanelVisible {
-                    Divider()
+            if let recent = appShell.visibleProjects.first {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("menu.recent_project")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                    Text(recent.name)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .lineLimit(1)
+                    Text(formattedDate(recent.modifiedAt))
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.68))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            }
 
-                    SimulationToolstripView(
-                        viewModel: viewModel
+            HStack(spacing: 12) {
+                startMenuButton(title: "Мульти-испытания", systemImage: "network") {
+                    // v1.5.1: when no project is active the simulation defaults to
+                    // UAVReferenceCatalog.defaultProfileID; pass the same fallback so
+                    // remote replica assignments match the local UAV that will be used.
+                    lanSessionViewModel.updateLocalVehicleProfileID(
+                        appShell.activeSimulation?.selectedDroneProfile.id
+                            ?? UAVReferenceCatalog.defaultProfileID
                     )
-
-                    Divider()
+                    isOnlineTrialsPresented = true
                 }
 
-                HStack(spacing: 0) {
-                    if viewModel.isParametersPanelVisible, viewModel.activeControlModule != nil {
-                        SidebarModuleHostView(
-                            viewModel: viewModel,
-                            appLanguage: selectedLanguageBinding
+                startMenuButton(title: "Самописец", systemImage: "archivebox") {
+                    startScreenReplayLibrary.refresh()
+                    isReplayCenterPresented = true
+                }
+            }
+            .onChange(of: isReplayCenterPresented) { _, new in
+                guard new else { return }
+                isReplayCenterPresented = false
+                ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
+            }
+        }
+    }
+
+    private func startMenuButton(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func simulationWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
+        if viewModel.isSpectatorMode {
+            spectatorWorkspace(viewModel)
+        } else {
+            ControllerInteractionSurface(
+                bridge: viewModel.controllerUIBridge,
+                surfaceID: "simulation-workspace",
+                secondaryAction: {
+                    viewModel.handleControllerUICancel()
+                }
+            ) {
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 0) {
+                    simulationHeader(viewModel)
+
+                    if viewModel.isToolPanelVisible {
+                        Divider()
+
+                        SimulationToolstripView(
+                            viewModel: viewModel
                         )
-                        .frame(width: 430)
 
                         Divider()
                     }
 
-                    SceneViewportView(viewModel: viewModel)
-                        .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                    HStack(spacing: 0) {
+                        if viewModel.isParametersPanelVisible, viewModel.activeControlModule != nil {
+                            SidebarModuleHostView(
+                                viewModel: viewModel,
+                                appLanguage: selectedLanguageBinding
+                            )
+                            .frame(width: 430)
 
-                if viewModel.isPayloadPanelVisible {
-                    payloadOverlay(for: viewModel)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
-                }
-
-                if viewModel.isMissionMapVisible {
-                    missionMapOverlay(for: viewModel)
-                        .transition(.opacity)
-                }
-
-                if viewModel.isControllerHubVisible {
-                    controllerHubOverlay(for: viewModel)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                }
-
-                if viewModel.signalInterferencePresentation.isVisible {
-                    SignalInterferenceOverlayView(
-                        presentation: viewModel.signalInterferencePresentation,
-                        onRecover: {
-                            viewModel.recoverSignal()
+                            Divider()
                         }
+
+                        SceneViewportView(
+                            viewModel: viewModel,
+                            trialPhase: lanSessionViewModel.state.trialPhase,
+                            recentSharedEvents: lanSessionViewModel.sharedEvents,
+                            onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
+                            onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
+                        )
+                            .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+
+                    if viewModel.isPayloadPanelVisible {
+                        payloadOverlay(for: viewModel)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                    }
+
+                    if viewModel.isMissionMapVisible {
+                        missionMapOverlay(for: viewModel)
+                            .transition(.opacity)
+                    }
+
+                    if viewModel.isControllerHubVisible {
+                        controllerHubOverlay(for: viewModel)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    }
+
+                    if viewModel.signalInterferencePresentation.isVisible {
+                        SignalInterferenceOverlayView(
+                            presentation: viewModel.signalInterferencePresentation,
+                            onRecover: {
+                                viewModel.recoverSignal()
+                            }
+                        )
+                    }
+
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(KeyBindingsSheetHost(simulationViewModel: viewModel))
+            .alert("battery.depleted.title", isPresented: Binding(
+                get: { viewModel.showBatteryDepletedDialog },
+                set: { viewModel.showBatteryDepletedDialog = $0 }
+            )) {
+                Button("battery.depleted.charge") {
+                    viewModel.chargeDroneAndContinue()
+                }
+                Button("battery.depleted.restart") {
+                    viewModel.simulateAgainFromStart()
+                }
+            } message: {
+                Text("battery.depleted.message")
+            }
+            .alert(item: Binding(
+                get: { viewModel.telemetryExportAlert },
+                set: { viewModel.telemetryExportAlert = $0 }
+            )) { item in
+                Alert(
+                    title: Text(LocalizedStringKey(item.titleKey)),
+                    message: Text(item.message),
+                    dismissButton: .default(Text("common.ok"))
+                )
+            }
+            .onChange(of: isReplayCenterPresented) { _, new in
+                guard new else { return }
+                isReplayCenterPresented = false
+                ReplayCenterWindowHost.open(
+                    viewModel: viewModel.replayLibraryViewModel,
+                    availableDroneProfiles: viewModel.availableDroneProfiles
+                )
+            }
+        }
+    }
+
+    private func spectatorWorkspace(_ viewModel: DroneSimulationViewModel) -> some View {
+        ZStack(alignment: .topLeading) {
+            SceneViewportView(
+                viewModel: viewModel,
+                trialPhase: lanSessionViewModel.state.trialPhase,
+                recentSharedEvents: lanSessionViewModel.sharedEvents,
+                onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
+                onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
+            )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack(spacing: 10) {
+                if let runtimeContext = viewModel.onlineRuntimeContext {
+                    onlineRuntimeBanner(runtimeContext, viewModel: viewModel)
+                } else {
+                    Text("Spectator")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        )
+                }
+
+                Button {
+                    appShell.requestReturnToMenu()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Выйти")
+                            .font(.caption.weight(.bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.54), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
                     )
                 }
+                .buttonStyle(.plain)
             }
+            .padding(14)
         }
-        .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
+        .background(Color.black)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(KeyBindingsSheetHost(simulationViewModel: viewModel))
-        .alert("battery.depleted.title", isPresented: Binding(
-            get: { viewModel.showBatteryDepletedDialog },
-            set: { viewModel.showBatteryDepletedDialog = $0 }
-        )) {
-            Button("battery.depleted.charge") {
-                viewModel.chargeDroneAndContinue()
+    }
+
+    private func onlineRuntimeBanner(
+        _ context: OnlineTrialRuntimeContext,
+        viewModel: DroneSimulationViewModel
+    ) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(GroundControlPalette.success)
+                .frame(width: 6, height: 6)
+            Text(context.isSpectator ? "SPECTATOR" : "PILOT")
+                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .foregroundStyle(.white)
+                .tracking(0.2)
+            if context.isHost {
+                Text("HOST")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(GroundControlPalette.warning, in: RoundedRectangle(cornerRadius: 3))
             }
-            Button("battery.depleted.restart") {
-                viewModel.simulateAgainFromStart()
-            }
-        } message: {
-            Text("battery.depleted.message")
         }
-        .alert(item: Binding(
-            get: { viewModel.telemetryExportAlert },
-            set: { viewModel.telemetryExportAlert = $0 }
-        )) { item in
-            Alert(
-                title: Text(LocalizedStringKey(item.titleKey)),
-                message: Text(item.message),
-                dismissButton: .default(Text("common.ok"))
-            )
-        }
-        .onChange(of: isReplayCenterPresented) { _, new in
-            guard new else { return }
-            isReplayCenterPresented = false
-            ReplayCenterWindowHost.open(
-                viewModel: viewModel.replayLibraryViewModel,
-                availableDroneProfiles: viewModel.availableDroneProfiles
-            )
-        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.60), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.18), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -1309,6 +1628,18 @@ struct ContentView: View {
 
     private func simulationHeaderButtons(_ viewModel: DroneSimulationViewModel) -> some View {
         HStack(spacing: 8) {
+            if viewModel.onlineRuntimeContext != nil {
+                Button {
+                    appShell.requestReturnToMenu()
+                } label: {
+                    headerUtilityButtonLabel(systemImage: "house")
+                }
+                .buttonStyle(.plain)
+                .help("Выйти из LAN Trial")
+
+                Divider().frame(height: 20)
+            }
+
             Menu {
                 Button("project.save.action") {
                     appShell.saveActiveProject()
