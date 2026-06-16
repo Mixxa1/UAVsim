@@ -482,7 +482,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var backgroundTickSkipCounter = 0
     // Window visibility is set by delegate events; combined with input recency → activityState.
     private var currentVisibilityState: RuntimeVisibilityState = .activeVisible
-    private var lastUserInteractionAt: TimeInterval = 0
+    private var lastUserInteractionAt: TimeInterval = CACurrentMediaTime()
 
     // v1.4.4: Hz/FPS counters for PERF diagnostics; reset each second in tick().
     private var diagSnapshotOutCount: Int = 0
@@ -667,6 +667,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func noteUserInteraction() {
         lastUserInteractionAt = CACurrentMediaTime()
+        // Promote activeIdle → interacting immediately on any interaction, so arming/flying/camera
+        // movement restores 60 FPS without requiring a windowDidBecomeKey event.
+        if currentVisibilityState == .activeVisible,
+           performancePolicy.activityState == .activeIdle {
+            refreshActivityPolicy(now: lastUserInteractionAt)
+        }
     }
 
     private func refreshActivityPolicy(now: TimeInterval) {
@@ -3764,9 +3770,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
-        // Note interaction when UAV is actively flying (armed + moving) so the window
-        // doesn't transition to activeIdle while the pilot's drone is still in flight.
-        if currentVisibilityState == .activeVisible, isArmed, simd_length(state.velocity) > 0.15 {
+        // Keep interacting (60 FPS) whenever the UAV is armed, regardless of velocity.
+        if currentVisibilityState == .activeVisible, isArmed {
             noteUserInteraction()
         }
         cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
