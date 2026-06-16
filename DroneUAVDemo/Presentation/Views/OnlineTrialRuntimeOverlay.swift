@@ -17,10 +17,10 @@ struct OnlineTrialRuntimeOverlay: View {
 
     private var roleLabel: String {
         guard let context else { return "—" }
-        if context.isHost && context.isSpectator { return "HOST ADMIN" }
-        if context.isHost { return "HOST / PILOT" }
-        if context.isSpectator { return "SPECTATOR" }
-        return "PILOT"
+        if context.isHost && context.isSpectator { return L10n.s("online.runtime.role.host_admin") }
+        if context.isHost { return L10n.s("online.runtime.role.host_pilot") }
+        if context.isSpectator { return L10n.s("online.runtime.role.spectator") }
+        return L10n.s("online.runtime.role.pilot")
     }
 
     private var roleIsHost: Bool { context?.isHost == true }
@@ -49,10 +49,10 @@ struct OnlineTrialRuntimeOverlay: View {
 
     private var statusLabel: String {
         switch trialPhase {
-        case .lobby:     return "LOBBY"
-        case .launching: return "LAUNCHING"
-        case .running:   return staleCount > 0 ? "DEGRADED" : "RUNNING"
-        case .ended:     return "ENDED"
+        case .lobby:     return L10n.s("online.runtime.status.lobby")
+        case .launching: return L10n.s("online.runtime.status.launching")
+        case .running:   return staleCount > 0 ? L10n.s("online.runtime.status.degraded") : L10n.s("online.runtime.status.running")
+        case .ended:     return L10n.s("online.runtime.status.ended")
         }
     }
 
@@ -80,12 +80,12 @@ struct OnlineTrialRuntimeOverlay: View {
             authoritySection
             separator
 
-            infoRow("Participants", "\(participantCount)")
-            infoRow("Vehicles", "\(vehicleCount)")
+            infoRow(L10n.s("online.runtime.participants"), "\(participantCount)")
+            infoRow(L10n.s("online.runtime.vehicles"), "\(vehicleCount)")
             if staleCount > 0 {
-                infoRow("Stale", "\(staleCount)", valueColor: GroundControlPalette.warning)
+                infoRow(L10n.s("online.runtime.stale"), "\(staleCount)", valueColor: GroundControlPalette.warning)
             }
-            infoRow("Snapshot", "\(snapshotTargetHz) Hz")
+            infoRow(L10n.s("online.runtime.snapshot"), "\(snapshotTargetHz) Hz")
             separator
 
             statusSection
@@ -112,7 +112,7 @@ struct OnlineTrialRuntimeOverlay: View {
 
     private var headerRow: some View {
         HStack(spacing: 6) {
-            Text("LAN TRIAL")
+            Text("online.runtime.title")
                 .font(.system(size: 9, weight: .black, design: .monospaced))
                 .foregroundStyle(GroundControlPalette.warning)
                 .tracking(1)
@@ -143,16 +143,16 @@ struct OnlineTrialRuntimeOverlay: View {
 
     @ViewBuilder
     private var authoritySection: some View {
-        infoRow("Authority", "Distributed Object")
+        infoRow(L10n.s("online.runtime.authority"), L10n.s("online.runtime.authority.distributed_object"))
         if let ctx = context {
             let localColor: Color = ctx.isSpectator ? GroundControlPalette.textSecondary : GroundControlPalette.textPrimary
-            infoRow("Local auth", localAuthorityText, valueColor: localColor)
+            infoRow(L10n.s("online.runtime.local_authority"), localAuthorityText, valueColor: localColor)
             if ctx.isWorldAuthorityHost {
-                infoRow("World auth", "host (local)", valueColor: GroundControlPalette.success)
+                infoRow(L10n.s("online.runtime.world_authority"), L10n.s("online.runtime.world_authority.host_local"), valueColor: GroundControlPalette.success)
             }
         }
-        infoRow("Участник", context?.localParticipant.displayName ?? "—")
-        infoRow("Replicas", "\(remoteCount)")
+        infoRow(L10n.s("online.runtime.participant_label"), context?.localParticipant.displayName ?? "—")
+        infoRow(L10n.s("online.runtime.replicas"), "\(remoteCount)")
     }
 
     private var separator: some View {
@@ -166,29 +166,29 @@ struct OnlineTrialRuntimeOverlay: View {
     private var statusSection: some View {
         if let ctx = context {
             if trialPhase == .ended {
-                statusLine("Испытание завершено")
+                statusLine(L10n.s("online.runtime.trial_ended"))
             } else if ctx.isSpectator && ctx.isHost {
-                statusLine("HOST ADMIN · без UAV")
+                statusLine(L10n.s("online.runtime.host_admin.no_uav"))
             } else if ctx.isSpectator {
-                statusLine("Receive-only spectator")
+                statusLine(L10n.s("online.runtime.spectator.receive_only"))
                 if remoteStates.isEmpty {
                     if participantCount < 2 {
-                        statusLine("Ожидание второго участника...")
+                        statusLine(L10n.s("online.runtime.waiting_second_participant"))
                     } else {
-                        statusLine("Spectator connected · нет snapshot")
+                        statusLine(L10n.s("online.runtime.spectator.no_snapshot"))
                     }
                 } else {
-                    statusLine("Наблюдение: \(remoteCount) ghost(s)")
+                    statusLine(L10n.f("online.runtime.spectator_replicas.count", remoteCount))
                 }
             } else {
                 if remoteStates.isEmpty {
                     if participantCount < 2 {
-                        statusLine("Ожидание второго участника...")
+                        statusLine(L10n.s("online.runtime.waiting_second_participant"))
                     } else {
-                        statusLine("Участник подключён · ожидание snapshot")
+                        statusLine(L10n.s("online.runtime.connected.waiting_snapshot"))
                     }
                 } else {
-                    statusLine("Remote: \(remoteCount) ghost(s)")
+                    statusLine(L10n.f("online.runtime.remote_replicas.count", remoteCount))
                 }
             }
         }
@@ -211,9 +211,9 @@ struct OnlineTrialRuntimeOverlay: View {
                 HStack(spacing: 6) {
                     diagCell("TX", "\(diagnostics.outgoingSnapshotCount)")
                     diagCell("RX", "\(diagnostics.incomingSnapshotCount)")
-                    diagCell("GHOSTS", "\(diagnostics.remoteGhostVisibleCount)")
-                    if diagnostics.remoteGhostStaleCount > 0 {
-                        diagCell("STALE", "\(diagnostics.remoteGhostStaleCount)", color: GroundControlPalette.warning)
+                    diagCell("REPS", "\(diagnostics.remoteReplicaVisibleCount)")
+                    if diagnostics.remoteReplicaStaleCount > 0 {
+                        diagCell("STALE", "\(diagnostics.remoteReplicaStaleCount)", color: GroundControlPalette.warning)
                     }
                     diagCell("EVT", "\(diagnostics.sharedEventReceivedCount)")
                     diagCell("PING", diagnostics.pingLabel)
@@ -250,6 +250,10 @@ struct OnlineTrialRuntimeOverlay: View {
                                 : GroundControlPalette.success
                             diagCell("LAG", String(format: "%.0f ms", lagMs), color: lagColor)
                         }
+                        if let recvAgo = diagnostics.lastSnapshotReceivedAgoMs {
+                            let recvColor: Color = recvAgo > 500 ? GroundControlPalette.warning : GroundControlPalette.textPrimary
+                            diagCell("RECV", String(format: "%.0f ms", recvAgo), color: recvColor)
+                        }
                         diagCell("BUF", "\(diagnostics.remoteSnapshotBufferDepthMax)")
                         if diagnostics.remoteOutOfOrderDropCount > 0 {
                             diagCell("OOO", "\(diagnostics.remoteOutOfOrderDropCount)", color: GroundControlPalette.warning)
@@ -258,7 +262,8 @@ struct OnlineTrialRuntimeOverlay: View {
                 }
 
                 HStack(spacing: 6) {
-                    diagCell("VIS", diagnostics.visibilityStateLabel)
+                    // ACT = RuntimeActivityState (interacting/activeIdle/bgIdle/minimized/hidden)
+                    diagCell("ACT", diagnostics.visibilityStateLabel)
                     diagCell("ScFPS", "\(diagnostics.scenePreferredFPS)")
                     if !diagnostics.sceneIsPlaying {
                         diagCell("PLAY", "off", color: GroundControlPalette.warning)
@@ -283,18 +288,18 @@ struct OnlineTrialRuntimeOverlay: View {
     @ViewBuilder
     private var actionButtons: some View {
         if context?.isHost == true, trialPhase == .running, let onEndTrial {
-            overlayButton("Завершить испытание", systemImage: "stop.circle", isDestructive: true, action: onEndTrial)
+            overlayButton(L10n.s("online.runtime.end_trial"), systemImage: "stop.circle", isDestructive: true, action: onEndTrial)
         }
         if let onLeaveTrial {
-            overlayButton("Выйти", systemImage: "arrow.left", isDestructive: false, action: onLeaveTrial)
+            overlayButton(L10n.s("online.runtime.leave"), systemImage: "arrow.left", isDestructive: false, action: onLeaveTrial)
         }
     }
 
     private var localDamageLabel: String {
         switch localVehicleDamageRecord?.operationalState {
-        case .disabled: return "LOCAL UAV DISABLED"
-        case .crashed:  return "LOCAL UAV CRASHED"
-        default:        return "LOCAL UAV DAMAGED"
+        case .disabled: return L10n.s("online.runtime.local_uav_disabled")
+        case .crashed:  return L10n.s("online.runtime.local_uav_crashed")
+        default:        return L10n.s("online.runtime.local_uav_damaged")
         }
     }
 
@@ -310,7 +315,7 @@ struct OnlineTrialRuntimeOverlay: View {
 
         if let event = lastSharedEvent {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Events")
+                Text("online.runtime.events")
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 HStack(spacing: 4) {

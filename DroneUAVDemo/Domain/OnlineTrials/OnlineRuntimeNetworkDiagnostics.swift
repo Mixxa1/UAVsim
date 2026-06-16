@@ -16,10 +16,13 @@ struct OnlineRuntimeNetworkDiagnostics: Equatable {
     // Session topology
     var connectedParticipantCount: Int = 0
 
-    // Ghost replica health (receiver-local time, no sender-clock dependency)
-    var remoteGhostVisibleCount: Int = 0
-    var remoteGhostStaleCount: Int = 0
+    // Replica health — all times use CACurrentMediaTime() (receiver-local), no sender-clock dependency.
+    // sourceSnapshotAge = now - receivedAtLocalTime, so it measures true visual lag (not clock skew).
+    // lastSnapshotReceivedAgoMs = how long since last snapshot arrived (receiver RX recency).
+    var remoteReplicaVisibleCount: Int = 0
+    var remoteReplicaStaleCount: Int = 0
     var remoteVisualLagMs: Double? = nil
+    var lastSnapshotReceivedAgoMs: Double? = nil
     var remoteSnapshotBufferDepthMax: Int = 0
     var remoteDroppedOldSnapshotCount: UInt64 = 0
     var remoteOutOfOrderDropCount: UInt64 = 0

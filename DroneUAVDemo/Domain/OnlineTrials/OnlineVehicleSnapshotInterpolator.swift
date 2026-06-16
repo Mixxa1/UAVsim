@@ -183,6 +183,8 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
 struct OnlineVehicleInterpolationStore: Equatable {
     var buffersByVehicleID: [UUID: OnlineVehicleSnapshotInterpolationBuffer] = [:]
     private(set) var outOfOrderDropCount: UInt64 = 0
+    // CACurrentMediaTime() timestamp of the most recently accepted snapshot from any vehicle.
+    private(set) var latestReceivedAt: TimeInterval? = nil
 
     mutating func apply(
         _ snapshot: OnlineVehicleStateSnapshot,
@@ -194,7 +196,11 @@ struct OnlineVehicleInterpolationStore: Equatable {
             buffersByVehicleID[snapshot.vehicleID] = OnlineVehicleSnapshotInterpolationBuffer(vehicleID: snapshot.vehicleID)
         }
         let accepted = buffersByVehicleID[snapshot.vehicleID]?.push(snapshot, receivedAt: receivedAt) ?? true
-        if !accepted { outOfOrderDropCount &+= 1 }
+        if accepted {
+            if latestReceivedAt == nil || receivedAt > latestReceivedAt! { latestReceivedAt = receivedAt }
+        } else {
+            outOfOrderDropCount &+= 1
+        }
     }
 
     mutating func apply(

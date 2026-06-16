@@ -41,6 +41,7 @@
 		10000000000000000000021F /* DroneFleetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000011F /* DroneFleetManager.swift */; };
 		100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000120 /* DroneSceneViewRepresentable.swift */; };
 		100000000000000000000221 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000121 /* AppLanguage.swift */; };
+		1000000000000000000003A2 /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000003A1 /* L10n.swift */; };
 		100000000000000000000222 /* AutoPathPlannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000122 /* AutoPathPlannerService.swift */; };
 		100000000000000000000223 /* AbstractModelEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000123 /* AbstractModelEditorView.swift */; };
 		100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000124 /* CompactTelemetryHUDView.swift */; };
@@ -293,6 +294,7 @@
 		10000000000000000000011F /* DroneFleetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFleetManager.swift; sourceTree = "<group>"; };
 		100000000000000000000120 /* DroneSceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneViewRepresentable.swift; sourceTree = "<group>"; };
 		100000000000000000000121 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		1000000000000000000003A1 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		100000000000000000000122 /* AutoPathPlannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPathPlannerService.swift; sourceTree = "<group>"; };
 		100000000000000000000123 /* AbstractModelEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbstractModelEditorView.swift; sourceTree = "<group>"; };
 		100000000000000000000124 /* CompactTelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactTelemetryHUDView.swift; sourceTree = "<group>"; };
@@ -563,6 +565,7 @@
 				10000000000000000000037E /* Networking */,
 				100000000000000000000380 /* OnlineTrials */,
 				100000000000000000000121 /* AppLanguage.swift */,
+				1000000000000000000003A1 /* L10n.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
 				100000000000000000000113 /* CameraConfiguration.swift */,
@@ -1043,6 +1046,7 @@
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
 				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
 				100000000000000000000221 /* AppLanguage.swift in Sources */,
+				1000000000000000000003A2 /* L10n.swift in Sources */,
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
 				10000000000000000000024F /* AutoNavigationController.swift in Sources */,
 				100000000000000000000223 /* AbstractModelEditorView.swift in Sources */,

@@ -12,7 +12,7 @@ struct LANOnlineTrialsView: View {
     private var localIPAddress: String {
         let all = Host.current().addresses
         let ipv4 = all.first { $0.contains(".") && !$0.hasPrefix("127.") && !$0.hasPrefix("169.254.") }
-        return ipv4 ?? "неизвестно"
+        return ipv4 ?? L10n.s("online.unknown")
     }
 
     init(
@@ -31,7 +31,7 @@ struct LANOnlineTrialsView: View {
                 Button(action: onClose) {
                     HStack(spacing: 8) {
                         Image(systemName: "chevron.left")
-                        Text("Назад")
+                        Text("common.back")
                     }
                     .font(.caption.weight(.bold))
                 }
@@ -45,10 +45,10 @@ struct LANOnlineTrialsView: View {
             }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text("Мульти-испытания")
+                Text("online.menu.multi_simulation")
                     .font(.system(size: 30, weight: .bold))
                     .foregroundStyle(.white)
-                Text("Локальная LAN-оболочка для P2P-сессий. Server будет добавлен позже.")
+                Text("online.subtitle")
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.68))
             }
@@ -60,7 +60,7 @@ struct LANOnlineTrialsView: View {
                     HStack(spacing: 12) {
                         entryModePanel(
                             title: "LAN",
-                            subtitle: "Локальная сеть",
+                            subtitle: L10n.s("online.mode.lan.local_network"),
                             systemImage: "network",
                             isActive: true,
                             isDisabled: false
@@ -68,7 +68,7 @@ struct LANOnlineTrialsView: View {
 
                         entryModePanel(
                             title: "Server",
-                            subtitle: "позже",
+                            subtitle: L10n.s("online.mode.server.badge_later"),
                             systemImage: "server.rack",
                             isActive: false,
                             isDisabled: true
@@ -99,15 +99,15 @@ struct LANOnlineTrialsView: View {
             sectionTitle("LAN")
 
             VStack(alignment: .leading, spacing: 7) {
-                formLabel("Имя участника")
-                TextField("Участник", text: $viewModel.displayName)
+                formLabel(L10n.s("online.participant_name"))
+                TextField(L10n.s("online.participant.placeholder"), text: $viewModel.displayName)
                     .textFieldStyle(.roundedBorder)
                     .disabled(viewModel.isSessionActive)
             }
 
             VStack(alignment: .leading, spacing: 7) {
-                formLabel("Роль")
-                Picker("Роль", selection: $viewModel.selectedRole) {
+                formLabel(L10n.s("online.role"))
+                Picker(L10n.s("online.role"), selection: $viewModel.selectedRole) {
                     ForEach(LANParticipantRole.allCases) { role in
                         Text(role.displayName).tag(role)
                     }
@@ -121,7 +121,7 @@ struct LANOnlineTrialsView: View {
             Button {
                 viewModel.createHostSession()
             } label: {
-                actionLabel("Создать LAN-сессию", systemImage: "plus.circle")
+                actionLabel(L10n.s("online.lan.create"), systemImage: "plus.circle")
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isSessionActive)
@@ -132,14 +132,14 @@ struct LANOnlineTrialsView: View {
 
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 7) {
-                    formLabel("IP / адрес")
+                    formLabel(L10n.s("online.ip_address"))
                     TextField("127.0.0.1", text: $viewModel.joinAddress)
                         .textFieldStyle(.roundedBorder)
                         .disabled(viewModel.isSessionActive)
                 }
 
                 VStack(alignment: .leading, spacing: 7) {
-                    formLabel("Порт")
+                    formLabel(L10n.s("online.port"))
                     TextField("7777", text: $viewModel.portText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 86)
@@ -150,7 +150,7 @@ struct LANOnlineTrialsView: View {
             Button {
                 viewModel.joinSession()
             } label: {
-                actionLabel("Подключиться", systemImage: "arrow.right.circle")
+                actionLabel(L10n.s("online.connect"), systemImage: "arrow.right.circle")
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isSessionActive)
@@ -179,7 +179,7 @@ struct LANOnlineTrialsView: View {
         VStack(spacing: 0) {
             // Pinned header — always visible.
             HStack {
-                sectionTitle("Сессия")
+                sectionTitle(L10n.s("online.session"))
                 Spacer()
                 statusBadge(viewModel.state.connectionState)
             }
@@ -197,27 +197,27 @@ struct LANOnlineTrialsView: View {
                         Image(systemName: "circle.grid.3x3.fill")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.46))
-                        Text("LAN P2P · Distributed Authority")
+                        Text("online.architecture.p2p")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(.white.opacity(0.46))
                     }
 
                     VStack(alignment: .leading, spacing: 7) {
-                        formLabel("Соединение")
-                        compactMetric("Адрес", connectionAddressText)
-                        compactMetric("Порт", "\(viewModel.state.port)")
-                        compactMetric("Режим", viewModel.state.mode?.rawValue.uppercased() ?? "-")
-                        compactMetric("Фаза", viewModel.state.trialPhase.rawValue.uppercased())
+                        formLabel(L10n.s("online.connection"))
+                        compactMetric(L10n.s("online.address"), connectionAddressText)
+                        compactMetric(L10n.s("online.port"), "\(viewModel.state.port)")
+                        compactMetric(L10n.s("online.mode"), viewModel.state.mode?.rawValue.uppercased() ?? "-")
+                        compactMetric(L10n.s("online.phase"), viewModel.state.trialPhase.rawValue.uppercased())
                     }
 
                     if viewModel.state.mode == .host {
                         VStack(alignment: .leading, spacing: 7) {
-                            formLabel("Сетевое подключение")
+                            formLabel(L10n.s("online.network.connection"))
                             HStack(spacing: 6) {
                                 Image(systemName: "network")
                                     .font(.system(size: 10))
                                     .foregroundStyle(.white.opacity(0.52))
-                                Text("Мой IP: ")
+                                Text(L10n.s("online.network.my_ip"))
                                     .foregroundStyle(.white.opacity(0.52))
                                 Text(localIPAddress)
                                     .foregroundStyle(.white.opacity(0.92))
@@ -226,7 +226,7 @@ struct LANOnlineTrialsView: View {
                                     .foregroundStyle(.white.opacity(0.52))
                             }
                             .font(.caption.monospacedDigit())
-                            Text("Сообщи этот адрес другим участникам для подключения.")
+                            Text("online.network.ip_hint")
                                 .font(.caption2)
                                 .foregroundStyle(.white.opacity(0.44))
                                 .fixedSize(horizontal: false, vertical: true)
@@ -235,19 +235,19 @@ struct LANOnlineTrialsView: View {
 
                     // P2P v1.3: checklist
                     VStack(alignment: .leading, spacing: 4) {
-                        formLabel("Статус")
-                        checklistRow("Сессия активна", isOk: viewModel.isSessionActive)
-                        checklistRow("Участников: \(viewModel.state.participants.count)", isOk: viewModel.state.participants.count > 0)
-                        checklistRow("Фаза: \(viewModel.state.trialPhase.rawValue)", isOk: viewModel.state.trialPhase != .ended)
+                        formLabel(L10n.s("online.status"))
+                        checklistRow(L10n.s("online.status.session_active"), isOk: viewModel.isSessionActive)
+                        checklistRow(L10n.f("online.status.participants_count", viewModel.state.participants.count), isOk: viewModel.state.participants.count > 0)
+                        checklistRow(L10n.f("online.status.phase", viewModel.state.trialPhase.rawValue), isOk: viewModel.state.trialPhase != .ended)
                         if viewModel.isSessionActive {
-                            checklistRow("Транспорт: OK", isOk: true)
+                            checklistRow(L10n.s("online.status.transport_ok"), isOk: true)
                             HStack(spacing: 10) {
                                 Button {
                                     viewModel.sendTestPing()
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "antenna.radiowaves.left.and.right")
-                                        Text("Тест пинг")
+                                        Text("online.test_ping")
                                     }
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.white.opacity(0.82))
@@ -273,15 +273,15 @@ struct LANOnlineTrialsView: View {
 
                     if let local = viewModel.state.localParticipant {
                         VStack(alignment: .leading, spacing: 7) {
-                            formLabel("Локальный участник")
+                            formLabel(L10n.s("online.local_participant"))
                             participantRow(local, isLocal: true)
                         }
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        formLabel("Участники")
+                        formLabel(L10n.s("online.participants"))
                         if viewModel.state.participants.isEmpty {
-                            Text("Список пуст")
+                            Text("online.participants.empty")
                                 .font(.caption)
                                 .foregroundStyle(.white.opacity(0.54))
                         } else {
@@ -327,7 +327,7 @@ struct LANOnlineTrialsView: View {
             Button {
                 viewModel.leaveSession()
             } label: {
-                actionLabel("Выйти из сессии", systemImage: "xmark.circle", isDestructive: true)
+                actionLabel(L10n.s("online.leave_session"), systemImage: "xmark.circle", isDestructive: true)
             }
             .buttonStyle(.plain)
             .padding(16)
@@ -351,8 +351,8 @@ struct LANOnlineTrialsView: View {
 
     private var launchControlPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            formLabel("Запуск")
-            Text("Пилотам будут назначены аппараты. Наблюдатели войдут без БЛА.")
+            formLabel(L10n.s("online.launch"))
+            Text("online.launch.description")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
@@ -361,7 +361,7 @@ struct LANOnlineTrialsView: View {
             if viewModel.state.participants.count < 2 {
                 HStack(spacing: 7) {
                     Image(systemName: "person.badge.clock")
-                    Text("Ожидание подключения участников...")
+                    Text("online.launch.waiting_for_participants")
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color(red: 0.95, green: 0.74, blue: 0.35))
@@ -370,7 +370,7 @@ struct LANOnlineTrialsView: View {
             if !viewModel.hasPilotParticipants {
                 HStack(spacing: 7) {
                     Image(systemName: "eye")
-                    Text("Пилотов нет: испытание откроется в режиме наблюдения.")
+                    Text("online.launch.no_pilots")
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color(red: 0.66, green: 0.82, blue: 1.0))
@@ -379,7 +379,7 @@ struct LANOnlineTrialsView: View {
             Button {
                 viewModel.launchTrial()
             } label: {
-                actionLabel("Запустить испытание", systemImage: "play.circle")
+                actionLabel(L10n.s("online.start_trial"), systemImage: "play.circle")
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.canLaunchTrial)
@@ -396,7 +396,7 @@ struct LANOnlineTrialsView: View {
             Image(systemName: "clock")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color(red: 0.66, green: 0.82, blue: 1.0))
-            Text("Ожидание запуска host...")
+            Text("online.launch.waiting_for_host")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color(red: 0.66, green: 0.82, blue: 1.0))
         }
@@ -413,7 +413,7 @@ struct LANOnlineTrialsView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(GroundControlPalette.warning)
-            Text("Runtime handoff не завершён — перезапустите сессию.")
+            Text("online.handoff_failed")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(GroundControlPalette.warning)
         }
@@ -432,11 +432,11 @@ struct LANOnlineTrialsView: View {
             HStack(spacing: 7) {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundStyle(Color(red: 0.35, green: 0.86, blue: 0.58))
-                Text("Испытание завершено")
+                Text("online.trial_ended")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white.opacity(0.88))
             }
-            Text("Нажмите «Выйти из сессии» чтобы вернуться в лобби для нового испытания.")
+            Text("online.trial_ended.hint")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.54))
                 .fixedSize(horizontal: false, vertical: true)
@@ -462,7 +462,7 @@ struct LANOnlineTrialsView: View {
                     .font(.system(size: 20, weight: .semibold))
                 Spacer()
                 if isDisabled {
-                    Text("позже")
+                    Text("online.mode.server.badge_later")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundStyle(.white.opacity(0.44))
                 }

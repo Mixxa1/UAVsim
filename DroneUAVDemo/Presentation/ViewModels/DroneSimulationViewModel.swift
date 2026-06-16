@@ -627,16 +627,23 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    // P2P v1.3: mirror LANSessionViewModel diagnostics for display in overlay.
-    // Ghost counts are patched in from the interpolation result — rest comes from session layer.
+    // v1.3+: mirror LANSessionViewModel diagnostics for display in overlay.
+    // Replica counts are patched in from the interpolation result — rest comes from session layer.
+    // All times here use CACurrentMediaTime() (receiver-local clock, same as receivedAtLocalTime).
     func applyOnlineDiagnostics(_ diagnostics: OnlineRuntimeNetworkDiagnostics) {
         var merged = diagnostics
+        let now = CACurrentMediaTime()
         let staleThreshold = 2.0
-        merged.remoteGhostVisibleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < staleThreshold }.count
-        merged.remoteGhostStaleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge >= staleThreshold }.count
+        merged.remoteReplicaVisibleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < staleThreshold }.count
+        merged.remoteReplicaStaleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge >= staleThreshold }.count
+        // sourceSnapshotAge = now(render) - receivedAtLocalTime; after clock fix both use CACurrentMediaTime.
+        // Clamp to 0 as safety guard against any transient ordering.
         merged.remoteVisualLagMs = onlineInterpolatedRemoteStates
             .max(by: { $0.sourceSnapshotAge < $1.sourceSnapshotAge })
-            .map { $0.sourceSnapshotAge * 1000 }
+            .map { max(0, $0.sourceSnapshotAge) * 1000 }
+        // How long ago the last snapshot was received (receiver-local clock).
+        merged.lastSnapshotReceivedAgoMs = onlineInterpolationStore.latestReceivedAt
+            .map { max(0, now - $0) * 1000 }
         merged.remoteSnapshotBufferDepthMax = onlineInterpolationStore.totalBufferDepth
         merged.remoteOutOfOrderDropCount = onlineInterpolationStore.outOfOrderDropCount
         merged.outgoingSnapshotHz = diagLastComputedHz.out
@@ -1589,7 +1596,7 @@ final class DroneSimulationViewModel: ObservableObject {
         onlineInterpolationStore.apply(
             filteredState,
             ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID,
-            receivedAt: Date().timeIntervalSince1970
+            receivedAt: CACurrentMediaTime()
         )
     }
 
@@ -1634,7 +1641,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         var state = OnlineRemoteVehicleSnapshotState()
         state.apply(snapshot, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID)
-        onlineInterpolationStore.apply(state, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID, receivedAt: Date().timeIntervalSince1970)
+        onlineInterpolationStore.apply(state, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID, receivedAt: CACurrentMediaTime())
     }
     #endif
 
