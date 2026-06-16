@@ -24,6 +24,10 @@ struct OnlineRuntimeNetworkDiagnostics: Equatable {
     var lastPongAt: TimeInterval? = nil
     var lastPingRoundtripMs: Double? = nil
 
+    // Remote replica visual health (receiver-local time, not sender clock)
+    var remoteVisualLatencyMs: Double? = nil
+    var interpolationBufferDepth: Int = 0
+
     var pingLabel: String {
         guard let rtt = lastPingRoundtripMs else { return "—" }
         return String(format: "%.0f ms", rtt)

@@ -464,6 +464,27 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         forwardedWindowDelegate?.windowWillClose?(notification)
     }
 
+    // v1.4.3: throttle CPU when window is minimized or loses key focus
+    func windowDidMiniaturize(_ notification: Notification) {
+        activeSimulation?.applyWindowVisibilityState(.minimized)
+        forwardedWindowDelegate?.windowDidMiniaturize?(notification)
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        activeSimulation?.applyWindowVisibilityState(.activeVisible)
+        forwardedWindowDelegate?.windowDidDeminiaturize?(notification)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        activeSimulation?.applyWindowVisibilityState(.activeVisible)
+        forwardedWindowDelegate?.windowDidBecomeKey?(notification)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        activeSimulation?.applyWindowVisibilityState(.inactiveVisible)
+        forwardedWindowDelegate?.windowDidResignKey?(notification)
+    }
+
     func toggleFullscreen() {
         WindowFullscreenController.toggle(preferredWindow: window)
     }

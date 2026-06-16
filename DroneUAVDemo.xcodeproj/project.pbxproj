@@ -54,6 +54,7 @@
 		10000000000000000000022D /* UAVDimensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000130 /* UAVDimensions.swift */; };
 		10000000000000000000022E /* UAVProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000131 /* UAVProfile.swift */; };
 		10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000132 /* UAVReferenceCatalog.swift */; };
+		1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039F /* RuntimePerformancePolicy.swift */; };
 		100000000000000000000230 /* UAVVisualPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000133 /* UAVVisualPreset.swift */; };
 		100000000000000000000231 /* UAVVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000134 /* UAVVisualFactory.swift */; };
 		100000000000000000000232 /* UAVFilterState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000135 /* UAVFilterState.swift */; };
@@ -306,6 +307,7 @@
 		100000000000000000000130 /* UAVDimensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVDimensions.swift; sourceTree = "<group>"; };
 		100000000000000000000131 /* UAVProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVProfile.swift; sourceTree = "<group>"; };
 		100000000000000000000132 /* UAVReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVReferenceCatalog.swift; sourceTree = "<group>"; };
+		10000000000000000000039F /* RuntimePerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimePerformancePolicy.swift; sourceTree = "<group>"; };
 		100000000000000000000133 /* UAVVisualPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualPreset.swift; sourceTree = "<group>"; };
 		100000000000000000000134 /* UAVVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualFactory.swift; sourceTree = "<group>"; };
 		100000000000000000000135 /* UAVFilterState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVFilterState.swift; sourceTree = "<group>"; };
@@ -619,6 +621,7 @@
 				10000000000000000000012F /* UAVPayloadCapabilityMode.swift */,
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
+				10000000000000000000039F /* RuntimePerformancePolicy.swift */,
 				100000000000000000000137 /* UAVSelectionState.swift */,
 				10000000000000000000012E /* UAVSpecConfidence.swift */,
 				100000000000000000000148 /* UAVFlightTuningProfile.swift */,
@@ -1089,6 +1092,7 @@
 				10000000000000000000022D /* UAVDimensions.swift in Sources */,
 				10000000000000000000022E /* UAVProfile.swift in Sources */,
 				10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */,
+				1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */,
 				100000000000000000000230 /* UAVVisualPreset.swift in Sources */,
 				100000000000000000000231 /* UAVVisualFactory.swift in Sources */,
 				100000000000000000000232 /* UAVFilterState.swift in Sources */,

@@ -217,6 +217,16 @@ struct OnlineTrialRuntimeOverlay: View {
                     diagCell("EVT", "\(diagnostics.sharedEventReceivedCount)")
                     diagCell("PING", diagnostics.pingLabel)
                 }
+
+                if let latencyMs = diagnostics.remoteVisualLatencyMs, remoteCount > 0 {
+                    let latencyColor: Color = latencyMs > 1500 ? Color(red: 1.0, green: 0.25, blue: 0.25)
+                        : latencyMs > 500 ? GroundControlPalette.warning
+                        : GroundControlPalette.success
+                    HStack(spacing: 6) {
+                        diagCell("RX LAG", String(format: "%.0f ms", latencyMs), color: latencyColor)
+                        diagCell("BUF", "\(diagnostics.interpolationBufferDepth)")
+                    }
+                }
             }
             separator
         }

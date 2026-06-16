@@ -477,6 +477,10 @@ final class DroneSimulationViewModel: ObservableObject {
     // P2P v1.3: diagnostics mirrored from LANSessionViewModel via applyOnlineDiagnostics.
     @Published private(set) var onlineRuntimeDiagnostics = OnlineRuntimeNetworkDiagnostics()
 
+    // v1.4.3: performance policy driven by window visibility (minimized / inactive / active)
+    @Published private(set) var performancePolicy = RuntimePerformancePolicy.default
+    private var backgroundTickSkipCounter = 0
+
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
     @Published private(set) var activeUAVProfile: UAVProfile?
@@ -615,7 +619,17 @@ final class DroneSimulationViewModel: ObservableObject {
         let staleThreshold = 2.0
         merged.remoteGhostVisibleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < staleThreshold }.count
         merged.remoteGhostStaleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge >= staleThreshold }.count
+        merged.remoteVisualLatencyMs = onlineInterpolatedRemoteStates.max(by: { $0.sourceSnapshotAge < $1.sourceSnapshotAge })
+            .map { $0.sourceSnapshotAge * 1000 }
+        merged.interpolationBufferDepth = onlineInterpolationStore.totalBufferDepth
         onlineRuntimeDiagnostics = merged
+    }
+
+    func applyWindowVisibilityState(_ state: RuntimeVisibilityState) {
+        let policy = RuntimePerformancePolicy(state)
+        guard policy != performancePolicy else { return }
+        performancePolicy = policy
+        backgroundTickSkipCounter = 0
     }
 
     func canUseControlModule(_ module: ControlModule) -> Bool {
@@ -824,7 +838,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var onlineSnapshotSequenceNumber: UInt64 = 0
     private var lastOnlineSnapshotSentAt: TimeInterval = 0
     private var lastOnlineSnapshotCleanupAt: TimeInterval = 0
-    private let onlineSnapshotSendInterval: TimeInterval = 0.1
+    private var onlineSnapshotSendInterval: TimeInterval { performancePolicy.snapshotSendInterval }
     private weak var onlineSnapshotTransport: OnlineTrialSnapshotTransport?
     // P2P v1.2: owner-side collision detection + shared event submission.
     private weak var onlineSharedEventTransport: OnlineSharedEventTransport?
@@ -1502,8 +1516,13 @@ final class DroneSimulationViewModel: ObservableObject {
         guard onlineRemoteSnapshotState != filteredState else { return }
 
         onlineRemoteSnapshotState = filteredState
-        // Feed into interpolation buffer for smooth per-frame updates
-        onlineInterpolationStore.apply(filteredState, ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID)
+        // Feed into interpolation buffer. Use local receive time so clock skew between sender
+        // and receiver does not corrupt the interpolation timeline (v1.4.3 fix).
+        onlineInterpolationStore.apply(
+            filteredState,
+            ignoringLocalVehicleID: onlineRuntimeContext.localVehicleID,
+            receivedAt: Date().timeIntervalSince1970
+        )
     }
 
     private func updateOnlineInterpolatedRemoteStates(now: TimeInterval) {
@@ -1533,7 +1552,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         var state = OnlineRemoteVehicleSnapshotState()
         state.apply(snapshot, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID)
-        onlineInterpolationStore.apply(state, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID)
+        onlineInterpolationStore.apply(state, ignoringLocalVehicleID: onlineTrialContext?.localVehicleID, receivedAt: Date().timeIntervalSince1970)
     }
     #endif
 
@@ -1600,9 +1619,13 @@ final class DroneSimulationViewModel: ObservableObject {
         if let startedAt = onlineTrialStartedAt,
            now - startedAt < onlineCollisionGracePeriodSeconds { return }
 
+        // Only collide against replicas with fresh receiver-local snapshot data.
+        // Stale replicas (>500 ms) may be frozen at a position that no longer reflects
+        // the remote UAV's actual location, causing false collision events.
+        let freshRemoteStates = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < 0.5 }
         let candidates = localCollisionDetector.detect(
             localSnapshot: localSnapshot,
-            remoteStates: onlineInterpolatedRemoteStates
+            remoteStates: freshRemoteStates
         )
 
         for candidate in candidates {
@@ -3577,6 +3600,24 @@ final class DroneSimulationViewModel: ObservableObject {
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
+
+        // v1.4.3: when minimized/hidden, run only 1 in N ticks to save CPU.
+        // Online snapshot interpolation and publishing still run every N ticks via the
+        // updateOnlineInterpolatedRemoteStates / publishOnlineVehicleSnapshotIfNeeded calls
+        // below — their internal rate-limiters control actual network throughput.
+        if performancePolicy.isThrottled {
+            backgroundTickSkipCounter += 1
+            if backgroundTickSkipCounter < performancePolicy.backgroundTickDivisor {
+                if onlineRuntimeContext != nil {
+                    cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
+                    updateOnlineInterpolatedRemoteStates(now: now)
+                    publishOnlineVehicleSnapshotIfNeeded(now: now)
+                }
+                return
+            }
+            backgroundTickSkipCounter = 0
+        }
+
         guard let lastTimestamp else {
             self.lastTimestamp = now
             let resolvedInput = updateInputPipeline(deltaTime: 0.0)
