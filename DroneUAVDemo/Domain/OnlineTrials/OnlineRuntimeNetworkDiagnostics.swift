@@ -36,7 +36,8 @@ struct OnlineRuntimeNetworkDiagnostics: Equatable {
     var lastPingRoundtripMs: Double? = nil
 
     // Window / scene state
-    var visibilityStateLabel: String = "active"
+    var visibilityStateLabel: String = "active"  // RuntimeActivityState.label (interacting/activeIdle/bgIdle/…)
+    var windowVisibilityLabel: String = "active"  // RuntimeVisibilityState.label (active/inactive/minimized/hidden)
     var sceneIsPlaying: Bool = true
     var scenePreferredFPS: Int = 60
 

@@ -244,7 +244,7 @@ struct OnlineTrialRuntimeOverlay: View {
 
                 if remoteCount > 0 {
                     HStack(spacing: 6) {
-                        if let lagMs = diagnostics.remoteVisualLagMs {
+                        if let lagMs = diagnostics.remoteVisualLagMs, lagMs >= 0, lagMs < 10_000 {
                             let lagColor: Color = lagMs > 1500 ? Color(red: 1.0, green: 0.25, blue: 0.25)
                                 : lagMs > 500 ? GroundControlPalette.warning
                                 : GroundControlPalette.success
@@ -262,8 +262,9 @@ struct OnlineTrialRuntimeOverlay: View {
                 }
 
                 HStack(spacing: 6) {
-                    // ACT = RuntimeActivityState (interacting/activeIdle/bgIdle/minimized/hidden)
+                    // ACT = RuntimeActivityState; VIS = window visibility (active/inactive/minimized/hidden)
                     diagCell("ACT", diagnostics.visibilityStateLabel)
+                    diagCell("VIS", diagnostics.windowVisibilityLabel)
                     diagCell("ScFPS", "\(diagnostics.scenePreferredFPS)")
                     if !diagnostics.sceneIsPlaying {
                         diagCell("PLAY", "off", color: GroundControlPalette.warning)

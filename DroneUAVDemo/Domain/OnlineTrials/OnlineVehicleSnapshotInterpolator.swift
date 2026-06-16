@@ -78,8 +78,11 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
         }
 
         if renderTime >= entries[entries.count - 1].receivedAtLocalTime {
-            // renderTime is past all received data — extrapolate from latest if recent enough
-            return makeExtrapolatedOrHeld(e: entries[entries.count - 1], renderTime: renderTime, now: now)
+            // renderTime is past all received data — extrapolate from latest if recent enough.
+            // Pass previous entry so makeExtrapolatedOrHeld can derive velocity from position delta
+            // when the sender reports zero kinematics (e.g. brief physics stall or idle state).
+            let prev: OnlineTimestampedSnapshot? = entries.count >= 2 ? entries[entries.count - 2] : nil
+            return makeExtrapolatedOrHeld(e: entries[entries.count - 1], prev: prev, renderTime: renderTime, now: now)
         }
 
         for index in 0..<(entries.count - 1) {
@@ -93,42 +96,59 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
         }
 
         let last = entries[entries.count - 1]
-        return makeExtrapolatedOrHeld(e: last, renderTime: renderTime, now: now)
+        let prev: OnlineTimestampedSnapshot? = entries.count >= 2 ? entries[entries.count - 2] : nil
+        return makeExtrapolatedOrHeld(e: last, prev: prev, renderTime: renderTime, now: now)
     }
 
     // Extrapolate position by velocity when we're past the latest snapshot but it's recent.
-    // This smooths over the gap between snapshot packets at 10 Hz, eliminating the freeze/snap effect.
+    // Uses sender-reported kinematics; if they are all zero (sender idle or stale physics),
+    // falls back to velocity computed from the two most recent received positions.
+    // Clamps extrapolation to 0.10–0.15 s; holds latest pose if snapshot is older than 0.35 s.
     private func makeExtrapolatedOrHeld(
         e: OnlineTimestampedSnapshot,
+        prev: OnlineTimestampedSnapshot? = nil,
         renderTime: TimeInterval,
         now: TimeInterval
     ) -> OnlineVehicleInterpolatedState {
         let age = now - e.receivedAtLocalTime
-        let extrapolationTime = max(0, renderTime - e.receivedAtLocalTime)
+        guard age <= 0.35 else { return makeState(from: e.snapshot, sourceAge: age) }
 
-        // Only extrapolate for very fresh snapshots to avoid drifting far from reality
-        if age <= 0.25, extrapolationTime > 0, extrapolationTime <= 0.15 {
-            let ex = extrapolationTime
-            let extrapolatedPose = OnlineVehiclePose(
-                positionX: e.snapshot.pose.positionX + e.snapshot.kinematics.velocityX * ex,
-                positionY: e.snapshot.pose.positionY + e.snapshot.kinematics.velocityY * ex,
-                positionZ: e.snapshot.pose.positionZ + e.snapshot.kinematics.velocityZ * ex,
-                yaw: e.snapshot.pose.yaw,
-                pitch: e.snapshot.pose.pitch,
-                roll: e.snapshot.pose.roll
-            )
-            return OnlineVehicleInterpolatedState(
-                vehicleID: e.snapshot.vehicleID,
-                participantID: e.snapshot.participantID,
-                participantName: e.snapshot.participantName,
-                pose: extrapolatedPose,
-                kinematics: e.snapshot.kinematics,
-                isArmed: e.snapshot.isArmed,
-                flightModeLabel: e.snapshot.flightModeLabel,
-                sourceSnapshotAge: age
-            )
+        let extrapolationTime = max(0, renderTime - e.receivedAtLocalTime)
+        guard extrapolationTime > 0, extrapolationTime <= 0.15 else {
+            return makeState(from: e.snapshot, sourceAge: age)
         }
-        return makeState(from: e.snapshot, sourceAge: age)
+
+        // Prefer sender-reported velocity; fall back to position-derived velocity when zero.
+        var vx = e.snapshot.kinematics.velocityX
+        var vy = e.snapshot.kinematics.velocityY
+        var vz = e.snapshot.kinematics.velocityZ
+        let kinematicsAreZero = abs(vx) < 0.001 && abs(vy) < 0.001 && abs(vz) < 0.001
+        if kinematicsAreZero, let p = prev {
+            let dt = max(e.receivedAtLocalTime - p.receivedAtLocalTime, 0.001)
+            vx = (e.snapshot.pose.positionX - p.snapshot.pose.positionX) / dt
+            vy = (e.snapshot.pose.positionY - p.snapshot.pose.positionY) / dt
+            vz = (e.snapshot.pose.positionZ - p.snapshot.pose.positionZ) / dt
+        }
+
+        let ex = extrapolationTime
+        let extrapolatedPose = OnlineVehiclePose(
+            positionX: e.snapshot.pose.positionX + vx * ex,
+            positionY: e.snapshot.pose.positionY + vy * ex,
+            positionZ: e.snapshot.pose.positionZ + vz * ex,
+            yaw: e.snapshot.pose.yaw,
+            pitch: e.snapshot.pose.pitch,
+            roll: e.snapshot.pose.roll
+        )
+        return OnlineVehicleInterpolatedState(
+            vehicleID: e.snapshot.vehicleID,
+            participantID: e.snapshot.participantID,
+            participantName: e.snapshot.participantName,
+            pose: extrapolatedPose,
+            kinematics: e.snapshot.kinematics,
+            isArmed: e.snapshot.isArmed,
+            flightModeLabel: e.snapshot.flightModeLabel,
+            sourceSnapshotAge: age
+        )
     }
 
     private func makeState(from s: OnlineVehicleStateSnapshot, sourceAge: TimeInterval) -> OnlineVehicleInterpolatedState {

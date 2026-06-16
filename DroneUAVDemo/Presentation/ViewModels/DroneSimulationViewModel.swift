@@ -651,6 +651,7 @@ final class DroneSimulationViewModel: ObservableObject {
         merged.sceneApplyHz = diagLastComputedHz.sceneApply
         merged.renderFPS = diagLastComputedHz.renderFPS
         merged.visibilityStateLabel = performancePolicy.activityState.label
+        merged.windowVisibilityLabel = currentVisibilityState.label
         merged.sceneIsPlaying = !performancePolicy.stopRendering
         merged.scenePreferredFPS = performancePolicy.targetRenderFPS
         onlineRuntimeDiagnostics = merged

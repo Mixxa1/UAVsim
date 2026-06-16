@@ -85,11 +85,14 @@ struct RuntimePerformancePolicy: Equatable {
             overlayPublishInterval = 0.5      // 2 Hz
 
         case .backgroundIdle:
-            targetRenderFPS = 15
-            snapshotSendInterval = 0.5        // 2 Hz TX
-            backgroundTickDivisor = 6         // 10 Hz physics
+            // Visible-but-inactive window (e.g. observer watching remote UAV while piloting in another window).
+            // 30 FPS / 30 Hz replica apply keeps remote movement smooth; alpha = dt*14 ≈ 0.46 (lerp, not snap).
+            // Local physics at 15 Hz (backgroundTickDivisor=2) is fine for an idle UAV.
+            targetRenderFPS = 30
+            snapshotSendInterval = 0.5        // 2 Hz TX (local UAV idle)
+            backgroundTickDivisor = 2         // 15 Hz local physics
             stopRendering = false
-            remoteSceneApplyInterval = 0.1    // 10 Hz
+            remoteSceneApplyInterval = 0.033  // 30 Hz
             overlayPublishInterval = 1.0      // 1 Hz
 
         case .minimized, .hidden:

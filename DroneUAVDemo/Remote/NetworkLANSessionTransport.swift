@@ -14,6 +14,14 @@ final class NetworkLANSessionTransport: LANSessionTransport {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
+    // TCP noDelay prevents Nagle buffering of small JSON snapshot packets,
+    // reducing bursty delivery that causes stutter in remote replica movement.
+    private static let lanParameters: NWParameters = {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        return NWParameters(tls: nil, tcp: tcp)
+    }()
+
     func startHost(port: UInt16) throws {
         stopTransport(notify: false)
         isStopping = false
@@ -22,7 +30,7 @@ final class NetworkLANSessionTransport: LANSessionTransport {
             throw LANSessionTransportError.invalidPort
         }
 
-        let listener = try NWListener(using: .tcp, on: nwPort)
+        let listener = try NWListener(using: NetworkLANSessionTransport.lanParameters, on: nwPort)
         self.listener = listener
         notifyState(.hosting)
 
@@ -46,7 +54,7 @@ final class NetworkLANSessionTransport: LANSessionTransport {
         let connection = NWConnection(
             host: NWEndpoint.Host(host),
             port: nwPort,
-            using: .tcp
+            using: NetworkLANSessionTransport.lanParameters
         )
         clientConnection = connection
         notifyState(.joining)
