@@ -1,5 +1,9 @@
 import Foundation
 
+// MARK: - RuntimeVisibilityState
+// Set by NSWindowDelegate events (miniaturize, key/resign, hide/unhide).
+// The VM derives RuntimeActivityState from this + user-input recency.
+
 enum RuntimeVisibilityState: Equatable {
     case activeVisible
     case inactiveVisible
@@ -16,35 +20,87 @@ enum RuntimeVisibilityState: Equatable {
     }
 }
 
+// MARK: - RuntimeActivityState
+// Combines window visibility with user-input recency for fine-grained throttle.
+
+enum RuntimeActivityState: Equatable {
+    case interacting      // key window + recent user input (< 1 s ago)
+    case activeIdle       // key window + no recent input
+    case backgroundIdle   // visible but not key/main
+    case minimized
+    case hidden
+
+    var label: String {
+        switch self {
+        case .interacting:    return "interacting"
+        case .activeIdle:     return "activeIdle"
+        case .backgroundIdle: return "bgIdle"
+        case .minimized:      return "minimized"
+        case .hidden:         return "hidden"
+        }
+    }
+
+    // True when the SceneKit render loop should be running.
+    var isRendering: Bool {
+        switch self {
+        case .interacting, .activeIdle, .backgroundIdle: return true
+        case .minimized, .hidden: return false
+        }
+    }
+}
+
+// MARK: - RuntimePerformancePolicy
+
 struct RuntimePerformancePolicy: Equatable {
-    let visibilityState: RuntimeVisibilityState
+    let activityState: RuntimeActivityState
     let targetRenderFPS: Int
     let snapshotSendInterval: TimeInterval
     let backgroundTickDivisor: Int
-    // When true the SCNView should stop playing entirely (isPlaying = false).
+    /// True → SCNView.isPlaying = false (scene render loop stopped entirely).
     let stopRendering: Bool
+    /// Minimum seconds between sceneController.applyOnlineInterpolatedRemoteStates() calls.
+    let remoteSceneApplyInterval: TimeInterval
+    /// Minimum seconds between @Published overlay / remote-states updates.
+    let overlayPublishInterval: TimeInterval
 
-    static let `default` = RuntimePerformancePolicy(.activeVisible)
+    static let `default` = RuntimePerformancePolicy(.interacting)
 
-    init(_ state: RuntimeVisibilityState) {
-        visibilityState = state
+    init(_ state: RuntimeActivityState) {
+        activityState = state
         switch state {
-        case .activeVisible:
+        case .interacting:
             targetRenderFPS = 60
-            snapshotSendInterval = 0.1
+            snapshotSendInterval = 0.1        // 10 Hz TX
             backgroundTickDivisor = 1
             stopRendering = false
-        case .inactiveVisible:
+            remoteSceneApplyInterval = 0.016  // ≈ 60 Hz
+            overlayPublishInterval = 0.1      // 10 Hz
+
+        case .activeIdle:
             targetRenderFPS = 30
-            snapshotSendInterval = 0.2
-            backgroundTickDivisor = 2   // 30 Hz physics; render is already 30 fps
+            snapshotSendInterval = 0.2        // 5 Hz TX
+            backgroundTickDivisor = 2         // 30 Hz physics
             stopRendering = false
+            remoteSceneApplyInterval = 0.033  // ≈ 30 Hz
+            overlayPublishInterval = 0.5      // 2 Hz
+
+        case .backgroundIdle:
+            targetRenderFPS = 15
+            snapshotSendInterval = 0.5        // 2 Hz TX
+            backgroundTickDivisor = 6         // 10 Hz physics
+            stopRendering = false
+            remoteSceneApplyInterval = 0.1    // 10 Hz
+            overlayPublishInterval = 1.0      // 1 Hz
+
         case .minimized, .hidden:
-            // preferredFramesPerSecond = 1 is a safety backstop; isPlaying=false is the real gate.
+            // isPlaying = false handled separately via FocusableSCNView window notifications
+            // so that SCNView is paused even when SwiftUI defers body updates for minimized windows.
             targetRenderFPS = 1
-            snapshotSendInterval = 0.5
-            backgroundTickDivisor = 12
+            snapshotSendInterval = 0.5        // 2 Hz TX
+            backgroundTickDivisor = 12        // 5 Hz physics
             stopRendering = true
+            remoteSceneApplyInterval = .infinity  // no apply; one-shot on restore
+            overlayPublishInterval = 2.0
         }
     }
 

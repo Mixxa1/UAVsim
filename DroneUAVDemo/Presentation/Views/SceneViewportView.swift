@@ -19,8 +19,7 @@ struct SceneViewportView: View {
                 cameraMode: viewModel.cameraConfiguration.mode,
                 cameraSensitivity: viewModel.cameraConfiguration.sensitivity,
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
-                targetFPS: viewModel.performancePolicy.targetRenderFPS,
-                stopRendering: viewModel.performancePolicy.stopRendering,
+                activityState: viewModel.performancePolicy.activityState,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },

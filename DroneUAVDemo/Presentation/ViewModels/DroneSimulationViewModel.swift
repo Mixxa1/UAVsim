@@ -477,9 +477,12 @@ final class DroneSimulationViewModel: ObservableObject {
     // P2P v1.3: diagnostics mirrored from LANSessionViewModel via applyOnlineDiagnostics.
     @Published private(set) var onlineRuntimeDiagnostics = OnlineRuntimeNetworkDiagnostics()
 
-    // v1.4.3: performance policy driven by window visibility (minimized / inactive / active)
+    // v1.4.6: activity-state-driven performance policy
     @Published private(set) var performancePolicy = RuntimePerformancePolicy.default
     private var backgroundTickSkipCounter = 0
+    // Window visibility is set by delegate events; combined with input recency → activityState.
+    private var currentVisibilityState: RuntimeVisibilityState = .activeVisible
+    private var lastUserInteractionAt: TimeInterval = 0
 
     // v1.4.4: Hz/FPS counters for PERF diagnostics; reset each second in tick().
     private var diagSnapshotOutCount: Int = 0
@@ -488,9 +491,10 @@ final class DroneSimulationViewModel: ObservableObject {
     private var diagRenderFrameCount: Int = 0
     private var diagLastResetTime: TimeInterval = 0
     private var diagLastComputedHz = (out: 0.0, rx: 0.0, sceneApply: 0.0, renderFPS: 0.0)
-    // Throttle @Published onlineInterpolatedRemoteStates to 4 Hz (overlay + collision use only).
-    // The scene apply itself runs every tick — no SwiftUI overhead on the hot path.
+    // Throttle @Published onlineInterpolatedRemoteStates; interval driven by policy.overlayPublishInterval.
     private var lastRemoteStatesPublishTime: TimeInterval = 0
+    // v1.4.6: time-gated remote scene apply (policy.remoteSceneApplyInterval)
+    private var lastOnlineSceneApplyTime: TimeInterval = 0
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -639,20 +643,44 @@ final class DroneSimulationViewModel: ObservableObject {
         merged.incomingSnapshotHz = diagLastComputedHz.rx
         merged.sceneApplyHz = diagLastComputedHz.sceneApply
         merged.renderFPS = diagLastComputedHz.renderFPS
-        merged.visibilityStateLabel = performancePolicy.visibilityState.label
+        merged.visibilityStateLabel = performancePolicy.activityState.label
         merged.sceneIsPlaying = !performancePolicy.stopRendering
         merged.scenePreferredFPS = performancePolicy.targetRenderFPS
         onlineRuntimeDiagnostics = merged
     }
 
     func applyWindowVisibilityState(_ state: RuntimeVisibilityState) {
-        let policy = RuntimePerformancePolicy(state)
+        if state == .activeVisible {
+            noteUserInteraction()   // window becoming key / restored from minimize counts as interaction
+        }
+        currentVisibilityState = state
+        refreshActivityPolicy(now: CACurrentMediaTime())
+    }
+
+    private func noteUserInteraction() {
+        lastUserInteractionAt = CACurrentMediaTime()
+    }
+
+    private func refreshActivityPolicy(now: TimeInterval) {
+        let activity: RuntimeActivityState
+        switch currentVisibilityState {
+        case .minimized:       activity = .minimized
+        case .hidden:          activity = .hidden
+        case .inactiveVisible: activity = .backgroundIdle
+        case .activeVisible:
+            activity = (now - lastUserInteractionAt < 1.0) ? .interacting : .activeIdle
+        }
+        let policy = RuntimePerformancePolicy(activity)
         guard policy != performancePolicy else { return }
         performancePolicy = policy
         backgroundTickSkipCounter = 0
         if policy.stopRendering {
             sceneController.resetRemoteApplyTime()
+            lastOnlineSceneApplyTime = 0
         }
+        #if DEBUG
+        print("[PERF] activity: \(activity.label) (vis=\(currentVisibilityState.label))")
+        #endif
     }
 
     private func refreshDiagnosticHz(now: TimeInterval) {
@@ -1570,16 +1598,21 @@ final class DroneSimulationViewModel: ObservableObject {
         onlineInterpolationStore.removeStaleSnapshots(olderThan: 2.0, now: now)
         let states = onlineInterpolationStore.interpolatedStates(now: now)
 
-        // Always apply to scene on every tick (pull-based, no SwiftUI overhead on the hot path).
-        // The smoothing lerp inside applyOnlineInterpolatedRemoteStates needs to run every frame.
-        sceneController.applyOnlineInterpolatedRemoteStates(states)
-        diagSceneApplyCount += 1
+        // Rate-gate scene node writes by activity-state-driven remoteSceneApplyInterval.
+        // Skip entirely when rendering is paused.
+        if !performancePolicy.stopRendering,
+           now - lastOnlineSceneApplyTime >= performancePolicy.remoteSceneApplyInterval {
+            sceneController.applyOnlineInterpolatedRemoteStates(states)
+            lastOnlineSceneApplyTime = now
+            diagSceneApplyCount += 1
+        }
 
-        // Throttle @Published update to 4 Hz so SwiftUI overlay doesn't rebuild at tick rate.
-        // Publish immediately if presence changes (UAV appears or disappears) for correct ghost counts.
+        // Throttle @Published update by overlayPublishInterval (min 0.25 s).
+        // Presence changes (UAV appears / disappears) always publish immediately.
         let presenceChanged = states.isEmpty != onlineInterpolatedRemoteStates.isEmpty
             || states.count != onlineInterpolatedRemoteStates.count
-        if presenceChanged || now - lastRemoteStatesPublishTime >= 0.25 {
+        let publishInterval = max(0.25, performancePolicy.overlayPublishInterval)
+        if presenceChanged || now - lastRemoteStatesPublishTime >= publishInterval {
             lastRemoteStatesPublishTime = now
             onlineInterpolatedRemoteStates = states
         }
@@ -3235,6 +3268,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
+        noteUserInteraction()
         if isSpectatorMode {
             sceneController.applySpectatorLook(
                 yawDeltaDeg: deltaX * 0.08 * cameraConfiguration.effectiveLookSensitivity,
@@ -3652,6 +3686,14 @@ final class DroneSimulationViewModel: ObservableObject {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
 
+        // v1.4.6: drive interacting → activeIdle transition (key window, no input for 1 s).
+        // The reverse (activeIdle → interacting) is triggered immediately by noteUserInteraction().
+        if currentVisibilityState == .activeVisible,
+           performancePolicy.activityState == .interacting,
+           now - lastUserInteractionAt >= 1.0 {
+            refreshActivityPolicy(now: now)
+        }
+
         // v1.4.3+: when throttled, run only 1 in N full ticks. Online work is split:
         //   • stopRendering=false (inactive): scene interpolation runs on skip ticks too so
         //     remote replicas stay smooth between 30 Hz full ticks.
@@ -3714,11 +3756,18 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
+        // Note interaction when UAV is actively flying (armed + moving) so the window
+        // doesn't transition to activeIdle while the pilot's drone is still in flight.
+        if currentVisibilityState == .activeVisible, isArmed, simd_length(state.velocity) > 0.15 {
+            noteUserInteraction()
+        }
         cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
         refreshDiagnosticHz(now: now)
         updateOnlineInterpolatedRemoteStates(now: now)
         if isSpectatorMode {
-            updateSpectatorRuntime(deltaTime: dt)
+            if !performancePolicy.stopRendering {
+                updateSpectatorRuntime(deltaTime: dt)
+            }
             return
         }
         syncControllerInteractionMode()
@@ -3736,14 +3785,16 @@ final class DroneSimulationViewModel: ObservableObject {
         guard isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
-            sceneController.update(
-                with: state,
-                camera: cameraConfiguration,
-                damage: damageState,
-                thermal: thermalState,
-                diagnosticMode: diagnosticMode,
-                deltaTime: 0.0
-            )
+            if !performancePolicy.stopRendering {
+                sceneController.update(
+                    with: state,
+                    camera: cameraConfiguration,
+                    damage: damageState,
+                    thermal: thermalState,
+                    diagnosticMode: diagnosticMode,
+                    deltaTime: 0.0
+                )
+            }
             refreshCompassOverlay()
             refreshPayloadCameraStatus()
             syncPayloadLifecycleEvents()
@@ -3904,21 +3955,23 @@ final class DroneSimulationViewModel: ObservableObject {
         sampleMissionObservationIfNeeded()
 
         let renderStart = CACurrentMediaTime()
-        sceneController.applyWeatherVisual(weather)
-        sceneController.update(
-            with: state,
-            camera: cameraConfiguration,
-            damage: damageState,
-            thermal: thermalState,
-            diagnosticMode: diagnosticMode,
-            deltaTime: dt
-        )
-        sceneController.updateFleetWingmen(
-            wingmen,
-            profile: selectedDroneProfile,
-            throttle: state.throttle,
-            deltaTime: dt
-        )
+        if !performancePolicy.stopRendering {
+            sceneController.applyWeatherVisual(weather)
+            sceneController.update(
+                with: state,
+                camera: cameraConfiguration,
+                damage: damageState,
+                thermal: thermalState,
+                diagnosticMode: diagnosticMode,
+                deltaTime: dt
+            )
+            sceneController.updateFleetWingmen(
+                wingmen,
+                profile: selectedDroneProfile,
+                throttle: state.throttle,
+                deltaTime: dt
+            )
+        }
         refreshCompassOverlay()
         refreshPayloadCameraStatus()
         syncPayloadLifecycleEvents()
@@ -3927,7 +3980,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         collisionDebugAccumulator += dt
         let collisionDebugStateChanged = (lastCollisionDebugEnabled != collisionDebugEnabled)
-        if (collisionDebugEnabled && collisionDebugAccumulator > 0.12) || collisionDebugStateChanged {
+        if !performancePolicy.stopRendering,
+           (collisionDebugEnabled && collisionDebugAccumulator > 0.12) || collisionDebugStateChanged {
             sceneController.updateCollisionDebug(risk: collisionAnalysis, enabled: collisionDebugEnabled)
             sceneController.updatePathDebug(
                 path: navigationSnapshot.waypoints,
@@ -3941,7 +3995,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         diagnosticsSamplingAccumulator += dt
-        if diagnosticsSamplingAccumulator >= 0.45 || cachedDiagnostics.activeObjectCount == 0 {
+        if !performancePolicy.stopRendering,
+           diagnosticsSamplingAccumulator >= 0.45 || cachedDiagnostics.activeObjectCount == 0 {
             let sceneStats = sceneController.sceneDiagnostics()
             let nextDiagnostics = SimulationDiagnostics(
                 frameTimeMs: (CACurrentMediaTime() - frameStart) * 1000.0,
