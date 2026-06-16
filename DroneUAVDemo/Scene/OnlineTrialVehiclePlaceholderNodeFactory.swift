@@ -47,21 +47,10 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
     private static let profileRepository = LIPODroneModelRepository()
     private static func resolveProfile(_ profileID: String?) -> DroneModelProfile {
         let abstractFallback = LIPODroneModelRepository.abstractProfile(from: AbstractDroneParameters.default)
-        guard let profileID else {
-            #if DEBUG
-            print("[LAN][PROFILE][WARNING] Falling back to abstract replica — profileID is nil")
-            #endif
-            return abstractFallback
-        }
+        guard let profileID else { return abstractFallback }
         if let found = profileRepository.allProfiles.first(where: { $0.id == profileID }) {
-            #if DEBUG
-            print("[LAN][PROFILE] replica factory resolved profileID=\(profileID) → \(found.uiDisplayName)")
-            #endif
             return found
         }
-        #if DEBUG
-        print("[LAN][PROFILE][WARNING] Falling back to abstract replica for profileID=\(profileID) — not found in repository")
-        #endif
         return abstractFallback
     }
 

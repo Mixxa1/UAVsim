@@ -1,9 +1,13 @@
 import Foundation
 
 struct OnlineRuntimeNetworkDiagnostics: Equatable {
-    // Snapshot throughput
+    // Snapshot throughput (measured per second on the receiver side)
     var outgoingSnapshotCount: Int = 0
     var incomingSnapshotCount: Int = 0
+    var outgoingSnapshotHz: Double = 0
+    var incomingSnapshotHz: Double = 0
+    var sceneApplyHz: Double = 0
+    var renderFPS: Double = 0
 
     // Shared event throughput
     var sharedEventSentCount: Int = 0
@@ -12,9 +16,13 @@ struct OnlineRuntimeNetworkDiagnostics: Equatable {
     // Session topology
     var connectedParticipantCount: Int = 0
 
-    // Ghost replica health (updated by DroneSimulationViewModel after each interpolation pass)
+    // Ghost replica health (receiver-local time, no sender-clock dependency)
     var remoteGhostVisibleCount: Int = 0
     var remoteGhostStaleCount: Int = 0
+    var remoteVisualLagMs: Double? = nil
+    var remoteSnapshotBufferDepthMax: Int = 0
+    var remoteDroppedOldSnapshotCount: UInt64 = 0
+    var remoteOutOfOrderDropCount: UInt64 = 0
 
     // Runtime handoff timestamp
     var lastRuntimeHandoffAt: TimeInterval? = nil
@@ -24,9 +32,10 @@ struct OnlineRuntimeNetworkDiagnostics: Equatable {
     var lastPongAt: TimeInterval? = nil
     var lastPingRoundtripMs: Double? = nil
 
-    // Remote replica visual health (receiver-local time, not sender clock)
-    var remoteVisualLatencyMs: Double? = nil
-    var interpolationBufferDepth: Int = 0
+    // Window / scene state
+    var visibilityStateLabel: String = "active"
+    var sceneIsPlaying: Bool = true
+    var scenePreferredFPS: Int = 60
 
     var pingLabel: String {
         guard let rtt = lastPingRoundtripMs else { return "—" }

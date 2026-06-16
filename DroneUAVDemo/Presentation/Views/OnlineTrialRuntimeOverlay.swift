@@ -199,13 +199,14 @@ struct OnlineTrialRuntimeOverlay: View {
         let hasData = diagnostics.outgoingSnapshotCount > 0
             || diagnostics.incomingSnapshotCount > 0
             || diagnostics.lastPingRoundtripMs != nil
+            || diagnostics.renderFPS > 0
         if hasData {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("DIAGNOSTICS")
+            VStack(alignment: .leading, spacing: 4) {
+                // Network counters
+                Text("NET")
                     .font(.system(size: 8, weight: .black, design: .monospaced))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                     .tracking(0.8)
-                    .padding(.bottom, 1)
 
                 HStack(spacing: 6) {
                     diagCell("TX", "\(diagnostics.outgoingSnapshotCount)")
@@ -218,13 +219,49 @@ struct OnlineTrialRuntimeOverlay: View {
                     diagCell("PING", diagnostics.pingLabel)
                 }
 
-                if let latencyMs = diagnostics.remoteVisualLatencyMs, remoteCount > 0 {
-                    let latencyColor: Color = latencyMs > 1500 ? Color(red: 1.0, green: 0.25, blue: 0.25)
-                        : latencyMs > 500 ? GroundControlPalette.warning
-                        : GroundControlPalette.success
+                // Performance section
+                Text("PERF")
+                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .tracking(0.8)
+                    .padding(.top, 2)
+
+                HStack(spacing: 6) {
+                    if diagnostics.renderFPS > 0 {
+                        let fpsColor: Color = diagnostics.renderFPS < 20 ? GroundControlPalette.warning : GroundControlPalette.textPrimary
+                        diagCell("FPS", String(format: "%.0f", diagnostics.renderFPS), color: fpsColor)
+                    }
+                    if diagnostics.outgoingSnapshotHz > 0 {
+                        diagCell("TX Hz", String(format: "%.0f", diagnostics.outgoingSnapshotHz))
+                    }
+                    if diagnostics.incomingSnapshotHz > 0 {
+                        diagCell("RX Hz", String(format: "%.0f", diagnostics.incomingSnapshotHz))
+                    }
+                    if diagnostics.sceneApplyHz > 0 {
+                        diagCell("Apply", String(format: "%.0f", diagnostics.sceneApplyHz))
+                    }
+                }
+
+                if remoteCount > 0 {
                     HStack(spacing: 6) {
-                        diagCell("RX LAG", String(format: "%.0f ms", latencyMs), color: latencyColor)
-                        diagCell("BUF", "\(diagnostics.interpolationBufferDepth)")
+                        if let lagMs = diagnostics.remoteVisualLagMs {
+                            let lagColor: Color = lagMs > 1500 ? Color(red: 1.0, green: 0.25, blue: 0.25)
+                                : lagMs > 500 ? GroundControlPalette.warning
+                                : GroundControlPalette.success
+                            diagCell("LAG", String(format: "%.0f ms", lagMs), color: lagColor)
+                        }
+                        diagCell("BUF", "\(diagnostics.remoteSnapshotBufferDepthMax)")
+                        if diagnostics.remoteOutOfOrderDropCount > 0 {
+                            diagCell("OOO", "\(diagnostics.remoteOutOfOrderDropCount)", color: GroundControlPalette.warning)
+                        }
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    diagCell("VIS", diagnostics.visibilityStateLabel)
+                    diagCell("ScFPS", "\(diagnostics.scenePreferredFPS)")
+                    if !diagnostics.sceneIsPlaying {
+                        diagCell("PLAY", "off", color: GroundControlPalette.warning)
                     }
                 }
             }

@@ -70,6 +70,10 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     private weak var forwardedWindowDelegate: (any NSWindowDelegate)?
     private var pendingExitAction: PendingExitAction?
     private var allowWindowClose = false
+    // v1.4.4: debounce inactiveVisible so transient key loss (sheet/dialog) doesn't throttle FPS.
+    private var inactiveDebounceTask: DispatchWorkItem?
+    private var appHideObserver: Any?
+    private var appUnhideObserver: Any?
 
     init(projectStorage: ProjectStorageManaging = ProjectStorageService()) {
         self.projectStorage = projectStorage
@@ -108,6 +112,23 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
 
         self.window = window
         window.delegate = self
+
+        // Subscribe to application-level hide/unhide once (idempotent guard).
+        if appHideObserver == nil {
+            let nc = NotificationCenter.default
+            appHideObserver = nc.addObserver(
+                forName: NSApplication.didHideNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.activeSimulation?.applyWindowVisibilityState(.hidden)
+            }
+            appUnhideObserver = nc.addObserver(
+                forName: NSApplication.didUnhideNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.activeSimulation?.applyWindowVisibilityState(.activeVisible)
+            }
+        }
     }
 
     func refreshProjects() {
@@ -464,24 +485,41 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         forwardedWindowDelegate?.windowWillClose?(notification)
     }
 
-    // v1.4.3: throttle CPU when window is minimized or loses key focus
+    // v1.4.3/v1.4.4: throttle CPU when window is minimized or loses key focus.
+    // v1.4.4: inactiveVisible uses a 0.8 s debounce so transient key loss from sheets/dialogs
+    // within the same window doesn't accidentally throttle the render FPS.
     func windowDidMiniaturize(_ notification: Notification) {
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
         activeSimulation?.applyWindowVisibilityState(.minimized)
         forwardedWindowDelegate?.windowDidMiniaturize?(notification)
     }
 
     func windowDidDeminiaturize(_ notification: Notification) {
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
         activeSimulation?.applyWindowVisibilityState(.activeVisible)
         forwardedWindowDelegate?.windowDidDeminiaturize?(notification)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
         activeSimulation?.applyWindowVisibilityState(.activeVisible)
         forwardedWindowDelegate?.windowDidBecomeKey?(notification)
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        activeSimulation?.applyWindowVisibilityState(.inactiveVisible)
+        // Debounce: only downgrade to inactiveVisible after 0.8 s of sustained non-key status.
+        // This prevents a sheet or panel opening briefly (e.g. UAV catalog, settings) from
+        // cutting SceneKit FPS in half during normal pilot operations.
+        let task = DispatchWorkItem { [weak self] in
+            self?.inactiveDebounceTask = nil
+            self?.activeSimulation?.applyWindowVisibilityState(.inactiveVisible)
+        }
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: task)
         forwardedWindowDelegate?.windowDidResignKey?(notification)
     }
 

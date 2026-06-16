@@ -81,6 +81,10 @@ final class DroneSceneController {
     private let onlineTrialPlaceholderRootNode = SCNNode()
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
+    // v1.4.4: timestamp for computing deltaTime inside applyOnlineInterpolatedRemoteStates.
+    private var lastRemoteApplyTime: TimeInterval = 0
+
+    func resetRemoteApplyTime() { lastRemoteApplyTime = 0 }
 
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
@@ -377,7 +381,14 @@ final class DroneSceneController {
 
     // P2P 0.9: ghost nodes are visual-only remote vehicles, not physics bodies.
     // Called per-frame from simulation tick with interpolated states for smooth movement.
+    // v1.4.4: position lerp eliminates micro-jitter; if > 20 m away the node snaps to avoid drag.
     func applyOnlineInterpolatedRemoteStates(_ states: [OnlineVehicleInterpolatedState]) {
+        let now = CACurrentMediaTime()
+        let dt: Float = lastRemoteApplyTime == 0
+            ? 0.016
+            : Float(min(now - lastRemoteApplyTime, 0.1))
+        lastRemoteApplyTime = now
+
         let activeNodeNames = Set(states.map { onlineTrialVehicleNodeName(for: $0.vehicleID) })
 
         for child in onlineTrialPlaceholderRootNode.childNodes {
@@ -385,13 +396,15 @@ final class DroneSceneController {
             child.isHidden = !activeNodeNames.contains(name)
         }
 
+        let smoothingRate: Float = 14.0
+        let alpha = min(dt * smoothingRate, 1.0)
+
         for state in states {
             let nodeName = onlineTrialVehicleNodeName(for: state.vehicleID)
             let node: SCNNode
             if let existing = onlineTrialPlaceholderRootNode.childNode(withName: nodeName, recursively: false) {
                 node = existing
             } else {
-                // v1.5: use cached profileID so late-arriving snapshots still build the right visual.
                 let cachedProfileID = replicaProfileCache[state.vehicleID]
                 node = OnlineTrialVehiclePlaceholderNodeFactory.makeGhostNode(
                     vehicleID: state.vehicleID,
@@ -402,11 +415,19 @@ final class DroneSceneController {
                 onlineTrialPlaceholderRootNode.addChildNode(node)
             }
 
-            node.position = SCNVector3(
+            let targetPos = SIMD3<Float>(
                 Float(state.pose.positionX),
                 Float(state.pose.positionY),
                 Float(state.pose.positionZ)
             )
+            let currentPos = node.simdPosition
+            // Snap if the node is far away (first appearance, warp, etc.)
+            if simd_distance(currentPos, targetPos) > 20.0 {
+                node.simdPosition = targetPos
+            } else {
+                node.simdPosition = simd_mix(currentPos, targetPos, SIMD3<Float>(repeating: alpha))
+            }
+
             node.simdOrientation = orientationQuaternion(
                 from: SIMD3<Float>(
                     Float(state.pose.roll),
@@ -414,7 +435,6 @@ final class DroneSceneController {
                     Float(state.pose.yaw)
                 )
             )
-            // P2P v1.0: fade replica when snapshot is aging — hides silently at store expiry (>2s).
             node.opacity = state.sourceSnapshotAge > 1.0 ? 0.30 : 0.88
             node.isHidden = false
         }

@@ -212,6 +212,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     let cameraSensitivity: Float
     let freeMoveSpeed: Float
     var targetFPS: Int = 60
+    var stopRendering: Bool = false
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -226,7 +227,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.preferredFramesPerSecond = targetFPS
         view.rendersContinuously = false
         view.backgroundColor = .black
-        view.isPlaying = true
+        view.isPlaying = !stopRendering
         view.delegate = context.coordinator
         view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
         view.usesUnboundedMouseLook = cameraMode == .spectator
@@ -249,6 +250,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         context.coordinator.onRenderFrame = onRenderFrame
         view.pointOfView = pointOfView
         view.preferredFramesPerSecond = targetFPS
+        view.isPlaying = !stopRendering
         if let view = view as? FocusableSCNView {
             view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
             view.usesUnboundedMouseLook = cameraMode == .spectator

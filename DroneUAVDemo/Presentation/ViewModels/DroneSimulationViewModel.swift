@@ -481,6 +481,17 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var performancePolicy = RuntimePerformancePolicy.default
     private var backgroundTickSkipCounter = 0
 
+    // v1.4.4: Hz/FPS counters for PERF diagnostics; reset each second in tick().
+    private var diagSnapshotOutCount: Int = 0
+    private var diagSnapshotInCount: Int = 0
+    private var diagSceneApplyCount: Int = 0
+    private var diagRenderFrameCount: Int = 0
+    private var diagLastResetTime: TimeInterval = 0
+    private var diagLastComputedHz = (out: 0.0, rx: 0.0, sceneApply: 0.0, renderFPS: 0.0)
+    // Throttle @Published onlineInterpolatedRemoteStates to 4 Hz (overlay + collision use only).
+    // The scene apply itself runs every tick — no SwiftUI overhead on the hot path.
+    private var lastRemoteStatesPublishTime: TimeInterval = 0
+
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
     @Published private(set) var activeUAVProfile: UAVProfile?
@@ -619,9 +630,18 @@ final class DroneSimulationViewModel: ObservableObject {
         let staleThreshold = 2.0
         merged.remoteGhostVisibleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < staleThreshold }.count
         merged.remoteGhostStaleCount = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge >= staleThreshold }.count
-        merged.remoteVisualLatencyMs = onlineInterpolatedRemoteStates.max(by: { $0.sourceSnapshotAge < $1.sourceSnapshotAge })
+        merged.remoteVisualLagMs = onlineInterpolatedRemoteStates
+            .max(by: { $0.sourceSnapshotAge < $1.sourceSnapshotAge })
             .map { $0.sourceSnapshotAge * 1000 }
-        merged.interpolationBufferDepth = onlineInterpolationStore.totalBufferDepth
+        merged.remoteSnapshotBufferDepthMax = onlineInterpolationStore.totalBufferDepth
+        merged.remoteOutOfOrderDropCount = onlineInterpolationStore.outOfOrderDropCount
+        merged.outgoingSnapshotHz = diagLastComputedHz.out
+        merged.incomingSnapshotHz = diagLastComputedHz.rx
+        merged.sceneApplyHz = diagLastComputedHz.sceneApply
+        merged.renderFPS = diagLastComputedHz.renderFPS
+        merged.visibilityStateLabel = performancePolicy.visibilityState.label
+        merged.sceneIsPlaying = !performancePolicy.stopRendering
+        merged.scenePreferredFPS = performancePolicy.targetRenderFPS
         onlineRuntimeDiagnostics = merged
     }
 
@@ -630,6 +650,25 @@ final class DroneSimulationViewModel: ObservableObject {
         guard policy != performancePolicy else { return }
         performancePolicy = policy
         backgroundTickSkipCounter = 0
+        if policy.stopRendering {
+            sceneController.resetRemoteApplyTime()
+        }
+    }
+
+    private func refreshDiagnosticHz(now: TimeInterval) {
+        guard now - diagLastResetTime >= 1.0 else { return }
+        let elapsed = max(now - diagLastResetTime, 0.001)
+        diagLastComputedHz = (
+            out: Double(diagSnapshotOutCount) / elapsed,
+            rx: Double(diagSnapshotInCount) / elapsed,
+            sceneApply: Double(diagSceneApplyCount) / elapsed,
+            renderFPS: Double(diagRenderFrameCount) / elapsed
+        )
+        diagSnapshotOutCount = 0
+        diagSnapshotInCount = 0
+        diagSceneApplyCount = 0
+        diagRenderFrameCount = 0
+        diagLastResetTime = now
     }
 
     func canUseControlModule(_ module: ControlModule) -> Bool {
@@ -1516,6 +1555,7 @@ final class DroneSimulationViewModel: ObservableObject {
         guard onlineRemoteSnapshotState != filteredState else { return }
 
         onlineRemoteSnapshotState = filteredState
+        diagSnapshotInCount += filteredState.snapshots.count
         // Feed into interpolation buffer. Use local receive time so clock skew between sender
         // and receiver does not corrupt the interpolation timeline (v1.4.3 fix).
         onlineInterpolationStore.apply(
@@ -1529,11 +1569,20 @@ final class DroneSimulationViewModel: ObservableObject {
         guard onlineRuntimeContext != nil else { return }
         onlineInterpolationStore.removeStaleSnapshots(olderThan: 2.0, now: now)
         let states = onlineInterpolationStore.interpolatedStates(now: now)
-        guard states != onlineInterpolatedRemoteStates else { return }
-        onlineInterpolatedRemoteStates = states
-        // P2P v1.1: states list contains only remoteReplica vehicles — local vehicle is already
-        // excluded via ignoringLocalVehicleID in apply(). Ghost nodes are visual-only; no physics.
+
+        // Always apply to scene on every tick (pull-based, no SwiftUI overhead on the hot path).
+        // The smoothing lerp inside applyOnlineInterpolatedRemoteStates needs to run every frame.
         sceneController.applyOnlineInterpolatedRemoteStates(states)
+        diagSceneApplyCount += 1
+
+        // Throttle @Published update to 4 Hz so SwiftUI overlay doesn't rebuild at tick rate.
+        // Publish immediately if presence changes (UAV appears or disappears) for correct ghost counts.
+        let presenceChanged = states.isEmpty != onlineInterpolatedRemoteStates.isEmpty
+            || states.count != onlineInterpolatedRemoteStates.count
+        if presenceChanged || now - lastRemoteStatesPublishTime >= 0.25 {
+            lastRemoteStatesPublishTime = now
+            onlineInterpolatedRemoteStates = states
+        }
     }
 
     #if DEBUG
@@ -1599,6 +1648,7 @@ final class DroneSimulationViewModel: ObservableObject {
             flightModeLabel: mode.rawValue
         )
         onlineSnapshotTransport?.sendVehicleSnapshot(snapshot)
+        diagSnapshotOutCount += 1
         emitLocalCollisionEventsIfNeeded(localSnapshot: snapshot, now: now)
     }
 
@@ -1620,9 +1670,9 @@ final class DroneSimulationViewModel: ObservableObject {
            now - startedAt < onlineCollisionGracePeriodSeconds { return }
 
         // Only collide against replicas with fresh receiver-local snapshot data.
-        // Stale replicas (>500 ms) may be frozen at a position that no longer reflects
+        // Stale replicas (>350 ms) may be frozen at a position that no longer reflects
         // the remote UAV's actual location, causing false collision events.
-        let freshRemoteStates = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < 0.5 }
+        let freshRemoteStates = onlineInterpolatedRemoteStates.filter { $0.sourceSnapshotAge < 0.35 }
         let candidates = localCollisionDetector.detect(
             localSnapshot: localSnapshot,
             remoteStates: freshRemoteStates
@@ -3208,6 +3258,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func handleSceneRenderFrame(atTime time: TimeInterval, cameraMode: CameraMode) {
+        diagRenderFrameCount += 1
         sceneController.updatePayloadCameraForRenderFrame(
             atTime: time,
             isActive: cameraMode == .payload
@@ -3601,16 +3652,19 @@ final class DroneSimulationViewModel: ObservableObject {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
 
-        // v1.4.3: when minimized/hidden, run only 1 in N ticks to save CPU.
-        // Online snapshot interpolation and publishing still run every N ticks via the
-        // updateOnlineInterpolatedRemoteStates / publishOnlineVehicleSnapshotIfNeeded calls
-        // below — their internal rate-limiters control actual network throughput.
+        // v1.4.3+: when throttled, run only 1 in N full ticks. Online work is split:
+        //   • stopRendering=false (inactive): scene interpolation runs on skip ticks too so
+        //     remote replicas stay smooth between 30 Hz full ticks.
+        //   • stopRendering=true (minimized/hidden): skip-ticks do nothing but TX rate-check;
+        //     full tick (5 Hz) handles cleanup, interpolation, and scene apply.
         if performancePolicy.isThrottled {
             backgroundTickSkipCounter += 1
             if backgroundTickSkipCounter < performancePolicy.backgroundTickDivisor {
                 if onlineRuntimeContext != nil {
-                    cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
-                    updateOnlineInterpolatedRemoteStates(now: now)
+                    if !performancePolicy.stopRendering {
+                        cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
+                        updateOnlineInterpolatedRemoteStates(now: now)
+                    }
                     publishOnlineVehicleSnapshotIfNeeded(now: now)
                 }
                 return
@@ -3661,6 +3715,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
         cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
+        refreshDiagnosticHz(now: now)
         updateOnlineInterpolatedRemoteStates(now: now)
         if isSpectatorMode {
             updateSpectatorRuntime(deltaTime: dt)

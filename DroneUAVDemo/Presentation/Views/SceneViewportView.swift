@@ -20,6 +20,7 @@ struct SceneViewportView: View {
                 cameraSensitivity: viewModel.cameraConfiguration.sensitivity,
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
                 targetFPS: viewModel.performancePolicy.targetRenderFPS,
+                stopRendering: viewModel.performancePolicy.stopRendering,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },

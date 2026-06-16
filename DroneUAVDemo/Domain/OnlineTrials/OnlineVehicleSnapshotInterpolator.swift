@@ -8,7 +8,7 @@ struct OnlineVehicleInterpolatedState: Codable, Equatable {
     var kinematics: OnlineVehicleKinematics
     var isArmed: Bool
     var flightModeLabel: String
-    // Age is measured in receiver-local time so clock skew between sender/receiver does not inflate it.
+    // Age measured in receiver-local time so clock skew between sender/receiver does not inflate it.
     var sourceSnapshotAge: TimeInterval
 }
 
@@ -31,14 +31,23 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
         self.vehicleID = vehicleID
     }
 
-    mutating func push(_ snapshot: OnlineVehicleStateSnapshot, receivedAt: TimeInterval) {
-        guard snapshot.sequenceNumber > latestSequenceNumber else { return }
+    // Returns true if the snapshot was accepted, false if out-of-order (for diagnostics).
+    @discardableResult
+    mutating func push(_ snapshot: OnlineVehicleStateSnapshot, receivedAt: TimeInterval) -> Bool {
+        guard snapshot.sequenceNumber > latestSequenceNumber else { return false }
         latestSequenceNumber = snapshot.sequenceNumber
         entries.append(OnlineTimestampedSnapshot(snapshot: snapshot, receivedAtLocalTime: receivedAt))
         trim(now: receivedAt)
+        return true
     }
 
     mutating func trim(now: TimeInterval) {
+        // If the newest entry itself is stale, the buffer built up a backlog — clear it all
+        // rather than trying to "play back" old data which causes the seconds-long lag.
+        if let last = entries.last, now - last.receivedAtLocalTime > 1.0 {
+            entries.removeAll()
+            return
+        }
         entries.removeAll { now - $0.receivedAtLocalTime > 1.0 }
         if entries.count > maxEntries {
             entries.removeFirst(entries.count - maxEntries)
@@ -46,6 +55,10 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
     }
 
     mutating func removeStaleSnapshots(olderThan maxAgeSeconds: TimeInterval, now: TimeInterval) {
+        if let last = entries.last, now - last.receivedAtLocalTime > maxAgeSeconds {
+            entries.removeAll()
+            return
+        }
         entries.removeAll { now - $0.receivedAtLocalTime > maxAgeSeconds }
     }
 
@@ -56,7 +69,7 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
 
         if entries.count == 1 {
             let e = entries[0]
-            return makeState(from: e.snapshot, sourceAge: now - e.receivedAtLocalTime)
+            return makeExtrapolatedOrHeld(e: e, renderTime: renderTime, now: now)
         }
 
         if renderTime <= entries[0].receivedAtLocalTime {
@@ -65,8 +78,8 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
         }
 
         if renderTime >= entries[entries.count - 1].receivedAtLocalTime {
-            let e = entries[entries.count - 1]
-            return makeState(from: e.snapshot, sourceAge: now - e.receivedAtLocalTime)
+            // renderTime is past all received data — extrapolate from latest if recent enough
+            return makeExtrapolatedOrHeld(e: entries[entries.count - 1], renderTime: renderTime, now: now)
         }
 
         for index in 0..<(entries.count - 1) {
@@ -80,7 +93,42 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
         }
 
         let last = entries[entries.count - 1]
-        return makeState(from: last.snapshot, sourceAge: now - last.receivedAtLocalTime)
+        return makeExtrapolatedOrHeld(e: last, renderTime: renderTime, now: now)
+    }
+
+    // Extrapolate position by velocity when we're past the latest snapshot but it's recent.
+    // This smooths over the gap between snapshot packets at 10 Hz, eliminating the freeze/snap effect.
+    private func makeExtrapolatedOrHeld(
+        e: OnlineTimestampedSnapshot,
+        renderTime: TimeInterval,
+        now: TimeInterval
+    ) -> OnlineVehicleInterpolatedState {
+        let age = now - e.receivedAtLocalTime
+        let extrapolationTime = max(0, renderTime - e.receivedAtLocalTime)
+
+        // Only extrapolate for very fresh snapshots to avoid drifting far from reality
+        if age <= 0.25, extrapolationTime > 0, extrapolationTime <= 0.15 {
+            let ex = extrapolationTime
+            let extrapolatedPose = OnlineVehiclePose(
+                positionX: e.snapshot.pose.positionX + e.snapshot.kinematics.velocityX * ex,
+                positionY: e.snapshot.pose.positionY + e.snapshot.kinematics.velocityY * ex,
+                positionZ: e.snapshot.pose.positionZ + e.snapshot.kinematics.velocityZ * ex,
+                yaw: e.snapshot.pose.yaw,
+                pitch: e.snapshot.pose.pitch,
+                roll: e.snapshot.pose.roll
+            )
+            return OnlineVehicleInterpolatedState(
+                vehicleID: e.snapshot.vehicleID,
+                participantID: e.snapshot.participantID,
+                participantName: e.snapshot.participantName,
+                pose: extrapolatedPose,
+                kinematics: e.snapshot.kinematics,
+                isArmed: e.snapshot.isArmed,
+                flightModeLabel: e.snapshot.flightModeLabel,
+                sourceSnapshotAge: age
+            )
+        }
+        return makeState(from: e.snapshot, sourceAge: age)
     }
 
     private func makeState(from s: OnlineVehicleStateSnapshot, sourceAge: TimeInterval) -> OnlineVehicleInterpolatedState {
@@ -134,6 +182,7 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
 
 struct OnlineVehicleInterpolationStore: Equatable {
     var buffersByVehicleID: [UUID: OnlineVehicleSnapshotInterpolationBuffer] = [:]
+    private(set) var outOfOrderDropCount: UInt64 = 0
 
     mutating func apply(
         _ snapshot: OnlineVehicleStateSnapshot,
@@ -144,7 +193,8 @@ struct OnlineVehicleInterpolationStore: Equatable {
         if buffersByVehicleID[snapshot.vehicleID] == nil {
             buffersByVehicleID[snapshot.vehicleID] = OnlineVehicleSnapshotInterpolationBuffer(vehicleID: snapshot.vehicleID)
         }
-        buffersByVehicleID[snapshot.vehicleID]?.push(snapshot, receivedAt: receivedAt)
+        let accepted = buffersByVehicleID[snapshot.vehicleID]?.push(snapshot, receivedAt: receivedAt) ?? true
+        if !accepted { outOfOrderDropCount &+= 1 }
     }
 
     mutating func apply(
