@@ -18,6 +18,42 @@
       "licenseName": "Creative Commons Attribution",
       "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
       "changes": "Imported as USDZ and used as a tiled terrain grass material in DroneUAVDemo."
+    },
+    {
+      "id": "snow04_publicdomaintextures",
+      "title": "Snow04",
+      "author": "Publicdomaintextures",
+      "sourceURL": "https://skfb.ly/oRwAR",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as a tiled terrain snow material in DroneUAVDemo for snow weather."
+    },
+    {
+      "id": "patch_of_old_snow_simonspata",
+      "title": "Patch of Old Snow",
+      "author": "simonspata",
+      "sourceURL": "https://skfb.ly/oUIpU",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as a decorative snow patch prop in DroneUAVDemo for snow weather."
+    },
+    {
+      "id": "snow_foot_step_gm3dscan",
+      "title": "Snow foot step",
+      "author": "GM3Dscan",
+      "sourceURL": "https://skfb.ly/oUIpB",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as a decorative snow footstep prop near the spawn area in DroneUAVDemo for snow weather."
+    },
+    {
+      "id": "colorado_blue_spruce_plantcatalog",
+      "title": "Realistic HD Colorado Blue spruce Koster",
+      "author": "PlantCatalog",
+      "sourceURL": "https://skfb.ly/oUsOs",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as the snow-weather tree visual replacing Pine Tree in DroneUAVDemo."
     }
   ]
 }

@@ -4,10 +4,15 @@ import simd
 
 final class ScenePopulationService {
     private let containerNode = SCNNode()
+    private let treeVisualsNode = SCNNode()
+    private var storedTreeDescriptors: [EnvironmentObjectDescriptor] = []
+    private var lastVisualQuality: EnvironmentVisualQuality = .detailed
 
     init(rootNode: SCNNode) {
         containerNode.name = "environmentContainer"
+        treeVisualsNode.name = "environment.trees"
         rootNode.addChildNode(containerNode)
+        containerNode.addChildNode(treeVisualsNode)
     }
 
     @discardableResult
@@ -74,15 +79,35 @@ final class ScenePopulationService {
         )
         let allDescriptors = collidableDescriptors + beltDescriptors
 
+        // Re-establish treeVisualsNode after clearing containerNode children
+        containerNode.addChildNode(treeVisualsNode)
+        lastVisualQuality = visualQuality
+        storedTreeDescriptors = allDescriptors.filter { $0.kind == .tree }
+
         var nodesByID: [UUID: SCNNode] = [:]
         nodesByID.reserveCapacity(allDescriptors.count)
         for descriptor in allDescriptors {
             let node = EnvironmentObjectFactory.makeNode(for: descriptor, quality: visualQuality)
             nodesByID[descriptor.id] = node
-            containerNode.addChildNode(node)
+            if descriptor.kind == .tree {
+                treeVisualsNode.addChildNode(node)
+            } else {
+                containerNode.addChildNode(node)
+            }
         }
 
         return (allDescriptors, nodesByID)
+    }
+
+    func refreshTreeVisuals(snowWeatherActive: Bool) {
+        EnvironmentObjectFactory.snowWeatherActive = snowWeatherActive
+        treeVisualsNode.childNodes.forEach { $0.removeFromParentNode() }
+        EnvironmentObjectFactory.resetDiagnostics()
+        for descriptor in storedTreeDescriptors {
+            let node = EnvironmentObjectFactory.makeNode(for: descriptor, quality: lastVisualQuality)
+            treeVisualsNode.addChildNode(node)
+        }
+        EnvironmentObjectFactory.printDiagnostics()
     }
 
     private func generateGridDemo(

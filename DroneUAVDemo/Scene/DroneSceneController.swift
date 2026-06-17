@@ -139,6 +139,8 @@ final class DroneSceneController {
     private var pathDebugSignature: Int = 0
     private var lastWeatherVisualSignature: Int?
     private var lastComponentOverlaySignature: Int?
+    private var lastTerrainConfig: TerrainConfiguration?
+    private let snowDecorationsNode = SCNNode()
 
     private struct SupplementalCollisionObstacle {
         let obstacle: CollisionObstacle
@@ -262,6 +264,9 @@ final class DroneSceneController {
 
         onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
         scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
+
+        snowDecorationsNode.name = "environment.snowDecorations"
+        scene.rootNode.addChildNode(snowDecorationsNode)
 
         nearestContactNode.geometry = SCNSphere(radius: 0.14)
         nearestContactNode.geometry?.firstMaterial?.diffuse.contents = NSColor.systemRed.withAlphaComponent(0.82)
@@ -1179,7 +1184,9 @@ final class DroneSceneController {
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
+        lastTerrainConfig = terrain
         EnvironmentObjectFactory.resetDiagnostics()
+        EnvironmentObjectFactory.snowWeatherActive = (currentWeather.preset == .snow)
         let (descriptors, nodesByID) = scenePopulationService.populate(with: terrain)
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
         supportSurfaces = environmentMapDescriptors.compactMap(supportSurfaceDescriptor(for:))
@@ -1223,6 +1230,8 @@ final class DroneSceneController {
         pathStartMarkerNode.isHidden = true
         pathGoalMarkerNode.isHidden = true
         pathCurrentWaypointNode.isHidden = true
+
+        buildSnowDecorations(for: terrain)
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {
@@ -1257,6 +1266,13 @@ final class DroneSceneController {
 
         scene.fogColor = fogColor
         updateWeatherParticles(weather)
+
+        if let terrain = lastTerrainConfig {
+            let isSnow = weather.preset == .snow
+            scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
+            refreshGroundMaterial(for: terrain)
+            buildSnowDecorations(for: terrain)
+        }
     }
 
     func update(
@@ -2005,6 +2021,84 @@ final class DroneSceneController {
         }
     }
 
+    private func refreshGroundMaterial(for terrain: TerrainConfiguration) {
+        guard let geometry = groundNode.geometry, terrain.preset != .gridDemo else { return }
+        let mapSizeMeters = terrain.scenicHalfExtent * 2.0
+        let material: SCNMaterial = (currentWeather.preset == .snow)
+            ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+            : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+        geometry.materials = [material]
+    }
+
+    private func buildSnowDecorations(for terrain: TerrainConfiguration) {
+        snowDecorationsNode.childNodes.forEach { $0.removeFromParentNode() }
+        guard currentWeather.preset == .snow, terrain.preset != .gridDemo else { return }
+
+        var rng = TerrainDetailSeededGenerator(seed: terrain.seed &+ 0xDEAD_BEEF_C0FF_EE42)
+        let spawnR = max(terrain.safeSpawnRadius, 6.0)
+        let extent = terrain.scenicHalfExtent * 0.82
+
+        // Target visual diameter for each decoration kind, independent of asset native size.
+        let targetPatchDiameter: Float = 3.5      // meters across for a snow patch
+        let targetFootstepDiameter: Float = 0.55  // meters across for a single footstep print
+
+        let patchLoader = SnowPatchAssetLoader.shared
+        let footLoader = SnowFootstepAssetLoader.shared
+
+        // Force asset load (bounding boxes are measured on first load)
+        _ = patchLoader.makePatchNode(scale: 1.0)
+        _ = footLoader.makeFootstepNode(scale: 1.0)
+
+        let patchBaseScale = patchLoader.naturalFootprint > 0.001
+            ? targetPatchDiameter / patchLoader.naturalFootprint : 1.0
+        let footBaseScale = footLoader.naturalFootprint > 0.001
+            ? targetFootstepDiameter / footLoader.naturalFootprint : 1.0
+
+        // Hard exclusion: no patch centre within (spawnR + half target diameter) of origin,
+        // so even the edge of the largest patch never reaches the drone spawn.
+        let patchExclusion = spawnR + targetPatchDiameter * 0.6
+
+        let patchCount = 12 + Int(Float.random(in: 0..<1, using: &rng) * 19)
+        var placed = 0
+        var attempts = 0
+        while placed < patchCount, attempts < patchCount * 4 {
+            attempts += 1
+            let x = Float.random(in: -extent...extent, using: &rng)
+            let z = Float.random(in: -extent...extent, using: &rng)
+            guard simd_length(SIMD2<Float>(x, z)) >= patchExclusion else { continue }
+            let jitter = Float.random(in: 0.7...1.35, using: &rng)
+            let scale = patchBaseScale * jitter
+            let yaw = Float.random(in: 0..<(.pi * 2), using: &rng)
+            if let node = patchLoader.makePatchNode(scale: scale, yaw: yaw) {
+                node.position = SCNVector3(x, 0.0, z)
+                snowDecorationsNode.addChildNode(node)
+                placed += 1
+            }
+        }
+
+        // Footsteps: scattered in a band beyond spawn, not directly at origin
+        let footMin = spawnR + 4.0
+        let footMax = min(spawnR + 22.0, extent * 0.9)
+        let footCount = 4 + Int(Float.random(in: 0..<1, using: &rng) * 7)
+        for _ in 0..<footCount {
+            let angle = Float.random(in: 0..<(.pi * 2), using: &rng)
+            let dist = Float.random(in: footMin...max(footMin + 1, footMax), using: &rng)
+            let x = cos(angle) * dist
+            let z = sin(angle) * dist
+            let jitter = Float.random(in: 0.85...1.15, using: &rng)
+            let scale = footBaseScale * jitter
+            let yaw = Float.random(in: 0..<(.pi * 2), using: &rng)
+            if let node = footLoader.makeFootstepNode(scale: scale, yaw: yaw) {
+                node.position = SCNVector3(x, 0.0, z)
+                snowDecorationsNode.addChildNode(node)
+            }
+        }
+
+        let patches = snowDecorationsNode.childNodes.filter { $0.name == "environment.snow_patch" }.count
+        let footsteps = snowDecorationsNode.childNodes.filter { $0.name == "environment.snow_footstep" }.count
+        print("[Snow] Decorations built: patches=\(patches) footsteps=\(footsteps) patchScale=\(String(format:"%.3f",patchBaseScale)) footScale=\(String(format:"%.3f",footBaseScale))")
+    }
+
     private func applyTerrainVisualStyle(_ terrain: TerrainConfiguration) {
         configureWorldSurfaceGeometry(for: terrain)
         applyLightingProfile(for: terrain.preset)
@@ -2028,7 +2122,11 @@ final class DroneSceneController {
             let groundMaterial: SCNMaterial
             switch terrain.preset {
             case .field, .forest, .city, .cargoYard:
-                groundMaterial = GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+                if currentWeather.preset == .snow {
+                    groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                } else {
+                    groundMaterial = GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+                }
             case .gridDemo:
                 let proc = (EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset).copy() as? SCNMaterial)
                     ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset)

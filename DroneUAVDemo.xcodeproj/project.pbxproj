@@ -263,6 +263,14 @@
 		100000000000000000000408 /* Pine_Tree.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000409 /* Pine_Tree.usdz */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
+		10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040E /* SnowTerrainMaterialLoader.swift */; };
+		100000000000000000000411 /* SeasonalTreeAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000410 /* SeasonalTreeAssetLoader.swift */; };
+		100000000000000000000413 /* SnowPatchAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000412 /* SnowPatchAssetLoader.swift */; };
+		100000000000000000000415 /* SnowFootstepAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000414 /* SnowFootstepAssetLoader.swift */; };
+		100000000000000000000417 /* Snow04.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000416 /* Snow04.usdz */; };
+		100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000418 /* Patch_of_Old_Snow.usdz */; };
+		10000000000000000000041B /* Snow_foot_step.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041A /* Snow_foot_step.usdz */; };
+		10000000000000000000041D /* Colorado_Blue_Spruce_Koster.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -525,6 +533,14 @@
 		100000000000000000000409 /* Pine_Tree.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Pine_Tree.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
+		10000000000000000000040E /* SnowTerrainMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowTerrainMaterialLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000410 /* SeasonalTreeAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeasonalTreeAssetLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000412 /* SnowPatchAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowPatchAssetLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000414 /* SnowFootstepAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowFootstepAssetLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000416 /* Snow04.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Snow04.usdz"; sourceTree = "<group>"; };
+		100000000000000000000418 /* Patch_of_Old_Snow.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Patch_of_Old_Snow.usdz"; sourceTree = "<group>"; };
+		10000000000000000000041A /* Snow_foot_step.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Snow_foot_step.usdz"; sourceTree = "<group>"; };
+		10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Colorado_Blue_Spruce_Koster.usdz"; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -731,6 +747,10 @@
 				100000000000000000000405 /* EnvironmentDebugOptions.swift */,
 				100000000000000000000401 /* PineTreeAssetLoader.swift */,
 				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
+				10000000000000000000040E /* SnowTerrainMaterialLoader.swift */,
+				100000000000000000000410 /* SeasonalTreeAssetLoader.swift */,
+				100000000000000000000412 /* SnowPatchAssetLoader.swift */,
+				100000000000000000000414 /* SnowFootstepAssetLoader.swift */,
 				100000000000000000000142 /* FPVCameraAnchor.swift */,
 				100000000000000000000143 /* PayloadVisualFactory.swift */,
 				100000000000000000000157 /* PayloadDropCameraController.swift */,
@@ -878,6 +898,10 @@
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
 				10000000000000000000040B /* Generic_grass.usdz */,
+				100000000000000000000416 /* Snow04.usdz */,
+				100000000000000000000418 /* Patch_of_Old_Snow.usdz */,
+				10000000000000000000041A /* Snow_foot_step.usdz */,
+				10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */,
 				100000000000000000000364 /* uavpart_icon.icns */,
 				100000000000000000000365 /* cadnext_icon.icns */,
 				100000000000000000000366 /* Info.plist */,
@@ -997,6 +1021,10 @@
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
 				10000000000000000000040A /* Generic_grass.usdz in Resources */,
+				100000000000000000000417 /* Snow04.usdz in Resources */,
+				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,
+				10000000000000000000041B /* Snow_foot_step.usdz in Resources */,
+				10000000000000000000041D /* Colorado_Blue_Spruce_Koster.usdz in Resources */,
 				100000000000000000000362 /* uavpart_icon.icns in Resources */,
 				100000000000000000000363 /* cadnext_icon.icns in Resources */,
 			);
@@ -1068,6 +1096,10 @@
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
 				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
 				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,
+				10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */,
+				100000000000000000000411 /* SeasonalTreeAssetLoader.swift in Sources */,
+				100000000000000000000413 /* SnowPatchAssetLoader.swift in Sources */,
+				100000000000000000000415 /* SnowFootstepAssetLoader.swift in Sources */,
 				100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */,
 				10000000000000000000021E /* DroneFleetModel.swift in Sources */,
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
