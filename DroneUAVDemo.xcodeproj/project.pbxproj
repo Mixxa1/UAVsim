@@ -271,6 +271,16 @@
 		100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000418 /* Patch_of_Old_Snow.usdz */; };
 		10000000000000000000041B /* Snow_foot_step.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041A /* Snow_foot_step.usdz */; };
 		10000000000000000000041D /* Colorado_Blue_Spruce_Koster.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */; };
+		A15310000000000000000001 /* AbandonedCityAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */; };
+		A15310000000000000000002 /* AbandonedCityBuildingLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */; };
+		A15310000000000000000003 /* AbandonedCityMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */; };
+		A15310000000000000000004 /* AbandonedCityLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000004 /* AbandonedCityLayout.swift */; };
+		A15310000000000000000005 /* AbandonedCitySceneComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000005 /* AbandonedCitySceneComposer.swift */; };
+		A15310000000000000000006 /* Seamless_Brittle_Stone.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000006 /* Seamless_Brittle_Stone.usdz */; };
+		A15310000000000000000007 /* Abandoned_Shop_Old_House.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000007 /* Abandoned_Shop_Old_House.usdz */; };
+		A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */; };
+		A15310000000000000000009 /* Abandoned_House_Sengchor.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */; };
+		A1531000000000000000000A /* brittle_stone_albedo.png in Resources */ = {isa = PBXBuildFile; fileRef = A1530000000000000000000A /* brittle_stone_albedo.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -541,6 +551,16 @@
 		100000000000000000000418 /* Patch_of_Old_Snow.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Patch_of_Old_Snow.usdz"; sourceTree = "<group>"; };
 		10000000000000000000041A /* Snow_foot_step.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Snow_foot_step.usdz"; sourceTree = "<group>"; };
 		10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Colorado_Blue_Spruce_Koster.usdz"; sourceTree = "<group>"; };
+		A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityAssetCatalog.swift"; sourceTree = "<group>"; };
+		A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityBuildingLoader.swift"; sourceTree = "<group>"; };
+		A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityMaterialLoader.swift"; sourceTree = "<group>"; };
+		A15300000000000000000004 /* AbandonedCityLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityLayout.swift"; sourceTree = "<group>"; };
+		A15300000000000000000005 /* AbandonedCitySceneComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCitySceneComposer.swift"; sourceTree = "<group>"; };
+		A15300000000000000000006 /* Seamless_Brittle_Stone.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Seamless_Brittle_Stone.usdz"; sourceTree = "<group>"; };
+		A15300000000000000000007 /* Abandoned_Shop_Old_House.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_Shop_Old_House.usdz"; sourceTree = "<group>"; };
+		A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_House_AspectStudios.usdz"; sourceTree = "<group>"; };
+		A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_House_Sengchor.usdz"; sourceTree = "<group>"; };
+		A1530000000000000000000A /* brittle_stone_albedo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Textures/Urban/Abandoned/brittle_stone_albedo.png"; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -751,6 +771,11 @@
 				100000000000000000000410 /* SeasonalTreeAssetLoader.swift */,
 				100000000000000000000412 /* SnowPatchAssetLoader.swift */,
 				100000000000000000000414 /* SnowFootstepAssetLoader.swift */,
+				A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */,
+				A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */,
+				A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */,
+				A15300000000000000000004 /* AbandonedCityLayout.swift */,
+				A15300000000000000000005 /* AbandonedCitySceneComposer.swift */,
 				100000000000000000000142 /* FPVCameraAnchor.swift */,
 				100000000000000000000143 /* PayloadVisualFactory.swift */,
 				100000000000000000000157 /* PayloadDropCameraController.swift */,
@@ -902,6 +927,11 @@
 				100000000000000000000418 /* Patch_of_Old_Snow.usdz */,
 				10000000000000000000041A /* Snow_foot_step.usdz */,
 				10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */,
+				A15300000000000000000006 /* Seamless_Brittle_Stone.usdz */,
+				A15300000000000000000007 /* Abandoned_Shop_Old_House.usdz */,
+				A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */,
+				A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */,
+				A1530000000000000000000A /* brittle_stone_albedo.png */,
 				100000000000000000000364 /* uavpart_icon.icns */,
 				100000000000000000000365 /* cadnext_icon.icns */,
 				100000000000000000000366 /* Info.plist */,
@@ -1025,6 +1055,11 @@
 				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,
 				10000000000000000000041B /* Snow_foot_step.usdz in Resources */,
 				10000000000000000000041D /* Colorado_Blue_Spruce_Koster.usdz in Resources */,
+				A15310000000000000000006 /* Seamless_Brittle_Stone.usdz in Resources */,
+				A15310000000000000000007 /* Abandoned_Shop_Old_House.usdz in Resources */,
+				A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */,
+				A15310000000000000000009 /* Abandoned_House_Sengchor.usdz in Resources */,
+				A1531000000000000000000A /* brittle_stone_albedo.png in Resources */,
 				100000000000000000000362 /* uavpart_icon.icns in Resources */,
 				100000000000000000000363 /* cadnext_icon.icns in Resources */,
 			);
@@ -1100,6 +1135,11 @@
 				100000000000000000000411 /* SeasonalTreeAssetLoader.swift in Sources */,
 				100000000000000000000413 /* SnowPatchAssetLoader.swift in Sources */,
 				100000000000000000000415 /* SnowFootstepAssetLoader.swift in Sources */,
+				A15310000000000000000001 /* AbandonedCityAssetCatalog.swift in Sources */,
+				A15310000000000000000002 /* AbandonedCityBuildingLoader.swift in Sources */,
+				A15310000000000000000003 /* AbandonedCityMaterialLoader.swift in Sources */,
+				A15310000000000000000004 /* AbandonedCityLayout.swift in Sources */,
+				A15310000000000000000005 /* AbandonedCitySceneComposer.swift in Sources */,
 				100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */,
 				10000000000000000000021E /* DroneFleetModel.swift in Sources */,
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,

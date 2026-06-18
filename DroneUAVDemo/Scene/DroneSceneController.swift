@@ -36,6 +36,20 @@ struct MissionWaypointCaptureZoneVisual: Equatable {
     let isCompleted: Bool
 }
 
+private struct CityGenerationKey: Equatable {
+    let mapPreset: TerrainPreset
+    let mapScale: MapScale
+    let densityBits: UInt32
+    let seed: UInt64
+    let weatherPreset: WeatherPreset
+    let environmentRevision: Int
+}
+
+private struct CityCleanupStats {
+    let rootCount: Int
+    let nodeCount: Int
+}
+
     private struct SupportSurfaceDescriptor {
         let center: SIMD2<Float>
         let halfExtents: SIMD2<Float>
@@ -93,6 +107,8 @@ final class DroneSceneController {
     private var cameraNoisePhase: Float = 0.0
 
     private let scenePopulationService: ScenePopulationService
+    private let abandonedCitySceneComposer = AbandonedCitySceneComposer()
+    private let cityEnvironmentRevision = 1
 
     private var droneNode: SCNNode
     private var visualRootNode: SCNNode
@@ -140,6 +156,7 @@ final class DroneSceneController {
     private var lastWeatherVisualSignature: Int?
     private var lastComponentOverlaySignature: Int?
     private var lastTerrainConfig: TerrainConfiguration?
+    private var lastGeneratedCityKey: CityGenerationKey?
     private let snowDecorationsNode = SCNNode()
 
     private struct SupplementalCollisionObstacle {
@@ -1187,7 +1204,73 @@ final class DroneSceneController {
         lastTerrainConfig = terrain
         EnvironmentObjectFactory.resetDiagnostics()
         EnvironmentObjectFactory.snowWeatherActive = (currentWeather.preset == .snow)
+
+        if terrain.preset == .city {
+            let generationKey = CityGenerationKey(
+                mapPreset: terrain.preset,
+                mapScale: terrain.mapScale,
+                densityBits: terrain.density.bitPattern,
+                seed: terrain.seed,
+                weatherPreset: currentWeather.preset,
+                environmentRevision: cityEnvironmentRevision
+            )
+            if lastGeneratedCityKey == generationKey, hasCityRootInstalled(in: scene.rootNode) {
+                #if DEBUG
+                print("[City] generation skipped: same generation key")
+                #endif
+                return
+            }
+
+            let cleanup = removeExistingCityRoots(from: scene.rootNode)
+            if cleanup.rootCount > 0 || cleanup.nodeCount > 0 {
+                #if DEBUG
+                print("[City] cleanup removed oldCityRoots=\(cleanup.rootCount) oldCityNodes=\(cleanup.nodeCount)")
+                #endif
+            }
+            regenerateAbandonedCityEnvironment(terrain)
+            lastGeneratedCityKey = generationKey
+            return
+        }
+
+        lastGeneratedCityKey = nil
+        let cleanup = removeExistingCityRoots(from: scene.rootNode)
+        if cleanup.rootCount > 0 || cleanup.nodeCount > 0 {
+            #if DEBUG
+            print("[City] cleanup removed oldCityRoots=\(cleanup.rootCount) oldCityNodes=\(cleanup.nodeCount)")
+            #endif
+        }
+        #if DEBUG
+        print("[City] skipped: map is not city")
+        #endif
         let (descriptors, nodesByID) = scenePopulationService.populate(with: terrain)
+        installEnvironment(
+            descriptors: descriptors,
+            nodesByID: nodesByID,
+            terrain: terrain,
+            printProceduralDiagnostics: true
+        )
+    }
+
+    private func regenerateAbandonedCityEnvironment(_ terrain: TerrainConfiguration) {
+        scenePopulationService.clear()
+        let composition = abandonedCitySceneComposer.rebuild(
+            in: scene.rootNode,
+            terrain: terrain
+        )
+        installEnvironment(
+            descriptors: composition.descriptors,
+            nodesByID: composition.nodesByID,
+            terrain: terrain,
+            printProceduralDiagnostics: false
+        )
+    }
+
+    private func installEnvironment(
+        descriptors: [EnvironmentObjectDescriptor],
+        nodesByID: [UUID: SCNNode],
+        terrain: TerrainConfiguration,
+        printProceduralDiagnostics: Bool
+    ) {
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
         supportSurfaces = environmentMapDescriptors.compactMap(supportSurfaceDescriptor(for:))
 
@@ -1203,7 +1286,9 @@ final class DroneSceneController {
             }
         }
 
-        EnvironmentObjectFactory.printDiagnostics()
+        if printProceduralDiagnostics {
+            EnvironmentObjectFactory.printDiagnostics()
+        }
         applyTerrainVisualStyle(terrain)
         updateDockStationPosition(for: terrain)
         updateWorldBoundsVisual(for: terrain)
@@ -1232,6 +1317,9 @@ final class DroneSceneController {
         pathCurrentWaypointNode.isHidden = true
 
         buildSnowDecorations(for: terrain)
+        if terrain.preset == .city {
+            printCityGenerationDiagnostics(descriptors: descriptors)
+        }
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {
@@ -1269,7 +1357,9 @@ final class DroneSceneController {
 
         if let terrain = lastTerrainConfig {
             let isSnow = weather.preset == .snow
-            scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
+            if terrain.preset != .city {
+                scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
+            }
             refreshGroundMaterial(for: terrain)
             buildSnowDecorations(for: terrain)
         }
@@ -2024,15 +2114,24 @@ final class DroneSceneController {
     private func refreshGroundMaterial(for terrain: TerrainConfiguration) {
         guard let geometry = groundNode.geometry, terrain.preset != .gridDemo else { return }
         let mapSizeMeters = terrain.scenicHalfExtent * 2.0
-        let material: SCNMaterial = (currentWeather.preset == .snow)
-            ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
-            : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+        let material: SCNMaterial
+        if terrain.preset == .city {
+            material = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
+                mapSizeMeters: mapSizeMeters
+            )
+        } else {
+            material = (currentWeather.preset == .snow)
+                ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+        }
         geometry.materials = [material]
     }
 
     private func buildSnowDecorations(for terrain: TerrainConfiguration) {
         snowDecorationsNode.childNodes.forEach { $0.removeFromParentNode() }
-        guard currentWeather.preset == .snow, terrain.preset != .gridDemo else { return }
+        guard currentWeather.preset == .snow,
+              terrain.preset != .gridDemo,
+              terrain.preset != .city else { return }
 
         var rng = TerrainDetailSeededGenerator(seed: terrain.seed &+ 0xDEAD_BEEF_C0FF_EE42)
         let spawnR = max(terrain.safeSpawnRadius, 6.0)
@@ -2121,7 +2220,11 @@ final class DroneSceneController {
             let mapSizeMeters = terrain.scenicHalfExtent * 2.0
             let groundMaterial: SCNMaterial
             switch terrain.preset {
-            case .field, .forest, .city, .cargoYard:
+            case .city:
+                groundMaterial = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
+                    mapSizeMeters: mapSizeMeters
+                )
+            case .field, .forest, .cargoYard:
                 if currentWeather.preset == .snow {
                     groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
                 } else {
@@ -2155,7 +2258,7 @@ final class DroneSceneController {
         case .cargoYard:
             rebuildCargoYardSurfaceDetail(for: terrain)
         case .city:
-            rebuildCitySurfaceDetail(for: terrain)
+            return
         case .gridDemo:
             return
         }
@@ -2283,91 +2386,6 @@ final class DroneSceneController {
         patch.eulerAngles = SCNVector3(0, Float.random(in: 0.0...(.pi * 2.0), using: &generator), 0)
         patch.geometry?.materials = [material]
         return patch
-    }
-
-    private func rebuildCitySurfaceDetail(for terrain: TerrainConfiguration) {
-        let coverageScale = max(1.0, terrain.worldHalfExtent / 96.0)
-        let urbanScale = max(1.0, terrain.areaScaleFactor * 0.82 + coverageScale * 0.48)
-        let blockPitch: Float = 38.0 + min(urbanScale, 5.0) * 3.6
-        let roadWidth: Float = 10.0 + min(urbanScale, 4.2) * 1.4
-        let blockSpan = max(22.0, blockPitch - roadWidth)
-        let blockCount = max(2, Int((terrain.worldHalfExtent * 2.0) / blockPitch))
-        let centerOffset = Float(blockCount - 1) * blockPitch * 0.5
-
-        let blockMaterial = SCNMaterial()
-        blockMaterial.lightingModel = .physicallyBased
-        blockMaterial.diffuse.contents = NSColor(calibratedRed: 0.42, green: 0.43, blue: 0.45, alpha: 0.98)
-        blockMaterial.roughness.contents = 0.90
-        blockMaterial.metalness.contents = 0.02
-
-        let curbMaterial = SCNMaterial()
-        curbMaterial.lightingModel = .physicallyBased
-        curbMaterial.diffuse.contents = NSColor(calibratedRed: 0.72, green: 0.73, blue: 0.75, alpha: 0.98)
-        curbMaterial.roughness.contents = 0.86
-        curbMaterial.metalness.contents = 0.02
-
-        let laneMaterial = SCNMaterial()
-        laneMaterial.lightingModel = .constant
-        laneMaterial.diffuse.contents = NSColor.white.withAlphaComponent(0.52)
-        laneMaterial.emission.contents = NSColor.white.withAlphaComponent(0.16)
-
-        for ix in 0..<blockCount {
-            for iz in 0..<blockCount {
-                let center = SIMD2<Float>(
-                    Float(ix) * blockPitch - centerOffset,
-                    Float(iz) * blockPitch - centerOffset
-                )
-
-                let pad = SCNNode(geometry: SCNBox(
-                    width: CGFloat(blockSpan),
-                    height: 0.018,
-                    length: CGFloat(blockSpan),
-                    chamferRadius: CGFloat(blockSpan * 0.035)
-                ))
-                pad.position = SCNVector3(center.x, 0.006, center.y)
-                pad.geometry?.materials = [blockMaterial]
-                terrainDetailNode.addChildNode(pad)
-
-                let curbInset = max(1.0, roadWidth * 0.12)
-                let curb = SCNNode(geometry: SCNBox(
-                    width: CGFloat(max(4.0, blockSpan - curbInset * 2.0)),
-                    height: 0.014,
-                    length: CGFloat(max(4.0, blockSpan - curbInset * 2.0)),
-                    chamferRadius: CGFloat(blockSpan * 0.028)
-                ))
-                curb.position = SCNVector3(center.x, 0.016, center.y)
-                curb.geometry?.materials = [curbMaterial]
-                terrainDetailNode.addChildNode(curb)
-            }
-        }
-
-        let roadHalfLength = centerOffset + blockPitch * 0.5
-        for roadIndex in 0..<blockCount {
-            let offset = -centerOffset - blockPitch * 0.5 + Float(roadIndex) * blockPitch
-            if abs(offset) > terrain.worldHalfExtent + roadWidth {
-                continue
-            }
-
-            let verticalLine = SCNNode(geometry: SCNBox(
-                width: 0.16,
-                height: 0.008,
-                length: CGFloat(roadHalfLength * 2.0),
-                chamferRadius: 0.02
-            ))
-            verticalLine.position = SCNVector3(offset, 0.028, 0.0)
-            verticalLine.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(verticalLine)
-
-            let horizontalLine = SCNNode(geometry: SCNBox(
-                width: CGFloat(roadHalfLength * 2.0),
-                height: 0.008,
-                length: 0.16,
-                chamferRadius: 0.02
-            ))
-            horizontalLine.position = SCNVector3(0.0, 0.028, offset)
-            horizontalLine.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(horizontalLine)
-        }
     }
 
     private func rebuildCargoYardSurfaceDetail(for terrain: TerrainConfiguration) {
@@ -2986,14 +3004,13 @@ final class DroneSceneController {
         case .building:
             let width = max(6.0, descriptor.size.x) * 0.50
             let depth = max(6.0, descriptor.size.z) * 0.50
-            let height = max(9.0, descriptor.size.y)
-            let roofHeight = EnvironmentProceduralVisualFactory.roofHeight(for: height)
+            let height = max(6.0, descriptor.size.y)
             return SupportSurfaceDescriptor(
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(width * 1.02, depth * 1.02),
                 yawRadians: descriptor.yawRadians,
-                topY: descriptor.position.y + height + roofHeight,
-                source: "building.roof"
+                topY: descriptor.position.y + height,
+                source: "abandonedBuilding.bounds"
             )
 
         case .crate:
@@ -3007,6 +3024,111 @@ final class DroneSceneController {
 
         case .tree, .pole, .rock, .marker, .distantBelt:
             return nil
+        }
+    }
+
+    private func removeExistingCityRoots(from root: SCNNode) -> CityCleanupStats {
+        var targets: [SCNNode] = []
+        collectCityRoots(in: root, targets: &targets)
+        let nodeCount = targets.reduce(0) { $0 + subtreeNodeCount(for: $1) }
+        targets.forEach { $0.removeFromParentNode() }
+        return CityCleanupStats(rootCount: targets.count, nodeCount: nodeCount)
+    }
+
+    private func collectCityRoots(in node: SCNNode, targets: inout [SCNNode]) {
+        for child in node.childNodes {
+            if shouldRemoveCityRoot(named: child.name) {
+                targets.append(child)
+            } else {
+                collectCityRoots(in: child, targets: &targets)
+            }
+        }
+    }
+
+    private func shouldRemoveCityRoot(named name: String?) -> Bool {
+        guard let name else { return false }
+        if name.hasPrefix("environment.city.") || name.hasPrefix("environment.urban.") {
+            return true
+        }
+
+        return [
+            "environment.city.root",
+            "environment.urban.root",
+            AbandonedCitySceneComposer.rootName,
+            "cityRoot",
+            "urbanRoot",
+            "oldCityDebugRoot",
+            "proceduralCityRoot",
+            "roadRoot",
+            "sidewalkRoot",
+            "blockRoot",
+            "buildingRoot",
+            "debugCityRoot"
+        ].contains(name)
+    }
+
+    private func subtreeNodeCount(for node: SCNNode) -> Int {
+        1 + node.childNodes.reduce(0) { $0 + subtreeNodeCount(for: $1) }
+    }
+
+    private func hasCityRootInstalled(in node: SCNNode) -> Bool {
+        if shouldRemoveCityRoot(named: node.name) {
+            return true
+        }
+
+        for child in node.childNodes where hasCityRootInstalled(in: child) {
+            return true
+        }
+        return false
+    }
+
+    private func printCityGenerationDiagnostics(descriptors: [EnvironmentObjectDescriptor]) {
+        guard let cityRoot = findFirstNode(named: AbandonedCitySceneComposer.rootName, in: scene.rootNode) else {
+            #if DEBUG
+            print("[City] generated map=city buildings=0 roads=0 decorations=0 totalNodes=0 materials=0 memoryMode=legacy-disabled")
+            #endif
+            return
+        }
+
+        let buildings = descriptors.filter { $0.kind == .building }.count
+        let totalNodes = subtreeNodeCount(for: cityRoot)
+        let materials = uniqueMaterialCount(in: cityRoot)
+        #if DEBUG
+        print(
+            "[City] generated map=city buildings=\(buildings) roads=0 decorations=0 " +
+            "totalNodes=\(totalNodes) materials=\(materials) memoryMode=legacy-disabled"
+        )
+        #endif
+    }
+
+    private func findFirstNode(named targetName: String, in node: SCNNode) -> SCNNode? {
+        if node.name == targetName {
+            return node
+        }
+
+        for child in node.childNodes {
+            if let match = findFirstNode(named: targetName, in: child) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func uniqueMaterialCount(in node: SCNNode) -> Int {
+        var identities = Set<ObjectIdentifier>()
+        collectMaterials(in: node, identities: &identities)
+        return identities.count
+    }
+
+    private func collectMaterials(in node: SCNNode, identities: inout Set<ObjectIdentifier>) {
+        if let geometry = node.geometry {
+            for material in geometry.materials {
+                identities.insert(ObjectIdentifier(material))
+            }
+        }
+
+        for child in node.childNodes {
+            collectMaterials(in: child, identities: &identities)
         }
     }
 

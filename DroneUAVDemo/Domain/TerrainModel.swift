@@ -176,7 +176,7 @@ enum TerrainPreset: String, CaseIterable, Identifiable {
         case .cargoYard:
             return [.crate, .crate, .crate, .pole, .marker]
         case .city:
-            return [.building, .building, .building, .pole, .crate]
+            return []
         }
     }
 
