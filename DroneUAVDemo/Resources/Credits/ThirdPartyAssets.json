@@ -144,12 +144,34 @@
           "licenseName": "Creative Commons Attribution",
           "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
           "changes": "Imported as USDZ and used as a visual abandoned house asset in the abandoned city map of DroneUAVDemo."
+      },
+      {
+          "id": "dubai_clouds_etribe",
+          "title": "Dubai Clouds",
+          "author": "Etribe",
+          "sourceURL": "https://skfb.ly/6WNSA",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as background sky cloud decoration in DroneUAVDemo."
+      },
+      {
+          "id": "fluffy_cloud_loic_norgeot",
+          "title": "Fluffy Cloud",
+          "author": "Loïc Norgeot",
+          "sourceURL": "https://skfb.ly/6RFxT",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, scaled into an ambient envelope volume around the drone, and used as the fog weather visual in DroneUAVDemo."
+      },
+      {
+          "id": "evanescent_smoke_tycho_magnetic_anomaly",
+          "title": "Evanescent Smoke",
+          "author": "Tycho Magnetic Anomaly",
+          "sourceURL": "https://skfb.ly/ortyY",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, scaled into an ambient envelope volume around the drone, and used as the smog weather visual in DroneUAVDemo."
       }
-      // "Dubai Clouds" (https://skfb.ly/6WNSA) by Etribe is licensed under Creative Commons Attribution
-      // (http://creativecommons.org/licenses/by/4.0/).
-      
-      //"Fluffy Cloud" (https://skfb.ly/6RFxT) by Loïc Norgeot is licensed under Creative Commons Attribution
-      // (http://creativecommons.org/licenses/by/4.0/).
   ]
 }
 

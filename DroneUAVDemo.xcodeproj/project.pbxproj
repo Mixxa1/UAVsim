@@ -271,6 +271,12 @@
 		100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000418 /* Patch_of_Old_Snow.usdz */; };
 		10000000000000000000041B /* Snow_foot_step.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041A /* Snow_foot_step.usdz */; };
 		10000000000000000000041D /* Colorado_Blue_Spruce_Koster.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */; };
+		D70E00000000000000000002 /* WeatherCloudAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000001 /* WeatherCloudAssetLoader.swift */; };
+		E80F00000000000000000002 /* WeatherDepthOfFieldTechnique.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80F00000000000000000001 /* WeatherDepthOfFieldTechnique.swift */; };
+		E80F00000000000000000004 /* WeatherDepthOfField.metal in Sources */ = {isa = PBXBuildFile; fileRef = E80F00000000000000000003 /* WeatherDepthOfField.metal */; };
+		D70E00000000000000000004 /* Dubai_Clouds.usdz in Resources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000003 /* Dubai_Clouds.usdz */; };
+		D70E00000000000000000006 /* Fluffy_Cloud.usdz in Resources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000005 /* Fluffy_Cloud.usdz */; };
+		D70E00000000000000000008 /* Evanescent_Smoke.usdz in Resources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000007 /* Evanescent_Smoke.usdz */; };
 		A15310000000000000000001 /* AbandonedCityAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */; };
 		A15310000000000000000002 /* AbandonedCityBuildingLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */; };
 		A15310000000000000000003 /* AbandonedCityMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */; };
@@ -559,6 +565,12 @@
 		100000000000000000000418 /* Patch_of_Old_Snow.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Patch_of_Old_Snow.usdz"; sourceTree = "<group>"; };
 		10000000000000000000041A /* Snow_foot_step.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Snow_foot_step.usdz"; sourceTree = "<group>"; };
 		10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Colorado_Blue_Spruce_Koster.usdz"; sourceTree = "<group>"; };
+		D70E00000000000000000001 /* WeatherCloudAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherCloudAssetLoader.swift; sourceTree = "<group>"; };
+		E80F00000000000000000001 /* WeatherDepthOfFieldTechnique.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherDepthOfFieldTechnique.swift; sourceTree = "<group>"; };
+		E80F00000000000000000003 /* WeatherDepthOfField.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = WeatherDepthOfField.metal; sourceTree = "<group>"; };
+		D70E00000000000000000003 /* Dubai_Clouds.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/Dubai_Clouds.usdz"; sourceTree = "<group>"; };
+		D70E00000000000000000005 /* Fluffy_Cloud.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/Fluffy_Cloud.usdz"; sourceTree = "<group>"; };
+		D70E00000000000000000007 /* Evanescent_Smoke.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/Evanescent_Smoke.usdz"; sourceTree = "<group>"; };
 		A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityAssetCatalog.swift"; sourceTree = "<group>"; };
 		A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityBuildingLoader.swift"; sourceTree = "<group>"; };
 		A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityMaterialLoader.swift"; sourceTree = "<group>"; };
@@ -786,6 +798,9 @@
 				B20400000000000000000002 /* AsphaltMaterialLoader.swift */,
 				B20400000000000000000001 /* CargoContainerAssetLoader.swift */,
 				10000000000000000000040E /* SnowTerrainMaterialLoader.swift */,
+				D70E00000000000000000001 /* WeatherCloudAssetLoader.swift */,
+				E80F00000000000000000001 /* WeatherDepthOfFieldTechnique.swift */,
+				E80F00000000000000000003 /* WeatherDepthOfField.metal */,
 				100000000000000000000410 /* SeasonalTreeAssetLoader.swift */,
 				100000000000000000000412 /* SnowPatchAssetLoader.swift */,
 				100000000000000000000414 /* SnowFootstepAssetLoader.swift */,
@@ -951,6 +966,9 @@
 				100000000000000000000418 /* Patch_of_Old_Snow.usdz */,
 				10000000000000000000041A /* Snow_foot_step.usdz */,
 				10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */,
+				D70E00000000000000000003 /* Dubai_Clouds.usdz */,
+				D70E00000000000000000005 /* Fluffy_Cloud.usdz */,
+				D70E00000000000000000007 /* Evanescent_Smoke.usdz */,
 				A15300000000000000000006 /* Seamless_Brittle_Stone.usdz */,
 				A15300000000000000000007 /* Abandoned_Shop_Old_House.usdz */,
 				A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */,
@@ -1079,6 +1097,9 @@
 				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,
 				10000000000000000000041B /* Snow_foot_step.usdz in Resources */,
 				10000000000000000000041D /* Colorado_Blue_Spruce_Koster.usdz in Resources */,
+				D70E00000000000000000004 /* Dubai_Clouds.usdz in Resources */,
+				D70E00000000000000000006 /* Fluffy_Cloud.usdz in Resources */,
+				D70E00000000000000000008 /* Evanescent_Smoke.usdz in Resources */,
 				A15310000000000000000006 /* Seamless_Brittle_Stone.usdz in Resources */,
 				A15310000000000000000007 /* Abandoned_Shop_Old_House.usdz in Resources */,
 				A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */,
@@ -1164,6 +1185,9 @@
 				B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */,
 				B20410000000000000000001 /* CargoContainerAssetLoader.swift in Sources */,
 				10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */,
+				D70E00000000000000000002 /* WeatherCloudAssetLoader.swift in Sources */,
+				E80F00000000000000000002 /* WeatherDepthOfFieldTechnique.swift in Sources */,
+				E80F00000000000000000004 /* WeatherDepthOfField.metal in Sources */,
 				100000000000000000000411 /* SeasonalTreeAssetLoader.swift in Sources */,
 				100000000000000000000413 /* SnowPatchAssetLoader.swift in Sources */,
 				100000000000000000000415 /* SnowFootstepAssetLoader.swift in Sources */,

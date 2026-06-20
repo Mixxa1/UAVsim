@@ -277,6 +277,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     let cameraSensitivity: Float
     let freeMoveSpeed: Float
     var activityState: RuntimeActivityState = .interacting
+    var wantsWeatherDepthOfField: Bool = false
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -296,6 +297,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.delegate = context.coordinator
         view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
         view.usesUnboundedMouseLook = cameraMode == .spectator
+        view.technique = wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
 
         configureCameraControl(on: view)
 
@@ -307,6 +309,11 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
+        let wantsTechnique = wantsWeatherDepthOfField
+        if wantsTechnique != (view.technique != nil) {
+            view.technique = wantsTechnique ? WeatherDepthOfFieldTechnique.shared : nil
+        }
+
         if view.scene !== scene {
             view.scene = scene
         }

@@ -506,6 +506,26 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var terrain: TerrainConfiguration
     @Published private(set) var cameraConfiguration: CameraConfiguration
 
+    // Matches the weather envelope sphere's own visibility gate in DroneSceneController
+    // (`updateWeatherEnvelope`), which shows the haze at preset selection alone — its opacity
+    // formula has a non-zero floor (`0.25 + intensity*0.55`) so it's visible even at
+    // intensity == 0. Originally also required `normalizedIntensity > 0` here, which meant
+    // picking a fog/smog preset without separately raising intensity showed the envelope haze
+    // but never enabled blur — inconsistent with what the user actually sees on screen.
+    var wantsWeatherDepthOfField: Bool {
+        weather.preset == .fog || weather.preset == .smog
+    }
+
+    // Plain computed read for the diagnostics panel — deliberately *not* round-tripped through
+    // a callback from DroneSceneViewRepresentable: an earlier version had updateNSView report
+    // back via a closure that set an @Published property, which triggered another SceneViewportView
+    // body re-evaluation, another updateNSView call, another callback — an unbounded SwiftUI
+    // re-render loop that pegged CPU even with no weather active. Never feed view-update-cycle
+    // callbacks back into @Published state on the same observed object.
+    var weatherDepthOfFieldAppliedStatus: String {
+        "wants=\(wantsWeatherDepthOfField)"
+    }
+
     private(set) var batteryState: BatteryState
     private(set) var collisionAnalysis: CollisionAnalysisSnapshot
     @Published private(set) var damageState: DamageState

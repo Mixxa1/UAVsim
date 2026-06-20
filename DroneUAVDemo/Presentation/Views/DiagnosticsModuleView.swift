@@ -80,6 +80,10 @@ struct DiagnosticsModuleView: View {
                             value: viewModel.lastCollisionDetail
                         )
                         ModuleMetricCell(
+                            labelKey: "diagnostic.weather_dof_status",
+                            value: viewModel.weatherDepthOfFieldAppliedStatus
+                        )
+                        ModuleMetricCell(
                             labelKey: "diagnostic.active_physics",
                             value: "\(viewModel.diagnostics.activePhysicsBodyCount)"
                         )

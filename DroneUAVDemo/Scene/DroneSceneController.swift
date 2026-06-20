@@ -106,6 +106,16 @@ final class DroneSceneController {
     private var thunderPulse: Float = 0.0
     private var cameraNoisePhase: Float = 0.0
 
+    private let skyCloudsNode = SCNNode()
+    private let weatherEnvelopeNode = SCNNode()
+    private var activeWeatherEnvelopePreset: WeatherPreset?
+    // The envelope is a sphere centered on the drone, depth-tested normally — anything closer
+    // than this radius (terrain, trees) correctly occludes it, so it never visibly "blocks"
+    // nearby objects; its only real job is tinting the sky and anything beyond native fog's own
+    // falloff range (≈130-140m at full intensity), which scene.fog doesn't reach on its own.
+    // 250m keeps it well outside normal close-range flying so its boundary is never grazed.
+    private static let weatherEnvelopeRadius: Float = 250.0
+
     private let scenePopulationService: ScenePopulationService
     private let abandonedCitySceneComposer = AbandonedCitySceneComposer()
     private let cityEnvironmentRevision = 1
@@ -249,6 +259,14 @@ final class DroneSceneController {
 
         weatherNode.name = "weatherNode"
         scene.rootNode.addChildNode(weatherNode)
+
+        skyCloudsNode.name = "skyCloudsNode"
+        scene.rootNode.addChildNode(skyCloudsNode)
+        setUpSkyClouds()
+
+        weatherEnvelopeNode.name = "weatherEnvelopeNode"
+        weatherEnvelopeNode.isHidden = true
+        scene.rootNode.addChildNode(weatherEnvelopeNode)
 
         terrainDetailNode.name = "terrainDetailNode"
         scene.rootNode.addChildNode(terrainDetailNode)
@@ -1361,6 +1379,7 @@ final class DroneSceneController {
 
         scene.fogColor = fogColor
         updateWeatherParticles(weather)
+        updateWeatherEnvelope(weather)
 
         if let terrain = lastTerrainConfig {
             let isSnow = weather.preset == .snow
@@ -1371,6 +1390,91 @@ final class DroneSceneController {
             buildSnowDecorations(for: terrain)
         }
     }
+
+    /// Background cloud decoration — always present regardless of weather, similar to how a
+    /// clear sky still has some clouds in it. Re-centered on the drone's XZ position (and held
+    /// a fixed height above its *current* altitude) every frame in `update`, but never rotated
+    /// to match drone heading — that distinction matters: every camera (main or FPV) uses a
+    /// `zFar` of only 900 units (`configureCameraNode`), so anything genuinely fixed in world
+    /// space gets left behind — and hard-clipped mid-card, reading as a sharp edge — the moment
+    /// the drone flies any real distance from spawn. Following position keeps it in range;
+    /// *not* following orientation is what actually fixed the "rotates with the aircraft" complaint
+    /// (that turned out to be a billboard-constraint bug, not the position tracking itself).
+    ///
+    /// Dubai_Clouds only has 6 unique cloud shapes spread across one ~3km cluster — at native
+    /// scale most of that already exceeds the 900-unit budget on its own. Each instance is
+    /// scaled down to fit comfortably inside it, and several differently-rotated instances are
+    /// placed at small offsets to fill more of the sky using the same asset.
+    // A steep altitude-vs-spread ratio buries clouds almost directly overhead, invisible
+    // without pitching the camera up. Verified via an offscreen SCNRenderer snapshot test at
+    // *level* camera pitch (no looking up) before settling on these — this spread keeps
+    // multiple instances in view at a normal forward-looking angle, on most headings.
+    private static let skyCloudInstanceRadius: Float = 180
+    private static let skyCloudAltitudeAboveDrone: Float = 90
+    private static let skyCloudInstanceOffsets: [(SCNVector3, Float)] = [
+        (SCNVector3(0, 0, 500), 0),
+        (SCNVector3(420, 15, -380), 1.1),
+        (SCNVector3(-480, -10, 300), 2.6),
+        (SCNVector3(350, 20, 420), 4.0),
+        (SCNVector3(-520, 5, -280), 5.4)
+    ]
+
+    private func setUpSkyClouds() {
+        for (offset, yaw) in Self.skyCloudInstanceOffsets {
+            guard let node = WeatherCloudAssetLoader.shared.makeSkyCloudsNode(
+                offset: offset,
+                yaw: yaw,
+                targetRadius: Self.skyCloudInstanceRadius
+            ) else {
+                continue
+            }
+            skyCloudsNode.addChildNode(node)
+        }
+    }
+
+    /// Fog/smog get a tangible cloud/smoke volume around the drone, on top of the existing
+    /// distance-based `scene.fog*` properties — a single floating cloud wouldn't read as
+    /// ambient haze, so the asset is scaled up into a soft shell the drone flies inside of.
+    private func updateWeatherEnvelope(_ weather: WeatherModel) {
+        guard weather.preset == .fog || weather.preset == .smog else {
+            weatherEnvelopeNode.isHidden = true
+            activeWeatherEnvelopePreset = nil
+            return
+        }
+
+        if activeWeatherEnvelopePreset != weather.preset {
+            weatherEnvelopeNode.childNodes.forEach { $0.removeFromParentNode() }
+            let node: SCNNode?
+            switch weather.preset {
+            case .fog:
+                node = WeatherCloudAssetLoader.shared.makeFogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+            case .smog:
+                node = WeatherCloudAssetLoader.shared.makeSmogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+            default:
+                node = nil
+            }
+            if let node {
+                weatherEnvelopeNode.addChildNode(node)
+                activeWeatherEnvelopePreset = weather.preset
+            } else {
+                activeWeatherEnvelopePreset = nil
+            }
+        }
+
+        let hasContent = !weatherEnvelopeNode.childNodes.isEmpty
+        weatherEnvelopeNode.isHidden = !hasContent
+        // A single flat-shaded sphere layer, no overlapping duplicates compounding alpha
+        // (unlike the old mesh-based envelope), so this opacity is the actual visible strength,
+        // not diluted by stacking — can run much higher than the old 0.03-0.12 range.
+        weatherEnvelopeNode.opacity = CGFloat(0.25 + weather.normalizedIntensity * 0.55)
+    }
+
+    // SCNCamera.wantsDepthOfField produced zero visible blur in this SceneKit/macOS build, even
+    // at extreme settings (fStop 0.5, focalLength 135mm), verified via both an offscreen
+    // SCNRenderer and a live SCNView snapshot — a known SceneKit limitation, not a tuning gap.
+    // Real blur is now a from-scratch SCNTechnique (WeatherDepthOfFieldTechnique.swift +
+    // WeatherDepthOfField.metal), toggled on the SCNView itself based on
+    // DroneSimulationViewModel.wantsWeatherDepthOfField — see DroneSceneViewRepresentable.
 
     func update(
         with state: DroneState,
@@ -1383,6 +1487,16 @@ final class DroneSceneController {
         droneNode.position = SCNVector3(state.position.x, state.position.y, state.position.z)
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
+
+        skyCloudsNode.position = SCNVector3(
+            CGFloat(state.position.x),
+            CGFloat(state.position.y + Self.skyCloudAltitudeAboveDrone),
+            CGFloat(state.position.z)
+        )
+
+        if !weatherEnvelopeNode.isHidden {
+            weatherEnvelopeNode.position = SCNVector3(state.position.x, state.position.y, state.position.z)
+        }
 
         fpvPresentationActive = camera.mode == .fpv
         fpvObstructionHidingActive = (camera.mode == .fpv) && camera.fpv.hideObstructingParts

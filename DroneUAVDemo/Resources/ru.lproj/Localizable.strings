@@ -572,6 +572,7 @@
 
 "diagnostic.last_collision_source" = "Источник последнего столкновения";
 "diagnostic.last_collision_detail" = "Детали последнего столкновения";
+"diagnostic.weather_dof_status" = "Статус блюра погоды";
 "diagnostic.active_objects" = "Активные объекты";
 "diagnostic.active_physics" = "Активные физические тела";
 "diagnostic.active_particles" = "Количество частиц";

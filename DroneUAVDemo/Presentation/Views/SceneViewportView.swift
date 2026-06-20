@@ -20,6 +20,7 @@ struct SceneViewportView: View {
                 cameraSensitivity: viewModel.cameraConfiguration.sensitivity,
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
                 activityState: viewModel.performancePolicy.activityState,
+                wantsWeatherDepthOfField: viewModel.wantsWeatherDepthOfField,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },
