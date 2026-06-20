@@ -1382,6 +1382,13 @@ final class DroneSceneController {
         updateWeatherEnvelope(weather)
 
         if let terrain = lastTerrainConfig {
+            let haze = skyHorizonHazeColor(for: weather)
+            scene.background.contents = skyGradientImage(
+                for: terrain.preset,
+                weatherFogColor: haze?.color,
+                weatherFogStrength: haze?.strength ?? 0
+            )
+
             let isSnow = weather.preset == .snow
             if terrain.preset != .city {
                 scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
@@ -2330,7 +2337,8 @@ final class DroneSceneController {
         configureWorldSurfaceGeometry(for: terrain)
         applyLightingProfile(for: terrain.preset)
 
-        let backgroundImage = skyGradientImage(for: terrain.preset)
+        let haze = skyHorizonHazeColor(for: currentWeather)
+        let backgroundImage = skyGradientImage(for: terrain.preset, weatherFogColor: haze?.color, weatherFogStrength: haze?.strength ?? 0)
 
         switch terrain.preset {
         case .gridDemo:
@@ -2594,14 +2602,47 @@ final class DroneSceneController {
         }
     }
 
-    private func skyGradientImage(for terrain: TerrainPreset) -> NSImage {
+    /// Only fog/smog get a sky-gradient haze blend — matches `wantsWeatherDepthOfField`'s own
+    /// gating and the envelope sphere's preset check. Other presets (rain, snow, wind,
+    /// thunderstorm) keep their existing `scene.fogColor` treatment on real geometry only; their
+    /// `fogColor` values (e.g. the dark `wind`/`normal` tint) are tuned for that distance-fog
+    /// role, not for blending into a clear sky, so reusing them here unconditionally would
+    /// incorrectly darken the sky for weather that was never meant to touch the horizon at all.
+    /// Strength has the same non-zero floor as the weather envelope sphere's opacity
+    /// (`0.25 + intensity*0.55` in `updateWeatherEnvelope`) — and for the same reason that bit
+    /// `wantsWeatherDepthOfField` earlier: picking a fog/smog preset from the UI without
+    /// separately raising an intensity slider leaves `weather.intensity` at 0, and a strength
+    /// tied directly to `normalizedIntensity` (no floor) meant `weatherFogStrength > 0` was false
+    /// and the whole blend got skipped — zero visible error, zero visible effect, exactly what
+    /// the user reported, and exactly the same mistake as that earlier bug, just unported to
+    /// this newer code path.
+    private func skyHorizonHazeColor(for weather: WeatherModel) -> (color: NSColor, strength: CGFloat)? {
+        let strength = CGFloat(0.7 + weather.normalizedIntensity * 0.3)
+        switch weather.preset {
+        case .fog:
+            return (NSColor(calibratedRed: 0.84, green: 0.84, blue: 0.84, alpha: 1.0), strength)
+        case .smog:
+            return (NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0), strength)
+        default:
+            return nil
+        }
+    }
+
+    /// `weatherFogColor`/`weatherFogStrength` pull the gradient's horizon (and partly mid) stop
+    /// toward the active fog/smog color. This is what actually fixes the ground/sky horizon seam
+    /// — `scene.fog` only tints real depth-tested geometry, never this background image, so the
+    /// sky stayed its clear color no matter how the ground faded into fog. A post-process blur
+    /// shader can soften the seam's *shape* but can't erase a hard color contrast between two
+    /// flat regions; baking the haze into the sky gradient itself, at the source, means there's
+    /// no contrast left to fight by the time anything else runs.
+    private func skyGradientImage(for terrain: TerrainPreset, weatherFogColor: NSColor? = nil, weatherFogStrength: CGFloat = 0) -> NSImage {
         let size = NSSize(width: 1024, height: 768)
         let image = NSImage(size: size)
         image.lockFocus()
 
-        let topColor: NSColor
-        let midColor: NSColor
-        let horizonColor: NSColor
+        var topColor: NSColor
+        var midColor: NSColor
+        var horizonColor: NSColor
 
         switch terrain {
         case .gridDemo:
@@ -2624,6 +2665,14 @@ final class DroneSceneController {
             topColor = NSColor(calibratedRed: 0.18, green: 0.24, blue: 0.35, alpha: 1.0)
             midColor = NSColor(calibratedRed: 0.39, green: 0.46, blue: 0.57, alpha: 1.0)
             horizonColor = NSColor(calibratedRed: 0.74, green: 0.68, blue: 0.60, alpha: 1.0)
+        }
+
+        if let rawFogColor = weatherFogColor, weatherFogStrength > 0,
+           let fogColor = rawFogColor.usingColorSpace(.genericRGB) {
+            let clampedStrength = min(max(weatherFogStrength, 0), 1)
+            horizonColor = horizonColor.blended(withFraction: clampedStrength, of: fogColor) ?? horizonColor
+            midColor = midColor.blended(withFraction: clampedStrength * 0.65, of: fogColor) ?? midColor
+            topColor = topColor.blended(withFraction: clampedStrength * 0.28, of: fogColor) ?? topColor
         }
 
         let bounds = NSRect(origin: .zero, size: size)
