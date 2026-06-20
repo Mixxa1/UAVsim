@@ -34,13 +34,17 @@ struct CreditsView: View {
                 Text("No assets listed.")
                     .foregroundColor(.secondary)
             } else {
-                ForEach(assets) { asset in
-                    assetRow(asset)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(assets) { asset in
+                            assetRow(asset)
+                        }
+                    }
                 }
             }
         }
         .padding(20)
-        .frame(minWidth: 480, minHeight: 200)
+        .frame(minWidth: 560, minHeight: 320)
     }
 
     @ViewBuilder
@@ -62,7 +66,23 @@ struct CreditsView: View {
                 Text("credits.license", tableName: nil, bundle: nil, comment: "")
                     .foregroundColor(.secondary)
                     .frame(width: 80, alignment: .leading)
-                Text(asset.licenseName)
+                if let url = URL(string: asset.licenseURL) {
+                    Link(asset.licenseName, destination: url)
+                } else {
+                    Text(asset.licenseName)
+                }
+            }
+            .font(.callout)
+
+            HStack(alignment: .top, spacing: 4) {
+                Text("credits.source", tableName: nil, bundle: nil, comment: "")
+                    .foregroundColor(.secondary)
+                    .frame(width: 80, alignment: .leading)
+                if let url = URL(string: asset.sourceURL) {
+                    Link(asset.sourceURL, destination: url)
+                } else {
+                    Text(asset.sourceURL)
+                }
             }
             .font(.callout)
 

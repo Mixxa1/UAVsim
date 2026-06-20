@@ -762,6 +762,10 @@ struct TerrainMapCanvas: View {
             let path = Path(roundedRect: rect, cornerRadius: 1.5, style: .continuous)
             context.fill(path, with: .color(Color(red: 0.68, green: 0.52, blue: 0.24).opacity(0.76)))
             context.stroke(path, with: .color(Color.black.opacity(0.22)), lineWidth: 0.6)
+        case .cargoContainer:
+            let path = Path(roundedRect: rect, cornerRadius: 1.2, style: .continuous)
+            context.fill(path, with: .color(Color(red: 0.72, green: 0.34, blue: 0.18).opacity(0.82)))
+            context.stroke(path, with: .color(Color.black.opacity(0.30)), lineWidth: 0.8)
         case .pole:
             let poleRect = CGRect(
                 x: center.x - 1.3,

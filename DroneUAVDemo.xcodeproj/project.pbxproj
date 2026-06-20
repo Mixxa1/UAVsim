@@ -281,6 +281,14 @@
 		A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */; };
 		A15310000000000000000009 /* Abandoned_House_Sengchor.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */; };
 		A1531000000000000000000A /* brittle_stone_albedo.png in Resources */ = {isa = PBXBuildFile; fileRef = A1530000000000000000000A /* brittle_stone_albedo.png */; };
+		B20410000000000000000001 /* CargoContainerAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000001 /* CargoContainerAssetLoader.swift */; };
+		B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000002 /* AsphaltMaterialLoader.swift */; };
+		B20410000000000000000003 /* Asphalt13.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000003 /* Asphalt13.usdz */; };
+		B20410000000000000000004 /* Container_18_MB.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000004 /* Container_18_MB.usdz */; };
+		B20410000000000000000005 /* Containers.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000005 /* Containers.usdz */; };
+		B20410000000000000000006 /* Free_Ship_Container.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000006 /* Free_Ship_Container.usdz */; };
+		B20410000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz */; };
+		B20410000000000000000008 /* Shipping_Containers.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000008 /* Shipping_Containers.usdz */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -561,6 +569,14 @@
 		A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_House_AspectStudios.usdz"; sourceTree = "<group>"; };
 		A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_House_Sengchor.usdz"; sourceTree = "<group>"; };
 		A1530000000000000000000A /* brittle_stone_albedo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Textures/Urban/Abandoned/brittle_stone_albedo.png"; sourceTree = "<group>"; };
+		B20400000000000000000001 /* CargoContainerAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CargoContainerAssetLoader.swift; sourceTree = "<group>"; };
+		B20400000000000000000002 /* AsphaltMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsphaltMaterialLoader.swift; sourceTree = "<group>"; };
+		B20400000000000000000003 /* Asphalt13.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Asphalt13.usdz"; sourceTree = "<group>"; };
+		B20400000000000000000004 /* Container_18_MB.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Container_18_MB.usdz"; sourceTree = "<group>"; };
+		B20400000000000000000005 /* Containers.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Containers.usdz"; sourceTree = "<group>"; };
+		B20400000000000000000006 /* Free_Ship_Container.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Free_Ship_Container.usdz"; sourceTree = "<group>"; };
+		B20400000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Sea_cargo_container_-_LegendaryGameDev.usdz"; sourceTree = "<group>"; };
+		B20400000000000000000008 /* Shipping_Containers.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Shipping_Containers.usdz"; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -767,6 +783,8 @@
 				100000000000000000000405 /* EnvironmentDebugOptions.swift */,
 				100000000000000000000401 /* PineTreeAssetLoader.swift */,
 				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
+				B20400000000000000000002 /* AsphaltMaterialLoader.swift */,
+				B20400000000000000000001 /* CargoContainerAssetLoader.swift */,
 				10000000000000000000040E /* SnowTerrainMaterialLoader.swift */,
 				100000000000000000000410 /* SeasonalTreeAssetLoader.swift */,
 				100000000000000000000412 /* SnowPatchAssetLoader.swift */,
@@ -924,6 +942,12 @@
 				100000000000000000000409 /* Pine_Tree.usdz */,
 				10000000000000000000040B /* Generic_grass.usdz */,
 				100000000000000000000416 /* Snow04.usdz */,
+				B20400000000000000000003 /* Asphalt13.usdz */,
+				B20400000000000000000004 /* Container_18_MB.usdz */,
+				B20400000000000000000005 /* Containers.usdz */,
+				B20400000000000000000006 /* Free_Ship_Container.usdz */,
+				B20400000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz */,
+				B20400000000000000000008 /* Shipping_Containers.usdz */,
 				100000000000000000000418 /* Patch_of_Old_Snow.usdz */,
 				10000000000000000000041A /* Snow_foot_step.usdz */,
 				10000000000000000000041C /* Colorado_Blue_Spruce_Koster.usdz */,
@@ -1060,6 +1084,12 @@
 				A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */,
 				A15310000000000000000009 /* Abandoned_House_Sengchor.usdz in Resources */,
 				A1531000000000000000000A /* brittle_stone_albedo.png in Resources */,
+				B20410000000000000000003 /* Asphalt13.usdz in Resources */,
+				B20410000000000000000004 /* Container_18_MB.usdz in Resources */,
+				B20410000000000000000005 /* Containers.usdz in Resources */,
+				B20410000000000000000006 /* Free_Ship_Container.usdz in Resources */,
+				B20410000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz in Resources */,
+				B20410000000000000000008 /* Shipping_Containers.usdz in Resources */,
 				100000000000000000000362 /* uavpart_icon.icns in Resources */,
 				100000000000000000000363 /* cadnext_icon.icns in Resources */,
 			);
@@ -1131,6 +1161,8 @@
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
 				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
 				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,
+				B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */,
+				B20410000000000000000001 /* CargoContainerAssetLoader.swift in Sources */,
 				10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */,
 				100000000000000000000411 /* SeasonalTreeAssetLoader.swift in Sources */,
 				100000000000000000000413 /* SnowPatchAssetLoader.swift in Sources */,

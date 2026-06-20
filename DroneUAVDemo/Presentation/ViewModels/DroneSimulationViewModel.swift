@@ -515,6 +515,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var warnings: [String]
     @Published private(set) var diagnostics: SimulationDiagnostics
     @Published private(set) var lastCollisionSource: String
+    @Published private(set) var lastCollisionDetail: String = "n/a"
     @Published private(set) var lastModeTransitionReason: String
     @Published private(set) var fixedWingLastTransitionReason: String?
     @Published private(set) var fixedWingAutopilotDebugState: FixedWingAutopilotDebugState
@@ -3875,19 +3876,60 @@ final class DroneSimulationViewModel: ObservableObject {
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
 
-        let postPhysicsCollisionAnalysis = collisionService.analyze(
-            input: CollisionAnalysisInput(
-                dronePosition: state.position,
-                droneVelocity: state.velocity,
-                droneRadius: selectedDroneProfile.collisionRadius,
-                obstacles: sceneController.environmentObstacles,
-                weather: weather
+        let postPhysicsCollisionAnalysis: CollisionAnalysisSnapshot
+        if let sweptCollision = collisionService.firstSweptCollision(
+            from: previousState.position,
+            to: state.position,
+            droneRadius: selectedDroneProfile.collisionRadius,
+            obstacles: sceneController.environmentObstacles
+        ) {
+            let separation = max(0.025, selectedDroneProfile.collisionRadius * 0.06)
+            state.position = sweptCollision.contactPoint + sweptCollision.contactNormal * separation
+            postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
+                riskScore: 1.0,
+                nearestObstacleDistance: -separation,
+                nearestObstacleID: sweptCollision.obstacle.id,
+                nearestObstacleSource: sweptCollision.obstacle.source,
+                timeToCollision: 0.0,
+                emergencyAction: .emergencyStop,
+                contactNormal: sweptCollision.contactNormal
             )
-        )
+        } else {
+            postPhysicsCollisionAnalysis = collisionService.analyze(
+                input: CollisionAnalysisInput(
+                    dronePosition: state.position,
+                    droneVelocity: state.velocity,
+                    droneRadius: selectedDroneProfile.collisionRadius,
+                    obstacles: sceneController.environmentObstacles,
+                    weather: weather
+                )
+            )
+        }
 
         collisionAnalysis = postPhysicsCollisionAnalysis
         var needsCollisionAnalysisRefresh = false
         if postPhysicsCollisionAnalysis.nearestObstacleDistance <= -0.02 {
+            #if DEBUG
+            if let source = postPhysicsCollisionAnalysis.nearestObstacleSource, source.hasPrefix("container.") {
+                var obstacleInfo = ""
+                if let id = postPhysicsCollisionAnalysis.nearestObstacleID,
+                   let obstacle = sceneController.obstacle(for: id) {
+                    obstacleInfo =
+                        " obstacleCenter=\(obstacle.center)" +
+                        " planarHalfExtents=\(String(describing: obstacle.planarHalfExtents))" +
+                        " baseY=\(obstacle.baseY) topY=\(obstacle.topY)" +
+                        " yawRadians=\(obstacle.yawRadians)"
+                }
+                print(
+                    "[ContainerCollision] source=\(source) " +
+                    "dist=\(postPhysicsCollisionAnalysis.nearestObstacleDistance) " +
+                    "speed=\(simd_length(state.velocity)) " +
+                    "dronePos=\(state.position) " +
+                    "normal=\(postPhysicsCollisionAnalysis.contactNormal ?? SIMD3<Float>(repeating: .nan))" +
+                    obstacleInfo
+                )
+            }
+            #endif
             if simd_length(state.velocity) > 0.45, collisionCooldown <= 0.0 {
                 handleObstacleCollision(using: postPhysicsCollisionAnalysis)
                 collisionCooldown = collisionCooldownDuration(for: postPhysicsCollisionAnalysis.nearestObstacleSource)
@@ -4069,6 +4111,19 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func handleObstacleCollision(using analysis: CollisionAnalysisSnapshot) {
+        if let id = analysis.nearestObstacleID, let obstacle = sceneController.obstacle(for: id) {
+            let halfExtents = obstacle.planarHalfExtents
+            let hxz = halfExtents.map { String(format: "%.1f,%.1f", $0.x, $0.y) } ?? "r=\(String(format: "%.1f", obstacle.radius))"
+            lastCollisionDetail = String(
+                format: "c=%.1f,%.1f,%.1f h=%@ y=%.1f-%.1f yaw=%.0f° d=%.2f",
+                obstacle.center.x, obstacle.center.y, obstacle.center.z,
+                hxz, obstacle.baseY, obstacle.topY,
+                obstacle.yawRadians * 180.0 / .pi,
+                analysis.nearestObstacleDistance
+            )
+        } else {
+            lastCollisionDetail = "n/a"
+        }
         switch obstacleImpactClass(for: analysis.nearestObstacleSource) {
         case .foliage:
             applyFoliageCollisionResponse(using: analysis)
@@ -4124,10 +4179,14 @@ final class DroneSimulationViewModel: ObservableObject {
             lateralComponent * 0.12 +
             penetration * 2.8
 
+        // Calibrated against a multirotor hitting a hard surface (containers): severe — the
+        // tier that cuts the signal and force-disarms — now needs roughly an 8.5 m/s impact,
+        // not ~3.4 m/s. The old thresholds dated from before the container collision geometry
+        // fixes, when bogus multi-meter penetration depths inflated the score on minor grazes.
         switch severityScore {
-        case ..<1.9:
+        case ..<6.0:
             return .minorContact
-        case ..<4.6:
+        case ..<12.5:
             return .moderateImpact
         default:
             return .severeImpact
@@ -4303,7 +4362,13 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
 
-        let normal = horizontalPushNormal(awayFrom: obstacle)
+        let normal: SIMD3<Float>
+        if let contactNormal = analysis.contactNormal,
+           simd_length_squared(contactNormal) > 0.0001 {
+            normal = simd_normalize(contactNormal)
+        } else {
+            normal = horizontalPushNormal(awayFrom: obstacle)
+        }
 
         let pushDistance = penetration + max(0.03, selectedDroneProfile.collisionRadius * 0.08)
         state.position += normal * pushDistance
@@ -12128,7 +12193,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private func supportSurfaceY(for position: SIMD3<Float>) -> Float {
         sceneController.supportSurfaceHeight(
             at: SIMD2<Float>(position.x, position.z),
-            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48)
+            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48),
+            maximumHeight: position.y
         ) ?? 0.0
     }
 

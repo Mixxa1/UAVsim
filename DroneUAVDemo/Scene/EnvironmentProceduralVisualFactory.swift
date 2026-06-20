@@ -20,6 +20,8 @@ enum EnvironmentProceduralVisualFactory {
             return makePoleNode(descriptor: descriptor)
         case .crate:
             return makeCrateNode(descriptor: descriptor)
+        case .cargoContainer:
+            return makeCargoContainerNode(descriptor: descriptor)
         case .rock:
             return makeRockNode(descriptor: descriptor)
         case .marker:
@@ -43,6 +45,8 @@ enum EnvironmentProceduralVisualFactory {
                 color: NSColor(calibratedRed: 0.42, green: 0.30, blue: 0.20, alpha: 1.0),
                 namePrefix: "fast_crate"
             )
+        case .cargoContainer:
+            return makeCargoContainerNode(descriptor: descriptor)
         case .rock:
             return makeSimplifiedBoxNode(
                 descriptor: descriptor,
@@ -558,6 +562,57 @@ enum EnvironmentProceduralVisualFactory {
         node.position = SCNVector3(descriptor.position.x, descriptor.position.y + descriptor.size.y / 2.0, descriptor.position.z)
         node.name = "obstacle_crate_\(descriptor.id.uuidString)"
         return node
+    }
+
+    private static func makeCargoContainerNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
+        let root = SCNNode()
+        root.name = "fallback_cargo_container_\(descriptor.id.uuidString)"
+        root.position = SCNVector3(
+            descriptor.position.x,
+            descriptor.position.y,
+            descriptor.position.z
+        )
+        root.eulerAngles.y = CGFloat(descriptor.yawRadians)
+
+        let material = EnvironmentProceduralMaterials.crateMaterial
+        let length = max(2.0, descriptor.size.x)
+        let height = max(1.8, descriptor.size.y)
+        let width = max(1.6, descriptor.size.z)
+
+        if descriptor.cargoAsset?.hasFlyableInterior == true {
+            let wallThickness: Float = 0.12
+            let parts: [(SIMD3<Float>, SIMD3<Float>)] = [
+                (SIMD3<Float>(0.0, wallThickness * 0.5, 0.0), SIMD3<Float>(length, wallThickness, width)),
+                (SIMD3<Float>(0.0, height - wallThickness * 0.5, 0.0), SIMD3<Float>(length, wallThickness, width)),
+                (SIMD3<Float>(0.0, height * 0.5, -width * 0.5 + wallThickness * 0.5), SIMD3<Float>(length, height, wallThickness)),
+                (SIMD3<Float>(0.0, height * 0.5, width * 0.5 - wallThickness * 0.5), SIMD3<Float>(length, height, wallThickness)),
+                (SIMD3<Float>(-length * 0.5 + wallThickness * 0.5, height * 0.5, 0.0), SIMD3<Float>(wallThickness, height, width))
+            ]
+            for part in parts {
+                let node = SCNNode(geometry: SCNBox(
+                    width: CGFloat(part.1.x),
+                    height: CGFloat(part.1.y),
+                    length: CGFloat(part.1.z),
+                    chamferRadius: 0.0
+                ))
+                node.simdPosition = part.0
+                node.geometry?.materials = [material]
+                root.addChildNode(node)
+            }
+        } else {
+            let box = SCNBox(
+                width: CGFloat(length),
+                height: CGFloat(height),
+                length: CGFloat(width),
+                chamferRadius: 0.04
+            )
+            box.materials = [material]
+            let body = SCNNode(geometry: box)
+            body.position.y = CGFloat(height * 0.5)
+            root.addChildNode(body)
+        }
+
+        return root
     }
 
     private static func makeRockNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {

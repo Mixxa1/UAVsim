@@ -929,18 +929,27 @@ final class MissionReplaySceneController {
             plane.height = size
         }
 
-        let groundMaterial = (EnvironmentProceduralMaterials.groundMaterial(for: terrain).copy() as? SCNMaterial)
-            ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain)
-        let repeatCount = max(8.0, min(28.0, halfExtent / 28.0))
-        groundMaterial.diffuse.wrapS = .repeat
-        groundMaterial.diffuse.wrapT = .repeat
-        groundMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(
-            CGFloat(repeatCount),
-            CGFloat(repeatCount),
-            1.0
-        )
-        groundMaterial.roughness.contents = 0.96
-        groundMaterial.metalness.contents = 0.0
+        let groundMaterial: SCNMaterial
+        if terrain == .cargoYard {
+            groundMaterial = AsphaltMaterialLoader.makeAsphaltMaterial(
+                mapSizeMeters: max(400.0, halfExtent * 2.0 + 48.0)
+            )
+        } else {
+            groundMaterial = (EnvironmentProceduralMaterials.groundMaterial(for: terrain).copy() as? SCNMaterial)
+                ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain)
+        }
+        if terrain != .cargoYard {
+            let repeatCount = max(8.0, min(28.0, halfExtent / 28.0))
+            groundMaterial.diffuse.wrapS = .repeat
+            groundMaterial.diffuse.wrapT = .repeat
+            groundMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(
+                CGFloat(repeatCount),
+                CGFloat(repeatCount),
+                1.0
+            )
+            groundMaterial.roughness.contents = 0.96
+            groundMaterial.metalness.contents = 0.0
+        }
         groundNode.geometry?.materials = [groundMaterial]
     }
 

@@ -32,6 +32,14 @@ enum EnvironmentObjectFactory {
         switch descriptor.kind {
         case .tree:
             return makeTreeNode(descriptor: descriptor, quality: quality)
+        case .cargoContainer:
+            if let node = CargoContainerAssetLoader.shared.makeNode(
+                for: descriptor,
+                quality: quality
+            ) {
+                return node
+            }
+            return EnvironmentProceduralVisualFactory.makeNode(for: descriptor, quality: quality)
         case .pole, .rock, .crate, .marker:
             if EnvironmentDebugOptions.showPlaceholderObjects {
                 return EnvironmentProceduralVisualFactory.makeNode(for: descriptor, quality: quality)

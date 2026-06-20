@@ -76,6 +76,10 @@ struct DiagnosticsModuleView: View {
                             value: viewModel.lastCollisionSource
                         )
                         ModuleMetricCell(
+                            labelKey: "diagnostic.last_collision_detail",
+                            value: viewModel.lastCollisionDetail
+                        )
+                        ModuleMetricCell(
                             labelKey: "diagnostic.active_physics",
                             value: "\(viewModel.diagnostics.activePhysicsBodyCount)"
                         )

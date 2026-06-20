@@ -518,7 +518,8 @@ final class DroneSceneController {
 
         let supportY = supportSurfaceHeight(
             at: asset.position,
-            clearanceRadius: 0.28
+            clearanceRadius: 0.28,
+            maximumHeight: .greatestFiniteMagnitude
         ) ?? max(Float(groundNode.presentation.position.y), 0.0)
 
         switch asset {
@@ -550,7 +551,8 @@ final class DroneSceneController {
 
         let supportY = supportSurfaceHeight(
             at: asset.position,
-            clearanceRadius: 0.32
+            clearanceRadius: 0.32,
+            maximumHeight: .greatestFiniteMagnitude
         ) ?? max(Float(groundNode.presentation.position.y), 0.0)
         launchAssetNode.simdPosition = SIMD3<Float>(asset.position.x, supportY, asset.position.y)
         launchAssetNode.eulerAngles = SCNVector3(
@@ -1272,17 +1274,22 @@ final class DroneSceneController {
         printProceduralDiagnostics: Bool
     ) {
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
-        supportSurfaces = environmentMapDescriptors.compactMap(supportSurfaceDescriptor(for:))
+        supportSurfaces = environmentMapDescriptors.flatMap(supportSurfaceDescriptors(for:))
 
         obstacleMap = [:]
         obstacleSourceByID = [:]
         var obstacles: [CollisionObstacle] = []
         for descriptor in descriptors where descriptor.isCollidable {
             if let node = nodesByID[descriptor.id] {
-                let obstacle = configureObstacleCollisionProxy(for: node, descriptor: descriptor)
-                obstacleMap[descriptor.id] = node
-                obstacleSourceByID[descriptor.id] = obstacle.source
-                obstacles.append(obstacle)
+                let descriptorObstacles = configureObstacleCollisionProxies(
+                    for: node,
+                    descriptor: descriptor
+                )
+                for obstacle in descriptorObstacles {
+                    obstacleMap[obstacle.id] = node
+                    obstacleSourceByID[obstacle.id] = obstacle.source
+                    obstacles.append(obstacle)
+                }
             }
         }
 
@@ -1516,9 +1523,16 @@ final class DroneSceneController {
         return environmentObstacles.first(where: { $0.id == id })
     }
 
-    func supportSurfaceHeight(at planarPosition: SIMD2<Float>, clearanceRadius: Float) -> Float? {
+    func supportSurfaceHeight(
+        at planarPosition: SIMD2<Float>,
+        clearanceRadius: Float,
+        maximumHeight: Float
+    ) -> Float? {
         var bestHeight: Float?
         for surface in supportSurfaces {
+            guard surface.topY <= maximumHeight + 0.08 else {
+                continue
+            }
             guard planarPoint(planarPosition, intersects: surface, clearanceRadius: clearanceRadius) else {
                 continue
             }
@@ -2224,7 +2238,13 @@ final class DroneSceneController {
                 groundMaterial = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
                     mapSizeMeters: mapSizeMeters
                 )
-            case .field, .forest, .cargoYard:
+            case .cargoYard:
+                if currentWeather.preset == .snow {
+                    groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                } else {
+                    groundMaterial = AsphaltMaterialLoader.makeAsphaltMaterial(mapSizeMeters: mapSizeMeters)
+                }
+            case .field, .forest:
                 if currentWeather.preset == .snow {
                     groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
                 } else {
@@ -2255,11 +2275,7 @@ final class DroneSceneController {
         switch terrain.preset {
         case .field, .forest:
             rebuildNaturalSurfaceDetail(for: terrain)
-        case .cargoYard:
-            rebuildCargoYardSurfaceDetail(for: terrain)
-        case .city:
-            return
-        case .gridDemo:
+        case .cargoYard, .city, .gridDemo:
             return
         }
     }
@@ -2386,110 +2402,6 @@ final class DroneSceneController {
         patch.eulerAngles = SCNVector3(0, Float.random(in: 0.0...(.pi * 2.0), using: &generator), 0)
         patch.geometry?.materials = [material]
         return patch
-    }
-
-    private func rebuildCargoYardSurfaceDetail(for terrain: TerrainConfiguration) {
-        let coverageScale = max(1.0, terrain.worldHalfExtent / 96.0)
-        let yardScale = max(1.0, terrain.areaScaleFactor * 0.64 + coverageScale * 0.46)
-        let bayPitchX: Float = 19.0 + min(yardScale, 5.0) * 2.9
-        let bayPitchZ: Float = 16.0 + min(yardScale, 5.0) * 2.4
-        let laneWidth: Float = 9.0 + min(yardScale, 4.5) * 1.1
-        let bayWidth = max(7.0, bayPitchX - laneWidth)
-        let bayDepth = max(6.0, bayPitchZ - laneWidth)
-        let columnCount = max(4, Int((terrain.worldHalfExtent * 2.0) / bayPitchX))
-        let rowCount = max(4, Int((terrain.worldHalfExtent * 2.0) / bayPitchZ))
-        let centerOffsetX = Float(columnCount - 1) * bayPitchX * 0.5
-        let centerOffsetZ = Float(rowCount - 1) * bayPitchZ * 0.5
-
-        let slabMaterial = SCNMaterial()
-        slabMaterial.lightingModel = .physicallyBased
-        slabMaterial.diffuse.contents = NSColor(calibratedRed: 0.36, green: 0.35, blue: 0.31, alpha: 0.96)
-        slabMaterial.roughness.contents = 0.92
-        slabMaterial.metalness.contents = 0.03
-
-        let laneMaterial = SCNMaterial()
-        laneMaterial.lightingModel = .physicallyBased
-        laneMaterial.diffuse.contents = NSColor(calibratedRed: 0.82, green: 0.68, blue: 0.24, alpha: 0.74)
-        laneMaterial.emission.contents = NSColor(calibratedRed: 0.42, green: 0.32, blue: 0.10, alpha: 0.10)
-        laneMaterial.roughness.contents = 0.78
-        laneMaterial.metalness.contents = 0.0
-
-        let stainMaterial = terrainDetailMaterial(
-            diffuse: NSColor(calibratedRed: 0.14, green: 0.12, blue: 0.10, alpha: 0.18),
-            emission: NSColor(calibratedRed: 0.06, green: 0.05, blue: 0.04, alpha: 0.02),
-            roughness: 0.98
-        )
-
-        for ix in 0..<columnCount {
-            for iz in 0..<rowCount {
-                let center = SIMD2<Float>(
-                    Float(ix) * bayPitchX - centerOffsetX,
-                    Float(iz) * bayPitchZ - centerOffsetZ
-                )
-
-                let mainAisleX = ix % 4 == 0
-                let mainAisleZ = iz % 3 == 0
-                if mainAisleX || mainAisleZ {
-                    continue
-                }
-
-                let slab = SCNNode(geometry: SCNBox(
-                    width: CGFloat(bayWidth * 0.84),
-                    height: 0.010,
-                    length: CGFloat(bayDepth * 0.80),
-                    chamferRadius: 0.08
-                ))
-                slab.position = SCNVector3(center.x, 0.006, center.y)
-                slab.geometry?.materials = [slabMaterial]
-                terrainDetailNode.addChildNode(slab)
-            }
-        }
-
-        let fullWidth = centerOffsetX + bayPitchX * 0.5
-        let fullDepth = centerOffsetZ + bayPitchZ * 0.5
-
-        for ix in 0..<columnCount {
-            if ix % 4 != 0 { continue }
-            let x = Float(ix) * bayPitchX - centerOffsetX
-            let lane = SCNNode(geometry: SCNBox(
-                width: 0.24,
-                height: 0.008,
-                length: CGFloat(fullDepth * 2.0 + bayPitchZ),
-                chamferRadius: 0.02
-            ))
-            lane.position = SCNVector3(x, 0.016, 0.0)
-            lane.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(lane)
-        }
-
-        for iz in 0..<rowCount {
-            if iz % 3 != 0 { continue }
-            let z = Float(iz) * bayPitchZ - centerOffsetZ
-            let lane = SCNNode(geometry: SCNBox(
-                width: CGFloat(fullWidth * 2.0 + bayPitchX),
-                height: 0.008,
-                length: 0.24,
-                chamferRadius: 0.02
-            ))
-            lane.position = SCNVector3(0.0, 0.016, z)
-            lane.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(lane)
-        }
-
-        var generator = TerrainDetailSeededGenerator(seed: terrain.seed &+ 0xC4A6)
-        let stainCount = max(10, Int(7.0 + yardScale * 2.8))
-        for _ in 0..<stainCount {
-            terrainDetailNode.addChildNode(
-                makeTerrainPatchNode(
-                    radiusX: Float.random(in: 5.0...10.0, using: &generator),
-                    radiusZ: Float.random(in: 3.5...8.0, using: &generator),
-                    y: 0.012,
-                    halfExtent: terrain.worldHalfExtent * 0.88,
-                    material: stainMaterial,
-                    generator: &generator
-                )
-            )
-        }
     }
 
     private func applyLightingProfile(for terrain: TerrainPreset) {
@@ -2900,9 +2812,47 @@ final class DroneSceneController {
         droneNode.addChildNode(droneCollisionProxyNode)
     }
 
-    private func configureObstacleCollisionProxy(for node: SCNNode, descriptor: EnvironmentObjectDescriptor) -> CollisionObstacle {
-        let proxy = obstacleProxySpec(for: descriptor)
+    private func configureObstacleCollisionProxies(
+        for node: SCNNode,
+        descriptor: EnvironmentObjectDescriptor
+    ) -> [CollisionObstacle] {
         node.physicsBody = nil
+        guard !descriptor.collisionParts.isEmpty else {
+            return [configureDefaultObstacleCollisionProxy(for: descriptor)]
+        }
+
+        return descriptor.collisionParts
+            .map { part in
+                let planarOffset = rotatePlanar(
+                    SIMD2<Float>(part.localCenter.x, part.localCenter.z),
+                    radians: descriptor.yawRadians
+                )
+                let center = SIMD3<Float>(
+                    descriptor.position.x + planarOffset.x,
+                    descriptor.position.y + part.localCenter.y,
+                    descriptor.position.z + planarOffset.y
+                )
+                let halfExtents = SIMD2<Float>(
+                    max(0.02, part.size.x * 0.5),
+                    max(0.02, part.size.z * 0.5)
+                )
+                return CollisionObstacle(
+                    id: part.id,
+                    center: center,
+                    radius: simd_length(halfExtents),
+                    source: part.source,
+                    baseY: center.y - part.size.y * 0.5,
+                    topY: center.y + part.size.y * 0.5,
+                    planarHalfExtents: halfExtents,
+                    yawRadians: descriptor.yawRadians + part.yawRadians
+                )
+            }
+    }
+
+    private func configureDefaultObstacleCollisionProxy(
+        for descriptor: EnvironmentObjectDescriptor
+    ) -> CollisionObstacle {
+        let proxy = obstacleProxySpec(for: descriptor)
 
         return CollisionObstacle(
             id: descriptor.id,
@@ -2953,6 +2903,18 @@ final class DroneSceneController {
                 topY: height
             )
 
+        case .cargoContainer:
+            let width = max(1.6, descriptor.size.x)
+            let depth = max(1.6, descriptor.size.z)
+            let height = max(1.8, descriptor.size.y)
+            return ObstacleProxySpec(
+                localCenterY: height * 0.5,
+                analysisRadius: max(width, depth) * 0.5,
+                source: "container.fallback",
+                baseY: 0.0,
+                topY: height
+            )
+
         case .pole:
             let capRadius = max(0.16, descriptor.size.x * 0.22)
             let height = max(4.0, descriptor.size.y)
@@ -2999,32 +2961,76 @@ final class DroneSceneController {
         }
     }
 
-    private func supportSurfaceDescriptor(for descriptor: EnvironmentObjectDescriptor) -> SupportSurfaceDescriptor? {
+    private func supportSurfaceDescriptors(
+        for descriptor: EnvironmentObjectDescriptor
+    ) -> [SupportSurfaceDescriptor] {
+        if !descriptor.collisionParts.isEmpty {
+            return descriptor.collisionParts.compactMap { part in
+                guard part.supportsLanding else {
+                    return nil
+                }
+                let offset = rotatePlanar(
+                    SIMD2<Float>(part.localCenter.x, part.localCenter.z),
+                    radians: descriptor.yawRadians
+                )
+                return SupportSurfaceDescriptor(
+                    center: SIMD2<Float>(
+                        descriptor.position.x + offset.x,
+                        descriptor.position.z + offset.y
+                    ),
+                    halfExtents: SIMD2<Float>(
+                        part.size.x * 0.5,
+                        part.size.z * 0.5
+                    ),
+                    yawRadians: descriptor.yawRadians + part.yawRadians,
+                    topY: descriptor.position.y + part.localCenter.y + part.size.y * 0.5,
+                    source: part.source
+                )
+            }
+        }
+
         switch descriptor.kind {
         case .building:
             let width = max(6.0, descriptor.size.x) * 0.50
             let depth = max(6.0, descriptor.size.z) * 0.50
             let height = max(6.0, descriptor.size.y)
-            return SupportSurfaceDescriptor(
+            return [SupportSurfaceDescriptor(
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(width * 1.02, depth * 1.02),
                 yawRadians: descriptor.yawRadians,
                 topY: descriptor.position.y + height,
                 source: "abandonedBuilding.bounds"
-            )
+            )]
 
         case .crate:
-            return SupportSurfaceDescriptor(
+            return [SupportSurfaceDescriptor(
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(descriptor.size.x * 0.52, descriptor.size.z * 0.52),
                 yawRadians: descriptor.yawRadians,
                 topY: descriptor.position.y + descriptor.size.y,
                 source: "crate.top"
-            )
+            )]
 
-        case .tree, .pole, .rock, .marker, .distantBelt:
-            return nil
+        case .tree, .pole, .cargoContainer, .rock, .marker, .distantBelt:
+            return []
         }
+    }
+
+    // Matches SceneKit's actual eulerAngles.y rotation direction (verified empirically: a
+    // child at local +X ends up at world -Z under a +90° parent rotation). The textbook 2D
+    // rotation matrix [[cos,-sin],[sin,cos]] turns out to spin the opposite way once X/Z are
+    // mapped onto SceneKit's right-handed, Y-up axes — this previously meant collision parts
+    // were mirrored relative to the visual model for any non-zero descriptor.yawRadians.
+    private func rotatePlanar(
+        _ value: SIMD2<Float>,
+        radians: Float
+    ) -> SIMD2<Float> {
+        let cosine = cos(radians)
+        let sine = sin(radians)
+        return SIMD2<Float>(
+            value.x * cosine + value.y * sine,
+            -value.x * sine + value.y * cosine
+        )
     }
 
     private func removeExistingCityRoots(from root: SCNNode) -> CityCleanupStats {
@@ -3347,8 +3353,28 @@ final class DroneSceneController {
         }
 
         for obstacle in environmentObstacles {
-            let marker = SCNNode(geometry: SCNSphere(radius: CGFloat(obstacle.radius)))
-            marker.position = SCNVector3(obstacle.center.x, obstacle.center.y + obstacle.radius, obstacle.center.z)
+            let marker: SCNNode
+            if let halfExtents = obstacle.planarHalfExtents {
+                marker = SCNNode(geometry: SCNBox(
+                    width: CGFloat(halfExtents.x * 2.0),
+                    height: CGFloat(max(0.04, obstacle.topY - obstacle.baseY)),
+                    length: CGFloat(halfExtents.y * 2.0),
+                    chamferRadius: 0.0
+                ))
+                marker.position = SCNVector3(
+                    obstacle.center.x,
+                    (obstacle.baseY + obstacle.topY) * 0.5,
+                    obstacle.center.z
+                )
+                marker.eulerAngles.y = CGFloat(obstacle.yawRadians)
+            } else {
+                marker = SCNNode(geometry: SCNSphere(radius: CGFloat(obstacle.radius)))
+                marker.position = SCNVector3(
+                    obstacle.center.x,
+                    obstacle.center.y,
+                    obstacle.center.z
+                )
+            }
             marker.name = "debug_obstacle_\(obstacle.id.uuidString)"
             marker.geometry?.firstMaterial?.diffuse.contents = NSColor.systemYellow.withAlphaComponent(0.42)
             marker.geometry?.firstMaterial?.fillMode = .lines
