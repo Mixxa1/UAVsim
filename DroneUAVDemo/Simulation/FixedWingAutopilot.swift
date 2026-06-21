@@ -259,7 +259,7 @@ final class FixedWingAutopilot {
         let speedForLookahead = max(currentSpeed, cruiseAirspeed * 0.6)
         let minimumTurnRadius = max(
             wing.waypointAcceptanceRadiusMeters * 1.4,
-            speedForLookahead / max(0.1, wing.nominalTurnRateRadPerSec)
+            wing.minimumTurnRadius(airspeed: speedForLookahead)
         )
         let lookaheadDistance = max(
             Tuning.lookaheadMinMeters,

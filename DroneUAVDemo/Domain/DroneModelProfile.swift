@@ -238,9 +238,11 @@ struct FixedWingParameters: Hashable {
         let resolvedMaxAirspeed = maxAirspeed ?? max(resolvedCruiseAirspeed * 1.35, resolvedClimbAirspeed * 1.18)
         let resolvedNominalClimbRate = nominalClimbRateMps ?? max(1.2, min(climbSpeedMps * 0.24, resolvedCruiseAirspeed * 0.30))
         let resolvedNominalSinkRate = nominalSinkRateMps ?? max(1.0, min(resolvedCruiseAirspeed * 0.22, resolvedNominalClimbRate * 1.15))
+        let turnReferenceSpeed = max(resolvedCruiseAirspeed, resolvedMinSafeAirspeed)
+        let turnBankRad = max(5.0, maxBankAngleDeg) * Float.pi / 180.0
         let resolvedTurnRadius = max(
             waypointAcceptanceRadiusMeters * 1.1,
-            max(resolvedCruiseAirspeed, resolvedMinSafeAirspeed) / max(0.05, nominalTurnRateDegPerSec * .pi / 180.0)
+            (turnReferenceSpeed * turnReferenceSpeed) / (9.81 * tan(turnBankRad))
         )
         let resolvedMaxPitchUpDeg = maxPitchUpDeg ?? max(10.0, min(18.0, initialClimbPitchDeg + 4.0))
 
@@ -267,15 +269,17 @@ struct FixedWingParameters: Hashable {
         self.initialClimbTargetAltitude = initialClimbTargetAltitude
     }
 
-    var nominalTurnRateRadPerSec: Float {
-        max(0.05, nominalTurnRateDegPerSec * .pi / 180.0)
-    }
-
+    /// Lift-based turn radius `R = V²/(g·tan(bank))`, not the old kinematic
+    /// `V/turnRate` — a banked aircraft's radius is set by how much lift it
+    /// can redirect sideways at a given bank angle, not by a flat assumed
+    /// turn rate. `maxBankAngleDeg` is the same limit the autopilot itself
+    /// commands during a route turn, so this reflects what it can actually fly.
     func minimumTurnRadius(airspeed: Float? = nil) -> Float {
         let referenceSpeed = max(airspeed ?? cruiseAirspeed, minSafeAirspeed)
+        let bankRad = max(5.0, maxBankAngleDeg) * Float.pi / 180.0
         return max(
             waypointAcceptanceRadiusMeters * 1.1,
-            referenceSpeed / nominalTurnRateRadPerSec
+            (referenceSpeed * referenceSpeed) / (9.81 * tan(bankRad))
         )
     }
 
@@ -1871,10 +1875,8 @@ private enum UAVMapScaleRecommendationResolver {
                 return max(4.0, runtimeProfile.collisionRadius * 7.5)
             }
 
-            if let wing = runtimeProfile.fixedWingParameters,
-               wing.nominalTurnRateDegPerSec > 0.01 {
-                let omega = wing.nominalTurnRateDegPerSec * .pi / 180.0
-                return max(8.0, wing.cruiseSpeedMps / omega)
+            if let wing = runtimeProfile.fixedWingParameters {
+                return max(8.0, wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps))
             }
 
             return max(8.0, operationalProfile.nominalCruiseSpeedMps * 2.2)

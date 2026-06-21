@@ -259,7 +259,7 @@ final class FixedWingAssistController {
         nextState.commandedTurnDirection = filteredBankDeg > 0.5 ? .right : (filteredBankDeg < -0.5 ? .left : .none)
         nextState.estimatedTurnRadiusMeters = max(
             wing.waypointAcceptanceRadiusMeters,
-            wing.cruiseAirspeed / max(0.1, wing.nominalTurnRateRadPerSec)
+            wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
         )
 
         if assistState.mode == .waypointIntercept,
@@ -348,7 +348,7 @@ final class FixedWingAssistController {
         let headingError = shortestAngle(bearing - aircraftState.orientation.z)
         let estimatedRadius = max(
             wing.waypointAcceptanceRadiusMeters,
-            wing.cruiseAirspeed / max(0.1, wing.nominalTurnRateRadPerSec)
+            wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
         )
         let availableTurnIn = max(0.0, distance - estimatedRadius)
         let feasibility: FixedWingAssistInterceptFeasibilityState = {

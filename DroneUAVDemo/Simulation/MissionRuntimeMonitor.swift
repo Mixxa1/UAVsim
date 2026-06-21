@@ -229,11 +229,7 @@ final class MissionRuntimeMonitor {
             return stallTimeout
         case .fixedWing:
             let wing = resolvedFixedWingParameters(fixedWingParameters)
-            let turnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
-            let baseTurnRadius = max(
-                wing.waypointAcceptanceRadiusMeters * 1.1,
-                wing.cruiseSpeedMps / turnRateRad
-            )
+            let baseTurnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
             let turnTime = Double((baseTurnRadius * .pi) / max(wing.cruiseSpeedMps, 1.0))
             return max(stallTimeout + 4.0, min(14.0, turnTime + 5.0))
         }
@@ -243,11 +239,7 @@ final class MissionRuntimeMonitor {
         fixedWingParameters: FixedWingParameters?
     ) -> Float {
         let wing = resolvedFixedWingParameters(fixedWingParameters)
-        let turnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
-        let turnRadius = max(
-            wing.waypointAcceptanceRadiusMeters * 1.1,
-            wing.cruiseSpeedMps / turnRateRad
-        )
+        let turnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
         return max(turnRadius * 1.35, wing.waypointAcceptanceRadiusMeters * 2.2)
     }
 
@@ -255,11 +247,7 @@ final class MissionRuntimeMonitor {
         fixedWingParameters: FixedWingParameters?
     ) -> Float {
         let wing = resolvedFixedWingParameters(fixedWingParameters)
-        let turnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
-        let turnRadius = max(
-            wing.waypointAcceptanceRadiusMeters * 1.1,
-            wing.cruiseSpeedMps / turnRateRad
-        )
+        let turnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
         return max(turnRadius * 0.55, wing.waypointAcceptanceRadiusMeters * 0.75)
     }
 
