@@ -330,7 +330,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.032, oswaldEfficiency: 0.78, stallDragBump: 1.1,
                 cm0: 0.02, cmAlpha: -0.65, cmDeltaE: 0.19, cmqBase: -8.0,
                 clBetaSlope: 0.10, clDeltaA: 0.12, clpBase: -0.45,
-                cnBetaSlope: -0.08, cnDeltaR: 0.06, cnrBase: -0.12,
+                cnBetaSlope: -0.10, cnDeltaR: 0.06, cnrBase: -0.22,
                 cyBeta: -0.30,
                 maxElevatorDeg: 24.0, maxAileronDeg: 20.0, maxRudderDeg: 18.0,
                 torqueThrustRatio: 0.08, pFactorGain: 0.05, tailSlipstreamCoverage: 0.30
@@ -341,7 +341,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.028, oswaldEfficiency: 0.70, stallDragBump: 0.7,
                 cm0: 0.0, cmAlpha: -0.35, cmDeltaE: 0.17, cmqBase: -5.0,
                 clBetaSlope: 0.06, clDeltaA: 0.09, clpBase: -0.35,
-                cnBetaSlope: -0.05, cnDeltaR: 0.05, cnrBase: -0.08,
+                cnBetaSlope: -0.07, cnDeltaR: 0.05, cnrBase: -0.15,
                 cyBeta: -0.22,
                 maxElevatorDeg: 22.0, maxAileronDeg: 18.0, maxRudderDeg: 16.0,
                 torqueThrustRatio: 0.06, pFactorGain: 0.03, tailSlipstreamCoverage: 0.20
@@ -352,7 +352,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.026, oswaldEfficiency: 0.75, stallDragBump: 1.2,
                 cm0: 0.0, cmAlpha: -0.55, cmDeltaE: 0.16, cmqBase: -10.0,
                 clBetaSlope: 0.09, clDeltaA: 0.10, clpBase: -0.40,
-                cnBetaSlope: -0.10, cnDeltaR: 0.07, cnrBase: -0.14,
+                cnBetaSlope: -0.12, cnDeltaR: 0.07, cnrBase: -0.24,
                 cyBeta: -0.28,
                 maxElevatorDeg: 20.0, maxAileronDeg: 18.0, maxRudderDeg: 16.0,
                 // MQ-9B (the only user of this family) is a confirmed rear
@@ -366,7 +366,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.024, oswaldEfficiency: 0.74, stallDragBump: 0.8,
                 cm0: 0.0, cmAlpha: -0.30, cmDeltaE: 0.12, cmqBase: -15.0,
                 clBetaSlope: 0.07, clDeltaA: 0.11, clpBase: -0.38,
-                cnBetaSlope: -0.04, cnDeltaR: 0.045, cnrBase: -0.07,
+                cnBetaSlope: -0.06, cnDeltaR: 0.045, cnrBase: -0.13,
                 cyBeta: -0.18,
                 maxElevatorDeg: 18.0, maxAileronDeg: 18.0, maxRudderDeg: 12.0,
                 torqueThrustRatio: 0.05, pFactorGain: 0.02, tailSlipstreamCoverage: 0.15
@@ -377,7 +377,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.028, oswaldEfficiency: 0.80, stallDragBump: 1.0,
                 cm0: 0.015, cmAlpha: -0.60, cmDeltaE: 0.19, cmqBase: -7.0,
                 clBetaSlope: 0.09, clDeltaA: 0.115, clpBase: -0.42,
-                cnBetaSlope: -0.085, cnDeltaR: 0.065, cnrBase: -0.11,
+                cnBetaSlope: -0.11, cnDeltaR: 0.065, cnrBase: -0.22,
                 cyBeta: -0.27,
                 maxElevatorDeg: 22.0, maxAileronDeg: 20.0, maxRudderDeg: 18.0,
                 torqueThrustRatio: 0.08, pFactorGain: 0.05, tailSlipstreamCoverage: 0.30
@@ -388,7 +388,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.034, oswaldEfficiency: 0.72, stallDragBump: 1.0,
                 cm0: 0.01, cmAlpha: -0.50, cmDeltaE: 0.15, cmqBase: -6.0,
                 clBetaSlope: 0.08, clDeltaA: 0.10, clpBase: -0.40,
-                cnBetaSlope: -0.07, cnDeltaR: 0.06, cnrBase: -0.10,
+                cnBetaSlope: -0.09, cnDeltaR: 0.06, cnrBase: -0.19,
                 cyBeta: -0.25,
                 maxElevatorDeg: 20.0, maxAileronDeg: 18.0, maxRudderDeg: 16.0,
                 torqueThrustRatio: 0.07, pFactorGain: 0.04, tailSlipstreamCoverage: 0.25
@@ -399,7 +399,7 @@ private struct FamilyAeroPreset {
                 cd0: 0.030, oswaldEfficiency: 0.76, stallDragBump: 1.0,
                 cm0: 0.012, cmAlpha: -0.55, cmDeltaE: 0.17, cmqBase: -6.5,
                 clBetaSlope: 0.085, clDeltaA: 0.11, clpBase: -0.41,
-                cnBetaSlope: -0.08, cnDeltaR: 0.06, cnrBase: -0.105,
+                cnBetaSlope: -0.10, cnDeltaR: 0.06, cnrBase: -0.20,
                 cyBeta: -0.26,
                 maxElevatorDeg: 21.0, maxAileronDeg: 19.0, maxRudderDeg: 17.0,
                 torqueThrustRatio: 0.07, pFactorGain: 0.04, tailSlipstreamCoverage: 0.25

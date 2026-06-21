@@ -177,7 +177,9 @@ final class FixedWingAutopilotController {
         parameters wing: FixedWingParameters,
         launchMode: LaunchMode,
         launchAsset: LaunchAsset?,
-        routeTracking: FixedWingRouteTrackingContext? = nil
+        routeTracking: FixedWingRouteTrackingContext? = nil,
+        missionMinAirspeed: Float? = nil,
+        missionMaxAirspeed: Float? = nil
     ) -> FixedWingAutopilotOutput {
         let airspeed = max(
             context.state.forwardAirspeed,
@@ -215,6 +217,11 @@ final class FixedWingAutopilotController {
         let altitudeFloor: Float? = isLaunchProtected
             ? max(context.targetAltitude, context.state.position.y + 4.0)
             : nil
+        // Mission speed bounds don't apply during the protected climb-out —
+        // that phase already has its own dedicated safe climb speed, which a
+        // mission-configured cap shouldn't be able to override.
+        let missionMinAirspeedActive: Float? = isLaunchProtected ? nil : missionMinAirspeed
+        let missionMaxAirspeedActive: Float? = isLaunchProtected ? nil : missionMaxAirspeed
 
         let input = FixedWingAutopilotInput(
             aircraftPosition: context.state.position,
@@ -231,6 +238,8 @@ final class FixedWingAutopilotController {
             wing: wing,
             cruiseAirspeedOverride: cruiseOverride,
             targetAltitudeOverride: altitudeFloor,
+            missionMinAirspeed: missionMinAirspeedActive,
+            missionMaxAirspeed: missionMaxAirspeedActive,
             input: input
         ) else {
             setPhase(.failed, reason: "autopilot_returned_nil")

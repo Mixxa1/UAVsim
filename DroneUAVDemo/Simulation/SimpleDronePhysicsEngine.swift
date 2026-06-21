@@ -398,6 +398,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 rudderFraction = desiredFixedWingRudderFraction(
                     control: control,
                     currentYaw: currentEuler.z,
+                    yawRate: state.bodyAngularVelocity.z,
                     authority: authority,
                     wing: wing,
                     fallbackHeading: wrap(control.targetOrientation.z)
@@ -436,6 +437,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 rudderFraction = desiredFixedWingRudderFraction(
                     control: control,
                     currentYaw: currentEuler.z,
+                    yawRate: state.bodyAngularVelocity.z,
                     authority: authority,
                     wing: wing,
                     fallbackHeading: wrap(control.targetOrientation.z)
@@ -653,16 +655,27 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     private func desiredFixedWingRudderFraction(
         control: DroneControlInput,
         currentYaw: Float,
+        yawRate: Float,
         authority: Float,
         wing: FixedWingParameters,
         fallbackHeading: Float
     ) -> Float {
+        // Yaw-rate damper (active in every mode): opposes yaw rate to suppress
+        // the lightly-damped Dutch-roll wallow that the real 6DOF model now
+        // simulates. Sign matches the aero cnr damper (cnDeltaR > 0, so rudder
+        // ∝ -yawRate produces a damping yaw moment). 0.18 is a light hand —
+        // enough to settle the side-to-side weave without making yaw sluggish.
+        let yawDamper = (-yawRate * 0.18).clamped(to: -0.5...0.5)
         let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
         if abs(manualIntent) > 0.001 {
-            return (manualIntent * 0.6 * authority).clamped(to: -1.0...1.0)
+            return (manualIntent * 0.6 * authority + yawDamper).clamped(to: -1.0...1.0)
         }
+        // Heading-error rudder gain was 0.8 — far too high. The rudder isn't
+        // the primary heading actuator (bank is); a large heading-error rudder
+        // term lags the wobble and pumps energy *into* the Dutch roll instead
+        // of holding course. Cut to 0.25 and let the yaw damper do the work.
         let headingError = wrap(fallbackHeading - currentYaw)
-        return (headingError * 0.8 * wing.bankResponseGain).clamped(to: -1.0...1.0)
+        return (headingError * 0.25 * wing.bankResponseGain + yawDamper).clamped(to: -1.0...1.0)
     }
 
     private func angleTrackingRates(

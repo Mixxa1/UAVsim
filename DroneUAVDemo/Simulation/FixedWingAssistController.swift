@@ -59,6 +59,8 @@ final class FixedWingAssistController {
         static let maxBankDeg: Float = 28.0
         static let altitudePitchGain: Float = 0.85
         static let altitudeDampingGain: Float = 1.6
+        static let turnLiftCompensationGainDeg: Float = 30.0 // extra deg pitch per unit (1/cos(bank) - 1)
+        static let turnThrottleCompensationGain: Float = 0.3 // throttle per unit (1/cos(bank) - 1)
         static let altitudeThrottleAssist: Float = 0.014
         static let pitchUpClampDeg: Float = 9.0
         static let pitchDownClampDeg: Float = 7.0
@@ -224,7 +226,10 @@ final class FixedWingAssistController {
             filteredCourseRad = wrapAngle(filteredCourseRad + delta * alpha)
         }
         let courseError = shortestAngle(filteredCourseRad - aircraftState.orientation.z)
-        let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians
+        // Low-altitude bank protection — see FixedWingAutopilot.swift.
+        let altitudeMarginFactor = (aircraftState.position.y / max(wing.initialClimbTargetAltitude, 1.0))
+            .clamped(to: 0.35...1.0)
+        let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians * altitudeMarginFactor
         var rawBankRad = (courseError * Tuning.headingBankGain).clamped(to: -maxBankRad...maxBankRad)
         if abs(courseError) < 0.04 {
             rawBankRad *= 0.4
@@ -235,8 +240,14 @@ final class FixedWingAssistController {
         // Altitude / pitch handling. Heading-hold also keeps altitude lightly.
         let altitudeError = targetAltitudeMeters - aircraftState.position.y
         let verticalVelocity = aircraftState.velocity.y.isFinite ? aircraftState.velocity.y : 0.0
+        // Coordinated-turn lift compensation — see FixedWingAutopilot.swift for
+        // the full rationale: banking costs vertical lift (cos(bank)) under the
+        // real aero model, so nose-up bias is needed to hold altitude in a turn.
+        let bankLiftLossDeg = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
+            * Tuning.turnLiftCompensationGainDeg
         var rawPitchDeg = (altitudeError * Tuning.altitudePitchGain
-            - verticalVelocity * Tuning.altitudeDampingGain)
+            - verticalVelocity * Tuning.altitudeDampingGain
+            + bankLiftLossDeg)
             .clamped(to: -Tuning.pitchDownClampDeg...Tuning.pitchUpClampDeg)
         if altitudeOverrideActive {
             rawPitchDeg *= 0.2
@@ -246,7 +257,10 @@ final class FixedWingAssistController {
 
         let baselineThrottle = max(0.32, baseline.cruiseReferenceThrottle)
         let throttleAssist = altitudeError * Tuning.altitudeThrottleAssist
-        let rawThrottle = (baselineThrottle + throttleAssist).clamped(to: 0.32...0.95)
+        // Coordinated-turn drag compensation — see FixedWingAutopilot.swift.
+        let turnDragBoost = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
+            * Tuning.turnThrottleCompensationGain
+        let rawThrottle = (baselineThrottle + throttleAssist + turnDragBoost).clamped(to: 0.32...0.95)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: dt)
         filteredThrottle = filteredThrottle + (rawThrottle - filteredThrottle) * throttleAlpha
 

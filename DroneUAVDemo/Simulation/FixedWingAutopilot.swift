@@ -88,11 +88,13 @@ final class FixedWingAutopilot {
         // Vertical (pitch from altitude)
         static let altitudePitchGain: Float = 0.075        // rad pitch per meter of altitude error
         static let verticalDampingGain: Float = 0.18       // rad pitch per (m/s) vertical velocity
+        static let turnLiftCompensationGain: Float = 0.6   // rad pitch per unit (1/cos(bank) - 1)
         static let pitchFilterTau: Float = 0.45
         static let maxAltitudeBleedRateMps: Float = 4.5
         // Throttle (speed)
         static let throttleSpeedGain: Float = 0.085        // throttle per (m/s) speed error
         static let throttleAltitudeAssistGain: Float = 0.018
+        static let turnThrottleCompensationGain: Float = 0.3 // throttle per unit (1/cos(bank) - 1)
         static let throttleFilterTau: Float = 0.55
         static let throttleHoverSpan: ClosedRange<Float> = 0.32...0.95
         // Stall protection
@@ -137,6 +139,8 @@ final class FixedWingAutopilot {
         wing: FixedWingParameters,
         cruiseAirspeedOverride: Float?,
         targetAltitudeOverride: Float?,
+        missionMinAirspeed: Float? = nil,
+        missionMaxAirspeed: Float? = nil,
         input: FixedWingAutopilotInput
     ) -> FixedWingAutopilotResult? {
         guard !plan.waypoints.isEmpty else {
@@ -308,7 +312,16 @@ final class FixedWingAutopilot {
         let desiredCourse = state.filteredCourseRad
         let courseError = shortestAngle(desiredCourse - input.aircraftYawRadians)
 
-        let maxBankRad = max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95
+        // Low-altitude bank protection: pitch/throttle compensation alone
+        // can't fully erase the lift a steep bank costs, so below the
+        // aircraft's own climb-out altitude it should not attempt a turn
+        // sharp enough to outrun its margin in the first place — exactly the
+        // "banks while still low, sinks into the ground" failure mode seen
+        // repeatedly in testing. Ramps linearly back to full authority once
+        // there's real altitude to spend.
+        let altitudeMarginFactor = (input.aircraftPosition.y / max(wing.initialClimbTargetAltitude, 1.0))
+            .clamped(to: 0.35...1.0)
+        let maxBankRad = max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95 * altitudeMarginFactor
         var rawBankRad = (courseError * Tuning.bankProportionalGain).clamped(to: -maxBankRad...maxBankRad)
         // Anti-windup: bleed the bank command toward zero when the heading
         // error is small. This prevents endless small corrections that look
@@ -324,8 +337,15 @@ final class FixedWingAutopilot {
         let altitudeError = targetAltitude - input.aircraftPosition.y
         let verticalVelocity = input.aircraftVelocity.y.isFinite ? input.aircraftVelocity.y : 0.0
         let bleed: Float = Tuning.maxAltitudeBleedRateMps
+        // Coordinated-turn lift compensation: a real bank trades vertical lift
+        // for centripetal force (lift's vertical component falls by cos(bank)),
+        // which the old kinematic model never charged for. Without this term
+        // the aircraft sinks every time it banks toward a waypoint — exactly
+        // what was driving low-altitude post-launch turns into the ground.
+        let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
         let altitudePitchRaw = (altitudeError * Tuning.altitudePitchGain
-            - verticalVelocity * Tuning.verticalDampingGain).clamped(to: -bleed...bleed)
+            - verticalVelocity * Tuning.verticalDampingGain
+            + bankLiftLossRad).clamped(to: -bleed...bleed)
         let maxPitchUpRad = max(0.05, wing.maxPitchUpDeg.degreesToRadians)
         let maxPitchDownRad = max(0.05, wing.maxPitchDownDeg.degreesToRadians)
         var rawPitchRad = altitudePitchRaw.clamped(to: -maxPitchDownRad...maxPitchUpRad)
@@ -354,15 +374,26 @@ final class FixedWingAutopilot {
             let blend = (distance / slow).clamped(to: 0.0...1.0)
             return Tuning.approachSpeedScale + (1.0 - Tuning.approachSpeedScale) * blend
         }()
-        let targetSpeed = (cruiseAirspeed * approachScale).clamped(to: stallSafeSpeed...wing.maxAirspeed)
+        // Mission speed bounds narrow the airframe's own safe envelope, never
+        // widen it — a mission can ask to cruise slower/faster within what's
+        // physically flyable, not below stall or above the airframe's max.
+        let missionSpeedFloor = max(stallSafeSpeed, missionMinAirspeed ?? stallSafeSpeed)
+        let missionSpeedCeiling = max(missionSpeedFloor, min(wing.maxAirspeed, missionMaxAirspeed ?? wing.maxAirspeed))
+        let targetSpeed = (cruiseAirspeed * approachScale).clamped(to: missionSpeedFloor...missionSpeedCeiling)
         let speedError = targetSpeed - currentSpeed
         let cruiseHover: Float = 0.55
         let altitudeBoost = max(0.0, altitudeError) * Tuning.throttleAltitudeAssistGain
         let stallBoost: Float = stallProtectionActive ? 0.18 : 0.0
+        // Coordinated-turn drag compensation: a banked turn needs more lift
+        // (1/cos(bank)), and induced drag grows with the square of that — so
+        // without extra throttle the aircraft bleeds airspeed through a turn,
+        // which costs even more lift on top of the bank's own cosine loss.
+        let turnDragBoost = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnThrottleCompensationGain
         var rawThrottle = (cruiseHover
             + speedError * Tuning.throttleSpeedGain
             + altitudeBoost
             + stallBoost
+            + turnDragBoost
             - max(0.0, -altitudeError) * 0.012) // gentle pull back during high-altitude descent
         rawThrottle = rawThrottle.clamped(to: Tuning.throttleHoverSpan)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: input.deltaTime)

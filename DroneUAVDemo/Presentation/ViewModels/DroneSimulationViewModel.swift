@@ -5568,12 +5568,17 @@ final class DroneSimulationViewModel: ObservableObject {
                 fixedWingGuidanceSource = activeFixedWingGuidanceSource == .none ? .mission : activeFixedWingGuidanceSource
             }
             setFixedWingGuidanceSource(fixedWingGuidanceSource, reason: "fixed_wing_autopilot_tracking")
+            let missionSpeedConstraints = fixedWingGuidanceSource == .mission ? currentMissionPlan?.constraints.speed : nil
             let output = fixedWingAutopilotController.trackingCommand(
                 for: context,
                 parameters: activeFixedWingParameters(),
                 launchMode: activeLaunchMode(),
                 launchAsset: activeLaunchAsset(),
-                routeTracking: currentFixedWingRouteTrackingContext(fallbackTarget: target)
+                routeTracking: currentFixedWingRouteTrackingContext(fallbackTarget: target),
+                missionMinAirspeed: missionSpeedConstraints?.minimumMetersPerSecond,
+                missionMaxAirspeed: missionSpeedConstraints.map {
+                    $0.effectiveMaximum(profileMaxSpeed: activeFixedWingParameters().maxAirspeed)
+                }
             )
             fixedWingAutopilotAltitudeCommand = output.command.positionTarget.y
             fixedWingAutopilotCourseCommand = output.command.yawDegrees.degreesToRadians
