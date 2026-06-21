@@ -39,6 +39,17 @@ final class ScenePopulationService {
             return ([], [:])
         }
 
+        // generateGridDemo() only ever produced .marker/.pole/.crate descriptors, and those kinds
+        // render as an invisible empty SCNNode by default (EnvironmentObjectFactory.makeNode,
+        // gated on EnvironmentDebugOptions.showPlaceholderObjects, off in normal play) while still
+        // being registered as real `collidable: true` obstacles and counted on the radar/minimap.
+        // So this map previously had ~300 obstacles you could fly into but never see — not a
+        // rendering bug, the objects were genuinely there. The grid demo map is meant to be bare,
+        // so skip generating them at all rather than just hiding them.
+        if terrain.preset == .gridDemo {
+            return ([], [:])
+        }
+
         var generator = SeededRandomGenerator(seed: terrain.seed)
         let density = terrain.density.clamped(to: 0.0...1.0)
         let extent = terrain.worldHalfExtent
@@ -49,12 +60,8 @@ final class ScenePopulationService {
 
         switch terrain.preset {
         case .gridDemo:
-            collidableDescriptors = generateGridDemo(
-                density: density,
-                safeSpawn: terrain.safeSpawnRadius,
-                extent: extent,
-                generator: &generator
-            )
+            // The early return above is the only supported grid-demo path.
+            collidableDescriptors = []
         case .field:
             collidableDescriptors = generateField(
                 density: density,
@@ -128,36 +135,6 @@ final class ScenePopulationService {
             treeVisualsNode.addChildNode(node)
         }
         EnvironmentObjectFactory.printDiagnostics()
-    }
-
-    private func generateGridDemo(
-        density: Float,
-        safeSpawn: Float,
-        extent: Float,
-        generator: inout SeededRandomGenerator
-    ) -> [EnvironmentObjectDescriptor] {
-        var descriptors: [EnvironmentObjectDescriptor] = []
-
-        let spacing: Float = 10.0
-        let halfCells = max(2, Int((extent / spacing).rounded(.down)))
-
-        for ix in -halfCells...halfCells {
-            for iz in -halfCells...halfCells {
-                if abs(ix) <= 1, abs(iz) <= 1 { continue }
-                if Float.random(in: 0...1, using: &generator) > density + 0.18 { continue }
-
-                let x = Float(ix) * spacing
-                let z = Float(iz) * spacing
-                let startDistance = simd_length(SIMD2<Float>(x, z))
-                if startDistance < safeSpawn { continue }
-
-                let kind: EnvironmentObjectKind = (abs(ix + iz) % 3 == 0) ? .marker : ((abs(ix) % 2 == 0) ? .pole : .crate)
-                let size = sizeForKind(kind, terrain: .gridDemo, generator: &generator)
-                descriptors.append(makeDescriptor(kind: kind, biome: .gridDemo, position: SIMD3<Float>(x, 0, z), size: size, collidable: true))
-            }
-        }
-
-        return descriptors
     }
 
     private func cappedCollidableDescriptors(
