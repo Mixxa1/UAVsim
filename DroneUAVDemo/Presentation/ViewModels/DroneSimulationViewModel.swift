@@ -4413,6 +4413,7 @@ final class DroneSimulationViewModel: ObservableObject {
         state.orientation.y *= 0.74
         if abs(state.orientation.x) < 0.002 { state.orientation.x = 0.0 }
         if abs(state.orientation.y) < 0.002 { state.orientation.y = 0.0 }
+        resyncFixedWingAttitudeFromEuler()
 
         switch severity {
         case .minorContact:
@@ -10484,6 +10485,7 @@ final class DroneSimulationViewModel: ObservableObject {
         state.orientation.x = 0.0
         state.orientation.y = 0.0
         state.orientation.z = spawnYaw
+        resyncFixedWingAttitudeFromEuler()
         lastFiniteState = state
         updateLegacyLaunchState(.prelaunchCheck)
         updateControlValues({ values in
@@ -12253,6 +12255,10 @@ final class DroneSimulationViewModel: ObservableObject {
             isArmed = false
             setFlightMode(.manual, reason: "runtime_safety_position_recovery")
             transitionPhysicalState(.disarmed)
+            if !state.orientation.x.isFinite || !state.orientation.y.isFinite || !state.orientation.z.isFinite {
+                state.orientation = .zero
+            }
+            resyncFixedWingAttitudeFromEuler()
         }
 
         if !controlValues.x.isFinite || !controlValues.y.isFinite || !controlValues.z.isFinite ||
@@ -12389,11 +12395,33 @@ final class DroneSimulationViewModel: ObservableObject {
             state.orientation.y = 0.0
         }
 
+        resyncFixedWingAttitudeFromEuler()
         lastFiniteState = state
     }
 
     private func spawnOrientation(for profile: DroneModelProfile) -> SIMD3<Float> {
         return .zero
+    }
+
+    /// Rebuilds `state.fixedWingOrientationQuat` from the current Euler
+    /// `state.orientation` and zeroes `state.bodyAngularVelocity`.
+    ///
+    /// `SimpleDronePhysicsEngine`'s fixed-wing step treats the quaternion as
+    /// authoritative (Euler `orientation` is just a derived display copy) so
+    /// every place outside the physics step that forces `state.orientation`/
+    /// `state.angularVelocity` to a specific value (spawn, launch sequence,
+    /// disarm/ground settling, NaN recovery) must call this afterward.
+    /// Otherwise the quaternion is left stale from whatever attitude the
+    /// aircraft (or a previously-flown different aircraft) last had, and the
+    /// next physics step applies thrust along that stale nose direction
+    /// instead of the visually-reset one — looks like the aircraft barely
+    /// moves even at full throttle.
+    private func resyncFixedWingAttitudeFromEuler() {
+        guard selectedDroneProfile.airframeClass == .fixedWing else { return }
+        state.fixedWingOrientationQuat = simd_quatf(angle: state.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+            * simd_quatf(angle: state.orientation.y, axis: SIMD3<Float>(1, 0, 0))
+            * simd_quatf(angle: state.orientation.x, axis: SIMD3<Float>(0, 0, 1))
+        state.bodyAngularVelocity = .zero
     }
 
     private func neutralControls(from state: DroneState) -> DroneControlValues {
@@ -12420,6 +12448,7 @@ final class DroneSimulationViewModel: ObservableObject {
         state.motorThrottle = 0.0
         state.orientation.x = 0.0
         state.orientation.y = 0.0
+        resyncFixedWingAttitudeFromEuler()
         setFlightMode(.manual, reason: "settle_disarmed_grounded")
         state.mode = mode
         collisionCooldown = 0.0
@@ -12568,6 +12597,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         if abs(state.orientation.x) < 0.0005 { state.orientation.x = 0.0 }
         if abs(state.orientation.y) < 0.0005 { state.orientation.y = 0.0 }
+        resyncFixedWingAttitudeFromEuler()
     }
 
     private func approach(current: Float, target: Float, rate: Float, dt: Float) -> Float {

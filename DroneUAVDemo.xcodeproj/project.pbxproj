@@ -24,6 +24,7 @@
 		10000000000000000000020E /* DroneModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010E /* DroneModelBuilder.swift */; };
 		10000000000000000000020F /* DroneSceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010F /* DroneSceneController.swift */; };
 		100000000000000000000210 /* DroneModelProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000110 /* DroneModelProfile.swift */; };
+		10000000000000000000041F /* FixedWingAerodynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041E /* FixedWingAerodynamics.swift */; };
 		100000000000000000000211 /* WeatherModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000111 /* WeatherModel.swift */; };
 		100000000000000000000212 /* TerrainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000112 /* TerrainModel.swift */; };
 		100000000000000000000213 /* CameraConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000113 /* CameraConfiguration.swift */; };
@@ -317,6 +318,7 @@
 		10000000000000000000010E /* DroneModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelBuilder.swift; sourceTree = "<group>"; };
 		10000000000000000000010F /* DroneSceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneController.swift; sourceTree = "<group>"; };
 		100000000000000000000110 /* DroneModelProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelProfile.swift; sourceTree = "<group>"; };
+		10000000000000000000041E /* FixedWingAerodynamics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAerodynamics.swift; sourceTree = "<group>"; };
 		100000000000000000000111 /* WeatherModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherModel.swift; sourceTree = "<group>"; };
 		100000000000000000000112 /* TerrainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainModel.swift; sourceTree = "<group>"; };
 		100000000000000000000113 /* CameraConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConfiguration.swift; sourceTree = "<group>"; };
@@ -648,6 +650,7 @@
 				1000000000000000000003A1 /* L10n.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
+				10000000000000000000041E /* FixedWingAerodynamics.swift */,
 				100000000000000000000113 /* CameraConfiguration.swift */,
 				100000000000000000000116 /* CollisionAnalysis.swift */,
 				100000000000000000000114 /* DamageThermalModel.swift */,
@@ -1146,6 +1149,7 @@
 				10000000000000000000020E /* DroneModelBuilder.swift in Sources */,
 				10000000000000000000020F /* DroneSceneController.swift in Sources */,
 				100000000000000000000210 /* DroneModelProfile.swift in Sources */,
+				10000000000000000000041F /* FixedWingAerodynamics.swift in Sources */,
 				100000000000000000000211 /* WeatherModel.swift in Sources */,
 				100000000000000000000212 /* TerrainModel.swift in Sources */,
 				100000000000000000000213 /* CameraConfiguration.swift in Sources */,
