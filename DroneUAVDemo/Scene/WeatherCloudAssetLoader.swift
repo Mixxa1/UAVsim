@@ -20,6 +20,11 @@ private enum WeatherCloudConstants {
     // direction by construction, one shading pass instead of three, no USDZ load at all.
     static let resourceExtension = "usdz"
     static let modelSubdirectory = "Models/Environment/Weather"
+    static let lightningResourceName = "3_Pack_of_Storm_Lightning"
+    // The pack's 3 bolt variants are named th_bolt_0 / th_bolt_001_1 / th_bolt_002_2 in the
+    // source file (confirmed by dumping the usdz's node hierarchy directly) — matching by prefix
+    // finds all 3 regardless of the exact suffix.
+    static let lightningBoltNamePrefix = "th_bolt"
 }
 
 /// Loads the sky-decoration cloud cluster (Dubai_Clouds) and builds the procedural fog/smog
@@ -33,9 +38,16 @@ final class WeatherCloudAssetLoader {
         let boundingRadius: Float
     }
 
+    private struct LightningBoltTemplate {
+        let node: SCNNode
+        let nativeHeight: Float
+    }
+
     private var cachedTemplates: [String: Template] = [:]
     private var attemptedNames: Set<String> = []
     private var warnedNames: Set<String> = []
+    private var lightningBoltTemplates: [LightningBoltTemplate]?
+    private var lightningLoadAttempted = false
 
     private init() {}
 
@@ -58,6 +70,117 @@ final class WeatherCloudAssetLoader {
 
     private static let fogTintColor = NSColor(calibratedRed: 0.80, green: 0.82, blue: 0.85, alpha: 1.0)
     private static let smogTintColor = NSColor(calibratedRed: 0.40, green: 0.38, blue: 0.33, alpha: 1.0)
+
+    /// Reuses the same Dubai_Clouds geometry/billboarding/zFar-safe scaling as the regular sky
+    /// decoration, just tinted dark for thunderclouds. `tintColor`/`opacity` differ per call so
+    /// several instances can read as "varying density" (some lighter/thinner, some near-black
+    /// and dense) rather than one uniform grey sky. Deep-copies materials before tinting —
+    /// `node.clone()` shares the cached template's actual `SCNMaterial` instances, so without
+    /// this every other clone of Dubai_Clouds (including the plain, untinted sky decoration)
+    /// would pick up whatever tint was set here too. That exact bug already happened once with
+    /// the fog/smog envelope sharing Fluffy_Cloud's material (see project memory) — not repeating
+    /// it here now that Dubai_Clouds is shared between two different visual roles.
+    func makeStormCloudNode(offset: SCNVector3, yaw: Float, targetRadius: Float, tintColor: NSColor, opacity: Float) -> SCNNode? {
+        guard let node = makeNode(named: WeatherCloudConstants.skyCloudsResourceName, nodeName: "weather.storm_cloud") else {
+            return nil
+        }
+        applySkyCloudBillboarding(node)
+        deepCopyMaterials(node)
+        applyTint(node, color: tintColor)
+        scaleToTemplateRadius(node, named: WeatherCloudConstants.skyCloudsResourceName, targetRadius: targetRadius)
+        node.position = offset
+        node.eulerAngles = SCNVector3(0, yaw, 0)
+        node.opacity = CGFloat(opacity)
+        return node
+    }
+
+    private func deepCopyMaterials(_ node: SCNNode) {
+        if let geometry = node.geometry, let geometryCopy = geometry.copy() as? SCNGeometry {
+            geometryCopy.materials = geometry.materials.map { $0.copy() as! SCNMaterial }
+            node.geometry = geometryCopy
+        }
+        for child in node.childNodes {
+            deepCopyMaterials(child)
+        }
+    }
+
+    private func applyTint(_ node: SCNNode, color: NSColor) {
+        if let geometry = node.geometry {
+            for material in geometry.materials {
+                material.multiply.contents = color
+            }
+        }
+        for child in node.childNodes {
+            applyTint(child, color: color)
+        }
+    }
+
+    /// Picks a random one of the pack's 3 bolt variants and scales it (non-uniformly — see
+    /// `horizontalScaleFactor`) so its native ~4.5-unit height matches `targetHeight`. Materials
+    /// are shared across clones (no per-instance tint/deep-copy, unlike `makeStormCloudNode`)
+    /// since every strike should look like the same glowing bolt, just placed and sized
+    /// differently — there's no per-instance visual property that needs isolating here.
+    func makeLightningBoltNode(targetHeight: Float, horizontalScaleFactor: Float = 0.55) -> SCNNode? {
+        guard let templates = loadLightningBoltTemplates(), let chosen = templates.randomElement() else {
+            warnOnce(WeatherCloudConstants.lightningResourceName)
+            return nil
+        }
+        let node = chosen.node.clone()
+        node.name = "weather.lightning_bolt"
+        let verticalScale = CGFloat(targetHeight / chosen.nativeHeight)
+        node.scale = SCNVector3(verticalScale * CGFloat(horizontalScaleFactor), verticalScale, verticalScale * CGFloat(horizontalScaleFactor))
+        return node
+    }
+
+    /// Each `th_bolt_*` node's own geometry already sits with its base near local Y=0 and its
+    /// tip near local Y=nativeHeight (confirmed by dumping the asset's per-node bounding boxes
+    /// directly) — so cloning just that node, without recentering, places the bolt's base at
+    /// whatever world position the caller assigns and lets it extend straight upward from there.
+    private func loadLightningBoltTemplates() -> [LightningBoltTemplate]? {
+        if let cached = lightningBoltTemplates {
+            return cached
+        }
+        if lightningLoadAttempted {
+            return nil
+        }
+        lightningLoadAttempted = true
+
+        guard let url = bundleURL(resourceName: WeatherCloudConstants.lightningResourceName) else {
+            return nil
+        }
+        guard let scene = try? SCNScene(url: url, options: [
+            .checkConsistency: false,
+            .preserveOriginalTopology: false
+        ]) else {
+            return nil
+        }
+
+        let boltNodes = lightningBoltWrapperNodes(in: scene.rootNode)
+        guard !boltNodes.isEmpty else {
+            return nil
+        }
+
+        let templates = boltNodes.map { boltNode -> LightningBoltTemplate in
+            let detached = boltNode.clone()
+            sanitize(detached)
+            let (minBB, maxBB) = detached.boundingBox
+            let height = max(0.001, Float(maxBB.y - minBB.y))
+            return LightningBoltTemplate(node: detached, nativeHeight: height)
+        }
+        lightningBoltTemplates = templates
+        return templates
+    }
+
+    private func lightningBoltWrapperNodes(in node: SCNNode) -> [SCNNode] {
+        if let name = node.name, name.hasPrefix(WeatherCloudConstants.lightningBoltNamePrefix) {
+            return [node]
+        }
+        var result: [SCNNode] = []
+        for child in node.childNodes {
+            result.append(contentsOf: lightningBoltWrapperNodes(in: child))
+        }
+        return result
+    }
 
     func makeFogEnvelopeNode(targetRadius: Float) -> SCNNode? {
         makeEnvelopeSphere(radius: targetRadius, tint: Self.fogTintColor, name: "weather.fog_envelope")

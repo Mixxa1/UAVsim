@@ -277,6 +277,7 @@
 		D70E00000000000000000004 /* Dubai_Clouds.usdz in Resources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000003 /* Dubai_Clouds.usdz */; };
 		D70E00000000000000000006 /* Fluffy_Cloud.usdz in Resources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000005 /* Fluffy_Cloud.usdz */; };
 		D70E00000000000000000008 /* Evanescent_Smoke.usdz in Resources */ = {isa = PBXBuildFile; fileRef = D70E00000000000000000007 /* Evanescent_Smoke.usdz */; };
+		E81000000000000000000002 /* 3_Pack_of_Storm_Lightning.usdz in Resources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000001 /* 3_Pack_of_Storm_Lightning.usdz */; };
 		A15310000000000000000001 /* AbandonedCityAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */; };
 		A15310000000000000000002 /* AbandonedCityBuildingLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */; };
 		A15310000000000000000003 /* AbandonedCityMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */; };
@@ -571,6 +572,7 @@
 		D70E00000000000000000003 /* Dubai_Clouds.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/Dubai_Clouds.usdz"; sourceTree = "<group>"; };
 		D70E00000000000000000005 /* Fluffy_Cloud.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/Fluffy_Cloud.usdz"; sourceTree = "<group>"; };
 		D70E00000000000000000007 /* Evanescent_Smoke.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/Evanescent_Smoke.usdz"; sourceTree = "<group>"; };
+		E81000000000000000000001 /* 3_Pack_of_Storm_Lightning.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Weather/3_Pack_of_Storm_Lightning.usdz"; sourceTree = "<group>"; };
 		A15300000000000000000001 /* AbandonedCityAssetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityAssetCatalog.swift"; sourceTree = "<group>"; };
 		A15300000000000000000002 /* AbandonedCityBuildingLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityBuildingLoader.swift"; sourceTree = "<group>"; };
 		A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/AbandonedCityMaterialLoader.swift"; sourceTree = "<group>"; };
@@ -969,6 +971,7 @@
 				D70E00000000000000000003 /* Dubai_Clouds.usdz */,
 				D70E00000000000000000005 /* Fluffy_Cloud.usdz */,
 				D70E00000000000000000007 /* Evanescent_Smoke.usdz */,
+				E81000000000000000000001 /* 3_Pack_of_Storm_Lightning.usdz */,
 				A15300000000000000000006 /* Seamless_Brittle_Stone.usdz */,
 				A15300000000000000000007 /* Abandoned_Shop_Old_House.usdz */,
 				A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */,
@@ -1100,6 +1103,7 @@
 				D70E00000000000000000004 /* Dubai_Clouds.usdz in Resources */,
 				D70E00000000000000000006 /* Fluffy_Cloud.usdz in Resources */,
 				D70E00000000000000000008 /* Evanescent_Smoke.usdz in Resources */,
+				E81000000000000000000002 /* 3_Pack_of_Storm_Lightning.usdz in Resources */,
 				A15310000000000000000006 /* Seamless_Brittle_Stone.usdz in Resources */,
 				A15310000000000000000007 /* Abandoned_Shop_Old_House.usdz in Resources */,
 				A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */,

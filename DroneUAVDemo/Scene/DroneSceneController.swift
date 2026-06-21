@@ -103,10 +103,12 @@ final class DroneSceneController {
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
     private var snowSystem: SCNParticleSystem?
-    private var thunderPulse: Float = 0.0
     private var cameraNoisePhase: Float = 0.0
 
     private let skyCloudsNode = SCNNode()
+    private let stormCloudsNode = SCNNode()
+    private var stormCloudsBuilt = false
+    private let lightningStrikesNode = SCNNode()
     private let weatherEnvelopeNode = SCNNode()
     private var activeWeatherEnvelopePreset: WeatherPreset?
     // The envelope is a sphere centered on the drone, depth-tested normally — anything closer
@@ -263,6 +265,12 @@ final class DroneSceneController {
         skyCloudsNode.name = "skyCloudsNode"
         scene.rootNode.addChildNode(skyCloudsNode)
         setUpSkyClouds()
+
+        stormCloudsNode.name = "stormCloudsNode"
+        stormCloudsNode.isHidden = true
+        scene.rootNode.addChildNode(stormCloudsNode)
+
+        setUpLightningStrikes()
 
         weatherEnvelopeNode.name = "weatherEnvelopeNode"
         weatherEnvelopeNode.isHidden = true
@@ -1380,14 +1388,22 @@ final class DroneSceneController {
         scene.fogColor = fogColor
         updateWeatherParticles(weather)
         updateWeatherEnvelope(weather)
+        updateStormClouds(weather)
 
         if let terrain = lastTerrainConfig {
             let haze = skyHorizonHazeColor(for: weather)
-            scene.background.contents = skyGradientImage(
+            let backgroundImage = skyGradientImage(
                 for: terrain.preset,
                 weatherFogColor: haze?.color,
-                weatherFogStrength: haze?.strength ?? 0
+                weatherFogStrength: haze?.strength ?? 0,
+                weatherHazeDistribution: haze?.distribution ?? .groundHaze
             )
+            scene.background.contents = backgroundImage
+            // applyTerrainVisualStyle keeps lightingEnvironment.contents in lockstep with the
+            // visible sky on terrain changes; weather can change independently of terrain, so
+            // without this the IBL ambient light kept using the pre-storm bright gradient even
+            // though the visible sky had already gone dark.
+            scene.lightingEnvironment.contents = backgroundImage
 
             let isSnow = weather.preset == .snow
             if terrain.preset != .city {
@@ -1439,10 +1455,86 @@ final class DroneSceneController {
         }
     }
 
+    // 8 hand-placed cards left wide gaps between them — at a typical forward-pitched view, mostly
+    // empty dark gradient showed through, which read as "night sky" rather than "covered in dark
+    // clouds" (the user's exact complaint). Two full-360° rings of big, overlapping cards instead
+    // — a near/low ring (closer, lower, smaller cards) and a far/high ring (farther, much higher
+    // above the drone, bigger cards so they stay legible at distance) — so wherever the camera
+    // looks, there's cloud coverage both near the horizon and higher up, not just a thin band.
+    // Each tuple is (offset, yaw, tint, opacity, radius) — darker tint + higher opacity reads as a
+    // denser, thicker cell; lighter/more transparent ones read as thinner, wispier cloud, which is
+    // "разной густоты" (varying density), not just "more clouds".
+    private struct StormCloudRingSpec {
+        let distance: Float
+        let altitude: Float
+        let radius: Float
+        let count: Int
+    }
+
+    // Offset magnitude + radius for the far ring is ~531+300=831, safely inside camera.zFar=900
+    // (see SceneFactory.makeCameraNode) — the same zFar-safety margin every other cloud placement
+    // in this file keeps.
+    private static let stormCloudRings: [StormCloudRingSpec] = [
+        StormCloudRingSpec(distance: 320, altitude: 55, radius: 230, count: 10),
+        StormCloudRingSpec(distance: 520, altitude: 130, radius: 300, count: 10)
+    ]
+
+    private static let stormCloudInstances: [(offset: SCNVector3, yaw: Float, tint: NSColor, opacity: Float, radius: Float)] = {
+        var instances: [(offset: SCNVector3, yaw: Float, tint: NSColor, opacity: Float, radius: Float)] = []
+        for ring in stormCloudRings {
+            for i in 0..<ring.count {
+                let baseAngle = (Float(i) / Float(ring.count)) * 2.0 * Float.pi
+                let angle = baseAngle + Float.random(in: -0.18...0.18)
+                let x = cos(angle) * ring.distance
+                let z = sin(angle) * ring.distance
+                // 0.22-0.58 stays well lighter than the near-black sky color (~0.13-0.16 after the
+                // night-vs-storm-day rebalance below) — a card tinted as dark as its backdrop has
+                // no contrast and effectively disappears.
+                let grey = CGFloat(Float.random(in: 0.22...0.58))
+                let tint = NSColor(calibratedWhite: grey, alpha: 1.0)
+                let opacity = Float.random(in: 0.45...0.92)
+                instances.append((
+                    offset: SCNVector3(x, ring.altitude, z),
+                    yaw: angle,
+                    tint: tint,
+                    opacity: opacity,
+                    radius: ring.radius
+                ))
+            }
+        }
+        return instances
+    }()
+
+    private func setUpStormClouds() {
+        guard !stormCloudsBuilt else { return }
+        stormCloudsBuilt = true
+        for instance in Self.stormCloudInstances {
+            guard let node = WeatherCloudAssetLoader.shared.makeStormCloudNode(
+                offset: instance.offset,
+                yaw: instance.yaw,
+                targetRadius: instance.radius,
+                tintColor: instance.tint,
+                opacity: instance.opacity
+            ) else {
+                continue
+            }
+            stormCloudsNode.addChildNode(node)
+        }
+    }
+
     /// Fog/smog get a tangible cloud/smoke volume around the drone, on top of the existing
     /// distance-based `scene.fog*` properties — a single floating cloud wouldn't read as
     /// ambient haze, so the asset is scaled up into a soft shell the drone flies inside of.
     private func updateWeatherEnvelope(_ weather: WeatherModel) {
+        // Thunderstorm deliberately does NOT use this envelope, unlike fog/smog: it's a flat,
+        // untextured, single-color sphere by construction (see makeEnvelopeSphere) — exactly
+        // right for uniform haze, but at storm-strength opacity it fills the whole view with one
+        // flat color and erases any cloud structure behind it. The user's own read on that result
+        // was "это больше похоже на туман другого цвета, чем на отличительные черты погоды с
+        // грозой" (this looks more like fog of a different color than distinctive thunderstorm
+        // features) — confirming the flat sphere is the wrong tool for "distinctive dark clouds".
+        // Thunderstorm darkening instead comes from the sky gradient's `.overcast` distribution
+        // (real gradient/structure) plus the storm cloud cards plus dimmed sun/shadows.
         guard weather.preset == .fog || weather.preset == .smog else {
             weatherEnvelopeNode.isHidden = true
             activeWeatherEnvelopePreset = nil
@@ -1476,6 +1568,23 @@ final class DroneSceneController {
         weatherEnvelopeNode.opacity = CGFloat(0.25 + weather.normalizedIntensity * 0.55)
     }
 
+    // Built lazily on first thunderstorm activation rather than at scene setup like skyCloudsNode
+    // — this avoids paying the Dubai_Clouds clone+tint+deep-copy cost for every session that never
+    // selects this preset. Stays built afterward (just toggled hidden) since presets are switched
+    // back and forth far more often than this initial build cost would justify repeating.
+    private func updateStormClouds(_ weather: WeatherModel) {
+        guard weather.preset == .thunderstorm else {
+            stormCloudsNode.isHidden = true
+            return
+        }
+        setUpStormClouds()
+        stormCloudsNode.isHidden = false
+        // Same non-zero floor pattern as weatherEnvelopeNode/skyHorizonHazeColor — intensity is
+        // 0 by default until the user separately touches a slider, and gating fully on it caused
+        // the exact same "preset selected but nothing visible" bug fixed twice already elsewhere.
+        stormCloudsNode.opacity = CGFloat(0.6 + weather.normalizedIntensity * 0.4)
+    }
+
     // SCNCamera.wantsDepthOfField produced zero visible blur in this SceneKit/macOS build, even
     // at extreme settings (fStop 0.5, focalLength 135mm), verified via both an offscreen
     // SCNRenderer and a live SCNView snapshot — a known SceneKit limitation, not a tuning gap.
@@ -1503,6 +1612,17 @@ final class DroneSceneController {
 
         if !weatherEnvelopeNode.isHidden {
             weatherEnvelopeNode.position = SCNVector3(state.position.x, state.position.y, state.position.z)
+        }
+
+        if !stormCloudsNode.isHidden {
+            // Each ring's altitude is already baked into its instances' own offsets (see
+            // stormCloudRings) — this just keeps the whole formation centered over the drone's
+            // current position, not an extra altitude on top.
+            stormCloudsNode.position = SCNVector3(
+                CGFloat(state.position.x),
+                CGFloat(state.position.y),
+                CGFloat(state.position.z)
+            )
         }
 
         fpvPresentationActive = camera.mode == .fpv
@@ -2338,7 +2458,12 @@ final class DroneSceneController {
         applyLightingProfile(for: terrain.preset)
 
         let haze = skyHorizonHazeColor(for: currentWeather)
-        let backgroundImage = skyGradientImage(for: terrain.preset, weatherFogColor: haze?.color, weatherFogStrength: haze?.strength ?? 0)
+        let backgroundImage = skyGradientImage(
+            for: terrain.preset,
+            weatherFogColor: haze?.color,
+            weatherFogStrength: haze?.strength ?? 0,
+            weatherHazeDistribution: haze?.distribution ?? .groundHaze
+        )
 
         switch terrain.preset {
         case .gridDemo:
@@ -2602,27 +2727,50 @@ final class DroneSceneController {
         }
     }
 
-    /// Only fog/smog get a sky-gradient haze blend — matches `wantsWeatherDepthOfField`'s own
-    /// gating and the envelope sphere's preset check. Other presets (rain, snow, wind,
-    /// thunderstorm) keep their existing `scene.fogColor` treatment on real geometry only; their
-    /// `fogColor` values (e.g. the dark `wind`/`normal` tint) are tuned for that distance-fog
-    /// role, not for blending into a clear sky, so reusing them here unconditionally would
-    /// incorrectly darken the sky for weather that was never meant to touch the horizon at all.
+    /// `.groundHaze` keeps the existing fog/smog behavior: strongest at the horizon, thinning out
+    /// overhead, matching how ground-level haze actually thins with altitude. `.overcast` is for
+    /// thunderstorm — a real storm sky is capped by cloud nearly everywhere, often *darkest*
+    /// overhead rather than at the horizon (where a paler band under the storm's leading edge is
+    /// common) — so it blends strongly at all three gradient stops instead of fading toward the
+    /// top. See `skyGradientImage` for where the fractions actually differ.
+    private enum SkyHazeDistribution {
+        case groundHaze
+        case overcast
+    }
+
+    /// Only fog/smog/thunderstorm get a sky-gradient haze blend — matches `wantsWeatherDepthOfField`'s
+    /// own gating and the envelope sphere's preset check. Other presets (rain, snow, wind) keep
+    /// their existing `scene.fogColor` treatment on real geometry only; their `fogColor` values
+    /// (e.g. the dark `wind`/`normal` tint) are tuned for that distance-fog role, not for blending
+    /// into a clear sky, so reusing them here unconditionally would incorrectly darken the sky for
+    /// weather that was never meant to touch the horizon at all.
     /// Strength has the same non-zero floor as the weather envelope sphere's opacity
     /// (`0.25 + intensity*0.55` in `updateWeatherEnvelope`) — and for the same reason that bit
-    /// `wantsWeatherDepthOfField` earlier: picking a fog/smog preset from the UI without
-    /// separately raising an intensity slider leaves `weather.intensity` at 0, and a strength
-    /// tied directly to `normalizedIntensity` (no floor) meant `weatherFogStrength > 0` was false
-    /// and the whole blend got skipped — zero visible error, zero visible effect, exactly what
-    /// the user reported, and exactly the same mistake as that earlier bug, just unported to
-    /// this newer code path.
-    private func skyHorizonHazeColor(for weather: WeatherModel) -> (color: NSColor, strength: CGFloat)? {
-        let strength = CGFloat(0.7 + weather.normalizedIntensity * 0.3)
+    /// `wantsWeatherDepthOfField` earlier: picking a fog/smog/thunderstorm preset from the UI
+    /// without separately raising an intensity slider leaves `weather.intensity` at 0, and a
+    /// strength tied directly to `normalizedIntensity` (no floor) meant `weatherFogStrength > 0`
+    /// was false and the whole blend got skipped — zero visible error, zero visible effect.
+    /// Thunderstorm's floor is deliberately higher than fog/smog's (0.78 vs 0.7) and its color
+    /// near-black rather than pale — a freshly-selected storm preset with no slider touch should
+    /// already read as a real storm, not "barely different from clear weather", which is what it
+    /// looked like before this existed: `effectiveFactors.visibilityFactor` itself is 1.0 (fully
+    /// clear) at intensity 0 since it interpolates *from* 1.0, so nothing else in
+    /// `applyWeatherVisual` darkened anything either at that point.
+    private func skyHorizonHazeColor(for weather: WeatherModel) -> (color: NSColor, strength: CGFloat, distribution: SkyHazeDistribution)? {
+        let groundHazeStrength = CGFloat(0.7 + weather.normalizedIntensity * 0.3)
         switch weather.preset {
         case .fog:
-            return (NSColor(calibratedRed: 0.84, green: 0.84, blue: 0.84, alpha: 1.0), strength)
+            return (NSColor(calibratedRed: 0.84, green: 0.84, blue: 0.84, alpha: 1.0), groundHazeStrength, .groundHaze)
         case .smog:
-            return (NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0), strength)
+            return (NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0), groundHazeStrength, .groundHaze)
+        case .thunderstorm:
+            // Near-black (0.06-0.08) read as literal nighttime rather than a dark stormy *day* —
+            // the user's screenshot showed a near-black sky with the storm cloud cards crushed
+            // into it, indistinguishable from stars/night texture. A heavy-overcast slate grey
+            // keeps the "oppressive" read while leaving enough headroom for the (now much denser)
+            // cloud cards to actually show up as visibly darker shapes against it.
+            let stormStrength = CGFloat(0.72 + weather.normalizedIntensity * 0.22)
+            return (NSColor(calibratedRed: 0.16, green: 0.165, blue: 0.19, alpha: 1.0), stormStrength, .overcast)
         default:
             return nil
         }
@@ -2635,7 +2783,12 @@ final class DroneSceneController {
     /// shader can soften the seam's *shape* but can't erase a hard color contrast between two
     /// flat regions; baking the haze into the sky gradient itself, at the source, means there's
     /// no contrast left to fight by the time anything else runs.
-    private func skyGradientImage(for terrain: TerrainPreset, weatherFogColor: NSColor? = nil, weatherFogStrength: CGFloat = 0) -> NSImage {
+    private func skyGradientImage(
+        for terrain: TerrainPreset,
+        weatherFogColor: NSColor? = nil,
+        weatherFogStrength: CGFloat = 0,
+        weatherHazeDistribution: SkyHazeDistribution = .groundHaze
+    ) -> NSImage {
         let size = NSSize(width: 1024, height: 768)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -2670,9 +2823,19 @@ final class DroneSceneController {
         if let rawFogColor = weatherFogColor, weatherFogStrength > 0,
            let fogColor = rawFogColor.usingColorSpace(.genericRGB) {
             let clampedStrength = min(max(weatherFogStrength, 0), 1)
-            horizonColor = horizonColor.blended(withFraction: clampedStrength, of: fogColor) ?? horizonColor
-            midColor = midColor.blended(withFraction: clampedStrength * 0.65, of: fogColor) ?? midColor
-            topColor = topColor.blended(withFraction: clampedStrength * 0.28, of: fogColor) ?? topColor
+            switch weatherHazeDistribution {
+            case .groundHaze:
+                horizonColor = horizonColor.blended(withFraction: clampedStrength, of: fogColor) ?? horizonColor
+                midColor = midColor.blended(withFraction: clampedStrength * 0.65, of: fogColor) ?? midColor
+                topColor = topColor.blended(withFraction: clampedStrength * 0.28, of: fogColor) ?? topColor
+            case .overcast:
+                // Strong at every stop, slightly *more* overhead than at the horizon (1.0 vs 0.85)
+                // — a storm ceiling reads as thick cloud everywhere, not haze that thins with
+                // altitude, and a paler band right at the horizon under the front is realistic.
+                horizonColor = horizonColor.blended(withFraction: clampedStrength * 0.85, of: fogColor) ?? horizonColor
+                midColor = midColor.blended(withFraction: clampedStrength * 0.95, of: fogColor) ?? midColor
+                topColor = topColor.blended(withFraction: clampedStrength, of: fogColor) ?? topColor
+            }
         }
 
         let bounds = NSRect(origin: .zero, size: size)
@@ -2680,15 +2843,19 @@ final class DroneSceneController {
             gradient.draw(in: bounds, angle: -90.0)
         }
 
-        let hazeRect = NSRect(
-            x: size.width * 0.12,
-            y: size.height * 0.06,
-            width: size.width * 0.76,
-            height: size.height * 0.24
-        )
-        let hazePath = NSBezierPath(ovalIn: hazeRect)
-        NSColor.white.withAlphaComponent(0.10).setFill()
-        hazePath.fill()
+        // A thick storm ceiling has no visible sun glow through it — drawing this highlight at
+        // its usual strength was quietly re-brightening the otherwise-darkened overcast sky.
+        if weatherHazeDistribution != .overcast {
+            let hazeRect = NSRect(
+                x: size.width * 0.12,
+                y: size.height * 0.06,
+                width: size.width * 0.76,
+                height: size.height * 0.24
+            )
+            let hazePath = NSBezierPath(ovalIn: hazeRect)
+            NSColor.white.withAlphaComponent(0.10).setFill()
+            hazePath.fill()
+        }
 
         image.unlockFocus()
         return image
@@ -3494,20 +3661,86 @@ final class DroneSceneController {
     }
 
     private func updateWeatherAnimation(deltaTime: Float, weather: WeatherModel) {
-        let baseSun = CGFloat(1200 * (0.65 + weather.effectiveFactors.visibilityFactor * 0.5))
-        var intensity = baseSun
+        var baseSun = CGFloat(1200 * (0.65 + weather.effectiveFactors.visibilityFactor * 0.5))
 
         if weather.preset == .thunderstorm {
-            thunderPulse -= deltaTime
-            if thunderPulse <= 0.0 {
-                thunderPulse = Float.random(in: 0.6...2.2)
-                if Float.random(in: 0...1) < weather.normalizedIntensity * 0.5 + 0.2 {
-                    intensity += CGFloat(Float.random(in: 900...2600) * weather.normalizedIntensity)
-                }
-            }
+            // effectiveFactors.visibilityFactor interpolates *from* 1.0 at intensity 0, so at the
+            // moment the preset is picked (before any slider is touched) it's identical to clear
+            // weather's brightness — same non-zero-floor fix as everywhere else, applied directly
+            // to the sun instead of through that shared interpolation (which also drives
+            // gameplay-tuning factors like drag/collision risk that shouldn't jump just because
+            // the preset was selected).
+            // Raised from 0.50-0.30*intensity — that range pushed full-intensity brightness down
+            // to ~14% of clear weather, dark enough that the ground/trees read as literal night
+            // rather than an overcast day. This keeps it dim but still day-lit at any intensity.
+            let dimFloor = CGFloat(0.62 - weather.normalizedIntensity * 0.28)
+            baseSun *= dimFloor
+
+            // A thick overcast deck scatters direct sunlight, so real storm-day shadows are soft
+            // and faint rather than the hard, crisp-edged shadows clear weather casts — the user
+            // pointed out the shadows in a screenshot still looked just as sharp as clear weather.
+            // Same non-zero floor as everywhere else: noticeably softened the moment the preset
+            // is picked, softer still as intensity rises.
+            let softness = CGFloat(0.55 + weather.normalizedIntensity * 0.45)
+            sunLightNode.light?.shadowRadius = Self.clearWeatherShadowRadius + softness * 14.0
+            sunLightNode.light?.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha * (1.0 - softness * 0.65))
+        } else {
+            sunLightNode.light?.shadowRadius = Self.clearWeatherShadowRadius
+            sunLightNode.light?.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha)
         }
 
-        sunLightNode.light?.intensity = intensity
+        // Lightning used to also jolt sunLightNode.light.intensity here on a 0.6-2.2s random
+        // pulse — a full-screen brightness spike on every flash. The user explicitly found that
+        // unpleasant ("резкие вспышки на экране... не по себе от этого"), so strikes are now a
+        // real 3D event instead: see `triggerLightningStrike`, scheduled minutes apart by the
+        // view model, with its own small localized light that never touches the global sun.
+        sunLightNode.light?.intensity = baseSun
+    }
+
+    // Mirrors SceneFactory.makeDirectionalLightNode's defaults — kept here so updateWeatherAnimation
+    // can restore them exactly when leaving thunderstorm, instead of hardcoding the same numbers twice.
+    private static let clearWeatherShadowRadius: CGFloat = 1.0
+    private static let clearWeatherShadowAlpha: CGFloat = 0.26
+
+    // Container for transient lightning-bolt nodes spawned by `triggerLightningStrike` — kept
+    // separate from `stormCloudsNode` since bolts are short-lived one-shots (each removes itself
+    // via SCNAction when its flash finishes), not a persistent, toggled-by-preset visual.
+    private func setUpLightningStrikes() {
+        lightningStrikesNode.name = "lightningStrikesNode"
+        scene.rootNode.addChildNode(lightningStrikesNode)
+    }
+
+    /// Spawns one of the 3 bolt variants at `impactPosition` (its base; `boltHeight` is how far
+    /// it extends straight up from there), flashes briefly, and removes itself — no per-frame
+    /// view-model bookkeeping needed for cleanup. The accompanying light is a child of the bolt
+    /// node, short-range (`attenuationEndDistance`) and short-lived (removed along with the bolt
+    /// when its action sequence finishes) — deliberately NOT `sunLightNode`, so this never
+    /// produces the disliked full-screen brightness spike; it only lights up the immediate area
+    /// around the strike, the same way a real nearby lightning flash would.
+    func triggerLightningStrike(impactPosition: SCNVector3, boltHeight: Float) {
+        guard let bolt = WeatherCloudAssetLoader.shared.makeLightningBoltNode(targetHeight: boltHeight) else {
+            return
+        }
+        bolt.position = impactPosition
+        bolt.opacity = 0.0
+        lightningStrikesNode.addChildNode(bolt)
+
+        let flashLight = SCNLight()
+        flashLight.type = .omni
+        flashLight.color = NSColor(calibratedRed: 0.80, green: 0.84, blue: 1.0, alpha: 1.0)
+        flashLight.intensity = 4500
+        flashLight.attenuationStartDistance = 4
+        flashLight.attenuationEndDistance = 50
+        let flashLightNode = SCNNode()
+        flashLightNode.light = flashLight
+        flashLightNode.position = SCNVector3(0, boltHeight * 0.3, 0)
+        bolt.addChildNode(flashLightNode)
+
+        let appear = SCNAction.fadeIn(duration: 0.035)
+        let hold = SCNAction.wait(duration: Double.random(in: 0.06...0.12))
+        let fade = SCNAction.fadeOut(duration: 0.22)
+        let remove = SCNAction.removeFromParentNode()
+        bolt.runAction(.sequence([appear, hold, fade, remove]))
     }
 
     private func ensureCollisionDebugMarkers() {

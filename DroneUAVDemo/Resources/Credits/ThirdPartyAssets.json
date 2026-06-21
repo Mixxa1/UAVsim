@@ -171,6 +171,15 @@
           "licenseName": "Creative Commons Attribution",
           "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
           "changes": "Imported as USDZ, scaled into an ambient envelope volume around the drone, and used as the smog weather visual in DroneUAVDemo."
+      },
+      {
+          "id": "3_pack_of_storm_lightning_incg5764",
+          "title": "3 Pack of Storm Lightning",
+          "author": "Incg5764",
+          "sourceURL": "https://skfb.ly/ozxVV",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ; its three bolt variants are spawned at random world locations as the thunderstorm weather's lightning strike visual in DroneUAVDemo."
       }
   ]
 }

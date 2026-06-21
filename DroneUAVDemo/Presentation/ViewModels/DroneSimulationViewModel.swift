@@ -536,6 +536,10 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var diagnostics: SimulationDiagnostics
     @Published private(set) var lastCollisionSource: String
     @Published private(set) var lastCollisionDetail: String = "n/a"
+    // Decremented only while preset == .thunderstorm (see updateThunderstormLightning) — picking
+    // the preset doesn't reset it, so toggling away and back resumes the same wait rather than
+    // restarting a fresh 60-600s window every time.
+    private var nextLightningStrikeCountdown: Float = Float.random(in: 60...600)
     @Published private(set) var lastModeTransitionReason: String
     @Published private(set) var fixedWingLastTransitionReason: String?
     @Published private(set) var fixedWingAutopilotDebugState: FixedWingAutopilotDebugState
@@ -4028,6 +4032,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         applyMissionSafetyRuntimeIfNeeded()
         sampleMissionObservationIfNeeded()
+        updateThunderstormLightning(deltaTime: dt)
 
         let renderStart = CACurrentMediaTime()
         if !performancePolicy.stopRendering {
@@ -4299,6 +4304,62 @@ final class DroneSimulationViewModel: ObservableObject {
         case .severeImpact:
             applySevereCollisionConsequences(source: analysis.nearestObstacleSource)
         }
+    }
+
+    /// Real, localized strikes rather than the old full-screen sun-intensity flash (removed from
+    /// DroneSceneController's `updateWeatherAnimation`) — minutes apart per the user's spec ("от
+    /// 60 до 600 секунд"), at a random point near the drone, with a small chance of actually
+    /// hitting it.
+    private func updateThunderstormLightning(deltaTime: Float) {
+        guard weather.preset == .thunderstorm else {
+            return
+        }
+        nextLightningStrikeCountdown -= deltaTime
+        guard nextLightningStrikeCountdown <= 0 else {
+            return
+        }
+        nextLightningStrikeCountdown = Float.random(in: 60...600)
+
+        // Same non-zero-floor pattern as the visual darkening elsewhere in this preset — a
+        // freshly-picked storm (intensity 0) still carries a real, if smaller, chance of a hit.
+        let hitChance = 0.05 + weather.normalizedIntensity * 0.05
+        let isHit = Float.random(in: 0...1) < hitChance
+
+        let impactPosition: SCNVector3
+        let boltHeight: Float
+        if isHit {
+            impactPosition = SCNVector3(state.position.x, state.position.y, state.position.z)
+            boltHeight = max(40.0, state.position.y + 45.0)
+            applyLightningStrikeDamage()
+        } else {
+            let radius = Float.random(in: 30...220)
+            let angle = Float.random(in: 0...(2.0 * Float.pi))
+            impactPosition = SCNVector3(
+                state.position.x + cos(angle) * radius,
+                0.0,
+                state.position.z + sin(angle) * radius
+            )
+            boltHeight = Float.random(in: 50...75)
+        }
+
+        if !performancePolicy.stopRendering {
+            sceneController.triggerLightningStrike(impactPosition: impactPosition, boltHeight: boltHeight)
+        }
+    }
+
+    /// A struck aircraft takes real damage ("шанс никогда же не равен 0... приведет к
+    /// поломке") — reuses the same collision-damage pipeline as a physical impact rather than
+    /// inventing a separate one.
+    private func applyLightningStrikeDamage() {
+        damageState = damageState.applyingCollisionDamage(impactEnergy: 9.0)
+        lastCollisionSource = "lightning_strike"
+        collisionAftermathState = .damaged
+        impactSeverityAccumulator = max(impactSeverityAccumulator, 2.0)
+        state.angularVelocity += SIMD3<Float>(
+            Float.random(in: -0.8...0.8),
+            Float.random(in: -0.4...0.4),
+            Float.random(in: -0.8...0.8)
+        )
     }
 
     private func applyCollisionDamage(using analysis: CollisionAnalysisSnapshot) {
