@@ -34,6 +34,7 @@ struct CollisionAnalysisSnapshot {
     var nearestObstacleSource: String?
     var timeToCollision: Float?
     var emergencyAction: CollisionEmergencyAction
+    var contactNormal: SIMD3<Float>?
 
     static let safe = CollisionAnalysisSnapshot(
         riskScore: 0.0,
@@ -41,6 +42,7 @@ struct CollisionAnalysisSnapshot {
         nearestObstacleID: nil,
         nearestObstacleSource: nil,
         timeToCollision: nil,
-        emergencyAction: .none
+        emergencyAction: .none,
+        contactNormal: nil
     )
 }

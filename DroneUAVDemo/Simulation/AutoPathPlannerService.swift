@@ -479,15 +479,19 @@ final class AutoPathPlannerService {
         droneRadius: Float,
         grid: inout NavigationGrid
     ) {
+        if obstacle.source == "container.floor" || obstacle.source == "container.roof" {
+            return
+        }
         let inflation = obstacleInflation(for: obstacle.source, droneRadius: droneRadius)
-        let blockedRadius = max(0.4, obstacle.radius + inflation)
-        let penaltyRadius = blockedRadius + max(1.5, blockedRadius * 0.9)
+        let blockedMargin = max(0.12, inflation)
+        let penaltyMargin = blockedMargin + max(1.2, blockedMargin * 1.6)
+        let queryRadius = obstacle.radius + penaltyMargin
 
         let center = SIMD2<Float>(obstacle.center.x, obstacle.center.z)
-        let minXFloat = (center.x - penaltyRadius - grid.originX) / grid.cellSize
-        let maxXFloat = (center.x + penaltyRadius - grid.originX) / grid.cellSize
-        let minZFloat = (center.y - penaltyRadius - grid.originZ) / grid.cellSize
-        let maxZFloat = (center.y + penaltyRadius - grid.originZ) / grid.cellSize
+        let minXFloat = (center.x - queryRadius - grid.originX) / grid.cellSize
+        let maxXFloat = (center.x + queryRadius - grid.originX) / grid.cellSize
+        let minZFloat = (center.y - queryRadius - grid.originZ) / grid.cellSize
+        let maxZFloat = (center.y + queryRadius - grid.originZ) / grid.cellSize
 
         let minX = max(0, Int(floor(minXFloat)))
         let maxX = min(grid.width - 1, Int(ceil(maxXFloat)))
@@ -501,24 +505,28 @@ final class AutoPathPlannerService {
         let xRange = minX...maxX
         let zRange = minZ...maxZ
 
-        let blockedRadiusSq = blockedRadius * blockedRadius
         for z in zRange {
             for x in xRange {
                 let cell = NavigationGrid.Cell(x: x, z: z)
                 if !grid.contains(cell) { continue }
 
                 let world = grid.worldXZ(for: cell)
-                let d = simd_distance(world, center)
+                let distance = obstacle.planarSignedDistance(to: world)
                 let idx = grid.index(cell)
 
-                if d * d <= blockedRadiusSq {
+                if distance <= blockedMargin {
                     grid.blocked[idx] = 1
                     grid.penalty[idx] = max(grid.penalty[idx], 1.0)
                     continue
                 }
 
-                if d < penaltyRadius {
-                    let normalized = (1.0 - ((d - blockedRadius) / max(0.001, penaltyRadius - blockedRadius))).clamped(to: 0.0...1.0)
+                if distance < penaltyMargin {
+                    let normalized = (
+                        1.0 - (
+                            (distance - blockedMargin) /
+                            max(0.001, penaltyMargin - blockedMargin)
+                        )
+                    ).clamped(to: 0.0...1.0)
                     grid.penalty[idx] = max(grid.penalty[idx], normalized * 0.85)
                 }
             }
@@ -540,10 +548,13 @@ final class AutoPathPlannerService {
             base = 0.9
         case let value where value.contains("terrain"):
             base = 0.8
+        case let value where value.contains("container"):
+            base = 0.12
         default:
             base = 1.0
         }
-        return base + droneRadius * 0.6
+        let radiusFactor: Float = source.contains("container") ? 0.45 : 0.6
+        return base + droneRadius * radiusFactor
     }
 
     private func preferredCellSize(for terrain: TerrainConfiguration) -> Float {
@@ -842,6 +853,11 @@ final class AutoPathPlannerService {
             hasher.combine(Int((obstacle.radius * 10.0).rounded()))
             hasher.combine(Int((obstacle.baseY * 10.0).rounded()))
             hasher.combine(Int((obstacle.topY * 10.0).rounded()))
+            if let halfExtents = obstacle.planarHalfExtents {
+                hasher.combine(Int((halfExtents.x * 10.0).rounded()))
+                hasher.combine(Int((halfExtents.y * 10.0).rounded()))
+                hasher.combine(Int((obstacle.yawRadians * 100.0).rounded()))
+            }
             hasher.combine(obstacle.source)
         }
         return hasher.finalize()

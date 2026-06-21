@@ -799,6 +799,9 @@ private struct TacticalMapCanvas: View {
                 context.fill(Path(ellipseIn: rect), with: .color(Color(red: 0.29, green: 0.56, blue: 0.30).opacity(0.56)))
             case .rock:
                 context.fill(Path(ellipseIn: rect), with: .color(Color(red: 0.64, green: 0.66, blue: 0.68).opacity(0.52)))
+            case .cargoContainer:
+                let path = Path(roundedRect: rect, cornerRadius: 1.2, style: .continuous)
+                context.fill(path, with: .color(Color(red: 0.72, green: 0.34, blue: 0.18).opacity(0.72)))
             case .crate, .pole, .marker:
                 continue
             case .distantBelt:

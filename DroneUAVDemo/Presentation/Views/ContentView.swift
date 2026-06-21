@@ -57,7 +57,16 @@ private enum PendingExitAction {
 
 @MainActor
 private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDelegate {
-    @Published var activeSimulation: DroneSimulationViewModel?
+    @Published var activeSimulation: DroneSimulationViewModel? {
+        didSet {
+            // windowDidBecomeKey fires before activeSimulation is set (window was already key
+            // when the user clicked "start"), so the new VM never receives applyWindowVisibilityState.
+            // Apply it here directly so the first tick() sees .activeVisible + .interacting (60 FPS).
+            if let vm = activeSimulation, window?.isKeyWindow == true {
+                vm.applyWindowVisibilityState(.activeVisible)
+            }
+        }
+    }
     @Published var projects: [ProjectRecordSummary] = []
     @Published var searchQuery: String = ""
     @Published var sortOrder: ProjectSortOrder = .newest
@@ -457,6 +466,12 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         if let window = notification.object as? NSWindow {
             WindowFullscreenController.markTransitionFinished(for: window)
         }
+        // Cancel any in-flight inactiveVisible debounce triggered during the fullscreen
+        // animation (windowDidResignKey fires mid-animation; if the animation takes > 0.8 s
+        // the debounce can win the race against windowDidBecomeKey and pin FPS to 15).
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
+        activeSimulation?.applyWindowVisibilityState(.activeVisible)
         forwardedWindowDelegate?.windowDidEnterFullScreen?(notification)
     }
 
@@ -468,6 +483,9 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         if let window = notification.object as? NSWindow {
             WindowFullscreenController.markTransitionFinished(for: window)
         }
+        inactiveDebounceTask?.cancel()
+        inactiveDebounceTask = nil
+        activeSimulation?.applyWindowVisibilityState(.activeVisible)
         forwardedWindowDelegate?.windowDidExitFullScreen?(notification)
     }
 
@@ -514,8 +532,13 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         // This prevents a sheet or panel opening briefly (e.g. UAV catalog, settings) from
         // cutting SceneKit FPS in half during normal pilot operations.
         let task = DispatchWorkItem { [weak self] in
-            self?.inactiveDebounceTask = nil
-            self?.activeSimulation?.applyWindowVisibilityState(.inactiveVisible)
+            guard let self else { return }
+            // Belt-and-suspenders: if the window is key again by the time the debounce fires
+            // (windowDidBecomeKey cancels the task, but asyncAfter can race on edge cases),
+            // skip the downgrade so we never accidentally pin FPS to 15 on an active window.
+            guard self.window?.isKeyWindow != true else { return }
+            self.inactiveDebounceTask = nil
+            self.activeSimulation?.applyWindowVisibilityState(.inactiveVisible)
         }
         inactiveDebounceTask?.cancel()
         inactiveDebounceTask = task

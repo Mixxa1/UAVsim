@@ -36,6 +36,20 @@ struct MissionWaypointCaptureZoneVisual: Equatable {
     let isCompleted: Bool
 }
 
+private struct CityGenerationKey: Equatable {
+    let mapPreset: TerrainPreset
+    let mapScale: MapScale
+    let densityBits: UInt32
+    let seed: UInt64
+    let weatherPreset: WeatherPreset
+    let environmentRevision: Int
+}
+
+private struct CityCleanupStats {
+    let rootCount: Int
+    let nodeCount: Int
+}
+
     private struct SupportSurfaceDescriptor {
         let center: SIMD2<Float>
         let halfExtents: SIMD2<Float>
@@ -89,10 +103,24 @@ final class DroneSceneController {
     private let weatherNode = SCNNode()
     private var rainSystem: SCNParticleSystem?
     private var snowSystem: SCNParticleSystem?
-    private var thunderPulse: Float = 0.0
     private var cameraNoisePhase: Float = 0.0
 
+    private let skyCloudsNode = SCNNode()
+    private let stormCloudsNode = SCNNode()
+    private var stormCloudsBuilt = false
+    private let lightningStrikesNode = SCNNode()
+    private let weatherEnvelopeNode = SCNNode()
+    private var activeWeatherEnvelopePreset: WeatherPreset?
+    // The envelope is a sphere centered on the drone, depth-tested normally — anything closer
+    // than this radius (terrain, trees) correctly occludes it, so it never visibly "blocks"
+    // nearby objects; its only real job is tinting the sky and anything beyond native fog's own
+    // falloff range (≈130-140m at full intensity), which scene.fog doesn't reach on its own.
+    // 250m keeps it well outside normal close-range flying so its boundary is never grazed.
+    private static let weatherEnvelopeRadius: Float = 250.0
+
     private let scenePopulationService: ScenePopulationService
+    private let abandonedCitySceneComposer = AbandonedCitySceneComposer()
+    private let cityEnvironmentRevision = 1
 
     private var droneNode: SCNNode
     private var visualRootNode: SCNNode
@@ -139,6 +167,9 @@ final class DroneSceneController {
     private var pathDebugSignature: Int = 0
     private var lastWeatherVisualSignature: Int?
     private var lastComponentOverlaySignature: Int?
+    private var lastTerrainConfig: TerrainConfiguration?
+    private var lastGeneratedCityKey: CityGenerationKey?
+    private let snowDecorationsNode = SCNNode()
 
     private struct SupplementalCollisionObstacle {
         let obstacle: CollisionObstacle
@@ -231,6 +262,20 @@ final class DroneSceneController {
         weatherNode.name = "weatherNode"
         scene.rootNode.addChildNode(weatherNode)
 
+        skyCloudsNode.name = "skyCloudsNode"
+        scene.rootNode.addChildNode(skyCloudsNode)
+        setUpSkyClouds()
+
+        stormCloudsNode.name = "stormCloudsNode"
+        stormCloudsNode.isHidden = true
+        scene.rootNode.addChildNode(stormCloudsNode)
+
+        setUpLightningStrikes()
+
+        weatherEnvelopeNode.name = "weatherEnvelopeNode"
+        weatherEnvelopeNode.isHidden = true
+        scene.rootNode.addChildNode(weatherEnvelopeNode)
+
         terrainDetailNode.name = "terrainDetailNode"
         scene.rootNode.addChildNode(terrainDetailNode)
 
@@ -262,6 +307,9 @@ final class DroneSceneController {
 
         onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
         scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
+
+        snowDecorationsNode.name = "environment.snowDecorations"
+        scene.rootNode.addChildNode(snowDecorationsNode)
 
         nearestContactNode.geometry = SCNSphere(radius: 0.14)
         nearestContactNode.geometry?.firstMaterial?.diffuse.contents = NSColor.systemRed.withAlphaComponent(0.82)
@@ -496,7 +544,8 @@ final class DroneSceneController {
 
         let supportY = supportSurfaceHeight(
             at: asset.position,
-            clearanceRadius: 0.28
+            clearanceRadius: 0.28,
+            maximumHeight: .greatestFiniteMagnitude
         ) ?? max(Float(groundNode.presentation.position.y), 0.0)
 
         switch asset {
@@ -528,7 +577,8 @@ final class DroneSceneController {
 
         let supportY = supportSurfaceHeight(
             at: asset.position,
-            clearanceRadius: 0.32
+            clearanceRadius: 0.32,
+            maximumHeight: .greatestFiniteMagnitude
         ) ?? max(Float(groundNode.presentation.position.y), 0.0)
         launchAssetNode.simdPosition = SIMD3<Float>(asset.position.x, supportY, asset.position.y)
         launchAssetNode.eulerAngles = SCNVector3(
@@ -1179,22 +1229,99 @@ final class DroneSceneController {
     }
 
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
+        lastTerrainConfig = terrain
+        EnvironmentObjectFactory.resetDiagnostics()
+        EnvironmentObjectFactory.snowWeatherActive = (currentWeather.preset == .snow)
+
+        if terrain.preset == .city {
+            let generationKey = CityGenerationKey(
+                mapPreset: terrain.preset,
+                mapScale: terrain.mapScale,
+                densityBits: terrain.density.bitPattern,
+                seed: terrain.seed,
+                weatherPreset: currentWeather.preset,
+                environmentRevision: cityEnvironmentRevision
+            )
+            if lastGeneratedCityKey == generationKey, hasCityRootInstalled(in: scene.rootNode) {
+                #if DEBUG
+                print("[City] generation skipped: same generation key")
+                #endif
+                return
+            }
+
+            let cleanup = removeExistingCityRoots(from: scene.rootNode)
+            if cleanup.rootCount > 0 || cleanup.nodeCount > 0 {
+                #if DEBUG
+                print("[City] cleanup removed oldCityRoots=\(cleanup.rootCount) oldCityNodes=\(cleanup.nodeCount)")
+                #endif
+            }
+            regenerateAbandonedCityEnvironment(terrain)
+            lastGeneratedCityKey = generationKey
+            return
+        }
+
+        lastGeneratedCityKey = nil
+        let cleanup = removeExistingCityRoots(from: scene.rootNode)
+        if cleanup.rootCount > 0 || cleanup.nodeCount > 0 {
+            #if DEBUG
+            print("[City] cleanup removed oldCityRoots=\(cleanup.rootCount) oldCityNodes=\(cleanup.nodeCount)")
+            #endif
+        }
+        #if DEBUG
+        print("[City] skipped: map is not city")
+        #endif
         let (descriptors, nodesByID) = scenePopulationService.populate(with: terrain)
+        installEnvironment(
+            descriptors: descriptors,
+            nodesByID: nodesByID,
+            terrain: terrain,
+            printProceduralDiagnostics: true
+        )
+    }
+
+    private func regenerateAbandonedCityEnvironment(_ terrain: TerrainConfiguration) {
+        scenePopulationService.clear()
+        let composition = abandonedCitySceneComposer.rebuild(
+            in: scene.rootNode,
+            terrain: terrain
+        )
+        installEnvironment(
+            descriptors: composition.descriptors,
+            nodesByID: composition.nodesByID,
+            terrain: terrain,
+            printProceduralDiagnostics: false
+        )
+    }
+
+    private func installEnvironment(
+        descriptors: [EnvironmentObjectDescriptor],
+        nodesByID: [UUID: SCNNode],
+        terrain: TerrainConfiguration,
+        printProceduralDiagnostics: Bool
+    ) {
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
-        supportSurfaces = environmentMapDescriptors.compactMap(supportSurfaceDescriptor(for:))
+        supportSurfaces = environmentMapDescriptors.flatMap(supportSurfaceDescriptors(for:))
 
         obstacleMap = [:]
         obstacleSourceByID = [:]
         var obstacles: [CollisionObstacle] = []
         for descriptor in descriptors where descriptor.isCollidable {
             if let node = nodesByID[descriptor.id] {
-                let obstacle = configureObstacleCollisionProxy(for: node, descriptor: descriptor)
-                obstacleMap[descriptor.id] = node
-                obstacleSourceByID[descriptor.id] = obstacle.source
-                obstacles.append(obstacle)
+                let descriptorObstacles = configureObstacleCollisionProxies(
+                    for: node,
+                    descriptor: descriptor
+                )
+                for obstacle in descriptorObstacles {
+                    obstacleMap[obstacle.id] = node
+                    obstacleSourceByID[obstacle.id] = obstacle.source
+                    obstacles.append(obstacle)
+                }
             }
         }
 
+        if printProceduralDiagnostics {
+            EnvironmentObjectFactory.printDiagnostics()
+        }
         applyTerrainVisualStyle(terrain)
         updateDockStationPosition(for: terrain)
         updateWorldBoundsVisual(for: terrain)
@@ -1221,6 +1348,11 @@ final class DroneSceneController {
         pathStartMarkerNode.isHidden = true
         pathGoalMarkerNode.isHidden = true
         pathCurrentWaypointNode.isHidden = true
+
+        buildSnowDecorations(for: terrain)
+        if terrain.preset == .city {
+            printCityGenerationDiagnostics(descriptors: descriptors)
+        }
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {
@@ -1255,7 +1387,210 @@ final class DroneSceneController {
 
         scene.fogColor = fogColor
         updateWeatherParticles(weather)
+        updateWeatherEnvelope(weather)
+        updateStormClouds(weather)
+
+        if let terrain = lastTerrainConfig {
+            let haze = skyHorizonHazeColor(for: weather)
+            let backgroundImage = skyGradientImage(
+                for: terrain.preset,
+                weatherFogColor: haze?.color,
+                weatherFogStrength: haze?.strength ?? 0,
+                weatherHazeDistribution: haze?.distribution ?? .groundHaze
+            )
+            scene.background.contents = backgroundImage
+            // applyTerrainVisualStyle keeps lightingEnvironment.contents in lockstep with the
+            // visible sky on terrain changes; weather can change independently of terrain, so
+            // without this the IBL ambient light kept using the pre-storm bright gradient even
+            // though the visible sky had already gone dark.
+            scene.lightingEnvironment.contents = backgroundImage
+
+            let isSnow = weather.preset == .snow
+            if terrain.preset != .city {
+                scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
+            }
+            refreshGroundMaterial(for: terrain)
+            buildSnowDecorations(for: terrain)
+        }
     }
+
+    /// Background cloud decoration — always present regardless of weather, similar to how a
+    /// clear sky still has some clouds in it. Re-centered on the drone's XZ position (and held
+    /// a fixed height above its *current* altitude) every frame in `update`, but never rotated
+    /// to match drone heading — that distinction matters: every camera (main or FPV) uses a
+    /// `zFar` of only 900 units (`configureCameraNode`), so anything genuinely fixed in world
+    /// space gets left behind — and hard-clipped mid-card, reading as a sharp edge — the moment
+    /// the drone flies any real distance from spawn. Following position keeps it in range;
+    /// *not* following orientation is what actually fixed the "rotates with the aircraft" complaint
+    /// (that turned out to be a billboard-constraint bug, not the position tracking itself).
+    ///
+    /// Dubai_Clouds only has 6 unique cloud shapes spread across one ~3km cluster — at native
+    /// scale most of that already exceeds the 900-unit budget on its own. Each instance is
+    /// scaled down to fit comfortably inside it, and several differently-rotated instances are
+    /// placed at small offsets to fill more of the sky using the same asset.
+    // A steep altitude-vs-spread ratio buries clouds almost directly overhead, invisible
+    // without pitching the camera up. Verified via an offscreen SCNRenderer snapshot test at
+    // *level* camera pitch (no looking up) before settling on these — this spread keeps
+    // multiple instances in view at a normal forward-looking angle, on most headings.
+    private static let skyCloudInstanceRadius: Float = 180
+    private static let skyCloudAltitudeAboveDrone: Float = 90
+    private static let skyCloudInstanceOffsets: [(SCNVector3, Float)] = [
+        (SCNVector3(0, 0, 500), 0),
+        (SCNVector3(420, 15, -380), 1.1),
+        (SCNVector3(-480, -10, 300), 2.6),
+        (SCNVector3(350, 20, 420), 4.0),
+        (SCNVector3(-520, 5, -280), 5.4)
+    ]
+
+    private func setUpSkyClouds() {
+        for (offset, yaw) in Self.skyCloudInstanceOffsets {
+            guard let node = WeatherCloudAssetLoader.shared.makeSkyCloudsNode(
+                offset: offset,
+                yaw: yaw,
+                targetRadius: Self.skyCloudInstanceRadius
+            ) else {
+                continue
+            }
+            skyCloudsNode.addChildNode(node)
+        }
+    }
+
+    // 8 hand-placed cards left wide gaps between them — at a typical forward-pitched view, mostly
+    // empty dark gradient showed through, which read as "night sky" rather than "covered in dark
+    // clouds" (the user's exact complaint). Two full-360° rings of big, overlapping cards instead
+    // — a near/low ring (closer, lower, smaller cards) and a far/high ring (farther, much higher
+    // above the drone, bigger cards so they stay legible at distance) — so wherever the camera
+    // looks, there's cloud coverage both near the horizon and higher up, not just a thin band.
+    // Each tuple is (offset, yaw, tint, opacity, radius) — darker tint + higher opacity reads as a
+    // denser, thicker cell; lighter/more transparent ones read as thinner, wispier cloud, which is
+    // "разной густоты" (varying density), not just "more clouds".
+    private struct StormCloudRingSpec {
+        let distance: Float
+        let altitude: Float
+        let radius: Float
+        let count: Int
+    }
+
+    // Offset magnitude + radius for the far ring is ~531+300=831, safely inside camera.zFar=900
+    // (see SceneFactory.makeCameraNode) — the same zFar-safety margin every other cloud placement
+    // in this file keeps.
+    private static let stormCloudRings: [StormCloudRingSpec] = [
+        StormCloudRingSpec(distance: 320, altitude: 55, radius: 230, count: 10),
+        StormCloudRingSpec(distance: 520, altitude: 130, radius: 300, count: 10)
+    ]
+
+    private static let stormCloudInstances: [(offset: SCNVector3, yaw: Float, tint: NSColor, opacity: Float, radius: Float)] = {
+        var instances: [(offset: SCNVector3, yaw: Float, tint: NSColor, opacity: Float, radius: Float)] = []
+        for ring in stormCloudRings {
+            for i in 0..<ring.count {
+                let baseAngle = (Float(i) / Float(ring.count)) * 2.0 * Float.pi
+                let angle = baseAngle + Float.random(in: -0.18...0.18)
+                let x = cos(angle) * ring.distance
+                let z = sin(angle) * ring.distance
+                // 0.22-0.58 stays well lighter than the near-black sky color (~0.13-0.16 after the
+                // night-vs-storm-day rebalance below) — a card tinted as dark as its backdrop has
+                // no contrast and effectively disappears.
+                let grey = CGFloat(Float.random(in: 0.22...0.58))
+                let tint = NSColor(calibratedWhite: grey, alpha: 1.0)
+                let opacity = Float.random(in: 0.45...0.92)
+                instances.append((
+                    offset: SCNVector3(x, ring.altitude, z),
+                    yaw: angle,
+                    tint: tint,
+                    opacity: opacity,
+                    radius: ring.radius
+                ))
+            }
+        }
+        return instances
+    }()
+
+    private func setUpStormClouds() {
+        guard !stormCloudsBuilt else { return }
+        stormCloudsBuilt = true
+        for instance in Self.stormCloudInstances {
+            guard let node = WeatherCloudAssetLoader.shared.makeStormCloudNode(
+                offset: instance.offset,
+                yaw: instance.yaw,
+                targetRadius: instance.radius,
+                tintColor: instance.tint,
+                opacity: instance.opacity
+            ) else {
+                continue
+            }
+            stormCloudsNode.addChildNode(node)
+        }
+    }
+
+    /// Fog/smog get a tangible cloud/smoke volume around the drone, on top of the existing
+    /// distance-based `scene.fog*` properties — a single floating cloud wouldn't read as
+    /// ambient haze, so the asset is scaled up into a soft shell the drone flies inside of.
+    private func updateWeatherEnvelope(_ weather: WeatherModel) {
+        // Thunderstorm deliberately does NOT use this envelope, unlike fog/smog: it's a flat,
+        // untextured, single-color sphere by construction (see makeEnvelopeSphere) — exactly
+        // right for uniform haze, but at storm-strength opacity it fills the whole view with one
+        // flat color and erases any cloud structure behind it. The user's own read on that result
+        // was "это больше похоже на туман другого цвета, чем на отличительные черты погоды с
+        // грозой" (this looks more like fog of a different color than distinctive thunderstorm
+        // features) — confirming the flat sphere is the wrong tool for "distinctive dark clouds".
+        // Thunderstorm darkening instead comes from the sky gradient's `.overcast` distribution
+        // (real gradient/structure) plus the storm cloud cards plus dimmed sun/shadows.
+        guard weather.preset == .fog || weather.preset == .smog else {
+            weatherEnvelopeNode.isHidden = true
+            activeWeatherEnvelopePreset = nil
+            return
+        }
+
+        if activeWeatherEnvelopePreset != weather.preset {
+            weatherEnvelopeNode.childNodes.forEach { $0.removeFromParentNode() }
+            let node: SCNNode?
+            switch weather.preset {
+            case .fog:
+                node = WeatherCloudAssetLoader.shared.makeFogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+            case .smog:
+                node = WeatherCloudAssetLoader.shared.makeSmogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+            default:
+                node = nil
+            }
+            if let node {
+                weatherEnvelopeNode.addChildNode(node)
+                activeWeatherEnvelopePreset = weather.preset
+            } else {
+                activeWeatherEnvelopePreset = nil
+            }
+        }
+
+        let hasContent = !weatherEnvelopeNode.childNodes.isEmpty
+        weatherEnvelopeNode.isHidden = !hasContent
+        // A single flat-shaded sphere layer, no overlapping duplicates compounding alpha
+        // (unlike the old mesh-based envelope), so this opacity is the actual visible strength,
+        // not diluted by stacking — can run much higher than the old 0.03-0.12 range.
+        weatherEnvelopeNode.opacity = CGFloat(0.25 + weather.normalizedIntensity * 0.55)
+    }
+
+    // Built lazily on first thunderstorm activation rather than at scene setup like skyCloudsNode
+    // — this avoids paying the Dubai_Clouds clone+tint+deep-copy cost for every session that never
+    // selects this preset. Stays built afterward (just toggled hidden) since presets are switched
+    // back and forth far more often than this initial build cost would justify repeating.
+    private func updateStormClouds(_ weather: WeatherModel) {
+        guard weather.preset == .thunderstorm else {
+            stormCloudsNode.isHidden = true
+            return
+        }
+        setUpStormClouds()
+        stormCloudsNode.isHidden = false
+        // Same non-zero floor pattern as weatherEnvelopeNode/skyHorizonHazeColor — intensity is
+        // 0 by default until the user separately touches a slider, and gating fully on it caused
+        // the exact same "preset selected but nothing visible" bug fixed twice already elsewhere.
+        stormCloudsNode.opacity = CGFloat(0.6 + weather.normalizedIntensity * 0.4)
+    }
+
+    // SCNCamera.wantsDepthOfField produced zero visible blur in this SceneKit/macOS build, even
+    // at extreme settings (fStop 0.5, focalLength 135mm), verified via both an offscreen
+    // SCNRenderer and a live SCNView snapshot — a known SceneKit limitation, not a tuning gap.
+    // Real blur is now a from-scratch SCNTechnique (WeatherDepthOfFieldTechnique.swift +
+    // WeatherDepthOfField.metal), toggled on the SCNView itself based on
+    // DroneSimulationViewModel.wantsWeatherDepthOfField — see DroneSceneViewRepresentable.
 
     func update(
         with state: DroneState,
@@ -1268,6 +1603,27 @@ final class DroneSceneController {
         droneNode.position = SCNVector3(state.position.x, state.position.y, state.position.z)
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
+
+        skyCloudsNode.position = SCNVector3(
+            CGFloat(state.position.x),
+            CGFloat(state.position.y + Self.skyCloudAltitudeAboveDrone),
+            CGFloat(state.position.z)
+        )
+
+        if !weatherEnvelopeNode.isHidden {
+            weatherEnvelopeNode.position = SCNVector3(state.position.x, state.position.y, state.position.z)
+        }
+
+        if !stormCloudsNode.isHidden {
+            // Each ring's altitude is already baked into its instances' own offsets (see
+            // stormCloudRings) — this just keeps the whole formation centered over the drone's
+            // current position, not an extra altitude on top.
+            stormCloudsNode.position = SCNVector3(
+                CGFloat(state.position.x),
+                CGFloat(state.position.y),
+                CGFloat(state.position.z)
+            )
+        }
 
         fpvPresentationActive = camera.mode == .fpv
         fpvObstructionHidingActive = (camera.mode == .fpv) && camera.fpv.hideObstructingParts
@@ -1408,9 +1764,16 @@ final class DroneSceneController {
         return environmentObstacles.first(where: { $0.id == id })
     }
 
-    func supportSurfaceHeight(at planarPosition: SIMD2<Float>, clearanceRadius: Float) -> Float? {
+    func supportSurfaceHeight(
+        at planarPosition: SIMD2<Float>,
+        clearanceRadius: Float,
+        maximumHeight: Float
+    ) -> Float? {
         var bestHeight: Float?
         for surface in supportSurfaces {
+            guard surface.topY <= maximumHeight + 0.08 else {
+                continue
+            }
             guard planarPoint(planarPosition, intersects: surface, clearanceRadius: clearanceRadius) else {
                 continue
             }
@@ -2003,11 +2366,104 @@ final class DroneSceneController {
         }
     }
 
+    private func refreshGroundMaterial(for terrain: TerrainConfiguration) {
+        guard let geometry = groundNode.geometry, terrain.preset != .gridDemo else { return }
+        let mapSizeMeters = terrain.scenicHalfExtent * 2.0
+        let material: SCNMaterial
+        if terrain.preset == .city {
+            material = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
+                mapSizeMeters: mapSizeMeters
+            )
+        } else {
+            material = (currentWeather.preset == .snow)
+                ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+        }
+        geometry.materials = [material]
+    }
+
+    private func buildSnowDecorations(for terrain: TerrainConfiguration) {
+        snowDecorationsNode.childNodes.forEach { $0.removeFromParentNode() }
+        guard currentWeather.preset == .snow,
+              terrain.preset != .gridDemo,
+              terrain.preset != .city else { return }
+
+        var rng = TerrainDetailSeededGenerator(seed: terrain.seed &+ 0xDEAD_BEEF_C0FF_EE42)
+        let spawnR = max(terrain.safeSpawnRadius, 6.0)
+        let extent = terrain.scenicHalfExtent * 0.82
+
+        // Target visual diameter for each decoration kind, independent of asset native size.
+        let targetPatchDiameter: Float = 3.5      // meters across for a snow patch
+        let targetFootstepDiameter: Float = 0.55  // meters across for a single footstep print
+
+        let patchLoader = SnowPatchAssetLoader.shared
+        let footLoader = SnowFootstepAssetLoader.shared
+
+        // Force asset load (bounding boxes are measured on first load)
+        _ = patchLoader.makePatchNode(scale: 1.0)
+        _ = footLoader.makeFootstepNode(scale: 1.0)
+
+        let patchBaseScale = patchLoader.naturalFootprint > 0.001
+            ? targetPatchDiameter / patchLoader.naturalFootprint : 1.0
+        let footBaseScale = footLoader.naturalFootprint > 0.001
+            ? targetFootstepDiameter / footLoader.naturalFootprint : 1.0
+
+        // Hard exclusion: no patch centre within (spawnR + half target diameter) of origin,
+        // so even the edge of the largest patch never reaches the drone spawn.
+        let patchExclusion = spawnR + targetPatchDiameter * 0.6
+
+        let patchCount = 12 + Int(Float.random(in: 0..<1, using: &rng) * 19)
+        var placed = 0
+        var attempts = 0
+        while placed < patchCount, attempts < patchCount * 4 {
+            attempts += 1
+            let x = Float.random(in: -extent...extent, using: &rng)
+            let z = Float.random(in: -extent...extent, using: &rng)
+            guard simd_length(SIMD2<Float>(x, z)) >= patchExclusion else { continue }
+            let jitter = Float.random(in: 0.7...1.35, using: &rng)
+            let scale = patchBaseScale * jitter
+            let yaw = Float.random(in: 0..<(.pi * 2), using: &rng)
+            if let node = patchLoader.makePatchNode(scale: scale, yaw: yaw) {
+                node.position = SCNVector3(x, 0.0, z)
+                snowDecorationsNode.addChildNode(node)
+                placed += 1
+            }
+        }
+
+        // Footsteps: scattered in a band beyond spawn, not directly at origin
+        let footMin = spawnR + 4.0
+        let footMax = min(spawnR + 22.0, extent * 0.9)
+        let footCount = 4 + Int(Float.random(in: 0..<1, using: &rng) * 7)
+        for _ in 0..<footCount {
+            let angle = Float.random(in: 0..<(.pi * 2), using: &rng)
+            let dist = Float.random(in: footMin...max(footMin + 1, footMax), using: &rng)
+            let x = cos(angle) * dist
+            let z = sin(angle) * dist
+            let jitter = Float.random(in: 0.85...1.15, using: &rng)
+            let scale = footBaseScale * jitter
+            let yaw = Float.random(in: 0..<(.pi * 2), using: &rng)
+            if let node = footLoader.makeFootstepNode(scale: scale, yaw: yaw) {
+                node.position = SCNVector3(x, 0.0, z)
+                snowDecorationsNode.addChildNode(node)
+            }
+        }
+
+        let patches = snowDecorationsNode.childNodes.filter { $0.name == "environment.snow_patch" }.count
+        let footsteps = snowDecorationsNode.childNodes.filter { $0.name == "environment.snow_footstep" }.count
+        print("[Snow] Decorations built: patches=\(patches) footsteps=\(footsteps) patchScale=\(String(format:"%.3f",patchBaseScale)) footScale=\(String(format:"%.3f",footBaseScale))")
+    }
+
     private func applyTerrainVisualStyle(_ terrain: TerrainConfiguration) {
         configureWorldSurfaceGeometry(for: terrain)
         applyLightingProfile(for: terrain.preset)
 
-        let backgroundImage = skyGradientImage(for: terrain.preset)
+        let haze = skyHorizonHazeColor(for: currentWeather)
+        let backgroundImage = skyGradientImage(
+            for: terrain.preset,
+            weatherFogColor: haze?.color,
+            weatherFogStrength: haze?.strength ?? 0,
+            weatherHazeDistribution: haze?.distribution ?? .groundHaze
+        )
 
         switch terrain.preset {
         case .gridDemo:
@@ -2022,16 +2478,38 @@ final class DroneSceneController {
         scene.lightingEnvironment.contents = backgroundImage
 
         if let geometry = groundNode.geometry {
-            let groundMaterial = (EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset).copy() as? SCNMaterial)
-                ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset)
-            let scenicRepeat = max(10.0, min(28.0, terrain.scenicHalfExtent / 28.0))
-            groundMaterial.diffuse.wrapS = .repeat
-            groundMaterial.diffuse.wrapT = .repeat
-            groundMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(
-                CGFloat(scenicRepeat),
-                CGFloat(scenicRepeat),
-                1.0
-            )
+            let mapSizeMeters = terrain.scenicHalfExtent * 2.0
+            let groundMaterial: SCNMaterial
+            switch terrain.preset {
+            case .city:
+                groundMaterial = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
+                    mapSizeMeters: mapSizeMeters
+                )
+            case .cargoYard:
+                if currentWeather.preset == .snow {
+                    groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                } else {
+                    groundMaterial = AsphaltMaterialLoader.makeAsphaltMaterial(mapSizeMeters: mapSizeMeters)
+                }
+            case .field, .forest:
+                if currentWeather.preset == .snow {
+                    groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                } else {
+                    groundMaterial = GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+                }
+            case .gridDemo:
+                let proc = (EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset).copy() as? SCNMaterial)
+                    ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain.preset)
+                let scenicRepeat = max(10.0, min(28.0, terrain.scenicHalfExtent / 28.0))
+                proc.diffuse.wrapS = .repeat
+                proc.diffuse.wrapT = .repeat
+                proc.diffuse.contentsTransform = SCNMatrix4MakeScale(
+                    CGFloat(scenicRepeat),
+                    CGFloat(scenicRepeat),
+                    1.0
+                )
+                groundMaterial = proc
+            }
             geometry.materials = [groundMaterial]
         }
 
@@ -2044,11 +2522,7 @@ final class DroneSceneController {
         switch terrain.preset {
         case .field, .forest:
             rebuildNaturalSurfaceDetail(for: terrain)
-        case .cargoYard:
-            rebuildCargoYardSurfaceDetail(for: terrain)
-        case .city:
-            rebuildCitySurfaceDetail(for: terrain)
-        case .gridDemo:
+        case .cargoYard, .city, .gridDemo:
             return
         }
     }
@@ -2177,195 +2651,6 @@ final class DroneSceneController {
         return patch
     }
 
-    private func rebuildCitySurfaceDetail(for terrain: TerrainConfiguration) {
-        let coverageScale = max(1.0, terrain.worldHalfExtent / 96.0)
-        let urbanScale = max(1.0, terrain.areaScaleFactor * 0.82 + coverageScale * 0.48)
-        let blockPitch: Float = 38.0 + min(urbanScale, 5.0) * 3.6
-        let roadWidth: Float = 10.0 + min(urbanScale, 4.2) * 1.4
-        let blockSpan = max(22.0, blockPitch - roadWidth)
-        let blockCount = max(2, Int((terrain.worldHalfExtent * 2.0) / blockPitch))
-        let centerOffset = Float(blockCount - 1) * blockPitch * 0.5
-
-        let blockMaterial = SCNMaterial()
-        blockMaterial.lightingModel = .physicallyBased
-        blockMaterial.diffuse.contents = NSColor(calibratedRed: 0.42, green: 0.43, blue: 0.45, alpha: 0.98)
-        blockMaterial.roughness.contents = 0.90
-        blockMaterial.metalness.contents = 0.02
-
-        let curbMaterial = SCNMaterial()
-        curbMaterial.lightingModel = .physicallyBased
-        curbMaterial.diffuse.contents = NSColor(calibratedRed: 0.72, green: 0.73, blue: 0.75, alpha: 0.98)
-        curbMaterial.roughness.contents = 0.86
-        curbMaterial.metalness.contents = 0.02
-
-        let laneMaterial = SCNMaterial()
-        laneMaterial.lightingModel = .constant
-        laneMaterial.diffuse.contents = NSColor.white.withAlphaComponent(0.52)
-        laneMaterial.emission.contents = NSColor.white.withAlphaComponent(0.16)
-
-        for ix in 0..<blockCount {
-            for iz in 0..<blockCount {
-                let center = SIMD2<Float>(
-                    Float(ix) * blockPitch - centerOffset,
-                    Float(iz) * blockPitch - centerOffset
-                )
-
-                let pad = SCNNode(geometry: SCNBox(
-                    width: CGFloat(blockSpan),
-                    height: 0.018,
-                    length: CGFloat(blockSpan),
-                    chamferRadius: CGFloat(blockSpan * 0.035)
-                ))
-                pad.position = SCNVector3(center.x, 0.006, center.y)
-                pad.geometry?.materials = [blockMaterial]
-                terrainDetailNode.addChildNode(pad)
-
-                let curbInset = max(1.0, roadWidth * 0.12)
-                let curb = SCNNode(geometry: SCNBox(
-                    width: CGFloat(max(4.0, blockSpan - curbInset * 2.0)),
-                    height: 0.014,
-                    length: CGFloat(max(4.0, blockSpan - curbInset * 2.0)),
-                    chamferRadius: CGFloat(blockSpan * 0.028)
-                ))
-                curb.position = SCNVector3(center.x, 0.016, center.y)
-                curb.geometry?.materials = [curbMaterial]
-                terrainDetailNode.addChildNode(curb)
-            }
-        }
-
-        let roadHalfLength = centerOffset + blockPitch * 0.5
-        for roadIndex in 0..<blockCount {
-            let offset = -centerOffset - blockPitch * 0.5 + Float(roadIndex) * blockPitch
-            if abs(offset) > terrain.worldHalfExtent + roadWidth {
-                continue
-            }
-
-            let verticalLine = SCNNode(geometry: SCNBox(
-                width: 0.16,
-                height: 0.008,
-                length: CGFloat(roadHalfLength * 2.0),
-                chamferRadius: 0.02
-            ))
-            verticalLine.position = SCNVector3(offset, 0.028, 0.0)
-            verticalLine.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(verticalLine)
-
-            let horizontalLine = SCNNode(geometry: SCNBox(
-                width: CGFloat(roadHalfLength * 2.0),
-                height: 0.008,
-                length: 0.16,
-                chamferRadius: 0.02
-            ))
-            horizontalLine.position = SCNVector3(0.0, 0.028, offset)
-            horizontalLine.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(horizontalLine)
-        }
-    }
-
-    private func rebuildCargoYardSurfaceDetail(for terrain: TerrainConfiguration) {
-        let coverageScale = max(1.0, terrain.worldHalfExtent / 96.0)
-        let yardScale = max(1.0, terrain.areaScaleFactor * 0.64 + coverageScale * 0.46)
-        let bayPitchX: Float = 19.0 + min(yardScale, 5.0) * 2.9
-        let bayPitchZ: Float = 16.0 + min(yardScale, 5.0) * 2.4
-        let laneWidth: Float = 9.0 + min(yardScale, 4.5) * 1.1
-        let bayWidth = max(7.0, bayPitchX - laneWidth)
-        let bayDepth = max(6.0, bayPitchZ - laneWidth)
-        let columnCount = max(4, Int((terrain.worldHalfExtent * 2.0) / bayPitchX))
-        let rowCount = max(4, Int((terrain.worldHalfExtent * 2.0) / bayPitchZ))
-        let centerOffsetX = Float(columnCount - 1) * bayPitchX * 0.5
-        let centerOffsetZ = Float(rowCount - 1) * bayPitchZ * 0.5
-
-        let slabMaterial = SCNMaterial()
-        slabMaterial.lightingModel = .physicallyBased
-        slabMaterial.diffuse.contents = NSColor(calibratedRed: 0.36, green: 0.35, blue: 0.31, alpha: 0.96)
-        slabMaterial.roughness.contents = 0.92
-        slabMaterial.metalness.contents = 0.03
-
-        let laneMaterial = SCNMaterial()
-        laneMaterial.lightingModel = .physicallyBased
-        laneMaterial.diffuse.contents = NSColor(calibratedRed: 0.82, green: 0.68, blue: 0.24, alpha: 0.74)
-        laneMaterial.emission.contents = NSColor(calibratedRed: 0.42, green: 0.32, blue: 0.10, alpha: 0.10)
-        laneMaterial.roughness.contents = 0.78
-        laneMaterial.metalness.contents = 0.0
-
-        let stainMaterial = terrainDetailMaterial(
-            diffuse: NSColor(calibratedRed: 0.14, green: 0.12, blue: 0.10, alpha: 0.18),
-            emission: NSColor(calibratedRed: 0.06, green: 0.05, blue: 0.04, alpha: 0.02),
-            roughness: 0.98
-        )
-
-        for ix in 0..<columnCount {
-            for iz in 0..<rowCount {
-                let center = SIMD2<Float>(
-                    Float(ix) * bayPitchX - centerOffsetX,
-                    Float(iz) * bayPitchZ - centerOffsetZ
-                )
-
-                let mainAisleX = ix % 4 == 0
-                let mainAisleZ = iz % 3 == 0
-                if mainAisleX || mainAisleZ {
-                    continue
-                }
-
-                let slab = SCNNode(geometry: SCNBox(
-                    width: CGFloat(bayWidth * 0.84),
-                    height: 0.010,
-                    length: CGFloat(bayDepth * 0.80),
-                    chamferRadius: 0.08
-                ))
-                slab.position = SCNVector3(center.x, 0.006, center.y)
-                slab.geometry?.materials = [slabMaterial]
-                terrainDetailNode.addChildNode(slab)
-            }
-        }
-
-        let fullWidth = centerOffsetX + bayPitchX * 0.5
-        let fullDepth = centerOffsetZ + bayPitchZ * 0.5
-
-        for ix in 0..<columnCount {
-            if ix % 4 != 0 { continue }
-            let x = Float(ix) * bayPitchX - centerOffsetX
-            let lane = SCNNode(geometry: SCNBox(
-                width: 0.24,
-                height: 0.008,
-                length: CGFloat(fullDepth * 2.0 + bayPitchZ),
-                chamferRadius: 0.02
-            ))
-            lane.position = SCNVector3(x, 0.016, 0.0)
-            lane.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(lane)
-        }
-
-        for iz in 0..<rowCount {
-            if iz % 3 != 0 { continue }
-            let z = Float(iz) * bayPitchZ - centerOffsetZ
-            let lane = SCNNode(geometry: SCNBox(
-                width: CGFloat(fullWidth * 2.0 + bayPitchX),
-                height: 0.008,
-                length: 0.24,
-                chamferRadius: 0.02
-            ))
-            lane.position = SCNVector3(0.0, 0.016, z)
-            lane.geometry?.materials = [laneMaterial]
-            terrainDetailNode.addChildNode(lane)
-        }
-
-        var generator = TerrainDetailSeededGenerator(seed: terrain.seed &+ 0xC4A6)
-        let stainCount = max(10, Int(7.0 + yardScale * 2.8))
-        for _ in 0..<stainCount {
-            terrainDetailNode.addChildNode(
-                makeTerrainPatchNode(
-                    radiusX: Float.random(in: 5.0...10.0, using: &generator),
-                    radiusZ: Float.random(in: 3.5...8.0, using: &generator),
-                    y: 0.012,
-                    halfExtent: terrain.worldHalfExtent * 0.88,
-                    material: stainMaterial,
-                    generator: &generator
-                )
-            )
-        }
-    }
-
     private func applyLightingProfile(for terrain: TerrainPreset) {
         let sunIntensity: CGFloat
         let sunColor: NSColor
@@ -2442,14 +2727,75 @@ final class DroneSceneController {
         }
     }
 
-    private func skyGradientImage(for terrain: TerrainPreset) -> NSImage {
+    /// `.groundHaze` keeps the existing fog/smog behavior: strongest at the horizon, thinning out
+    /// overhead, matching how ground-level haze actually thins with altitude. `.overcast` is for
+    /// thunderstorm — a real storm sky is capped by cloud nearly everywhere, often *darkest*
+    /// overhead rather than at the horizon (where a paler band under the storm's leading edge is
+    /// common) — so it blends strongly at all three gradient stops instead of fading toward the
+    /// top. See `skyGradientImage` for where the fractions actually differ.
+    private enum SkyHazeDistribution {
+        case groundHaze
+        case overcast
+    }
+
+    /// Only fog/smog/thunderstorm get a sky-gradient haze blend — matches `wantsWeatherDepthOfField`'s
+    /// own gating and the envelope sphere's preset check. Other presets (rain, snow, wind) keep
+    /// their existing `scene.fogColor` treatment on real geometry only; their `fogColor` values
+    /// (e.g. the dark `wind`/`normal` tint) are tuned for that distance-fog role, not for blending
+    /// into a clear sky, so reusing them here unconditionally would incorrectly darken the sky for
+    /// weather that was never meant to touch the horizon at all.
+    /// Strength has the same non-zero floor as the weather envelope sphere's opacity
+    /// (`0.25 + intensity*0.55` in `updateWeatherEnvelope`) — and for the same reason that bit
+    /// `wantsWeatherDepthOfField` earlier: picking a fog/smog/thunderstorm preset from the UI
+    /// without separately raising an intensity slider leaves `weather.intensity` at 0, and a
+    /// strength tied directly to `normalizedIntensity` (no floor) meant `weatherFogStrength > 0`
+    /// was false and the whole blend got skipped — zero visible error, zero visible effect.
+    /// Thunderstorm's floor is deliberately higher than fog/smog's (0.78 vs 0.7) and its color
+    /// near-black rather than pale — a freshly-selected storm preset with no slider touch should
+    /// already read as a real storm, not "barely different from clear weather", which is what it
+    /// looked like before this existed: `effectiveFactors.visibilityFactor` itself is 1.0 (fully
+    /// clear) at intensity 0 since it interpolates *from* 1.0, so nothing else in
+    /// `applyWeatherVisual` darkened anything either at that point.
+    private func skyHorizonHazeColor(for weather: WeatherModel) -> (color: NSColor, strength: CGFloat, distribution: SkyHazeDistribution)? {
+        let groundHazeStrength = CGFloat(0.7 + weather.normalizedIntensity * 0.3)
+        switch weather.preset {
+        case .fog:
+            return (NSColor(calibratedRed: 0.84, green: 0.84, blue: 0.84, alpha: 1.0), groundHazeStrength, .groundHaze)
+        case .smog:
+            return (NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0), groundHazeStrength, .groundHaze)
+        case .thunderstorm:
+            // Near-black (0.06-0.08) read as literal nighttime rather than a dark stormy *day* —
+            // the user's screenshot showed a near-black sky with the storm cloud cards crushed
+            // into it, indistinguishable from stars/night texture. A heavy-overcast slate grey
+            // keeps the "oppressive" read while leaving enough headroom for the (now much denser)
+            // cloud cards to actually show up as visibly darker shapes against it.
+            let stormStrength = CGFloat(0.72 + weather.normalizedIntensity * 0.22)
+            return (NSColor(calibratedRed: 0.16, green: 0.165, blue: 0.19, alpha: 1.0), stormStrength, .overcast)
+        default:
+            return nil
+        }
+    }
+
+    /// `weatherFogColor`/`weatherFogStrength` pull the gradient's horizon (and partly mid) stop
+    /// toward the active fog/smog color. This is what actually fixes the ground/sky horizon seam
+    /// — `scene.fog` only tints real depth-tested geometry, never this background image, so the
+    /// sky stayed its clear color no matter how the ground faded into fog. A post-process blur
+    /// shader can soften the seam's *shape* but can't erase a hard color contrast between two
+    /// flat regions; baking the haze into the sky gradient itself, at the source, means there's
+    /// no contrast left to fight by the time anything else runs.
+    private func skyGradientImage(
+        for terrain: TerrainPreset,
+        weatherFogColor: NSColor? = nil,
+        weatherFogStrength: CGFloat = 0,
+        weatherHazeDistribution: SkyHazeDistribution = .groundHaze
+    ) -> NSImage {
         let size = NSSize(width: 1024, height: 768)
         let image = NSImage(size: size)
         image.lockFocus()
 
-        let topColor: NSColor
-        let midColor: NSColor
-        let horizonColor: NSColor
+        var topColor: NSColor
+        var midColor: NSColor
+        var horizonColor: NSColor
 
         switch terrain {
         case .gridDemo:
@@ -2474,20 +2820,42 @@ final class DroneSceneController {
             horizonColor = NSColor(calibratedRed: 0.74, green: 0.68, blue: 0.60, alpha: 1.0)
         }
 
+        if let rawFogColor = weatherFogColor, weatherFogStrength > 0,
+           let fogColor = rawFogColor.usingColorSpace(.genericRGB) {
+            let clampedStrength = min(max(weatherFogStrength, 0), 1)
+            switch weatherHazeDistribution {
+            case .groundHaze:
+                horizonColor = horizonColor.blended(withFraction: clampedStrength, of: fogColor) ?? horizonColor
+                midColor = midColor.blended(withFraction: clampedStrength * 0.65, of: fogColor) ?? midColor
+                topColor = topColor.blended(withFraction: clampedStrength * 0.28, of: fogColor) ?? topColor
+            case .overcast:
+                // Strong at every stop, slightly *more* overhead than at the horizon (1.0 vs 0.85)
+                // — a storm ceiling reads as thick cloud everywhere, not haze that thins with
+                // altitude, and a paler band right at the horizon under the front is realistic.
+                horizonColor = horizonColor.blended(withFraction: clampedStrength * 0.85, of: fogColor) ?? horizonColor
+                midColor = midColor.blended(withFraction: clampedStrength * 0.95, of: fogColor) ?? midColor
+                topColor = topColor.blended(withFraction: clampedStrength, of: fogColor) ?? topColor
+            }
+        }
+
         let bounds = NSRect(origin: .zero, size: size)
         if let gradient = NSGradient(colors: [topColor, midColor, horizonColor]) {
             gradient.draw(in: bounds, angle: -90.0)
         }
 
-        let hazeRect = NSRect(
-            x: size.width * 0.12,
-            y: size.height * 0.06,
-            width: size.width * 0.76,
-            height: size.height * 0.24
-        )
-        let hazePath = NSBezierPath(ovalIn: hazeRect)
-        NSColor.white.withAlphaComponent(0.10).setFill()
-        hazePath.fill()
+        // A thick storm ceiling has no visible sun glow through it — drawing this highlight at
+        // its usual strength was quietly re-brightening the otherwise-darkened overcast sky.
+        if weatherHazeDistribution != .overcast {
+            let hazeRect = NSRect(
+                x: size.width * 0.12,
+                y: size.height * 0.06,
+                width: size.width * 0.76,
+                height: size.height * 0.24
+            )
+            let hazePath = NSBezierPath(ovalIn: hazeRect)
+            NSColor.white.withAlphaComponent(0.10).setFill()
+            hazePath.fill()
+        }
 
         image.unlockFocus()
         return image
@@ -2774,9 +3142,47 @@ final class DroneSceneController {
         droneNode.addChildNode(droneCollisionProxyNode)
     }
 
-    private func configureObstacleCollisionProxy(for node: SCNNode, descriptor: EnvironmentObjectDescriptor) -> CollisionObstacle {
-        let proxy = obstacleProxySpec(for: descriptor)
+    private func configureObstacleCollisionProxies(
+        for node: SCNNode,
+        descriptor: EnvironmentObjectDescriptor
+    ) -> [CollisionObstacle] {
         node.physicsBody = nil
+        guard !descriptor.collisionParts.isEmpty else {
+            return [configureDefaultObstacleCollisionProxy(for: descriptor)]
+        }
+
+        return descriptor.collisionParts
+            .map { part in
+                let planarOffset = rotatePlanar(
+                    SIMD2<Float>(part.localCenter.x, part.localCenter.z),
+                    radians: descriptor.yawRadians
+                )
+                let center = SIMD3<Float>(
+                    descriptor.position.x + planarOffset.x,
+                    descriptor.position.y + part.localCenter.y,
+                    descriptor.position.z + planarOffset.y
+                )
+                let halfExtents = SIMD2<Float>(
+                    max(0.02, part.size.x * 0.5),
+                    max(0.02, part.size.z * 0.5)
+                )
+                return CollisionObstacle(
+                    id: part.id,
+                    center: center,
+                    radius: simd_length(halfExtents),
+                    source: part.source,
+                    baseY: center.y - part.size.y * 0.5,
+                    topY: center.y + part.size.y * 0.5,
+                    planarHalfExtents: halfExtents,
+                    yawRadians: descriptor.yawRadians + part.yawRadians
+                )
+            }
+    }
+
+    private func configureDefaultObstacleCollisionProxy(
+        for descriptor: EnvironmentObjectDescriptor
+    ) -> CollisionObstacle {
+        let proxy = obstacleProxySpec(for: descriptor)
 
         return CollisionObstacle(
             id: descriptor.id,
@@ -2827,6 +3233,18 @@ final class DroneSceneController {
                 topY: height
             )
 
+        case .cargoContainer:
+            let width = max(1.6, descriptor.size.x)
+            let depth = max(1.6, descriptor.size.z)
+            let height = max(1.8, descriptor.size.y)
+            return ObstacleProxySpec(
+                localCenterY: height * 0.5,
+                analysisRadius: max(width, depth) * 0.5,
+                source: "container.fallback",
+                baseY: 0.0,
+                topY: height
+            )
+
         case .pole:
             let capRadius = max(0.16, descriptor.size.x * 0.22)
             let height = max(4.0, descriptor.size.y)
@@ -2873,32 +3291,180 @@ final class DroneSceneController {
         }
     }
 
-    private func supportSurfaceDescriptor(for descriptor: EnvironmentObjectDescriptor) -> SupportSurfaceDescriptor? {
+    private func supportSurfaceDescriptors(
+        for descriptor: EnvironmentObjectDescriptor
+    ) -> [SupportSurfaceDescriptor] {
+        if !descriptor.collisionParts.isEmpty {
+            return descriptor.collisionParts.compactMap { part in
+                guard part.supportsLanding else {
+                    return nil
+                }
+                let offset = rotatePlanar(
+                    SIMD2<Float>(part.localCenter.x, part.localCenter.z),
+                    radians: descriptor.yawRadians
+                )
+                return SupportSurfaceDescriptor(
+                    center: SIMD2<Float>(
+                        descriptor.position.x + offset.x,
+                        descriptor.position.z + offset.y
+                    ),
+                    halfExtents: SIMD2<Float>(
+                        part.size.x * 0.5,
+                        part.size.z * 0.5
+                    ),
+                    yawRadians: descriptor.yawRadians + part.yawRadians,
+                    topY: descriptor.position.y + part.localCenter.y + part.size.y * 0.5,
+                    source: part.source
+                )
+            }
+        }
+
         switch descriptor.kind {
         case .building:
             let width = max(6.0, descriptor.size.x) * 0.50
             let depth = max(6.0, descriptor.size.z) * 0.50
-            let height = max(9.0, descriptor.size.y)
-            let roofHeight = EnvironmentProceduralVisualFactory.roofHeight(for: height)
-            return SupportSurfaceDescriptor(
+            let height = max(6.0, descriptor.size.y)
+            return [SupportSurfaceDescriptor(
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(width * 1.02, depth * 1.02),
                 yawRadians: descriptor.yawRadians,
-                topY: descriptor.position.y + height + roofHeight,
-                source: "building.roof"
-            )
+                topY: descriptor.position.y + height,
+                source: "abandonedBuilding.bounds"
+            )]
 
         case .crate:
-            return SupportSurfaceDescriptor(
+            return [SupportSurfaceDescriptor(
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(descriptor.size.x * 0.52, descriptor.size.z * 0.52),
                 yawRadians: descriptor.yawRadians,
                 topY: descriptor.position.y + descriptor.size.y,
                 source: "crate.top"
-            )
+            )]
 
-        case .tree, .pole, .rock, .marker, .distantBelt:
-            return nil
+        case .tree, .pole, .cargoContainer, .rock, .marker, .distantBelt:
+            return []
+        }
+    }
+
+    // Matches SceneKit's actual eulerAngles.y rotation direction (verified empirically: a
+    // child at local +X ends up at world -Z under a +90° parent rotation). The textbook 2D
+    // rotation matrix [[cos,-sin],[sin,cos]] turns out to spin the opposite way once X/Z are
+    // mapped onto SceneKit's right-handed, Y-up axes — this previously meant collision parts
+    // were mirrored relative to the visual model for any non-zero descriptor.yawRadians.
+    private func rotatePlanar(
+        _ value: SIMD2<Float>,
+        radians: Float
+    ) -> SIMD2<Float> {
+        let cosine = cos(radians)
+        let sine = sin(radians)
+        return SIMD2<Float>(
+            value.x * cosine + value.y * sine,
+            -value.x * sine + value.y * cosine
+        )
+    }
+
+    private func removeExistingCityRoots(from root: SCNNode) -> CityCleanupStats {
+        var targets: [SCNNode] = []
+        collectCityRoots(in: root, targets: &targets)
+        let nodeCount = targets.reduce(0) { $0 + subtreeNodeCount(for: $1) }
+        targets.forEach { $0.removeFromParentNode() }
+        return CityCleanupStats(rootCount: targets.count, nodeCount: nodeCount)
+    }
+
+    private func collectCityRoots(in node: SCNNode, targets: inout [SCNNode]) {
+        for child in node.childNodes {
+            if shouldRemoveCityRoot(named: child.name) {
+                targets.append(child)
+            } else {
+                collectCityRoots(in: child, targets: &targets)
+            }
+        }
+    }
+
+    private func shouldRemoveCityRoot(named name: String?) -> Bool {
+        guard let name else { return false }
+        if name.hasPrefix("environment.city.") || name.hasPrefix("environment.urban.") {
+            return true
+        }
+
+        return [
+            "environment.city.root",
+            "environment.urban.root",
+            AbandonedCitySceneComposer.rootName,
+            "cityRoot",
+            "urbanRoot",
+            "oldCityDebugRoot",
+            "proceduralCityRoot",
+            "roadRoot",
+            "sidewalkRoot",
+            "blockRoot",
+            "buildingRoot",
+            "debugCityRoot"
+        ].contains(name)
+    }
+
+    private func subtreeNodeCount(for node: SCNNode) -> Int {
+        1 + node.childNodes.reduce(0) { $0 + subtreeNodeCount(for: $1) }
+    }
+
+    private func hasCityRootInstalled(in node: SCNNode) -> Bool {
+        if shouldRemoveCityRoot(named: node.name) {
+            return true
+        }
+
+        for child in node.childNodes where hasCityRootInstalled(in: child) {
+            return true
+        }
+        return false
+    }
+
+    private func printCityGenerationDiagnostics(descriptors: [EnvironmentObjectDescriptor]) {
+        guard let cityRoot = findFirstNode(named: AbandonedCitySceneComposer.rootName, in: scene.rootNode) else {
+            #if DEBUG
+            print("[City] generated map=city buildings=0 roads=0 decorations=0 totalNodes=0 materials=0 memoryMode=legacy-disabled")
+            #endif
+            return
+        }
+
+        let buildings = descriptors.filter { $0.kind == .building }.count
+        let totalNodes = subtreeNodeCount(for: cityRoot)
+        let materials = uniqueMaterialCount(in: cityRoot)
+        #if DEBUG
+        print(
+            "[City] generated map=city buildings=\(buildings) roads=0 decorations=0 " +
+            "totalNodes=\(totalNodes) materials=\(materials) memoryMode=legacy-disabled"
+        )
+        #endif
+    }
+
+    private func findFirstNode(named targetName: String, in node: SCNNode) -> SCNNode? {
+        if node.name == targetName {
+            return node
+        }
+
+        for child in node.childNodes {
+            if let match = findFirstNode(named: targetName, in: child) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func uniqueMaterialCount(in node: SCNNode) -> Int {
+        var identities = Set<ObjectIdentifier>()
+        collectMaterials(in: node, identities: &identities)
+        return identities.count
+    }
+
+    private func collectMaterials(in node: SCNNode, identities: inout Set<ObjectIdentifier>) {
+        if let geometry = node.geometry {
+            for material in geometry.materials {
+                identities.insert(ObjectIdentifier(material))
+            }
+        }
+
+        for child in node.childNodes {
+            collectMaterials(in: child, identities: &identities)
         }
     }
 
@@ -3095,20 +3661,86 @@ final class DroneSceneController {
     }
 
     private func updateWeatherAnimation(deltaTime: Float, weather: WeatherModel) {
-        let baseSun = CGFloat(1200 * (0.65 + weather.effectiveFactors.visibilityFactor * 0.5))
-        var intensity = baseSun
+        var baseSun = CGFloat(1200 * (0.65 + weather.effectiveFactors.visibilityFactor * 0.5))
 
         if weather.preset == .thunderstorm {
-            thunderPulse -= deltaTime
-            if thunderPulse <= 0.0 {
-                thunderPulse = Float.random(in: 0.6...2.2)
-                if Float.random(in: 0...1) < weather.normalizedIntensity * 0.5 + 0.2 {
-                    intensity += CGFloat(Float.random(in: 900...2600) * weather.normalizedIntensity)
-                }
-            }
+            // effectiveFactors.visibilityFactor interpolates *from* 1.0 at intensity 0, so at the
+            // moment the preset is picked (before any slider is touched) it's identical to clear
+            // weather's brightness — same non-zero-floor fix as everywhere else, applied directly
+            // to the sun instead of through that shared interpolation (which also drives
+            // gameplay-tuning factors like drag/collision risk that shouldn't jump just because
+            // the preset was selected).
+            // Raised from 0.50-0.30*intensity — that range pushed full-intensity brightness down
+            // to ~14% of clear weather, dark enough that the ground/trees read as literal night
+            // rather than an overcast day. This keeps it dim but still day-lit at any intensity.
+            let dimFloor = CGFloat(0.62 - weather.normalizedIntensity * 0.28)
+            baseSun *= dimFloor
+
+            // A thick overcast deck scatters direct sunlight, so real storm-day shadows are soft
+            // and faint rather than the hard, crisp-edged shadows clear weather casts — the user
+            // pointed out the shadows in a screenshot still looked just as sharp as clear weather.
+            // Same non-zero floor as everywhere else: noticeably softened the moment the preset
+            // is picked, softer still as intensity rises.
+            let softness = CGFloat(0.55 + weather.normalizedIntensity * 0.45)
+            sunLightNode.light?.shadowRadius = Self.clearWeatherShadowRadius + softness * 14.0
+            sunLightNode.light?.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha * (1.0 - softness * 0.65))
+        } else {
+            sunLightNode.light?.shadowRadius = Self.clearWeatherShadowRadius
+            sunLightNode.light?.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha)
         }
 
-        sunLightNode.light?.intensity = intensity
+        // Lightning used to also jolt sunLightNode.light.intensity here on a 0.6-2.2s random
+        // pulse — a full-screen brightness spike on every flash. The user explicitly found that
+        // unpleasant ("резкие вспышки на экране... не по себе от этого"), so strikes are now a
+        // real 3D event instead: see `triggerLightningStrike`, scheduled minutes apart by the
+        // view model, with its own small localized light that never touches the global sun.
+        sunLightNode.light?.intensity = baseSun
+    }
+
+    // Mirrors SceneFactory.makeDirectionalLightNode's defaults — kept here so updateWeatherAnimation
+    // can restore them exactly when leaving thunderstorm, instead of hardcoding the same numbers twice.
+    private static let clearWeatherShadowRadius: CGFloat = 1.0
+    private static let clearWeatherShadowAlpha: CGFloat = 0.26
+
+    // Container for transient lightning-bolt nodes spawned by `triggerLightningStrike` — kept
+    // separate from `stormCloudsNode` since bolts are short-lived one-shots (each removes itself
+    // via SCNAction when its flash finishes), not a persistent, toggled-by-preset visual.
+    private func setUpLightningStrikes() {
+        lightningStrikesNode.name = "lightningStrikesNode"
+        scene.rootNode.addChildNode(lightningStrikesNode)
+    }
+
+    /// Spawns one of the 3 bolt variants at `impactPosition` (its base; `boltHeight` is how far
+    /// it extends straight up from there), flashes briefly, and removes itself — no per-frame
+    /// view-model bookkeeping needed for cleanup. The accompanying light is a child of the bolt
+    /// node, short-range (`attenuationEndDistance`) and short-lived (removed along with the bolt
+    /// when its action sequence finishes) — deliberately NOT `sunLightNode`, so this never
+    /// produces the disliked full-screen brightness spike; it only lights up the immediate area
+    /// around the strike, the same way a real nearby lightning flash would.
+    func triggerLightningStrike(impactPosition: SCNVector3, boltHeight: Float) {
+        guard let bolt = WeatherCloudAssetLoader.shared.makeLightningBoltNode(targetHeight: boltHeight) else {
+            return
+        }
+        bolt.position = impactPosition
+        bolt.opacity = 0.0
+        lightningStrikesNode.addChildNode(bolt)
+
+        let flashLight = SCNLight()
+        flashLight.type = .omni
+        flashLight.color = NSColor(calibratedRed: 0.80, green: 0.84, blue: 1.0, alpha: 1.0)
+        flashLight.intensity = 4500
+        flashLight.attenuationStartDistance = 4
+        flashLight.attenuationEndDistance = 50
+        let flashLightNode = SCNNode()
+        flashLightNode.light = flashLight
+        flashLightNode.position = SCNVector3(0, boltHeight * 0.3, 0)
+        bolt.addChildNode(flashLightNode)
+
+        let appear = SCNAction.fadeIn(duration: 0.035)
+        let hold = SCNAction.wait(duration: Double.random(in: 0.06...0.12))
+        let fade = SCNAction.fadeOut(duration: 0.22)
+        let remove = SCNAction.removeFromParentNode()
+        bolt.runAction(.sequence([appear, hold, fade, remove]))
     }
 
     private func ensureCollisionDebugMarkers() {
@@ -3117,8 +3749,28 @@ final class DroneSceneController {
         }
 
         for obstacle in environmentObstacles {
-            let marker = SCNNode(geometry: SCNSphere(radius: CGFloat(obstacle.radius)))
-            marker.position = SCNVector3(obstacle.center.x, obstacle.center.y + obstacle.radius, obstacle.center.z)
+            let marker: SCNNode
+            if let halfExtents = obstacle.planarHalfExtents {
+                marker = SCNNode(geometry: SCNBox(
+                    width: CGFloat(halfExtents.x * 2.0),
+                    height: CGFloat(max(0.04, obstacle.topY - obstacle.baseY)),
+                    length: CGFloat(halfExtents.y * 2.0),
+                    chamferRadius: 0.0
+                ))
+                marker.position = SCNVector3(
+                    obstacle.center.x,
+                    (obstacle.baseY + obstacle.topY) * 0.5,
+                    obstacle.center.z
+                )
+                marker.eulerAngles.y = CGFloat(obstacle.yawRadians)
+            } else {
+                marker = SCNNode(geometry: SCNSphere(radius: CGFloat(obstacle.radius)))
+                marker.position = SCNVector3(
+                    obstacle.center.x,
+                    obstacle.center.y,
+                    obstacle.center.z
+                )
+            }
             marker.name = "debug_obstacle_\(obstacle.id.uuidString)"
             marker.geometry?.firstMaterial?.diffuse.contents = NSColor.systemYellow.withAlphaComponent(0.42)
             marker.geometry?.firstMaterial?.fillMode = .lines

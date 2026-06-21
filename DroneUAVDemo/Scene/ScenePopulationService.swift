@@ -2,12 +2,24 @@ import Foundation
 import SceneKit
 import simd
 
+struct CityGenerationBudget {
+    static let maxBuildings = 8
+    static let maxRoadSegments = 4
+    static let maxDecorations = 0
+    static let maxTotalCityNodes = 128
+}
+
 final class ScenePopulationService {
     private let containerNode = SCNNode()
+    private let treeVisualsNode = SCNNode()
+    private var storedTreeDescriptors: [EnvironmentObjectDescriptor] = []
+    private var lastVisualQuality: EnvironmentVisualQuality = .detailed
 
     init(rootNode: SCNNode) {
         containerNode.name = "environmentContainer"
+        treeVisualsNode.name = "environment.trees"
         rootNode.addChildNode(containerNode)
+        containerNode.addChildNode(treeVisualsNode)
     }
 
     @discardableResult
@@ -15,23 +27,41 @@ final class ScenePopulationService {
         with terrain: TerrainConfiguration,
         visualQuality: EnvironmentVisualQuality = .detailed
     ) -> ([EnvironmentObjectDescriptor], [UUID: SCNNode]) {
-        containerNode.childNodes.forEach { $0.removeFromParentNode() }
+        clear()
+
+        if terrain.preset == .city {
+            #if DEBUG
+            let memoryMode = EnvironmentVisualOptions.enableLegacyCityGeneration
+                ? "legacy-capped"
+                : "legacy-disabled"
+            print("[City] generated map=city buildings=0 roads=0 decorations=0 totalNodes=0 materials=0 memoryMode=\(memoryMode)")
+            #endif
+            return ([], [:])
+        }
+
+        // generateGridDemo() only ever produced .marker/.pole/.crate descriptors, and those kinds
+        // render as an invisible empty SCNNode by default (EnvironmentObjectFactory.makeNode,
+        // gated on EnvironmentDebugOptions.showPlaceholderObjects, off in normal play) while still
+        // being registered as real `collidable: true` obstacles and counted on the radar/minimap.
+        // So this map previously had ~300 obstacles you could fly into but never see — not a
+        // rendering bug, the objects were genuinely there. The grid demo map is meant to be bare,
+        // so skip generating them at all rather than just hiding them.
+        if terrain.preset == .gridDemo {
+            return ([], [:])
+        }
 
         var generator = SeededRandomGenerator(seed: terrain.seed)
         let density = terrain.density.clamped(to: 0.0...1.0)
         let extent = terrain.worldHalfExtent
-        let areaScale = terrain.areaScaleFactor.clamped(to: 0.25...2.2)
+        let areaScaleUpperBound: Float = terrain.preset == .cargoYard ? 4.2 : 2.2
+        let areaScale = terrain.areaScaleFactor.clamped(to: 0.25...areaScaleUpperBound)
 
         var collidableDescriptors: [EnvironmentObjectDescriptor] = []
 
         switch terrain.preset {
         case .gridDemo:
-            collidableDescriptors = generateGridDemo(
-                density: density,
-                safeSpawn: terrain.safeSpawnRadius,
-                extent: extent,
-                generator: &generator
-            )
+            // The early return above is the only supported grid-demo path.
+            collidableDescriptors = []
         case .field:
             collidableDescriptors = generateField(
                 density: density,
@@ -57,13 +87,8 @@ final class ScenePopulationService {
                 generator: &generator
             )
         case .city:
-            collidableDescriptors = generateCity(
-                density: density,
-                areaScale: areaScale,
-                safeSpawn: terrain.safeSpawnRadius,
-                extent: extent,
-                generator: &generator
-            )
+            // The early return above is the only supported city path.
+            collidableDescriptors = []
         }
 
         collidableDescriptors = cappedCollidableDescriptors(collidableDescriptors, for: terrain)
@@ -74,45 +99,42 @@ final class ScenePopulationService {
         )
         let allDescriptors = collidableDescriptors + beltDescriptors
 
+        // Re-establish treeVisualsNode after clearing containerNode children
+        containerNode.addChildNode(treeVisualsNode)
+        lastVisualQuality = visualQuality
+        storedTreeDescriptors = allDescriptors.filter { $0.kind == .tree }
+
         var nodesByID: [UUID: SCNNode] = [:]
         nodesByID.reserveCapacity(allDescriptors.count)
         for descriptor in allDescriptors {
             let node = EnvironmentObjectFactory.makeNode(for: descriptor, quality: visualQuality)
             nodesByID[descriptor.id] = node
-            containerNode.addChildNode(node)
+            if descriptor.kind == .tree {
+                treeVisualsNode.addChildNode(node)
+            } else {
+                containerNode.addChildNode(node)
+            }
         }
 
         return (allDescriptors, nodesByID)
     }
 
-    private func generateGridDemo(
-        density: Float,
-        safeSpawn: Float,
-        extent: Float,
-        generator: inout SeededRandomGenerator
-    ) -> [EnvironmentObjectDescriptor] {
-        var descriptors: [EnvironmentObjectDescriptor] = []
+    func clear() {
+        containerNode.childNodes.forEach { $0.removeFromParentNode() }
+        treeVisualsNode.childNodes.forEach { $0.removeFromParentNode() }
+        storedTreeDescriptors.removeAll(keepingCapacity: false)
+        containerNode.addChildNode(treeVisualsNode)
+    }
 
-        let spacing: Float = 10.0
-        let halfCells = max(2, Int((extent / spacing).rounded(.down)))
-
-        for ix in -halfCells...halfCells {
-            for iz in -halfCells...halfCells {
-                if abs(ix) <= 1, abs(iz) <= 1 { continue }
-                if Float.random(in: 0...1, using: &generator) > density + 0.18 { continue }
-
-                let x = Float(ix) * spacing
-                let z = Float(iz) * spacing
-                let startDistance = simd_length(SIMD2<Float>(x, z))
-                if startDistance < safeSpawn { continue }
-
-                let kind: EnvironmentObjectKind = (abs(ix + iz) % 3 == 0) ? .marker : ((abs(ix) % 2 == 0) ? .pole : .crate)
-                let size = sizeForKind(kind, terrain: .gridDemo, generator: &generator)
-                descriptors.append(makeDescriptor(kind: kind, biome: .gridDemo, position: SIMD3<Float>(x, 0, z), size: size, collidable: true))
-            }
+    func refreshTreeVisuals(snowWeatherActive: Bool) {
+        EnvironmentObjectFactory.snowWeatherActive = snowWeatherActive
+        treeVisualsNode.childNodes.forEach { $0.removeFromParentNode() }
+        EnvironmentObjectFactory.resetDiagnostics()
+        for descriptor in storedTreeDescriptors {
+            let node = EnvironmentObjectFactory.makeNode(for: descriptor, quality: lastVisualQuality)
+            treeVisualsNode.addChildNode(node)
         }
-
-        return descriptors
+        EnvironmentObjectFactory.printDiagnostics()
     }
 
     private func cappedCollidableDescriptors(
@@ -144,7 +166,7 @@ final class ScenePopulationService {
         case .forest:
             baseLimit = 720
         case .cargoYard:
-            baseLimit = 560
+            baseLimit = 1_100
         case .city:
             baseLimit = 620
         }
@@ -456,381 +478,197 @@ final class ScenePopulationService {
     ) -> [EnvironmentObjectDescriptor] {
         var descriptors: [EnvironmentObjectDescriptor] = []
         var occupied: [(SIMD2<Float>, Float)] = []
+        let targetCount = cargoContainerTargetCount(
+            density: density,
+            areaScale: areaScale
+        )
+        let hubCount = cargoTerminalHubCount(areaScale: areaScale)
+        let spawnExclusionRadius = safeSpawn + 30.0
+        let assets = CargoContainerAssetKind.allCases
 
-        let coverageScale = min(max(1.0, extent / 96.0), 2.8)
-        let yardScale = max(1.0, areaScale * 0.64 + coverageScale * 0.32)
-        let padPitchX: Float = 19.0 + min(yardScale, 5.0) * 2.9
-        let padPitchZ: Float = 16.0 + min(yardScale, 5.0) * 2.4
-        let spawnExclusionRadius = safeSpawn + max(padPitchX, padPitchZ) * 1.75
-        let columnCount = min(18, max(4, Int((extent * 2.0) / padPitchX)))
-        let rowCount = min(18, max(4, Int((extent * 2.0) / padPitchZ)))
-        let layoutWidth = extent * 1.72
-        let layoutDepth = extent * 1.72
-        let effectivePadPitchX = columnCount > 1 ? layoutWidth / Float(columnCount - 1) : padPitchX
-        let effectivePadPitchZ = rowCount > 1 ? layoutDepth / Float(rowCount - 1) : padPitchZ
-        let centerOffsetX = Float(columnCount - 1) * effectivePadPitchX * 0.5
-        let centerOffsetZ = Float(rowCount - 1) * effectivePadPitchZ * 0.5
+        for hubIndex in 0..<hubCount {
+            let remainingHubs = hubCount - hubIndex
+            let remainingContainers = targetCount - descriptors.count
+            let containersInHub = Int(
+                ceil(Double(remainingContainers) / Double(max(1, remainingHubs)))
+            )
+            let hubAngle = (Float(hubIndex) / Float(max(1, hubCount))) * (.pi * 2.0)
+                + Float.random(in: -0.45...0.45, using: &generator)
+            let minimumRadius = spawnExclusionRadius + 26.0
+            let hubRadius = Float.random(in: minimumRadius...(extent * 0.85), using: &generator)
+            let hubCenter = SIMD2<Float>(
+                cos(hubAngle) * hubRadius,
+                sin(hubAngle) * hubRadius
+            )
+            let hubYaw: Float = Float.random(in: 0.0...1.0, using: &generator) < 0.5
+                ? 0.0
+                : (Float.pi * 0.5)
+            let rightAxis = SIMD2<Float>(cos(hubYaw), sin(hubYaw))
+            let forwardAxis = SIMD2<Float>(-sin(hubYaw), cos(hubYaw))
+            let columns = max(4, Int(ceil(sqrt(Double(containersInHub)))))
+            let rows = max(3, Int(ceil(Double(containersInHub) / Double(columns))))
 
-        for ix in 0..<columnCount {
-            for iz in 0..<rowCount {
-                let center = SIMD2<Float>(
-                    Float(ix) * effectivePadPitchX - centerOffsetX,
-                    Float(iz) * effectivePadPitchZ - centerOffsetZ
+            for slot in 0..<containersInHub where descriptors.count < targetCount {
+                let row = slot / columns
+                let column = slot % columns
+                let aisleOffset = column >= columns / 2 ? 9.0 as Float : 0.0
+                let localX = (Float(column) - Float(columns - 1) * 0.5) * 17.0
+                    + aisleOffset
+                let localZ = (Float(row) - Float(rows - 1) * 0.5) * 14.5
+                let jitter = SIMD2<Float>(
+                    Float.random(in: -0.9...0.9, using: &generator),
+                    Float.random(in: -0.55...0.55, using: &generator)
                 )
+                let center = hubCenter + rightAxis * (localX + jitter.x)
+                    + forwardAxis * (localZ + jitter.y)
 
-                let mainAisleX = ix % 4 == 0
-                let mainAisleZ = iz % 3 == 0
-                if mainAisleX || mainAisleZ {
-                    if simd_length(center) < spawnExclusionRadius {
-                        continue
-                    }
-                    if Float.random(in: 0.0...1.0, using: &generator) < 0.18 {
-                        _ = appendPlacedObject(
-                            kind: Float.random(in: 0.0...1.0, using: &generator) < 0.72 ? .pole : .marker,
-                            terrain: .cargoYard,
-                            position: center + SIMD2<Float>(
-                                Float.random(in: -3.2...3.2, using: &generator),
-                                Float.random(in: -3.2...3.2, using: &generator)
-                            ),
-                            safeSpawn: spawnExclusionRadius,
-                            overlapPadding: 1.08,
-                            occupied: &occupied,
-                            descriptors: &descriptors,
-                            generator: &generator
-                        )
-                    }
+                let asset = assets[(slot + hubIndex) % assets.count]
+                let size = asset.nominalSize
+                let footprintRadius = max(size.x, size.z) * 0.54
+
+                guard abs(center.x) + footprintRadius < extent * 0.92,
+                      abs(center.y) + footprintRadius < extent * 0.92,
+                      simd_length(center) > spawnExclusionRadius + footprintRadius,
+                      !overlaps(
+                        position: center,
+                        radius: footprintRadius,
+                        occupied: occupied,
+                        padding: 1.02
+                      ) else {
                     continue
                 }
 
-                let layoutRoll = Float.random(in: 0.0...1.0, using: &generator)
-                let footprintRadius: Float
-                if layoutRoll < 0.26 {
-                    footprintRadius = 5.6
-                } else if layoutRoll < 0.64 {
-                    footprintRadius = 4.8
-                } else {
-                    footprintRadius = 4.2
-                }
-
-                if simd_length(center) < spawnExclusionRadius + footprintRadius {
-                    continue
-                }
-                guard !overlaps(position: center, radius: footprintRadius, occupied: occupied, padding: 1.10) else {
-                    continue
-                }
+                let facesAisle = asset.hasFlyableInterior && column >= columns / 2
+                let yaw: Float = facesAisle ? hubYaw + Float.pi : hubYaw
+                descriptors.append(
+                    makeCargoContainerDescriptor(
+                        asset: asset,
+                        position: SIMD3<Float>(center.x, 0.0, center.y),
+                        yawRadians: yaw
+                    )
+                )
                 occupied.append((center, footprintRadius))
-
-                let yaw: Float = Float.random(in: 0.0...1.0, using: &generator) < 0.5 ? 0.0 : (.pi / 2.0)
-                if layoutRoll < 0.26 {
-                    appendCargoGate(
-                        center: center,
-                        yawRadians: yaw,
-                        descriptors: &descriptors,
-                        generator: &generator
-                    )
-                } else if layoutRoll < 0.64 {
-                    appendCargoStackCluster(
-                        center: center,
-                        yawRadians: yaw,
-                        descriptors: &descriptors,
-                        generator: &generator
-                    )
-                } else {
-                    appendCargoLongStack(
-                        center: center,
-                        yawRadians: yaw,
-                        descriptors: &descriptors,
-                        generator: &generator
-                    )
-                }
             }
         }
 
-        let serviceObjectCount = max(8, Int((6.0 + density * 10.0) * max(1.0, yardScale * 0.62)))
-        appendScatter(
-            count: serviceObjectCount,
-            extent: extent * 0.88,
-            safeSpawn: spawnExclusionRadius,
-            overlapPadding: 1.10,
-            terrain: .cargoYard,
+        let scatterCount = max(30, Int(Float(targetCount) * 0.50))
+        appendCargoScatter(
+            count: scatterCount,
+            extent: extent,
+            spawnExclusionRadius: spawnExclusionRadius,
             occupied: &occupied,
             descriptors: &descriptors,
             generator: &generator
-        ) { rng in
-            let pick = Float.random(in: 0.0...1.0, using: &rng)
-            if pick < 0.58 { return .pole }
-            if pick < 0.84 { return .marker }
-            return .crate
-        }
+        )
+
+        #if DEBUG
+        let inventory = Dictionary(grouping: descriptors, by: \.cargoAsset)
+            .mapValues(\.count)
+        let inventoryDescription = CargoContainerAssetKind.allCases
+            .map { "\($0.rawValue)=\(inventory[$0] ?? 0)" }
+            .joined(separator: " ")
+        print(
+            "[Cargo] generated target=\(targetCount) placed=\(descriptors.count) " +
+            "hubs=\(hubCount) scattered=\(scatterCount) \(inventoryDescription)"
+        )
+        #endif
 
         return descriptors
     }
 
-    private func generateCity(
-        density: Float,
-        areaScale: Float,
-        safeSpawn: Float,
+    private func appendCargoScatter(
+        count: Int,
         extent: Float,
-        generator: inout SeededRandomGenerator
-    ) -> [EnvironmentObjectDescriptor] {
-        var descriptors: [EnvironmentObjectDescriptor] = []
-        var occupied: [(SIMD2<Float>, Float)] = []
-
-        let coverageScale = min(max(1.0, extent / 96.0), 2.8)
-        let urbanScale = max(1.0, areaScale * 0.72 + coverageScale * 0.28)
-        let blockPitch: Float = 38.0 + min(urbanScale, 5.0) * 3.6
-        let roadWidth: Float = 10.0 + min(urbanScale, 4.2) * 1.4
-        let blockSpan = max(22.0, blockPitch - roadWidth)
-        let halfBlock = blockSpan * 0.5
-        let blockCount = min(14, max(2, Int((extent * 2.0) / blockPitch)))
-        let layoutWidth = extent * 1.72
-        let effectiveBlockPitch = blockCount > 1 ? layoutWidth / Float(blockCount - 1) : blockPitch
-        let centerOffset = Float(blockCount - 1) * effectiveBlockPitch * 0.5
-
-        for ix in 0..<blockCount {
-            for iz in 0..<blockCount {
-                let center = SIMD2<Float>(
-                    Float(ix) * effectiveBlockPitch - centerOffset,
-                    Float(iz) * effectiveBlockPitch - centerOffset
-                )
-
-                if simd_length(center) < safeSpawn + blockPitch * 0.78 {
-                    continue
-                }
-
-                let distanceRatio = (simd_length(center) / max(extent, 1.0)).clamped(to: 0.0...1.0)
-                let centrality = (1.0 - distanceRatio).clamped(to: 0.18...1.0)
-                let avenueX = ix % 3 == 0
-                let avenueZ = iz % 3 == 0
-                let occupancyChance = min(0.97, 0.58 + density * 0.26 + centrality * 0.18)
-                let blockRoll = Float.random(in: 0.0...1.0, using: &generator)
-
-                if blockRoll > occupancyChance {
-                    if Float.random(in: 0.0...1.0, using: &generator) < 0.62 {
-                        appendCluster(
-                            count: Int.random(in: 4...9, using: &generator),
-                            center: center,
-                            radius: blockSpan * 0.24,
-                            terrain: .city,
-                            safeSpawn: safeSpawn,
-                            overlapPadding: 0.98,
-                            occupied: &occupied,
-                            descriptors: &descriptors,
-                            generator: &generator
-                        ) { rng in
-                            Float.random(in: 0.0...1.0, using: &rng) < 0.82 ? .tree : .pole
-                        }
-                    }
-                    continue
-                }
-
-                let sideSetback = max(1.4, roadWidth * 0.16)
-                let avenueBoost: Float = (avenueX || avenueZ) ? 1.16 : 1.0
-                let lotDepthBase = max(9.0, halfBlock - sideSetback - 0.8)
-
-                appendCityFrontage(
-                    center: center,
-                    isHorizontal: true,
-                    sign: 1.0,
-                    frontageLength: blockSpan - 5.0,
-                    lotDepthBase: lotDepthBase,
-                    safeSpawn: safeSpawn,
-                    density: density,
-                    centrality: centrality,
-                    avenueBoost: avenueBoost,
-                    occupied: &occupied,
-                    descriptors: &descriptors,
-                    generator: &generator
-                )
-                appendCityFrontage(
-                    center: center,
-                    isHorizontal: true,
-                    sign: -1.0,
-                    frontageLength: blockSpan - 5.0,
-                    lotDepthBase: lotDepthBase,
-                    safeSpawn: safeSpawn,
-                    density: density,
-                    centrality: centrality,
-                    avenueBoost: avenueBoost,
-                    occupied: &occupied,
-                    descriptors: &descriptors,
-                    generator: &generator
-                )
-                appendCityFrontage(
-                    center: center,
-                    isHorizontal: false,
-                    sign: 1.0,
-                    frontageLength: blockSpan - 6.0,
-                    lotDepthBase: lotDepthBase,
-                    safeSpawn: safeSpawn,
-                    density: density,
-                    centrality: centrality,
-                    avenueBoost: avenueBoost,
-                    occupied: &occupied,
-                    descriptors: &descriptors,
-                    generator: &generator
-                )
-                appendCityFrontage(
-                    center: center,
-                    isHorizontal: false,
-                    sign: -1.0,
-                    frontageLength: blockSpan - 6.0,
-                    lotDepthBase: lotDepthBase,
-                    safeSpawn: safeSpawn,
-                    density: density,
-                    centrality: centrality,
-                    avenueBoost: avenueBoost,
-                    occupied: &occupied,
-                    descriptors: &descriptors,
-                    generator: &generator
-                )
-
-                let towerChance = min(0.34, 0.08 + centrality * 0.18 + ((avenueX && avenueZ) ? 0.10 : 0.0))
-                if blockSpan > 24.0,
-                   Float.random(in: 0.0...1.0, using: &generator) < towerChance {
-                    let centerWidth = Float.random(in: 8.0...12.0, using: &generator)
-                    let centerDepth = Float.random(in: 8.0...12.0, using: &generator)
-                    let centerHeight = Float.random(in: 22.0...54.0, using: &generator)
-                    appendCityBuilding(
-                        at: center + SIMD2<Float>(
-                            Float.random(in: -2.2...2.2, using: &generator),
-                            Float.random(in: -2.2...2.2, using: &generator)
-                        ),
-                        yawRadians: Float.random(in: 0.0...1.0, using: &generator) < 0.5 ? 0.0 : (.pi / 2.0),
-                        size: SIMD3<Float>(centerWidth, centerHeight, centerDepth),
-                        safeSpawn: safeSpawn,
-                        occupied: &occupied,
-                        descriptors: &descriptors
-                    )
-                }
-
-                let cornerPoleChance = min(0.9, 0.46 + density * 0.28)
-                if Float.random(in: 0.0...1.0, using: &generator) < cornerPoleChance {
-                    let poleOffsets: [SIMD2<Float>] = [
-                        SIMD2<Float>( halfBlock + roadWidth * 0.22,  halfBlock + roadWidth * 0.22),
-                        SIMD2<Float>(-halfBlock - roadWidth * 0.22,  halfBlock + roadWidth * 0.22),
-                        SIMD2<Float>( halfBlock + roadWidth * 0.22, -halfBlock - roadWidth * 0.22),
-                        SIMD2<Float>(-halfBlock - roadWidth * 0.22, -halfBlock - roadWidth * 0.22)
-                    ]
-                    for offset in poleOffsets where Float.random(in: 0.0...1.0, using: &generator) < 0.58 {
-                        _ = appendPlacedObject(
-                            kind: .pole,
-                            terrain: .city,
-                            position: center + offset,
-                            safeSpawn: safeSpawn,
-                            overlapPadding: 1.10,
-                            occupied: &occupied,
-                            descriptors: &descriptors,
-                            generator: &generator
-                        )
-                    }
-                }
-            }
-        }
-
-        return descriptors
-    }
-
-    private func appendCityFrontage(
-        center: SIMD2<Float>,
-        isHorizontal: Bool,
-        sign: Float,
-        frontageLength: Float,
-        lotDepthBase: Float,
-        safeSpawn: Float,
-        density: Float,
-        centrality: Float,
-        avenueBoost: Float,
+        spawnExclusionRadius: Float,
         occupied: inout [(SIMD2<Float>, Float)],
         descriptors: inout [EnvironmentObjectDescriptor],
         generator: inout SeededRandomGenerator
     ) {
-        let baseYaw: Float = isHorizontal ? 0.0 : (.pi / 2.0)
-        let minLotWidth: Float = isHorizontal ? 9.5 : 8.5
-        let maxLotWidth: Float = isHorizontal ? 16.0 : 13.0
-        let innerSetback = Float.random(in: 0.8...1.8, using: &generator)
-        let usableHalfSpan = max(8.0, frontageLength * 0.5 - 1.8)
-        let serviceGapChance = max(0.05, 0.16 - density * 0.05)
+        let assets = CargoContainerAssetKind.allCases
+        var placed = 0
+        var attempts = 0
 
-        var cursor = -usableHalfSpan
-        while cursor < usableHalfSpan - minLotWidth {
-            let remaining = usableHalfSpan - cursor
-            let lotWidth = min(remaining, Float.random(in: minLotWidth...maxLotWidth, using: &generator))
-            let alongCenter = cursor + lotWidth * 0.5
-            let leavesServiceGap = remaining > minLotWidth * 1.4
-                && Float.random(in: 0.0...1.0, using: &generator) < serviceGapChance
+        while placed < count, attempts < count * 25 {
+            attempts += 1
+            let center = SIMD2<Float>(
+                Float.random(in: -extent...extent, using: &generator),
+                Float.random(in: -extent...extent, using: &generator)
+            )
+            let assetIndex = Int(Float.random(in: 0.0..<Float(assets.count), using: &generator))
+            let asset = assets[assetIndex]
+            let size = asset.nominalSize
+            let footprintRadius = max(size.x, size.z) * 0.54
 
-            if !leavesServiceGap {
-                var buildingWidth = max(7.2, lotWidth - Float.random(in: 0.8...2.2, using: &generator))
-                var buildingDepth = max(8.0, lotDepthBase * Float.random(in: 0.64...0.92, using: &generator))
-                var buildingHeight = min(
-                    110.0,
-                    max(
-                        12.0,
-                        mix(14.0, 56.0, centrality)
-                            * avenueBoost
-                            * Float.random(in: 0.74...1.18, using: &generator)
-                    )
-                )
-
-                if Float.random(in: 0.0...1.0, using: &generator) < max(0.06, 0.14 * centrality) {
-                    buildingHeight *= Float.random(in: 1.18...1.52, using: &generator)
-                    buildingWidth *= Float.random(in: 0.72...0.92, using: &generator)
-                    buildingDepth *= Float.random(in: 0.72...0.92, using: &generator)
-                }
-
-                let planarPosition: SIMD2<Float>
-                if isHorizontal {
-                    planarPosition = SIMD2<Float>(
-                        center.x + alongCenter,
-                        center.y + sign * (lotDepthBase - buildingDepth * 0.5 - innerSetback)
-                    )
-                } else {
-                    planarPosition = SIMD2<Float>(
-                        center.x + sign * (lotDepthBase - buildingDepth * 0.5 - innerSetback),
-                        center.y + alongCenter
-                    )
-                }
-
-                appendCityBuilding(
-                    at: planarPosition,
-                    yawRadians: baseYaw,
-                    size: SIMD3<Float>(buildingWidth, buildingHeight, buildingDepth),
-                    safeSpawn: safeSpawn,
-                    occupied: &occupied,
-                    descriptors: &descriptors
-                )
+            guard abs(center.x) + footprintRadius < extent * 0.94,
+                  abs(center.y) + footprintRadius < extent * 0.94,
+                  simd_length(center) > spawnExclusionRadius + footprintRadius,
+                  !overlaps(
+                    position: center,
+                    radius: footprintRadius,
+                    occupied: occupied,
+                    padding: 1.3
+                  ) else {
+                continue
             }
 
-            cursor += lotWidth + Float.random(in: 1.2...2.8, using: &generator)
+            let yaw: Float = Float.random(in: 0.0...1.0, using: &generator) < 0.5
+                ? 0.0
+                : (Float.pi * 0.5)
+            descriptors.append(
+                makeCargoContainerDescriptor(
+                    asset: asset,
+                    position: SIMD3<Float>(center.x, 0.0, center.y),
+                    yawRadians: yaw
+                )
+            )
+            occupied.append((center, footprintRadius))
+            placed += 1
         }
     }
 
-    private func appendCityBuilding(
-        at position: SIMD2<Float>,
-        yawRadians: Float,
-        size: SIMD3<Float>,
-        safeSpawn: Float,
-        occupied: inout [(SIMD2<Float>, Float)],
-        descriptors: inout [EnvironmentObjectDescriptor]
-    ) {
-        let radius = max(size.x, size.z) * 0.58
-        guard simd_length(position) >= safeSpawn + radius * 0.75 else {
-            return
-        }
-        guard !overlaps(position: position, radius: radius, occupied: occupied, padding: 1.22) else {
-            return
+    private func cargoContainerTargetCount(
+        density: Float,
+        areaScale: Float
+    ) -> Int {
+        let baseCount: Float
+        switch areaScale {
+        case ...0.90:
+            baseCount = 96
+        case ...1.10:
+            baseCount = 180
+        case ...1.50:
+            baseCount = 360
+        case ...1.90:
+            baseCount = 520
+        case ...2.50:
+            baseCount = 680
+        case ...3.50:
+            baseCount = 840
+        default:
+            baseCount = 1_000
         }
 
-        descriptors.append(makeDescriptor(
-            kind: .building,
-            biome: .city,
-            position: SIMD3<Float>(position.x, 0.0, position.y),
-            yawRadians: yawRadians,
-            size: size,
-            collidable: true
-        ))
-        occupied.append((position, radius))
+        let densityMultiplier = 0.80 + density.clamped(to: 0.0...1.0) * 0.35
+        return max(60, Int((baseCount * densityMultiplier).rounded()))
+    }
+
+    private func cargoTerminalHubCount(areaScale: Float) -> Int {
+        switch areaScale {
+        case ...0.90:
+            return 4
+        case ...1.10:
+            return 6
+        case ...1.50:
+            return 8
+        case ...1.90:
+            return 12
+        case ...2.50:
+            return 16
+        case ...3.50:
+            return 24
+        default:
+            return 32
+        }
     }
 
     private func scatterObjects(
@@ -892,9 +730,9 @@ final class ScenePopulationService {
         case .field:
             ringCount = 3
         case .cargoYard:
-            ringCount = 3
+            ringCount = 0
         case .city:
-            ringCount = 3
+            ringCount = 0
         case .gridDemo:
             ringCount = 2
         }
@@ -927,16 +765,7 @@ final class ScenePopulationService {
                     ))
 
                 case .city:
-                    let width = Float.random(in: 10.0...24.0, using: &generator)
-                    let depth = Float.random(in: 10.0...20.0, using: &generator)
-                    let height = Float.random(in: 34.0...110.0, using: &generator)
-                    descriptors.append(makeDescriptor(
-                        kind: .building,
-                        biome: .city,
-                        position: SIMD3<Float>(x, 0.0, z),
-                        size: SIMD3<Float>(width, height, depth),
-                        collidable: false
-                    ))
+                    continue
 
                 case .cargoYard:
                     descriptors.append(makeDescriptor(
@@ -1168,6 +997,168 @@ final class ScenePopulationService {
         )
     }
 
+    private func makeCargoContainerDescriptor(
+        asset: CargoContainerAssetKind,
+        position: SIMD3<Float>,
+        yawRadians: Float
+    ) -> EnvironmentObjectDescriptor {
+        let size = asset.nominalSize
+        return EnvironmentObjectDescriptor(
+            id: UUID(),
+            kind: .cargoContainer,
+            biome: .cargoYard,
+            position: position,
+            yawRadians: yawRadians,
+            size: size,
+            boundingRadius: max(size.x, size.z) * 0.55,
+            isCollidable: true,
+            cargoAsset: asset,
+            collisionParts: cargoCollisionParts(for: asset, size: size)
+        )
+    }
+
+    // `Containers.usdz` looked like 6 named groups ("Object_2"..."Object_7"), but two of them
+    // ("Object_2", "Object_3") each turned out to be TWO physically disjoint crates merged into
+    // one mesh resource by the export pipeline — a per-vertex-index connectivity check missed
+    // this because hard-edge seams duplicate vertices, hiding the fact that they're not actually
+    // joined. A spatial-proximity connectivity pass (union vertices within 0.5 source units,
+    // not just shared indices) found the real split: 8 physical crates, not 6. Treating each
+    // "Object_N" group as one box meant the box silently bridged the gap between two disjoint
+    // crates — solid-looking collision floating in the empty air between them. Every piece below
+    // was independently fit (min-area yaw search, 0-180°, 0.5° steps) and verified at zero vertex
+    // overflow against the real mesh.
+    private static let containersClusterBoxes: [(centerFraction: SIMD3<Float>, sizeFraction: SIMD3<Float>, yawRadians: Float)] = [
+        (SIMD3(-0.1163, 0.3816, 0.2152), SIMD3(0.1603, 0.7539, 0.5682), -0.0175),
+        (SIMD3(-0.0957, 0.8353, -0.3138), SIMD3(0.4933, 0.3294, 0.1740), -2.8885),
+        (SIMD3(-0.0335, 0.5017, -0.3779), SIMD3(0.4930, 0.3294, 0.1740), 0.0),
+        (SIMD3(-0.0968, 0.1704, -0.0160), SIMD3(0.4930, 0.3294, 0.1740), 0.0),
+        (SIMD3(-0.0968, 0.1704, -0.4130), SIMD3(0.1583, 0.3294, 0.5417), -1.5708),
+        (SIMD3(-0.2535, 0.1704, -0.1944), SIMD3(0.1583, 0.3294, 0.5417), -1.5708),
+        (SIMD3(-0.0968, 0.5017, -0.1975), SIMD3(0.1583, 0.3294, 0.5417), -1.5708),
+        (SIMD3(0.2784, 0.1384, 0.2152), SIMD3(0.4942, 0.2767, 0.2178), -2.1817)
+    ]
+
+    // `Container_18_MB.usdz`'s isolated open module ("_2_2") is itself a composite: a body
+    // shell ("Wall_2") plus 4 separately-hinged door panels swung open at 4 different angles
+    // (one at each corner). Verified the same way as the cluster boxes above (real SceneKit
+    // transform chain, then zero-overflow check against the source vertices). The body only
+    // spans this fraction of the container's nominal length — the rest is the doors projecting
+    // past both ends — so the floor/walls below are shortened to match instead of using the
+    // generic full-length formula.
+    private static let container18MBBodyLengthFraction: Float = 0.7755
+    private static let container18MBDoors: [(centerFraction: SIMD3<Float>, sizeFraction: SIMD3<Float>, yawRadians: Float)] = [
+        (SIMD3(0.4451, 0.5043, 0.3818), SIMD3(0.0138, 0.9125, 0.4832), -1.1694),
+        (SIMD3(-0.4441, 0.5043, -0.3921), SIMD3(0.1178, 0.9125, 0.0563), -2.7925),
+        (SIMD3(-0.4341, 0.5043, 0.3242), SIMD3(0.1178, 0.9125, 0.0566), -0.6894),
+        (SIMD3(0.4381, 0.5043, -0.3339), SIMD3(0.0139, 0.9125, 0.4831), -2.2078)
+    ]
+
+    private func cargoCollisionParts(
+        for asset: CargoContainerAssetKind,
+        size: SIMD3<Float>
+    ) -> [EnvironmentCollisionPart] {
+        if asset == .containersCluster {
+            return Self.containersClusterBoxes.enumerated().map { index, box in
+                EnvironmentCollisionPart(
+                    localCenter: box.centerFraction * size,
+                    size: box.sizeFraction * size,
+                    yawRadians: box.yawRadians,
+                    source: "container.cluster.box\(index)",
+                    supportsLanding: true
+                )
+            }
+        }
+
+        if asset == .container18MB {
+            let thickness = min(0.14, max(0.09, min(size.y, size.z) * 0.05))
+            let bodyLength = size.x * Self.container18MBBodyLengthFraction
+            var parts = [
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, thickness * 0.5, 0.0),
+                    size: SIMD3<Float>(bodyLength, thickness, size.z),
+                    source: "container.floor",
+                    supportsLanding: true
+                ),
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, size.y - thickness * 0.5, 0.0),
+                    size: SIMD3<Float>(bodyLength, thickness, size.z),
+                    source: "container.roof",
+                    supportsLanding: true
+                ),
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, size.y * 0.5, -size.z * 0.5 + thickness * 0.5),
+                    size: SIMD3<Float>(bodyLength, size.y, thickness),
+                    source: "container.wall.left"
+                ),
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, size.y * 0.5, size.z * 0.5 - thickness * 0.5),
+                    size: SIMD3<Float>(bodyLength, size.y, thickness),
+                    source: "container.wall.right"
+                )
+            ]
+            for (index, door) in Self.container18MBDoors.enumerated() {
+                parts.append(
+                    EnvironmentCollisionPart(
+                        localCenter: door.centerFraction * size,
+                        size: door.sizeFraction * size,
+                        yawRadians: door.yawRadians,
+                        source: "container.door\(index)"
+                    )
+                )
+            }
+            return parts
+        }
+
+        guard asset.hasFlyableInterior else {
+            return [
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, size.y * 0.5, 0.0),
+                    size: size,
+                    source: "container.closed.\(asset.rawValue)",
+                    supportsLanding: true
+                )
+            ]
+        }
+
+        let thickness = min(0.14, max(0.09, min(size.y, size.z) * 0.05))
+
+        var parts = [
+            EnvironmentCollisionPart(
+                localCenter: SIMD3<Float>(0.0, thickness * 0.5, 0.0),
+                size: SIMD3<Float>(size.x, thickness, size.z),
+                source: "container.floor",
+                supportsLanding: true
+            ),
+            EnvironmentCollisionPart(
+                localCenter: SIMD3<Float>(0.0, size.y - thickness * 0.5, 0.0),
+                size: SIMD3<Float>(size.x, thickness, size.z),
+                source: "container.roof",
+                supportsLanding: true
+            ),
+            EnvironmentCollisionPart(
+                localCenter: SIMD3<Float>(0.0, size.y * 0.5, -size.z * 0.5 + thickness * 0.5),
+                size: SIMD3<Float>(size.x, size.y, thickness),
+                source: "container.wall.left"
+            ),
+            EnvironmentCollisionPart(
+                localCenter: SIMD3<Float>(0.0, size.y * 0.5, size.z * 0.5 - thickness * 0.5),
+                size: SIMD3<Float>(size.x, size.y, thickness),
+                source: "container.wall.right"
+            )
+        ]
+
+        if !asset.hasOpenRearEnd {
+            parts.append(
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(-size.x * 0.5 + thickness * 0.5, size.y * 0.5, 0.0),
+                    size: SIMD3<Float>(thickness, size.y, size.z),
+                    source: "container.wall.rear"
+                )
+            )
+        }
+        return parts
+    }
+
     private func overlaps(position: SIMD2<Float>, radius: Float, occupied: [(SIMD2<Float>, Float)], padding: Float) -> Bool {
         for entry in occupied {
             let distance = simd_distance(entry.0, position)
@@ -1240,6 +1231,8 @@ final class ScenePopulationService {
                     Float.random(in: 1.0...3.0, using: &generator)
                 )
             }
+        case .cargoContainer:
+            return CargoContainerAssetKind.shippingContainerOpen.nominalSize
         case .rock:
             return SIMD3<Float>(
                 Float.random(in: 1.2...3.2, using: &generator),

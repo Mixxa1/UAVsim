@@ -571,6 +571,8 @@
 "camera.invert_y" = "Инвертировать Y";
 
 "diagnostic.last_collision_source" = "Источник последнего столкновения";
+"diagnostic.last_collision_detail" = "Детали последнего столкновения";
+"diagnostic.weather_dof_status" = "Статус блюра погоды";
 "diagnostic.active_objects" = "Активные объекты";
 "diagnostic.active_physics" = "Активные физические тела";
 "diagnostic.active_particles" = "Количество частиц";
@@ -2085,3 +2087,11 @@
 "online.runtime.events" = "События";
 "online.runtime.end_trial" = "Завершить испытание";
 "online.runtime.leave" = "Выйти";
+
+"credits.title" = "Сторонние ассеты";
+"credits.third_party_assets" = "Сторонние ассеты";
+"credits.author" = "Автор";
+"credits.license" = "Лицензия";
+"credits.source" = "Источник";
+"credits.changes" = "Изменения";
+"credits.menu" = "Авторство";

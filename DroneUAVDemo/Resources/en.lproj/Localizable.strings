@@ -576,6 +576,8 @@
 "camera.invert_y" = "Invert Y";
 
 "diagnostic.last_collision_source" = "Last collision source";
+"diagnostic.last_collision_detail" = "Last collision detail";
+"diagnostic.weather_dof_status" = "Weather blur status";
 "diagnostic.active_objects" = "Active objects";
 "diagnostic.active_physics" = "Active physics bodies";
 "diagnostic.active_particles" = "Particle count";
@@ -2090,3 +2092,11 @@
 "online.runtime.events" = "Events";
 "online.runtime.end_trial" = "End Trial";
 "online.runtime.leave" = "Leave";
+
+"credits.title" = "Third-Party Assets";
+"credits.third_party_assets" = "Third-Party Assets";
+"credits.author" = "Author";
+"credits.license" = "License";
+"credits.source" = "Source";
+"credits.changes" = "Changes";
+"credits.menu" = "Credits";

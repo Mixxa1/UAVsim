@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+      {
+          "id": "pine_tree_evolveduk",
+          "title": "Pine Tree",
+          "author": "evolveduk",
+          "sourceURL": "https://skfb.ly/ouSXM",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as an environment tree visual asset in DroneUAVDemo."
+      },
+      {
+          "id": "generic_grass_aartee",
+          "title": "Generic grass",
+          "author": "Aartee",
+          "sourceURL": "https://skfb.ly/oEZVJ",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a tiled terrain grass material in DroneUAVDemo."
+      },
+      {
+          "id": "snow04_publicdomaintextures",
+          "title": "Snow04",
+          "author": "Publicdomaintextures",
+          "sourceURL": "https://skfb.ly/oRwAR",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a tiled terrain snow material in DroneUAVDemo for snow weather."
+      },
+      {
+          "id": "patch_of_old_snow_simonspata",
+          "title": "Patch of Old Snow",
+          "author": "simonspata",
+          "sourceURL": "https://skfb.ly/oUIpU",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a decorative snow patch prop in DroneUAVDemo for snow weather."
+      },
+      {
+          "id": "snow_foot_step_gm3dscan",
+          "title": "Snow foot step",
+          "author": "GM3Dscan",
+          "sourceURL": "https://skfb.ly/oUIpB",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a decorative snow footstep prop near the spawn area in DroneUAVDemo for snow weather."
+      },
+      {
+          "id": "colorado_blue_spruce_plantcatalog",
+          "title": "Realistic HD Colorado Blue spruce Koster",
+          "author": "PlantCatalog",
+          "sourceURL": "https://skfb.ly/oUsOs",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as the snow-weather tree visual replacing Pine Tree in DroneUAVDemo."
+      },
+      {
+          "id": "container_18_mb_mehdi_shahsavan",
+          "title": "Container_18_MB",
+          "author": "Mehdi Shahsavan",
+          "sourceURL": "https://skfb.ly/p8pR6",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, normalized to simulation scale, and used as a cargo-container cluster in the cargo yard map."
+      },
+      {
+          "id": "free_ship_container_jonhgillessen",
+          "title": "Free Ship Container",
+          "author": "JonhGillessen",
+          "sourceURL": "https://skfb.ly/oxyBn",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, normalized to simulation scale, and used as a cargo container in the cargo yard map."
+      },
+      {
+          "id": "shipping_containers_arsen_ismailov",
+          "title": "Shipping Containers",
+          "author": "Arsen Ismailov",
+          "sourceURL": "https://skfb.ly/oKY9G",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and adapted as an open-door, fly-through cargo container with separate wall, roof, floor, rear-wall, and door collision proxies."
+      },
+      {
+          "id": "sea_cargo_container_legendarygamedev_riencecg",
+          "title": "Sea cargo container - LegendaryGameDev",
+          "author": "RienceCG",
+          "sourceURL": "https://skfb.ly/oGUqJ",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, normalized to simulation scale, and used as a cargo container in the cargo yard map."
+      },
+      {
+          "id": "containers_zapley",
+          "title": "Containers",
+          "author": "zapley",
+          "sourceURL": "https://skfb.ly/6CNsu",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, normalized to simulation scale, and used as a cargo-container cluster in the cargo yard map."
+      },
+      {
+          "id": "asphalt13_publicdomaintextures",
+          "title": "Asphalt13",
+          "author": "Publicdomaintextures",
+          "sourceURL": "https://skfb.ly/6RvoB",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as the tiled base terrain material for the cargo yard map."
+      },
+      {
+          "id": "seamless_pbr_texture_ground_01_arthur_zim",
+          "title": "Seamless PBR Texture Ground 01",
+          "author": "Arthur.Zim",
+          "sourceURL": "https://sketchfab.com/3d-models/seamless-pbr-texture-ground-01-3c842e5dc6cd41d3baa788ec255d79f0",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ/texture source and used as the tiled base terrain material for the abandoned city map in DroneUAVDemo."
+      },
+      {
+          "id": "abandoned_shop_old_house_yadrogames",
+          "title": "Abandoned | Building | Shop | Old | House",
+          "author": "YadroGames",
+          "sourceURL": "https://sketchfab.com/3d-models/abandoned-building-shop-old-house-0ed14367314946b298d9a58db66da040",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a visual abandoned building asset in the abandoned city map of DroneUAVDemo."
+      },
+      {
+          "id": "abandoned_house_aspectstudios",
+          "title": "Abandoned House",
+          "author": "AspectStudios",
+          "sourceURL": "https://sketchfab.com/3d-models/abandoned-house-c876fa6c530f4946a5234666752803ce",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a visual abandoned house asset in the abandoned city map of DroneUAVDemo."
+      },
+      {
+          "id": "abandoned_house_sengchor",
+          "title": "Abandoned House",
+          "author": "Sengchor",
+          "sourceURL": "https://sketchfab.com/3d-models/abandoned-house-a0c01ce35a474545b805c0739806aace",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a visual abandoned house asset in the abandoned city map of DroneUAVDemo."
+      },
+      {
+          "id": "dubai_clouds_etribe",
+          "title": "Dubai Clouds",
+          "author": "Etribe",
+          "sourceURL": "https://skfb.ly/6WNSA",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as background sky cloud decoration in DroneUAVDemo."
+      },
+      {
+          "id": "fluffy_cloud_loic_norgeot",
+          "title": "Fluffy Cloud",
+          "author": "Loïc Norgeot",
+          "sourceURL": "https://skfb.ly/6RFxT",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, scaled into an ambient envelope volume around the drone, and used as the fog weather visual in DroneUAVDemo."
+      },
+      {
+          "id": "evanescent_smoke_tycho_magnetic_anomaly",
+          "title": "Evanescent Smoke",
+          "author": "Tycho Magnetic Anomaly",
+          "sourceURL": "https://skfb.ly/ortyY",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, scaled into an ambient envelope volume around the drone, and used as the smog weather visual in DroneUAVDemo."
+      },
+      {
+          "id": "3_pack_of_storm_lightning_incg5764",
+          "title": "3 Pack of Storm Lightning",
+          "author": "Incg5764",
+          "sourceURL": "https://skfb.ly/ozxVV",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ; its three bolt variants are spawned at random world locations as the thunderstorm weather's lightning strike visual in DroneUAVDemo."
+      }
+  ]
+}
+

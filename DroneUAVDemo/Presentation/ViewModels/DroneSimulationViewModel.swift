@@ -482,7 +482,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var backgroundTickSkipCounter = 0
     // Window visibility is set by delegate events; combined with input recency → activityState.
     private var currentVisibilityState: RuntimeVisibilityState = .activeVisible
-    private var lastUserInteractionAt: TimeInterval = 0
+    private var lastUserInteractionAt: TimeInterval = CACurrentMediaTime()
 
     // v1.4.4: Hz/FPS counters for PERF diagnostics; reset each second in tick().
     private var diagSnapshotOutCount: Int = 0
@@ -506,6 +506,26 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var terrain: TerrainConfiguration
     @Published private(set) var cameraConfiguration: CameraConfiguration
 
+    // Matches the weather envelope sphere's own visibility gate in DroneSceneController
+    // (`updateWeatherEnvelope`), which shows the haze at preset selection alone — its opacity
+    // formula has a non-zero floor (`0.25 + intensity*0.55`) so it's visible even at
+    // intensity == 0. Originally also required `normalizedIntensity > 0` here, which meant
+    // picking a fog/smog preset without separately raising intensity showed the envelope haze
+    // but never enabled blur — inconsistent with what the user actually sees on screen.
+    var wantsWeatherDepthOfField: Bool {
+        weather.preset == .fog || weather.preset == .smog
+    }
+
+    // Plain computed read for the diagnostics panel — deliberately *not* round-tripped through
+    // a callback from DroneSceneViewRepresentable: an earlier version had updateNSView report
+    // back via a closure that set an @Published property, which triggered another SceneViewportView
+    // body re-evaluation, another updateNSView call, another callback — an unbounded SwiftUI
+    // re-render loop that pegged CPU even with no weather active. Never feed view-update-cycle
+    // callbacks back into @Published state on the same observed object.
+    var weatherDepthOfFieldAppliedStatus: String {
+        "wants=\(wantsWeatherDepthOfField)"
+    }
+
     private(set) var batteryState: BatteryState
     private(set) var collisionAnalysis: CollisionAnalysisSnapshot
     @Published private(set) var damageState: DamageState
@@ -515,6 +535,11 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var warnings: [String]
     @Published private(set) var diagnostics: SimulationDiagnostics
     @Published private(set) var lastCollisionSource: String
+    @Published private(set) var lastCollisionDetail: String = "n/a"
+    // Decremented only while preset == .thunderstorm (see updateThunderstormLightning) — picking
+    // the preset doesn't reset it, so toggling away and back resumes the same wait rather than
+    // restarting a fresh 60-600s window every time.
+    private var nextLightningStrikeCountdown: Float = Float.random(in: 60...600)
     @Published private(set) var lastModeTransitionReason: String
     @Published private(set) var fixedWingLastTransitionReason: String?
     @Published private(set) var fixedWingAutopilotDebugState: FixedWingAutopilotDebugState
@@ -667,6 +692,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func noteUserInteraction() {
         lastUserInteractionAt = CACurrentMediaTime()
+        // Promote activeIdle → interacting immediately on any interaction, so arming/flying/camera
+        // movement restores 60 FPS without requiring a windowDidBecomeKey event.
+        if currentVisibilityState == .activeVisible,
+           performancePolicy.activityState == .activeIdle {
+            refreshActivityPolicy(now: lastUserInteractionAt)
+        }
     }
 
     private func refreshActivityPolicy(now: TimeInterval) {
@@ -3764,9 +3795,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let resolvedInput = updateInputPipeline(deltaTime: TimeInterval(dt))
         let controllerSnapshot = inputManager.snapshot(for: .gameController)
-        // Note interaction when UAV is actively flying (armed + moving) so the window
-        // doesn't transition to activeIdle while the pilot's drone is still in flight.
-        if currentVisibilityState == .activeVisible, isArmed, simd_length(state.velocity) > 0.15 {
+        // Keep interacting (60 FPS) whenever the UAV is armed, regardless of velocity.
+        if currentVisibilityState == .activeVisible, isArmed {
             noteUserInteraction()
         }
         cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
@@ -3870,19 +3900,60 @@ final class DroneSimulationViewModel: ObservableObject {
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
 
-        let postPhysicsCollisionAnalysis = collisionService.analyze(
-            input: CollisionAnalysisInput(
-                dronePosition: state.position,
-                droneVelocity: state.velocity,
-                droneRadius: selectedDroneProfile.collisionRadius,
-                obstacles: sceneController.environmentObstacles,
-                weather: weather
+        let postPhysicsCollisionAnalysis: CollisionAnalysisSnapshot
+        if let sweptCollision = collisionService.firstSweptCollision(
+            from: previousState.position,
+            to: state.position,
+            droneRadius: selectedDroneProfile.collisionRadius,
+            obstacles: sceneController.environmentObstacles
+        ) {
+            let separation = max(0.025, selectedDroneProfile.collisionRadius * 0.06)
+            state.position = sweptCollision.contactPoint + sweptCollision.contactNormal * separation
+            postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
+                riskScore: 1.0,
+                nearestObstacleDistance: -separation,
+                nearestObstacleID: sweptCollision.obstacle.id,
+                nearestObstacleSource: sweptCollision.obstacle.source,
+                timeToCollision: 0.0,
+                emergencyAction: .emergencyStop,
+                contactNormal: sweptCollision.contactNormal
             )
-        )
+        } else {
+            postPhysicsCollisionAnalysis = collisionService.analyze(
+                input: CollisionAnalysisInput(
+                    dronePosition: state.position,
+                    droneVelocity: state.velocity,
+                    droneRadius: selectedDroneProfile.collisionRadius,
+                    obstacles: sceneController.environmentObstacles,
+                    weather: weather
+                )
+            )
+        }
 
         collisionAnalysis = postPhysicsCollisionAnalysis
         var needsCollisionAnalysisRefresh = false
         if postPhysicsCollisionAnalysis.nearestObstacleDistance <= -0.02 {
+            #if DEBUG
+            if let source = postPhysicsCollisionAnalysis.nearestObstacleSource, source.hasPrefix("container.") {
+                var obstacleInfo = ""
+                if let id = postPhysicsCollisionAnalysis.nearestObstacleID,
+                   let obstacle = sceneController.obstacle(for: id) {
+                    obstacleInfo =
+                        " obstacleCenter=\(obstacle.center)" +
+                        " planarHalfExtents=\(String(describing: obstacle.planarHalfExtents))" +
+                        " baseY=\(obstacle.baseY) topY=\(obstacle.topY)" +
+                        " yawRadians=\(obstacle.yawRadians)"
+                }
+                print(
+                    "[ContainerCollision] source=\(source) " +
+                    "dist=\(postPhysicsCollisionAnalysis.nearestObstacleDistance) " +
+                    "speed=\(simd_length(state.velocity)) " +
+                    "dronePos=\(state.position) " +
+                    "normal=\(postPhysicsCollisionAnalysis.contactNormal ?? SIMD3<Float>(repeating: .nan))" +
+                    obstacleInfo
+                )
+            }
+            #endif
             if simd_length(state.velocity) > 0.45, collisionCooldown <= 0.0 {
                 handleObstacleCollision(using: postPhysicsCollisionAnalysis)
                 collisionCooldown = collisionCooldownDuration(for: postPhysicsCollisionAnalysis.nearestObstacleSource)
@@ -3961,6 +4032,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         applyMissionSafetyRuntimeIfNeeded()
         sampleMissionObservationIfNeeded()
+        updateThunderstormLightning(deltaTime: dt)
 
         let renderStart = CACurrentMediaTime()
         if !performancePolicy.stopRendering {
@@ -4064,6 +4136,19 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func handleObstacleCollision(using analysis: CollisionAnalysisSnapshot) {
+        if let id = analysis.nearestObstacleID, let obstacle = sceneController.obstacle(for: id) {
+            let halfExtents = obstacle.planarHalfExtents
+            let hxz = halfExtents.map { String(format: "%.1f,%.1f", $0.x, $0.y) } ?? "r=\(String(format: "%.1f", obstacle.radius))"
+            lastCollisionDetail = String(
+                format: "c=%.1f,%.1f,%.1f h=%@ y=%.1f-%.1f yaw=%.0f° d=%.2f",
+                obstacle.center.x, obstacle.center.y, obstacle.center.z,
+                hxz, obstacle.baseY, obstacle.topY,
+                obstacle.yawRadians * 180.0 / .pi,
+                analysis.nearestObstacleDistance
+            )
+        } else {
+            lastCollisionDetail = "n/a"
+        }
         switch obstacleImpactClass(for: analysis.nearestObstacleSource) {
         case .foliage:
             applyFoliageCollisionResponse(using: analysis)
@@ -4119,10 +4204,14 @@ final class DroneSimulationViewModel: ObservableObject {
             lateralComponent * 0.12 +
             penetration * 2.8
 
+        // Calibrated against a multirotor hitting a hard surface (containers): severe — the
+        // tier that cuts the signal and force-disarms — now needs roughly an 8.5 m/s impact,
+        // not ~3.4 m/s. The old thresholds dated from before the container collision geometry
+        // fixes, when bogus multi-meter penetration depths inflated the score on minor grazes.
         switch severityScore {
-        case ..<1.9:
+        case ..<6.0:
             return .minorContact
-        case ..<4.6:
+        case ..<12.5:
             return .moderateImpact
         default:
             return .severeImpact
@@ -4217,6 +4306,62 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// Real, localized strikes rather than the old full-screen sun-intensity flash (removed from
+    /// DroneSceneController's `updateWeatherAnimation`) — minutes apart per the user's spec ("от
+    /// 60 до 600 секунд"), at a random point near the drone, with a small chance of actually
+    /// hitting it.
+    private func updateThunderstormLightning(deltaTime: Float) {
+        guard weather.preset == .thunderstorm else {
+            return
+        }
+        nextLightningStrikeCountdown -= deltaTime
+        guard nextLightningStrikeCountdown <= 0 else {
+            return
+        }
+        nextLightningStrikeCountdown = Float.random(in: 60...600)
+
+        // Same non-zero-floor pattern as the visual darkening elsewhere in this preset — a
+        // freshly-picked storm (intensity 0) still carries a real, if smaller, chance of a hit.
+        let hitChance = 0.05 + weather.normalizedIntensity * 0.05
+        let isHit = Float.random(in: 0...1) < hitChance
+
+        let impactPosition: SCNVector3
+        let boltHeight: Float
+        if isHit {
+            impactPosition = SCNVector3(state.position.x, state.position.y, state.position.z)
+            boltHeight = max(40.0, state.position.y + 45.0)
+            applyLightningStrikeDamage()
+        } else {
+            let radius = Float.random(in: 30...220)
+            let angle = Float.random(in: 0...(2.0 * Float.pi))
+            impactPosition = SCNVector3(
+                state.position.x + cos(angle) * radius,
+                0.0,
+                state.position.z + sin(angle) * radius
+            )
+            boltHeight = Float.random(in: 50...75)
+        }
+
+        if !performancePolicy.stopRendering {
+            sceneController.triggerLightningStrike(impactPosition: impactPosition, boltHeight: boltHeight)
+        }
+    }
+
+    /// A struck aircraft takes real damage ("шанс никогда же не равен 0... приведет к
+    /// поломке") — reuses the same collision-damage pipeline as a physical impact rather than
+    /// inventing a separate one.
+    private func applyLightningStrikeDamage() {
+        damageState = damageState.applyingCollisionDamage(impactEnergy: 9.0)
+        lastCollisionSource = "lightning_strike"
+        collisionAftermathState = .damaged
+        impactSeverityAccumulator = max(impactSeverityAccumulator, 2.0)
+        state.angularVelocity += SIMD3<Float>(
+            Float.random(in: -0.8...0.8),
+            Float.random(in: -0.4...0.4),
+            Float.random(in: -0.8...0.8)
+        )
+    }
+
     private func applyCollisionDamage(using analysis: CollisionAnalysisSnapshot) {
         let impact = simd_length(state.velocity)
         lastCollisionSource = analysis.nearestObstacleSource ?? "unknown"
@@ -4298,7 +4443,13 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
 
-        let normal = horizontalPushNormal(awayFrom: obstacle)
+        let normal: SIMD3<Float>
+        if let contactNormal = analysis.contactNormal,
+           simd_length_squared(contactNormal) > 0.0001 {
+            normal = simd_normalize(contactNormal)
+        } else {
+            normal = horizontalPushNormal(awayFrom: obstacle)
+        }
 
         let pushDistance = penetration + max(0.03, selectedDroneProfile.collisionRadius * 0.08)
         state.position += normal * pushDistance
@@ -12123,7 +12274,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private func supportSurfaceY(for position: SIMD3<Float>) -> Float {
         sceneController.supportSurfaceHeight(
             at: SIMD2<Float>(position.x, position.z),
-            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48)
+            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48),
+            maximumHeight: position.y
         ) ?? 0.0
     }
 

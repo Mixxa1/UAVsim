@@ -174,9 +174,9 @@ enum TerrainPreset: String, CaseIterable, Identifiable {
         case .forest:
             return [.tree, .tree, .tree, .rock, .pole]
         case .cargoYard:
-            return [.crate, .crate, .crate, .pole, .marker]
+            return [.cargoContainer, .cargoContainer, .cargoContainer, .pole, .marker]
         case .city:
-            return [.building, .building, .building, .pole, .crate]
+            return []
         }
     }
 
@@ -201,9 +201,73 @@ enum EnvironmentObjectKind: String {
     case building
     case pole
     case crate
+    case cargoContainer
     case rock
     case marker
     case distantBelt
+}
+
+enum CargoContainerAssetKind: String, CaseIterable {
+    case container18MB
+    case freeShipContainer
+    case shippingContainerOpen
+    case seaCargoContainer
+    case containersCluster
+
+    var nominalSize: SIMD3<Float> {
+        switch self {
+        case .container18MB:
+            return SIMD3<Float>(11.98, 3.00, 2.92)
+        case .freeShipContainer:
+            return SIMD3<Float>(12.20, 2.59, 2.44)
+        case .shippingContainerOpen, .seaCargoContainer:
+            return SIMD3<Float>(6.06, 2.59, 2.44)
+        case .containersCluster:
+            return SIMD3<Float>(8.90, 5.20, 8.10)
+        }
+    }
+
+    var hasFlyableInterior: Bool {
+        switch self {
+        case .shippingContainerOpen, .freeShipContainer, .container18MB:
+            return true
+        case .seaCargoContainer, .containersCluster:
+            return false
+        }
+    }
+
+    /// `freeShipContainer`'s source mesh has no end caps at all, and `container18MB`'s isolated
+    /// "doors open" module has door geometry swung open at both ends — both stay open all the
+    /// way through, so neither gets a rear wall. `shippingContainerOpen` is confirmed
+    /// single-ended from its own door node data, so it keeps one.
+    var hasOpenRearEnd: Bool {
+        self == .freeShipContainer || self == .container18MB
+    }
+}
+
+struct EnvironmentCollisionPart {
+    let id: UUID
+    let localCenter: SIMD3<Float>
+    let size: SIMD3<Float>
+    let yawRadians: Float
+    let source: String
+    let supportsLanding: Bool
+
+    init(
+        id: UUID = UUID(),
+        localCenter: SIMD3<Float>,
+        size: SIMD3<Float>,
+        yawRadians: Float = 0.0,
+        source: String,
+        supportsLanding: Bool = false
+    ) {
+        self.id = id
+        self.localCenter = localCenter
+        self.size = size
+        self.yawRadians = yawRadians
+        self.source = source
+        self.supportsLanding = supportsLanding
+    }
 }
 
 struct TerrainConfiguration {
@@ -258,4 +322,30 @@ struct EnvironmentObjectDescriptor: Identifiable {
     let size: SIMD3<Float>
     let boundingRadius: Float
     let isCollidable: Bool
+    let cargoAsset: CargoContainerAssetKind?
+    let collisionParts: [EnvironmentCollisionPart]
+
+    init(
+        id: UUID,
+        kind: EnvironmentObjectKind,
+        biome: TerrainPreset,
+        position: SIMD3<Float>,
+        yawRadians: Float,
+        size: SIMD3<Float>,
+        boundingRadius: Float,
+        isCollidable: Bool,
+        cargoAsset: CargoContainerAssetKind? = nil,
+        collisionParts: [EnvironmentCollisionPart] = []
+    ) {
+        self.id = id
+        self.kind = kind
+        self.biome = biome
+        self.position = position
+        self.yawRadians = yawRadians
+        self.size = size
+        self.boundingRadius = boundingRadius
+        self.isCollidable = isCollidable
+        self.cargoAsset = cargoAsset
+        self.collisionParts = collisionParts
+    }
 }
