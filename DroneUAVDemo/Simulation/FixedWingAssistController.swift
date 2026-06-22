@@ -226,8 +226,13 @@ final class FixedWingAssistController {
             filteredCourseRad = wrapAngle(filteredCourseRad + delta * alpha)
         }
         let courseError = shortestAngle(filteredCourseRad - aircraftState.orientation.z)
-        // Low-altitude bank protection — see FixedWingAutopilot.swift.
-        let altitudeMarginFactor = (aircraftState.position.y / max(wing.initialClimbTargetAltitude, 1.0))
+        // Low-altitude bank protection — see FixedWingAutopilot.swift. Measured
+        // against this leg's own target altitude (already resolved above),
+        // not a fixed absolute height, so a mission that deliberately
+        // cruises low still gets full bank authority once it's actually at
+        // its own intended altitude.
+        let altitudeDeficit = max(0.0, targetAltitudeMeters - aircraftState.position.y)
+        let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
             .clamped(to: 0.35...1.0)
         let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians * altitudeMarginFactor
         var rawBankRad = (courseError * Tuning.headingBankGain).clamped(to: -maxBankRad...maxBankRad)
@@ -286,6 +291,15 @@ final class FixedWingAssistController {
            let waypointID = assistState.selectedWaypointID {
             let distance = simd_length(target - aircraftPlanar)
             let baseAcceptance = max(wing.waypointAcceptanceRadiusMeters, 5.0) * Tuning.interceptCaptureMultiplier
+            // Reverted: scaling this uncapped against minimumTurnRadius blew
+            // up to hundreds/thousands of meters for fast airframes (e.g.
+            // ~1.3km for a 90 m/s cruiser at 28° max bank), capturing
+            // waypoints from absurdly far away on the *main* route, not just
+            // the close-reselect case it was meant to fix — confirmed
+            // regression, not a tradeoff worth keeping. Back to the bounded
+            // form; the close-reselect dead zone (pure pursuit can't
+            // converge on a target inside its own minimum turn radius) needs
+            // a real intercept-maneuver fix, not a capture-radius hack.
             let captureRadius = max(
                 baseAcceptance * 1.45,
                 min(

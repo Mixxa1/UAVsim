@@ -970,6 +970,15 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fleetNearestInterDroneDistance: Float = .infinity
     private var isTerrainDensitySliderEditing: Bool = false
     private var terrainMapTrail: [SIMD2<Float>] = []
+    /// `obstacle.source` -> classified base radius, so the string-matching
+    /// switch in `fixedWingProtectedObstacleRadius` runs once per distinct
+    /// source string instead of on every call. `fixedWingPathNeedsObstacleReroute`
+    /// calls it once per obstacle per route-rebuild, and that rebuild happens
+    /// every simulation tick — with a couple hundred environment obstacles
+    /// (e.g. procedurally placed trees), the repeated `.contains` chains were
+    /// measured pegging the main thread (confirmed via Xcode's paused-thread
+    /// backtrace landing in Foundation's string search machinery).
+    private var fixedWingObstacleBaseRadiusCache: [String: Float] = [:]
     private var installedPayloadConfiguration: PayloadConfiguration?
     private var activePayloadReleaseID: UUID?
     private var lastSidebarModule: ControlModule = .flightOps
@@ -7714,7 +7723,7 @@ final class DroneSimulationViewModel: ObservableObject {
         targetAltitude: Float
     ) -> FixedWingSafeRouteCacheKey {
         FixedWingSafeRouteCacheKey(
-            routeSignature: fixedWingPlanarRouteSignature(routePoints),
+            routeSignature: fixedWingCoarseRouteSignature(routePoints),
             noFlyZoneSignature: fixedWingNoFlyZoneSignature(zones),
             obstacleSignature: fixedWingObstacleSignature(),
             terrainSignature: fixedWingTerrainSignature(),
@@ -7722,6 +7731,28 @@ final class DroneSimulationViewModel: ObservableObject {
             targetAltitudeBucket: Int((targetAltitude * 2.0).rounded()),
             profileID: selectedDroneProfile.id
         )
+    }
+
+    /// Coarser than `fixedWingPlanarRouteSignature` (0.5m buckets) on purpose:
+    /// several call sites feed this cache the *live* aircraft position as the
+    /// route's first point (e.g. `fixedWingAssistProtectedGuidanceSnapshot`,
+    /// `fixedWingAssistSafeOverlayRoute`), which moves every tick — at 0.5m
+    /// buckets the cache key changes essentially every tick during flight,
+    /// so it never hits and `buildSafeFixedWingRoute`'s grid A* search (the
+    /// confirmed hot path in a profiled freeze) reruns from scratch every
+    /// tick for as long as a reroute is needed. 15m buckets mean "moved a
+    /// little since the last reroute" reuses the same safe path instead of
+    /// recomputing it — safe because the underlying obstacle/no-fly geometry
+    /// the path avoids hasn't moved, only where exactly along it we ask.
+    private func fixedWingCoarseRouteSignature(_ routePoints: [SIMD2<Float>]) -> Int {
+        var hasher = Hasher()
+        let compacted = compactedPlanarPath(routePoints)
+        hasher.combine(compacted.count)
+        for point in compacted {
+            hasher.combine(Int((point.x / 15.0).rounded()))
+            hasher.combine(Int((point.y / 15.0).rounded()))
+        }
+        return hasher.finalize()
     }
 
     private func fixedWingPlanarRouteSignature(_ routePoints: [SIMD2<Float>]) -> Int {
@@ -7837,23 +7868,30 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func fixedWingProtectedObstacleRadius(_ obstacle: CollisionObstacle) -> Float {
         let base: Float
-        switch obstacle.source {
-        case let value where value.contains("no_fly"):
-            base = 2.2
-        case let value where value.contains("building"):
-            base = 1.4
-        case let value where value.contains("tree"):
-            base = 1.1
-        case let value where value.contains("pole"):
-            base = 1.2
-        case let value where value.contains("barrier"):
-            base = 1.6
-        case let value where value.contains("dock"):
-            base = 0.9
-        case let value where value.contains("terrain"):
-            base = 0.8
-        default:
-            base = 1.0
+        if let cached = fixedWingObstacleBaseRadiusCache[obstacle.source] {
+            base = cached
+        } else {
+            let classified: Float
+            switch obstacle.source {
+            case let value where value.contains("no_fly"):
+                classified = 2.2
+            case let value where value.contains("building"):
+                classified = 1.4
+            case let value where value.contains("tree"):
+                classified = 1.1
+            case let value where value.contains("pole"):
+                classified = 1.2
+            case let value where value.contains("barrier"):
+                classified = 1.6
+            case let value where value.contains("dock"):
+                classified = 0.9
+            case let value where value.contains("terrain"):
+                classified = 0.8
+            default:
+                classified = 1.0
+            }
+            fixedWingObstacleBaseRadiusCache[obstacle.source] = classified
+            base = classified
         }
         return obstacle.radius + base + selectedDroneProfile.collisionRadius * 0.6
     }
@@ -7868,7 +7906,16 @@ final class DroneSimulationViewModel: ObservableObject {
             return nil
         }
 
-        let planner = AutoPathPlannerService()
+        // Reuse the shared planner instance (same one evaluateFixedWingTurnCorridorAssessment
+        // uses) rather than `AutoPathPlannerService()` — a fresh instance has no grid cache,
+        // so every call below was rebuilding the *entire-map* navigation grid from scratch
+        // (cellSize ~3m over a 25,600m map is on the order of tens of millions of cells,
+        // allocated and rasterized every time) instead of reusing it across calls the way
+        // `ensureGrid`'s own signature-based cache is designed to. Confirmed via a paused
+        // backtrace landing in AutoPathPlannerService.astar's cell hashing exactly when this
+        // ran. `invalidate()` below only clears path/goal state, not the grid cache, so the
+        // grid still gets rebuilt correctly whenever terrain/obstacles actually change.
+        let planner = autoPathPlanner
         let obstacles = navigationObstacles(including: noFlyZones)
         let droneRadius = selectedDroneProfile.collisionRadius
         let altitude = max(2.0, targetAltitude)
@@ -8897,7 +8944,18 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         )
         let verticalTolerance = max(2.0, droneRadius * 1.6)
-        let navigationObstacles = navigationObstaclesIncludingNoFlyZones()
+        // Cheap distance pre-filter before any of the expensive per-obstacle
+        // work below (segment-distance scan, full collision analysis, path
+        // assessment) — on a large map with hundreds of environment
+        // obstacles (procedural trees etc.), running that work against every
+        // single one every time the aircraft nears a waypoint measured as a
+        // real, reproducible freeze. Nothing farther than the corridor's own
+        // reach from `middle` can possibly intersect it, so this can only
+        // drop obstacles that were guaranteed-irrelevant anyway.
+        let corridorBoundingRadius = leadDistance + effectiveRadius + corridorHalfWidth + 20.0
+        let navigationObstacles = navigationObstaclesIncludingNoFlyZones().filter {
+            simd_distance($0.planarCenter, middle) <= corridorBoundingRadius + $0.radius
+        }
         let obstacleInTurnCorridor = navigationObstacles.contains { obstacle in
             let minimumDistance = zip(arcPoints, arcPoints.dropFirst()).reduce(Float.greatestFiniteMagnitude) { currentMinimum, segment in
                 min(

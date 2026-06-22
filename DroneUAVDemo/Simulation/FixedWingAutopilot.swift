@@ -312,14 +312,28 @@ final class FixedWingAutopilot {
         let desiredCourse = state.filteredCourseRad
         let courseError = shortestAngle(desiredCourse - input.aircraftYawRadians)
 
+        // Vertical target, resolved early so the bank limiter below can
+        // reference it (the rest of vertical guidance recomputes the same
+        // value further down — cheap, and keeps this section self-contained).
+        let earlyTargetAltitude = targetAltitudeOverride ?? activeWaypoint.altitude
+
         // Low-altitude bank protection: pitch/throttle compensation alone
-        // can't fully erase the lift a steep bank costs, so below the
-        // aircraft's own climb-out altitude it should not attempt a turn
-        // sharp enough to outrun its margin in the first place — exactly the
-        // "banks while still low, sinks into the ground" failure mode seen
-        // repeatedly in testing. Ramps linearly back to full authority once
-        // there's real altitude to spend.
-        let altitudeMarginFactor = (input.aircraftPosition.y / max(wing.initialClimbTargetAltitude, 1.0))
+        // can't fully erase the lift a steep bank costs, so while still
+        // climbing toward where the mission wants it to be, the aircraft
+        // shouldn't attempt a turn sharp enough to outrun its margin before
+        // getting there — the "banks while still low, sinks into the
+        // ground" failure mode seen repeatedly in testing. Deliberately
+        // measured against *this leg's own target altitude*, not a fixed
+        // absolute height: a mission that intentionally cruises at 15m
+        // should get full authority once it's actually at its own 15m
+        // cruise, not be permanently capped because 15m is "low" in some
+        // absolute sense — that previously made low-altitude missions
+        // unable to complete turns at all. The restriction now only bites
+        // while genuinely below profile (e.g. mid climb-out), and lifts as
+        // soon as the aircraft reaches the altitude it's already trying to
+        // hold.
+        let altitudeDeficit = max(0.0, earlyTargetAltitude - input.aircraftPosition.y)
+        let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
             .clamped(to: 0.35...1.0)
         let maxBankRad = max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95 * altitudeMarginFactor
         var rawBankRad = (courseError * Tuning.bankProportionalGain).clamped(to: -maxBankRad...maxBankRad)
@@ -333,7 +347,7 @@ final class FixedWingAutopilot {
         state.filteredBankRad = state.filteredBankRad + (rawBankRad - state.filteredBankRad) * bankAlpha
 
         // Vertical guidance — pitch + throttle.
-        let targetAltitude = targetAltitudeOverride ?? activeWaypoint.altitude
+        let targetAltitude = earlyTargetAltitude
         let altitudeError = targetAltitude - input.aircraftPosition.y
         let verticalVelocity = input.aircraftVelocity.y.isFinite ? input.aircraftVelocity.y : 0.0
         let bleed: Float = Tuning.maxAltitudeBleedRateMps
