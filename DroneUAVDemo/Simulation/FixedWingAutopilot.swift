@@ -337,15 +337,8 @@ final class FixedWingAutopilot {
         let altitudeError = targetAltitude - input.aircraftPosition.y
         let verticalVelocity = input.aircraftVelocity.y.isFinite ? input.aircraftVelocity.y : 0.0
         let bleed: Float = Tuning.maxAltitudeBleedRateMps
-        // Coordinated-turn lift compensation: a real bank trades vertical lift
-        // for centripetal force (lift's vertical component falls by cos(bank)),
-        // which the old kinematic model never charged for. Without this term
-        // the aircraft sinks every time it banks toward a waypoint — exactly
-        // what was driving low-altitude post-launch turns into the ground.
-        let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
         let altitudePitchRaw = (altitudeError * Tuning.altitudePitchGain
-            - verticalVelocity * Tuning.verticalDampingGain
-            + bankLiftLossRad).clamped(to: -bleed...bleed)
+            - verticalVelocity * Tuning.verticalDampingGain).clamped(to: -bleed...bleed)
         let maxPitchUpRad = max(0.05, wing.maxPitchUpDeg.degreesToRadians)
         let maxPitchDownRad = max(0.05, wing.maxPitchDownDeg.degreesToRadians)
         var rawPitchRad = altitudePitchRaw.clamped(to: -maxPitchDownRad...maxPitchUpRad)
@@ -360,6 +353,17 @@ final class FixedWingAutopilot {
 
         let pitchAlpha = filterAlpha(tau: Tuning.pitchFilterTau, dt: input.deltaTime)
         state.filteredPitchRad = state.filteredPitchRad + (rawPitchRad - state.filteredPitchRad) * pitchAlpha
+        // Coordinated-turn lift compensation is applied *after* the pitch
+        // filter, not blended into the filtered term — bank itself reaches
+        // the lower-level PD loop after only the bank filter's lag (~0.32s);
+        // routing the compensation through the pitch filter too (~0.45s)
+        // would make it systematically trail the lift loss it's meant to
+        // cancel. A bank trades vertical lift for centripetal force (lift's
+        // vertical component falls by cos(bank)) — the old kinematic model
+        // never charged for this, so without this term the aircraft sinks
+        // every time it banks toward a waypoint.
+        let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
+        state.filteredPitchRad = (state.filteredPitchRad + bankLiftLossRad).clamped(to: -maxPitchDownRad...maxPitchUpRad)
 
         // Throttle: cruise + speed error + altitude assist when climbing.
         let approachScale: Float = {
@@ -384,21 +388,22 @@ final class FixedWingAutopilot {
         let cruiseHover: Float = 0.55
         let altitudeBoost = max(0.0, altitudeError) * Tuning.throttleAltitudeAssistGain
         let stallBoost: Float = stallProtectionActive ? 0.18 : 0.0
-        // Coordinated-turn drag compensation: a banked turn needs more lift
-        // (1/cos(bank)), and induced drag grows with the square of that — so
-        // without extra throttle the aircraft bleeds airspeed through a turn,
-        // which costs even more lift on top of the bank's own cosine loss.
-        let turnDragBoost = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnThrottleCompensationGain
         var rawThrottle = (cruiseHover
             + speedError * Tuning.throttleSpeedGain
             + altitudeBoost
             + stallBoost
-            + turnDragBoost
             - max(0.0, -altitudeError) * 0.012) // gentle pull back during high-altitude descent
         rawThrottle = rawThrottle.clamped(to: Tuning.throttleHoverSpan)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: input.deltaTime)
         state.filteredThrottle = state.filteredThrottle + (rawThrottle - state.filteredThrottle) * throttleAlpha
-        state.filteredThrottle = state.filteredThrottle.clamped(to: Tuning.throttleHoverSpan)
+        // Coordinated-turn drag compensation, applied post-filter — same
+        // reasoning as the pitch compensation above (throttle's own filter,
+        // 0.55s, is even slower, so this matters even more here). A banked
+        // turn needs more lift (1/cos(bank)), and induced drag grows with the
+        // square of that, so without extra throttle airspeed bleeds through
+        // the turn, costing even more lift on top of the bank's cosine loss.
+        let turnDragBoost = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnThrottleCompensationGain
+        state.filteredThrottle = (state.filteredThrottle + turnDragBoost).clamped(to: Tuning.throttleHoverSpan)
 
         let bankDeg = state.filteredBankRad.radiansToDegrees
         let pitchDeg = state.filteredPitchRad.radiansToDegrees

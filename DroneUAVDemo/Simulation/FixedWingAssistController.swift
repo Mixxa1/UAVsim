@@ -240,29 +240,33 @@ final class FixedWingAssistController {
         // Altitude / pitch handling. Heading-hold also keeps altitude lightly.
         let altitudeError = targetAltitudeMeters - aircraftState.position.y
         let verticalVelocity = aircraftState.velocity.y.isFinite ? aircraftState.velocity.y : 0.0
-        // Coordinated-turn lift compensation — see FixedWingAutopilot.swift for
-        // the full rationale: banking costs vertical lift (cos(bank)) under the
-        // real aero model, so nose-up bias is needed to hold altitude in a turn.
-        let bankLiftLossDeg = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
-            * Tuning.turnLiftCompensationGainDeg
         var rawPitchDeg = (altitudeError * Tuning.altitudePitchGain
-            - verticalVelocity * Tuning.altitudeDampingGain
-            + bankLiftLossDeg)
+            - verticalVelocity * Tuning.altitudeDampingGain)
             .clamped(to: -Tuning.pitchDownClampDeg...Tuning.pitchUpClampDeg)
         if altitudeOverrideActive {
             rawPitchDeg *= 0.2
         }
         let pitchAlpha = filterAlpha(tau: Tuning.pitchFilterTau, dt: dt)
         filteredPitchDeg = filteredPitchDeg + (rawPitchDeg - filteredPitchDeg) * pitchAlpha
+        // Coordinated-turn lift compensation, applied post-filter — see
+        // FixedWingAutopilot.swift for the full rationale (bank's own filter
+        // is faster than this pitch filter, so routing compensation through
+        // the pitch filter too would make it systematically trail the lift
+        // loss it's meant to cancel).
+        let bankLiftLossDeg = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
+            * Tuning.turnLiftCompensationGainDeg
+        filteredPitchDeg = (filteredPitchDeg + bankLiftLossDeg)
+            .clamped(to: -Tuning.pitchDownClampDeg...Tuning.pitchUpClampDeg)
 
         let baselineThrottle = max(0.32, baseline.cruiseReferenceThrottle)
         let throttleAssist = altitudeError * Tuning.altitudeThrottleAssist
-        // Coordinated-turn drag compensation — see FixedWingAutopilot.swift.
-        let turnDragBoost = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
-            * Tuning.turnThrottleCompensationGain
-        let rawThrottle = (baselineThrottle + throttleAssist + turnDragBoost).clamped(to: 0.32...0.95)
+        let rawThrottle = (baselineThrottle + throttleAssist).clamped(to: 0.32...0.95)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: dt)
         filteredThrottle = filteredThrottle + (rawThrottle - filteredThrottle) * throttleAlpha
+        // Coordinated-turn drag compensation, applied post-filter — see FixedWingAutopilot.swift.
+        let turnDragBoost = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
+            * Tuning.turnThrottleCompensationGain
+        filteredThrottle = (filteredThrottle + turnDragBoost).clamped(to: 0.32...0.95)
 
         // Waypoint intercept — track capture progress for auto-advance.
         nextState.distanceToActiveWaypointMeters = nil

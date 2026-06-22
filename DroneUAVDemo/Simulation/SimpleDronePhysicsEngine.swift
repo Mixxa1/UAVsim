@@ -440,7 +440,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                     yawRate: state.bodyAngularVelocity.z,
                     authority: authority,
                     wing: wing,
-                    fallbackHeading: wrap(control.targetOrientation.z)
+                    fallbackHeading: wrap(control.targetOrientation.z),
+                    coordinationBankRad: currentEuler.x
                 )
             }
         }
@@ -658,7 +659,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         yawRate: Float,
         authority: Float,
         wing: FixedWingParameters,
-        fallbackHeading: Float
+        fallbackHeading: Float,
+        coordinationBankRad: Float = 0.0
     ) -> Float {
         // Yaw-rate damper (active in every mode): opposes yaw rate to suppress
         // the lightly-damped Dutch-roll wallow that the real 6DOF model now
@@ -666,6 +668,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // ∝ -yawRate produces a damping yaw moment). 0.18 is a light hand —
         // enough to settle the side-to-side weave without making yaw sluggish.
         let yawDamper = (-yawRate * 0.18).clamped(to: -0.5...0.5)
+        // Turn coordination (autopilot/assist only — manual stick-and-rudder
+        // is the player's job): a banked turn's own geometry demands a yaw
+        // rate of the *same sign* as the bank (right bank -> right turn).
+        // Same-sign with bank is the self-consistent direction here too —
+        // the autopilot already commands bank with the same sign as its
+        // course error, so this rudder term must reinforce that bank, not
+        // oppose it. Without this the turn is flown on ailerons alone and
+        // has to build sideslip before the fuselage/fin "catch up" to the
+        // turn — exactly the slip that was feeding the Dutch-roll wallow.
+        let coordination = coordinationBankRad * 0.5
         let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
         if abs(manualIntent) > 0.001 {
             return (manualIntent * 0.6 * authority + yawDamper).clamped(to: -1.0...1.0)
@@ -675,7 +687,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // term lags the wobble and pumps energy *into* the Dutch roll instead
         // of holding course. Cut to 0.25 and let the yaw damper do the work.
         let headingError = wrap(fallbackHeading - currentYaw)
-        return (headingError * 0.25 * wing.bankResponseGain + yawDamper).clamped(to: -1.0...1.0)
+        return (headingError * 0.25 * wing.bankResponseGain + yawDamper + coordination).clamped(to: -1.0...1.0)
     }
 
     private func angleTrackingRates(
