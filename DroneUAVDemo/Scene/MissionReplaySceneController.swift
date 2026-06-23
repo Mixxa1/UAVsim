@@ -88,6 +88,29 @@ final class MissionReplaySceneController {
     private let pathNode: SCNNode
     private let eventMarkersNode: SCNNode
     private let environmentNode: SCNNode
+    private let skyCloudsNode: SCNNode
+    private let weatherEnvelopeNode: SCNNode
+    private let abandonedCitySceneComposer = AbandonedCitySceneComposer()
+    private var activeWeatherPreset: WeatherPreset = .normal
+
+    private static let skyCloudInstanceRadius: Float = 180
+    private static let skyCloudAltitudeAboveDrone: Float = 90
+    private static let weatherEnvelopeRadius: Float = 250.0
+    // Mid-range stand-in for the live sim's `0.25 + intensity * 0.55` envelope opacity —
+    // MissionReplayContextSnapshot only captures which weather preset was recorded, not the
+    // intensity/wind values, so the exact recorded strength can't be reconstructed.
+    private static let weatherEnvelopeReplayOpacity: CGFloat = 0.55
+    private static let skyCloudInstanceOffsets: [(SCNVector3, Float)] = [
+        (SCNVector3(0, 0, 500), 0),
+        (SCNVector3(420, 15, -380), 1.1),
+        (SCNVector3(-480, -10, 300), 2.6),
+        (SCNVector3(350, 20, 420), 4.0),
+        (SCNVector3(-520, 5, -280), 5.4)
+    ]
+
+    var wantsWeatherDepthOfField: Bool {
+        activeWeatherPreset == .fog || activeWeatherPreset == .smog
+    }
 
     private var orbitYawRadians: Float = 0
     private var orbitPitchRadians: Float = -0.35
@@ -116,6 +139,8 @@ final class MissionReplaySceneController {
         pathNode = SCNNode()
         eventMarkersNode = SCNNode()
         environmentNode = SCNNode()
+        skyCloudsNode = SCNNode()
+        weatherEnvelopeNode = SCNNode()
         buildScene()
     }
 
@@ -390,6 +415,16 @@ final class MissionReplaySceneController {
         let pitch = simd_quatf(angle: Float(frame.attitude.pitchRadians), axis: SIMD3<Float>(1, 0, 0))
         let roll  = simd_quatf(angle: Float(frame.attitude.rollRadians),  axis: SIMD3<Float>(0, 0, 1))
         replayDroneNode.simdOrientation = yaw * pitch * roll
+
+        skyCloudsNode.simdPosition = SIMD3<Float>(
+            replayDroneNode.simdPosition.x,
+            replayDroneNode.simdPosition.y + Self.skyCloudAltitudeAboveDrone,
+            replayDroneNode.simdPosition.z
+        )
+        if !weatherEnvelopeNode.isHidden {
+            weatherEnvelopeNode.simdPosition = replayDroneNode.simdPosition
+        }
+
         updateCameraForCurrentMode(frame: frame, replayTime: replayTime, duration: duration)
     }
 
@@ -700,11 +735,48 @@ final class MissionReplaySceneController {
         buildCamera()
         pathNode.castsShadow = false
         eventMarkersNode.castsShadow = false
+        skyCloudsNode.name = "replaySkyCloudsNode"
+        weatherEnvelopeNode.name = "replayWeatherEnvelopeNode"
+        weatherEnvelopeNode.isHidden = true
+        setUpSkyClouds()
         scene.rootNode.addChildNode(groundNode)
         scene.rootNode.addChildNode(environmentNode)
         scene.rootNode.addChildNode(replayDroneNode)
         scene.rootNode.addChildNode(pathNode)
         scene.rootNode.addChildNode(eventMarkersNode)
+        scene.rootNode.addChildNode(skyCloudsNode)
+        scene.rootNode.addChildNode(weatherEnvelopeNode)
+    }
+
+    private func setUpSkyClouds() {
+        for (offset, yaw) in Self.skyCloudInstanceOffsets {
+            guard let node = WeatherCloudAssetLoader.shared.makeSkyCloudsNode(
+                offset: offset,
+                yaw: yaw,
+                targetRadius: Self.skyCloudInstanceRadius
+            ) else {
+                continue
+            }
+            skyCloudsNode.addChildNode(node)
+        }
+    }
+
+    private func updateReplayWeatherEnvelope(_ preset: WeatherPreset) {
+        weatherEnvelopeNode.childNodes.forEach { $0.removeFromParentNode() }
+        let node: SCNNode?
+        switch preset {
+        case .fog:
+            node = WeatherCloudAssetLoader.shared.makeFogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+        case .smog:
+            node = WeatherCloudAssetLoader.shared.makeSmogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+        default:
+            node = nil
+        }
+        if let node {
+            weatherEnvelopeNode.addChildNode(node)
+        }
+        weatherEnvelopeNode.isHidden = weatherEnvelopeNode.childNodes.isEmpty
+        weatherEnvelopeNode.opacity = Self.weatherEnvelopeReplayOpacity
     }
 
     private func configureOverlayNode(_ node: SCNNode) {
@@ -729,6 +801,16 @@ final class MissionReplaySceneController {
         }
         pathNode.castsShadow = false
         eventMarkersNode.castsShadow = false
+        // Sky decoration and weather haze never cast shadows in the live sim either (baked in
+        // via WeatherCloudAssetLoader.sanitize()/makeEnvelopeSphere) — the blanket sweep above
+        // would otherwise have these billboard cards and the fog/smog sphere throw shadows onto
+        // the ground in quality-mode exports, which never happens during live play or interactive
+        // replay. Recursing explicitly (not just the container node) since castsShadow isn't
+        // inherited from a parent — the sweep above already flipped every descendant individually.
+        for root in [skyCloudsNode, weatherEnvelopeNode] {
+            root.castsShadow = false
+            root.enumerateChildNodes { node, _ in node.castsShadow = false }
+        }
     }
 
     private func buildGround() {
@@ -863,6 +945,8 @@ final class MissionReplaySceneController {
               let scaleRaw = context.mapScaleRawValue,
               let mapScale = MapScale(rawValue: scaleRaw),
               let seed = context.terrainSeed else {
+            activeWeatherPreset = .normal
+            updateReplayWeatherEnvelope(.normal)
             applyReplayTerrainVisualStyle(for: .field, halfExtent: 800.0)
             buildWorldBoundsIndicator(halfExtent: 800.0)
             return EnvironmentBuildResult(description: "n/a", hasEnvironment: false)
@@ -876,9 +960,18 @@ final class MissionReplaySceneController {
             safeSpawnRadius: 15.0
         )
 
-        let svc = ScenePopulationService(rootNode: environmentNode)
-        svc.populate(with: config, visualQuality: visualQuality)
-        applyReplayTerrainVisualStyle(for: preset, halfExtent: config.scenicHalfExtent)
+        let weather = context.weatherPresetRawValue.flatMap(WeatherPreset.init(rawValue:)) ?? .normal
+        EnvironmentObjectFactory.snowWeatherActive = (weather == .snow)
+        activeWeatherPreset = weather
+        updateReplayWeatherEnvelope(weather)
+
+        if preset == .city {
+            _ = abandonedCitySceneComposer.rebuild(in: environmentNode, terrain: config)
+        } else {
+            let svc = ScenePopulationService(rootNode: environmentNode)
+            svc.populate(with: config, visualQuality: visualQuality)
+        }
+        applyReplayTerrainVisualStyle(for: preset, halfExtent: config.scenicHalfExtent, weather: weather)
         buildWorldBoundsIndicator(halfExtent: config.worldHalfExtent)
 
         let desc = "\(preset.rawValue) / \(mapScale.rawValue)"
@@ -890,7 +983,11 @@ final class MissionReplaySceneController {
         _ = buildReplayEnvironment(from: loadedContext, visualQuality: quality)
     }
 
-    private func applyReplayTerrainVisualStyle(for terrain: TerrainPreset, halfExtent: Float) {
+    private func applyReplayTerrainVisualStyle(
+        for terrain: TerrainPreset,
+        halfExtent: Float,
+        weather: WeatherPreset = .normal
+    ) {
         let sky = replaySkyGradientImage(for: terrain)
         scene.background.contents = sky
         scene.lightingEnvironment.contents = sky
@@ -929,26 +1026,33 @@ final class MissionReplaySceneController {
             plane.height = size
         }
 
+        let mapSizeMeters = max(400.0, halfExtent * 2.0 + 48.0)
         let groundMaterial: SCNMaterial
-        if terrain == .cargoYard {
-            groundMaterial = AsphaltMaterialLoader.makeAsphaltMaterial(
-                mapSizeMeters: max(400.0, halfExtent * 2.0 + 48.0)
-            )
-        } else {
-            groundMaterial = (EnvironmentProceduralMaterials.groundMaterial(for: terrain).copy() as? SCNMaterial)
+        switch terrain {
+        case .city:
+            groundMaterial = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(mapSizeMeters: mapSizeMeters)
+        case .cargoYard:
+            groundMaterial = weather == .snow
+                ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                : AsphaltMaterialLoader.makeAsphaltMaterial(mapSizeMeters: mapSizeMeters)
+        case .field, .forest:
+            groundMaterial = weather == .snow
+                ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+        case .gridDemo:
+            let proc = (EnvironmentProceduralMaterials.groundMaterial(for: terrain).copy() as? SCNMaterial)
                 ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain)
-        }
-        if terrain != .cargoYard {
             let repeatCount = max(8.0, min(28.0, halfExtent / 28.0))
-            groundMaterial.diffuse.wrapS = .repeat
-            groundMaterial.diffuse.wrapT = .repeat
-            groundMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(
+            proc.diffuse.wrapS = .repeat
+            proc.diffuse.wrapT = .repeat
+            proc.diffuse.contentsTransform = SCNMatrix4MakeScale(
                 CGFloat(repeatCount),
                 CGFloat(repeatCount),
                 1.0
             )
-            groundMaterial.roughness.contents = 0.96
-            groundMaterial.metalness.contents = 0.0
+            proc.roughness.contents = 0.96
+            proc.metalness.contents = 0.0
+            groundMaterial = proc
         }
         groundNode.geometry?.materials = [groundMaterial]
     }

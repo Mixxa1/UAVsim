@@ -173,6 +173,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         scnView.rendersContinuously      = true
         scnView.preferredFramesPerSecond = 60
         scnView.allowsCameraControl      = false
+        scnView.technique                = sceneController.wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
         scnView.autoresizingMask         = [.width, .height]
         scnView.onDrag = { [weak self] dx, dy in
             self?.sceneController.handleDragInput(dx: dx, dy: dy)

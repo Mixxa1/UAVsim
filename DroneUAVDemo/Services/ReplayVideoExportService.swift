@@ -188,6 +188,7 @@ final class ReplayVideoExportService: ObservableObject {
         let renderer = SCNRenderer(device: nil, options: nil)
         renderer.scene = controller.scene
         renderer.pointOfView = controller.cameraNode
+        renderer.technique = controller.wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
         let renderSize = NSSize(width: settings.width, height: settings.height)
 
         do {

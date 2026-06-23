@@ -25,6 +25,7 @@ struct MissionReplaySceneViewRepresentable: NSViewRepresentable {
         view.showsStatistics          = false
         view.rendersContinuously      = true
         view.preferredFramesPerSecond = 60
+        view.technique                = sceneController.wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
 
         let cfg = view.cameraControlConfiguration
         cfg.allowsTranslation       = true
@@ -43,6 +44,10 @@ struct MissionReplaySceneViewRepresentable: NSViewRepresentable {
             nsView.scene = sceneController.scene
         }
         nsView.pointOfView = sceneController.cameraNode
+        let wantsTechnique = sceneController.wantsWeatherDepthOfField
+        if wantsTechnique != (nsView.technique != nil) {
+            nsView.technique = wantsTechnique ? WeatherDepthOfFieldTechnique.shared : nil
+        }
         configureInput(for: nsView)
         applyMode(cameraMode, to: nsView)
     }
