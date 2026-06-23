@@ -2059,7 +2059,9 @@ final class DroneSceneController {
             to: (-settings.fpv.yawLimitDeg.degreesToRadians)...(settings.fpv.yawLimitDeg.degreesToRadians)
         )
         let fpvBaseYaw = atan2(fpvLocalForward.x, -fpvLocalForward.z)
-        fpvYawNode.eulerAngles.y = CGFloat(fpvBaseYaw + relativeYaw + userYaw)
+        let targetFpvYaw = fpvBaseYaw + relativeYaw + userYaw
+        let currentFpvYaw = Float(fpvYawNode.eulerAngles.y)
+        fpvYawNode.eulerAngles.y = CGFloat(currentFpvYaw + wrapAngle(targetFpvYaw - currentFpvYaw) * response)
 
         let gimbalPitch = (-state.velocity.y * 0.05).clamped(
             to: (-settings.fpv.pitchLimitDeg.degreesToRadians)...(settings.fpv.pitchLimitDeg.degreesToRadians)
@@ -2070,7 +2072,14 @@ final class DroneSceneController {
             to: (-settings.fpv.pitchLimitDeg.degreesToRadians)...(settings.fpv.pitchLimitDeg.degreesToRadians)
         )
         let localRoll = -state.orientation.x * stabilizer * 0.30
-        fpvPitchNode.eulerAngles = SCNVector3(localPitch + userPitch, 0.0, localRoll)
+        let targetFpvPitch = localPitch + userPitch
+        let currentFpvPitch = Float(fpvPitchNode.eulerAngles.x)
+        let currentFpvRoll = Float(fpvPitchNode.eulerAngles.z)
+        fpvPitchNode.eulerAngles = SCNVector3(
+            CGFloat(currentFpvPitch + (targetFpvPitch - currentFpvPitch) * response),
+            0.0,
+            CGFloat(currentFpvRoll + (localRoll - currentFpvRoll) * response)
+        )
 
         let fov = CGFloat(settings.fov.clamped(to: 30.0...110.0))
         followCameraNode.camera?.fieldOfView = fov
