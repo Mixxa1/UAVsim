@@ -134,15 +134,42 @@ final class ReplayVideoExportService: ObservableObject {
         }
 
         let fileType: AVFileType = settings.format == .mp4 ? .mp4 : .mov
+
+        // Quality mode gets HEVC — roughly 2x the compression efficiency of H.264 at the same
+        // bitrate (so the existing bitrate presets go noticeably further), safe to assume
+        // available since HEVC hardware encode has shipped on every Mac since 2017, well below
+        // this app's deployment target. Fast mode keeps H.264: it encodes faster and that mode's
+        // whole point is turnaround speed over maximum quality-per-bit.
+        let codec: AVVideoCodecType = settings.exportMode == .quality ? .hevc : .h264
+
+        var compressionProperties: [String: Any] = [
+            AVVideoAverageBitRateKey: resolvedBitrate,
+            AVVideoExpectedSourceFrameRateKey: settings.framesPerSecond
+        ]
+        if codec == .h264 {
+            // Explicit High profile — AVFoundation otherwise defaults to a lower, less efficient
+            // profile. High has been decodable by essentially everything for over a decade, so
+            // this is a strict quality-per-bit win with no real compatibility cost. HEVC doesn't
+            // need the equivalent here; its encoder defaults are already the efficient ones.
+            compressionProperties[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
+        }
+
+        // Tags the output as standard Rec.709 (SDR) instead of leaving color interpretation to
+        // whatever the encoder/player guesses — this is ordinary SDR render output, not HDR or a
+        // wide-gamut source, so this is the correct tag rather than an enhancement.
+        let colorProperties: [String: Any] = [
+            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+            AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+        ]
+
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: fileType)
         let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoCodecKey: codec,
             AVVideoWidthKey: settings.width,
             AVVideoHeightKey: settings.height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: resolvedBitrate,
-                AVVideoExpectedSourceFrameRateKey: settings.framesPerSecond
-            ]
+            AVVideoColorPropertiesKey: colorProperties,
+            AVVideoCompressionPropertiesKey: compressionProperties
         ]
         let fallbackVideoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -411,7 +438,8 @@ final class ReplayVideoExportService: ObservableObject {
         let bitrateMbps = Double(resolvedBitrate) / 1_000_000
         let status = cancelled ? "cancelled" : "finished"
         let trimDescription = settings.trimRange.map { "\(String(format: "%.2f", $0.startTime))...\(String(format: "%.2f", $0.endTime))" } ?? "full"
-        print("[ReplayExport] \(status) mode=\(settings.exportMode.rawValue) format=\(settings.format.rawValue) resolutionPreset=\(settings.resolutionPreset.rawValue) resolution=\(settings.width)x\(settings.height) fps=\(settings.framesPerSecond) bitratePreset=\(settings.bitratePreset.rawValue) bitrate=\(String(format: "%.1f", bitrateMbps))Mbps estimatedSize=\(String(format: "%.1f", estimatedOutputSizeMB))MB camera=\(cameraMode.rawValue) trim=\(trimDescription) frames=\(totalFrames) elapsed=\(String(format: "%.2f", elapsed))s avgOutputFrame=\(String(format: "%.1f", averageOutputFrameMS))ms avgRender=\(String(format: "%.1f", averageRenderMS))ms avgWriterWait=\(String(format: "%.1f", averageWriterWaitMS))ms path=\(renderOptions.showPathTrail) markers=\(renderOptions.showEventMarkers) overlay=\(renderOptions.showOverlay) environment=\(renderOptions.environmentQuality)")
+        let loggedCodec = settings.exportMode == .quality ? "hevc" : "h264"
+        print("[ReplayExport] \(status) mode=\(settings.exportMode.rawValue) codec=\(loggedCodec) format=\(settings.format.rawValue) resolutionPreset=\(settings.resolutionPreset.rawValue) resolution=\(settings.width)x\(settings.height) fps=\(settings.framesPerSecond) bitratePreset=\(settings.bitratePreset.rawValue) bitrate=\(String(format: "%.1f", bitrateMbps))Mbps estimatedSize=\(String(format: "%.1f", estimatedOutputSizeMB))MB camera=\(cameraMode.rawValue) trim=\(trimDescription) frames=\(totalFrames) elapsed=\(String(format: "%.2f", elapsed))s avgOutputFrame=\(String(format: "%.1f", averageOutputFrameMS))ms avgRender=\(String(format: "%.1f", averageRenderMS))ms avgWriterWait=\(String(format: "%.1f", averageWriterWaitMS))ms path=\(renderOptions.showPathTrail) markers=\(renderOptions.showEventMarkers) overlay=\(renderOptions.showOverlay) environment=\(renderOptions.environmentQuality)")
         if averageRenderMS > 50 {
             print("[ReplayExport] warning: average render time is high; keep export at 720p/24fps while stabilization continues.")
         }

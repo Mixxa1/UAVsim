@@ -371,8 +371,26 @@ final class MissionReplaySceneController {
         if mode == .onboardMount {
             onboardMountIsEditing = true
         }
+        // The directional sun light's shadow map is sized/projected to cover the whole
+        // kilometer-scale scene (ground + environment), so its effective resolution at the
+        // centimeter scale of this drone's own fuselage/wing is far too coarse for clean
+        // self-shadowing — the wing box intersects the fuselage capsule right at body-center,
+        // and the shadow that intersection casts on itself comes out as blocky, unstable "shadow
+        // acne" that's invisible from any previous camera distance but fills a large fraction of
+        // frame at onboard-mount range, and visibly swims frame to frame (matches "large,
+        // irregular, moves on its own" reports). Only the aircraft's own self-shadow is at issue —
+        // disable it just for this mode; every other mode keeps the existing look untouched.
+        setDroneSelfShadowing(enabled: mode != .onboardMount)
         updateGizmoVisibility()
         updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
+
+    private func setDroneSelfShadowing(enabled: Bool) {
+        // Sweeps the gizmo's nodes too, harmlessly — it's hidden outside onboard-mount edit and
+        // a hidden node never casts a shadow regardless of this flag.
+        replayDroneNode.enumerateChildNodes { node, _ in
+            node.castsShadow = enabled
+        }
     }
 
     func setTopDownHeight(_ height: Float) {
