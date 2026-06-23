@@ -1,5 +1,9 @@
 import SwiftUI
 
+private func localized(_ key: String) -> String {
+    L10n.s(key, language: L10n.currentLanguage())
+}
+
 struct ReplayTimelineEditorView: View {
     let duration: TimeInterval
     let events: [MissionReplayEvent]
@@ -12,7 +16,7 @@ struct ReplayTimelineEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("Шкала времени")
+                Text("replay.timeline.title")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
@@ -116,7 +120,7 @@ struct ReplayTimelineEditorView: View {
     }
 
     private func trimHandle(x: CGFloat, height: CGFloat, isStart: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 3, style: .continuous)
+        let base = RoundedRectangle(cornerRadius: 3, style: .continuous)
             .fill(GroundControlPalette.accent)
             .frame(width: handleWidth, height: height)
             .overlay(
@@ -125,7 +129,11 @@ struct ReplayTimelineEditorView: View {
                     .frame(width: 1, height: height - 12)
             )
             .offset(x: x)
-            .help(isStart ? "Начало обрезки" : "Конец обрезки")
+        if isStart {
+            return base.help("replay.trim.start_tooltip")
+        } else {
+            return base.help("replay.trim.end_tooltip")
+        }
     }
 
     private func x(for time: TimeInterval, width: CGFloat, duration: TimeInterval) -> CGFloat {
@@ -172,7 +180,7 @@ struct ReplayTelemetryGraphView: View {
                     .foregroundStyle(GroundControlPalette.textSecondary)
                 Spacer()
                 if let unit = series.first?.unit, !unit.isEmpty {
-                    Text(unit)
+                    Text(localized(unit))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
@@ -189,8 +197,8 @@ struct ReplayTelemetryGraphView: View {
     }
 
     private var title: String {
-        if series.count == 1 { return series[0].title }
-        return series.map(\.title).joined(separator: " / ")
+        if series.count == 1 { return localized(series[0].title) }
+        return series.map { localized($0.title) }.joined(separator: " / ")
     }
 
     private func graph(width: CGFloat, height: CGFloat) -> some View {

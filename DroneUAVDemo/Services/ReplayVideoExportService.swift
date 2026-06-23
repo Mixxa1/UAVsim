@@ -10,15 +10,16 @@ enum ReplayVideoExportError: LocalizedError {
     case writerFailed(String)
 
     var errorDescription: String? {
+        let language = L10n.currentLanguage()
         switch self {
         case .noFrames:
-            return "Replay has no frames to export."
+            return L10n.s("replay.export.error.no_frames", language: language)
         case .cancelled:
-            return "Export cancelled."
+            return L10n.s("replay.export.error.cancelled", language: language)
         case .pixelBufferUnavailable:
-            return "Video pixel buffer is unavailable."
+            return L10n.s("replay.export.error.pixel_buffer_unavailable", language: language)
         case .imageConversionFailed:
-            return "Could not convert rendered replay frame to video buffer."
+            return L10n.s("replay.export.error.image_conversion_failed", language: language)
         case .writerFailed(let message):
             return message
         }
@@ -156,7 +157,7 @@ final class ReplayVideoExportService: ObservableObject {
         } else {
             let fallbackInput = AVAssetWriterInput(mediaType: .video, outputSettings: fallbackVideoSettings)
             guard writer.canAdd(fallbackInput) else {
-                throw ReplayVideoExportError.writerFailed("Video writer cannot add H.264 input for \(settings.format.rawValue.uppercased()).")
+                throw ReplayVideoExportError.writerFailed(L10n.f("replay.export.error.cannot_add_input", language: L10n.currentLanguage(), settings.format.rawValue.uppercased()))
             }
             input = fallbackInput
         }
@@ -173,7 +174,7 @@ final class ReplayVideoExportService: ObservableObject {
 
         writer.add(input)
         guard writer.startWriting() else {
-            throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? "Video writer failed to start.")
+            throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? L10n.s("replay.export.error.writer_start_failed", language: L10n.currentLanguage()))
         }
         writer.startSession(atSourceTime: .zero)
 
@@ -235,7 +236,7 @@ final class ReplayVideoExportService: ObservableObject {
 
                 let presentationTime = CMTime(value: CMTimeValue(frameIndex), timescale: CMTimeScale(settings.framesPerSecond))
                 guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-                    throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? "Video writer failed while appending frames.")
+                    throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? L10n.s("replay.export.error.writer_append_failed", language: L10n.currentLanguage()))
                 }
 
                 let nextProgress = Double(frameIndex + 1) / Double(totalFrames)
@@ -256,7 +257,7 @@ final class ReplayVideoExportService: ObservableObject {
             input.markAsFinished()
             await writer.finishWriting()
             if writer.status == .failed {
-                throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? "Video writer failed.")
+                throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? L10n.s("replay.export.error.writer_failed", language: L10n.currentLanguage()))
             }
 
             logExportSummary(
@@ -424,7 +425,8 @@ final class ReplayVideoExportService: ObservableObject {
             .foregroundColor: NSColor.white,
             .paragraphStyle: paragraph
         ]
-        let text = "Black Box Replay  \(cameraMode.displayName)  \(format(time)) / \(format(duration))"
+        let title = L10n.s("replay.title", language: L10n.currentLanguage())
+        let text = "\(title)  \(cameraMode.displayName)  \(format(time)) / \(format(duration))"
         let rect = NSRect(x: 24, y: image.size.height - 48, width: image.size.width - 48, height: 28)
         NSColor.black.withAlphaComponent(0.45).setFill()
         NSBezierPath(roundedRect: rect.insetBy(dx: -8, dy: -6), xRadius: 8, yRadius: 8).fill()

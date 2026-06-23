@@ -17,8 +17,12 @@ struct ReplayVideoExportSettings: Codable, Equatable {
     static let temporaryMaxWidth = ReplayExportResolutionPreset.p1440.width
     static let temporaryMaxHeight = ReplayExportResolutionPreset.p1440.height
     static let temporaryMaxFramesPerSecond = 30
-    static let performanceWarning = "Fast uses simplified environment rendering. Quality allows up to 1440p/30fps and may use more CPU."
-    static let debugBuildWarning = "Debug builds may export significantly slower. Use Release for performance validation."
+    static var performanceWarning: String {
+        L10n.s("replay.export.performance_warning", language: L10n.currentLanguage())
+    }
+    static var debugBuildWarning: String {
+        L10n.s("replay.export.debug_build_warning", language: L10n.currentLanguage())
+    }
 
     var exportMode: ReplayVideoExportMode
     var resolutionPreset: ReplayExportResolutionPreset

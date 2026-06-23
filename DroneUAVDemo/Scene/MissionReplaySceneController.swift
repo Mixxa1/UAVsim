@@ -6,9 +6,13 @@ import simd
 
 struct ReplayReconstructionStatus {
     enum Quality: String {
-        case full     = "Полный"
-        case partial  = "Частичный"
-        case fallback = "Резервный"
+        case full
+        case partial
+        case fallback
+
+        var titleKey: String {
+            "replay.quality.\(rawValue)"
+        }
     }
 
     var uavDisplayName: String
@@ -21,10 +25,10 @@ struct ReplayReconstructionStatus {
     var warningMessages: [String]
 
     static let none = ReplayReconstructionStatus(
-        uavDisplayName: "Generic",
-        terrainDisplayName: "n/a",
-        weatherDisplayName: "n/a",
-        payloadDisplayName: "none",
+        uavDisplayName: L10n.s("replay.uav.generic", language: L10n.currentLanguage()),
+        terrainDisplayName: L10n.s("common.na", language: L10n.currentLanguage()),
+        weatherDisplayName: L10n.s("common.na", language: L10n.currentLanguage()),
+        payloadDisplayName: L10n.s("replay.payload.none", language: L10n.currentLanguage()),
         quality: .fallback,
         hasContext: false,
         profileFound: false,
@@ -144,20 +148,9 @@ final class MissionReplaySceneController {
         buildScene()
     }
 
-    // MARK: - Session loading (legacy, no profiles)
+    // MARK: - Session loading
 
     func loadSession(_ session: MissionReplaySession, events: [MissionReplayEvent] = []) {
-        loadSession(session, availableDroneProfiles: [], fallbackProfile: nil, events: events)
-    }
-
-    // MARK: - Session loading (visual reconstruction)
-
-    func loadSession(
-        _ session: MissionReplaySession,
-        availableDroneProfiles: [DroneModelProfile],
-        fallbackProfile: DroneModelProfile? = nil,
-        events: [MissionReplayEvent] = []
-    ) {
         pathNode.childNodes.forEach { $0.removeFromParentNode() }
         eventMarkersNode.childNodes.forEach { $0.removeFromParentNode() }
         environmentNode.childNodes.forEach { $0.removeFromParentNode() }
@@ -165,11 +158,7 @@ final class MissionReplaySceneController {
         let context = session.context
         loadedContext = context
 
-        let uavResult = buildReplayUAV(
-            context: context,
-            availableDroneProfiles: availableDroneProfiles,
-            fallbackProfile: fallbackProfile
-        )
+        let uavResult = buildReplayUAV(context: context)
         let envResult = buildReplayEnvironment(from: context)
 
         let sorted = session.frames.sorted { $0.timestamp < $1.timestamp }
@@ -187,19 +176,32 @@ final class MissionReplaySceneController {
             overallQuality = .fallback
         }
 
+        let language = L10n.currentLanguage()
         var warnings: [String] = []
         if context == nil {
-            warnings.append("This replay was recorded before visual context snapshots were added. Fallback visual reconstruction is used.")
+            warnings.append(L10n.s("replay.warning.no_context", language: language))
         }
         if !uavResult.profileFound {
-            warnings.append("Original UAV profile was not found. Generic replay UAV is used.")
+            warnings.append(L10n.s("replay.warning.uav_not_found", language: language))
         }
+
+        let terrainDisplayName: String
+        if let preset = envResult.terrainPreset, let mapScale = envResult.mapScale {
+            terrainDisplayName = "\(L10n.s(preset.titleKey, language: language)) / \(L10n.s(mapScale.titleKey, language: language))"
+        } else {
+            terrainDisplayName = L10n.s("common.na", language: language)
+        }
+
+        let weatherDisplayName = context?.weatherPresetRawValue
+            .flatMap(WeatherPreset.init(rawValue:))
+            .map { L10n.s($0.titleKey, language: language) }
+            ?? L10n.s("common.na", language: language)
 
         reconstructionStatus = ReplayReconstructionStatus(
             uavDisplayName: uavResult.displayName,
-            terrainDisplayName: envResult.description,
-            weatherDisplayName: context?.weatherPresetRawValue?.capitalized ?? "n/a",
-            payloadDisplayName: context?.payloadResolvedName ?? "none",
+            terrainDisplayName: terrainDisplayName,
+            weatherDisplayName: weatherDisplayName,
+            payloadDisplayName: context?.payloadResolvedName ?? L10n.s("replay.payload.none", language: language),
             quality: overallQuality,
             hasContext: context != nil,
             profileFound: uavResult.profileFound,
@@ -257,9 +259,9 @@ final class MissionReplaySceneController {
 
     var payloadCameraStatusText: String? {
         guard loadedEvents.contains(where: { $0.type == .payloadReleased || $0.type == .payloadImpact }) else {
-            return "Payload camera unavailable: no payload release or impact events."
+            return L10n.s("replay.payload_camera.unavailable_no_events", language: L10n.currentLanguage())
         }
-        return "Payload trajectory unavailable. Using event focus fallback."
+        return L10n.s("replay.payload_camera.unavailable_fallback", language: L10n.currentLanguage())
     }
 
     func prepareForVideoExport(_ options: MissionReplayExportRenderOptions) {
@@ -862,35 +864,41 @@ final class MissionReplaySceneController {
         let profileFound: Bool
     }
 
-    private func buildReplayUAV(
-        context: MissionReplayContextSnapshot?,
-        availableDroneProfiles: [DroneModelProfile],
-        fallbackProfile: DroneModelProfile?
-    ) -> UAVBuildResult {
+    /// Resolves against the full canonical catalog (`LIPODroneModelRepository`) rather than a
+    /// caller-supplied list — the previous version relied on whichever screen happened to open
+    /// the replay viewer to thread a non-empty `availableDroneProfiles` array through, and the
+    /// start-screen entry point (`ReplayCenterWindowHost.open` with no active simulation) and the
+    /// video exporter (`ReplayVideoExportService`) both always passed `[]`, so real recordings of
+    /// real catalog UAVs fell back to the generic placeholder even though the exact model was
+    /// resolvable. Runs the recorded ID through `canonicalModelID` first so recordings saved under
+    /// a since-renamed legacy model ID (see `LIPODroneModelRepository.legacyModelIDMap`) still match.
+    private func buildReplayUAV(context: MissionReplayContextSnapshot?) -> UAVBuildResult {
         replayDroneNode.childNodes.forEach { $0.removeFromParentNode() }
 
+        let allProfiles = LIPODroneModelRepository().allProfiles
         var foundProfile: DroneModelProfile?
 
         if let context = context {
             if let profileID = context.selectedDroneProfileID {
-                foundProfile = availableDroneProfiles.first { $0.id == profileID }
+                let canonicalID = LIPODroneModelRepository.canonicalModelID(profileID)
+                foundProfile = allProfiles.first { $0.id == canonicalID }
             }
             if foundProfile == nil, let profileName = context.selectedDroneProfileName {
-                foundProfile = availableDroneProfiles.first { $0.displayName == profileName }
+                foundProfile = allProfiles.first { $0.displayName == profileName }
             }
         }
 
-        let resolvedProfile = foundProfile ?? fallbackProfile
-
-        if let profile = resolvedProfile {
+        if let profile = foundProfile {
             let visual = DroneModelBuilder.build(profile: profile)
             replayDroneNode.addChildNode(visual.rootNode)
-            let name = profile.displayName
-            return UAVBuildResult(displayName: name, profileFound: foundProfile != nil)
+            return UAVBuildResult(displayName: profile.displayName, profileFound: true)
         }
 
         buildGenericDroneProxy()
-        let fallbackName = context?.selectedDroneProfileName.map { "\($0) (not found)" } ?? "Generic"
+        let language = L10n.currentLanguage()
+        let fallbackName = context?.selectedDroneProfileName.map {
+            L10n.f("replay.uav.not_found_named", language: language, $0)
+        } ?? L10n.s("replay.uav.generic", language: language)
         return UAVBuildResult(displayName: fallbackName, profileFound: false)
     }
 
@@ -931,7 +939,8 @@ final class MissionReplaySceneController {
     // MARK: - Environment reconstruction
 
     private struct EnvironmentBuildResult {
-        let description: String
+        let terrainPreset: TerrainPreset?
+        let mapScale: MapScale?
         let hasEnvironment: Bool
     }
 
@@ -949,7 +958,7 @@ final class MissionReplaySceneController {
             updateReplayWeatherEnvelope(.normal)
             applyReplayTerrainVisualStyle(for: .field, halfExtent: 800.0)
             buildWorldBoundsIndicator(halfExtent: 800.0)
-            return EnvironmentBuildResult(description: "n/a", hasEnvironment: false)
+            return EnvironmentBuildResult(terrainPreset: nil, mapScale: nil, hasEnvironment: false)
         }
 
         let config = TerrainConfiguration(
@@ -974,8 +983,7 @@ final class MissionReplaySceneController {
         applyReplayTerrainVisualStyle(for: preset, halfExtent: config.scenicHalfExtent, weather: weather)
         buildWorldBoundsIndicator(halfExtent: config.worldHalfExtent)
 
-        let desc = "\(preset.rawValue) / \(mapScale.rawValue)"
-        return EnvironmentBuildResult(description: desc, hasEnvironment: true)
+        return EnvironmentBuildResult(terrainPreset: preset, mapScale: mapScale, hasEnvironment: true)
     }
 
     private func rebuildReplayEnvironment(quality: EnvironmentVisualQuality) {

@@ -11,22 +11,26 @@ enum ReplayCameraMode: String, CaseIterable, Identifiable, Codable, Equatable {
 
     var id: String { rawValue }
 
-    var displayName: String {
+    var titleKey: String {
         switch self {
         case .freeObserver:
-            return "Свободный наблюдатель"
+            return "replay.camera_mode.free_observer"
         case .chase:
-            return "Преследование"
+            return "replay.camera_mode.chase"
         case .orbit:
-            return "Орбита"
+            return "replay.camera_mode.orbit"
         case .topDown:
-            return "Вид сверху"
+            return "replay.camera_mode.top_down"
         case .fpvApproximation:
-            return "От первого лица"
+            return "replay.camera_mode.fpv"
         case .payloadFollow:
-            return "За грузом"
+            return "replay.camera_mode.payload_follow"
         case .cinematicEvent:
-            return "Событие"
+            return "replay.camera_mode.cinematic_event"
         }
+    }
+
+    var displayName: String {
+        L10n.s(titleKey, language: L10n.currentLanguage())
     }
 }

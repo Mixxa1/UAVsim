@@ -2,6 +2,10 @@ import AppKit
 import SceneKit
 import simd
 
+private func localized(_ key: String) -> String {
+    L10n.s(key, language: L10n.currentLanguage())
+}
+
 // MARK: - Keyboard-routing window
 
 final class FullscreenReplayWindow: NSWindow {
@@ -98,7 +102,6 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     static func open(session: MissionReplaySession,
                      report: MissionReport?,
-                     availableDroneProfiles: [DroneModelProfile],
                      initialTime: TimeInterval,
                      initialCameraMode: ReplayCameraMode = .freeObserver,
                      selectedEvent: MissionReplayEvent? = nil) {
@@ -109,7 +112,6 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         host.build(
             session: session,
             report:  report,
-            availableDroneProfiles: availableDroneProfiles,
             initialTime: initialTime,
             initialCameraMode: initialCameraMode,
             selectedEvent: selectedEvent
@@ -120,7 +122,6 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     private func build(session: MissionReplaySession,
                        report: MissionReport?,
-                       availableDroneProfiles: [DroneModelProfile],
                        initialTime: TimeInterval,
                        initialCameraMode: ReplayCameraMode,
                        selectedEvent: MissionReplayEvent?) {
@@ -130,11 +131,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         let events = report?.events ?? session.events
         player.load(session: session)
         if initialTime > 0 { player.seek(to: initialTime) }
-        sceneController.loadSession(
-            session,
-            availableDroneProfiles: availableDroneProfiles,
-            events: events
-        )
+        sceneController.loadSession(session, events: events)
         sceneController.update(frame: player.currentFrame)
         sceneController.setSelectedEvent(selectedEvent ?? events.first)
         sceneController.setCameraMode(initialCameraMode)
@@ -214,7 +211,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         parent.addSubview(bar)
         topBar = bar
 
-        let title = NSTextField(labelWithString: "Бортовой самописец")
+        let title = NSTextField(labelWithString: localized("replay.title"))
         title.font = .systemFont(ofSize: 13, weight: .bold)
         title.textColor = .white
         title.frame = NSRect(x: 16, y: 30, width: 260, height: 18)
@@ -228,7 +225,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(subtitle)
         subtitleLabel = subtitle
 
-        let cameraLabel = NSTextField(labelWithString: "Камера: \(sceneController.cameraMode.displayName)")
+        let cameraLabel = NSTextField(labelWithString: String(format: localized("replay.fullscreen.camera_format"), sceneController.cameraMode.displayName))
         cameraLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         cameraLabel.textColor = NSColor.white.withAlphaComponent(0.72)
         cameraLabel.frame = NSRect(
@@ -255,7 +252,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(cameraPopup)
         cameraModePopup = cameraPopup
 
-        let heightLabel = NSTextField(labelWithString: "Top height: \(Int(sceneController.topDownHeight)) m")
+        let heightLabel = NSTextField(labelWithString: String(format: localized("replay.fullscreen.height_format"), Int(sceneController.topDownHeight)))
         heightLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         heightLabel.textColor = NSColor.white.withAlphaComponent(0.72)
         heightLabel.frame = NSRect(x: 392, y: 30, width: 130, height: 16)
@@ -287,7 +284,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(badge)
         qualityBadge = badge
 
-        let hideBtn = NSButton(title: "Hide UI", target: self, action: #selector(hideOverlay))
+        let hideBtn = NSButton(title: localized("replay.fullscreen.hide_ui"), target: self, action: #selector(hideOverlay))
         hideBtn.bezelStyle = .rounded
         hideBtn.font = .systemFont(ofSize: 11, weight: .medium)
         hideBtn.frame = NSRect(
@@ -298,7 +295,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(hideBtn)
 
         if let xImg = NSImage(systemSymbolName: "xmark.circle.fill",
-                              accessibilityDescription: "Close") {
+                              accessibilityDescription: localized("replay.fullscreen.close_accessibility")) {
             let closeBtn = NSButton(image: xImg, target: self, action: #selector(closeRequested))
             closeBtn.isBordered = false
             closeBtn.contentTintColor = NSColor.white.withAlphaComponent(0.70)
@@ -373,8 +370,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         speedUpButton = speedUp
 
         // Hint label (right of speed up, below time label)
-        let hint = NSTextField(labelWithString:
-            "WASD move · Q/E vertical · Drag look · Scroll zoom · Space play/pause · R reset · Esc close")
+        let hint = NSTextField(labelWithString: localized("replay.fullscreen.keyboard_hints"))
         hint.font = .systemFont(ofSize: 9)
         hint.textColor = NSColor.white.withAlphaComponent(0.38)
         hint.alignment = .right
@@ -411,7 +407,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     private func buildShowUIButton(in parent: NSView) {
         guard let eye = NSImage(systemSymbolName: "eye.fill",
-                                accessibilityDescription: "Show UI") else { return }
+                                accessibilityDescription: localized("replay.fullscreen.show_ui_accessibility")) else { return }
         let btn = NSButton(image: eye, target: self, action: #selector(showOverlay))
         btn.isBordered = false
         btn.contentTintColor = NSColor.white.withAlphaComponent(0.55)
@@ -488,11 +484,11 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         case .partial:  color = .yellow
         case .fallback: color = NSColor(red: 0.9, green: 0.5, blue: 0.1, alpha: 1.0)
         }
-        qualityBadge?.stringValue = "● " + q.rawValue.uppercased()
+        qualityBadge?.stringValue = "● " + localized(q.titleKey).uppercased()
         qualityBadge?.textColor   = color
-        cameraModeLabel?.stringValue = "Камера: \(sceneController.cameraMode.displayName)"
+        cameraModeLabel?.stringValue = String(format: localized("replay.fullscreen.camera_format"), sceneController.cameraMode.displayName)
         selectCameraPopupMode(sceneController.cameraMode)
-        topDownHeightLabel?.stringValue = "Высота: \(Int(sceneController.topDownHeight)) м"
+        topDownHeightLabel?.stringValue = String(format: localized("replay.fullscreen.height_format"), Int(sceneController.topDownHeight))
         topDownHeightSlider?.doubleValue = Double(sceneController.topDownHeight)
         let isTopDown = sceneController.cameraMode == .topDown
         topDownHeightLabel?.isHidden = !isTopDown
@@ -503,10 +499,17 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
             let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).squareRoot()
             let bat   = frame.batteryPercent.map { String(format: "%.0f%%", $0) } ?? "—"
             let ap    = frame.autopilotDescription ?? "—"
-            var text  = String(format:
-                "X %.1f   Y %.1f m   Z %.1f   Spd %.1f m/s   Mode %@   AP %@   Bat %@",
-                frame.position.x, frame.position.y, frame.position.z, speed,
-                frame.flightModeDescription, ap, bat)
+            let speedLabel = localized("replay.frame.speed_short")
+            let modeLabel = localized("replay.frame.mode_short")
+            let apLabel = localized("replay.frame.autopilot_short")
+            let batLabel = localized("replay.frame.battery_short")
+            var text = "X \(String(format: "%.1f", frame.position.x))   " +
+                "Y \(String(format: "%.1f", frame.position.y)) m   " +
+                "Z \(String(format: "%.1f", frame.position.z))   " +
+                "\(speedLabel) \(String(format: "%.1f", speed)) m/s   " +
+                "\(modeLabel) \(frame.flightModeDescription)   " +
+                "\(apLabel) \(ap)   " +
+                "\(batLabel) \(bat)"
             if frame.warningCount > 0 {
                 text += "   ⚠ \(frame.warningCount)"
             }

@@ -2095,3 +2095,166 @@
 "credits.source" = "Источник";
 "credits.changes" = "Изменения";
 "credits.menu" = "Авторство";
+
+"replay.title" = "Бортовой самописец";
+"replay.no_selection" = "Выберите запись для просмотра отчёта";
+"replay.list.empty.title" = "Нет записей";
+"replay.list.empty.subtitle" = "Записи сохраняются автоматически после каждого цикла ВООРУЖИТЬ → РАЗОРУЖИТЬ.";
+"replay.retention.auto_delete" = "Авто-удаление старых записей";
+"replay.retention.keep_last" = "Хранить последние";
+
+"replay.delete.title" = "Удалить запись?";
+"replay.delete.message" = "\"%@\" будет безвозвратно удалена.";
+"replay.delete.confirm" = "Удалить";
+
+"replay.quality.full" = "ПОЛНЫЙ";
+"replay.quality.partial" = "ЧАСТИЧНЫЙ";
+"replay.quality.fallback" = "РЕЗЕРВНЫЙ";
+"replay.uav.generic" = "Обобщённый";
+"replay.uav.not_found_named" = "%@ (не найден)";
+"replay.payload.none" = "нет";
+"replay.warning.no_context" = "Эта запись была сделана до появления снимков визуального контекста. Используется резервная визуальная реконструкция.";
+"replay.warning.uav_not_found" = "Исходный профиль БЛА не найден. Используется обобщённая модель БЛА.";
+"replay.payload_camera.unavailable_no_events" = "Камера груза недоступна: нет событий сброса или удара груза.";
+"replay.payload_camera.unavailable_fallback" = "Траектория груза недоступна. Используется резервная фокусировка на событии.";
+"replay.reconstruction.title" = "Визуальная реконструкция";
+"replay.uav_label" = "БЛА";
+"replay.terrain_label" = "Местность";
+"replay.weather_label" = "Погода";
+"replay.payload_label" = "Груз";
+
+"replay.camera_label" = "Камера";
+"replay.camera.height_format" = "Высота %d м";
+"replay.fullscreen.button" = "На весь экран";
+"replay.fullscreen.tooltip" = "Открыть воспроизведение во весь экран";
+"replay.fullscreen.camera_format" = "Камера: %@";
+"replay.fullscreen.height_format" = "Высота: %d м";
+"replay.fullscreen.hide_ui" = "Скрыть интерфейс";
+"replay.fullscreen.close_accessibility" = "Закрыть";
+"replay.fullscreen.show_ui_accessibility" = "Показать интерфейс";
+"replay.fullscreen.keyboard_hints" = "WASD движение · Q/E высота · Перетаскивание — взгляд · Колесо — масштаб · Пробел пауза · R сброс · Esc закрыть";
+
+"replay.frame.meters_format" = "%.1f м";
+"replay.frame.speed_short" = "Ск";
+"replay.frame.speed_format" = "%.1f м/с";
+"replay.frame.mode_short" = "Режим";
+"replay.frame.autopilot_short" = "АП";
+"replay.frame.battery_short" = "Бат";
+"replay.frame.warnings_short" = "Пред";
+"replay.frame.no_data" = "Нет данных кадра";
+"replay.session.not_loaded" = "Сессия не загружена";
+
+"replay.report.title" = "Отчёт о миссии";
+"replay.metrics.duration" = "Длительность";
+"replay.metrics.frames" = "Кадры";
+"replay.metrics.events" = "События";
+"replay.metrics.warnings" = "Предупреждения";
+"replay.metrics.max_speed" = "Макс. скорость";
+"replay.metrics.avg_speed" = "Ср. скорость";
+"replay.metrics.max_altitude" = "Макс. высота";
+"replay.metrics.battery_used" = "Заряд батареи";
+
+"replay.trim.title" = "Обрезка";
+"replay.trim.preview" = "Просмотр";
+"replay.trim.reset" = "Сброс";
+"replay.trim.start_label" = "Начало";
+"replay.trim.end_label" = "Конец";
+"replay.trim.selected_label" = "Выбрано";
+"replay.trim.note" = "Оригинальная запись сохраняется. Обрезка применяется к графикам и экспорту.";
+"replay.trim.start_tooltip" = "Начало обрезки";
+"replay.trim.end_tooltip" = "Конец обрезки";
+"replay.timeline.title" = "Шкала времени";
+
+"replay.telemetry.title" = "Телеметрия";
+"replay.telemetry.altitude" = "Высота";
+"replay.telemetry.speed" = "Скорость";
+"replay.telemetry.battery" = "Батарея";
+"replay.telemetry.roll" = "Крен";
+"replay.telemetry.pitch" = "Тангаж";
+"replay.telemetry.yaw" = "Рыскание";
+
+"replay.unit.meters" = "м";
+"replay.unit.meters_per_second" = "м/с";
+"replay.unit.percent" = "%";
+"replay.unit.degrees" = "°";
+"replay.unit.seconds" = "с";
+"replay.unit.frames_short" = "кд";
+
+"replay.export.title" = "Экспорт видео";
+"replay.export.cancel" = "Отмена";
+"replay.export.mode_label" = "Режим";
+"replay.export.format_label" = "Формат";
+"replay.export.resolution_label" = "Разрешение";
+"replay.export.bitrate_label" = "Битрейт";
+"replay.export.custom_bitrate_label" = "Свой битрейт";
+"replay.export.fast_1080p_hint" = "1080p (Быстрый) доступен, однако 720p — более экономичный вариант.";
+"replay.export.fast_mode_hint" = "Быстрый режим отключает наложения, трек пути и метки событий для снижения нагрузки.";
+"replay.export.overlay" = "Наложение";
+"replay.export.path_trail" = "Трек пути";
+"replay.export.event_markers" = "Метки событий";
+"replay.export.use_trim" = "Использовать обрезку";
+"replay.export.export_button" = "Экспортировать видео";
+"replay.export.actual_bitrate_format" = "Фактический битрейт: %.1f Мбит/с";
+"replay.export.estimated_size_format" = "Оценочный размер: ~%.1f МБ";
+"replay.export.file_format" = "Файл: %@";
+"replay.export.performance_warning" = "Быстрый режим использует упрощённый рендеринг окружения. Качественный режим поддерживает до 1440p/30fps и может использовать больше ресурсов процессора.";
+"replay.export.debug_build_warning" = "Debug-сборки могут экспортировать значительно медленнее. Используйте Release-сборку для проверки производительности.";
+
+"replay.export_mode.fast" = "Быстрый";
+"replay.export_mode.quality" = "Качественный";
+"replay.export_mode.fast.description" = "Облегчённый экспорт. Меньше нагрев, меньше деталей, быстрее результат.";
+"replay.export_mode.quality.description" = "Детальный экспорт. Больше деталей сцены, медленнее рендеринг, выше нагрузка на процессор.";
+"replay.bitrate.auto" = "Авто";
+"replay.bitrate.low" = "Низкий";
+"replay.bitrate.medium" = "Средний";
+"replay.bitrate.high" = "Высокий";
+"replay.bitrate.custom" = "Свой";
+
+"replay.export.error.no_frames" = "В записи нет кадров для экспорта.";
+"replay.export.error.cancelled" = "Экспорт отменён.";
+"replay.export.error.pixel_buffer_unavailable" = "Буфер пикселей видео недоступен.";
+"replay.export.error.image_conversion_failed" = "Не удалось преобразовать отрендеренный кадр в видеобуфер.";
+"replay.export.error.writer_start_failed" = "Не удалось запустить видеозаписыватель.";
+"replay.export.error.writer_append_failed" = "Ошибка видеозаписывателя при добавлении кадров.";
+"replay.export.error.writer_failed" = "Ошибка видеозаписывателя.";
+"replay.export.error.cannot_add_input" = "Видеозаписыватель не может добавить вход H.264 для %@.";
+
+"replay.compare.title" = "Сравнение записей";
+"replay.compare.second_label" = "Вторая";
+"replay.compare.pick_recording" = "Выберите запись";
+"replay.compare.compare_button" = "Сравнить";
+"replay.compare.duration" = "Длительность";
+"replay.compare.frames" = "Кадры";
+"replay.compare.events" = "События";
+"replay.compare.warnings" = "Предупреждения";
+"replay.compare.max_speed" = "Макс. скорость";
+"replay.compare.avg_speed" = "Средняя скорость";
+"replay.compare.max_altitude" = "Макс. высота";
+"replay.compare.battery_used" = "Расход батареи";
+"replay.compare.summary.second_faster" = "Вторая запись достигла более высокой максимальной скорости.";
+"replay.compare.summary.first_faster" = "Первая запись достигла более высокой максимальной скорости.";
+"replay.compare.summary.same_speed" = "Обе записи достигли одинаковой максимальной скорости.";
+"replay.compare.summary.second_longer" = "Вторая запись длиннее.";
+"replay.compare.summary.first_longer" = "Первая запись длиннее.";
+"replay.compare.summary.same_duration" = "Обе записи одинаковой длительности.";
+"replay.compare.summary.second_more_battery" = "Вторая запись израсходовала больше заряда батареи.";
+"replay.compare.summary.first_more_battery" = "Первая запись израсходовала больше заряда батареи.";
+"replay.compare.summary.battery_comparable" = "Расход батареи сопоставим или недоступен.";
+"replay.compare.summary.second_more_warnings" = "Во второй записи больше предупреждений.";
+"replay.compare.summary.first_more_warnings" = "В первой записи больше предупреждений.";
+"replay.compare.summary.same_warnings" = "Количество предупреждений одинаково.";
+
+"replay.events.section_title_format" = "События (%d)";
+"replay.events.jump" = "Перейти";
+
+"replay.camera_mode.free_observer" = "Свободный наблюдатель";
+"replay.camera_mode.chase" = "Преследование";
+"replay.camera_mode.orbit" = "Орбита";
+"replay.camera_mode.top_down" = "Вид сверху";
+"replay.camera_mode.fpv" = "От первого лица";
+"replay.camera_mode.payload_follow" = "За грузом";
+"replay.camera_mode.cinematic_event" = "Событие";
+
+"replay.event.session_started" = "Сессия начата";
+"replay.event.session_stopped" = "Сессия завершена";
+"replay.event.recording_limit_reached" = "Достигнут лимит записи: %d кадров";

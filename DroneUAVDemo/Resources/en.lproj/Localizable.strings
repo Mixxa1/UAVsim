@@ -2100,3 +2100,166 @@
 "credits.source" = "Source";
 "credits.changes" = "Changes";
 "credits.menu" = "Credits";
+
+"replay.title" = "Flight Recorder";
+"replay.no_selection" = "Select a recording to view its report";
+"replay.list.empty.title" = "No recordings";
+"replay.list.empty.subtitle" = "Recordings are saved automatically after each ARM → DISARM cycle.";
+"replay.retention.auto_delete" = "Auto-delete old recordings";
+"replay.retention.keep_last" = "Keep last";
+
+"replay.delete.title" = "Delete recording?";
+"replay.delete.message" = "\"%@\" will be permanently deleted.";
+"replay.delete.confirm" = "Delete";
+
+"replay.quality.full" = "FULL";
+"replay.quality.partial" = "PARTIAL";
+"replay.quality.fallback" = "FALLBACK";
+"replay.uav.generic" = "Generic";
+"replay.uav.not_found_named" = "%@ (not found)";
+"replay.payload.none" = "none";
+"replay.warning.no_context" = "This replay was recorded before visual context snapshots were added. Fallback visual reconstruction is used.";
+"replay.warning.uav_not_found" = "Original UAV profile was not found. Generic replay UAV is used.";
+"replay.payload_camera.unavailable_no_events" = "Payload camera unavailable: no payload release or impact events.";
+"replay.payload_camera.unavailable_fallback" = "Payload trajectory unavailable. Using event focus fallback.";
+"replay.reconstruction.title" = "Visual reconstruction";
+"replay.uav_label" = "UAV";
+"replay.terrain_label" = "Terrain";
+"replay.weather_label" = "Weather";
+"replay.payload_label" = "Payload";
+
+"replay.camera_label" = "Camera";
+"replay.camera.height_format" = "Height %d m";
+"replay.fullscreen.button" = "Fullscreen";
+"replay.fullscreen.tooltip" = "Open fullscreen playback";
+"replay.fullscreen.camera_format" = "Camera: %@";
+"replay.fullscreen.height_format" = "Top height: %d m";
+"replay.fullscreen.hide_ui" = "Hide UI";
+"replay.fullscreen.close_accessibility" = "Close";
+"replay.fullscreen.show_ui_accessibility" = "Show UI";
+"replay.fullscreen.keyboard_hints" = "WASD move · Q/E vertical · Drag look · Scroll zoom · Space play/pause · R reset · Esc close";
+
+"replay.frame.meters_format" = "%.1f m";
+"replay.frame.speed_short" = "Spd";
+"replay.frame.speed_format" = "%.1f m/s";
+"replay.frame.mode_short" = "Mode";
+"replay.frame.autopilot_short" = "AP";
+"replay.frame.battery_short" = "Bat";
+"replay.frame.warnings_short" = "Warn";
+"replay.frame.no_data" = "No frame data";
+"replay.session.not_loaded" = "Session not loaded";
+
+"replay.report.title" = "Mission Report";
+"replay.metrics.duration" = "Duration";
+"replay.metrics.frames" = "Frames";
+"replay.metrics.events" = "Events";
+"replay.metrics.warnings" = "Warnings";
+"replay.metrics.max_speed" = "Max Speed";
+"replay.metrics.avg_speed" = "Avg Speed";
+"replay.metrics.max_altitude" = "Max Altitude";
+"replay.metrics.battery_used" = "Battery Used";
+
+"replay.trim.title" = "Trim";
+"replay.trim.preview" = "Preview";
+"replay.trim.reset" = "Reset";
+"replay.trim.start_label" = "Start";
+"replay.trim.end_label" = "End";
+"replay.trim.selected_label" = "Selected";
+"replay.trim.note" = "The original recording is preserved. Trimming applies to graphs and export.";
+"replay.trim.start_tooltip" = "Trim start";
+"replay.trim.end_tooltip" = "Trim end";
+"replay.timeline.title" = "Timeline";
+
+"replay.telemetry.title" = "Telemetry";
+"replay.telemetry.altitude" = "Altitude";
+"replay.telemetry.speed" = "Speed";
+"replay.telemetry.battery" = "Battery";
+"replay.telemetry.roll" = "Roll";
+"replay.telemetry.pitch" = "Pitch";
+"replay.telemetry.yaw" = "Yaw";
+
+"replay.unit.meters" = "m";
+"replay.unit.meters_per_second" = "m/s";
+"replay.unit.percent" = "%";
+"replay.unit.degrees" = "°";
+"replay.unit.seconds" = "s";
+"replay.unit.frames_short" = "fr";
+
+"replay.export.title" = "Video Export";
+"replay.export.cancel" = "Cancel";
+"replay.export.mode_label" = "Mode";
+"replay.export.format_label" = "Format";
+"replay.export.resolution_label" = "Resolution";
+"replay.export.bitrate_label" = "Bitrate";
+"replay.export.custom_bitrate_label" = "Custom bitrate";
+"replay.export.fast_1080p_hint" = "1080p (Fast) is available, but 720p is more efficient.";
+"replay.export.fast_mode_hint" = "Fast mode disables overlay, path trail and event markers to reduce load.";
+"replay.export.overlay" = "Overlay";
+"replay.export.path_trail" = "Path trail";
+"replay.export.event_markers" = "Event markers";
+"replay.export.use_trim" = "Use trim";
+"replay.export.export_button" = "Export video";
+"replay.export.actual_bitrate_format" = "Actual bitrate: %.1f Mbps";
+"replay.export.estimated_size_format" = "Estimated size: ~%.1f MB";
+"replay.export.file_format" = "File: %@";
+"replay.export.performance_warning" = "Fast uses simplified environment rendering. Quality allows up to 1440p/30fps and may use more CPU.";
+"replay.export.debug_build_warning" = "Debug builds may export significantly slower. Use Release for performance validation.";
+
+"replay.export_mode.fast" = "Fast";
+"replay.export_mode.quality" = "Quality";
+"replay.export_mode.fast.description" = "Lightweight export. Lower heat, fewer details, faster output.";
+"replay.export_mode.quality.description" = "Detailed export. More scene details, slower rendering, higher CPU usage.";
+"replay.bitrate.auto" = "Auto";
+"replay.bitrate.low" = "Low";
+"replay.bitrate.medium" = "Medium";
+"replay.bitrate.high" = "High";
+"replay.bitrate.custom" = "Custom";
+
+"replay.export.error.no_frames" = "Replay has no frames to export.";
+"replay.export.error.cancelled" = "Export cancelled.";
+"replay.export.error.pixel_buffer_unavailable" = "Video pixel buffer is unavailable.";
+"replay.export.error.image_conversion_failed" = "Could not convert rendered replay frame to video buffer.";
+"replay.export.error.writer_start_failed" = "Video writer failed to start.";
+"replay.export.error.writer_append_failed" = "Video writer failed while appending frames.";
+"replay.export.error.writer_failed" = "Video writer failed.";
+"replay.export.error.cannot_add_input" = "Video writer cannot add H.264 input for %@.";
+
+"replay.compare.title" = "Compare recordings";
+"replay.compare.second_label" = "Second";
+"replay.compare.pick_recording" = "Select a recording";
+"replay.compare.compare_button" = "Compare";
+"replay.compare.duration" = "Duration";
+"replay.compare.frames" = "Frames";
+"replay.compare.events" = "Events";
+"replay.compare.warnings" = "Warnings";
+"replay.compare.max_speed" = "Max Speed";
+"replay.compare.avg_speed" = "Average Speed";
+"replay.compare.max_altitude" = "Max Altitude";
+"replay.compare.battery_used" = "Battery Used";
+"replay.compare.summary.second_faster" = "Second replay reached a higher max speed.";
+"replay.compare.summary.first_faster" = "First replay reached a higher max speed.";
+"replay.compare.summary.same_speed" = "Both replays reached the same max speed.";
+"replay.compare.summary.second_longer" = "Second replay is longer.";
+"replay.compare.summary.first_longer" = "First replay is longer.";
+"replay.compare.summary.same_duration" = "Both replays have the same duration.";
+"replay.compare.summary.second_more_battery" = "Second replay used more battery.";
+"replay.compare.summary.first_more_battery" = "First replay used more battery.";
+"replay.compare.summary.battery_comparable" = "Battery use is comparable or unavailable.";
+"replay.compare.summary.second_more_warnings" = "Second replay has more warnings.";
+"replay.compare.summary.first_more_warnings" = "First replay has more warnings.";
+"replay.compare.summary.same_warnings" = "Warning counts are equal.";
+
+"replay.events.section_title_format" = "Events (%d)";
+"replay.events.jump" = "Jump";
+
+"replay.camera_mode.free_observer" = "Free Observer";
+"replay.camera_mode.chase" = "Chase";
+"replay.camera_mode.orbit" = "Orbit";
+"replay.camera_mode.top_down" = "Top-Down";
+"replay.camera_mode.fpv" = "First Person";
+"replay.camera_mode.payload_follow" = "Payload Follow";
+"replay.camera_mode.cinematic_event" = "Event";
+
+"replay.event.session_started" = "Session started";
+"replay.event.session_stopped" = "Session stopped";
+"replay.event.recording_limit_reached" = "Recording limit reached: %d frames";

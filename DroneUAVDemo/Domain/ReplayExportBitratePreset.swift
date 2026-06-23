@@ -9,19 +9,23 @@ enum ReplayExportBitratePreset: String, Codable, CaseIterable, Identifiable, Equ
 
     var id: String { rawValue }
 
-    var displayName: String {
+    var titleKey: String {
         switch self {
         case .automatic:
-            return "Auto"
+            return "replay.bitrate.auto"
         case .low:
-            return "Low"
+            return "replay.bitrate.low"
         case .medium:
-            return "Medium"
+            return "replay.bitrate.medium"
         case .high:
-            return "High"
+            return "replay.bitrate.high"
         case .custom:
-            return "Custom"
+            return "replay.bitrate.custom"
         }
+    }
+
+    var displayName: String {
+        L10n.s(titleKey, language: L10n.currentLanguage())
     }
 }
 

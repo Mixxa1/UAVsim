@@ -10,15 +10,17 @@ struct ReplayComparisonBuilder {
         let firstStats = stats(for: first, report: firstReport)
         let secondStats = stats(for: second, report: secondReport)
 
+        // `title`/`unit` are localization keys (resolved at display time by the view), not text —
+        // `id` is the separate stable matching key, unaffected by language.
         let metrics = [
-            metric("duration", "Duration", firstStats.duration, secondStats.duration, "s"),
-            metric("frames", "Frames", Double(firstStats.frameCount), Double(secondStats.frameCount), "fr"),
-            metric("events", "Events", Double(firstStats.eventCount), Double(secondStats.eventCount), ""),
-            metric("warnings", "Warnings", Double(firstStats.warningCount), Double(secondStats.warningCount), ""),
-            metric("maxSpeed", "Max Speed", firstStats.maxSpeed, secondStats.maxSpeed, "m/s"),
-            metric("averageSpeed", "Average Speed", firstStats.averageSpeed, secondStats.averageSpeed, "m/s"),
-            metric("maxAltitude", "Max Altitude", firstStats.maxAltitude, secondStats.maxAltitude, "m"),
-            metric("batteryUsed", "Battery Used", firstStats.batteryUsed, secondStats.batteryUsed, "%")
+            metric("duration", "replay.compare.duration", firstStats.duration, secondStats.duration, "replay.unit.seconds"),
+            metric("frames", "replay.compare.frames", Double(firstStats.frameCount), Double(secondStats.frameCount), "replay.unit.frames_short"),
+            metric("events", "replay.compare.events", Double(firstStats.eventCount), Double(secondStats.eventCount), ""),
+            metric("warnings", "replay.compare.warnings", Double(firstStats.warningCount), Double(secondStats.warningCount), ""),
+            metric("maxSpeed", "replay.compare.max_speed", firstStats.maxSpeed, secondStats.maxSpeed, "replay.unit.meters_per_second"),
+            metric("averageSpeed", "replay.compare.avg_speed", firstStats.averageSpeed, secondStats.averageSpeed, "replay.unit.meters_per_second"),
+            metric("maxAltitude", "replay.compare.max_altitude", firstStats.maxAltitude, secondStats.maxAltitude, "replay.unit.meters"),
+            metric("batteryUsed", "replay.compare.battery_used", firstStats.batteryUsed, secondStats.batteryUsed, "replay.unit.percent")
         ]
 
         return ReplayComparisonResult(
@@ -96,23 +98,26 @@ struct ReplayComparisonBuilder {
     }
 
     private func summary(first: Stats, second: Stats) -> String {
+        let language = L10n.currentLanguage()
+        func t(_ key: String) -> String { L10n.s(key, language: language) }
+
         let faster: String
         if second.maxSpeed > first.maxSpeed {
-            faster = "Second replay reached a higher max speed."
+            faster = t("replay.compare.summary.second_faster")
         } else if first.maxSpeed > second.maxSpeed {
-            faster = "First replay reached a higher max speed."
+            faster = t("replay.compare.summary.first_faster")
         } else {
-            faster = "Both replays reached the same max speed."
+            faster = t("replay.compare.summary.same_speed")
         }
 
-        let duration = second.duration > first.duration ? "Second replay is longer." :
-            first.duration > second.duration ? "First replay is longer." : "Both replays have the same duration."
+        let duration = second.duration > first.duration ? t("replay.compare.summary.second_longer") :
+            first.duration > second.duration ? t("replay.compare.summary.first_longer") : t("replay.compare.summary.same_duration")
 
-        let battery = (second.batteryUsed ?? -1) > (first.batteryUsed ?? -1) ? "Second replay used more battery." :
-            (first.batteryUsed ?? -1) > (second.batteryUsed ?? -1) ? "First replay used more battery." : "Battery use is comparable or unavailable."
+        let battery = (second.batteryUsed ?? -1) > (first.batteryUsed ?? -1) ? t("replay.compare.summary.second_more_battery") :
+            (first.batteryUsed ?? -1) > (second.batteryUsed ?? -1) ? t("replay.compare.summary.first_more_battery") : t("replay.compare.summary.battery_comparable")
 
-        let warnings = second.warningCount > first.warningCount ? "Second replay has more warnings." :
-            first.warningCount > second.warningCount ? "First replay has more warnings." : "Warning counts are equal."
+        let warnings = second.warningCount > first.warningCount ? t("replay.compare.summary.second_more_warnings") :
+            first.warningCount > second.warningCount ? t("replay.compare.summary.first_more_warnings") : t("replay.compare.summary.same_warnings")
 
         return [faster, duration, battery, warnings].joined(separator: " ")
     }
