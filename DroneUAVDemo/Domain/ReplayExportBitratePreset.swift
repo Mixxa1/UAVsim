@@ -47,7 +47,7 @@ struct ReplayExportBitrateResolver {
     ) -> Int {
         let resolvedPreset = preset == .automatic ? .medium : preset
         if resolvedPreset == .custom {
-            let clamped = min(40.0, max(0.5, customMbps ?? mediumMbps(mode: mode, resolution: resolution, framesPerSecond: framesPerSecond)))
+            let clamped = min(120.0, max(0.5, customMbps ?? mediumMbps(mode: mode, resolution: resolution, framesPerSecond: framesPerSecond)))
             return Int(clamped * 1_000_000)
         }
 
