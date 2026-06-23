@@ -883,7 +883,9 @@ struct ReplayCenterView: View {
                         )) {
                             Text("24").tag(24)
                             if exportSettings.exportMode == .quality {
-                                Text("30").tag(30)
+                                ForEach(ReplayVideoExportSettings.qualityAllowedFrameRates.filter { $0 != 24 }, id: \.self) { fps in
+                                    Text("\(fps)").tag(fps)
+                                }
                             }
                         }
                     }
@@ -913,7 +915,7 @@ struct ReplayCenterView: View {
                             Stepper(
                                 "\(String(format: "%.1f", customBitrateMbpsBinding.wrappedValue)) Mbps",
                                 value: customBitrateMbpsBinding,
-                                in: 0.5...40.0,
+                                in: 0.5...120.0,
                                 step: 0.5
                             )
                         }
@@ -1254,7 +1256,7 @@ struct ReplayCenterView: View {
         Binding(
             get: { exportSettings.customBitrateMbps ?? resolvedExportBitrateMbps },
             set: {
-                exportSettings.customBitrateMbps = min(40.0, max(0.5, $0))
+                exportSettings.customBitrateMbps = min(120.0, max(0.5, $0))
                 exportSettings = exportSettings.clamped
             }
         )
@@ -1304,7 +1306,7 @@ struct ReplayCenterView: View {
             }
             exportSettings.width = exportSettings.resolutionPreset.width
             exportSettings.height = exportSettings.resolutionPreset.height
-            if ![24, 30].contains(exportSettings.framesPerSecond) {
+            if !ReplayVideoExportSettings.qualityAllowedFrameRates.contains(exportSettings.framesPerSecond) {
                 exportSettings.framesPerSecond = 24
             }
             exportSettings.includePathTrail = true

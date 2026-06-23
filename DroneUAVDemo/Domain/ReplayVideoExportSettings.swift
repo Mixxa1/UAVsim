@@ -16,7 +16,7 @@ struct ReplayVideoExportSettings: Codable, Equatable {
     static let fastFramesPerSecond = 24
     static let temporaryMaxWidth = ReplayExportResolutionPreset.p1440.width
     static let temporaryMaxHeight = ReplayExportResolutionPreset.p1440.height
-    static let temporaryMaxFramesPerSecond = 30
+    static let qualityAllowedFrameRates: [Int] = [24, 30, 40, 60, 90, 120]
     static var performanceWarning: String {
         L10n.s("replay.export.performance_warning", language: L10n.currentLanguage())
     }
@@ -56,7 +56,10 @@ struct ReplayVideoExportSettings: Codable, Equatable {
 
     var clamped: ReplayVideoExportSettings {
         let speed = min(8.0, max(0.25, playbackSpeed))
-        let customMbps = customBitrateMbps.map { min(40.0, max(0.5, $0)) }
+        // 1440p/120fps "high" auto-preset now resolves to ~96 Mbps (see ReplayExportBitrateResolver's
+        // fps scaling) — the custom cap needs headroom above that, not the old 40 Mbps ceiling that
+        // predates frame rates over 30.
+        let customMbps = customBitrateMbps.map { min(120.0, max(0.5, $0)) }
         if exportMode == .fast {
             let preset: ReplayExportResolutionPreset = resolutionPreset == .p1440 ? Self.fastResolutionPreset : resolutionPreset
             return ReplayVideoExportSettings(
@@ -90,7 +93,9 @@ struct ReplayVideoExportSettings: Codable, Equatable {
             format: format,
             width: min(Self.temporaryMaxWidth, max(640, preset.width)),
             height: min(Self.temporaryMaxHeight, max(360, preset.height)),
-            framesPerSecond: [24, 30].contains(framesPerSecond) ? framesPerSecond : (framesPerSecond < 30 ? 24 : 30),
+            framesPerSecond: Self.qualityAllowedFrameRates.contains(framesPerSecond)
+                ? framesPerSecond
+                : Self.qualityAllowedFrameRates.min(by: { abs($0 - framesPerSecond) < abs($1 - framesPerSecond) }) ?? Self.fastFramesPerSecond,
             bitratePreset: bitratePreset,
             customBitrateMbps: customMbps,
             playbackSpeed: speed,
@@ -106,7 +111,8 @@ struct ReplayVideoExportSettings: Codable, Equatable {
             mode: clamped.exportMode,
             resolution: clamped.resolutionPreset,
             preset: clamped.bitratePreset,
-            customMbps: clamped.customBitrateMbps
+            customMbps: clamped.customBitrateMbps,
+            framesPerSecond: clamped.framesPerSecond
         )
     }
 }

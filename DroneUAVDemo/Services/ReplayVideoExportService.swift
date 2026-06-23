@@ -185,6 +185,15 @@ final class ReplayVideoExportService: ObservableObject {
         if cameraMode == .cinematicEvent {
             controller.setSelectedEvent(selectedEvent.flatMap { trim.contains($0.timestamp) ? $0 : nil })
         }
+        if cameraMode == .onboardMount {
+            // setCameraMode defaults onboard-mount to its editing sub-state (gizmo visible,
+            // camera orbiting outside the drone) — exactly right the first time someone picks
+            // this mode interactively, completely wrong for a rendered export: it would bake the
+            // move arrows/rotate rings/eye marker into the video and show the wide orbit framing
+            // instead of the configured "through the lens" shot. Exports always want the final
+            // preview result.
+            controller.setOnboardMountEditing(false)
+        }
 
         let renderer = SCNRenderer(device: nil, options: nil)
         renderer.scene = controller.scene

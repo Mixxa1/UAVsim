@@ -2202,7 +2202,7 @@
 "replay.export.actual_bitrate_format" = "Actual bitrate: %.1f Mbps";
 "replay.export.estimated_size_format" = "Estimated size: ~%.1f MB";
 "replay.export.file_format" = "File: %@";
-"replay.export.performance_warning" = "Fast uses simplified environment rendering. Quality allows up to 1440p/30fps and may use more CPU.";
+"replay.export.performance_warning" = "Fast uses simplified environment rendering. Quality allows up to 1440p/120fps and may use more CPU — higher frame rates take proportionally longer to render.";
 "replay.export.debug_build_warning" = "Debug builds may export significantly slower. Use Release for performance validation.";
 
 "replay.export_mode.fast" = "Fast";
