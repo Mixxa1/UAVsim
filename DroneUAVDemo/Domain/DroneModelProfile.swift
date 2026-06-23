@@ -283,6 +283,24 @@ struct FixedWingParameters: Hashable {
         )
     }
 
+    /// Radius of the waypoint volume that is both rendered to the operator and
+    /// used by route guidance to decide that the waypoint was actually crossed.
+    ///
+    /// Keep this separate from guidance lookahead: lookahead may be much larger
+    /// than the visible sphere, but it must never make the autopilot advance to
+    /// the next leg before the aircraft enters this volume.
+    func waypointCaptureRadius(airspeed: Float? = nil) -> Float {
+        let baseRadius = max(waypointAcceptanceRadiusMeters, 4.0)
+        let referenceSpeed = max(airspeed ?? cruiseAirspeed, minSafeAirspeed)
+        return max(
+            baseRadius * 1.45,
+            min(
+                minimumTurnRadius(airspeed: referenceSpeed) * 0.50,
+                baseRadius * 5.0
+            )
+        )
+    }
+
     func guidanceLookaheadDistance(airspeed: Float? = nil) -> Float {
         let referenceSpeed = max(airspeed ?? cruiseAirspeed, minSafeAirspeed)
         return max(

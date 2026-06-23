@@ -1007,10 +1007,18 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fixedWingSafeRouteCacheRoute: FixedWingSafeRoute?
     private var fixedWingSafeRouteCacheStoresNil: Bool = false
     private var simulationTickCounter: UInt64 = 0
+    private var fixedWingGuidanceDeferredThroughTick: UInt64?
     private var lastTargetMarkerRejectionReason: MissionGuidanceRejectionReason?
     private var terrainMapStaticOverlayCacheKey: TerrainMapStaticOverlayKey?
     private var terrainMapStaticOverlayCache: TerrainMapStaticOverlay?
+    private var terrainMapObjectsCacheRevision: UInt64?
+    private var terrainMapObjectsCacheExtentBucket: Int?
+    private var terrainMapObjectsCache: [TerrainMapObject] = []
     private var terrainMapHeavyRebuildCount: Int = 0
+    private var fixedWingObstacleSignatureRevision: UInt64?
+    private var fixedWingObstacleSignatureCache: Int = 0
+    private var environmentObjectSignatureRevision: UInt64?
+    private var environmentObjectSignatureCache: Int = 0
 
     private enum ActiveRouteTargetSource {
         case none
@@ -4741,14 +4749,21 @@ final class DroneSimulationViewModel: ObservableObject {
                        !fixedWingAssistState.capturedWaypointIDs.contains(completedWaypointID) {
                         fixedWingAssistState.capturedWaypointIDs.append(completedWaypointID)
                     }
+                    var waypointChanged = flyByHandoffCompleted
                     if flyByHandoffCompleted {
-                        refreshFixedWingAssistRuntimeDebugState()
+                        // The next simulation tick computes guidance for the
+                        // new waypoint before issuing its control command.
                     } else if captureTransitionOccurred {
-                        handleFixedWingAssistCaptureCompletion(wing: wing)
+                        waypointChanged = handleFixedWingAssistCaptureCompletion()
                     } else if fixedWingAssistState.interceptCompleted {
-                        updatePendingFixedWingAutoAdvanceIfNeeded(wing: wing)
+                        waypointChanged = updatePendingFixedWingAutoAdvanceIfNeeded()
                     }
-                    refreshFixedWingAssistRuntimeDebugState()
+                    if !waypointChanged {
+                        refreshFixedWingAssistRuntimeDebugState(
+                            precomputedGuidanceSnapshot: guidanceSnapshot,
+                            recomputeGuidance: false
+                        )
+                    }
                     fixedWingAssistUsesTargetYawWhileManual = !turnOverrideActive
                     if let reason = assistOutput.transitionReason,
                        !captureTransitionOccurred {
@@ -8320,6 +8335,11 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func fixedWingObstacleSignature() -> Int {
+        let revision = sceneController.environmentRevision
+        if fixedWingObstacleSignatureRevision == revision {
+            return fixedWingObstacleSignatureCache
+        }
+
         var hasher = Hasher()
         for obstacle in sceneController.environmentObstacles {
             hasher.combine(obstacle.id)
@@ -8328,7 +8348,10 @@ final class DroneSimulationViewModel: ObservableObject {
             hasher.combine(Int((obstacle.center.z * 2.0).rounded()))
             hasher.combine(Int((obstacle.radius * 4.0).rounded()))
         }
-        return hasher.finalize()
+        let signature = hasher.finalize()
+        fixedWingObstacleSignatureRevision = revision
+        fixedWingObstacleSignatureCache = signature
+        return signature
     }
 
     private func fixedWingWeatherSignature() -> Int {
@@ -8558,15 +8581,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let currentPosition = currentPlanarPosition()
-        let currentAirspeed = max(state.forwardAirspeed, wing.minSustainableSpeedMps)
-        let baseAcceptance = max(wing.waypointAcceptanceRadiusMeters, 5.0) * 1.1
-        let captureRadius = max(
-            baseAcceptance * 1.45,
-            min(
-                wing.minimumTurnRadius(airspeed: max(currentAirspeed, wing.cruiseAirspeed * 0.72)) * 0.50,
-                baseAcceptance * 5.0
-            )
-        )
+        let captureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
         var directGuidanceTarget = plan.selectedWaypoint.position
         var directGuidanceMode = "singlePointIntercept"
         if let start = plan.currentLegStart,
@@ -8852,10 +8867,16 @@ final class DroneSimulationViewModel: ObservableObject {
             return start
         }
 
-        let captureExitLead = max(captureRadius * 1.75, lookaheadDistance, 4.0)
-        let desiredDistance = max(
-            legLength + captureExitLead,
-            max(0.0, alongTrackDistance + lookaheadDistance)
+        let boundedLookahead = min(
+            lookaheadDistance,
+            max(captureRadius * 3.0, legLength)
+        )
+        // Stop the moving aim point at the waypoint center. Letting it extend
+        // beyond the waypoint and continue moving ahead kept the aircraft on a
+        // nearly parallel course whenever cross-track error remained.
+        let desiredDistance = min(
+            legLength,
+            max(0.0, alongTrackDistance + boundedLookahead)
         )
         return start + direction * desiredDistance
     }
@@ -9248,7 +9269,8 @@ final class DroneSimulationViewModel: ObservableObject {
         assistState.usingObsoleteFixedWingMode = false
     }
 
-    private func updatePendingFixedWingAutoAdvanceIfNeeded(wing: FixedWingParameters) {
+    @discardableResult
+    private func updatePendingFixedWingAutoAdvanceIfNeeded() -> Bool {
         let options = fixedWingAssistWaypointOptions
         let classification = fixedWingAssistWaypointClassification(
             activeIndex: fixedWingAssistState.activeWaypointIndex,
@@ -9260,11 +9282,11 @@ final class DroneSimulationViewModel: ObservableObject {
               fixedWingAssistState.interceptCompleted,
               fixedWingAssistState.mode == .waypointIntercept,
               let nextWaypointIndex = classification.nextWaypointIndex else {
-            return
+            return false
         }
 
         guard options.indices.contains(nextWaypointIndex) else {
-            return
+            return false
         }
 
         let nextWaypoint = options[nextWaypointIndex]
@@ -9287,15 +9309,15 @@ final class DroneSimulationViewModel: ObservableObject {
             currentState: fixedWingAssistState
         )
         syncFixedWingAssistSelection()
-        applyFixedWingAssistFlyBySnapshot(
-            fixedWingAssistFlyByGuidanceSnapshot(wing: wing),
-            to: &fixedWingAssistState
-        )
+        // Defer potentially expensive protected-route/A* guidance for the new
+        // waypoint until the next simulation tick.
         fixedWingAssistState.stateTransitionReason = "fixed_wing_assist_auto_advance_to_next_waypoint"
         fixedWingLastTransitionReason = fixedWingAssistState.stateTransitionReason
+        return true
     }
 
-    private func handleFixedWingAssistCaptureCompletion(wing: FixedWingParameters) {
+    @discardableResult
+    private func handleFixedWingAssistCaptureCompletion() -> Bool {
         let options = fixedWingAssistWaypointOptions
         let classification = fixedWingAssistWaypointClassification(
             activeIndex: fixedWingAssistState.activeWaypointIndex,
@@ -9311,8 +9333,7 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingAssistState.activeGuidanceTargetType = "routeComplete"
             fixedWingAssistState.activeGuidanceMode = "routeComplete"
             fixedWingAssistUsesTargetYawWhileManual = true
-            refreshFixedWingAssistRuntimeDebugState()
-            return
+            return false
         }
 
         guard fixedWingAssistState.autoAdvanceEnabled else {
@@ -9322,8 +9343,7 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingAssistState.activeGuidanceMode = "outboundLegTrack"
             fixedWingAssistState.stateTransitionReason = "fixed_wing_assist_nonfinal_waypoint_waiting_next_selection"
             fixedWingLastTransitionReason = fixedWingAssistState.stateTransitionReason
-            refreshFixedWingAssistRuntimeDebugState()
-            return
+            return false
         }
 
         guard let activeWaypointIndex = classification.activeWaypointIndex,
@@ -9341,8 +9361,7 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingAssistState.lateralGuidanceSuppressedForPoorGeometry = false
             fixedWingAssistState.stateTransitionReason = "fixed_wing_assist_auto_advance_missing_active_waypoint"
             fixedWingLastTransitionReason = fixedWingAssistState.stateTransitionReason
-            refreshFixedWingAssistRuntimeDebugState()
-            return
+            return false
         }
 
         clearFixedWingAssistAutoAdvanceDiagnostics(&fixedWingAssistState)
@@ -9352,8 +9371,7 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingAssistState.activeGuidanceMode = "outboundLegTrack"
         fixedWingAssistState.stateTransitionReason = "fixed_wing_assist_auto_advance_pending_flyby_handoff"
         fixedWingLastTransitionReason = fixedWingAssistState.stateTransitionReason
-        updatePendingFixedWingAutoAdvanceIfNeeded(wing: wing)
-        refreshFixedWingAssistRuntimeDebugState()
+        return updatePendingFixedWingAutoAdvanceIfNeeded()
     }
 
     func selectFixedWingAssistWaypoint(_ id: UUID) {
@@ -9385,12 +9403,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 selectedWaypointID: id,
                 currentState: fixedWingAssistState
             )
-            if let wing = selectedDroneProfile.fixedWingParameters {
-                applyFixedWingAssistFlyBySnapshot(
-                    fixedWingAssistFlyByGuidanceSnapshot(wing: wing),
-                    to: &fixedWingAssistState
-                )
-            }
+            // Guidance for the newly selected waypoint is computed by the
+            // simulation tick. Running it synchronously from the UI action
+            // can include protected-route/A* work and stalls rendering.
             fixedWingAssistState.stateTransitionReason = "fixed_wing_assist_target_selected"
             fixedWingLastTransitionReason = "fixed_wing_assist_target_selected"
         } else {
@@ -9410,8 +9425,9 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
-        refreshFixedWingAssistRuntimeDebugState()
-        refreshTerrainMapSnapshotIfVisible(recordTrail: false)
+        // Runtime diagnostics and map overlays are refreshed by the normal
+        // simulation cadence. Keeping them out of the selection action avoids
+        // a route rebuild on the UI/main thread.
         refreshFlightControlDiagnostics()
     }
 
@@ -9425,10 +9441,11 @@ final class DroneSimulationViewModel: ObservableObject {
             activeIndex: fixedWingAssistState.activeWaypointIndex
         )
         applyFixedWingWaypointClassification(classification, to: &fixedWingAssistState)
+        var waypointChanged = false
         if enabled,
            fixedWingAssistState.interceptCompleted,
-           let wing = selectedDroneProfile.fixedWingParameters {
-            handleFixedWingAssistCaptureCompletion(wing: wing)
+           selectedDroneProfile.fixedWingParameters != nil {
+            waypointChanged = handleFixedWingAssistCaptureCompletion()
         } else if !enabled {
             clearFixedWingAssistAutoAdvanceDiagnostics(&fixedWingAssistState)
             if fixedWingAssistState.interceptCompleted {
@@ -9443,7 +9460,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 }
             }
         }
-        refreshFixedWingAssistRuntimeDebugState()
+        if !waypointChanged {
+            refreshFixedWingAssistRuntimeDebugState(recomputeGuidance: false)
+        }
         refreshTerrainMapSnapshotIfVisible(recordTrail: false)
         refreshFlightControlDiagnostics()
     }
@@ -9580,10 +9599,14 @@ final class DroneSimulationViewModel: ObservableObject {
             .option
     }
 
-    private func refreshFixedWingAssistRuntimeDebugState() {
-        let routePlan = fixedWingFlyByRoutePlan(
-            targetAltitude: max(0.0, state.position.y)
-        )
+    private func refreshFixedWingAssistRuntimeDebugState(
+        precomputedGuidanceSnapshot: FixedWingAssistFlyByGuidanceSnapshot? = nil,
+        recomputeGuidance: Bool = true
+    ) {
+        let guidanceDeferred = fixedWingGuidanceDeferredThroughTick == simulationTickCounter
+        let routePlan = guidanceDeferred
+            ? fixedWingFlyByRoutePlanCache
+            : fixedWingFlyByRoutePlan(targetAltitude: max(0.0, state.position.y))
         let previewUsesCachedFlyByPlan = routePlan?.previewUsesCachedFlyByPlan == true && (
             currentMissionPlan != nil || tacticalMapState.previewRoute != nil
         )
@@ -9657,10 +9680,17 @@ final class DroneSimulationViewModel: ObservableObject {
             target: activeWaypoint.position
         )
         if fixedWingAssistState.mode == .waypointIntercept {
-            applyFixedWingAssistFlyBySnapshot(
-                fixedWingAssistFlyByGuidanceSnapshot(wing: wing),
-                to: &fixedWingAssistState
+            let guidanceSnapshot = precomputedGuidanceSnapshot ?? (
+                recomputeGuidance && !guidanceDeferred
+                    ? fixedWingAssistFlyByGuidanceSnapshot(wing: wing)
+                    : nil
             )
+            if let guidanceSnapshot {
+                applyFixedWingAssistFlyBySnapshot(
+                    guidanceSnapshot,
+                    to: &fixedWingAssistState
+                )
+            }
             if fixedWingAssistState.interceptFeasibilityState == nil {
                 fixedWingAssistState.interceptFeasibilityState = geometryAssessment?.feasibilityState
             }
@@ -9725,7 +9755,14 @@ final class DroneSimulationViewModel: ObservableObject {
     private func resetFixedWingRuntimeRouteStart() {
         fixedWingRuntimeRouteStartKey = nil
         fixedWingRuntimeRouteStartPosition = nil
-        invalidateFixedWingRouteCaches()
+        fixedWingGuidanceDeferredThroughTick = simulationTickCounter
+        // A waypoint handoff changes only the runtime join anchor. The static
+        // mission route, safe route and obstacle-grid caches remain valid.
+        // Clearing all of them here caused synchronous full-route/A* rebuilds
+        // in the exact frame where the active waypoint changed.
+        fixedWingFlyablePathCacheKey = nil
+        fixedWingFlyablePathCacheRoute = nil
+        invalidateFixedWingRouteTrackingContextCache()
     }
 
     private func invalidateFixedWingRouteCaches() {
@@ -10807,7 +10844,28 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingAssistState.heavyMapRebuildCount = terrainMapHeavyRebuildCount
 
         let missionOverlay = terrainMapMissionOverlay(viewport: viewport)
-        let mapObjects = sceneController.environmentMapDescriptors
+        let mapObjects = terrainMapObjects(extent: extent)
+
+        let overlay = TerrainMapStaticOverlay(
+            routePoints: missionOverlay.routePoints,
+            waypoints: missionOverlay.waypoints,
+            noFlyZones: missionOverlay.noFlyZones,
+            objects: mapObjects
+        )
+        terrainMapStaticOverlayCacheKey = key
+        terrainMapStaticOverlayCache = overlay
+        return overlay
+    }
+
+    private func terrainMapObjects(extent: Float) -> [TerrainMapObject] {
+        let revision = sceneController.environmentRevision
+        let extentBucket = Int(extent.rounded())
+        if terrainMapObjectsCacheRevision == revision,
+           terrainMapObjectsCacheExtentBucket == extentBucket {
+            return terrainMapObjectsCache
+        }
+
+        let objects = sceneController.environmentMapDescriptors
             .filter { descriptor in
                 descriptor.kind != .distantBelt &&
                 abs(descriptor.position.x) <= extent + descriptor.boundingRadius &&
@@ -10828,15 +10886,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 max(lhs.footprint.x, lhs.footprint.y) > max(rhs.footprint.x, rhs.footprint.y)
             }
 
-        let overlay = TerrainMapStaticOverlay(
-            routePoints: missionOverlay.routePoints,
-            waypoints: missionOverlay.waypoints,
-            noFlyZones: missionOverlay.noFlyZones,
-            objects: mapObjects
-        )
-        terrainMapStaticOverlayCacheKey = key
-        terrainMapStaticOverlayCache = overlay
-        return overlay
+        terrainMapObjectsCacheRevision = revision
+        terrainMapObjectsCacheExtentBucket = extentBucket
+        terrainMapObjectsCache = objects
+        return objects
     }
 
     private func terrainMapStaticOverlayKey(extent: Float) -> TerrainMapStaticOverlayKey {
@@ -10862,6 +10915,11 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func environmentObjectSignature() -> Int {
+        let revision = sceneController.environmentRevision
+        if environmentObjectSignatureRevision == revision {
+            return environmentObjectSignatureCache
+        }
+
         var hasher = Hasher()
         for descriptor in sceneController.environmentMapDescriptors {
             hasher.combine(descriptor.id)
@@ -10870,7 +10928,10 @@ final class DroneSimulationViewModel: ObservableObject {
             hasher.combine(Int((descriptor.position.z * 0.5).rounded()))
             hasher.combine(Int((descriptor.boundingRadius * 2.0).rounded()))
         }
-        return hasher.finalize()
+        let signature = hasher.finalize()
+        environmentObjectSignatureRevision = revision
+        environmentObjectSignatureCache = signature
+        return signature
     }
 
     private func activeNoFlyZonesForNavigation() -> [MissionZone] {
@@ -10911,19 +10972,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch selectedDroneProfile.airframeClass {
         case .fixedWing:
             let wing = activeFixedWingParameters()
-            let baseAcceptance = max(wing.waypointAcceptanceRadiusMeters, 4.0)
-            let referenceSpeed = max(
-                state.forwardAirspeed,
-                wing.cruiseAirspeed * 0.72,
-                wing.minSafeAirspeed
-            )
-            return max(
-                baseAcceptance * 1.45,
-                min(
-                    wing.minimumTurnRadius(airspeed: referenceSpeed) * 0.50,
-                    baseAcceptance * 5.0
-                )
-            )
+            return wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
         case .multirotor:
             return 1.2
         }
@@ -11387,7 +11436,14 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         isInMissionDropZone = missionPlanState.dropZone?.contains(currentPlanarPosition()) ?? false
-        refreshTerrainMapSnapshot(recordTrail: false)
+        // Rebinding the next mission waypoint happens on the simulation/main
+        // thread. Rebuilding the complete tactical-map snapshot here is wasted
+        // work while both map surfaces are hidden and can include sorting every
+        // environment descriptor plus regenerating route overlays. On large
+        // worlds this blocked rendering for several seconds immediately after
+        // waypoint capture. A visible map is still refreshed synchronously; a
+        // hidden map is rebuilt by its normal visibility refresh when opened.
+        refreshTerrainMapSnapshotIfVisible(recordTrail: false)
         refreshCompassOverlay()
         refreshFlightControlDiagnostics()
     }

@@ -64,7 +64,6 @@ final class FixedWingAssistController {
         static let altitudeThrottleAssist: Float = 0.014
         static let pitchUpClampDeg: Float = 9.0
         static let pitchDownClampDeg: Float = 7.0
-        static let interceptCaptureMultiplier: Float = 1.1
         static let courseFilterTau: Float = 0.22
         static let bankFilterTau: Float = 0.30
         static let pitchFilterTau: Float = 0.45
@@ -290,23 +289,10 @@ final class FixedWingAssistController {
            let target = captureTarget ?? interceptTarget,
            let waypointID = assistState.selectedWaypointID {
             let distance = simd_length(target - aircraftPlanar)
-            let baseAcceptance = max(wing.waypointAcceptanceRadiusMeters, 5.0) * Tuning.interceptCaptureMultiplier
-            // Reverted: scaling this uncapped against minimumTurnRadius blew
-            // up to hundreds/thousands of meters for fast airframes (e.g.
-            // ~1.3km for a 90 m/s cruiser at 28° max bank), capturing
-            // waypoints from absurdly far away on the *main* route, not just
-            // the close-reselect case it was meant to fix — confirmed
-            // regression, not a tradeoff worth keeping. Back to the bounded
-            // form; the close-reselect dead zone (pure pursuit can't
-            // converge on a target inside its own minimum turn radius) needs
-            // a real intercept-maneuver fix, not a capture-radius hack.
-            let captureRadius = max(
-                baseAcceptance * 1.45,
-                min(
-                    wing.minimumTurnRadius(airspeed: max(aircraftState.forwardAirspeed, wing.cruiseAirspeed * 0.72)) * 0.50,
-                    baseAcceptance * 5.0
-                )
-            )
+            // Use the exact same radius as the tactical-map/3D sphere and the
+            // main fixed-wing autopilot. Assist guidance must not silently
+            // capture a larger invisible circle.
+            let captureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
             let legStart = interceptDebugContext.currentLegStart ?? tracker?.legStartPosition ?? aircraftPlanar
 
             nextState.distanceToActiveWaypointMeters = distance

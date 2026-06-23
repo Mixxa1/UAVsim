@@ -73,6 +73,10 @@ struct FixedWingAutopilotResult: Equatable {
     var remainingPathLengthMeters: Float
     var stallProtectionActive: Bool
     var hasCompletedRoute: Bool
+    /// True on the tick the aircraft crosses the waypoint's abeam plane
+    /// without entering its capture sphere. The route does not advance: the
+    /// controller keeps the waypoint active and turns back to reacquire it.
+    var missedActiveWaypoint: Bool
 }
 
 final class FixedWingAutopilot {
@@ -115,6 +119,7 @@ final class FixedWingAutopilot {
         var legAnchor: SIMD2<Float> = .zero
         var hasLegAnchor: Bool = false
         var hasCompletedRoute: Bool = false
+        var missedActiveWaypoint: Bool = false
         var previousAircraftPlanar: SIMD2<Float> = .zero
         var hasPreviousAircraftPlanar: Bool = false
     }
@@ -192,18 +197,56 @@ final class FixedWingAutopilot {
         let currentSpeed = max(0.0, input.aircraftAirspeed.isFinite ? input.aircraftAirspeed : 0.0)
 
         // Advance through any waypoints we have already crossed.
+        //
+        // `active.acceptanceRadius` is the same capture volume rendered on the
+        // tactical map and in the 3D scene. Guidance lookahead is intentionally
+        // larger, but it must not advance the route before this actual sphere
+        // is crossed. The swept-segment test still catches a fast fly-through
+        // that crosses the sphere between two ticks.
+        state.missedActiveWaypoint = false
         var advanceGuard = 0
         while advanceGuard < plan.waypoints.count {
             let active = plan.waypoints[state.activeWaypointIndex]
-            let acceptance = max(active.acceptanceRadius, wing.waypointAcceptanceRadiusMeters)
+            let captureRadius = max(active.acceptanceRadius, 4.0)
             let distanceToWaypoint = simd_length(aircraftPlanar - active.position)
             let crossedCaptureVolume = motionSegmentIntersectsCircle(
                 from: state.previousAircraftPlanar,
                 to: aircraftPlanar,
                 center: active.position,
-                radius: acceptance
+                radius: captureRadius
             )
-            let insideAcceptance = distanceToWaypoint <= acceptance
+            let insideAcceptance = distanceToWaypoint <= captureRadius
+
+            // Detect crossing the waypoint's abeam plane without entering its
+            // sphere. This is diagnostic only: a miss must never be counted as
+            // a completed waypoint. Guidance below will cap its carrot at the
+            // waypoint itself, causing a turn back and reacquisition.
+            let inboundDirection: SIMD2<Float> = {
+                if state.activeWaypointIndex > 0 {
+                    let raw = active.position - plan.waypoints[state.activeWaypointIndex - 1].position
+                    let length = simd_length(raw)
+                    if length > 0.001 {
+                        return raw / length
+                    }
+                }
+                // First waypoint (no preceding waypoint to define a leg): fall
+                // back to the aircraft's actual travel direction this tick, not
+                // a bearing-to-waypoint, so the abeam test reflects real motion.
+                let travel = aircraftPlanar - state.previousAircraftPlanar
+                let travelLength = simd_length(travel)
+                if travelLength > 0.0001 {
+                    return travel / travelLength
+                }
+                return forwardDirection(yaw: input.aircraftYawRadians)
+            }()
+            let previousAlong = simd_dot(state.previousAircraftPlanar - active.position, inboundDirection)
+            let currentAlong = simd_dot(aircraftPlanar - active.position, inboundDirection)
+            let crossedAbeamPlane = previousAlong < 0.0 && currentAlong >= 0.0
+            let overshotWithoutCapture = crossedAbeamPlane && !crossedCaptureVolume && !insideAcceptance
+
+            if overshotWithoutCapture {
+                state.missedActiveWaypoint = true
+            }
 
             if crossedCaptureVolume || insideAcceptance {
                 let isLast = state.activeWaypointIndex >= plan.waypoints.count - 1
@@ -467,7 +510,8 @@ final class FixedWingAutopilot {
             alongTrackProgress: alongTrackProgress,
             remainingPathLengthMeters: remainingDistance,
             stallProtectionActive: stallProtectionActive,
-            hasCompletedRoute: state.hasCompletedRoute
+            hasCompletedRoute: state.hasCompletedRoute,
+            missedActiveWaypoint: state.missedActiveWaypoint
         )
     }
 
@@ -488,15 +532,24 @@ final class FixedWingAutopilot {
             return activeWaypoint.position
         }
 
-        let captureExitLead = max(
-            activeWaypoint.acceptanceRadius * 1.75,
-            lookaheadDistance,
+        let captureScale = max(
+            activeWaypoint.acceptanceRadius,
             4.0
         )
-        let throughCaptureDistance = legLength + captureExitLead
-        let desiredAlongTrack = max(
-            throughCaptureDistance,
-            max(0.0, alongTrack + lookaheadDistance)
+        let boundedLookahead = min(
+            lookaheadDistance,
+            max(captureScale * 3.0, legLength)
+        )
+        // The carrot may move forward along the inbound leg, but it stops at
+        // the waypoint center. Previously `max(...)` pushed it beyond the
+        // waypoint and then kept moving it ahead of the aircraft forever. With
+        // lateral error the aircraft followed a nearly parallel course and
+        // crossed the abeam plane outside the sphere. Capping at `legLength`
+        // progressively increases the intercept angle and, after an overshoot,
+        // commands a genuine turn back toward the sphere.
+        let desiredAlongTrack = min(
+            legLength,
+            max(0.0, alongTrack + boundedLookahead)
         )
         return legStart + legDirection * desiredAlongTrack
     }

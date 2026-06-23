@@ -261,6 +261,13 @@ final class FixedWingAutopilotController {
             setPhase(.trackingLeg, reason: "tracking")
         }
 
+        // Surface a genuine miss (set AFTER setPhase, which overwrites the
+        // transition reason). The waypoint remains active and guidance turns
+        // back to reacquire its sphere.
+        if result.missedActiveWaypoint {
+            lastTransitionReason = "waypoint_missed_reacquiring"
+        }
+
         let command = AutopilotControlCommand(
             positionTarget: result.positionTarget,
             rollDegrees: result.rollDegrees,
@@ -398,14 +405,7 @@ final class FixedWingAutopilotController {
         defaultAltitude: Float,
         wing: FixedWingParameters
     ) -> FixedWingAutopilotPlan {
-        let baseAcceptanceRadius = max(wing.waypointAcceptanceRadiusMeters, 4.0)
-        let turnAwareAcceptanceRadius = max(
-            baseAcceptanceRadius * 1.45,
-            min(
-                wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed) * 0.85,
-                baseAcceptanceRadius * 8.0
-            )
-        )
+        let waypointCaptureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
         let waypoints: [FixedWingAutopilotWaypoint] = tracking.waypoints
             .filter { isFinite($0.position) }
             .map { wp in
@@ -414,7 +414,7 @@ final class FixedWingAutopilotController {
                     altitude: wp.position.y.isFinite && wp.position.y > 0.05
                         ? wp.position.y
                         : max(defaultAltitude, 1.0),
-                    acceptanceRadius: turnAwareAcceptanceRadius
+                    acceptanceRadius: waypointCaptureRadius
                 )
             }
         let minimumIndex = max(0, tracking.minimumWaypointIndex ?? 0)
