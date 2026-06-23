@@ -63,6 +63,11 @@ struct ReplayCenterView: View {
     @State private var deleteCandidate: MissionReplayRecordSummary?
     @State private var cameraMode: ReplayCameraMode = .freeObserver
     @State private var topDownHeight: Double = 120
+    // Mirrors sceneHolder.controller's onboardMount state for the Edit/Preview + Move/Rotate
+    // toggles — the gizmo is dragged via raw AppKit mouse events deep inside ReplaySCNView,
+    // entirely outside SwiftUI's own binding system, so these have to be refreshed from the
+    // 60fps timer tick below rather than from a SwiftUI-driven onChange.
+    @State private var onboardMountIsEditingDisplay = true
     @State private var reconstructionStatus: ReplayReconstructionStatus = .none
     @State private var fullscreenSession: MissionReplaySession?
     @State private var selectedReplayEvent: MissionReplayEvent?
@@ -119,6 +124,7 @@ struct ReplayCenterView: View {
             sceneHolder.controller.setCameraMode(newMode)
             sceneHolder.controller.setTopDownHeight(Float(topDownHeight))
             sceneHolder.controller.setSelectedEvent(selectedReplayEvent)
+            onboardMountIsEditingDisplay = sceneHolder.controller.onboardMountIsEditing
             if let frame = replayPlayer.currentFrame {
                 sceneHolder.controller.update(frame: frame)
             }
@@ -145,6 +151,9 @@ struct ReplayCenterView: View {
             replayPlayer.update(deltaTime: 1.0 / 60.0)
             if replayPlayer.isPlaying {
                 sceneHolder.controller.update(frame: replayPlayer.currentFrame)
+            }
+            if cameraMode == .onboardMount {
+                onboardMountIsEditingDisplay = sceneHolder.controller.onboardMountIsEditing
             }
             if cameraMode == .freeObserver {
                 let keys = wasdMonitor.pressedKeys
@@ -570,21 +579,40 @@ struct ReplayCenterView: View {
                         .disabled(!replayPlayer.isLoaded)
                 }
 
-                Spacer(minLength: 0)
-            }
+                if cameraMode == .onboardMount {
+                    Divider().frame(height: 18)
 
-            if replayPlayer.isLoaded, replayPlayer.duration > 0 {
-                Slider(
-                    value: Binding(
-                        get: { replayPlayer.currentTime },
-                        set: { t in
-                            replayPlayer.seek(to: t)
-                            sceneHolder.controller.update(frame: replayPlayer.currentFrame)
+                    Picker("", selection: Binding(
+                        get: { onboardMountIsEditingDisplay },
+                        set: { editing in
+                            sceneHolder.controller.setOnboardMountEditing(editing)
+                            onboardMountIsEditingDisplay = editing
+                            if let frame = replayPlayer.currentFrame {
+                                sceneHolder.controller.update(frame: frame)
+                            }
                         }
-                    ),
-                    in: 0...replayPlayer.duration
-                )
-                .tint(GroundControlPalette.accent)
+                    )) {
+                        Text("replay.mount.edit").tag(true)
+                        Text("replay.mount.preview").tag(false)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .frame(width: 150)
+                    .disabled(!replayPlayer.isLoaded)
+
+                    Button("replay.trim.reset") {
+                        sceneHolder.controller.resetOnboardMountOffset()
+                        if let frame = replayPlayer.currentFrame {
+                            sceneHolder.controller.update(frame: frame)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(GroundControlPalette.accent)
+                    .disabled(!replayPlayer.isLoaded)
+                }
+
+                Spacer(minLength: 0)
             }
         }
     }
@@ -1182,7 +1210,7 @@ struct ReplayCenterView: View {
     // MARK: - Helpers
 
     private var availableCameraModes: [ReplayCameraMode] {
-        var modes: [ReplayCameraMode] = [.freeObserver, .chase, .orbit, .topDown, .fpvApproximation]
+        var modes: [ReplayCameraMode] = [.freeObserver, .chase, .orbit, .topDown, .fpvApproximation, .onboardMount]
         let events = viewModel.selectedReport?.events ?? fullscreenSession?.events ?? []
         if events.contains(where: { $0.type == .payloadReleased || $0.type == .payloadImpact }) {
             modes.append(.payloadFollow)

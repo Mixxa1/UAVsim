@@ -2252,6 +2252,9 @@
 "replay.camera_mode.orbit" = "Орбита";
 "replay.camera_mode.top_down" = "Вид сверху";
 "replay.camera_mode.fpv" = "От первого лица";
+"replay.camera_mode.onboard_mount" = "На борту";
+"replay.mount.edit" = "Правка";
+"replay.mount.preview" = "Просмотр";
 "replay.camera_mode.payload_follow" = "За грузом";
 "replay.camera_mode.cinematic_event" = "Событие";
 

@@ -2257,6 +2257,9 @@
 "replay.camera_mode.orbit" = "Orbit";
 "replay.camera_mode.top_down" = "Top-Down";
 "replay.camera_mode.fpv" = "First Person";
+"replay.camera_mode.onboard_mount" = "Onboard";
+"replay.mount.edit" = "Edit";
+"replay.mount.preview" = "Preview";
 "replay.camera_mode.payload_follow" = "Payload Follow";
 "replay.camera_mode.cinematic_event" = "Event";
 

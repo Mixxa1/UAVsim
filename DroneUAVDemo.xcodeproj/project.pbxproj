@@ -205,6 +205,7 @@
 		1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DC /* MissionReplayPlayer.swift */; };
 		1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DE /* MissionReplaySceneController.swift */; };
 		1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */; };
+		100000000000000000000421 /* ReplayGizmoInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000420 /* ReplayGizmoInteraction.swift */; };
 		1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E2 /* ReplayCameraMode.swift */; };
 		1000000000000000000002E5 /* MissionReplayContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */; };
 		1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E6 /* FullscreenReplayViewerView.swift */; };
@@ -500,6 +501,7 @@
 		1000000000000000000002DC /* MissionReplayPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayPlayer.swift; sourceTree = "<group>"; };
 		1000000000000000000002DE /* MissionReplaySceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneController.swift; sourceTree = "<group>"; };
 		1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneViewRepresentable.swift; sourceTree = "<group>"; };
+		100000000000000000000420 /* ReplayGizmoInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayGizmoInteraction.swift; sourceTree = "<group>"; };
 		1000000000000000000002E2 /* ReplayCameraMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCameraMode.swift; sourceTree = "<group>"; };
 		1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayContextSnapshot.swift; sourceTree = "<group>"; };
 		1000000000000000000002E6 /* FullscreenReplayViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenReplayViewerView.swift; sourceTree = "<group>"; };
@@ -880,6 +882,7 @@
 				1000000000000000000002D4 /* ReplayCenterView.swift */,
 				1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */,
 				1000000000000000000002E6 /* FullscreenReplayViewerView.swift */,
+				100000000000000000000420 /* ReplayGizmoInteraction.swift */,
 				10000000000000000000033A /* ReplayCenterWindowHost.swift */,
 				1000000000000000000002F6 /* ReplayTimelineEditorView.swift */,
 				100000000000000000000351 /* LegalAgreementView.swift */,
@@ -1345,6 +1348,7 @@
 				1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */,
 				1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */,
 				1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */,
+				100000000000000000000421 /* ReplayGizmoInteraction.swift in Sources */,
 				1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */,
 				1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */,
 				1000000000000000000002E9 /* ReplayTrimRange.swift in Sources */,

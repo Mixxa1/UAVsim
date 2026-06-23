@@ -6,6 +6,7 @@ enum ReplayCameraMode: String, CaseIterable, Identifiable, Codable, Equatable {
     case orbit
     case topDown
     case fpvApproximation
+    case onboardMount
     case payloadFollow
     case cinematicEvent
 
@@ -23,6 +24,8 @@ enum ReplayCameraMode: String, CaseIterable, Identifiable, Codable, Equatable {
             return "replay.camera_mode.top_down"
         case .fpvApproximation:
             return "replay.camera_mode.fpv"
+        case .onboardMount:
+            return "replay.camera_mode.onboard_mount"
         case .payloadFollow:
             return "replay.camera_mode.payload_follow"
         case .cinematicEvent:

@@ -30,13 +30,30 @@ final class FullscreenReplayWindow: NSWindow {
 final class ReplayInteractiveSCNView: SCNView {
     var onDrag:   ((Float, Float) -> Void)?
     var onScroll: ((Float) -> Void)?
+    var onGizmoMouseDown: ((CGPoint) -> Void)?
+    /// Return `true` if the drag was consumed by the gizmo, so the caller skips `onDrag`.
+    var onGizmoMouseDragged: ((Float, Float) -> Bool)?
+    var onGizmoMouseUp: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onGizmoMouseDown?(convert(event.locationInWindow, from: nil))
+        super.mouseDown(with: event)
+    }
 
     override func mouseDragged(with event: NSEvent) {
+        if onGizmoMouseDragged?(Float(event.deltaX), Float(event.deltaY)) == true {
+            return
+        }
         if let h = onDrag {
             h(Float(event.deltaX), Float(event.deltaY))
         } else {
             super.mouseDragged(with: event)
         }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onGizmoMouseUp?()
+        super.mouseUp(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -79,6 +96,8 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     private var cameraModePopup:  NSPopUpButton?
     private var topDownHeightLabel: NSTextField?
     private var topDownHeightSlider: NSSlider?
+    private var mountModeSegmented: NSSegmentedControl?
+    private var mountResetButton: NSButton?
     private var frameInfoLabel:   NSTextField?
     private var playPauseButton:  NSButton?
     private var stopButton:       NSButton?
@@ -178,6 +197,25 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         scnView.onScroll = { [weak self] delta in
             self?.sceneController.handleScrollInput(delta: delta)
         }
+        scnView.onGizmoMouseDown = { [weak self, weak scnView] point in
+            guard let self, let scnView, self.sceneController.canInteractWithGizmo,
+                  let hit = ReplayGizmoInteraction.hitTestHandle(at: point, in: scnView) else { return }
+            self.sceneController.beginGizmoDrag(axis: hit.axis, kind: hit.kind)
+        }
+        scnView.onGizmoMouseDragged = { [weak self, weak scnView] dx, dy in
+            guard let self, let scnView, self.sceneController.isDraggingGizmoAxis,
+                  let ray = self.sceneController.gizmoAxisWorldRay() else { return false }
+            let delta = ReplayGizmoInteraction.axisDelta(
+                view: scnView,
+                worldOrigin: ray.origin,
+                worldDirection: ray.direction,
+                mouseDeltaX: dx,
+                mouseDeltaY: dy
+            )
+            self.sceneController.applyGizmoDrag(incrementalAxisDelta: delta)
+            return true
+        }
+        scnView.onGizmoMouseUp = { [weak self] in self?.sceneController.endGizmoDrag() }
         root.addSubview(scnView)
         sceneView = scnView
 
@@ -271,6 +309,31 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         heightSlider.autoresizingMask = [.maxXMargin]
         bar.addSubview(heightSlider)
         topDownHeightSlider = heightSlider
+
+        let mountSegmented = NSSegmentedControl(
+            labels: [localized("replay.mount.edit"), localized("replay.mount.preview")],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(mountEditingChanged(_:))
+        )
+        mountSegmented.frame = NSRect(x: 392, y: 26, width: 150, height: 22)
+        mountSegmented.font = .systemFont(ofSize: 10, weight: .medium)
+        mountSegmented.selectedSegment = 0
+        mountSegmented.autoresizingMask = [.maxXMargin]
+        bar.addSubview(mountSegmented)
+        mountModeSegmented = mountSegmented
+
+        let mountReset = NSButton(
+            title: localized("replay.trim.reset"),
+            target: self,
+            action: #selector(mountResetTapped)
+        )
+        mountReset.bezelStyle = .rounded
+        mountReset.font = .systemFont(ofSize: 9, weight: .medium)
+        mountReset.frame = NSRect(x: 392, y: 5, width: 60, height: 18)
+        mountReset.autoresizingMask = [.maxXMargin]
+        bar.addSubview(mountReset)
+        mountResetButton = mountReset
 
         let badge = NSTextField(labelWithString: "")
         badge.font = .systemFont(ofSize: 10, weight: .bold)
@@ -494,6 +557,13 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         topDownHeightLabel?.isHidden = !isTopDown
         topDownHeightSlider?.isHidden = !isTopDown
 
+        let isOnboardMount = sceneController.cameraMode == .onboardMount
+        mountModeSegmented?.isHidden = !isOnboardMount
+        mountResetButton?.isHidden = !isOnboardMount
+        if isOnboardMount {
+            mountModeSegmented?.selectedSegment = sceneController.onboardMountIsEditing ? 0 : 1
+        }
+
         if let frame = player.currentFrame {
             let vel   = frame.velocity.simd
             let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).squareRoot()
@@ -597,6 +667,18 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         updateUI()
     }
 
+    @objc private func mountEditingChanged(_ sender: NSSegmentedControl) {
+        sceneController.setOnboardMountEditing(sender.selectedSegment == 0)
+        sceneController.update(frame: player.currentFrame)
+        updateUI()
+    }
+
+    @objc private func mountResetTapped() {
+        sceneController.resetOnboardMountOffset()
+        sceneController.update(frame: player.currentFrame)
+        updateUI()
+    }
+
     @objc private func sliderChanged(_ sender: NSSlider) {
         player.seek(to: sender.doubleValue)
         sceneController.update(frame: player.currentFrame)
@@ -635,7 +717,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     }
 
     private var availableCameraModes: [ReplayCameraMode] {
-        var modes: [ReplayCameraMode] = [.freeObserver, .chase, .orbit, .topDown, .fpvApproximation]
+        var modes: [ReplayCameraMode] = [.freeObserver, .chase, .orbit, .topDown, .fpvApproximation, .onboardMount]
         let events = session?.events ?? []
         if events.contains(where: { $0.type == .payloadReleased || $0.type == .payloadImpact }) {
             modes.append(.payloadFollow)
@@ -745,6 +827,9 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         sceneView?.delegate = nil
         sceneView?.onDrag = nil
         sceneView?.onScroll = nil
+        sceneView?.onGizmoMouseDown = nil
+        sceneView?.onGizmoMouseDragged = nil
+        sceneView?.onGizmoMouseUp = nil
 
         if let win = window {
             win.keyboardHandler = nil
