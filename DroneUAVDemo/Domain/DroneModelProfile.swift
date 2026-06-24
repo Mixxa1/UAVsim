@@ -1058,7 +1058,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 cameraPreset: DroneCameraPreset(fpvFov: 64.0, followDistance: 8.0, followHeight: 2.5),
                 collisionRadiusMeters: 0.42
             )
-        case .flyEye:
+        case .lightFixedWingSurvey:
             return RuntimeTuning(
                 fallbackTakeoffMass: 12.0,
                 fallbackDimensions: DroneDimensionsMM(x: 3600, y: 1800, z: 420),
@@ -1148,80 +1148,6 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     initialClimbTargetAltitude: 16.0
                 )
             )
-        case "delair-ux11":
-            return fixedWingRuntimeTuning(
-                fallbackTakeoffMass: 1.6,
-                fallbackDimensions: DroneDimensionsMM(x: 1100, y: 650, z: 170),
-                maxHorizontalSpeedMps: 25.0,
-                maxAscentSpeedMps: 4.2,
-                maxDescentSpeedMps: 4.0,
-                maxFlightTimeMin: 59.0,
-                maxWindResistanceMps: 12.0,
-                batteryEnergyWh: 76.0,
-                visualClass: .delairUX11Class,
-                controlResponsiveness: 0.54,
-                cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 6.0, followHeight: 1.8),
-                collisionRadiusMeters: 0.24,
-                fixedWingParameters: FixedWingParameters(
-                    family: .conventionalSurvey,
-                    minSustainableSpeedMps: 12.6,
-                    cruiseSpeedMps: 17.8,
-                    climbSpeedMps: 14.2,
-                    stallWarningSpeedMps: 11.4,
-                    waypointAcceptanceRadiusMeters: 9.0,
-                    nominalTurnRateDegPerSec: 13.0,
-                    bankResponseGain: 0.78,
-                    climbResponseGain: 0.66,
-                    descentResponseGain: 0.56,
-                    dragFactor: 0.99,
-                    throttleResponseGain: 0.64,
-                    turnAuthority: 0.62,
-                    maxBankAngleDeg: 38.0,
-                    supportedLaunchModes: [.standard, .handLaunch],
-                    preferredLaunchMode: .handLaunch,
-                    initialClimbPitchDeg: 10.5,
-                    maxInitialBankDeg: 14.0,
-                    handThrowSpeed: 8.0,
-                    initialClimbTargetAltitude: 15.0
-                )
-            )
-        case "scaneagle":
-            return fixedWingRuntimeTuning(
-                fallbackTakeoffMass: 22.0,
-                fallbackDimensions: DroneDimensionsMM(x: 3100, y: 1700, z: 430),
-                maxHorizontalSpeedMps: 41.0,
-                maxAscentSpeedMps: 4.4,
-                maxDescentSpeedMps: 4.2,
-                maxFlightTimeMin: 1440.0,
-                maxWindResistanceMps: 16.0,
-                batteryEnergyWh: 2400.0,
-                visualClass: .fixedWingRectangular,
-                controlResponsiveness: 0.40,
-                cameraPreset: DroneCameraPreset(fpvFov: 64.0, followDistance: 7.0, followHeight: 2.1),
-                collisionRadiusMeters: 0.34,
-                fixedWingParameters: FixedWingParameters(
-                    family: .conventionalSurvey,
-                    minSustainableSpeedMps: 16.0,
-                    cruiseSpeedMps: 27.0,
-                    climbSpeedMps: 21.0,
-                    stallWarningSpeedMps: 14.2,
-                    waypointAcceptanceRadiusMeters: 11.0,
-                    nominalTurnRateDegPerSec: 11.4,
-                    bankResponseGain: 0.72,
-                    climbResponseGain: 0.62,
-                    descentResponseGain: 0.54,
-                    dragFactor: 1.01,
-                    throttleResponseGain: 0.62,
-                    turnAuthority: 0.56,
-                    maxBankAngleDeg: 36.0,
-                    supportedLaunchModes: [.standard, .catapult],
-                    preferredLaunchMode: .catapult,
-                    initialClimbPitchDeg: 10.0,
-                    maxInitialBankDeg: 13.0,
-                    catapultExitSpeed: 19.0,
-                    initialClimbTargetAltitude: 20.0
-                )
-            )
         case "rq-21-integrator":
             return fixedWingRuntimeTuning(
                 fallbackTakeoffMass: 61.0,
@@ -1257,85 +1183,6 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     maxInitialBankDeg: 12.0,
                     catapultExitSpeed: 22.0,
                     initialClimbTargetAltitude: 24.0
-                )
-            )
-        case "tekever-ar3-evo":
-            return fixedWingRuntimeTuning(
-                fallbackTakeoffMass: 25.0,
-                fallbackDimensions: DroneDimensionsMM(x: 3500, y: 2200, z: 520),
-                maxHorizontalSpeedMps: 30.0,
-                maxAscentSpeedMps: 4.8,
-                maxDescentSpeedMps: 5.2,
-                maxFlightTimeMin: 960.0,
-                maxWindResistanceMps: 16.0,
-                batteryEnergyWh: 2600.0,
-                visualClass: .trinityClass,
-                operationalCategory: .fixedWingVTOL,
-                airframeStyle: .surveyEVTOL,
-                launchMethod: .vertical,
-                landingMethod: .vertical,
-                controlResponsiveness: 0.44,
-                cameraPreset: DroneCameraPreset(fpvFov: 66.0, followDistance: 8.4, followHeight: 2.6),
-                collisionRadiusMeters: 0.38,
-                fixedWingParameters: FixedWingParameters(
-                    family: .surveyEVTOL,
-                    minSustainableSpeedMps: 17.0,
-                    cruiseSpeedMps: 24.0,
-                    climbSpeedMps: 20.0,
-                    stallWarningSpeedMps: 15.4,
-                    waypointAcceptanceRadiusMeters: 12.0,
-                    nominalTurnRateDegPerSec: 11.2,
-                    bankResponseGain: 0.74,
-                    climbResponseGain: 0.64,
-                    descentResponseGain: 0.56,
-                    dragFactor: 1.00,
-                    throttleResponseGain: 0.62,
-                    turnAuthority: 0.58,
-                    maxBankAngleDeg: 36.0,
-                    supportedLaunchModes: [.standard, .catapult, .vtol],
-                    preferredLaunchMode: .vtol,
-                    initialClimbPitchDeg: 10.0,
-                    maxInitialBankDeg: 13.0,
-                    catapultExitSpeed: 20.5,
-                    initialClimbTargetAltitude: 22.0
-                )
-            )
-        case "uav-factory-penguin-b":
-            return fixedWingRuntimeTuning(
-                fallbackTakeoffMass: 26.0,
-                fallbackDimensions: DroneDimensionsMM(x: 3400, y: 2290, z: 520),
-                maxHorizontalSpeedMps: 36.0,
-                maxAscentSpeedMps: 4.4,
-                maxDescentSpeedMps: 4.4,
-                maxFlightTimeMin: 1200.0,
-                maxWindResistanceMps: 17.0,
-                batteryEnergyWh: 2400.0,
-                visualClass: .fixedWingRectangular,
-                controlResponsiveness: 0.38,
-                cameraPreset: DroneCameraPreset(fpvFov: 62.0, followDistance: 7.4, followHeight: 2.2),
-                collisionRadiusMeters: 0.36,
-                fixedWingParameters: FixedWingParameters(
-                    family: .conventionalSurvey,
-                    minSustainableSpeedMps: 16.8,
-                    cruiseSpeedMps: 27.5,
-                    climbSpeedMps: 21.5,
-                    stallWarningSpeedMps: 15.2,
-                    waypointAcceptanceRadiusMeters: 11.0,
-                    nominalTurnRateDegPerSec: 10.8,
-                    bankResponseGain: 0.72,
-                    climbResponseGain: 0.62,
-                    descentResponseGain: 0.54,
-                    dragFactor: 1.01,
-                    throttleResponseGain: 0.60,
-                    turnAuthority: 0.54,
-                    maxBankAngleDeg: 34.0,
-                    supportedLaunchModes: [.standard, .runway],
-                    preferredLaunchMode: .runway,
-                    takeoffRotationSpeed: 18.4,
-                    initialClimbPitchDeg: 9.0,
-                    maxInitialBankDeg: 11.0,
-                    runwayTakeoffDistance: 85.0,
-                    initialClimbTargetAltitude: 20.0
                 )
             )
         default:

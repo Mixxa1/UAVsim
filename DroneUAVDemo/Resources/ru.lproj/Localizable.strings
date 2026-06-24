@@ -699,8 +699,6 @@
 "uav.profile.hermes-900.mission_role" = "Многоцелевая ISR-разведка и морское патрулирование";
 "uav.profile.ft5-los.short_description" = "Двухдвигательная тактическая самолетная платформа с компактным разведывательным планером и модульной интеграцией полезной нагрузки.";
 "uav.profile.ft5-los.mission_role" = "Тактическая разведка и ISTAR";
-"uav.profile.flyeye.short_description" = "Легкий самолетный разведывательный БЛА с компактным фюзеляжем и нижней электрооптической полезной нагрузкой.";
-"uav.profile.flyeye.mission_role" = "Ближняя разведка и наблюдение";
 "uav.profile.abstract-uav.short_description" = "Пользовательский профиль БЛА для будущей настройки параметров.";
 "uav.profile.abstract-uav.mission_role" = "Пользовательская задача";
 

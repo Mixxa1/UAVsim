@@ -704,8 +704,6 @@
 "uav.profile.hermes-900.mission_role" = "Multi-role MALE ISR and maritime patrol";
 "uav.profile.ft5-los.short_description" = "Twin-engine tactical fixed-wing platform with a compact surveillance airframe and modular payload integration.";
 "uav.profile.ft5-los.mission_role" = "Tactical reconnaissance and ISTAR";
-"uav.profile.flyeye.short_description" = "Lightweight fixed-wing observation UAV with a compact fuselage and underbelly electro-optical payload zone.";
-"uav.profile.flyeye.mission_role" = "Close-range reconnaissance and observation";
 "uav.profile.abstract-uav.short_description" = "User-defined custom UAV profile kept for future parameter tuning.";
 "uav.profile.abstract-uav.mission_role" = "User-defined custom mission";
 

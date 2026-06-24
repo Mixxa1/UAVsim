@@ -236,7 +236,7 @@ struct UAVFlightTuningProfile: Hashable {
                 payloadCruisePenaltyFactor: 0.18,
                 source: source
             )
-        case .flyEye:
+        case .lightFixedWingSurvey:
             return fixedWing(
                 referenceMass: referenceMass,
                 cruiseThrottleBaseline: 0.45,

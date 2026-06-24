@@ -39,8 +39,8 @@ enum UAVVisualFactory {
             return buildHermes900(payloadMountOffset: payloadMountOffset)
         case .ft5Los:
             return buildFT5Los(payloadMountOffset: payloadMountOffset)
-        case .flyEye:
-            return buildFlyEye(payloadMountOffset: payloadMountOffset)
+        case .lightFixedWingSurvey:
+            return buildLightFixedWingSurvey(payloadMountOffset: payloadMountOffset)
         }
     }
 
@@ -1617,9 +1617,9 @@ enum UAVVisualFactory {
         )
     }
 
-    private static func buildFlyEye(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+    private static func buildLightFixedWingSurvey(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
         let root = SCNNode()
-        root.name = "uavRoot.flyEye"
+        root.name = "uavRoot.lightFixedWingSurvey"
 
         let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.66, green: 0.69, blue: 0.73, alpha: 1.0), roughness: 0.34, metalness: 0.14)
         let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.26, green: 0.30, blue: 0.34, alpha: 1.0), roughness: 0.42, metalness: 0.22)
@@ -1708,7 +1708,7 @@ enum UAVVisualFactory {
 
         let rearProp = forwardPropellerNode(material: rotorMaterial, radius: 0.09)
         rearProp.position = SCNVector3(0.0, 0.02, -0.24)
-        rearProp.name = "propeller.flyeye.rear"
+        rearProp.name = "propeller.lightFixedWingSurvey.rear"
         root.addChildNode(rearProp)
         append(rearProp, to: .propellerRR, componentNodes: &componentNodes)
 

@@ -330,32 +330,6 @@ enum UAVReferenceCatalog {
             missionRole: "Tactical reconnaissance and ISTAR"
         ),
         UAVProfile(
-            id: "flyeye",
-            displayName: "FlyEye",
-            manufacturer: "WB Group",
-            countryOfOrigin: "Poland",
-            vehicleType: .fixedWing,
-            massCategory: .light,
-            specConfidence: .partial,
-            payloadCapabilityMode: .sensor,
-            baseMass: nil,
-            batteryMass: nil,
-            estimatedBatteryMass: 1.6,
-            maxPayloadMass: nil,
-            estimatedMaxPayloadMass: 1.2,
-            maxTakeoffMass: nil,
-            estimatedMaxTakeoffMass: 12.0,
-            dimensions: UAVDimensions(
-                wingspanMillimeters: 3600,
-                fuselageLengthMillimeters: 1800
-            ),
-            payloadMountOffset: SIMD3<Float>(0.0, -0.05, 0.06),
-            visualPreset: .flyEye,
-            shortDescription: "Lightweight fixed-wing observation UAV with a compact fuselage and underbelly electro-optical payload zone.",
-            notes: "WB Group official FlyEye technical details confirm a 3.6 m wingspan and 1.8 m length. Other mass fields remain optional rather than inferred from system-level carry data.",
-            missionRole: "Close-range reconnaissance and observation"
-        ),
-        UAVProfile(
             id: "sensefly-ebee-tac",
             displayName: "senseFly eBee TAC",
             manufacturer: "AgEagle senseFly",
@@ -376,62 +350,10 @@ enum UAVReferenceCatalog {
                 fuselageLengthMillimeters: 700
             ),
             payloadMountOffset: SIMD3<Float>(0.0, -0.04, 0.05),
-            visualPreset: .flyEye,
+            visualPreset: .lightFixedWingSurvey,
             shortDescription: "Compact hand-launch tactical mapping wing with a lightweight survey payload bay.",
             notes: "Conservative estimated configuration based on public eBee TAC family data. Launch semantics are modeled as hand launch with modest climb corridor and aircraft-like fly-by turns.",
             missionRole: "Short-range tactical mapping and reconnaissance"
-        ),
-        UAVProfile(
-            id: "delair-ux11",
-            displayName: "Delair UX11",
-            manufacturer: "Delair",
-            countryOfOrigin: "France",
-            vehicleType: .fixedWing,
-            massCategory: .light,
-            specConfidence: .partial,
-            payloadCapabilityMode: .sensor,
-            baseMass: nil,
-            batteryMass: nil,
-            estimatedBatteryMass: 0.42,
-            maxPayloadMass: nil,
-            estimatedMaxPayloadMass: 0.40,
-            maxTakeoffMass: nil,
-            estimatedMaxTakeoffMass: 1.6,
-            dimensions: UAVDimensions(
-                wingspanMillimeters: 1100,
-                fuselageLengthMillimeters: 650
-            ),
-            payloadMountOffset: SIMD3<Float>(0.0, -0.04, 0.05),
-            visualPreset: .flyEye,
-            shortDescription: "Portable hand-launch fixed-wing mapping aircraft with a compact belly sensor bay.",
-            notes: "Conservative estimated configuration using public UX11 family references where official mass split data is incomplete. Launch semantics remain realistic hand launch rather than runway behavior.",
-            missionRole: "Corridor mapping and inspection"
-        ),
-        UAVProfile(
-            id: "scaneagle",
-            displayName: "ScanEagle",
-            manufacturer: "Insitu",
-            countryOfOrigin: "United States",
-            vehicleType: .fixedWing,
-            massCategory: .light,
-            specConfidence: .partial,
-            payloadCapabilityMode: .sensor,
-            baseMass: nil,
-            batteryMass: nil,
-            estimatedBatteryMass: 1.8,
-            maxPayloadMass: nil,
-            estimatedMaxPayloadMass: 3.5,
-            maxTakeoffMass: nil,
-            estimatedMaxTakeoffMass: 22.0,
-            dimensions: UAVDimensions(
-                wingspanMillimeters: 3100,
-                fuselageLengthMillimeters: 1700
-            ),
-            payloadMountOffset: SIMD3<Float>(0.0, -0.07, 0.07),
-            visualPreset: .flyEye,
-            shortDescription: "Long-endurance catapult-launched ISR aircraft with a slim fuselage and nose sensor payload.",
-            notes: "Conservative estimated mode based on public ScanEagle specifications. Launch semantics are modeled as catapult with controlled exit corridor and initial climb before route capture.",
-            missionRole: "Persistent ISR and maritime observation"
         ),
         UAVProfile(
             id: "rq-21-integrator",
@@ -458,58 +380,6 @@ enum UAVReferenceCatalog {
             shortDescription: "Medium tactical catapult-launched ISR platform with modular payload stations and runway-free launch concept.",
             notes: "Conservative estimated mode based on public RQ-21 family references. Launch semantics are intentionally catapult-biased with rail heading and protected initial climb.",
             missionRole: "Tactical ISR and expeditionary surveillance"
-        ),
-        UAVProfile(
-            id: "tekever-ar3-evo",
-            displayName: "TEKEVER AR3 EVO",
-            manufacturer: "TEKEVER",
-            countryOfOrigin: "Portugal",
-            vehicleType: .hybridVTOL,
-            massCategory: .medium,
-            specConfidence: .partial,
-            payloadCapabilityMode: .modular,
-            baseMass: nil,
-            batteryMass: nil,
-            estimatedBatteryMass: 2.4,
-            maxPayloadMass: nil,
-            estimatedMaxPayloadMass: 4.0,
-            maxTakeoffMass: nil,
-            estimatedMaxTakeoffMass: 25.0,
-            dimensions: UAVDimensions(
-                wingspanMillimeters: 3500,
-                fuselageLengthMillimeters: 2200
-            ),
-            payloadMountOffset: SIMD3<Float>(0.0, -0.08, 0.10),
-            visualPreset: .quantumSystemsTrinityPro,
-            shortDescription: "Flexible tactical aircraft profile supporting catapult or VTOL-style launch semantics with long-endurance cruise.",
-            notes: "Partial public-data profile. Conservative estimated mode keeps both catapult and VTOL launch semantics available without overstating exact manufacturer-only parameters.",
-            missionRole: "Maritime and overland ISR"
-        ),
-        UAVProfile(
-            id: "uav-factory-penguin-b",
-            displayName: "UAV Factory Penguin B",
-            manufacturer: "UAV Factory",
-            countryOfOrigin: "Latvia",
-            vehicleType: .fixedWing,
-            massCategory: .medium,
-            specConfidence: .partial,
-            payloadCapabilityMode: .modular,
-            baseMass: nil,
-            batteryMass: nil,
-            estimatedBatteryMass: 2.3,
-            maxPayloadMass: nil,
-            estimatedMaxPayloadMass: 4.0,
-            maxTakeoffMass: nil,
-            estimatedMaxTakeoffMass: 26.0,
-            dimensions: UAVDimensions(
-                wingspanMillimeters: 3400,
-                fuselageLengthMillimeters: 2290
-            ),
-            payloadMountOffset: SIMD3<Float>(0.0, -0.08, 0.08),
-            visualPreset: .ft5Los,
-            shortDescription: "Runway-capable tactical fixed-wing UAV with a pusher layout and modular ISR payload section.",
-            notes: "Conservative estimated mode built from public Penguin B family references. Runway launch semantics include align, roll, rotation, and protected initial climb corridor.",
-            missionRole: "Tactical ISR and survey"
         )
     ]
 
@@ -584,20 +454,10 @@ enum UAVReferenceCatalog {
             return URL(string: "https://elbitsystems.com/product/hermes-900/")
         case "ft5-los":
             return URL(string: "https://www.wbgroup.pl/app/uploads/2017/06/ft5_eng_21q03.pdf")
-        case "flyeye":
-            return URL(string: "https://www.wbgroup.pl/en/produkt/flyeye-unmanned-aerial-system/")
         case "sensefly-ebee-tac":
             return URL(string: "https://ageagle.com/drone-sensors/ebee-tac/")
-        case "delair-ux11":
-            return URL(string: "https://delair.aero/ux11/")
-        case "scaneagle":
-            return URL(string: "https://www.insitu.com/products/scaneagle")
         case "rq-21-integrator":
             return URL(string: "https://www.insitu.com/products/integrator")
-        case "tekever-ar3-evo":
-            return URL(string: "https://www.tekever.com/ar3/")
-        case "uav-factory-penguin-b":
-            return URL(string: "https://www.uavfactory.com/product/penguin-b/")
         default:
             return nil
         }
