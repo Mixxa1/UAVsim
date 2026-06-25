@@ -3,8 +3,130 @@ import SceneKit
 import simd
 
 enum UAVVisualFactory {
+    private enum AirframeAccent {
+        case topPanel(color: NSColor, size: SIMD3<Float>, position: SIMD3<Float>)
+        case sideRails(color: NSColor)
+        case dockShell
+        case fixedWingWinglets(color: NSColor)
+        case indoorGuardCage(color: NSColor)
+    }
+
     static func build(profile: UAVProfile) -> DroneVisualModel {
-        build(preset: profile.visualPreset, payloadMountOffset: profile.payloadMountOffset)
+        switch profile.id {
+        case "dji-mavic-3t":
+            return visualVariant(
+                buildDJIMavic4Pro(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.djiMavic3T",
+                scale: 0.92,
+                accents: [
+                    .topPanel(color: NSColor(calibratedWhite: 0.18, alpha: 1.0), size: SIMD3<Float>(0.095, 0.010, 0.070), position: SIMD3<Float>(0.0, 0.078, -0.018))
+                ]
+            )
+        case "dji-matrice-4t":
+            return visualVariant(
+                buildDJIMavic4Pro(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.djiMatrice4T",
+                scale: 1.08,
+                accents: [
+                    .topPanel(color: NSColor(calibratedRed: 0.72, green: 0.74, blue: 0.76, alpha: 1.0), size: SIMD3<Float>(0.125, 0.012, 0.090), position: SIMD3<Float>(0.0, 0.080, -0.020)),
+                    .sideRails(color: NSColor(calibratedWhite: 0.12, alpha: 1.0))
+                ]
+            )
+        case "dji-matrice-30t":
+            return visualVariant(
+                buildDJIMatrice350RTK(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.djiMatrice30T",
+                scale: 0.76,
+                accents: [
+                    .topPanel(color: NSColor(calibratedWhite: 0.12, alpha: 1.0), size: SIMD3<Float>(0.155, 0.018, 0.120), position: SIMD3<Float>(0.0, 0.120, -0.005))
+                ]
+            )
+        case "dji-matrice-400":
+            return visualVariant(
+                buildDJIMatrice350RTK(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.djiMatrice400",
+                scale: 1.22,
+                accents: [
+                    .topPanel(color: NSColor(calibratedRed: 0.78, green: 0.80, blue: 0.82, alpha: 1.0), size: SIMD3<Float>(0.210, 0.022, 0.155), position: SIMD3<Float>(0.0, 0.127, -0.010)),
+                    .sideRails(color: NSColor(calibratedWhite: 0.08, alpha: 1.0))
+                ]
+            )
+        case "fotokite-sigma":
+            return visualVariant(
+                buildAbstractCustom(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fotokiteSigma",
+                scale: 0.86
+            )
+        case "everdrone-first-on-scene":
+            return visualVariant(
+                buildDJIMatrice350RTK(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.everdroneFirstOnScene",
+                scale: 0.70,
+                accents: [
+                    .topPanel(color: NSColor(calibratedRed: 0.86, green: 0.18, blue: 0.16, alpha: 1.0), size: SIMD3<Float>(0.115, 0.014, 0.090), position: SIMD3<Float>(0.0, 0.116, -0.006))
+                ]
+            )
+        case "zipline-platform-1":
+            return visualVariant(
+                buildLightFixedWingSurvey(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.ziplinePlatform1",
+                scale: 1.18,
+                accents: [
+                    .fixedWingWinglets(color: NSColor(calibratedRed: 0.88, green: 0.10, blue: 0.08, alpha: 1.0))
+                ]
+            )
+        case "wingcopter-198":
+            return visualVariant(
+                buildQuantumSystemsTrinityPro(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.wingcopter198",
+                scale: 0.95,
+                accents: [
+                    .fixedWingWinglets(color: NSColor(calibratedWhite: 0.92, alpha: 1.0))
+                ]
+            )
+        case "matternet-m2":
+            return visualVariant(
+                buildAbstractCustom(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.matternetM2",
+                scale: 0.78,
+                accents: [
+                    .topPanel(color: NSColor(calibratedWhite: 0.92, alpha: 1.0), size: SIMD3<Float>(0.090, 0.012, 0.070), position: SIMD3<Float>(0.0, 0.048, -0.005)),
+                    .sideRails(color: NSColor(calibratedWhite: 0.16, alpha: 1.0))
+                ]
+            )
+        case "skydio-x10":
+            return visualVariant(
+                buildDJIMavic4Pro(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.skydioX10",
+                scale: 1.03,
+                accents: [
+                    .topPanel(color: NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.13, alpha: 1.0), size: SIMD3<Float>(0.150, 0.014, 0.105), position: SIMD3<Float>(0.0, 0.080, -0.010)),
+                    .sideRails(color: NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.13, alpha: 1.0))
+                ]
+            )
+        case "dji-matrice-4td-dock-3":
+            return visualVariant(
+                buildDJIMavic4Pro(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.djiMatrice4TDDock3",
+                scale: 1.16,
+                accents: [
+                    .dockShell
+                ]
+            )
+        case "brinc-lemur-2":
+            return visualVariant(
+                buildDJINeo(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.brincLemur2",
+                scale: 1.12,
+                accents: [
+                    .indoorGuardCage(color: NSColor(calibratedWhite: 0.08, alpha: 1.0))
+                ]
+            )
+        default:
+            break
+        }
+
+        return build(preset: profile.visualPreset, payloadMountOffset: profile.payloadMountOffset)
     }
 
     static func build(preset: UAVVisualPreset, payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
@@ -1733,6 +1855,83 @@ enum UAVVisualFactory {
 
     private static func append(_ node: SCNNode, to component: DamageComponent, componentNodes: inout [DamageComponent: [SCNNode]]) {
         componentNodes[component, default: []].append(node)
+    }
+
+    private static func visualVariant(
+        _ model: DroneVisualModel,
+        name: String,
+        scale: Float,
+        accents: [AirframeAccent] = []
+    ) -> DroneVisualModel {
+        model.rootNode.name = name
+        for accent in accents {
+            applyAirframeAccent(accent, to: model.rootNode)
+        }
+        model.rootNode.scale = SCNVector3(scale, scale, scale)
+        return model
+    }
+
+    private static func applyAirframeAccent(_ accent: AirframeAccent, to root: SCNNode) {
+        switch accent {
+        case let .topPanel(color, size, position):
+            let panel = boxNode(size: size, chamfer: 0.006, material: material(diffuse: color, roughness: 0.30, metalness: 0.22))
+            panel.name = "airframe.accent.topPanel"
+            panel.position = SCNVector3(position.x, position.y, position.z)
+            root.addChildNode(panel)
+        case let .sideRails(color):
+            let railMaterial = material(diffuse: color, roughness: 0.36, metalness: 0.24)
+            for side: Float in [-1.0, 1.0] {
+                let rail = beamNode(
+                    start: SIMD3<Float>(0.090 * side, 0.030, -0.085),
+                    end: SIMD3<Float>(0.090 * side, 0.030, 0.090),
+                    radius: 0.006,
+                    material: railMaterial
+                )
+                rail.name = "airframe.accent.sideRail"
+                root.addChildNode(rail)
+            }
+        case .dockShell:
+            let shellMaterial = material(
+                diffuse: NSColor(calibratedRed: 0.74, green: 0.77, blue: 0.80, alpha: 1.0),
+                roughness: 0.32,
+                metalness: 0.18
+            )
+            let deck = boxNode(size: SIMD3<Float>(0.160, 0.018, 0.112), chamfer: 0.008, material: shellMaterial)
+            deck.name = "airframe.accent.dockShell"
+            deck.position = SCNVector3(0.0, 0.084, -0.016)
+            root.addChildNode(deck)
+
+            let finMaterial = material(diffuse: NSColor(calibratedWhite: 0.12, alpha: 1.0), roughness: 0.36, metalness: 0.22)
+            for side: Float in [-1.0, 1.0] {
+                let fin = boxNode(size: SIMD3<Float>(0.010, 0.052, 0.072), chamfer: 0.004, material: finMaterial)
+                fin.name = "airframe.accent.dockFin"
+                fin.position = SCNVector3(0.070 * side, 0.068, -0.010)
+                root.addChildNode(fin)
+            }
+        case let .fixedWingWinglets(color):
+            let wingletMaterial = material(diffuse: color, roughness: 0.34, metalness: 0.14)
+            for side: Float in [-1.0, 1.0] {
+                let winglet = boxNode(size: SIMD3<Float>(0.020, 0.095, 0.040), chamfer: 0.004, material: wingletMaterial)
+                winglet.name = "airframe.accent.winglet"
+                winglet.position = SCNVector3(0.500 * side, 0.040, 0.000)
+                winglet.eulerAngles = SCNVector3(0.0, 0.0, -0.18 * side)
+                root.addChildNode(winglet)
+            }
+        case let .indoorGuardCage(color):
+            let cageMaterial = material(diffuse: color, roughness: 0.42, metalness: 0.16)
+            let corners: [SIMD3<Float>] = [
+                SIMD3<Float>(-0.145, 0.002, 0.108),
+                SIMD3<Float>(0.145, 0.002, 0.108),
+                SIMD3<Float>(0.145, 0.002, -0.108),
+                SIMD3<Float>(-0.145, 0.002, -0.108)
+            ]
+            for index in corners.indices {
+                let next = corners[(index + 1) % corners.count]
+                let rail = beamNode(start: corners[index], end: next, radius: 0.005, material: cageMaterial)
+                rail.name = "airframe.accent.indoorCage"
+                root.addChildNode(rail)
+            }
+        }
     }
 
     private static func makePayloadMountNode(offset: SIMD3<Float>) -> SCNNode {

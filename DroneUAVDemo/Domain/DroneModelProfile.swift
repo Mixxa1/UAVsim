@@ -1110,6 +1110,280 @@ struct LIPODroneModelRepository: DroneModelRepository {
         for uavProfile: UAVProfile
     ) -> RuntimeTuning? {
         switch uavProfile.id {
+        case "dji-mavic-3t":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 1.05,
+                fallbackDimensions: DroneDimensionsMM(x: 347.5, y: 283.0, z: 107.7),
+                maxHorizontalSpeedMps: 21.0,
+                maxAscentSpeedMps: 8.0,
+                maxDescentSpeedMps: 6.0,
+                maxFlightTimeMin: 45.0,
+                maxHoverTimeMin: 38.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 77.0,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .miniCompact,
+                controlResponsiveness: 0.84,
+                hoverThrottle: 0.53,
+                cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
+                collisionRadiusMeters: 0.24
+            )
+        case "dji-matrice-4t":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 1.42,
+                fallbackDimensions: DroneDimensionsMM(x: 307.0, y: 387.5, z: 149.5),
+                maxHorizontalSpeedMps: 21.0,
+                maxAscentSpeedMps: 10.0,
+                maxDescentSpeedMps: 8.0,
+                maxFlightTimeMin: 49.0,
+                maxHoverTimeMin: 42.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 99.5,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .miniCompact,
+                controlResponsiveness: 0.82,
+                hoverThrottle: 0.52,
+                cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
+                collisionRadiusMeters: 0.26
+            )
+        case "dji-matrice-30t":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 4.069,
+                fallbackDimensions: DroneDimensionsMM(x: 470.0, y: 585.0, z: 215.0),
+                maxHorizontalSpeedMps: 23.0,
+                maxAscentSpeedMps: 6.0,
+                maxDescentSpeedMps: 5.0,
+                maxFlightTimeMin: 41.0,
+                maxHoverTimeMin: 36.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 263.2,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .vectorMidDual,
+                controlResponsiveness: 0.72,
+                hoverThrottle: 0.57,
+                cameraPreset: DroneCameraPreset(fpvFov: 82.0, followDistance: 10.8, followHeight: 3.8),
+                collisionRadiusMeters: 0.35
+            )
+        case "dji-matrice-400":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 15.8,
+                fallbackDimensions: DroneDimensionsMM(x: 980.0, y: 760.0, z: 480.0),
+                maxHorizontalSpeedMps: 25.0,
+                maxAscentSpeedMps: 10.0,
+                maxDescentSpeedMps: 8.0,
+                maxFlightTimeMin: 59.0,
+                maxHoverTimeMin: 53.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 977.0,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .atlasProTriple,
+                controlResponsiveness: 0.62,
+                hoverThrottle: 0.59,
+                cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 14.8, followHeight: 5.4),
+                collisionRadiusMeters: 0.58
+            )
+        case "fotokite-sigma":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 1.30,
+                fallbackDimensions: DroneDimensionsMM(x: 520.0, y: 520.0, z: 180.0),
+                maxHorizontalSpeedMps: 2.0,
+                maxAscentSpeedMps: 1.2,
+                maxDescentSpeedMps: 1.2,
+                maxFlightTimeMin: 1440.0,
+                maxHoverTimeMin: 1440.0,
+                maxWindResistanceMps: 8.0,
+                batteryEnergyWh: 0.0,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .abstract,
+                controlResponsiveness: 0.58,
+                hoverThrottle: 0.50,
+                cameraPreset: DroneCameraPreset(fpvFov: 76.0, followDistance: 8.0, followHeight: 2.8),
+                collisionRadiusMeters: 0.26
+            )
+        case "everdrone-first-on-scene":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 7.0,
+                fallbackDimensions: DroneDimensionsMM(x: 780.0, y: 780.0, z: 300.0),
+                maxHorizontalSpeedMps: 15.0,
+                maxAscentSpeedMps: 5.0,
+                maxDescentSpeedMps: 4.0,
+                maxFlightTimeMin: 24.0,
+                maxHoverTimeMin: 20.0,
+                maxWindResistanceMps: 10.0,
+                batteryEnergyWh: 240.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .vectorMidDual,
+                controlResponsiveness: 0.66,
+                hoverThrottle: 0.58,
+                cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 10.5, followHeight: 3.6),
+                collisionRadiusMeters: 0.36
+            )
+        case "zipline-platform-1":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 20.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3350.0, y: 1800.0, z: 420.0),
+                maxHorizontalSpeedMps: 31.3,
+                maxAscentSpeedMps: 4.5,
+                maxDescentSpeedMps: 4.0,
+                maxFlightTimeMin: 132.5,
+                maxWindResistanceMps: 14.0,
+                batteryEnergyWh: 1200.0,
+                visualClass: .fixedWingRectangular,
+                controlResponsiveness: 0.46,
+                cameraPreset: DroneCameraPreset(fpvFov: 66.0, followDistance: 6.8, followHeight: 2.1),
+                collisionRadiusMeters: 0.32,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 17.0,
+                    cruiseSpeedMps: 29.0,
+                    climbSpeedMps: 23.0,
+                    stallWarningSpeedMps: 15.0,
+                    waypointAcceptanceRadiusMeters: 13.0,
+                    nominalTurnRateDegPerSec: 10.0,
+                    bankResponseGain: 0.70,
+                    climbResponseGain: 0.60,
+                    descentResponseGain: 0.52,
+                    dragFactor: 1.00,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.50,
+                    maxBankAngleDeg: 34.0,
+                    supportedLaunchModes: [.standard, .catapult],
+                    preferredLaunchMode: .catapult,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 13.0,
+                    catapultExitSpeed: 22.0,
+                    initialClimbTargetAltitude: 24.0
+                )
+            )
+        case "wingcopter-198":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 25.0,
+                fallbackDimensions: DroneDimensionsMM(x: 1980.0, y: 1520.0, z: 650.0),
+                maxHorizontalSpeedMps: 25.0,
+                maxAscentSpeedMps: 5.5,
+                maxDescentSpeedMps: 5.5,
+                maxFlightTimeMin: 62.7,
+                maxWindResistanceMps: 14.0,
+                batteryEnergyWh: 1000.0,
+                visualClass: .trinityClass,
+                operationalCategory: .fixedWingVTOL,
+                airframeStyle: .surveyEVTOL,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.56,
+                cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 9.4, followHeight: 3.0),
+                collisionRadiusMeters: 0.38,
+                fixedWingParameters: FixedWingParameters(
+                    family: .surveyEVTOL,
+                    minSustainableSpeedMps: 12.5,
+                    cruiseSpeedMps: 22.0,
+                    climbSpeedMps: 15.0,
+                    stallWarningSpeedMps: 11.4,
+                    waypointAcceptanceRadiusMeters: 12.0,
+                    nominalTurnRateDegPerSec: 11.0,
+                    bankResponseGain: 0.76,
+                    climbResponseGain: 0.64,
+                    descentResponseGain: 0.56,
+                    dragFactor: 1.00,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.58,
+                    maxBankAngleDeg: 36.0,
+                    preferredLaunchMode: .vtol,
+                    initialClimbPitchDeg: 10.5,
+                    initialClimbTargetAltitude: 18.0
+                )
+            )
+        case "matternet-m2":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 12.0,
+                fallbackDimensions: DroneDimensionsMM(x: 720.0, y: 720.0, z: 320.0),
+                maxHorizontalSpeedMps: 14.0,
+                maxAscentSpeedMps: 4.5,
+                maxDescentSpeedMps: 3.5,
+                maxFlightTimeMin: 35.0,
+                maxHoverTimeMin: 30.0,
+                maxWindResistanceMps: 10.0,
+                batteryEnergyWh: 240.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .abstract,
+                controlResponsiveness: 0.64,
+                hoverThrottle: 0.58,
+                cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 9.5, followHeight: 3.2),
+                collisionRadiusMeters: 0.34
+            )
+        case "skydio-x10":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 2.13,
+                fallbackDimensions: DroneDimensionsMM(x: 351.0, y: 351.0, z: 160.0),
+                maxHorizontalSpeedMps: 20.1,
+                maxAscentSpeedMps: 8.0,
+                maxDescentSpeedMps: 6.0,
+                maxFlightTimeMin: 40.0,
+                maxHoverTimeMin: 35.0,
+                maxWindResistanceMps: 12.8,
+                batteryEnergyWh: 70.0,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .miniCompact,
+                controlResponsiveness: 0.84,
+                hoverThrottle: 0.53,
+                cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
+                collisionRadiusMeters: 0.27
+            )
+        case "dji-matrice-4td-dock-3":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 2.09,
+                fallbackDimensions: DroneDimensionsMM(x: 377.7, y: 416.2, z: 212.5),
+                maxHorizontalSpeedMps: 15.0,
+                maxAscentSpeedMps: 6.0,
+                maxDescentSpeedMps: 6.0,
+                maxFlightTimeMin: 54.0,
+                maxHoverTimeMin: 47.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 149.9,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .miniCompact,
+                controlResponsiveness: 0.78,
+                hoverThrottle: 0.54,
+                cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 9.0, followHeight: 3.2),
+                collisionRadiusMeters: 0.29
+            )
+        case "brinc-lemur-2":
+            // BRINC publishes weight, endurance, dimensions, and sensors, but not a numeric max speed.
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 1.50,
+                fallbackDimensions: DroneDimensionsMM(x: 406.4, y: 330.2, z: 101.6),
+                maxHorizontalSpeedMps: 10.0,
+                maxAscentSpeedMps: 3.0,
+                maxDescentSpeedMps: 3.0,
+                maxFlightTimeMin: 20.0,
+                maxHoverTimeMin: 20.0,
+                maxWindResistanceMps: 5.0,
+                batteryEnergyWh: 44.0,
+                cameraLayoutKey: "drone.camera.multi_lens",
+                visualClass: .miniCompact,
+                controlResponsiveness: 0.90,
+                hoverThrottle: 0.52,
+                cameraPreset: DroneCameraPreset(fpvFov: 92.0, followDistance: 5.2, followHeight: 1.6),
+                collisionRadiusMeters: 0.14
+            )
+        case "dji-neo":
+            return multirotorRuntimeTuning(
+                fallbackTakeoffMass: 0.135,
+                fallbackDimensions: DroneDimensionsMM(x: 130.0, y: 157.0, z: 48.5),
+                maxHorizontalSpeedMps: 16.0,
+                maxAscentSpeedMps: 3.0,
+                maxDescentSpeedMps: 2.0,
+                maxFlightTimeMin: 18.0,
+                maxHoverTimeMin: 18.0,
+                maxWindResistanceMps: 8.0,
+                batteryEnergyWh: 10.5,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .miniCompact,
+                controlResponsiveness: 0.92,
+                hoverThrottle: 0.50,
+                cameraPreset: DroneCameraPreset(fpvFov: 92.0, followDistance: 4.8, followHeight: 1.5),
+                collisionRadiusMeters: 0.12
+            )
         case "sensefly-ebee-tac":
             return fixedWingRuntimeTuning(
                 fallbackTakeoffMass: 1.7,
@@ -1188,6 +1462,49 @@ struct LIPODroneModelRepository: DroneModelRepository {
         default:
             return nil
         }
+    }
+
+    private static func multirotorRuntimeTuning(
+        fallbackTakeoffMass: Float,
+        fallbackDimensions: DroneDimensionsMM,
+        maxHorizontalSpeedMps: Float,
+        maxAscentSpeedMps: Float,
+        maxDescentSpeedMps: Float,
+        maxFlightTimeMin: Float,
+        maxHoverTimeMin: Float,
+        maxWindResistanceMps: Float,
+        batteryEnergyWh: Float,
+        cameraLayoutKey: String = "drone.camera.single_compact",
+        visualClass: DroneVisualClass,
+        airframeStyle: AirframeStyle = .multirotorQuad,
+        controlResponsiveness: Float,
+        hoverThrottle: Float,
+        cameraPreset: DroneCameraPreset,
+        collisionRadiusMeters: Float
+    ) -> RuntimeTuning {
+        RuntimeTuning(
+            fallbackTakeoffMass: fallbackTakeoffMass,
+            fallbackDimensions: fallbackDimensions,
+            maxHorizontalSpeedMps: maxHorizontalSpeedMps,
+            maxAscentSpeedMps: maxAscentSpeedMps,
+            maxDescentSpeedMps: maxDescentSpeedMps,
+            maxFlightTimeMin: maxFlightTimeMin,
+            maxHoverTimeMin: maxHoverTimeMin,
+            maxWindResistanceMps: maxWindResistanceMps,
+            batteryEnergyWh: batteryEnergyWh,
+            cameraLayoutKey: cameraLayoutKey,
+            visualClass: visualClass,
+            operationalCategory: .multirotor,
+            airframeClass: .multirotor,
+            airframeStyle: airframeStyle,
+            fixedWingParameters: nil,
+            launchMethod: .vertical,
+            landingMethod: .vertical,
+            controlResponsiveness: controlResponsiveness,
+            hoverThrottle: hoverThrottle,
+            cameraPreset: cameraPreset,
+            collisionRadiusMeters: collisionRadiusMeters
+        )
     }
 
     private static func fixedWingRuntimeTuning(

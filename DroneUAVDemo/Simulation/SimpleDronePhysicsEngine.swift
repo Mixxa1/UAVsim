@@ -135,7 +135,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
 
         let gravityForce = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
-        let linearDrag = -state.velocity * (1.45 + weather.dragMultiplier * 0.45)
+        let horizontalMax = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
+        let horizontalDragDamping = multirotorHorizontalDragDamping(
+            profile: profile,
+            controlMode: control.controlMode,
+            weather: weather
+        )
+        let verticalDragDamping = (1.45 + weather.dragMultiplier * 0.45).clamped(to: 1.20...2.40)
+        let linearDrag = SIMD3<Float>(
+            -state.velocity.x * mass * horizontalDragDamping,
+            -state.velocity.y * mass * verticalDragDamping,
+            -state.velocity.z * mass * horizontalDragDamping
+        )
         let windCompensation = (context.windVector - state.velocity) * (0.08 + weather.turbulenceFactor * 0.06)
         let totalForce = thrustWorld + gravityForce + linearDrag + windCompensation
 
@@ -159,12 +170,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let acceleration = totalForce / mass
         next.velocity = state.velocity + acceleration * dt
 
-        let horizontalMax = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
         let verticalUpMax = profile.maxAscentSpeedMps.clamped(to: 1.0...20.0)
         let verticalDownMax = profile.maxDescentSpeedMps.clamped(to: 1.0...20.0)
 
-        next.velocity.x = next.velocity.x.clamped(to: -horizontalMax...horizontalMax)
-        next.velocity.z = next.velocity.z.clamped(to: -horizontalMax...horizontalMax)
+        let horizontalVelocity = SIMD2<Float>(next.velocity.x, next.velocity.z)
+        let horizontalSpeed = simd_length(horizontalVelocity)
+        if horizontalSpeed > horizontalMax {
+            let scale = horizontalMax / horizontalSpeed
+            next.velocity.x *= scale
+            next.velocity.z *= scale
+        }
         next.velocity.y = next.velocity.y.clamped(to: -verticalDownMax...verticalUpMax)
 
         next.position = state.position + next.velocity * dt
@@ -219,6 +234,27 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.forwardAirspeed = simd_length(SIMD2<Float>(next.velocity.x, next.velocity.z))
 
         return next
+    }
+
+    private func multirotorHorizontalDragDamping(
+        profile: DroneModelProfile,
+        controlMode: FlightControlMode,
+        weather: WeatherFactors
+    ) -> Float {
+        let profileMaxSpeed = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
+        let referenceTiltDegrees: Float
+        switch controlMode {
+        case .hoverAssist:
+            referenceTiltDegrees = 22.0
+        case .stabilized:
+            referenceTiltDegrees = 36.0
+        case .acro:
+            referenceTiltDegrees = 48.0
+        }
+
+        let referenceAcceleration = Tuning.gravity * tan(referenceTiltDegrees.degreesToRadians)
+        let weatherDragPenalty = (weather.dragMultiplier - 1.0).clamped(to: 0.0...0.65)
+        return ((referenceAcceleration / profileMaxSpeed) * (1.0 + weatherDragPenalty * 0.55)).clamped(to: 0.18...2.80)
     }
 
     private func desiredMultirotorRates(

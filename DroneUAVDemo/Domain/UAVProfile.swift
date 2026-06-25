@@ -175,6 +175,8 @@ extension UAVProfile {
             return localizedCatalogString(key: "country.switzerland", fallback: countryOfOrigin)
         case "Germany":
             return localizedCatalogString(key: "country.germany", fallback: countryOfOrigin)
+        case "Sweden":
+            return localizedCatalogString(key: "country.sweden", fallback: countryOfOrigin)
         case "Israel":
             return localizedCatalogString(key: "country.israel", fallback: countryOfOrigin)
         case "Poland":

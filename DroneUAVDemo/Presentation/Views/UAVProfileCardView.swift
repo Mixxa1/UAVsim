@@ -37,11 +37,9 @@ struct UAVProfileCardView: View {
                     infoRow(localized("uav.card.type"), entry.profile.vehicleType.catalogTitle)
                     infoRow(localized("uav.card.mass_class"), entry.profile.massCategory?.catalogTitle ?? localized("common.not_specified"))
                     infoRow(localized("uav.card.base_mass"), massText(payloadData.baseMass))
-                    infoRow(localized("uav.card.max_payload"), massText(payloadData.maxPayloadMass))
                     infoRow(localized("uav.card.mtow"), massText(payloadData.maxTakeoffMass))
                     infoRow(localized("uav.card.role"), entry.profile.localizedMissionRole ?? localized("common.not_specified"))
                     infoRow(localized("uav.card.status"), entry.profile.specConfidence.catalogTitle)
-                    infoRow(localized("uav.card.payload_data_source"), payloadData.sourceQuality.title)
 
                     if let armamentCapabilityNote = entry.profile.localizedArmamentCapabilityNote {
                         VStack(alignment: .leading, spacing: 4) {
