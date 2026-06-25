@@ -77,12 +77,19 @@ final class DroneSceneController {
     private let fpvYawNode = SCNNode()
     private let fpvPitchNode = SCNNode()
     private let fpvCameraNode = SCNNode()
+    private let payloadCameraRigNode = SCNNode()
+    private let payloadCameraYawNode = SCNNode()
+    private let payloadCameraPitchNode = SCNNode()
+    private var payloadCameraStabilizationEuler = SIMD3<Float>(repeating: 0.0)
+    private var payloadCameraTargetLockYaw: Float?
+    private var payloadCameraTargetLockPitch: Float?
     private let payloadDropCameraController = PayloadDropCameraController()
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
     private let spectatorCameraNode = SCNNode()
 
     private let sunLightNode: SCNNode
+    private let defaultSunLightPosition: SCNVector3
     private let gridNode: SCNNode
     private let axesNode: SCNNode
     private let groundNode: SCNNode
@@ -143,6 +150,9 @@ final class DroneSceneController {
     private var fpvPresentationActive: Bool = false
     private var payloadVisualNode: SCNNode?
     private var activePayloadConfiguration: PayloadConfiguration?
+    private var payloadCameraNode: SCNNode?
+    private var payloadCamera: SCNCamera?
+    private var payloadCameraOpticsState = PayloadCameraOpticsState()
     private let fpvPayloadPresentationNode = SCNNode()
     private var droppedPayloadNodes: [UUID: SCNNode] = [:]
     private var droppedPayloadRuntime: [UUID: DroppedPayloadRuntime] = [:]
@@ -186,7 +196,14 @@ final class DroneSceneController {
 
     private enum RenderCategory {
         static let droppedPayload = 1 << 6
+        static let mountedPayload = 1 << 7
         static let visibleInFPV = Int.max & ~droppedPayload
+        static let visibleInPayloadOptics = Int.max & ~mountedPayload
+    }
+
+    private enum CameraClipping {
+        static let standardFar: CGFloat = 900
+        static let payloadOpticsFar: CGFloat = 2400
     }
 
     private var freeLookAngles = SIMD2<Float>(repeating: 0.0)   // yaw, pitch
@@ -198,6 +215,7 @@ final class DroneSceneController {
     private var orbitAngle: Float = 0.0
     private var activeProfile: DroneModelProfile
     private var currentWeather: WeatherModel = .normal
+    private var payloadOpticsShadowQualityActive = false
     private var areWorldBoundsVisible: Bool = false
     private(set) var dockSpawnPosition = SIMD3<Float>(0.0, 0.0, 0.0)
     private let dockDeckSurfaceHeight: Float = 0.037
@@ -210,6 +228,7 @@ final class DroneSceneController {
         self.scene = setup.scene
         self.freeCameraNode = setup.cameraNode
         self.sunLightNode = setup.sunLightNode
+        self.defaultSunLightPosition = setup.sunLightNode.position
         self.gridNode = setup.gridNode
         self.axesNode = setup.axesNode
         self.groundNode = setup.groundNode
@@ -233,6 +252,7 @@ final class DroneSceneController {
 
         self.scenePopulationService = ScenePopulationService(rootNode: scene.rootNode)
         configureDroneCollisionProxy(for: initialProfile)
+        ensurePayloadCameraNode()
 
         configureCameraNode(followCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(fpvCameraNode, fov: initialProfile.cameraPreset.fpvFov, hidesDroppedPayload: true)
@@ -348,11 +368,26 @@ final class DroneSceneController {
             return orbitCameraNode
         case .top:
             return topCameraNode
+        case .payloadOptics:
+            return payloadCameraPointOfView() ?? followCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
         case .spectator:
             return spectatorCameraNode
         }
+    }
+
+    func setPayloadCameraOpticsState(_ state: PayloadCameraOpticsState) {
+        payloadCameraOpticsState = state
+        updatePayloadCamera(state: state, droneState: .initial, deltaTime: 0.0)
+    }
+
+    func payloadCameraPointOfView() -> SCNNode? {
+        guard payloadCameraOpticsState.isAvailable else {
+            return nil
+        }
+        ensurePayloadCameraNode()
+        return payloadCameraNode
     }
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
@@ -854,9 +889,53 @@ final class DroneSceneController {
         )
     }
 
+    func payloadCameraTargetDistance(maxDistance: Double) -> Double? {
+        guard payloadCameraOpticsState.isAvailable,
+              payloadCameraOpticsState.isPowered,
+              let payloadCameraNode else {
+            return nil
+        }
+
+        let origin = payloadCameraNode.presentation.simdWorldPosition
+        let forward = simd_normalize(simd_act(
+            simd_quatf(payloadCameraNode.presentation.simdWorldTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        guard simd_length_squared(forward) > 0.000001 else {
+            return nil
+        }
+
+        let distanceLimit = max(1.0, Float(maxDistance))
+        let end = origin + forward * distanceLimit
+        let results = scene.rootNode.hitTestWithSegment(
+            from: SCNVector3(origin.x, origin.y, origin.z),
+            to: SCNVector3(end.x, end.y, end.z),
+            options: [
+                SCNHitTestOption.backFaceCulling.rawValue: false,
+                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue
+            ]
+        )
+
+        for result in results {
+            if isDescendant(result.node, of: droneNode) || isDescendant(result.node, of: payloadCameraRigNode) {
+                continue
+            }
+
+            let hit = SIMD3<Float>(
+                Float(result.worldCoordinates.x),
+                Float(result.worldCoordinates.y),
+                Float(result.worldCoordinates.z)
+            )
+            return Double(simd_distance(origin, hit))
+        }
+
+        return nil
+    }
+
     func attachPayloadVisual(_ configuration: PayloadConfiguration) {
         removePayloadVisual()
         let node = PayloadVisualFactory.build(configuration: configuration)
+        applyCategoryBitMask(RenderCategory.mountedPayload, to: node)
         payloadMountNode.addChildNode(node)
         payloadVisualNode = node
         activePayloadConfiguration = configuration
@@ -867,6 +946,7 @@ final class DroneSceneController {
     func attachMountedCADPayload(_ payload: MountedCADPayload) {
         removePayloadVisual()
         let node = CADPayloadVisualFactory.build(payload: payload)
+        applyCategoryBitMask(RenderCategory.mountedPayload, to: node)
         let mountCoordinateRoot = payloadMountNode.parent ?? visualRootNode
         mountCoordinateRoot.addChildNode(node)
         payloadVisualNode = node
@@ -1058,7 +1138,7 @@ final class DroneSceneController {
         case .fpv:
             fpvLookAngles.x = (fpvLookAngles.x + yawDelta).clamped(to: -0.9...0.9)
             fpvLookAngles.y = (fpvLookAngles.y + pitchDelta).clamped(to: -0.7...0.7)
-        case .follow, .orbit, .top, .payload, .spectator:
+        case .follow, .orbit, .top, .payloadOptics, .payload, .spectator:
             return
         }
     }
@@ -1076,6 +1156,8 @@ final class DroneSceneController {
             fpvLookAngles = .zero
         case .top:
             topLookAngles = .zero
+        case .payloadOptics:
+            return
         case .payload:
             return
         case .spectator:
@@ -1101,7 +1183,7 @@ final class DroneSceneController {
             orbitLookAngles = .zero
         case .top:
             topLookAngles = .zero
-        case .free, .follow, .fpv, .payload, .spectator:
+        case .free, .follow, .fpv, .payloadOptics, .payload, .spectator:
             break
         }
     }
@@ -1216,6 +1298,7 @@ final class DroneSceneController {
         resetFPVPayloadPresentation()
 
         scene.rootNode.addChildNode(droneNode)
+        ensurePayloadCameraNode()
         fpvPresentationRootNode.simdTransform = matrix_identity_float4x4
         configureDroneCollisionProxy(for: profile)
         resetCameraRuntimeState()
@@ -1376,28 +1459,7 @@ final class DroneSceneController {
         lastWeatherVisualSignature = signature
         currentWeather = weather
 
-        let factors = weather.effectiveFactors
-        scene.fogStartDistance = CGFloat(32.0 * factors.visibilityFactor + 4.0)
-        scene.fogEndDistance = CGFloat(260.0 * factors.visibilityFactor + 24.0)
-        scene.fogDensityExponent = CGFloat(0.75 + (1.0 - factors.visibilityFactor) * 2.7)
-
-        let fogColor: NSColor
-        switch weather.preset {
-        case .rain:
-            fogColor = NSColor(calibratedRed: 0.38, green: 0.42, blue: 0.49, alpha: 1.0)
-        case .snow:
-            fogColor = NSColor(calibratedRed: 0.82, green: 0.86, blue: 0.90, alpha: 1.0)
-        case .fog:
-            fogColor = NSColor(calibratedWhite: 0.84, alpha: 1.0)
-        case .smog:
-            fogColor = NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0)
-        case .thunderstorm:
-            fogColor = NSColor(calibratedRed: 0.22, green: 0.24, blue: 0.29, alpha: 1.0)
-        case .wind, .normal:
-            fogColor = NSColor(calibratedRed: 0.12, green: 0.16, blue: 0.20, alpha: 1.0)
-        }
-
-        scene.fogColor = fogColor
+        applyFogParameters(for: weather)
         updateWeatherParticles(weather)
         updateWeatherEnvelope(weather)
         updateStormClouds(weather)
@@ -1423,6 +1485,45 @@ final class DroneSceneController {
             }
             refreshGroundMaterial(for: terrain)
             buildSnowDecorations(for: terrain)
+        }
+    }
+
+    private func applyFogParameters(for weather: WeatherModel) {
+        let intensity = CGFloat(weather.normalizedIntensity)
+
+        switch weather.preset {
+        case .normal:
+            scene.fogStartDistance = 760
+            scene.fogEndDistance = 2600
+            scene.fogDensityExponent = 1.18
+            scene.fogColor = NSColor(calibratedRed: 0.62, green: 0.74, blue: 0.86, alpha: 1.0)
+
+        case .wind:
+            scene.fogStartDistance = 580 - intensity * 90
+            scene.fogEndDistance = 2200 - intensity * 360
+            scene.fogDensityExponent = 1.16 + intensity * 0.34
+            scene.fogColor = NSColor(calibratedRed: 0.58, green: 0.68, blue: 0.76, alpha: 1.0)
+
+        case .rain, .snow, .fog, .smog, .thunderstorm:
+            let factors = weather.effectiveFactors
+            scene.fogStartDistance = CGFloat(32.0 * factors.visibilityFactor + 4.0)
+            scene.fogEndDistance = CGFloat(260.0 * factors.visibilityFactor + 24.0)
+            scene.fogDensityExponent = CGFloat(0.75 + (1.0 - factors.visibilityFactor) * 2.7)
+
+            switch weather.preset {
+            case .rain:
+                scene.fogColor = NSColor(calibratedRed: 0.38, green: 0.42, blue: 0.49, alpha: 1.0)
+            case .snow:
+                scene.fogColor = NSColor(calibratedRed: 0.82, green: 0.86, blue: 0.90, alpha: 1.0)
+            case .fog:
+                scene.fogColor = NSColor(calibratedWhite: 0.84, alpha: 1.0)
+            case .smog:
+                scene.fogColor = NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0)
+            case .thunderstorm:
+                scene.fogColor = NSColor(calibratedRed: 0.22, green: 0.24, blue: 0.29, alpha: 1.0)
+            case .normal, .wind:
+                break
+            }
         }
     }
 
@@ -1645,6 +1746,7 @@ final class DroneSceneController {
             droneNode.opacity = 1.0
         }
         applyPayloadFPVPresentation()
+        updatePayloadCamera(state: payloadCameraOpticsState, droneState: state, deltaTime: deltaTime)
 
         rotatePropellers(state: state, deltaTime: deltaTime)
         updateDroppedPayloadRuntime(deltaTime: deltaTime)
@@ -1656,6 +1758,10 @@ final class DroneSceneController {
             deltaTime: deltaTime
         )
         updateWeatherAnimation(deltaTime: deltaTime, weather: currentWeather)
+        applyPayloadOpticsShadowQuality(
+            isActive: camera.mode == .payloadOptics,
+            weather: currentWeather
+        )
     }
 
     func updateCollisionDebug(risk: CollisionAnalysisSnapshot, enabled: Bool) {
@@ -1911,9 +2017,108 @@ final class DroneSceneController {
         let camera = SCNCamera()
         camera.fieldOfView = CGFloat(fov)
         camera.zNear = 0.01
-        camera.zFar = 900
+        camera.zFar = CameraClipping.standardFar
         camera.categoryBitMask = hidesDroppedPayload ? RenderCategory.visibleInFPV : Int.max
         node.camera = camera
+    }
+
+    func ensurePayloadCameraNode() {
+        if payloadCameraNode == nil {
+            let node = SCNNode()
+            node.name = "payloadCameraNode"
+
+            let camera = SCNCamera()
+            camera.fieldOfView = CGFloat(payloadCameraOpticsState.currentFieldOfViewDegrees)
+            camera.zNear = 0.015
+            camera.zFar = CameraClipping.payloadOpticsFar
+            camera.categoryBitMask = RenderCategory.visibleInPayloadOptics
+            node.camera = camera
+
+            payloadCameraRigNode.name = "payloadCameraRigNode"
+            payloadCameraYawNode.name = "payloadCameraYawNode"
+            payloadCameraPitchNode.name = "payloadCameraPitchNode"
+
+            payloadCameraRigNode.removeFromParentNode()
+            payloadCameraYawNode.removeFromParentNode()
+            payloadCameraPitchNode.removeFromParentNode()
+
+            payloadCameraRigNode.addChildNode(payloadCameraYawNode)
+            payloadCameraYawNode.addChildNode(payloadCameraPitchNode)
+            payloadCameraPitchNode.addChildNode(node)
+
+            payloadCameraPitchNode.simdPosition = SIMD3<Float>(0.0, -0.02, 0.02)
+            payloadCameraNode = node
+            payloadCamera = camera
+        }
+
+        if payloadCameraRigNode.parent !== payloadMountNode {
+            payloadCameraRigNode.removeFromParentNode()
+            payloadMountNode.addChildNode(payloadCameraRigNode)
+        }
+    }
+
+    func updatePayloadCamera(state: PayloadCameraOpticsState, droneState: DroneState, deltaTime: Float = 0.0) {
+        payloadCameraOpticsState = state
+        ensurePayloadCameraNode()
+
+        payloadCameraRigNode.isHidden = !state.isAvailable
+        updatePayloadTargetLockReferenceIfNeeded(state: state, droneState: droneState)
+        let stabilizationTarget = state.isAvailable ? stabilizedPayloadCameraEuler(for: droneState) : .zero
+        let response = 3.0 + Float(state.angularDamping) * 9.0
+        let stabilizationBlend = deltaTime > 0.0 ? min(deltaTime * response, 1.0) : 1.0
+        payloadCameraStabilizationEuler += (stabilizationTarget - payloadCameraStabilizationEuler) * stabilizationBlend
+        payloadCameraRigNode.eulerAngles = SCNVector3(
+            payloadCameraStabilizationEuler.x,
+            payloadCameraStabilizationEuler.y,
+            payloadCameraStabilizationEuler.z
+        )
+        payloadCameraYawNode.eulerAngles.y = CGFloat(Float(state.gimbalYawDegrees).degreesToRadians)
+        payloadCameraPitchNode.eulerAngles.x = CGFloat(Float(state.gimbalPitchDegrees).degreesToRadians)
+        payloadCamera?.fieldOfView = CGFloat(state.currentFieldOfViewDegrees)
+        payloadCamera?.zNear = 0.015
+        payloadCamera?.zFar = CameraClipping.payloadOpticsFar
+    }
+
+    private func stabilizedPayloadCameraEuler(for droneState: DroneState) -> SIMD3<Float> {
+        let strength = Float(payloadCameraOpticsState.stabilizationStrength).clamped(to: 0.0...1.0)
+        guard strength > 0.001 else {
+            return .zero
+        }
+
+        let rollCompensation = (-droneState.orientation.x * (0.76 + 0.22 * strength)).clamped(to: -0.8...0.8)
+        let pitchCompensation = (-droneState.orientation.y * (0.78 + 0.20 * strength)).clamped(to: -0.8...0.8)
+        let yawRateCompensation = (-droneState.angularVelocity.z * Float(payloadCameraOpticsState.vibrationSuppression) * 0.24 * strength)
+            .clamped(to: -0.32...0.32)
+
+        switch payloadCameraOpticsState.stabilizationMode {
+        case .off:
+            return .zero
+        case .horizonLock:
+            return SIMD3<Float>(pitchCompensation * strength, yawRateCompensation, rollCompensation * strength)
+        case .lowSpeedStabilized:
+            return SIMD3<Float>(pitchCompensation * strength, yawRateCompensation, rollCompensation * strength)
+        case .targetLock:
+            let lockedYaw = payloadCameraTargetLockYaw ?? droneState.orientation.z
+            let lockedPitch = payloadCameraTargetLockPitch ?? (-0.18)
+            let yawHold = (lockedYaw - droneState.orientation.z).clamped(to: -1.15...1.15)
+            let pitchHold = (lockedPitch - droneState.orientation.y).clamped(to: -0.95...0.95)
+            return SIMD3<Float>(pitchHold, yawHold, rollCompensation * strength)
+        }
+    }
+
+    private func updatePayloadTargetLockReferenceIfNeeded(state: PayloadCameraOpticsState, droneState: DroneState) {
+        guard state.isAvailable, state.targetLockEnabled else {
+            payloadCameraTargetLockYaw = nil
+            payloadCameraTargetLockPitch = nil
+            return
+        }
+
+        if payloadCameraTargetLockYaw == nil {
+            payloadCameraTargetLockYaw = droneState.orientation.z + Float(state.gimbalYawDegrees).degreesToRadians
+        }
+        if payloadCameraTargetLockPitch == nil {
+            payloadCameraTargetLockPitch = droneState.orientation.y + Float(state.gimbalPitchDegrees).degreesToRadians
+        }
     }
 
     private func updateCameras(
@@ -2325,6 +2530,17 @@ final class DroneSceneController {
             return modelForwardLocal()
         }
         return planarForward / planarLength
+    }
+
+    private func isDescendant(_ node: SCNNode, of ancestor: SCNNode) -> Bool {
+        var cursor: SCNNode? = node
+        while let current = cursor {
+            if current === ancestor {
+                return true
+            }
+            cursor = current.parent
+        }
+        return false
     }
 
     private func wrapAngle(_ value: Float) -> Float {
@@ -2761,10 +2977,8 @@ final class DroneSceneController {
 
     /// Only fog/smog/thunderstorm get a sky-gradient haze blend — matches `wantsWeatherDepthOfField`'s
     /// own gating and the envelope sphere's preset check. Other presets (rain, snow, wind) keep
-    /// their existing `scene.fogColor` treatment on real geometry only; their `fogColor` values
-    /// (e.g. the dark `wind`/`normal` tint) are tuned for that distance-fog role, not for blending
-    /// into a clear sky, so reusing them here unconditionally would incorrectly darken the sky for
-    /// weather that was never meant to touch the horizon at all.
+    /// their `scene.fogColor` treatment on real geometry only; reusing them here unconditionally
+    /// would incorrectly recolor the sky for weather that was never meant to touch the horizon.
     /// Strength has the same non-zero floor as the weather envelope sphere's opacity
     /// (`0.25 + intensity*0.55` in `updateWeatherEnvelope`) — and for the same reason that bit
     /// `wantsWeatherDepthOfField` earlier: picking a fog/smog/thunderstorm preset from the UI
@@ -3716,6 +3930,119 @@ final class DroneSceneController {
         // real 3D event instead: see `triggerLightningStrike`, scheduled minutes apart by the
         // view model, with its own small localized light that never touches the global sun.
         sunLightNode.light?.intensity = baseSun
+    }
+
+    private func applyPayloadOpticsShadowQuality(isActive: Bool, weather: WeatherModel) {
+        guard let light = sunLightNode.light else {
+            return
+        }
+
+        if isActive {
+            let projection = payloadOpticsShadowProjection()
+
+            light.castsShadow = true
+            light.automaticallyAdjustsShadowProjection = false
+            light.maximumShadowDistance = CameraClipping.payloadOpticsFar
+            light.sampleDistributedShadowMaps = false
+            light.shadowCascadeCount = 1
+            light.shadowCascadeSplittingFactor = 0.15
+            light.shadowMapSize = CGSize(width: 4096, height: 4096)
+            light.shadowSampleCount = 32
+            light.shadowBias = 0.62
+            light.zNear = 1
+            light.zFar = CameraClipping.payloadOpticsFar + 500
+            light.orthographicScale = projection.scale
+            sunLightNode.simdPosition = projection.lightPosition
+
+            switch weather.preset {
+            case .thunderstorm:
+                light.shadowRadius = 7.0
+                light.shadowColor = NSColor.black.withAlphaComponent(0.20)
+            case .fog, .smog, .snow:
+                light.shadowRadius = 4.5
+                light.shadowColor = NSColor.black.withAlphaComponent(0.24)
+            case .rain:
+                light.shadowRadius = 3.4
+                light.shadowColor = NSColor.black.withAlphaComponent(0.28)
+            case .normal, .wind:
+                light.shadowRadius = 1.6
+                light.shadowColor = NSColor.black.withAlphaComponent(0.42)
+            }
+
+            payloadOpticsShadowQualityActive = true
+            return
+        }
+
+        guard payloadOpticsShadowQualityActive else {
+            return
+        }
+
+        light.automaticallyAdjustsShadowProjection = true
+        light.maximumShadowDistance = 100
+        light.sampleDistributedShadowMaps = false
+        light.shadowCascadeCount = 1
+        light.shadowCascadeSplittingFactor = 0.15
+        light.shadowMapSize = CGSize(width: 1536, height: 1536)
+        light.shadowSampleCount = 12
+        light.shadowBias = 1.0
+        light.zNear = 1
+        light.zFar = 100
+        light.orthographicScale = 1
+        sunLightNode.position = defaultSunLightPosition
+
+        if weather.preset == .thunderstorm {
+            let softness = CGFloat(0.55 + weather.normalizedIntensity * 0.45)
+            light.shadowRadius = Self.clearWeatherShadowRadius + softness * 14.0
+            light.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha * (1.0 - softness * 0.65))
+        } else {
+            light.shadowRadius = Self.clearWeatherShadowRadius
+            light.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha)
+        }
+
+        payloadOpticsShadowQualityActive = false
+    }
+
+    private func payloadOpticsShadowProjection() -> (lightPosition: SIMD3<Float>, scale: CGFloat) {
+        guard let payloadCameraNode else {
+            return (sunLightNode.simdPosition, 420)
+        }
+
+        let cameraTransform = payloadCameraNode.presentation.simdWorldTransform
+        let cameraPosition = payloadCameraNode.presentation.simdWorldPosition
+        let cameraForward = simd_normalize(simd_act(
+            simd_quatf(cameraTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        let safeForward = simd_length_squared(cameraForward) > 0.0001
+            ? cameraForward
+            : SIMD3<Float>(0.0, -0.18, -0.98)
+
+        let targetDistance = Float(
+            payloadCameraOpticsState.targetDistanceMeters
+            ?? payloadCameraOpticsState.focusDistanceMeters
+        ).clamped(to: 80.0...720.0)
+        let fovRadians = Float(payloadCameraOpticsState.currentFieldOfViewDegrees)
+            .clamped(to: 1.0...55.0)
+            .degreesToRadians
+        let frameWidthAtTarget = tan(fovRadians * 0.5) * targetDistance * 2.0
+        let shadowScale = CGFloat((frameWidthAtTarget * 2.8 + 140.0).clamped(to: 180.0...920.0))
+
+        var focusPoint = cameraPosition + safeForward * targetDistance
+        let texelSize = Float(shadowScale) / 4096.0
+        if texelSize > 0.0001 {
+            focusPoint.x = (focusPoint.x / texelSize).rounded() * texelSize
+            focusPoint.y = (focusPoint.y / texelSize).rounded() * texelSize
+            focusPoint.z = (focusPoint.z / texelSize).rounded() * texelSize
+        }
+
+        let lightDirection = simd_normalize(simd_act(
+            simd_quatf(sunLightNode.presentation.simdWorldTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        let safeLightDirection = simd_length_squared(lightDirection) > 0.0001
+            ? lightDirection
+            : simd_normalize(SIMD3<Float>(-0.58, -0.66, -0.47))
+        return (focusPoint - safeLightDirection * 760.0, shadowScale)
     }
 
     // Mirrors SceneFactory.makeDirectionalLightNode's defaults — kept here so updateWeatherAnimation

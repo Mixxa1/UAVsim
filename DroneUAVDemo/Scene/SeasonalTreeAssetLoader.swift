@@ -52,6 +52,7 @@ final class SeasonalTreeAssetLoader {
         let pivot = SCNNode()
         pivot.name = "environment.snow_blue_spruce"
         pivot.addChildNode(inner)
+        enableShadowsRecursively(pivot)
         return pivot
     }
 
@@ -76,7 +77,7 @@ final class SeasonalTreeAssetLoader {
         for child in scene.rootNode.childNodes {
             root.addChildNode(child.clone())
         }
-        root.castsShadow = true
+        enableShadowsRecursively(root)
 
         let (minBB, maxBB) = root.boundingBox
         let h = Float(maxBB.y - minBB.y)
@@ -92,5 +93,13 @@ final class SeasonalTreeAssetLoader {
         guard !didWarnSpruceFailure else { return }
         didWarnSpruceFailure = true
         print("[Environment] Blue Spruce asset unavailable; no snow tree will be placed")
+    }
+
+    private func enableShadowsRecursively(_ node: SCNNode) {
+        node.castsShadow = true
+        node.geometry?.materials.forEach { $0.isDoubleSided = true }
+        for child in node.childNodes {
+            enableShadowsRecursively(child)
+        }
     }
 }

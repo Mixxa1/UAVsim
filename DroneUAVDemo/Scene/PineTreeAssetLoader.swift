@@ -26,6 +26,7 @@ final class PineTreeAssetLoader {
         node.scale = SCNVector3(scale, scale, scale)
         node.eulerAngles = SCNVector3(0, yaw, 0)
         node.name = PineTreeConstants.nodeName
+        enableShadowsRecursively(node)
         return node
     }
 
@@ -54,7 +55,7 @@ final class PineTreeAssetLoader {
         for child in scene.rootNode.childNodes {
             root.addChildNode(child.clone())
         }
-        root.castsShadow = true
+        enableShadowsRecursively(root)
 
         let (minBB, maxBB) = root.boundingBox
         let nativeHeight = Float(maxBB.y - minBB.y)
@@ -69,5 +70,13 @@ final class PineTreeAssetLoader {
         guard !didWarnFailure else { return }
         didWarnFailure = true
         print("[Environment] Pine Tree asset unavailable; using procedural tree fallback")
+    }
+
+    private func enableShadowsRecursively(_ node: SCNNode) {
+        node.castsShadow = true
+        node.geometry?.materials.forEach { $0.isDoubleSided = true }
+        for child in node.childNodes {
+            enableShadowsRecursively(child)
+        }
     }
 }

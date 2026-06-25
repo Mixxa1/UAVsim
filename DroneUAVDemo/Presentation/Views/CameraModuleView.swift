@@ -61,6 +61,10 @@ struct CameraModuleView: View {
                 .foregroundStyle(GroundControlPalette.textPrimary)
             }
 
+            if viewModel.payloadCameraOpticsState.isAvailable || viewModel.cameraConfiguration.mode == .payloadOptics {
+                payloadOpticsSection
+            }
+
             ModuleSection(
                 titleKey: "module.camera.presets",
                 subtitleKey: "module.camera.presets.subtitle"
@@ -254,6 +258,130 @@ struct CameraModuleView: View {
     }
 
     @ViewBuilder
+    private var payloadOpticsSection: some View {
+        let state = viewModel.payloadCameraOpticsState
+        let controlsEnabled = state.isAvailable && state.isPowered
+
+        ModuleSection(
+            titleKey: "payload.camera.title",
+            subtitleKey: "camera.mode.payload_optics"
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    ForEach(PayloadCameraMode.allCases) { mode in
+                        payloadModeChip(mode: mode, isSelected: state.mode == mode)
+                    }
+                }
+
+                LazyVGrid(columns: tileColumns, spacing: 8) {
+                    ForEach(PayloadCameraStabilizationMode.allCases) { mode in
+                        stabilizationModeChip(mode: mode, isSelected: state.stabilizationMode == mode) {
+                            viewModel.setPayloadStabilizationMode(mode)
+                        }
+                    }
+                }
+
+                ModuleSliderRow(
+                    titleKey: "payload.camera.zoom",
+                    value: Binding(
+                        get: { state.zoomLevel },
+                        set: { viewModel.setPayloadZoom($0) }
+                    ),
+                    range: state.minZoom...state.maxZoom,
+                    step: 0.1,
+                    formatter: Self.coordinateFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                ModuleSliderRow(
+                    titleKey: "payload.camera.focus",
+                    value: Binding(
+                        get: { state.focusDistanceMeters },
+                        set: { viewModel.setPayloadFocusDistance($0) }
+                    ),
+                    range: 1.0...500.0,
+                    step: 0.5,
+                    formatter: Self.coordinateFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                LazyVGrid(columns: tileColumns, spacing: 8) {
+                    payloadMetricCard(
+                        titleKey: "payload.camera.target_distance",
+                        value: state.targetDistanceMeters.map { String(format: "%.1f m", $0) } ?? "-- m"
+                    )
+                    payloadMetricCard(
+                        titleKey: "payload.camera.focus_error",
+                        value: String(format: "%.1f m", state.focusErrorMeters)
+                    )
+                    payloadMetricCard(
+                        titleKey: "payload.camera.fov",
+                        value: String(format: "%.1f°", state.currentFieldOfViewDegrees)
+                    )
+                    payloadMetricCard(
+                        titleKey: "payload.camera.stabilization_strength",
+                        value: String(format: "%.0f%%", state.stabilizationStrength * 100.0)
+                    )
+                    payloadMetricCard(
+                        titleKey: "payload.camera.vibration",
+                        value: vibrationLabel(for: state)
+                    )
+                }
+
+                LazyVGrid(columns: tileColumns, spacing: 8) {
+                    payloadActionButton(
+                        titleKey: state.isRecording ? "payload.camera.stop_record" : "payload.camera.record",
+                        systemImage: state.isRecording ? "stop.circle" : "record.circle",
+                        tint: Color.red,
+                        prominent: state.isRecording,
+                        isDisabled: !controlsEnabled
+                    ) {
+                        viewModel.togglePayloadRecording()
+                    }
+
+                    payloadActionButton(
+                        titleKey: "payload.camera.autofocus",
+                        systemImage: "viewfinder.circle",
+                        tint: GroundControlPalette.accent,
+                        prominent: state.autofocusEnabled,
+                        isDisabled: !controlsEnabled
+                    ) {
+                        viewModel.togglePayloadAutofocus()
+                    }
+
+                    payloadActionButton(
+                        titleKey: "payload.camera.focus_target",
+                        systemImage: "scope",
+                        tint: Color.orange,
+                        prominent: state.targetDistanceMeters != nil,
+                        isDisabled: !controlsEnabled || state.targetDistanceMeters == nil
+                    ) {
+                        viewModel.triggerPayloadAutofocusOnce()
+                    }
+
+                    payloadActionButton(
+                        titleKey: "payload.camera.reset_zoom",
+                        systemImage: "minus.magnifyingglass",
+                        tint: GroundControlPalette.textSecondary,
+                        prominent: false,
+                        isDisabled: !controlsEnabled || state.zoomLevel <= state.minZoom + 0.01
+                    ) {
+                        viewModel.resetPayloadZoom()
+                    }
+                }
+
+                if !state.isPowered {
+                    payloadStatusBanner("payload.camera.powered_off", tint: GroundControlPalette.warning)
+                } else if !state.isAvailable {
+                    payloadStatusBanner("payload.camera.unavailable", tint: GroundControlPalette.warning)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var fpvAdvancedBlock: some View {
         ModuleSection(titleKey: "module.camera.fpv_stack") {
             VStack(alignment: .leading, spacing: 12) {
@@ -350,6 +478,8 @@ struct CameraModuleView: View {
             return "record.circle"
         case .top:
             return "view.2d"
+        case .payloadOptics:
+            return "camera.viewfinder"
         case .payload:
             return "shippingbox"
         case .spectator:
@@ -376,5 +506,141 @@ struct CameraModuleView: View {
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+
+    private func payloadModeChip(mode: PayloadCameraMode, isSelected: Bool) -> some View {
+        let isEnabled = mode == .optical
+
+        return Text(payloadModeTitle(for: mode))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? GroundControlPalette.accent.opacity(0.20) : GroundControlPalette.inset)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isSelected ? GroundControlPalette.accent.opacity(0.55) : GroundControlPalette.border, lineWidth: 1)
+            )
+            .opacity(isEnabled ? 1.0 : 0.42)
+    }
+
+    private func payloadMetricCard(titleKey: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(LocalizedStringKey(titleKey))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(GroundControlPalette.textPrimary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(GroundControlPalette.inset)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.border, lineWidth: 1)
+        )
+    }
+
+    private func stabilizationModeChip(
+        mode: PayloadCameraStabilizationMode,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(stabilizationModeTitle(for: mode))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(isSelected ? GroundControlPalette.accent.opacity(0.20) : GroundControlPalette.inset)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(isSelected ? GroundControlPalette.accent.opacity(0.55) : GroundControlPalette.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func payloadActionButton(
+        titleKey: String,
+        systemImage: String,
+        tint: Color,
+        prominent: Bool,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        OperationalActionButton(
+            titleKey: titleKey,
+            systemImage: systemImage,
+            tint: tint,
+            prominent: prominent,
+            action: action
+        )
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1.0)
+    }
+
+    private func payloadStatusBanner(_ titleKey: String, tint: Color) -> some View {
+        Text(LocalizedStringKey(titleKey))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(tint.opacity(0.18))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(tint.opacity(0.42), lineWidth: 1)
+            )
+    }
+
+    private func payloadModeTitle(for mode: PayloadCameraMode) -> String {
+        switch mode {
+        case .optical:
+            return localized("payload.camera.mode.eo")
+        case .thermalStub:
+            return localized("payload.camera.mode.thermal_stub")
+        case .nightStub:
+            return localized("payload.camera.mode.night_stub")
+        }
+    }
+
+    private func stabilizationModeTitle(for mode: PayloadCameraStabilizationMode) -> String {
+        switch mode {
+        case .off:
+            return localized("payload.camera.stabilization.off")
+        case .horizonLock:
+            return localized("payload.camera.stabilization.horizon")
+        case .targetLock:
+            return localized("payload.camera.stabilization.target")
+        case .lowSpeedStabilized:
+            return localized("payload.camera.stabilization.low_speed")
+        }
+    }
+
+    private func vibrationLabel(for state: PayloadCameraOpticsState) -> String {
+        let visibleVibration = max(0.0, 1.0 - state.vibrationSuppression * state.stabilizationStrength)
+        switch visibleVibration {
+        case ..<0.22:
+            return localized("payload.camera.vibration.low")
+        case ..<0.52:
+            return localized("payload.camera.vibration.medium")
+        default:
+            return localized("payload.camera.vibration.high")
+        }
     }
 }

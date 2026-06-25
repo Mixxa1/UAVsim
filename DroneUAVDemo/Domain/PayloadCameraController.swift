@@ -51,13 +51,270 @@ struct PayloadCameraStatus: Equatable {
 }
 
 final class PayloadCameraController {
+    private enum OpticsConstants {
+        static let minFocusDistanceMeters = 1.0
+        static let maxFocusDistanceMeters = 500.0
+        static let minFieldOfViewDegrees = 1.0
+        static let minGimbalPitchDegrees = -90.0
+        static let maxGimbalPitchDegrees = 35.0
+        static let maxBlurRadius = 8.0
+        static let maxMotionBlurRadius = 6.0
+        static let autofocusResponse = 6.0
+        static let passiveFocusAssistResponse = 2.8
+        static let motionBlurRiseResponse = 12.0
+        static let motionBlurDecayResponse = 5.0
+        static let focusLockPulseDecay = 3.2
+        static let outOfFocusSignalThreshold = 6.0
+        static let focusLockThreshold = 0.35
+        static let passiveAssistStabilityFloor = 0.55
+        static let focusToleranceFactor = 0.08
+    }
+
     private(set) var trackedReleaseID: UUID?
     private(set) var previousUAVMode: CameraMode?
     private(set) var autoSwitchAfterRelease: Bool = false
     private(set) var status: PayloadCameraStatus = .inactive
+    private(set) var opticsState = PayloadCameraOpticsState()
+
+    private var pendingMissionSignals: [PayloadMissionSignal] = []
+    private var lastEmittedPowerState: Bool?
+    private var lastReportedTargetDistance: Double?
+    private var focusLockArmed = true
+    private var outOfFocusArmed = true
 
     func setAutoSwitchAfterRelease(_ enabled: Bool) {
         autoSwitchAfterRelease = enabled
+    }
+
+    func setOpticsAvailability(
+        isAvailable: Bool,
+        isPowered: Bool,
+        feedLabel: String? = nil
+    ) {
+        opticsState.isAvailable = isAvailable
+        opticsState.isPowered = isPowered
+        if let feedLabel {
+            opticsState.feedLabel = feedLabel
+        }
+
+        if !isAvailable || !isPowered {
+            opticsState.isRecording = false
+            opticsState.autofocusEnabled = false
+            opticsState.targetDistanceMeters = nil
+            opticsState.focusErrorMeters = 0.0
+            opticsState.blurRadius = 0.0
+            opticsState.motionBlurRadius = 0.0
+            opticsState.focusLockPulse = 0.0
+            opticsState.targetLockEnabled = false
+        }
+
+        if lastEmittedPowerState != isPowered {
+            pendingMissionSignals.append(.cameraPowered(isPowered))
+            lastEmittedPowerState = isPowered
+        }
+    }
+
+    func setPayloadCameraMode(_ mode: PayloadCameraMode) {
+        opticsState.mode = mode
+    }
+
+    func setStabilizationMode(_ mode: PayloadCameraStabilizationMode) {
+        opticsState.stabilizationMode = mode
+        opticsState.targetLockEnabled = mode == .targetLock
+    }
+
+    func updateStabilization(
+        speedMetersPerSecond: Double,
+        airframeClass: AirframeClass
+    ) {
+        let strength: Double
+
+        switch opticsState.stabilizationMode {
+        case .off:
+            strength = 0.0
+        case .horizonLock:
+            strength = airframeClass == .multirotor ? 0.88 : 0.72
+        case .targetLock:
+            strength = airframeClass == .multirotor ? 0.96 : 0.84
+        case .lowSpeedStabilized:
+            if airframeClass == .multirotor {
+                let speedFactor = min(max(speedMetersPerSecond / opticsState.stabilizationSpeedLimitMps, 0.0), 1.0)
+                strength = pow(1.0 - speedFactor, 0.65)
+            } else {
+                let slowPenalty = min(max((6.0 - speedMetersPerSecond) / 6.0, 0.0), 1.0)
+                let fastPenalty = min(max((speedMetersPerSecond - 22.0) / 12.0, 0.0), 1.0)
+                strength = min(max(0.78 - slowPenalty * 0.36 - fastPenalty * 0.22, 0.22), 0.82)
+            }
+        }
+
+        opticsState.stabilizationStrength = strength
+        opticsState.targetLockEnabled = opticsState.stabilizationMode == .targetLock
+    }
+
+    func setZoom(_ value: Double) {
+        let clampedZoom = min(max(value, opticsState.minZoom), opticsState.maxZoom)
+        opticsState.zoomLevel = clampedZoom
+        opticsState.currentFieldOfViewDegrees = max(
+            OpticsConstants.minFieldOfViewDegrees,
+            opticsState.baseFieldOfViewDegrees / clampedZoom
+        )
+    }
+
+    func setFocusDistance(_ meters: Double) {
+        opticsState.focusDistanceMeters = min(
+            max(meters, OpticsConstants.minFocusDistanceMeters),
+            OpticsConstants.maxFocusDistanceMeters
+        )
+        opticsState.autofocusEnabled = false
+        focusLockArmed = true
+        outOfFocusArmed = true
+    }
+
+    func adjustGimbal(yawDeltaDegrees: Double, pitchDeltaDegrees: Double) {
+        opticsState.gimbalYawDegrees = normalizedYawDegrees(opticsState.gimbalYawDegrees + yawDeltaDegrees)
+        opticsState.gimbalPitchDegrees = min(
+            max(
+                opticsState.gimbalPitchDegrees + pitchDeltaDegrees,
+                OpticsConstants.minGimbalPitchDegrees
+            ),
+            OpticsConstants.maxGimbalPitchDegrees
+        )
+    }
+
+    func resetGimbalOrientation() {
+        opticsState.gimbalYawDegrees = 0.0
+        opticsState.gimbalPitchDegrees = -12.0
+    }
+
+    func setAutofocusEnabled(_ enabled: Bool) {
+        guard opticsState.isAvailable, opticsState.isPowered else {
+            opticsState.autofocusEnabled = false
+            return
+        }
+        opticsState.autofocusEnabled = enabled
+        focusLockArmed = true
+        outOfFocusArmed = true
+    }
+
+    func toggleRecording() {
+        guard opticsState.isAvailable, opticsState.isPowered else {
+            return
+        }
+        opticsState.isRecording.toggle()
+        pendingMissionSignals.append(opticsState.isRecording ? .recordingStarted : .recordingStopped)
+    }
+
+    func updateTargetDistance(_ meters: Double?) {
+        let previousTarget = opticsState.targetDistanceMeters
+        opticsState.targetDistanceMeters = meters
+        if let meters,
+           lastReportedTargetDistance == nil || abs((lastReportedTargetDistance ?? 0.0) - meters) >= 0.5 {
+            pendingMissionSignals.append(.targetMeasured(distanceMeters: meters))
+            lastReportedTargetDistance = meters
+        } else if meters == nil {
+            lastReportedTargetDistance = nil
+        }
+        if previousTarget == nil || meters == nil || abs((previousTarget ?? 0.0) - (meters ?? 0.0)) >= 0.25 {
+            focusLockArmed = true
+            outOfFocusArmed = true
+        }
+    }
+
+    func updateOptics(
+        dt: TimeInterval,
+        platformStability: Double = 0.0,
+        motionDisturbance: Double = 0.0
+    ) {
+        setZoom(opticsState.zoomLevel)
+
+        guard opticsState.isAvailable, opticsState.isPowered else {
+            opticsState.focusErrorMeters = 0.0
+            opticsState.blurRadius = 0.0
+            opticsState.motionBlurRadius = 0.0
+            opticsState.focusLockPulse = 0.0
+            return
+        }
+
+        opticsState.focusLockPulse = max(0.0, opticsState.focusLockPulse - dt * OpticsConstants.focusLockPulseDecay)
+
+        if let target = opticsState.targetDistanceMeters {
+            let focusResponse: Double
+            if opticsState.autofocusEnabled {
+                focusResponse = OpticsConstants.autofocusResponse
+            } else {
+                let normalizedAssist = (platformStability - OpticsConstants.passiveAssistStabilityFloor) / (1.0 - OpticsConstants.passiveAssistStabilityFloor)
+                let assistWeight = min(max(normalizedAssist, 0.0), 1.0)
+                focusResponse = OpticsConstants.passiveFocusAssistResponse * assistWeight
+            }
+
+            if focusResponse > 0.0 {
+                let blend = min(max(dt, 0.0) * focusResponse, 1.0)
+                opticsState.focusDistanceMeters += (target - opticsState.focusDistanceMeters) * blend
+            }
+        }
+
+        if let target = opticsState.targetDistanceMeters {
+            opticsState.focusErrorMeters = abs(target - opticsState.focusDistanceMeters)
+        } else {
+            opticsState.focusErrorMeters = 0.0
+        }
+
+        let tolerance = max(1.0, opticsState.focusDistanceMeters * OpticsConstants.focusToleranceFactor)
+        let focusNormalized = min(opticsState.focusErrorMeters / tolerance, 1.0)
+        let focusBlurRadius = focusNormalized * OpticsConstants.maxBlurRadius
+        let visibleMotion = min(
+            max(
+                motionDisturbance * (1.0 - opticsState.vibrationSuppression * opticsState.stabilizationStrength),
+                0.0
+            ),
+            1.0
+        )
+        let motionTargetRadius = visibleMotion * OpticsConstants.maxMotionBlurRadius
+        let motionResponse = motionTargetRadius > opticsState.motionBlurRadius
+            ? OpticsConstants.motionBlurRiseResponse
+            : OpticsConstants.motionBlurDecayResponse
+        let motionBlend = min(max(dt, 0.0) * motionResponse, 1.0)
+        opticsState.motionBlurRadius += (motionTargetRadius - opticsState.motionBlurRadius) * motionBlend
+        opticsState.blurRadius = min(
+            OpticsConstants.maxBlurRadius,
+            max(focusBlurRadius, opticsState.motionBlurRadius) + min(focusBlurRadius, opticsState.motionBlurRadius) * 0.35
+        )
+
+        if let target = opticsState.targetDistanceMeters,
+           focusLockArmed,
+           opticsState.focusErrorMeters <= OpticsConstants.focusLockThreshold {
+            pendingMissionSignals.append(.focusLocked(distanceMeters: target))
+            opticsState.focusLockPulse = 1.0
+            focusLockArmed = false
+        } else if opticsState.focusErrorMeters > OpticsConstants.focusLockThreshold {
+            focusLockArmed = true
+        }
+
+        if outOfFocusArmed,
+           opticsState.blurRadius >= OpticsConstants.outOfFocusSignalThreshold {
+            pendingMissionSignals.append(.outOfFocus(errorMeters: opticsState.focusErrorMeters))
+            outOfFocusArmed = false
+        } else if opticsState.blurRadius < OpticsConstants.outOfFocusSignalThreshold * 0.5 {
+            outOfFocusArmed = true
+        }
+
+        opticsState.targetLockEnabled = opticsState.stabilizationMode == .targetLock
+    }
+
+    func consumeMissionSignals() -> [PayloadMissionSignal] {
+        let output = pendingMissionSignals
+        pendingMissionSignals.removeAll(keepingCapacity: true)
+        return output
+    }
+
+    private func normalizedYawDegrees(_ value: Double) -> Double {
+        var wrapped = value.truncatingRemainder(dividingBy: 360.0)
+        if wrapped <= -180.0 {
+            wrapped += 360.0
+        } else if wrapped > 180.0 {
+            wrapped -= 360.0
+        }
+        return wrapped
     }
 
     func canActivatePayloadView() -> Bool {

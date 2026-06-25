@@ -11,6 +11,8 @@ struct SceneViewportView: View {
 
     var body: some View {
         let overlayInset = viewModel.isParametersPanelVisible ? 18.0 : 12.0
+        let payloadOpticsActive = viewModel.cameraConfiguration.mode == .payloadOptics
+        let payloadOpticsState = viewModel.payloadCameraOpticsState
 
         ZStack(alignment: .topLeading) {
             DroneSceneViewRepresentable(
@@ -28,9 +30,15 @@ struct SceneViewportView: View {
                     viewModel.handleSceneRenderFrame(atTime: time, cameraMode: mode)
                 }
             )
+            .blur(radius: payloadOpticsActive ? min(max(payloadOpticsState.blurRadius, 0.0), 8.0) : 0.0)
             .ignoresSafeArea()
 
-            if viewModel.isSpectatorMode {
+            if payloadOpticsActive {
+                PayloadOpticsViewportOverlayView(state: payloadOpticsState)
+                    .ignoresSafeArea()
+            }
+
+            if viewModel.isSpectatorMode || payloadOpticsActive {
                 EmptyView()
             } else if !viewModel.isParametersPanelVisible || viewModel.isCompactTelemetryHUDEnabled {
                 CompactTelemetryHUDView(
@@ -76,7 +84,7 @@ struct SceneViewportView: View {
             }
         }
         .overlay(alignment: .top) {
-            if !viewModel.isSpectatorMode, viewModel.isCompassVisible {
+            if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive {
                 CompassOverlayView(viewModel: viewModel.compassViewModel)
                     .padding(.top, 12)
             }
@@ -222,6 +230,188 @@ private struct PayloadCameraStatusOverlayView: View {
         .font(.system(size: 10, weight: .medium, design: .monospaced))
         .lineLimit(1)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct PayloadOpticsViewportOverlayView: View {
+    let state: PayloadCameraOpticsState
+
+    private var targetText: String {
+        guard let target = state.targetDistanceMeters else {
+            return "-- m"
+        }
+        return String(format: "%.1f m", target)
+    }
+
+    private var zoomText: String {
+        String(format: "%.1fx", state.zoomLevel)
+    }
+
+    private var focusText: String {
+        String(format: "%.1f m", state.focusDistanceMeters)
+    }
+
+    private var fovText: String {
+        String(format: "%.1f°", state.currentFieldOfViewDegrees)
+    }
+
+    private var reticleOpacity: Double {
+        0.22 + state.focusLockPulse * 0.78
+    }
+
+    private var reticleScale: Double {
+        1.08 - state.focusLockPulse * 0.18
+    }
+
+    private var reticleColor: Color {
+        if state.focusLockPulse > 0.05 {
+            return Color.white.opacity(0.96)
+        }
+        return overlayTint.opacity(0.8)
+    }
+
+    private var overlayTint: Color {
+        state.isPowered ? Color(red: 0.78, green: 0.94, blue: 1.0) : Color.white.opacity(0.62)
+    }
+
+    var body: some View {
+        ZStack {
+            if !state.isPowered {
+                Color.black.opacity(0.34)
+            }
+
+            PayloadOpticsCornerFrame()
+                .stroke(overlayTint.opacity(0.95), style: StrokeStyle(lineWidth: 2.0, lineCap: .square))
+                .padding(22)
+
+            payloadFocusReticle
+                .scaleEffect(reticleScale)
+                .opacity(reticleOpacity)
+
+            VStack(spacing: 0) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.feedLabel)
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        Text("ZOOM \(zoomText)")
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    }
+
+                    Spacer()
+
+                    if state.isRecording {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 12, height: 12)
+                            Text("REC")
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.red.opacity(0.96))
+                        }
+                    }
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+
+                Spacer()
+
+                if !state.isPowered {
+                    statusPill(titleKey: "payload.camera.powered_off", tint: GroundControlPalette.warning)
+                } else if !state.isAvailable {
+                    statusPill(titleKey: "payload.camera.unavailable", tint: GroundControlPalette.warning)
+                }
+
+                Spacer()
+
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("FOCUS \(focusText)")
+                        Text("TARGET \(targetText)")
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 6) {
+                        if state.autofocusEnabled {
+                            Text("AF")
+                        }
+                        Text("FOV \(fovText)")
+                    }
+                }
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 32)
+                .padding(.bottom, 28)
+            }
+            .foregroundStyle(overlayTint)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func statusPill(titleKey: String, tint: Color) -> some View {
+        Text(LocalizedStringKey(titleKey))
+            .font(.system(size: 24, weight: .bold, design: .monospaced))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.56), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            )
+    }
+
+    private var payloadFocusReticle: some View {
+        ZStack {
+            CrosshairShape()
+                .stroke(reticleColor.opacity(0.92), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .frame(width: 116, height: 116)
+                .shadow(color: reticleColor.opacity(state.focusLockPulse * 0.55), radius: 18)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct PayloadOpticsCornerFrame: Shape {
+    func path(in rect: CGRect) -> Path {
+        let inset: CGFloat = 0.0
+        let length: CGFloat = 34.0
+
+        var path = Path()
+
+        path.move(to: CGPoint(x: inset, y: inset + length))
+        path.addLine(to: CGPoint(x: inset, y: inset))
+        path.addLine(to: CGPoint(x: inset + length, y: inset))
+
+        path.move(to: CGPoint(x: rect.maxX - inset - length, y: inset))
+        path.addLine(to: CGPoint(x: rect.maxX - inset, y: inset))
+        path.addLine(to: CGPoint(x: rect.maxX - inset, y: inset + length))
+
+        path.move(to: CGPoint(x: inset, y: rect.maxY - inset - length))
+        path.addLine(to: CGPoint(x: inset, y: rect.maxY - inset))
+        path.addLine(to: CGPoint(x: inset + length, y: rect.maxY - inset))
+
+        path.move(to: CGPoint(x: rect.maxX - inset - length, y: rect.maxY - inset))
+        path.addLine(to: CGPoint(x: rect.maxX - inset, y: rect.maxY - inset))
+        path.addLine(to: CGPoint(x: rect.maxX - inset, y: rect.maxY - inset - length))
+
+        return path
+    }
+}
+
+private struct CrosshairShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let midX = rect.midX
+        let midY = rect.midY
+        let arm: CGFloat = min(rect.width, rect.height) * 0.5
+
+        path.move(to: CGPoint(x: midX - arm, y: midY))
+        path.addLine(to: CGPoint(x: midX + arm, y: midY))
+
+        path.move(to: CGPoint(x: midX, y: midY - arm))
+        path.addLine(to: CGPoint(x: midX, y: midY + arm))
+
+        return path
     }
 }
 

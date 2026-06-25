@@ -54,6 +54,7 @@
 "camera.mode.fpv" = "FPV";
 "camera.mode.orbit" = "Орбита";
 "camera.mode.top" = "Вид сверху";
+"camera.mode.payload_optics" = "EO-камера ПН";
 "camera.mode.payload" = "Сброс ПН";
 "camera.mode.top_down" = "Вид сверху";
 "camera.payload.auto_switch" = "Автопереход на камеру ПН после сброса";
@@ -66,6 +67,35 @@
 "camera.follow_z" = "Смещение следования Z";
 "camera.fpv_stabilization" = "FPV стабилизация";
 "camera.fpv_shake" = "FPV дрожание";
+
+"payload.camera.title" = "Камера ПН";
+"payload.camera.mode" = "Режим";
+"payload.camera.mode.eo" = "EO-камера";
+"payload.camera.mode.thermal_stub" = "Тепловизор";
+"payload.camera.mode.night_stub" = "Ночной канал";
+"payload.camera.record" = "REC";
+"payload.camera.stop_record" = "STOP";
+"payload.camera.zoom" = "Зум";
+"payload.camera.focus" = "Фокус";
+"payload.camera.autofocus" = "Автофокус";
+"payload.camera.focus_target" = "Фокус на цель";
+"payload.camera.target_distance" = "Дистанция до цели";
+"payload.camera.focus_error" = "Ошибка фокуса";
+"payload.camera.blur" = "Размытие";
+"payload.camera.fov" = "Угол обзора";
+"payload.camera.reset_zoom" = "Сброс зума";
+"payload.camera.stabilization.off" = "Выкл";
+"payload.camera.stabilization.horizon" = "Горизонт";
+"payload.camera.stabilization.target" = "Цель";
+"payload.camera.stabilization.low_speed" = "Малая скорость";
+"payload.camera.stabilization_strength" = "Стабилизация";
+"payload.camera.vibration" = "Дрожание";
+"payload.camera.vibration.low" = "Низкое";
+"payload.camera.vibration.medium" = "Среднее";
+"payload.camera.vibration.high" = "Высокое";
+"payload.camera.out_of_focus" = "РАСФОКУС";
+"payload.camera.unavailable" = "Камера ПН недоступна";
+"payload.camera.powered_off" = "Камера ПН выключена";
 
 "command.reset" = "Сброс";
 "command.takeoff" = "Взлет";
@@ -412,6 +442,7 @@
 "keybind.camera.mode4" = "Камера 4 (От первого лица)";
 "keybind.camera.mode5" = "Камера 5 (Вид сверху)";
 "keybind.camera.mode6" = "Камера 6 (Падение полезной нагрузки)";
+"keybind.camera.mode8" = "Камера 8 (EO-камера ПН)";
 "keybind.camera.toggle_fpv" = "Переключить от первого лица";
 "keybind.camera.cycle_mode" = "Смена режима камеры";
 "keybind.camera.zoom_in" = "Приблизить";

@@ -519,54 +519,56 @@ private extension InputAction {
             return 13
         case .selectTopCamera:
             return 14
-        case .selectPayloadCamera:
+        case .selectPayloadOpticsCamera:
             return 15
-        case .toggleTerrainMap:
+        case .selectPayloadCamera:
             return 16
-        case .toggleCompassOverlay:
+        case .toggleTerrainMap:
             return 17
-        case .toggleThermalOverlay:
+        case .toggleCompassOverlay:
             return 18
-        case .toggleDamageOverlay:
+        case .toggleThermalOverlay:
             return 19
-        case .cycleCameraMode:
+        case .toggleDamageOverlay:
             return 20
-        case .toggleControlPanel:
+        case .cycleCameraMode:
             return 21
-        case .toggleToolPanel:
+        case .toggleControlPanel:
             return 22
-        case .toggleTelemetryHUD:
+        case .toggleToolPanel:
             return 23
-        case .zoomInCamera:
+        case .toggleTelemetryHUD:
             return 24
-        case .zoomOutCamera:
+        case .zoomInCamera:
             return 25
-        case .resetCameraOrientation:
+        case .zoomOutCamera:
             return 26
-        case .pauseMission:
+        case .resetCameraOrientation:
             return 27
-        case .resumeMission:
+        case .pauseMission:
             return 28
-        case .toggleControllerCursor:
+        case .resumeMission:
             return 29
-        case .openControllerHub:
+        case .toggleControllerCursor:
             return 30
-        case .uiSectionPrevious:
+        case .openControllerHub:
             return 31
-        case .uiSectionNext:
+        case .uiSectionPrevious:
             return 32
-        case .uiPrimary:
+        case .uiSectionNext:
             return 33
-        case .uiSecondary:
+        case .uiPrimary:
             return 34
-        case .uiFocusUp:
+        case .uiSecondary:
             return 35
-        case .uiFocusDown:
+        case .uiFocusUp:
             return 36
-        case .uiFocusLeft:
+        case .uiFocusDown:
             return 37
-        case .uiFocusRight:
+        case .uiFocusLeft:
             return 38
+        case .uiFocusRight:
+            return 39
         }
     }
 }

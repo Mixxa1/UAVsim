@@ -54,6 +54,7 @@
 "camera.mode.fpv" = "FPV";
 "camera.mode.orbit" = "Orbit";
 "camera.mode.top" = "Top";
+"camera.mode.payload_optics" = "Payload EO";
 "camera.mode.payload" = "Payload Drop";
 "camera.mode.top_down" = "Top Down";
 "camera.payload.auto_switch" = "Auto-switch to payload view after release";
@@ -66,6 +67,35 @@
 "camera.follow_z" = "Follow offset Z";
 "camera.fpv_stabilization" = "FPV stabilization";
 "camera.fpv_shake" = "FPV shake";
+
+"payload.camera.title" = "Payload Camera";
+"payload.camera.mode" = "Mode";
+"payload.camera.mode.eo" = "EO Camera";
+"payload.camera.mode.thermal_stub" = "Thermal";
+"payload.camera.mode.night_stub" = "Night";
+"payload.camera.record" = "REC";
+"payload.camera.stop_record" = "STOP";
+"payload.camera.zoom" = "Zoom";
+"payload.camera.focus" = "Focus";
+"payload.camera.autofocus" = "Autofocus";
+"payload.camera.focus_target" = "Focus Target";
+"payload.camera.target_distance" = "Target Distance";
+"payload.camera.focus_error" = "Focus Error";
+"payload.camera.blur" = "Blur";
+"payload.camera.fov" = "FOV";
+"payload.camera.reset_zoom" = "Reset Zoom";
+"payload.camera.stabilization.off" = "Off";
+"payload.camera.stabilization.horizon" = "Horizon";
+"payload.camera.stabilization.target" = "Target";
+"payload.camera.stabilization.low_speed" = "Low-speed";
+"payload.camera.stabilization_strength" = "Stabilization";
+"payload.camera.vibration" = "Vibration";
+"payload.camera.vibration.low" = "Low";
+"payload.camera.vibration.medium" = "Medium";
+"payload.camera.vibration.high" = "High";
+"payload.camera.out_of_focus" = "OUT OF FOCUS";
+"payload.camera.unavailable" = "Payload camera unavailable";
+"payload.camera.powered_off" = "Payload camera powered off";
 
 "command.reset" = "Reset";
 "command.takeoff" = "Takeoff";
@@ -416,6 +446,7 @@
 "keybind.camera.mode4" = "Camera 4 (FPV)";
 "keybind.camera.mode5" = "Camera 5 (Top)";
 "keybind.camera.mode6" = "Camera 6 (Payload Drop)";
+"keybind.camera.mode8" = "Camera 8 (Payload EO)";
 "keybind.camera.toggle_fpv" = "Toggle FPV";
 "keybind.camera.cycle_mode" = "Cycle camera mode";
 "keybind.camera.zoom_in" = "Zoom in";

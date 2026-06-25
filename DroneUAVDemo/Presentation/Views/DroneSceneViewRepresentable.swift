@@ -32,6 +32,11 @@ private final class FocusableSCNView: SCNView {
             }
         }
     }
+    var renderPolicy: SceneRenderPolicy = .policy(for: .interacting) {
+        didSet {
+            applyRenderPolicy()
+        }
+    }
 
     private var lastDragPoint: NSPoint?
     private var trackingArea: NSTrackingArea?
@@ -82,13 +87,17 @@ private final class FocusableSCNView: SCNView {
             forName: NSWindow.didDeminiaturizeNotification, object: window, queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            self.isPlaying = true
-            self.preferredFramesPerSecond = 60
-            self.rendersContinuously = true
+            self.applyRenderPolicy()
             #if DEBUG
-            print("[PERF] apply SceneRenderPolicy visibility=active fps=60 playing=true (deminiaturize)")
+            print("[PERF] apply SceneRenderPolicy visibility=active fps=\(self.renderPolicy.preferredFPS) playing=\(self.renderPolicy.isPlaying) (deminiaturize)")
             #endif
         }
+    }
+
+    private func applyRenderPolicy() {
+        preferredFramesPerSecond = renderPolicy.preferredFPS
+        isPlaying = renderPolicy.isPlaying
+        rendersContinuously = renderPolicy.rendersContinuously
     }
 
     override func updateTrackingAreas() {
@@ -278,6 +287,8 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     let freeMoveSpeed: Float
     var activityState: RuntimeActivityState = .interacting
     var wantsWeatherDepthOfField: Bool = false
+    var renderPolicyOverride: SceneRenderPolicy? = nil
+    var isInteractive: Bool = true
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -289,20 +300,20 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         let view = FocusableSCNView()
         view.scene = scene
         view.antialiasingMode = .multisampling2X
-        let policy = SceneRenderPolicy.policy(for: activityState)
-        view.preferredFramesPerSecond = policy.preferredFPS
-        view.rendersContinuously = policy.rendersContinuously
+        let policy = renderPolicyOverride ?? SceneRenderPolicy.policy(for: activityState)
+        view.renderPolicy = policy
         view.backgroundColor = .black
-        view.isPlaying = policy.isPlaying
         view.delegate = context.coordinator
-        view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
-        view.usesUnboundedMouseLook = cameraMode == .spectator
+        view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
+        view.usesUnboundedMouseLook = isInteractive && cameraMode == .spectator
         view.technique = wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
 
         configureCameraControl(on: view)
 
-        DispatchQueue.main.async {
-            view.window?.makeFirstResponder(view)
+        if isInteractive {
+            DispatchQueue.main.async {
+                view.window?.makeFirstResponder(view)
+            }
         }
 
         return view
@@ -322,27 +333,23 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         context.coordinator.onRenderFrame = onRenderFrame
         view.pointOfView = pointOfView
 
-        let policy = SceneRenderPolicy.policy(for: activityState)
-        if view.preferredFramesPerSecond != policy.preferredFPS {
-            view.preferredFramesPerSecond = policy.preferredFPS
-        }
-        if view.isPlaying != policy.isPlaying {
-            #if DEBUG
-            print("[PERF] apply SceneRenderPolicy activity=\(activityState.label) fps=\(policy.preferredFPS) playing=\(policy.isPlaying)")
-            #endif
-            view.isPlaying = policy.isPlaying
-        }
-        view.rendersContinuously = policy.rendersContinuously
-
+        let policy = renderPolicyOverride ?? SceneRenderPolicy.policy(for: activityState)
         if let view = view as? FocusableSCNView {
-            view.onLookDelta = (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
-            view.usesUnboundedMouseLook = cameraMode == .spectator
+            view.renderPolicy = policy
+            view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
+            view.usesUnboundedMouseLook = isInteractive && cameraMode == .spectator
+        } else {
+            if view.preferredFramesPerSecond != policy.preferredFPS {
+                view.preferredFramesPerSecond = policy.preferredFPS
+            }
+            view.isPlaying = policy.isPlaying
+            view.rendersContinuously = policy.rendersContinuously
         }
         configureCameraControl(on: view)
     }
 
     private func configureCameraControl(on view: SCNView) {
-        let isFreeMode = cameraMode == .free
+        let isFreeMode = isInteractive && cameraMode == .free
         view.allowsCameraControl = isFreeMode
 
         let sensitivity = CGFloat(cameraSensitivity.clamped(to: 0.2...2.5))

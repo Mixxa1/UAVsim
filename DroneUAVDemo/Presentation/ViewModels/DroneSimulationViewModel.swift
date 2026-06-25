@@ -495,6 +495,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private var lastRemoteStatesPublishTime: TimeInterval = 0
     // v1.4.6: time-gated remote scene apply (policy.remoteSceneApplyInterval)
     private var lastOnlineSceneApplyTime: TimeInterval = 0
+    private var previousPayloadCameraVelocity: SIMD3<Float>?
+    private var previousPayloadCameraAngularVelocity: SIMD3<Float>?
 
     @Published private(set) var availableDroneProfiles: [DroneModelProfile]
     @Published private(set) var selectedDroneProfile: DroneModelProfile
@@ -588,6 +590,8 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var missionDebrief: MissionDebrief?
     @Published private(set) var isCompassVisible: Bool
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
+    @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
+    @Published private(set) var payloadMissionSignals: [PayloadMissionSignal]
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
     @Published private(set) var controllerInteractionMode: ControllerInteractionMode = .flight
     @Published private(set) var activeInputSourceKind: InputSourceKind?
@@ -612,6 +616,10 @@ final class DroneSimulationViewModel: ObservableObject {
 
     var activeCameraNode: SCNNode {
         sceneController.pointOfView(for: cameraConfiguration.mode)
+    }
+
+    var payloadCameraPointOfView: SCNNode? {
+        sceneController.payloadCameraPointOfView()
     }
 
     var isSpectatorMode: Bool {
@@ -761,6 +769,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
+        if payloadCameraOpticsState.isAvailable || cameraConfiguration.mode == .payloadOptics {
+            modes.append(.payloadOptics)
+        }
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
             modes.append(.payload)
         }
@@ -956,6 +967,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let onlineCollisionGracePeriodSeconds: TimeInterval = 3.0
     private var manualYawIntent: Float = 0.0
     private var cameraLookVelocity = SIMD2<Float>(repeating: 0.0)
+    private var payloadGimbalLookVelocity = SIMD2<Float>(repeating: 0.0)
     private var resolvedInputState: ResolvedControlState = .neutral
     private var autoFlightGoal: SIMD3<Float>?
     private var autoFlightGoalIndex: Int = 0
@@ -1496,11 +1508,14 @@ final class DroneSimulationViewModel: ObservableObject {
         self.missionDebrief = nil
         self.isCompassVisible = false
         self.payloadCameraStatus = .inactive
+        self.payloadCameraOpticsState = PayloadCameraOpticsState()
+        self.payloadMissionSignals = []
         self.isPayloadCameraAutoSwitchEnabled = false
         self.telemetry = .zero
         self.cachedDiagnostics = .zero
 
         self.payloadCameraController.setAutoSwitchAfterRelease(false)
+        self.sceneController.setPayloadCameraOpticsState(self.payloadCameraOpticsState)
         sceneController.regenerateEnvironment(terrain)
         sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
         sanitizeDynamicStateForSpawn(context: "init")
@@ -1958,7 +1973,7 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.removePayloadVisual()
         payloadCameraController.clearTracking()
         sceneController.setPayloadCameraFocusReleaseID(nil)
-        if cameraConfiguration.mode == .payload {
+        if cameraConfiguration.mode == .payload || cameraConfiguration.mode == .payloadOptics {
             setCameraMode(.follow)
         } else {
             refreshPayloadCameraStatus()
@@ -2094,6 +2109,7 @@ final class DroneSimulationViewModel: ObservableObject {
         collisionCooldown = 0.0
         manualYawIntent = 0.0
         cameraLookVelocity = .zero
+        payloadGimbalLookVelocity = .zero
         lastCollisionDebugEnabled = false
         releasedPayloadConfiguration = nil
         lastPayloadImpact = nil
@@ -2117,7 +2133,7 @@ final class DroneSimulationViewModel: ObservableObject {
         resetFlightControlRouting()
         payloadCameraController.clearTracking()
         sceneController.setPayloadCameraFocusReleaseID(nil)
-        if cameraConfiguration.mode == .payload {
+        if cameraConfiguration.mode == .payload || cameraConfiguration.mode == .payloadOptics {
             cameraConfiguration.mode = .follow
         }
         sceneController.resetCameraRuntimeState()
@@ -2170,6 +2186,7 @@ final class DroneSimulationViewModel: ObservableObject {
         isArmed = false
         manualYawIntent = 0.0
         cameraLookVelocity = .zero
+        payloadGimbalLookVelocity = .zero
         autoPathPlanner.invalidate()
         autoFlightGoal = nil
         autoFlightGoalIndex = 0
@@ -3112,14 +3129,23 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        cameraLookVelocity = .zero
+        payloadGimbalLookVelocity = .zero
+
+        if oldMode == .payload, mode != .payload {
+            payloadCameraController.leavePayloadViewManually()
+        }
+
         if mode == .payload {
             guard payloadCameraController.canActivatePayloadView() else {
                 return
             }
             _ = payloadCameraController.activatePayloadView(from: oldMode)
             sceneController.setPayloadCameraFocusReleaseID(payloadCameraController.trackedReleaseID)
-        } else if oldMode == .payload {
-            payloadCameraController.leavePayloadViewManually()
+        } else if mode == .payloadOptics {
+            guard payloadCameraOpticsState.isAvailable else {
+                return
+            }
         }
 
         cameraConfiguration.mode = mode
@@ -3168,6 +3194,57 @@ final class DroneSimulationViewModel: ObservableObject {
     func setCameraSmoothing(_ value: Double) { cameraConfiguration.smoothing = Float(value) }
     func setCameraInvertX(_ value: Bool) { cameraConfiguration.invertLookX = value }
     func setCameraInvertY(_ value: Bool) { cameraConfiguration.invertLookY = value }
+    func setPayloadZoom(_ value: Double) {
+        payloadCameraController.setZoom(value)
+        publishPayloadCameraOpticsState()
+    }
+
+    func resetPayloadZoom() {
+        payloadCameraController.setZoom(payloadCameraController.opticsState.minZoom)
+        publishPayloadCameraOpticsState()
+    }
+
+    func setPayloadFocusDistance(_ value: Double) {
+        payloadCameraController.setFocusDistance(value)
+        publishPayloadCameraOpticsState()
+    }
+
+    func setPayloadStabilizationMode(_ mode: PayloadCameraStabilizationMode) {
+        payloadCameraController.setStabilizationMode(mode)
+        publishPayloadCameraOpticsState()
+    }
+
+    func adjustPayloadGimbal(yawDeltaDegrees: Double, pitchDeltaDegrees: Double) {
+        payloadCameraController.adjustGimbal(
+            yawDeltaDegrees: yawDeltaDegrees,
+            pitchDeltaDegrees: pitchDeltaDegrees
+        )
+        publishPayloadCameraOpticsState()
+    }
+
+    func resetPayloadGimbalOrientation() {
+        payloadCameraController.resetGimbalOrientation()
+        publishPayloadCameraOpticsState()
+    }
+
+    func togglePayloadAutofocus() {
+        payloadCameraController.setAutofocusEnabled(!payloadCameraController.opticsState.autofocusEnabled)
+        publishPayloadCameraOpticsState()
+    }
+
+    func triggerPayloadAutofocusOnce() {
+        let targetDistance = sceneController.payloadCameraTargetDistance(maxDistance: 500.0)
+        payloadCameraController.updateTargetDistance(targetDistance)
+        if let targetDistance {
+            payloadCameraController.setFocusDistance(targetDistance)
+        }
+        publishPayloadCameraOpticsState()
+    }
+
+    func togglePayloadRecording() {
+        payloadCameraController.toggleRecording()
+        publishPayloadCameraOpticsState()
+    }
     func setCameraSensitivityProfile(_ value: CameraSensitivityProfile) { cameraConfiguration.sensitivityProfile = value }
     func setOrbitDistance(_ value: Double) { cameraConfiguration.orbit.distance = Float(value).clamped(to: cameraConfiguration.orbit.minDistance...cameraConfiguration.orbit.maxDistance) }
     func setFollowOffsetX(_ value: Double) { cameraConfiguration.follow.lateralOffset = Float(value) }
@@ -3373,6 +3450,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     var supportsDistanceControl: Bool {
         cameraConfiguration.mode != .fpv &&
+            cameraConfiguration.mode != .payloadOptics &&
             cameraConfiguration.mode != .payload &&
             cameraConfiguration.mode != .spectator
     }
@@ -3392,6 +3470,8 @@ final class DroneSimulationViewModel: ObservableObject {
         case .top:
             return Double(cameraConfiguration.top.minHeight)...Double(cameraConfiguration.top.maxHeight)
         case .fpv:
+            return 0.0...0.0
+        case .payloadOptics:
             return 0.0...0.0
         case .payload:
             return 0.0...0.0
@@ -3792,7 +3872,7 @@ final class DroneSimulationViewModel: ObservableObject {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
             refreshCompassOverlay()
-            refreshPayloadCameraStatus()
+            refreshPayloadCameraStatus(deltaTime: 0.0)
             return
         }
 
@@ -3836,6 +3916,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         processInputActions(using: interactionAwareInput)
         applyContinuousCameraLook(deltaTime: dt, controlState: interactionAwareInput)
+        applyContinuousCameraZoom(deltaTime: dt)
 
         guard isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
@@ -3851,7 +3932,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
             }
             refreshCompassOverlay()
-            refreshPayloadCameraStatus()
+            refreshPayloadCameraStatus(deltaTime: 0.0)
             syncPayloadLifecycleEvents()
             return
         }
@@ -3862,7 +3943,7 @@ final class DroneSimulationViewModel: ObservableObject {
             refreshFlightControlDiagnostics()
             renderSignalLossFrame()
             refreshCompassOverlay()
-            refreshPayloadCameraStatus()
+            refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
             syncPayloadLifecycleEvents()
             return
         }
@@ -4070,7 +4151,7 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
         refreshCompassOverlay()
-        refreshPayloadCameraStatus()
+        refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
         syncPayloadLifecycleEvents()
         publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
@@ -4875,6 +4956,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 setCameraMode(.fpv)
             case .selectTopCamera:
                 setCameraMode(.top)
+            case .selectPayloadOpticsCamera:
+                setCameraMode(.payloadOptics)
             case .selectPayloadCamera:
                 setCameraMode(.payload)
             case .toggleFPV:
@@ -4926,44 +5009,84 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float,
         controlState: ResolvedControlState
     ) {
-        guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
+        guard !signalState.isInteractionBlocking else {
             cameraLookVelocity = .zero
+            payloadGimbalLookVelocity = .zero
             return
         }
 
         let speedMultiplier: Float = controlState.boostMode ? 1.85 : 1.0
-        let targetVelocity = SIMD2<Float>(
+        let inputVelocity = SIMD2<Float>(
             Float(controlState.cameraPan),
             Float(controlState.cameraTilt)
         )
-            * (92.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
+        let hasLookInput = abs(controlState.cameraPan) >= 0.001 || abs(controlState.cameraTilt) >= 0.001
 
-        let accelerationBlend = (deltaTime * 12.0).clamped(to: 0.0...1.0)
-        cameraLookVelocity = simd_mix(
-            cameraLookVelocity,
-            targetVelocity,
-            SIMD2<Float>(repeating: accelerationBlend)
-        )
+        switch cameraConfiguration.mode {
+        case .fpv:
+            let targetVelocity = inputVelocity * (92.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
+            let accelerationBlend = (deltaTime * 12.0).clamped(to: 0.0...1.0)
+            cameraLookVelocity = simd_mix(
+                cameraLookVelocity,
+                targetVelocity,
+                SIMD2<Float>(repeating: accelerationBlend)
+            )
 
-        if abs(controlState.cameraPan) < 0.001, abs(controlState.cameraTilt) < 0.001 {
-            let damping = max(0.0, 1.0 - deltaTime * 9.0)
-            cameraLookVelocity *= damping
-            if simd_length_squared(cameraLookVelocity) < 0.0001 {
-                cameraLookVelocity = .zero
+            if !hasLookInput {
+                let damping = max(0.0, 1.0 - deltaTime * 9.0)
+                cameraLookVelocity *= damping
+                if simd_length_squared(cameraLookVelocity) < 0.0001 {
+                    cameraLookVelocity = .zero
+                }
             }
-        }
 
-        guard simd_length_squared(cameraLookVelocity) > 0.0 else {
+            payloadGimbalLookVelocity = .zero
+            guard simd_length_squared(cameraLookVelocity) > 0.0 else {
+                return
+            }
+
+            sceneController.applyCameraNudge(
+                mode: cameraConfiguration.mode,
+                yawDeltaDeg: cameraLookVelocity.x * deltaTime,
+                pitchDeltaDeg: cameraLookVelocity.y * deltaTime,
+                invertX: cameraConfiguration.invertLookX,
+                invertY: cameraConfiguration.invertLookY
+            )
+            return
+        case .payloadOptics:
+            let targetVelocity = inputVelocity * (118.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
+            let accelerationBlend = (deltaTime * 10.0).clamped(to: 0.0...1.0)
+            payloadGimbalLookVelocity = simd_mix(
+                payloadGimbalLookVelocity,
+                targetVelocity,
+                SIMD2<Float>(repeating: accelerationBlend)
+            )
+
+            if !hasLookInput {
+                let damping = max(0.0, 1.0 - deltaTime * 8.5)
+                payloadGimbalLookVelocity *= damping
+                if simd_length_squared(payloadGimbalLookVelocity) < 0.0001 {
+                    payloadGimbalLookVelocity = .zero
+                }
+            }
+
+            cameraLookVelocity = .zero
+            guard simd_length_squared(payloadGimbalLookVelocity) > 0.0 else {
+                return
+            }
+
+            let yawSign: Float = cameraConfiguration.invertLookX ? -1.0 : 1.0
+            let pitchSign: Float = cameraConfiguration.invertLookY ? -1.0 : 1.0
+            adjustPayloadGimbal(
+                yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
+                pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
+            )
+            return
+        case .free, .follow, .orbit, .top, .payload, .spectator:
+            cameraLookVelocity = .zero
+            payloadGimbalLookVelocity = .zero
             return
         }
-
-        sceneController.applyCameraNudge(
-            mode: cameraConfiguration.mode,
-            yawDeltaDeg: cameraLookVelocity.x * deltaTime,
-            pitchDeltaDeg: cameraLookVelocity.y * deltaTime,
-            invertX: cameraConfiguration.invertLookX,
-            invertY: cameraConfiguration.invertLookY
-        )
     }
 
     private func nudgeCamera(yawDeg: Float, pitchDeg: Float) {
@@ -4982,6 +5105,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         if resetOrientation {
+            if cameraConfiguration.mode == .payloadOptics {
+                resetPayloadGimbalOrientation()
+            }
             sceneController.resetCameraOrientation(for: cameraConfiguration.mode)
         }
 
@@ -4993,6 +5119,42 @@ final class DroneSimulationViewModel: ObservableObject {
             diagnosticMode: diagnosticMode,
             deltaTime: 0.0
         )
+    }
+
+    private func applyContinuousCameraZoom(deltaTime: Float) {
+        let keyboardSnapshot = keyboardInputService.currentInputSnapshot()
+        let zoomInActive = keyboardSnapshot.activeContinuousCommands.contains(.zoomIn)
+        let zoomOutActive = keyboardSnapshot.activeContinuousCommands.contains(.zoomOut)
+        guard zoomInActive != zoomOutActive else {
+            return
+        }
+
+        let zoomDirection: Double = zoomInActive ? 1.0 : -1.0
+        let speedMultiplier: Double = keyboardSnapshot.axisInput.speedBoost || keyboardSnapshot.yawInput.speedBoost || keyboardSnapshot.lookInput.speedBoost
+            ? 1.8
+            : 1.0
+
+        switch cameraConfiguration.mode {
+        case .payloadOptics:
+            let zoomUnitsPerSecond = 8.5 * speedMultiplier
+            setPayloadZoom(payloadCameraOpticsState.zoomLevel + zoomDirection * Double(deltaTime) * zoomUnitsPerSecond)
+        case .free:
+            let zoomStep = 6.5 * speedMultiplier * Double(deltaTime) * Double(cameraConfiguration.free.zoomSensitivity)
+            cameraConfiguration.free.distance = (cameraConfiguration.free.distance - Float(zoomDirection * zoomStep))
+                .clamped(to: cameraConfiguration.free.minDistance...cameraConfiguration.free.maxDistance)
+            sceneController.dollyFreeCamera(by: Float(-zoomDirection * zoomStep))
+        case .follow, .orbit, .top:
+            let zoomStep = 6.5 * speedMultiplier * Double(deltaTime) * Double(cameraConfiguration.free.zoomSensitivity)
+            cameraConfiguration.setCameraDistance(
+                cameraConfiguration.cameraDistance - Float(zoomDirection * zoomStep)
+            )
+        case .fpv:
+            cameraConfiguration.fov = (
+                cameraConfiguration.fov - Float(zoomDirection * 24.0 * speedMultiplier * Double(deltaTime))
+            ).clamped(to: 30.0...110.0)
+        case .payload, .spectator:
+            return
+        }
     }
 
     private func adjustCameraZoom(inward: Bool) {
@@ -5008,6 +5170,9 @@ final class DroneSimulationViewModel: ObservableObject {
             cameraConfiguration.setCameraDistance(cameraConfiguration.cameraDistance + sign * zoomStep)
         case .fpv:
             cameraConfiguration.fov = (cameraConfiguration.fov + sign * 1.2).clamped(to: 30.0...110.0)
+        case .payloadOptics:
+            let delta = inward ? 0.5 : -0.5
+            setPayloadZoom(payloadCameraOpticsState.zoomLevel + delta)
         case .payload:
             return
         case .spectator:
@@ -5908,7 +6073,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private func buildFlightInputState(from controlState: ResolvedControlState) -> FlightInputState {
         FlightInputState(
             controlState: controlState,
-            payloadViewActive: cameraConfiguration.mode == .payload && payloadCameraStatus.isActive,
+            payloadViewActive: (
+                cameraConfiguration.mode == .payload && payloadCameraStatus.isActive
+            ) || cameraConfiguration.mode == .payloadOptics,
             mapOverlayActive: isTerrainMapVisible || isMissionMapVisible
         )
     }
@@ -6205,7 +6372,106 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
-    private func refreshPayloadCameraStatus() {
+    private var isMountedPayloadCameraAvailable: Bool {
+        if mountedCADPayload != nil {
+            return payloadState == .attached
+        }
+
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+
+        switch payloadDraftConfiguration.payloadType {
+        case .cameraGimbal, .thermalCamera, .custom:
+            return true
+        case .cargoBox, .lidarModule, .rescuePack, .sensorModule, .radioRelay:
+            return false
+        }
+    }
+
+    private var payloadCameraFeedLabel: String {
+        switch payloadCameraController.opticsState.mode {
+        case .optical:
+            return "EO CAM"
+        case .thermalStub:
+            return "THERMAL"
+        case .nightStub:
+            return "NV CAM"
+        }
+    }
+
+    private func publishPayloadCameraOpticsState() {
+        payloadCameraOpticsState = payloadCameraController.opticsState
+        sceneController.setPayloadCameraOpticsState(payloadCameraOpticsState)
+    }
+
+    private func refreshPayloadCameraStatus(deltaTime: TimeInterval = 0.0) {
+        if !isMountedPayloadCameraAvailable {
+            previousPayloadCameraVelocity = nil
+            previousPayloadCameraAngularVelocity = nil
+        }
+        payloadCameraController.setOpticsAvailability(
+            isAvailable: isMountedPayloadCameraAvailable,
+            isPowered: isMountedPayloadCameraAvailable,
+            feedLabel: payloadCameraFeedLabel
+        )
+        let targetDistance = sceneController.payloadCameraTargetDistance(maxDistance: 500.0)
+        let linearSpeed = Double(simd_length(state.velocity))
+        let angularSpeed = Double(simd_length(state.angularVelocity))
+        let linearAcceleration: Double
+        let angularAcceleration: Double
+        if deltaTime > 0.0001,
+           let previousVelocity = previousPayloadCameraVelocity,
+           let previousAngularVelocity = previousPayloadCameraAngularVelocity {
+            linearAcceleration = Double(simd_length((state.velocity - previousVelocity) / Float(deltaTime)))
+            angularAcceleration = Double(simd_length((state.angularVelocity - previousAngularVelocity) / Float(deltaTime)))
+        } else {
+            linearAcceleration = 0.0
+            angularAcceleration = 0.0
+        }
+
+        let speedStabilityLimit = selectedDroneProfile.airframeClass == .multirotor
+            ? max(payloadCameraController.opticsState.stabilizationSpeedLimitMps, 3.0)
+            : 14.0
+        let linearStability = min(max(1.0 - linearSpeed / speedStabilityLimit, 0.0), 1.0)
+        let angularStability = min(max(1.0 - angularSpeed / 0.65, 0.0), 1.0)
+        let accelerationStability = min(max(1.0 - linearAcceleration / 3.6, 0.0), 1.0)
+        let angularAccelerationStability = min(max(1.0 - angularAcceleration / 5.0, 0.0), 1.0)
+        let platformStability = min(
+            max(
+                linearStability * 0.42 +
+                angularStability * 0.34 +
+                accelerationStability * 0.12 +
+                angularAccelerationStability * 0.12,
+                0.0
+            ),
+            1.0
+        )
+
+        let motionDisturbance = min(
+            max(
+                angularSpeed / 0.55 * 0.46 +
+                angularAcceleration / 3.0 * 0.34 +
+                linearAcceleration / 2.8 * 0.14 +
+                linearSpeed / 1.2 * 0.06,
+                0.0
+            ),
+            1.0
+        )
+        payloadCameraController.updateStabilization(
+            speedMetersPerSecond: linearSpeed,
+            airframeClass: selectedDroneProfile.airframeClass
+        )
+        payloadCameraController.updateTargetDistance(targetDistance)
+        payloadCameraController.updateOptics(
+            dt: deltaTime,
+            platformStability: platformStability,
+            motionDisturbance: motionDisturbance
+        )
+        publishPayloadCameraOpticsState()
+        previousPayloadCameraVelocity = state.velocity
+        previousPayloadCameraAngularVelocity = state.angularVelocity
+
         sceneController.setPayloadCameraFocusReleaseID(payloadCameraController.trackedReleaseID)
         let sceneSnapshot = sceneController.payloadCameraSnapshot(for: payloadCameraController.trackedReleaseID)
         if let restoreMode = payloadCameraController.sync(
@@ -6217,6 +6483,13 @@ final class DroneSimulationViewModel: ObservableObject {
             syncCameraSystem(from: oldMode)
         }
         payloadCameraStatus = payloadCameraController.status
+        let signals = payloadCameraController.consumeMissionSignals()
+        if !signals.isEmpty {
+            payloadMissionSignals.append(contentsOf: signals)
+            if payloadMissionSignals.count > 24 {
+                payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
+            }
+        }
         refreshFlightControlDiagnostics()
     }
 
@@ -12316,6 +12589,7 @@ final class DroneSimulationViewModel: ObservableObject {
         signalLossSecondAccumulator = 0.0
         cancelTargetMarkerAutoNavigation()
         cameraLookVelocity = .zero
+        payloadGimbalLookVelocity = .zero
         controllerUIBridge.cancelTextInput()
         keyboardInputService.setInputProcessingMode(.editing)
         inputManager.reset()

@@ -7,6 +7,7 @@ enum CameraMode: String, CaseIterable, Identifiable {
     case orbit
     case fpv
     case top
+    case payloadOptics
     case payload
     case spectator
 
@@ -28,6 +29,8 @@ enum CameraMode: String, CaseIterable, Identifiable {
             return "camera.mode.fpv"
         case .top:
             return "camera.mode.top"
+        case .payloadOptics:
+            return "camera.mode.payload_optics"
         case .payload:
             return "camera.mode.payload"
         case .spectator:
@@ -46,6 +49,8 @@ enum CameraMode: String, CaseIterable, Identifiable {
         case .fpv:
             return .top
         case .top:
+            return .free
+        case .payloadOptics:
             return .free
         case .payload:
             return .free
@@ -66,6 +71,8 @@ enum CameraMode: String, CaseIterable, Identifiable {
             return .fpv
         case CameraMode.top.rawValue, "topDown":
             return .top
+        case CameraMode.payloadOptics.rawValue, "payloadOptics":
+            return .payloadOptics
         case CameraMode.payload.rawValue, "payloadDrop":
             return .payload
         case CameraMode.spectator.rawValue:
@@ -228,6 +235,8 @@ struct CameraConfiguration {
             return 0.0
         case .top:
             return top.height
+        case .payloadOptics:
+            return 0.0
         case .payload:
             return 0.0
         case .spectator:
@@ -251,6 +260,8 @@ struct CameraConfiguration {
             break
         case .top:
             top.height = value.clamped(to: top.minHeight...top.maxHeight)
+        case .payloadOptics:
+            break
         case .payload:
             break
         case .spectator:
