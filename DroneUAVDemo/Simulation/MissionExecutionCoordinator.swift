@@ -232,12 +232,18 @@ final class MissionExecutionCoordinator {
             return nextState
         }
 
-        let completedWaypointCount = nextState.waypointProgress.filter { $0.state == .completed }.count
-        let totalWaypointCount = max(plan.waypoints.count, nextState.waypointProgress.count)
+        // Reaching the final execution target completes the mission. We no
+        // longer additionally require `completedWaypointCount >= totalWaypointCount`
+        // here: that condition could leave the aircraft permanently `.blocked`
+        // in mid-air at the very end of the route if the per-tick progress
+        // bookkeeping ever lagged the autopilot's own waypoint advance by even
+        // one (the "after a miss it stops following the route completely"
+        // symptom). The aircraft has physically reached the last waypoint, so
+        // the route is done; any waypoint that was overshot rather than cleanly
+        // crossed is tracked per-waypoint (its progress entry / debrief) rather
+        // than by wedging the whole mission into a dead `.blocked` state.
         let reachedFinalExecutionTarget = reachedIndex >= plan.executionTargets.count - 1
-        guard totalWaypointCount > 0,
-              reachedFinalExecutionTarget,
-              completedWaypointCount >= totalWaypointCount else {
+        guard reachedFinalExecutionTarget else {
             return blocked(
                 from: nextState,
                 reason: .executionBlocked,

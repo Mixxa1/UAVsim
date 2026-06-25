@@ -59,10 +59,11 @@ final class FixedWingAssistController {
         static let maxBankDeg: Float = 28.0
         static let altitudePitchGain: Float = 0.85
         static let altitudeDampingGain: Float = 1.6
+        static let turnLiftCompensationGainDeg: Float = 30.0 // extra deg pitch per unit (1/cos(bank) - 1)
+        static let turnThrottleCompensationGain: Float = 0.3 // throttle per unit (1/cos(bank) - 1)
         static let altitudeThrottleAssist: Float = 0.014
         static let pitchUpClampDeg: Float = 9.0
         static let pitchDownClampDeg: Float = 7.0
-        static let interceptCaptureMultiplier: Float = 1.1
         static let courseFilterTau: Float = 0.22
         static let bankFilterTau: Float = 0.30
         static let pitchFilterTau: Float = 0.45
@@ -224,7 +225,15 @@ final class FixedWingAssistController {
             filteredCourseRad = wrapAngle(filteredCourseRad + delta * alpha)
         }
         let courseError = shortestAngle(filteredCourseRad - aircraftState.orientation.z)
-        let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians
+        // Low-altitude bank protection — see FixedWingAutopilot.swift. Measured
+        // against this leg's own target altitude (already resolved above),
+        // not a fixed absolute height, so a mission that deliberately
+        // cruises low still gets full bank authority once it's actually at
+        // its own intended altitude.
+        let altitudeDeficit = max(0.0, targetAltitudeMeters - aircraftState.position.y)
+        let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
+            .clamped(to: 0.35...1.0)
+        let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians * altitudeMarginFactor
         var rawBankRad = (courseError * Tuning.headingBankGain).clamped(to: -maxBankRad...maxBankRad)
         if abs(courseError) < 0.04 {
             rawBankRad *= 0.4
@@ -243,12 +252,25 @@ final class FixedWingAssistController {
         }
         let pitchAlpha = filterAlpha(tau: Tuning.pitchFilterTau, dt: dt)
         filteredPitchDeg = filteredPitchDeg + (rawPitchDeg - filteredPitchDeg) * pitchAlpha
+        // Coordinated-turn lift compensation, applied post-filter — see
+        // FixedWingAutopilot.swift for the full rationale (bank's own filter
+        // is faster than this pitch filter, so routing compensation through
+        // the pitch filter too would make it systematically trail the lift
+        // loss it's meant to cancel).
+        let bankLiftLossDeg = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
+            * Tuning.turnLiftCompensationGainDeg
+        filteredPitchDeg = (filteredPitchDeg + bankLiftLossDeg)
+            .clamped(to: -Tuning.pitchDownClampDeg...Tuning.pitchUpClampDeg)
 
         let baselineThrottle = max(0.32, baseline.cruiseReferenceThrottle)
         let throttleAssist = altitudeError * Tuning.altitudeThrottleAssist
         let rawThrottle = (baselineThrottle + throttleAssist).clamped(to: 0.32...0.95)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: dt)
         filteredThrottle = filteredThrottle + (rawThrottle - filteredThrottle) * throttleAlpha
+        // Coordinated-turn drag compensation, applied post-filter — see FixedWingAutopilot.swift.
+        let turnDragBoost = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
+            * Tuning.turnThrottleCompensationGain
+        filteredThrottle = (filteredThrottle + turnDragBoost).clamped(to: 0.32...0.95)
 
         // Waypoint intercept — track capture progress for auto-advance.
         nextState.distanceToActiveWaypointMeters = nil
@@ -259,7 +281,7 @@ final class FixedWingAssistController {
         nextState.commandedTurnDirection = filteredBankDeg > 0.5 ? .right : (filteredBankDeg < -0.5 ? .left : .none)
         nextState.estimatedTurnRadiusMeters = max(
             wing.waypointAcceptanceRadiusMeters,
-            wing.cruiseAirspeed / max(0.1, wing.nominalTurnRateRadPerSec)
+            wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
         )
 
         if assistState.mode == .waypointIntercept,
@@ -267,14 +289,10 @@ final class FixedWingAssistController {
            let target = captureTarget ?? interceptTarget,
            let waypointID = assistState.selectedWaypointID {
             let distance = simd_length(target - aircraftPlanar)
-            let baseAcceptance = max(wing.waypointAcceptanceRadiusMeters, 5.0) * Tuning.interceptCaptureMultiplier
-            let captureRadius = max(
-                baseAcceptance * 1.45,
-                min(
-                    wing.minimumTurnRadius(airspeed: max(aircraftState.forwardAirspeed, wing.cruiseAirspeed * 0.72)) * 0.50,
-                    baseAcceptance * 5.0
-                )
-            )
+            // Use the exact same radius as the tactical-map/3D sphere and the
+            // main fixed-wing autopilot. Assist guidance must not silently
+            // capture a larger invisible circle.
+            let captureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
             let legStart = interceptDebugContext.currentLegStart ?? tracker?.legStartPosition ?? aircraftPlanar
 
             nextState.distanceToActiveWaypointMeters = distance
@@ -348,7 +366,7 @@ final class FixedWingAssistController {
         let headingError = shortestAngle(bearing - aircraftState.orientation.z)
         let estimatedRadius = max(
             wing.waypointAcceptanceRadiusMeters,
-            wing.cruiseAirspeed / max(0.1, wing.nominalTurnRateRadPerSec)
+            wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
         )
         let availableTurnIn = max(0.0, distance - estimatedRadius)
         let feasibility: FixedWingAssistInterceptFeasibilityState = {

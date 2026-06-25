@@ -24,6 +24,7 @@
 		10000000000000000000020E /* DroneModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010E /* DroneModelBuilder.swift */; };
 		10000000000000000000020F /* DroneSceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010F /* DroneSceneController.swift */; };
 		100000000000000000000210 /* DroneModelProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000110 /* DroneModelProfile.swift */; };
+		10000000000000000000041F /* FixedWingAerodynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000041E /* FixedWingAerodynamics.swift */; };
 		100000000000000000000211 /* WeatherModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000111 /* WeatherModel.swift */; };
 		100000000000000000000212 /* TerrainModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000112 /* TerrainModel.swift */; };
 		100000000000000000000213 /* CameraConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000113 /* CameraConfiguration.swift */; };
@@ -204,6 +205,7 @@
 		1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DC /* MissionReplayPlayer.swift */; };
 		1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DE /* MissionReplaySceneController.swift */; };
 		1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */; };
+		100000000000000000000421 /* ReplayGizmoInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000420 /* ReplayGizmoInteraction.swift */; };
 		1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E2 /* ReplayCameraMode.swift */; };
 		1000000000000000000002E5 /* MissionReplayContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */; };
 		1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E6 /* FullscreenReplayViewerView.swift */; };
@@ -317,6 +319,7 @@
 		10000000000000000000010E /* DroneModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelBuilder.swift; sourceTree = "<group>"; };
 		10000000000000000000010F /* DroneSceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneController.swift; sourceTree = "<group>"; };
 		100000000000000000000110 /* DroneModelProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelProfile.swift; sourceTree = "<group>"; };
+		10000000000000000000041E /* FixedWingAerodynamics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAerodynamics.swift; sourceTree = "<group>"; };
 		100000000000000000000111 /* WeatherModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherModel.swift; sourceTree = "<group>"; };
 		100000000000000000000112 /* TerrainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainModel.swift; sourceTree = "<group>"; };
 		100000000000000000000113 /* CameraConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConfiguration.swift; sourceTree = "<group>"; };
@@ -498,6 +501,7 @@
 		1000000000000000000002DC /* MissionReplayPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayPlayer.swift; sourceTree = "<group>"; };
 		1000000000000000000002DE /* MissionReplaySceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneController.swift; sourceTree = "<group>"; };
 		1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneViewRepresentable.swift; sourceTree = "<group>"; };
+		100000000000000000000420 /* ReplayGizmoInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayGizmoInteraction.swift; sourceTree = "<group>"; };
 		1000000000000000000002E2 /* ReplayCameraMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCameraMode.swift; sourceTree = "<group>"; };
 		1000000000000000000002E4 /* MissionReplayContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayContextSnapshot.swift; sourceTree = "<group>"; };
 		1000000000000000000002E6 /* FullscreenReplayViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullscreenReplayViewerView.swift; sourceTree = "<group>"; };
@@ -648,6 +652,7 @@
 				1000000000000000000003A1 /* L10n.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
+				10000000000000000000041E /* FixedWingAerodynamics.swift */,
 				100000000000000000000113 /* CameraConfiguration.swift */,
 				100000000000000000000116 /* CollisionAnalysis.swift */,
 				100000000000000000000114 /* DamageThermalModel.swift */,
@@ -877,6 +882,7 @@
 				1000000000000000000002D4 /* ReplayCenterView.swift */,
 				1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */,
 				1000000000000000000002E6 /* FullscreenReplayViewerView.swift */,
+				100000000000000000000420 /* ReplayGizmoInteraction.swift */,
 				10000000000000000000033A /* ReplayCenterWindowHost.swift */,
 				1000000000000000000002F6 /* ReplayTimelineEditorView.swift */,
 				100000000000000000000351 /* LegalAgreementView.swift */,
@@ -1146,6 +1152,7 @@
 				10000000000000000000020E /* DroneModelBuilder.swift in Sources */,
 				10000000000000000000020F /* DroneSceneController.swift in Sources */,
 				100000000000000000000210 /* DroneModelProfile.swift in Sources */,
+				10000000000000000000041F /* FixedWingAerodynamics.swift in Sources */,
 				100000000000000000000211 /* WeatherModel.swift in Sources */,
 				100000000000000000000212 /* TerrainModel.swift in Sources */,
 				100000000000000000000213 /* CameraConfiguration.swift in Sources */,
@@ -1341,6 +1348,7 @@
 				1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */,
 				1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */,
 				1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */,
+				100000000000000000000421 /* ReplayGizmoInteraction.swift in Sources */,
 				1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */,
 				1000000000000000000002E7 /* FullscreenReplayViewerView.swift in Sources */,
 				1000000000000000000002E9 /* ReplayTrimRange.swift in Sources */,

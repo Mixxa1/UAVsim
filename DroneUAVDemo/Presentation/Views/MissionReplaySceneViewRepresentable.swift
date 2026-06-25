@@ -25,6 +25,7 @@ struct MissionReplaySceneViewRepresentable: NSViewRepresentable {
         view.showsStatistics          = false
         view.rendersContinuously      = true
         view.preferredFramesPerSecond = 60
+        view.technique                = sceneController.wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
 
         let cfg = view.cameraControlConfiguration
         cfg.allowsTranslation       = true
@@ -43,6 +44,10 @@ struct MissionReplaySceneViewRepresentable: NSViewRepresentable {
             nsView.scene = sceneController.scene
         }
         nsView.pointOfView = sceneController.cameraNode
+        let wantsTechnique = sceneController.wantsWeatherDepthOfField
+        if wantsTechnique != (nsView.technique != nil) {
+            nsView.technique = wantsTechnique ? WeatherDepthOfFieldTechnique.shared : nil
+        }
         configureInput(for: nsView)
         applyMode(cameraMode, to: nsView)
     }
@@ -52,6 +57,9 @@ struct MissionReplaySceneViewRepresentable: NSViewRepresentable {
         nsView.onScrollDelta = nil
         nsView.onMoveDelta = nil
         nsView.isFreeObserverActive = nil
+        nsView.onGizmoMouseDown = nil
+        nsView.onGizmoMouseDragged = nil
+        nsView.onGizmoMouseUp = nil
         nsView.clearInputState()
         nsView.rendersContinuously = false
         // Leave scene / pointOfView alone — the controller still references
@@ -71,6 +79,24 @@ struct MissionReplaySceneViewRepresentable: NSViewRepresentable {
         view.allowsCameraControl = false
         view.onDragDelta  = { dx, dy  in ctrl.handleDragInput(dx: dx, dy: dy) }
         view.onScrollDelta = { delta   in ctrl.handleScrollInput(delta: delta) }
+        view.onGizmoMouseDown = { [weak view] point in
+            guard let view, ctrl.canInteractWithGizmo,
+                  let hit = ReplayGizmoInteraction.hitTestHandle(at: point, in: view) else { return }
+            ctrl.beginGizmoDrag(axis: hit.axis, kind: hit.kind)
+        }
+        view.onGizmoMouseDragged = { [weak view] dx, dy in
+            guard let view, ctrl.isDraggingGizmoAxis, let ray = ctrl.gizmoAxisWorldRay() else { return false }
+            let delta = ReplayGizmoInteraction.axisDelta(
+                view: view,
+                worldOrigin: ray.origin,
+                worldDirection: ray.direction,
+                mouseDeltaX: dx,
+                mouseDeltaY: dy
+            )
+            ctrl.applyGizmoDrag(incrementalAxisDelta: delta)
+            return true
+        }
+        view.onGizmoMouseUp = { ctrl.endGizmoDrag() }
     }
 
     final class Coordinator: NSObject {}
@@ -84,6 +110,10 @@ final class ReplaySCNView: SCNView {
     var onScrollDelta: ((Float) -> Void)?
     var onMoveDelta: ((SIMD3<Float>) -> Void)?
     var isFreeObserverActive: (() -> Bool)?
+    var onGizmoMouseDown: ((CGPoint) -> Void)?
+    /// Return `true` if the drag was consumed by the gizmo, so the caller skips `onDragDelta`.
+    var onGizmoMouseDragged: ((Float, Float) -> Bool)?
+    var onGizmoMouseUp: (() -> Void)?
 
     private let movementKeyCodes: Set<UInt16> = [13, 1, 0, 2, 12, 14]
     private var pressedKeys: Set<UInt16> = []
@@ -107,16 +137,25 @@ final class ReplaySCNView: SCNView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        onGizmoMouseDown?(convert(event.locationInWindow, from: nil))
         super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        if onGizmoMouseDragged?(Float(event.deltaX), Float(event.deltaY)) == true {
+            return
+        }
         if let handler = onDragDelta {
             handler(Float(event.deltaX), Float(event.deltaY))
         } else {
             super.mouseDragged(with: event)
         }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onGizmoMouseUp?()
+        super.mouseUp(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {

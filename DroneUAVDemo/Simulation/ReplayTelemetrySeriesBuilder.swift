@@ -16,35 +16,38 @@ struct ReplayTelemetrySeries: Identifiable, Equatable {
 struct ReplayTelemetrySeriesBuilder {
     private let maxPointCount = 2_000
 
+    // `title`/`unit` are localization keys, not display text — both flow through unchanged as
+    // matching keys (ReplayCenterView filters series by `.title`) and get resolved to display
+    // text only at the point they're rendered (ReplayTimelineEditorView's ReplayTelemetryGraphView).
     func buildAltitudeSeries(from session: MissionReplaySession, trimRange: ReplayTrimRange?) -> ReplayTelemetrySeries {
-        buildSeries(title: "Высота", unit: "м", session: session, trimRange: trimRange) { $0.position.y }
+        buildSeries(title: "replay.telemetry.altitude", unit: "replay.unit.meters", session: session, trimRange: trimRange) { $0.position.y }
     }
 
     func buildSpeedSeries(from session: MissionReplaySession, trimRange: ReplayTrimRange?) -> ReplayTelemetrySeries {
-        buildSeries(title: "Скорость", unit: "м/с", session: session, trimRange: trimRange) { frame in
+        buildSeries(title: "replay.telemetry.speed", unit: "replay.unit.meters_per_second", session: session, trimRange: trimRange) { frame in
             let velocity = frame.velocity.simd
             return (velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z).squareRoot()
         }
     }
 
     func buildBatterySeries(from session: MissionReplaySession, trimRange: ReplayTrimRange?) -> ReplayTelemetrySeries {
-        buildSeries(title: "Батарея", unit: "%", session: session, trimRange: trimRange) { $0.batteryPercent }
+        buildSeries(title: "replay.telemetry.battery", unit: "replay.unit.percent", session: session, trimRange: trimRange) { $0.batteryPercent }
     }
 
     func buildRollSeries(from session: MissionReplaySession, trimRange: ReplayTrimRange?) -> ReplayTelemetrySeries {
-        buildSeries(title: "Крен", unit: "°", session: session, trimRange: trimRange) {
+        buildSeries(title: "replay.telemetry.roll", unit: "replay.unit.degrees", session: session, trimRange: trimRange) {
             $0.attitude.rollRadians * 180.0 / .pi
         }
     }
 
     func buildPitchSeries(from session: MissionReplaySession, trimRange: ReplayTrimRange?) -> ReplayTelemetrySeries {
-        buildSeries(title: "Тангаж", unit: "°", session: session, trimRange: trimRange) {
+        buildSeries(title: "replay.telemetry.pitch", unit: "replay.unit.degrees", session: session, trimRange: trimRange) {
             $0.attitude.pitchRadians * 180.0 / .pi
         }
     }
 
     func buildYawSeries(from session: MissionReplaySession, trimRange: ReplayTrimRange?) -> ReplayTelemetrySeries {
-        buildSeries(title: "Рыскание", unit: "°", session: session, trimRange: trimRange) {
+        buildSeries(title: "replay.telemetry.yaw", unit: "replay.unit.degrees", session: session, trimRange: trimRange) {
             $0.attitude.yawRadians * 180.0 / .pi
         }
     }

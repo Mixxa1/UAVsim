@@ -49,10 +49,9 @@ final class MissionProgressTracker {
                     turnAuthority: 0.64,
                     maxBankAngleDeg: 38.0
                 )
-                let nominalTurnRateRad = max(0.05, wing.nominalTurnRateDegPerSec * .pi / 180.0)
                 let minimumTurnRadius = max(
                     wing.waypointAcceptanceRadiusMeters * 1.05,
-                    wing.cruiseSpeedMps / nominalTurnRateRad
+                    wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
                 )
                 return max(
                     wing.waypointAcceptanceRadiusMeters * 1.15,

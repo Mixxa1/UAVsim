@@ -2,13 +2,52 @@ import AppKit
 import SceneKit
 import simd
 
+// MARK: - Onboard mount gizmo
+
+enum ReplayGizmoToolKind {
+    case move, rotate
+}
+
+enum ReplayGizmoAxis: CaseIterable {
+    case x, y, z
+
+    var localUnit: SIMD3<Float> {
+        switch self {
+        case .x: return SIMD3<Float>(1, 0, 0)
+        case .y: return SIMD3<Float>(0, 1, 0)
+        case .z: return SIMD3<Float>(0, 0, 1)
+        }
+    }
+
+    func nodeName(for kind: ReplayGizmoToolKind) -> String {
+        let suffix: String
+        switch self {
+        case .x: suffix = "X"
+        case .y: suffix = "Y"
+        case .z: suffix = "Z"
+        }
+        switch kind {
+        case .move: return "replayGizmoMove\(suffix)"
+        case .rotate: return "replayGizmoRotate\(suffix)"
+        }
+    }
+
+    static func matching(nodeName name: String?, kind: ReplayGizmoToolKind) -> ReplayGizmoAxis? {
+        allCases.first { $0.nodeName(for: kind) == name }
+    }
+}
+
 // MARK: - Reconstruction status
 
 struct ReplayReconstructionStatus {
     enum Quality: String {
-        case full     = "Полный"
-        case partial  = "Частичный"
-        case fallback = "Резервный"
+        case full
+        case partial
+        case fallback
+
+        var titleKey: String {
+            "replay.quality.\(rawValue)"
+        }
     }
 
     var uavDisplayName: String
@@ -21,10 +60,10 @@ struct ReplayReconstructionStatus {
     var warningMessages: [String]
 
     static let none = ReplayReconstructionStatus(
-        uavDisplayName: "Generic",
-        terrainDisplayName: "n/a",
-        weatherDisplayName: "n/a",
-        payloadDisplayName: "none",
+        uavDisplayName: L10n.s("replay.uav.generic", language: L10n.currentLanguage()),
+        terrainDisplayName: L10n.s("common.na", language: L10n.currentLanguage()),
+        weatherDisplayName: L10n.s("common.na", language: L10n.currentLanguage()),
+        payloadDisplayName: L10n.s("replay.payload.none", language: L10n.currentLanguage()),
         quality: .fallback,
         hasContext: false,
         profileFound: false,
@@ -88,6 +127,29 @@ final class MissionReplaySceneController {
     private let pathNode: SCNNode
     private let eventMarkersNode: SCNNode
     private let environmentNode: SCNNode
+    private let skyCloudsNode: SCNNode
+    private let weatherEnvelopeNode: SCNNode
+    private let abandonedCitySceneComposer = AbandonedCitySceneComposer()
+    private var activeWeatherPreset: WeatherPreset = .normal
+
+    private static let skyCloudInstanceRadius: Float = 180
+    private static let skyCloudAltitudeAboveDrone: Float = 90
+    private static let weatherEnvelopeRadius: Float = 250.0
+    // Mid-range stand-in for the live sim's `0.25 + intensity * 0.55` envelope opacity —
+    // MissionReplayContextSnapshot only captures which weather preset was recorded, not the
+    // intensity/wind values, so the exact recorded strength can't be reconstructed.
+    private static let weatherEnvelopeReplayOpacity: CGFloat = 0.55
+    private static let skyCloudInstanceOffsets: [(SCNVector3, Float)] = [
+        (SCNVector3(0, 0, 500), 0),
+        (SCNVector3(420, 15, -380), 1.1),
+        (SCNVector3(-480, -10, 300), 2.6),
+        (SCNVector3(350, 20, 420), 4.0),
+        (SCNVector3(-520, 5, -280), 5.4)
+    ]
+
+    var wantsWeatherDepthOfField: Bool {
+        activeWeatherPreset == .fog || activeWeatherPreset == .smog
+    }
 
     private var orbitYawRadians: Float = 0
     private var orbitPitchRadians: Float = -0.35
@@ -100,6 +162,51 @@ final class MissionReplaySceneController {
     private var cinematicSmoothTarget: SIMD3<Float>?
     private var smoothedScrollDelta: Float = 0
     private(set) var topDownHeight: Float = 120
+
+    // Separate orbit tunables from `.orbit` mode's — zooming in close (down to a few cm) to
+    // precisely place the gizmo on a small drone shouldn't leave `.orbit` mode unexpectedly
+    // zoomed in too when the user switches away.
+    private var mountEditYawRadians: Float = 0.6
+    private var mountEditPitchRadians: Float = -0.25
+    private var mountEditDistance: Float = 1.6
+    private(set) var onboardMountIsEditing: Bool = true
+    private(set) var onboardMountOffset: SIMD3<Float> = MissionReplaySceneController.loadPersistedOnboardMountOffset()
+    private(set) var onboardMountRotation: simd_quatf = MissionReplaySceneController.loadPersistedOnboardMountRotation()
+    private var onboardMountGizmoNode: SCNNode?
+    private var moveHandlesNode: SCNNode?
+    private var rotateHandlesNode: SCNNode?
+    private var eyePupilNode: SCNNode?
+    private var onboardMountBodyScale: Float = 0.3
+    private var activeGizmoAxis: ReplayGizmoAxis?
+    private var activeGizmoHandleKind: ReplayGizmoToolKind?
+
+    static let defaultOnboardMountOffset = SIMD3<Float>(0, 0.15, -0.25)
+    private static let onboardMountOffsetLimit: Float = 2.5
+    private static let onboardMountOffsetDefaultsKeyPrefix = "replay.onboardMountOffset.v1"
+    private static let onboardMountRotationDefaultsKeyPrefix = "replay.onboardMountRotation.v1"
+
+    private static func gizmoHandleLength(forBodyScale scale: Float) -> Float {
+        max(0.12, min(0.6, scale * 0.9))
+    }
+
+    private static func gizmoRotateRingRadius(forBodyScale scale: Float) -> Float {
+        gizmoHandleLength(forBodyScale: scale) * 1.6
+    }
+
+    private static func gizmoEyeRadius(forBodyScale scale: Float) -> Float {
+        gizmoHandleLength(forBodyScale: scale) * 0.12 * 1.6
+    }
+
+    /// Moves the eye's pupil to the point on the eyeball's surface facing the current look
+    /// direction — the eyeball itself is rigidly attached to the drone via normal scene-graph
+    /// parenting, so only the *extra* onboardMountRotation needs accounting for here.
+    private func updateEyePupil(rotation: simd_quatf) {
+        guard let pupilNode = eyePupilNode else { return }
+        let eyeRadius = Self.gizmoEyeRadius(forBodyScale: onboardMountBodyScale)
+        let forward = rotation.act(SIMD3<Float>(0, 0, -1))
+        pupilNode.simdPosition = forward * (eyeRadius * 0.78)
+    }
+
     private var lastKnownFrame: MissionReplayFrame?
     private var loadedFrames: [MissionReplayFrame] = []
     private var loadedEvents: [MissionReplayEvent] = []
@@ -107,6 +214,52 @@ final class MissionReplaySceneController {
     private var selectedReplayEvent: MissionReplayEvent?
 
     private(set) var reconstructionStatus: ReplayReconstructionStatus = .none
+
+    private static func loadPersistedOnboardMountOffset() -> SIMD3<Float> {
+        let defaults = UserDefaults.standard
+        let key = onboardMountOffsetDefaultsKeyPrefix
+        guard defaults.object(forKey: "\(key).x") != nil else {
+            return defaultOnboardMountOffset
+        }
+        return SIMD3<Float>(
+            Float(defaults.double(forKey: "\(key).x")),
+            Float(defaults.double(forKey: "\(key).y")),
+            Float(defaults.double(forKey: "\(key).z"))
+        )
+    }
+
+    private func persistOnboardMountOffset() {
+        let defaults = UserDefaults.standard
+        let key = Self.onboardMountOffsetDefaultsKeyPrefix
+        defaults.set(Double(onboardMountOffset.x), forKey: "\(key).x")
+        defaults.set(Double(onboardMountOffset.y), forKey: "\(key).y")
+        defaults.set(Double(onboardMountOffset.z), forKey: "\(key).z")
+    }
+
+    private static func loadPersistedOnboardMountRotation() -> simd_quatf {
+        let defaults = UserDefaults.standard
+        let key = onboardMountRotationDefaultsKeyPrefix
+        guard defaults.object(forKey: "\(key).w") != nil else {
+            return simd_quatf(real: 1, imag: .zero)
+        }
+        return simd_quatf(
+            real: Float(defaults.double(forKey: "\(key).w")),
+            imag: SIMD3<Float>(
+                Float(defaults.double(forKey: "\(key).x")),
+                Float(defaults.double(forKey: "\(key).y")),
+                Float(defaults.double(forKey: "\(key).z"))
+            )
+        )
+    }
+
+    private func persistOnboardMountRotation() {
+        let defaults = UserDefaults.standard
+        let key = Self.onboardMountRotationDefaultsKeyPrefix
+        defaults.set(Double(onboardMountRotation.imag.x), forKey: "\(key).x")
+        defaults.set(Double(onboardMountRotation.imag.y), forKey: "\(key).y")
+        defaults.set(Double(onboardMountRotation.imag.z), forKey: "\(key).z")
+        defaults.set(Double(onboardMountRotation.real), forKey: "\(key).w")
+    }
 
     init() {
         scene = SCNScene()
@@ -116,23 +269,14 @@ final class MissionReplaySceneController {
         pathNode = SCNNode()
         eventMarkersNode = SCNNode()
         environmentNode = SCNNode()
+        skyCloudsNode = SCNNode()
+        weatherEnvelopeNode = SCNNode()
         buildScene()
     }
 
-    // MARK: - Session loading (legacy, no profiles)
+    // MARK: - Session loading
 
     func loadSession(_ session: MissionReplaySession, events: [MissionReplayEvent] = []) {
-        loadSession(session, availableDroneProfiles: [], fallbackProfile: nil, events: events)
-    }
-
-    // MARK: - Session loading (visual reconstruction)
-
-    func loadSession(
-        _ session: MissionReplaySession,
-        availableDroneProfiles: [DroneModelProfile],
-        fallbackProfile: DroneModelProfile? = nil,
-        events: [MissionReplayEvent] = []
-    ) {
         pathNode.childNodes.forEach { $0.removeFromParentNode() }
         eventMarkersNode.childNodes.forEach { $0.removeFromParentNode() }
         environmentNode.childNodes.forEach { $0.removeFromParentNode() }
@@ -140,11 +284,11 @@ final class MissionReplaySceneController {
         let context = session.context
         loadedContext = context
 
-        let uavResult = buildReplayUAV(
-            context: context,
-            availableDroneProfiles: availableDroneProfiles,
-            fallbackProfile: fallbackProfile
-        )
+        let uavResult = buildReplayUAV(context: context)
+        if uavResult.bodyScale != onboardMountBodyScale {
+            onboardMountBodyScale = uavResult.bodyScale
+            rebuildGizmoHandles(bodyScale: uavResult.bodyScale)
+        }
         let envResult = buildReplayEnvironment(from: context)
 
         let sorted = session.frames.sorted { $0.timestamp < $1.timestamp }
@@ -162,19 +306,32 @@ final class MissionReplaySceneController {
             overallQuality = .fallback
         }
 
+        let language = L10n.currentLanguage()
         var warnings: [String] = []
         if context == nil {
-            warnings.append("This replay was recorded before visual context snapshots were added. Fallback visual reconstruction is used.")
+            warnings.append(L10n.s("replay.warning.no_context", language: language))
         }
         if !uavResult.profileFound {
-            warnings.append("Original UAV profile was not found. Generic replay UAV is used.")
+            warnings.append(L10n.s("replay.warning.uav_not_found", language: language))
         }
+
+        let terrainDisplayName: String
+        if let preset = envResult.terrainPreset, let mapScale = envResult.mapScale {
+            terrainDisplayName = "\(L10n.s(preset.titleKey, language: language)) / \(L10n.s(mapScale.titleKey, language: language))"
+        } else {
+            terrainDisplayName = L10n.s("common.na", language: language)
+        }
+
+        let weatherDisplayName = context?.weatherPresetRawValue
+            .flatMap(WeatherPreset.init(rawValue:))
+            .map { L10n.s($0.titleKey, language: language) }
+            ?? L10n.s("common.na", language: language)
 
         reconstructionStatus = ReplayReconstructionStatus(
             uavDisplayName: uavResult.displayName,
-            terrainDisplayName: envResult.description,
-            weatherDisplayName: context?.weatherPresetRawValue?.capitalized ?? "n/a",
-            payloadDisplayName: context?.payloadResolvedName ?? "none",
+            terrainDisplayName: terrainDisplayName,
+            weatherDisplayName: weatherDisplayName,
+            payloadDisplayName: context?.payloadResolvedName ?? L10n.s("replay.payload.none", language: language),
             quality: overallQuality,
             hasContext: context != nil,
             profileFound: uavResult.profileFound,
@@ -209,12 +366,150 @@ final class MissionReplaySceneController {
         cinematicSmoothPos = nil
         cinematicSmoothTarget = nil
         smoothedScrollDelta = 0
+        activeGizmoAxis = nil
+        activeGizmoHandleKind = nil
+        if mode == .onboardMount {
+            onboardMountIsEditing = true
+        }
+        // The directional sun light's shadow map is sized/projected to cover the whole
+        // kilometer-scale scene (ground + environment), so its effective resolution at the
+        // centimeter scale of this drone's own fuselage/wing is far too coarse for clean
+        // self-shadowing — the wing box intersects the fuselage capsule right at body-center,
+        // and the shadow that intersection casts on itself comes out as blocky, unstable "shadow
+        // acne" that's invisible from any previous camera distance but fills a large fraction of
+        // frame at onboard-mount range, and visibly swims frame to frame (matches "large,
+        // irregular, moves on its own" reports). Only the aircraft's own self-shadow is at issue —
+        // disable it just for this mode; every other mode keeps the existing look untouched.
+        setDroneSelfShadowing(enabled: mode != .onboardMount)
+        updateGizmoVisibility()
         updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
+
+    private func setDroneSelfShadowing(enabled: Bool) {
+        // Sweeps the gizmo's nodes too, harmlessly — it's hidden outside onboard-mount edit and
+        // a hidden node never casts a shadow regardless of this flag.
+        replayDroneNode.enumerateChildNodes { node, _ in
+            node.castsShadow = enabled
+        }
     }
 
     func setTopDownHeight(_ height: Float) {
         topDownHeight = max(30, min(400, height))
         updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
+
+    // MARK: - Onboard mount gizmo control
+
+    func setOnboardMountEditing(_ editing: Bool) {
+        onboardMountIsEditing = editing
+        activeGizmoAxis = nil
+        activeGizmoHandleKind = nil
+        updateGizmoVisibility()
+        updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
+
+    private func updateGizmoVisibility() {
+        // Move arrows and rotate rings are both shown together (no separate tool-mode toggle) —
+        // grab whichever handle you want, the hit node's own name tells beginGizmoDrag which kind
+        // of drag math to use.
+        let showGizmo = cameraMode == .onboardMount && onboardMountIsEditing
+        onboardMountGizmoNode?.isHidden = !showGizmo
+        moveHandlesNode?.isHidden = !showGizmo
+        rotateHandlesNode?.isHidden = !showGizmo
+    }
+
+    func setOnboardMountOffset(_ offset: SIMD3<Float>) {
+        let limit = Self.onboardMountOffsetLimit
+        let clamped = SIMD3<Float>(
+            max(-limit, min(limit, offset.x)),
+            max(-limit, min(limit, offset.y)),
+            max(-limit, min(limit, offset.z))
+        )
+        onboardMountOffset = clamped
+        onboardMountGizmoNode?.simdPosition = clamped
+        persistOnboardMountOffset()
+        updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
+
+    func setOnboardMountRotation(_ rotation: simd_quatf) {
+        let normalized = simd_normalize(rotation)
+        onboardMountRotation = normalized
+        rotateHandlesNode?.simdOrientation = normalized
+        updateEyePupil(rotation: normalized)
+        persistOnboardMountRotation()
+        updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
+
+    func resetOnboardMountOffset() {
+        setOnboardMountOffset(Self.defaultOnboardMountOffset)
+        setOnboardMountRotation(simd_quatf(real: 1, imag: .zero))
+    }
+
+    /// Whether the view should route the next drag to gizmo-axis hit-testing instead of
+    /// normal camera-drag handling.
+    var canInteractWithGizmo: Bool {
+        cameraMode == .onboardMount && onboardMountIsEditing
+    }
+
+    var isDraggingGizmoAxis: Bool { activeGizmoAxis != nil }
+
+    func beginGizmoDrag(axis: ReplayGizmoAxis, kind: ReplayGizmoToolKind) {
+        activeGizmoAxis = axis
+        activeGizmoHandleKind = kind
+    }
+
+    func endGizmoDrag() {
+        activeGizmoAxis = nil
+        activeGizmoHandleKind = nil
+    }
+
+    /// World-space origin + unit direction of the axis/tangent currently being dragged, recomputed
+    /// live since the drone (and so the gizmo, which is its child) can be rotating during playback.
+    /// For `.move` this is the axis itself; for `.rotate` it's the screen-facing tangent at the
+    /// ring (the direction "around the ring" closest to the camera), since rotation handles are
+    /// dragged tangentially rather than straight along a line.
+    func gizmoAxisWorldRay() -> (origin: SIMD3<Float>, direction: SIMD3<Float>)? {
+        guard let axis = activeGizmoAxis, let kind = activeGizmoHandleKind,
+              let gizmoNode = onboardMountGizmoNode else { return nil }
+        let origin = gizmoNode.simdWorldPosition
+        switch kind {
+        case .move:
+            let direction = replayDroneNode.simdOrientation.act(axis.localUnit)
+            return (origin, direction)
+        case .rotate:
+            let axisWorldDir = replayDroneNode.simdOrientation.act(onboardMountRotation.act(axis.localUnit))
+            let toCamera = cameraNode.simdPosition - origin
+            let toCameraLength = simd_length(toCamera)
+            guard toCameraLength > 0.0001 else { return nil }
+            let tangent = simd_cross(axisWorldDir, toCamera / toCameraLength)
+            let tangentLength = simd_length(tangent)
+            guard tangentLength > 0.0001 else { return nil }
+            return (origin, tangent / tangentLength)
+        }
+    }
+
+    func applyGizmoDrag(incrementalAxisDelta: Float) {
+        guard let axis = activeGizmoAxis, let kind = activeGizmoHandleKind else { return }
+        switch kind {
+        case .move:
+            var newOffset = onboardMountOffset
+            switch axis {
+            case .x: newOffset.x += incrementalAxisDelta
+            case .y: newOffset.y += incrementalAxisDelta
+            case .z: newOffset.z += incrementalAxisDelta
+            }
+            setOnboardMountOffset(newOffset)
+        case .rotate:
+            // incrementalAxisDelta is an arc length (axisDelta's "direction" was a tangent unit
+            // vector here, not the rotation axis) — divide by the ring's radius to recover radians.
+            let radius = Self.gizmoRotateRingRadius(forBodyScale: onboardMountBodyScale)
+            let angle = incrementalAxisDelta / radius
+            let increment = simd_quatf(angle: angle, axis: axis.localUnit)
+            // Composed on the right (gimbal-local), matching the rings tracking the *current*
+            // accumulated rotation visually — each drag rotates relative to where it's currently
+            // aimed, like a camera gimbal, not relative to the drone's original fixed body axes.
+            setOnboardMountRotation(onboardMountRotation * increment)
+        }
     }
 
     func setSelectedEvent(_ event: MissionReplayEvent?) {
@@ -232,9 +527,9 @@ final class MissionReplaySceneController {
 
     var payloadCameraStatusText: String? {
         guard loadedEvents.contains(where: { $0.type == .payloadReleased || $0.type == .payloadImpact }) else {
-            return "Payload camera unavailable: no payload release or impact events."
+            return L10n.s("replay.payload_camera.unavailable_no_events", language: L10n.currentLanguage())
         }
-        return "Payload trajectory unavailable. Using event focus fallback."
+        return L10n.s("replay.payload_camera.unavailable_fallback", language: L10n.currentLanguage())
     }
 
     func prepareForVideoExport(_ options: MissionReplayExportRenderOptions) {
@@ -291,6 +586,17 @@ final class MissionReplaySceneController {
             let up = replayDroneNode.simdOrientation.act(SIMD3<Float>(0, 1, 0))
             cameraNode.simdPosition = dronePos + forward * 1.0 + up * 0.35
             cameraNode.simdOrientation = replayDroneNode.simdOrientation
+        case .onboardMount:
+            if onboardMountIsEditing {
+                // External view so the gizmo (attached to the drone, at the configured offset)
+                // stays visible and draggable — can't see/drag a gizmo marking your own camera's
+                // position from inside that same camera.
+                updateMountEditCamera(around: dronePos)
+            } else {
+                let offset = replayDroneNode.simdOrientation.act(onboardMountOffset)
+                cameraNode.simdPosition = dronePos + offset
+                cameraNode.simdOrientation = replayDroneNode.simdOrientation * onboardMountRotation
+            }
         case .payloadFollow:
             guard let target = payloadFocusPosition(for: frame) else {
                 updateOrbitCamera(around: dronePos)
@@ -339,6 +645,13 @@ final class MissionReplaySceneController {
             orbitYawRadians += dx * 0.005
             orbitPitchRadians = max(-1.2, min(0.6, orbitPitchRadians - dy * 0.005))
             updateCameraForCurrentMode(frame: lastKnownFrame)
+        case .onboardMount:
+            // Dragging a gizmo handle is routed by the view straight to applyGizmoDrag(...)
+            // instead of here — this only runs for drags that didn't hit a handle.
+            guard onboardMountIsEditing else { return }
+            mountEditYawRadians += dx * 0.005
+            mountEditPitchRadians = max(-1.2, min(0.6, mountEditPitchRadians - dy * 0.005))
+            updateCameraForCurrentMode(frame: lastKnownFrame)
         default:
             break
         }
@@ -362,6 +675,12 @@ final class MissionReplaySceneController {
             chaseDistance = max(6, min(40, chaseDistance - scroll * 6.0))
         case .payloadFollow, .cinematicEvent:
             orbitDistance = max(6, min(80, orbitDistance - scroll * 6.0))
+        case .onboardMount:
+            guard onboardMountIsEditing else { return }
+            // Much tighter range than `.orbit` — the gizmo sits directly on a drone body that
+            // may only be tens of centimeters across, so precise placement needs to zoom in far
+            // closer than viewing the whole scene ever does.
+            mountEditDistance = max(0.3, min(20, mountEditDistance - scroll * 2.0))
         default:
             break
         }
@@ -390,6 +709,16 @@ final class MissionReplaySceneController {
         let pitch = simd_quatf(angle: Float(frame.attitude.pitchRadians), axis: SIMD3<Float>(1, 0, 0))
         let roll  = simd_quatf(angle: Float(frame.attitude.rollRadians),  axis: SIMD3<Float>(0, 0, 1))
         replayDroneNode.simdOrientation = yaw * pitch * roll
+
+        skyCloudsNode.simdPosition = SIMD3<Float>(
+            replayDroneNode.simdPosition.x,
+            replayDroneNode.simdPosition.y + Self.skyCloudAltitudeAboveDrone,
+            replayDroneNode.simdPosition.z
+        )
+        if !weatherEnvelopeNode.isHidden {
+            weatherEnvelopeNode.simdPosition = replayDroneNode.simdPosition
+        }
+
         updateCameraForCurrentMode(frame: frame, replayTime: replayTime, duration: duration)
     }
 
@@ -457,6 +786,16 @@ final class MissionReplaySceneController {
             orbitDistance * cos(orbitPitchRadians) * sin(orbitYawRadians),
             orbitDistance * sin(-orbitPitchRadians),
             orbitDistance * cos(orbitPitchRadians) * cos(orbitYawRadians)
+        )
+        cameraNode.simdPosition = target + offset
+        lookAtWithLockedHorizon(target)
+    }
+
+    private func updateMountEditCamera(around target: SIMD3<Float>) {
+        let offset = SIMD3<Float>(
+            mountEditDistance * cos(mountEditPitchRadians) * sin(mountEditYawRadians),
+            mountEditDistance * sin(-mountEditPitchRadians),
+            mountEditDistance * cos(mountEditPitchRadians) * cos(mountEditYawRadians)
         )
         cameraNode.simdPosition = target + offset
         lookAtWithLockedHorizon(target)
@@ -700,11 +1039,170 @@ final class MissionReplaySceneController {
         buildCamera()
         pathNode.castsShadow = false
         eventMarkersNode.castsShadow = false
+        skyCloudsNode.name = "replaySkyCloudsNode"
+        weatherEnvelopeNode.name = "replayWeatherEnvelopeNode"
+        weatherEnvelopeNode.isHidden = true
+        setUpSkyClouds()
         scene.rootNode.addChildNode(groundNode)
         scene.rootNode.addChildNode(environmentNode)
         scene.rootNode.addChildNode(replayDroneNode)
         scene.rootNode.addChildNode(pathNode)
         scene.rootNode.addChildNode(eventMarkersNode)
+        scene.rootNode.addChildNode(skyCloudsNode)
+        scene.rootNode.addChildNode(weatherEnvelopeNode)
+        buildOnboardMountGizmo()
+    }
+
+    private func buildOnboardMountGizmo() {
+        let root = SCNNode()
+        root.name = "replayGizmoRoot"
+        root.simdPosition = onboardMountOffset
+        root.isHidden = true
+        root.castsShadow = false
+        replayDroneNode.addChildNode(root)
+        onboardMountGizmoNode = root
+
+        let moveNode = SCNNode()
+        moveNode.name = "replayGizmoMoveRoot"
+        moveNode.castsShadow = false
+        root.addChildNode(moveNode)
+        moveHandlesNode = moveNode
+
+        let rotateNode = SCNNode()
+        rotateNode.name = "replayGizmoRotateRoot"
+        rotateNode.simdOrientation = onboardMountRotation
+        rotateNode.isHidden = true
+        rotateNode.castsShadow = false
+        root.addChildNode(rotateNode)
+        rotateHandlesNode = rotateNode
+
+        rebuildGizmoHandles(bodyScale: onboardMountBodyScale)
+    }
+
+    private static func gizmoAxisColor(_ axis: ReplayGizmoAxis) -> NSColor {
+        switch axis {
+        case .x: return NSColor(calibratedRed: 0.95, green: 0.22, blue: 0.22, alpha: 1.0)
+        case .y: return NSColor(calibratedRed: 0.25, green: 0.92, blue: 0.30, alpha: 1.0)
+        case .z: return NSColor(calibratedRed: 0.28, green: 0.55, blue: 0.98, alpha: 1.0)
+        }
+    }
+
+    private static func makeOverlayMaterial(color: NSColor) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.diffuse.contents = color
+        material.emission.contents = color.withAlphaComponent(0.55)
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        material.writesToDepthBuffer = false
+        return material
+    }
+
+    private func rebuildGizmoHandles(bodyScale: Float) {
+        guard let root = onboardMountGizmoNode, let moveNode = moveHandlesNode, let rotateNode = rotateHandlesNode else { return }
+        moveNode.childNodes.forEach { $0.removeFromParentNode() }
+        rotateNode.childNodes.forEach { $0.removeFromParentNode() }
+        root.childNodes.filter { $0.name == "replayGizmoEyeball" }.forEach { $0.removeFromParentNode() }
+
+        let length = Self.gizmoHandleLength(forBodyScale: bodyScale)
+        let radius = length * 0.12
+
+        for axis in ReplayGizmoAxis.allCases {
+            let cylinder = SCNCylinder(radius: CGFloat(radius), height: CGFloat(length))
+            cylinder.materials = [Self.makeOverlayMaterial(color: Self.gizmoAxisColor(axis))]
+
+            let handle = SCNNode(geometry: cylinder)
+            handle.name = axis.nodeName(for: .move)
+            handle.castsShadow = false
+            handle.renderingOrder = 50
+            switch axis {
+            case .x:
+                handle.simdPosition = SIMD3<Float>(length * 0.5, 0, 0)
+                handle.simdOrientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+            case .y:
+                handle.simdPosition = SIMD3<Float>(0, length * 0.5, 0)
+            case .z:
+                handle.simdPosition = SIMD3<Float>(0, 0, length * 0.5)
+                handle.simdOrientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+            }
+            moveNode.addChildNode(handle)
+        }
+
+        // Eyeball + pupil instead of a plain marker sphere — the pupil's position (set in
+        // updateEyePupil, driven by onboardMountRotation) shows which way the camera is currently
+        // aimed at a glance, which a uniform sphere never could regardless of the rotation rings.
+        let eyeRadius = Self.gizmoEyeRadius(forBodyScale: bodyScale)
+        let eyeballSphere = SCNSphere(radius: CGFloat(eyeRadius))
+        eyeballSphere.materials = [Self.makeOverlayMaterial(color: NSColor(calibratedWhite: 0.95, alpha: 1.0))]
+        let eyeballNode = SCNNode(geometry: eyeballSphere)
+        eyeballNode.name = "replayGizmoEyeball"
+        eyeballNode.castsShadow = false
+        eyeballNode.renderingOrder = 50
+        root.addChildNode(eyeballNode)
+
+        let pupilSphere = SCNSphere(radius: CGFloat(eyeRadius * 0.42))
+        pupilSphere.materials = [Self.makeOverlayMaterial(color: NSColor(calibratedWhite: 0.05, alpha: 1.0))]
+        let pupilNode = SCNNode(geometry: pupilSphere)
+        pupilNode.name = "replayGizmoEyePupil"
+        pupilNode.castsShadow = false
+        pupilNode.renderingOrder = 51
+        eyeballNode.addChildNode(pupilNode)
+        eyePupilNode = pupilNode
+        updateEyePupil(rotation: onboardMountRotation)
+
+        // Rings: a torus's own "hole" axis is local Y by default, so the Y ring needs no
+        // reorientation — X and Z reuse the exact same +90°-about-Z / +90°-about-X rotations as
+        // the move cylinders above, for the same reason (re-pointing a Y-aligned primitive).
+        let ringRadius = Self.gizmoRotateRingRadius(forBodyScale: bodyScale)
+        let pipeRadius = length * 0.05
+        for axis in ReplayGizmoAxis.allCases {
+            let torus = SCNTorus(ringRadius: CGFloat(ringRadius), pipeRadius: CGFloat(pipeRadius))
+            torus.materials = [Self.makeOverlayMaterial(color: Self.gizmoAxisColor(axis))]
+
+            let ring = SCNNode(geometry: torus)
+            ring.name = axis.nodeName(for: .rotate)
+            ring.castsShadow = false
+            ring.renderingOrder = 50
+            switch axis {
+            case .x:
+                ring.simdOrientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+            case .y:
+                break
+            case .z:
+                ring.simdOrientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+            }
+            rotateNode.addChildNode(ring)
+        }
+    }
+
+    private func setUpSkyClouds() {
+        for (offset, yaw) in Self.skyCloudInstanceOffsets {
+            guard let node = WeatherCloudAssetLoader.shared.makeSkyCloudsNode(
+                offset: offset,
+                yaw: yaw,
+                targetRadius: Self.skyCloudInstanceRadius
+            ) else {
+                continue
+            }
+            skyCloudsNode.addChildNode(node)
+        }
+    }
+
+    private func updateReplayWeatherEnvelope(_ preset: WeatherPreset) {
+        weatherEnvelopeNode.childNodes.forEach { $0.removeFromParentNode() }
+        let node: SCNNode?
+        switch preset {
+        case .fog:
+            node = WeatherCloudAssetLoader.shared.makeFogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+        case .smog:
+            node = WeatherCloudAssetLoader.shared.makeSmogEnvelopeNode(targetRadius: Self.weatherEnvelopeRadius)
+        default:
+            node = nil
+        }
+        if let node {
+            weatherEnvelopeNode.addChildNode(node)
+        }
+        weatherEnvelopeNode.isHidden = weatherEnvelopeNode.childNodes.isEmpty
+        weatherEnvelopeNode.opacity = Self.weatherEnvelopeReplayOpacity
     }
 
     private func configureOverlayNode(_ node: SCNNode) {
@@ -729,6 +1227,16 @@ final class MissionReplaySceneController {
         }
         pathNode.castsShadow = false
         eventMarkersNode.castsShadow = false
+        // Sky decoration and weather haze never cast shadows in the live sim either (baked in
+        // via WeatherCloudAssetLoader.sanitize()/makeEnvelopeSphere) — the blanket sweep above
+        // would otherwise have these billboard cards and the fog/smog sphere throw shadows onto
+        // the ground in quality-mode exports, which never happens during live play or interactive
+        // replay. Recursing explicitly (not just the container node) since castsShadow isn't
+        // inherited from a parent — the sweep above already flipped every descendant individually.
+        for root in [skyCloudsNode, weatherEnvelopeNode] {
+            root.castsShadow = false
+            root.enumerateChildNodes { node, _ in node.castsShadow = false }
+        }
     }
 
     private func buildGround() {
@@ -778,38 +1286,50 @@ final class MissionReplaySceneController {
     private struct UAVBuildResult {
         let displayName: String
         let profileFound: Bool
+        let bodyScale: Float
     }
 
-    private func buildReplayUAV(
-        context: MissionReplayContextSnapshot?,
-        availableDroneProfiles: [DroneModelProfile],
-        fallbackProfile: DroneModelProfile?
-    ) -> UAVBuildResult {
-        replayDroneNode.childNodes.forEach { $0.removeFromParentNode() }
+    /// Resolves against the full canonical catalog (`LIPODroneModelRepository`) rather than a
+    /// caller-supplied list — the previous version relied on whichever screen happened to open
+    /// the replay viewer to thread a non-empty `availableDroneProfiles` array through, and the
+    /// start-screen entry point (`ReplayCenterWindowHost.open` with no active simulation) and the
+    /// video exporter (`ReplayVideoExportService`) both always passed `[]`, so real recordings of
+    /// real catalog UAVs fell back to the generic placeholder even though the exact model was
+    /// resolvable. Runs the recorded ID through `canonicalModelID` first so recordings saved under
+    /// a since-renamed legacy model ID (see `LIPODroneModelRepository.legacyModelIDMap`) still match.
+    private func buildReplayUAV(context: MissionReplayContextSnapshot?) -> UAVBuildResult {
+        // The onboard-mount gizmo also lives under replayDroneNode (so it inherits the drone's
+        // per-frame transform for free) — skip it here or reloading a session would silently
+        // delete it along with the old visual model.
+        replayDroneNode.childNodes
+            .filter { $0.name != "replayGizmoRoot" }
+            .forEach { $0.removeFromParentNode() }
 
+        let allProfiles = LIPODroneModelRepository().allProfiles
         var foundProfile: DroneModelProfile?
 
         if let context = context {
             if let profileID = context.selectedDroneProfileID {
-                foundProfile = availableDroneProfiles.first { $0.id == profileID }
+                let canonicalID = LIPODroneModelRepository.canonicalModelID(profileID)
+                foundProfile = allProfiles.first { $0.id == canonicalID }
             }
             if foundProfile == nil, let profileName = context.selectedDroneProfileName {
-                foundProfile = availableDroneProfiles.first { $0.displayName == profileName }
+                foundProfile = allProfiles.first { $0.displayName == profileName }
             }
         }
 
-        let resolvedProfile = foundProfile ?? fallbackProfile
-
-        if let profile = resolvedProfile {
+        if let profile = foundProfile {
             let visual = DroneModelBuilder.build(profile: profile)
             replayDroneNode.addChildNode(visual.rootNode)
-            let name = profile.displayName
-            return UAVBuildResult(displayName: name, profileFound: foundProfile != nil)
+            return UAVBuildResult(displayName: profile.displayName, profileFound: true, bodyScale: profile.collisionRadius)
         }
 
         buildGenericDroneProxy()
-        let fallbackName = context?.selectedDroneProfileName.map { "\($0) (not found)" } ?? "Generic"
-        return UAVBuildResult(displayName: fallbackName, profileFound: false)
+        let language = L10n.currentLanguage()
+        let fallbackName = context?.selectedDroneProfileName.map {
+            L10n.f("replay.uav.not_found_named", language: language, $0)
+        } ?? L10n.s("replay.uav.generic", language: language)
+        return UAVBuildResult(displayName: fallbackName, profileFound: false, bodyScale: 0.3)
     }
 
     private func buildGenericDroneProxy() {
@@ -849,7 +1369,8 @@ final class MissionReplaySceneController {
     // MARK: - Environment reconstruction
 
     private struct EnvironmentBuildResult {
-        let description: String
+        let terrainPreset: TerrainPreset?
+        let mapScale: MapScale?
         let hasEnvironment: Bool
     }
 
@@ -863,9 +1384,11 @@ final class MissionReplaySceneController {
               let scaleRaw = context.mapScaleRawValue,
               let mapScale = MapScale(rawValue: scaleRaw),
               let seed = context.terrainSeed else {
+            activeWeatherPreset = .normal
+            updateReplayWeatherEnvelope(.normal)
             applyReplayTerrainVisualStyle(for: .field, halfExtent: 800.0)
             buildWorldBoundsIndicator(halfExtent: 800.0)
-            return EnvironmentBuildResult(description: "n/a", hasEnvironment: false)
+            return EnvironmentBuildResult(terrainPreset: nil, mapScale: nil, hasEnvironment: false)
         }
 
         let config = TerrainConfiguration(
@@ -876,13 +1399,21 @@ final class MissionReplaySceneController {
             safeSpawnRadius: 15.0
         )
 
-        let svc = ScenePopulationService(rootNode: environmentNode)
-        svc.populate(with: config, visualQuality: visualQuality)
-        applyReplayTerrainVisualStyle(for: preset, halfExtent: config.scenicHalfExtent)
+        let weather = context.weatherPresetRawValue.flatMap(WeatherPreset.init(rawValue:)) ?? .normal
+        EnvironmentObjectFactory.snowWeatherActive = (weather == .snow)
+        activeWeatherPreset = weather
+        updateReplayWeatherEnvelope(weather)
+
+        if preset == .city {
+            _ = abandonedCitySceneComposer.rebuild(in: environmentNode, terrain: config)
+        } else {
+            let svc = ScenePopulationService(rootNode: environmentNode)
+            svc.populate(with: config, visualQuality: visualQuality)
+        }
+        applyReplayTerrainVisualStyle(for: preset, halfExtent: config.scenicHalfExtent, weather: weather)
         buildWorldBoundsIndicator(halfExtent: config.worldHalfExtent)
 
-        let desc = "\(preset.rawValue) / \(mapScale.rawValue)"
-        return EnvironmentBuildResult(description: desc, hasEnvironment: true)
+        return EnvironmentBuildResult(terrainPreset: preset, mapScale: mapScale, hasEnvironment: true)
     }
 
     private func rebuildReplayEnvironment(quality: EnvironmentVisualQuality) {
@@ -890,7 +1421,11 @@ final class MissionReplaySceneController {
         _ = buildReplayEnvironment(from: loadedContext, visualQuality: quality)
     }
 
-    private func applyReplayTerrainVisualStyle(for terrain: TerrainPreset, halfExtent: Float) {
+    private func applyReplayTerrainVisualStyle(
+        for terrain: TerrainPreset,
+        halfExtent: Float,
+        weather: WeatherPreset = .normal
+    ) {
         let sky = replaySkyGradientImage(for: terrain)
         scene.background.contents = sky
         scene.lightingEnvironment.contents = sky
@@ -929,26 +1464,33 @@ final class MissionReplaySceneController {
             plane.height = size
         }
 
+        let mapSizeMeters = max(400.0, halfExtent * 2.0 + 48.0)
         let groundMaterial: SCNMaterial
-        if terrain == .cargoYard {
-            groundMaterial = AsphaltMaterialLoader.makeAsphaltMaterial(
-                mapSizeMeters: max(400.0, halfExtent * 2.0 + 48.0)
-            )
-        } else {
-            groundMaterial = (EnvironmentProceduralMaterials.groundMaterial(for: terrain).copy() as? SCNMaterial)
+        switch terrain {
+        case .city:
+            groundMaterial = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(mapSizeMeters: mapSizeMeters)
+        case .cargoYard:
+            groundMaterial = weather == .snow
+                ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                : AsphaltMaterialLoader.makeAsphaltMaterial(mapSizeMeters: mapSizeMeters)
+        case .field, .forest:
+            groundMaterial = weather == .snow
+                ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
+                : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
+        case .gridDemo:
+            let proc = (EnvironmentProceduralMaterials.groundMaterial(for: terrain).copy() as? SCNMaterial)
                 ?? EnvironmentProceduralMaterials.groundMaterial(for: terrain)
-        }
-        if terrain != .cargoYard {
             let repeatCount = max(8.0, min(28.0, halfExtent / 28.0))
-            groundMaterial.diffuse.wrapS = .repeat
-            groundMaterial.diffuse.wrapT = .repeat
-            groundMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(
+            proc.diffuse.wrapS = .repeat
+            proc.diffuse.wrapT = .repeat
+            proc.diffuse.contentsTransform = SCNMatrix4MakeScale(
                 CGFloat(repeatCount),
                 CGFloat(repeatCount),
                 1.0
             )
-            groundMaterial.roughness.contents = 0.96
-            groundMaterial.metalness.contents = 0.0
+            proc.roughness.contents = 0.96
+            proc.metalness.contents = 0.0
+            groundMaterial = proc
         }
         groundNode.geometry?.materials = [groundMaterial]
     }

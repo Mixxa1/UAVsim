@@ -1408,10 +1408,7 @@ struct ContentView: View {
             .onChange(of: isReplayCenterPresented) { _, new in
                 guard new else { return }
                 isReplayCenterPresented = false
-                ReplayCenterWindowHost.open(
-                    viewModel: viewModel.replayLibraryViewModel,
-                    availableDroneProfiles: viewModel.availableDroneProfiles
-                )
+                ReplayCenterWindowHost.open(viewModel: viewModel.replayLibraryViewModel)
             }
         }
     }

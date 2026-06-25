@@ -13,6 +13,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     private var warnedAboutStartupLateralForce = false
     private var verticalDebugCooldown: Float = 0.0
 
+    /// Near-ground turbulence gust state (Dryden low-altitude model,
+    /// MIL-F-8785C) — an Ornstein-Uhlenbeck process per axis, so it must
+    /// persist across ticks rather than being recomputed fresh each step
+    /// like everything else in `WeatherModel`. Lives on the engine (a class,
+    /// one instance per simulation) rather than on `DroneState`/`WeatherModel`
+    /// since it's filter state, not physical state — fixed-wing only.
+    private var windGustState = SIMD3<Float>(repeating: 0.0)
+
     func step(
         state: DroneState,
         control: DroneControlInput,
@@ -29,7 +37,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             case .multirotor:
                 next = stepMultirotorBaseline(state: next, control: control, context: context, dt: dt)
             case .fixedWing:
-                next = stepFixedWingBaseline(state: next, control: control, context: context, dt: dt)
+                next = stepFixedWingAerodynamic(state: next, control: control, context: context, dt: dt)
             }
             remaining -= dt
         }
@@ -127,7 +135,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
 
         let gravityForce = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
-        let linearDrag = -state.velocity * (1.45 + weather.dragMultiplier * 0.45)
+        let horizontalMax = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
+        let horizontalDragDamping = multirotorHorizontalDragDamping(
+            profile: profile,
+            controlMode: control.controlMode,
+            weather: weather
+        )
+        let verticalDragDamping = (1.45 + weather.dragMultiplier * 0.45).clamped(to: 1.20...2.40)
+        let linearDrag = SIMD3<Float>(
+            -state.velocity.x * mass * horizontalDragDamping,
+            -state.velocity.y * mass * verticalDragDamping,
+            -state.velocity.z * mass * horizontalDragDamping
+        )
         let windCompensation = (context.windVector - state.velocity) * (0.08 + weather.turbulenceFactor * 0.06)
         let totalForce = thrustWorld + gravityForce + linearDrag + windCompensation
 
@@ -151,12 +170,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let acceleration = totalForce / mass
         next.velocity = state.velocity + acceleration * dt
 
-        let horizontalMax = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
         let verticalUpMax = profile.maxAscentSpeedMps.clamped(to: 1.0...20.0)
         let verticalDownMax = profile.maxDescentSpeedMps.clamped(to: 1.0...20.0)
 
-        next.velocity.x = next.velocity.x.clamped(to: -horizontalMax...horizontalMax)
-        next.velocity.z = next.velocity.z.clamped(to: -horizontalMax...horizontalMax)
+        let horizontalVelocity = SIMD2<Float>(next.velocity.x, next.velocity.z)
+        let horizontalSpeed = simd_length(horizontalVelocity)
+        if horizontalSpeed > horizontalMax {
+            let scale = horizontalMax / horizontalSpeed
+            next.velocity.x *= scale
+            next.velocity.z *= scale
+        }
         next.velocity.y = next.velocity.y.clamped(to: -verticalDownMax...verticalUpMax)
 
         next.position = state.position + next.velocity * dt
@@ -211,6 +234,27 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.forwardAirspeed = simd_length(SIMD2<Float>(next.velocity.x, next.velocity.z))
 
         return next
+    }
+
+    private func multirotorHorizontalDragDamping(
+        profile: DroneModelProfile,
+        controlMode: FlightControlMode,
+        weather: WeatherFactors
+    ) -> Float {
+        let profileMaxSpeed = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
+        let referenceTiltDegrees: Float
+        switch controlMode {
+        case .hoverAssist:
+            referenceTiltDegrees = 22.0
+        case .stabilized:
+            referenceTiltDegrees = 36.0
+        case .acro:
+            referenceTiltDegrees = 48.0
+        }
+
+        let referenceAcceleration = Tuning.gravity * tan(referenceTiltDegrees.degreesToRadians)
+        let weatherDragPenalty = (weather.dragMultiplier - 1.0).clamped(to: 0.0...0.65)
+        return ((referenceAcceleration / profileMaxSpeed) * (1.0 + weatherDragPenalty * 0.55)).clamped(to: 0.18...2.80)
     }
 
     private func desiredMultirotorRates(
@@ -273,7 +317,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         }
     }
 
-    private func stepFixedWingBaseline(
+    private func stepFixedWingAerodynamic(
         state: DroneState,
         control: DroneControlInput,
         context: DroneSimulationContext,
@@ -350,111 +394,224 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             dt: dt
         )
 
-        let maxBank = Float(wing.maxBankAngleDeg).degreesToRadians
-        let maxPitch = (control.controlMode == .hoverAssist ? Float(16.0) : Float(26.0)).degreesToRadians
-        let targetYaw = wrap(control.targetOrientation.z)
+        // `profile.dimensions` can be a *visual scene-scale override*
+        // (`RuntimeTuning.runtimeSceneDimensionsOverride`, used by e.g.
+        // MQ-9B/Hermes 900 because their 3D model assets are authored at a
+        // different scale) — it is NOT a reliable physical size. Real
+        // aerodynamics must come from the catalog's actual wingspan first;
+        // fall back to a family-typical fuselage/height-to-span ratio for
+        // whatever the catalog entry doesn't specify, and only fall all the
+        // way back to `profile.dimensions` for aircraft with no catalog
+        // entry at all (custom/abstract profiles, which never carry a scene
+        // override). Getting this wrong silently undersizes wing area (and
+        // therefore thrust, sized off drag-at-cruise) by an order of
+        // magnitude — the aircraft "barely moves" despite 100% throttle.
+        let catalogDimensions = context.activeUAVProfile?.dimensions
+        let realWingSpanMm = catalogDimensions?.wingspanMillimeters ?? profile.dimensionsUnfoldedMm.x
+        let realFuselageLengthMm = catalogDimensions?.fuselageLengthMillimeters ?? (realWingSpanMm * 0.55)
+        let realHeightMm = catalogDimensions?.heightMillimeters ?? (realWingSpanMm * 0.12)
 
-        if state.physicalState == .crashed {
-            next.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - dt * 10.0))
-            next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
-        } else if control.controlMode.isRateMode {
-            let speedRatio = (max(state.forwardAirspeed, wing.minSustainableSpeedMps) / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...1.35)
-            let rollRateCommand = control.targetOrientation.x.clamped(to: -1.0...1.0) * (2.6 * authority * wing.turnAuthority.clamped(to: 0.5...1.4) * wing.bankResponseGain * speedRatio)
-            let pitchRateCommand = control.targetOrientation.y.clamped(to: -1.0...1.0) * (2.1 * authority * max(0.78, wing.climbResponseGain))
-            let yawRateCommand = desiredFixedWingYawRate(
-                control: control,
-                state: state,
-                authority: authority,
-                wing: wing,
-                airspeed: max(state.forwardAirspeed, wing.minSustainableSpeedMps),
-                fallbackHeading: targetYaw
-            )
-            let rateCommand = SIMD3<Float>(rollRateCommand, pitchRateCommand, yawRateCommand)
-            let rateGain = SIMD3<Float>(6.2 * authority, 5.0 * authority, 4.0 * authority)
-            let damping = SIMD3<Float>(1.5, 1.4, 1.3)
-            next.angularVelocity = state.angularVelocity + ((rateCommand - state.angularVelocity) * rateGain - state.angularVelocity * damping) * dt
-            next.angularVelocity = clampMagnitude(next.angularVelocity, limit: 7.8)
-            next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
-        } else {
-            let targetRoll = control.targetOrientation.x.clamped(to: -maxBank...maxBank)
-            let targetPitch = control.targetOrientation.y.clamped(to: -maxPitch...maxPitch)
-            next.orientation.x = approach(current: state.orientation.x, target: targetRoll, increaseRate: 2.6 * authority * wing.bankResponseGain, decreaseRate: 2.8 * authority * wing.bankResponseGain, dt: dt)
-            next.orientation.y = approach(current: state.orientation.y, target: targetPitch, increaseRate: 2.2 * authority * max(0.76, wing.climbResponseGain), decreaseRate: 2.4 * authority * max(0.76, wing.descentResponseGain), dt: dt)
-            if abs(control.yawIntent) > 0.001 {
-                let yawRate = desiredFixedWingYawRate(
+        let aero = FixedWingAerodynamics.build(
+            family: wing.family,
+            massKg: payloadMassModel.resolvedCurrentTotalMass,
+            wingSpanM: realWingSpanMm / 1000.0,
+            fuselageLengthM: realFuselageLengthMm / 1000.0,
+            heightM: realHeightMm / 1000.0,
+            turnAuthority: wing.turnAuthority,
+            minSustainableSpeedMps: wing.minSustainableSpeedMps
+        )
+
+        // --- Control surface mapping: stick/angle commands -> elevator/aileron/rudder deflection fractions.
+        var elevatorFraction: Float = 0.0
+        var aileronFraction: Float = 0.0
+        var rudderFraction: Float = 0.0
+
+        if !crashOrDisarmed {
+            let currentEuler = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat)
+            if control.controlMode.isRateMode {
+                elevatorFraction = control.targetOrientation.y.clamped(to: -1.0...1.0)
+                aileronFraction = control.targetOrientation.x.clamped(to: -1.0...1.0)
+                rudderFraction = desiredFixedWingRudderFraction(
                     control: control,
-                    state: state,
+                    currentYaw: currentEuler.z,
+                    yawRate: state.bodyAngularVelocity.z,
                     authority: authority,
                     wing: wing,
-                    airspeed: max(state.forwardAirspeed, wing.minSustainableSpeedMps),
-                    fallbackHeading: targetYaw
+                    fallbackHeading: wrap(control.targetOrientation.z)
                 )
-                next.orientation.z = wrap(state.orientation.z + yawRate * dt)
             } else {
-                let speedRatio = (state.forwardAirspeed / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.45...1.20)
-                let bankCoupling = sin(state.orientation.x) * wing.nominalTurnRateDegPerSec.degreesToRadians * max(0.45, speedRatio) * wing.turnAuthority
-                let coupledYaw = wrap(state.orientation.z + bankCoupling * dt)
-                next.orientation.z = wrap(approach(current: coupledYaw, target: targetYaw, increaseRate: 1.6 * authority * wing.bankResponseGain, decreaseRate: 1.6 * authority * wing.bankResponseGain, dt: dt))
+                let maxBank = Float(wing.maxBankAngleDeg).degreesToRadians
+                let maxPitchAngle = (control.controlMode == .hoverAssist ? Float(16.0) : Float(26.0)).degreesToRadians
+                let targetRoll = control.targetOrientation.x.clamped(to: -maxBank...maxBank)
+                let targetPitch = control.targetOrientation.y.clamped(to: -maxPitchAngle...maxPitchAngle)
+                let rollError = wrap(targetRoll - currentEuler.x)
+                let pitchError = wrap(targetPitch - currentEuler.y)
+                // Outer attitude-error loop: a normalized PD controller (error
+                // against this airframe's own angle envelope, rate term for
+                // damping) — NOT a raw angle-times-gain-divided-by-3 formula,
+                // which previously came out roughly 5-6x too weak (a 10°
+                // pitch command on FT5 only ever achieved ~3-4° actual pitch,
+                // since even the *maximum* representable error produced just
+                // ~0.2 of full elevator). Normalizing by maxBank/maxPitchAngle
+                // means every airframe reaches meaningful authority well
+                // inside its own commandable range, regardless of whether
+                // that range is 16° or 40°.
+                let rollErrorNorm = (rollError / maxBank).clamped(to: -1.0...1.0)
+                let rollRateNorm = (state.bodyAngularVelocity.x / 1.8).clamped(to: -1.0...1.0)
+                let pitchErrorNorm = (pitchError / maxPitchAngle).clamped(to: -1.0...1.0)
+                let pitchRateNorm = (state.bodyAngularVelocity.y / 1.2).clamped(to: -1.0...1.0)
+                // kP=3.5 (not 2.0): a pure P term always has some steady-state
+                // droop against the airframe's own natural restoring
+                // stiffness (cmAlpha) — e.g. Hermes 900 commanded to 8.5°
+                // only settled near 4.6° at kP=2.0. 3.5 pushes the
+                // equilibrium close enough to the commanded angle across the
+                // whole fleet (1.6kg-5670kg) without re-introducing the
+                // original bug's instability, since the rate term still damps
+                // the approach.
+                aileronFraction = ((rollErrorNorm * 3.5 - rollRateNorm * 0.4) * authority * max(0.75, wing.bankResponseGain)).clamped(to: -1.0...1.0)
+                elevatorFraction = ((pitchErrorNorm * 3.5 - pitchRateNorm * 0.4) * authority * max(0.75, wing.climbResponseGain)).clamped(to: -1.0...1.0)
+                rudderFraction = desiredFixedWingRudderFraction(
+                    control: control,
+                    currentYaw: currentEuler.z,
+                    yawRate: state.bodyAngularVelocity.z,
+                    authority: authority,
+                    wing: wing,
+                    fallbackHeading: wrap(control.targetOrientation.z),
+                    coordinationBankRad: currentEuler.x
+                )
             }
-            next.angularVelocity = SIMD3<Float>(
-                (next.orientation.x - state.orientation.x) / max(0.0001, dt),
-                (next.orientation.y - state.orientation.y) / max(0.0001, dt),
-                (next.orientation.z - state.orientation.z) / max(0.0001, dt)
-            )
         }
 
-        let cruiseTarget = max(
-            wing.minSustainableSpeedMps * (0.82 + baseline.stallProtectionBias),
-            wing.cruiseSpeedMps * baseline.payloadCruisePenaltyMultiplier
+        // --- Actuator slew-rate limiting: a real servo can't snap to a new
+        // deflection in one tick — applies to manual and autopilot input
+        // alike, since it's a property of the actuator, not of who issued
+        // the command. ~4/s means a full -1...1 swing takes ~0.5s, roughly
+        // a 90°/s small-UAV servo for a ±20-25° surface.
+        let surfaceSlewRate: Float = 4.0
+        elevatorFraction = approach(current: state.elevatorDeflection, target: elevatorFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        aileronFraction = approach(current: state.aileronDeflection, target: aileronFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        rudderFraction = approach(current: state.rudderDeflection, target: rudderFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        next.elevatorDeflection = elevatorFraction
+        next.aileronDeflection = aileronFraction
+        next.rudderDeflection = rudderFraction
+
+        // --- Aerodynamics: real angle-of-attack/sideslip-driven forces and moments.
+        let effectiveWind = effectiveWindWithGusts(
+            baseWind: context.windVector,
+            altitudeM: state.position.y,
+            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
+            dt: dt,
+            referenceAirspeed: max(simd_length(state.velocity), 1.0)
         )
-        let climbTarget = max(wing.climbSpeedMps, wing.minSustainableSpeedMps)
-        let speedEnvelope = control.mode == .takeoff ? climbTarget * 1.12 : cruiseTarget * 1.45
-        let cappedAirspeed = min(profile.maxHorizontalSpeedMps, wing.maxAirspeed)
-        let climbPenalty = max(0.0, sin(next.orientation.y)) * max(wing.cruiseAirspeed * 0.52, wing.nominalClimbRateMps * 2.4)
-        let diveAssist = max(0.0, -sin(next.orientation.y)) * wing.cruiseAirspeed * 0.18
-        let bankPenalty = abs(sin(next.orientation.x)) * max(wing.cruiseAirspeed * 0.20, wing.minSafeAirspeed * 0.25)
-        let targetForwardSpeed = (
-            motorThrottle * min(cappedAirspeed, speedEnvelope) * (0.55 + 0.45 * batteryFactor) -
-            climbPenalty -
-            bankPenalty +
-            diveAssist
-        ).clamped(to: 0.0...cappedAirspeed)
-        let minimumForwardSpeed = state.position.y > 0.15
-            ? wing.minSafeAirspeed * (0.90 + baseline.stallProtectionBias * 0.32)
-            : 0.0
-        let forwardSpeed = approach(
-            current: max(0.0, state.forwardAirspeed),
-            target: max(minimumForwardSpeed, targetForwardSpeed),
-            increaseRate: (6.2 + baseline.effectiveThrottleAuthority * 0.8 * wing.throttleResponseGain).clamped(to: 5.0...8.0),
-            decreaseRate: (4.8 + baseline.effectiveThrottleAuthority * 0.5 * wing.dragFactor).clamped(to: 4.0...6.4),
+        let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity - effectiveWind)
+        let airspeed = max(simd_length(bodyAirflow), 0.5)
+        let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
+        let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
+
+        let airDensity: Float = 1.225
+        let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
+
+        let (cl, cd) = aero.liftDrag(alphaRad: alpha)
+        let cy = aero.cyBeta * beta
+
+        let normalizedWindDir = simd_length(bodyAirflow) > 0.0001 ? simd_normalize(bodyAirflow) : SIMD3<Float>(0, 0, -1)
+        let bodyUp = SIMD3<Float>(0, 1, 0)
+        let bodyRight = SIMD3<Float>(1, 0, 0)
+        let liftDirRaw = bodyUp - normalizedWindDir * simd_dot(bodyUp, normalizedWindDir)
+        let liftDir = simd_length(liftDirRaw) > 0.0001 ? simd_normalize(liftDirRaw) : SIMD3<Float>(0, 1, 0)
+        let sideDirRaw = bodyRight - normalizedWindDir * simd_dot(bodyRight, normalizedWindDir)
+        let sideDir = simd_length(sideDirRaw) > 0.0001 ? simd_normalize(sideDirRaw) : SIMD3<Float>(1, 0, 0)
+
+        let liftForce = liftDir * (cl * dynamicPressure * aero.wingArea)
+        let dragForce = -normalizedWindDir * (cd * dynamicPressure * aero.wingArea)
+        let sideForce = sideDir * (cy * dynamicPressure * aero.wingArea)
+        let aeroForceBody = liftForce + dragForce + sideForce
+
+        // bodyAngularVelocity convention matches orientation/.x=roll,.y=pitch,.z=yaw (see DroneState).
+        let rollRate = state.bodyAngularVelocity.x
+        let pitchRate = state.bodyAngularVelocity.y
+        let yawRate = state.bodyAngularVelocity.z
+        let pHat = rollRate * aero.wingSpan / (2.0 * airspeed)
+        let qHat = pitchRate * aero.meanChord / (2.0 * airspeed)
+        let rHat = yawRate * aero.wingSpan / (2.0 * airspeed)
+
+        let cmPitch = aero.pitchMoment(alphaRad: alpha, elevatorFraction: elevatorFraction, qHat: qHat)
+        let clRoll = aero.rollMoment(alphaRad: alpha, betaRad: beta, aileronFraction: aileronFraction, pHat: pHat)
+        let cnYaw = aero.yawMoment(alphaRad: alpha, betaRad: beta, rudderFraction: rudderFraction, rHat: rHat)
+
+        var momentBody = SIMD3<Float>(
+            clRoll * dynamicPressure * aero.wingArea * aero.wingSpan,
+            cmPitch * dynamicPressure * aero.wingArea * aero.meanChord,
+            cnYaw * dynamicPressure * aero.wingArea * aero.wingSpan
+        )
+
+        // --- Thrust: sized so motorThrottle == baseline.cruiseReferenceThrottle balances drag at cruise.
+        let (_, cdTrim) = aero.liftDrag(alphaRad: 0.0)
+        let cruiseSpeed = max(wing.cruiseSpeedMps, wing.minSustainableSpeedMps, 1.0)
+        let dragAtCruise = 0.5 * airDensity * cruiseSpeed * cruiseSpeed * aero.wingArea * cdTrim
+        let referenceThrottle = max(0.2, baseline.cruiseReferenceThrottle)
+        let maxThrust = max(0.5, dragAtCruise / referenceThrottle) * batteryFactor
+        let thrustMagnitude = (crashOrDisarmed ? 0.0 : motorThrottle) * maxThrust
+        let thrustForceBody = SIMD3<Float>(0, 0, -1) * thrustMagnitude
+
+        // --- Propulsion-airframe coupling: prop wash on the tail, torque
+        // reaction, P-factor, gyroscopic precession. None of this existed
+        // before — thrust only ever pushed the aircraft forward.
+        if !crashOrDisarmed {
+            // Prop wash gives the elevator/rudder extra authority beyond
+            // what freestream airspeed alone would provide (e.g. holding the
+            // nose up during a slow takeoff roll) — added as the *delta*
+            // over the freestream-based moment already computed above, so
+            // the natural alpha/rate stability terms stay tied to freestream
+            // dynamic pressure and only the control-deflection terms see the
+            // boost.
+            let tailQ = aero.tailDynamicPressure(airspeed: airspeed, thrust: thrustMagnitude, airDensity: airDensity)
+            let extraQ = max(0.0, tailQ - dynamicPressure)
+            momentBody.y += aero.cmDeltaE * elevatorFraction * extraQ * aero.wingArea * aero.meanChord
+            momentBody.z += aero.cnDeltaR * rudderFraction * extraQ * aero.wingArea * aero.wingSpan
+
+            // Torque reaction: the airframe rolls opposite to the prop spin.
+            momentBody.x += -aero.propSpinSign * thrustMagnitude * aero.propRadius * aero.torqueThrustRatio
+
+            // P-factor: asymmetric blade loading at high AoA/low speed yaws
+            // the nose, growing with both thrust and AoA.
+            momentBody.z += aero.propSpinSign * sin(alpha) * thrustMagnitude * aero.propRadius * aero.pFactorGain
+
+            // Gyroscopic precession of the spinning prop disk against body
+            // rotation. Remapped from this codebase's (roll,pitch,yaw)
+            // labeling (roll about Z, pitch about X, yaw about Y) into
+            // standard (X,Y,Z) for the cross product, then back.
+            let propOmega = 50.0 + motorThrottle * 650.0
+            let propSpinVectorXYZ = SIMD3<Float>(0, 0, -aero.propSpinSign * propOmega)
+            let bodyRateXYZ = SIMD3<Float>(pitchRate, yawRate, rollRate)
+            let gyroMomentXYZ = aero.propInertia * simd_cross(propSpinVectorXYZ, bodyRateXYZ)
+            momentBody += SIMD3<Float>(gyroMomentXYZ.z, gyroMomentXYZ.x, gyroMomentXYZ.y)
+        }
+
+        // --- Integration: semi-implicit Euler (unconditionally stable for damped oscillatory systems).
+        let mass = max(0.1, payloadMassModel.resolvedCurrentTotalMass)
+        let totalForceWorld = simd_act(state.fixedWingOrientationQuat, aeroForceBody + thrustForceBody)
+            + SIMD3<Float>(0, -mass * Tuning.gravity, 0)
+        let acceleration = totalForceWorld / mass
+
+        next.velocity = state.velocity + acceleration * dt
+        next.position = state.position + next.velocity * dt
+
+        let angularAccel = momentBody / aero.inertiaTensor
+        next.bodyAngularVelocity = clampMagnitude(state.bodyAngularVelocity + angularAccel * dt, limit: 10.0)
+        next.fixedWingOrientationQuat = integrateFixedWingOrientation(
+            state.fixedWingOrientationQuat,
+            rollRate: next.bodyAngularVelocity.x,
+            pitchRate: next.bodyAngularVelocity.y,
+            yawRate: next.bodyAngularVelocity.z,
             dt: dt
         )
+        next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+        next.angularVelocity = next.bodyAngularVelocity
+        next.angleOfAttack = alpha
+        next.sideslipAngle = beta
 
-        let q = orientationQuaternion(from: next.orientation)
-        var velocity = simd_act(q, SIMD3<Float>(0.0, 0.0, -forwardSpeed))
-        velocity += (context.windVector - velocity) * (0.05 * wing.dragFactor)
-
-        let maxClimbRate = min(profile.maxAscentSpeedMps, wing.nominalClimbRateMps * 1.45).clamped(to: 0.8...profile.maxAscentSpeedMps)
-        let maxSinkRate = min(profile.maxDescentSpeedMps, wing.nominalSinkRateMps * 1.55).clamped(to: 0.8...profile.maxDescentSpeedMps)
-        let clampedVerticalSpeed = velocity.y.clamped(to: -maxSinkRate...maxClimbRate)
-        let planarVelocity = SIMD2<Float>(velocity.x, velocity.z)
-        let planarDirection: SIMD2<Float>
-        if simd_length(planarVelocity) > 0.001 {
-            planarDirection = simd_normalize(planarVelocity)
-        } else {
-            planarDirection = SIMD2<Float>(-sin(next.orientation.z), -cos(next.orientation.z))
-        }
-        let planarSpeed = sqrt(max(0.0, forwardSpeed * forwardSpeed - clampedVerticalSpeed * clampedVerticalSpeed))
-        velocity.x = planarDirection.x * planarSpeed
-        velocity.z = planarDirection.y * planarSpeed
-        velocity.y = clampedVerticalSpeed
-
-        if next.position.y <= 0.0 && motorThrottle < 0.12 {
-            velocity.y = 0.0
-        }
-
-        next.velocity = velocity
-        next.position += next.velocity * dt
+        // --- Ground handling.
         if next.position.y < 0.0 {
             next.position.y = 0.0
             if next.velocity.y < 0.0 {
@@ -466,19 +623,107 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         if groundRestState {
             next.velocity.x *= max(0.0, 1.0 - dt * 10.0)
             next.velocity.z *= max(0.0, 1.0 - dt * 10.0)
-            next.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - dt * 12.0))
+            next.bodyAngularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - dt * 12.0))
             if state.physicalState != .crashed {
-                next.orientation.x = approach(current: next.orientation.x, target: 0.0, increaseRate: 4.0, decreaseRate: 4.0, dt: dt)
-                next.orientation.y = approach(current: next.orientation.y, target: 0.0, increaseRate: 4.0, decreaseRate: 4.0, dt: dt)
+                // Level roll/pitch toward the ground while preserving current heading.
+                let headingOnlyQuat = simd_quatf(angle: next.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+                let levelBlend = min(1.0, dt * 4.0)
+                let blendedVector = next.fixedWingOrientationQuat.vector * (1.0 - levelBlend) + headingOnlyQuat.vector * levelBlend
+                next.fixedWingOrientationQuat = simd_quatf(vector: simd_normalize(blendedVector))
+                next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
             }
+            next.angularVelocity = next.bodyAngularVelocity
         }
 
         next.throttle = crashOrDisarmed ? 0.0 : motorThrottle
         next.motorThrottle = next.throttle
         next.rotorAngularSpeed = SIMD4<Float>(crashOrDisarmed ? 0.0 : (60.0 + motorThrottle * 540.0), 0.0, 0.0, 0.0)
-        next.forwardAirspeed = forwardSpeed
+        next.forwardAirspeed = airspeed
 
         return next
+    }
+
+    /// Extracts display/telemetry Euler angles (roll, pitch, yaw) from the
+    /// authoritative fixed-wing orientation quaternion. Derived directly from
+    /// the body forward/up basis vectors rather than a generic textbook
+    /// formula, so it matches this codebase's specific composition order
+    /// (`yaw * pitch * roll`, roll about Z) and its existing yaw convention
+    /// (`atan2(-dx, -dz)`, also used by `FixedWingAutopilotInput`). Gimbal-locks
+    /// at pitch = ±90° like any Euler representation — display-only, never fed
+    /// back into the physics integration.
+    private func eulerFromFixedWingQuaternion(_ q: simd_quatf) -> SIMD3<Float> {
+        let forward = simd_act(q, SIMD3<Float>(0, 0, -1))
+        let pitch = asin(forward.y.clamped(to: -1.0...1.0))
+        let yaw = atan2(-forward.x, -forward.z)
+
+        let upWorld = simd_act(q, SIMD3<Float>(0, 1, 0))
+        let invYaw = simd_quatf(angle: -yaw, axis: SIMD3<Float>(0, 1, 0))
+        let invPitch = simd_quatf(angle: -pitch, axis: SIMD3<Float>(1, 0, 0))
+        let unrolled = simd_act(invPitch, simd_act(invYaw, upWorld))
+        let roll = atan2(-unrolled.x, unrolled.y)
+
+        return SIMD3<Float>(roll, pitch, yaw)
+    }
+
+    /// Integrates the fixed-wing attitude quaternion from true body-frame
+    /// rates via q̇ = 0.5 * q ⊗ ω, normalizing every step. `rollRate`/
+    /// `pitchRate`/`yawRate` follow this codebase's roll-about-Z/pitch-about-X/
+    /// yaw-about-Y axis labeling, remapped here into the quaternion's
+    /// (x, y, z) imaginary axes.
+    private func integrateFixedWingOrientation(
+        _ q: simd_quatf,
+        rollRate: Float,
+        pitchRate: Float,
+        yawRate: Float,
+        dt: Float
+    ) -> simd_quatf {
+        let omega = simd_quatf(ix: pitchRate, iy: yawRate, iz: rollRate, r: 0)
+        let qDotVector = (q * omega).vector * 0.5
+        let qNextVector = q.vector + qDotVector * dt
+        let length = simd_length(qNextVector)
+        guard length.isFinite, length > 1e-6 else {
+            return simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+        }
+        return simd_quatf(vector: qNextVector / length)
+    }
+
+    /// Manual yaw stick (if present) else a light heading-hold correction,
+    /// returned as a rudder deflection fraction in -1...1.
+    private func desiredFixedWingRudderFraction(
+        control: DroneControlInput,
+        currentYaw: Float,
+        yawRate: Float,
+        authority: Float,
+        wing: FixedWingParameters,
+        fallbackHeading: Float,
+        coordinationBankRad: Float = 0.0
+    ) -> Float {
+        // Yaw-rate damper (active in every mode): opposes yaw rate to suppress
+        // the lightly-damped Dutch-roll wallow that the real 6DOF model now
+        // simulates. Sign matches the aero cnr damper (cnDeltaR > 0, so rudder
+        // ∝ -yawRate produces a damping yaw moment). 0.18 is a light hand —
+        // enough to settle the side-to-side weave without making yaw sluggish.
+        let yawDamper = (-yawRate * 0.18).clamped(to: -0.5...0.5)
+        // Turn coordination (autopilot/assist only — manual stick-and-rudder
+        // is the player's job): a banked turn's own geometry demands a yaw
+        // rate of the *same sign* as the bank (right bank -> right turn).
+        // Same-sign with bank is the self-consistent direction here too —
+        // the autopilot already commands bank with the same sign as its
+        // course error, so this rudder term must reinforce that bank, not
+        // oppose it. Without this the turn is flown on ailerons alone and
+        // has to build sideslip before the fuselage/fin "catch up" to the
+        // turn — exactly the slip that was feeding the Dutch-roll wallow.
+        let coordination = coordinationBankRad * 0.5
+        let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
+        if abs(manualIntent) > 0.001 {
+            return (manualIntent * 0.6 * authority + yawDamper).clamped(to: -1.0...1.0)
+        }
+        // Heading-error rudder gain was 0.8 — far too high. The rudder isn't
+        // the primary heading actuator (bank is); a large heading-error rudder
+        // term lags the wobble and pumps energy *into* the Dutch roll instead
+        // of holding course. Cut to 0.25 and let the yaw damper do the work.
+        let headingError = wrap(fallbackHeading - currentYaw)
+        return (headingError * 0.25 * wing.bankResponseGain + yawDamper + coordination).clamped(to: -1.0...1.0)
     }
 
     private func angleTrackingRates(
@@ -511,24 +756,6 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         let yawError = wrap(fallbackHeading - state.orientation.z)
         return yawError * headingGain
-    }
-
-    private func desiredFixedWingYawRate(
-        control: DroneControlInput,
-        state: DroneState,
-        authority: Float,
-        wing: FixedWingParameters,
-        airspeed: Float,
-        fallbackHeading: Float
-    ) -> Float {
-        let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
-        let turnScale = wing.turnAuthority.clamped(to: 0.4...1.4) * (airspeed / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...1.25)
-        if abs(manualIntent) > 0.001 {
-            return manualIntent * wing.nominalTurnRateDegPerSec.degreesToRadians * 0.65 * authority * turnScale
-        }
-
-        let headingCorrection = wrap(fallbackHeading - state.orientation.z) * (0.52 * turnScale * wing.bankResponseGain)
-        return headingCorrection + sin(state.orientation.x) * wing.nominalTurnRateDegPerSec.degreesToRadians * turnScale
     }
 
     private func emitStartupDiagnosticsIfNeeded(
@@ -625,6 +852,65 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             return current + min(delta, increaseRate * dt)
         }
         return current + max(delta, -decreaseRate * dt)
+    }
+
+    /// Adds a near-ground turbulence gust (Dryden low-altitude model,
+    /// MIL-F-8785C) on top of the steady wind — strongest at the surface,
+    /// fading to none by ~1000 ft. Driven by the existing steady wind speed
+    /// (real mechanical/boundary-layer turbulence needs wind to exist),
+    /// then *compounded* — not gated — by the weather preset's
+    /// turbulenceFactor, so calm conditions with some ambient wind still get
+    /// a believable bump on takeoff/landing and storms get more, rather
+    /// than calm weather (turbulenceFactor 0) zeroing it outright.
+    private func effectiveWindWithGusts(
+        baseWind: SIMD3<Float>,
+        altitudeM: Float,
+        turbulenceFactor: Float,
+        dt: Float,
+        referenceAirspeed: Float
+    ) -> SIMD3<Float> {
+        let altitudeFt = max(altitudeM, 0.0) * 3.28084
+        let fadeOut = (1.0 - altitudeFt / 1000.0).clamped(to: 0.0...1.0)
+        guard fadeOut > 0.0 else {
+            windGustState = .zero
+            return baseWind
+        }
+
+        // MIL-F-8785C low-altitude form is defined in feet; convert the
+        // resulting scale lengths back to meters for the sim's own units.
+        let referenceWindSpeed = max(simd_length(baseWind), 0.5)
+        let altitudeFtFloored = max(altitudeFt, 3.0)
+        let shapingTerm = (0.177 + 0.000823 * altitudeFtFloored)
+        let sigmaW = 0.1 * referenceWindSpeed
+        let sigmaUV = sigmaW / max(0.05, pow(shapingTerm, 0.4))
+        let scaleLengthWM = altitudeFtFloored * 0.3048
+        let scaleLengthUVM = (altitudeFtFloored / max(0.05, pow(shapingTerm, 1.2))) * 0.3048
+
+        let v = max(referenceAirspeed, 1.0)
+        let intensityBoost = 0.6 + 0.4 * turbulenceFactor.clamped(to: 0.0...1.0)
+
+        windGustState = SIMD3<Float>(
+            ouGustStep(current: windGustState.x, sigma: sigmaUV, scaleLength: scaleLengthUVM, airspeed: v, dt: dt),
+            ouGustStep(current: windGustState.y, sigma: sigmaW, scaleLength: scaleLengthWM, airspeed: v, dt: dt),
+            ouGustStep(current: windGustState.z, sigma: sigmaUV, scaleLength: scaleLengthUVM, airspeed: v, dt: dt)
+        )
+
+        return baseWind + windGustState * (fadeOut * intensityBoost)
+    }
+
+    /// One step of the discrete-time Ornstein-Uhlenbeck process — the exact
+    /// solution of the Dryden shaping filter's simplest (first-order) form,
+    /// so no continuous transfer-function/ARMA implementation is needed.
+    private func ouGustStep(current: Float, sigma: Float, scaleLength: Float, airspeed: Float, dt: Float) -> Float {
+        let decay = exp(-airspeed * dt / max(0.1, scaleLength))
+        let noise = sigma * sqrt(max(0.0, 1.0 - decay * decay)) * gaussianRandomSample()
+        return current * decay + noise
+    }
+
+    private func gaussianRandomSample() -> Float {
+        let u1 = max(1e-6, Float.random(in: 0.0...1.0))
+        let u2 = Float.random(in: 0.0...1.0)
+        return sqrt(-2.0 * log(u1)) * cos(2.0 * Float.pi * u2)
     }
 }
 

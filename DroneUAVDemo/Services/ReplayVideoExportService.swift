@@ -10,15 +10,16 @@ enum ReplayVideoExportError: LocalizedError {
     case writerFailed(String)
 
     var errorDescription: String? {
+        let language = L10n.currentLanguage()
         switch self {
         case .noFrames:
-            return "Replay has no frames to export."
+            return L10n.s("replay.export.error.no_frames", language: language)
         case .cancelled:
-            return "Export cancelled."
+            return L10n.s("replay.export.error.cancelled", language: language)
         case .pixelBufferUnavailable:
-            return "Video pixel buffer is unavailable."
+            return L10n.s("replay.export.error.pixel_buffer_unavailable", language: language)
         case .imageConversionFailed:
-            return "Could not convert rendered replay frame to video buffer."
+            return L10n.s("replay.export.error.image_conversion_failed", language: language)
         case .writerFailed(let message):
             return message
         }
@@ -133,15 +134,42 @@ final class ReplayVideoExportService: ObservableObject {
         }
 
         let fileType: AVFileType = settings.format == .mp4 ? .mp4 : .mov
+
+        // Quality mode gets HEVC — roughly 2x the compression efficiency of H.264 at the same
+        // bitrate (so the existing bitrate presets go noticeably further), safe to assume
+        // available since HEVC hardware encode has shipped on every Mac since 2017, well below
+        // this app's deployment target. Fast mode keeps H.264: it encodes faster and that mode's
+        // whole point is turnaround speed over maximum quality-per-bit.
+        let codec: AVVideoCodecType = settings.exportMode == .quality ? .hevc : .h264
+
+        var compressionProperties: [String: Any] = [
+            AVVideoAverageBitRateKey: resolvedBitrate,
+            AVVideoExpectedSourceFrameRateKey: settings.framesPerSecond
+        ]
+        if codec == .h264 {
+            // Explicit High profile — AVFoundation otherwise defaults to a lower, less efficient
+            // profile. High has been decodable by essentially everything for over a decade, so
+            // this is a strict quality-per-bit win with no real compatibility cost. HEVC doesn't
+            // need the equivalent here; its encoder defaults are already the efficient ones.
+            compressionProperties[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
+        }
+
+        // Tags the output as standard Rec.709 (SDR) instead of leaving color interpretation to
+        // whatever the encoder/player guesses — this is ordinary SDR render output, not HDR or a
+        // wide-gamut source, so this is the correct tag rather than an enhancement.
+        let colorProperties: [String: Any] = [
+            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+            AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+        ]
+
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: fileType)
         let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoCodecKey: codec,
             AVVideoWidthKey: settings.width,
             AVVideoHeightKey: settings.height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: resolvedBitrate,
-                AVVideoExpectedSourceFrameRateKey: settings.framesPerSecond
-            ]
+            AVVideoColorPropertiesKey: colorProperties,
+            AVVideoCompressionPropertiesKey: compressionProperties
         ]
         let fallbackVideoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -156,7 +184,7 @@ final class ReplayVideoExportService: ObservableObject {
         } else {
             let fallbackInput = AVAssetWriterInput(mediaType: .video, outputSettings: fallbackVideoSettings)
             guard writer.canAdd(fallbackInput) else {
-                throw ReplayVideoExportError.writerFailed("Video writer cannot add H.264 input for \(settings.format.rawValue.uppercased()).")
+                throw ReplayVideoExportError.writerFailed(L10n.f("replay.export.error.cannot_add_input", language: L10n.currentLanguage(), settings.format.rawValue.uppercased()))
             }
             input = fallbackInput
         }
@@ -173,7 +201,7 @@ final class ReplayVideoExportService: ObservableObject {
 
         writer.add(input)
         guard writer.startWriting() else {
-            throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? "Video writer failed to start.")
+            throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? L10n.s("replay.export.error.writer_start_failed", language: L10n.currentLanguage()))
         }
         writer.startSession(atSourceTime: .zero)
 
@@ -184,10 +212,20 @@ final class ReplayVideoExportService: ObservableObject {
         if cameraMode == .cinematicEvent {
             controller.setSelectedEvent(selectedEvent.flatMap { trim.contains($0.timestamp) ? $0 : nil })
         }
+        if cameraMode == .onboardMount {
+            // setCameraMode defaults onboard-mount to its editing sub-state (gizmo visible,
+            // camera orbiting outside the drone) — exactly right the first time someone picks
+            // this mode interactively, completely wrong for a rendered export: it would bake the
+            // move arrows/rotate rings/eye marker into the video and show the wide orbit framing
+            // instead of the configured "through the lens" shot. Exports always want the final
+            // preview result.
+            controller.setOnboardMountEditing(false)
+        }
 
         let renderer = SCNRenderer(device: nil, options: nil)
         renderer.scene = controller.scene
         renderer.pointOfView = controller.cameraNode
+        renderer.technique = controller.wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
         let renderSize = NSSize(width: settings.width, height: settings.height)
 
         do {
@@ -234,7 +272,7 @@ final class ReplayVideoExportService: ObservableObject {
 
                 let presentationTime = CMTime(value: CMTimeValue(frameIndex), timescale: CMTimeScale(settings.framesPerSecond))
                 guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-                    throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? "Video writer failed while appending frames.")
+                    throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? L10n.s("replay.export.error.writer_append_failed", language: L10n.currentLanguage()))
                 }
 
                 let nextProgress = Double(frameIndex + 1) / Double(totalFrames)
@@ -255,7 +293,7 @@ final class ReplayVideoExportService: ObservableObject {
             input.markAsFinished()
             await writer.finishWriting()
             if writer.status == .failed {
-                throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? "Video writer failed.")
+                throw ReplayVideoExportError.writerFailed(writer.error?.localizedDescription ?? L10n.s("replay.export.error.writer_failed", language: L10n.currentLanguage()))
             }
 
             logExportSummary(
@@ -400,7 +438,8 @@ final class ReplayVideoExportService: ObservableObject {
         let bitrateMbps = Double(resolvedBitrate) / 1_000_000
         let status = cancelled ? "cancelled" : "finished"
         let trimDescription = settings.trimRange.map { "\(String(format: "%.2f", $0.startTime))...\(String(format: "%.2f", $0.endTime))" } ?? "full"
-        print("[ReplayExport] \(status) mode=\(settings.exportMode.rawValue) format=\(settings.format.rawValue) resolutionPreset=\(settings.resolutionPreset.rawValue) resolution=\(settings.width)x\(settings.height) fps=\(settings.framesPerSecond) bitratePreset=\(settings.bitratePreset.rawValue) bitrate=\(String(format: "%.1f", bitrateMbps))Mbps estimatedSize=\(String(format: "%.1f", estimatedOutputSizeMB))MB camera=\(cameraMode.rawValue) trim=\(trimDescription) frames=\(totalFrames) elapsed=\(String(format: "%.2f", elapsed))s avgOutputFrame=\(String(format: "%.1f", averageOutputFrameMS))ms avgRender=\(String(format: "%.1f", averageRenderMS))ms avgWriterWait=\(String(format: "%.1f", averageWriterWaitMS))ms path=\(renderOptions.showPathTrail) markers=\(renderOptions.showEventMarkers) overlay=\(renderOptions.showOverlay) environment=\(renderOptions.environmentQuality)")
+        let loggedCodec = settings.exportMode == .quality ? "hevc" : "h264"
+        print("[ReplayExport] \(status) mode=\(settings.exportMode.rawValue) codec=\(loggedCodec) format=\(settings.format.rawValue) resolutionPreset=\(settings.resolutionPreset.rawValue) resolution=\(settings.width)x\(settings.height) fps=\(settings.framesPerSecond) bitratePreset=\(settings.bitratePreset.rawValue) bitrate=\(String(format: "%.1f", bitrateMbps))Mbps estimatedSize=\(String(format: "%.1f", estimatedOutputSizeMB))MB camera=\(cameraMode.rawValue) trim=\(trimDescription) frames=\(totalFrames) elapsed=\(String(format: "%.2f", elapsed))s avgOutputFrame=\(String(format: "%.1f", averageOutputFrameMS))ms avgRender=\(String(format: "%.1f", averageRenderMS))ms avgWriterWait=\(String(format: "%.1f", averageWriterWaitMS))ms path=\(renderOptions.showPathTrail) markers=\(renderOptions.showEventMarkers) overlay=\(renderOptions.showOverlay) environment=\(renderOptions.environmentQuality)")
         if averageRenderMS > 50 {
             print("[ReplayExport] warning: average render time is high; keep export at 720p/24fps while stabilization continues.")
         }
@@ -423,7 +462,8 @@ final class ReplayVideoExportService: ObservableObject {
             .foregroundColor: NSColor.white,
             .paragraphStyle: paragraph
         ]
-        let text = "Black Box Replay  \(cameraMode.displayName)  \(format(time)) / \(format(duration))"
+        let title = L10n.s("replay.title", language: L10n.currentLanguage())
+        let text = "\(title)  \(cameraMode.displayName)  \(format(time)) / \(format(duration))"
         let rect = NSRect(x: 24, y: image.size.height - 48, width: image.size.width - 48, height: 28)
         NSColor.black.withAlphaComponent(0.45).setFill()
         NSBezierPath(roundedRect: rect.insetBy(dx: -8, dy: -6), xRadius: 8, yRadius: 8).fill()

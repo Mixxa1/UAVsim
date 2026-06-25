@@ -177,7 +177,9 @@ final class FixedWingAutopilotController {
         parameters wing: FixedWingParameters,
         launchMode: LaunchMode,
         launchAsset: LaunchAsset?,
-        routeTracking: FixedWingRouteTrackingContext? = nil
+        routeTracking: FixedWingRouteTrackingContext? = nil,
+        missionMinAirspeed: Float? = nil,
+        missionMaxAirspeed: Float? = nil
     ) -> FixedWingAutopilotOutput {
         let airspeed = max(
             context.state.forwardAirspeed,
@@ -215,6 +217,11 @@ final class FixedWingAutopilotController {
         let altitudeFloor: Float? = isLaunchProtected
             ? max(context.targetAltitude, context.state.position.y + 4.0)
             : nil
+        // Mission speed bounds don't apply during the protected climb-out —
+        // that phase already has its own dedicated safe climb speed, which a
+        // mission-configured cap shouldn't be able to override.
+        let missionMinAirspeedActive: Float? = isLaunchProtected ? nil : missionMinAirspeed
+        let missionMaxAirspeedActive: Float? = isLaunchProtected ? nil : missionMaxAirspeed
 
         let input = FixedWingAutopilotInput(
             aircraftPosition: context.state.position,
@@ -231,6 +238,8 @@ final class FixedWingAutopilotController {
             wing: wing,
             cruiseAirspeedOverride: cruiseOverride,
             targetAltitudeOverride: altitudeFloor,
+            missionMinAirspeed: missionMinAirspeedActive,
+            missionMaxAirspeed: missionMaxAirspeedActive,
             input: input
         ) else {
             setPhase(.failed, reason: "autopilot_returned_nil")
@@ -250,6 +259,13 @@ final class FixedWingAutopilotController {
             setPhase(.approachingWaypoint, reason: "near_waypoint")
         } else {
             setPhase(.trackingLeg, reason: "tracking")
+        }
+
+        // Surface a genuine miss (set AFTER setPhase, which overwrites the
+        // transition reason). The waypoint remains active and guidance turns
+        // back to reacquire its sphere.
+        if result.missedActiveWaypoint {
+            lastTransitionReason = "waypoint_missed_reacquiring"
         }
 
         let command = AutopilotControlCommand(
@@ -389,14 +405,7 @@ final class FixedWingAutopilotController {
         defaultAltitude: Float,
         wing: FixedWingParameters
     ) -> FixedWingAutopilotPlan {
-        let baseAcceptanceRadius = max(wing.waypointAcceptanceRadiusMeters, 4.0)
-        let turnAwareAcceptanceRadius = max(
-            baseAcceptanceRadius * 1.45,
-            min(
-                wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed) * 0.85,
-                baseAcceptanceRadius * 8.0
-            )
-        )
+        let waypointCaptureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
         let waypoints: [FixedWingAutopilotWaypoint] = tracking.waypoints
             .filter { isFinite($0.position) }
             .map { wp in
@@ -405,7 +414,7 @@ final class FixedWingAutopilotController {
                     altitude: wp.position.y.isFinite && wp.position.y > 0.05
                         ? wp.position.y
                         : max(defaultAltitude, 1.0),
-                    acceptanceRadius: turnAwareAcceptanceRadius
+                    acceptanceRadius: waypointCaptureRadius
                 )
             }
         let minimumIndex = max(0, tracking.minimumWaypointIndex ?? 0)

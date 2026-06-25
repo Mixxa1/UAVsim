@@ -91,6 +91,8 @@ final class DroneSceneController {
     private let dockStationNode = SCNNode()
     private let missionDropZoneNode = SCNNode()
     private let missionWaypointCaptureNode = SCNNode()
+    private var renderedMissionWaypointCaptureZones: [MissionWaypointCaptureZoneVisual] = []
+    private var renderedMissionWaypointCaptureGroundY: Float?
     private let launchAssetNode = SCNNode()
     private let onlineTrialPlaceholderRootNode = SCNNode()
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
@@ -151,6 +153,7 @@ final class DroneSceneController {
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
     private(set) var environmentMapDescriptors: [EnvironmentObjectDescriptor] = []
+    private(set) var environmentRevision: UInt64 = 0
     private var supportSurfaces: [SupportSurfaceDescriptor] = []
     private var dynamicObstacles: [UUID: CollisionObstacle] = [:]
     private var wingmanVisuals: [UUID: WingmanVisual] = [:]
@@ -638,6 +641,15 @@ final class DroneSceneController {
     }
 
     func setMissionWaypointCaptureZones(_ zones: [MissionWaypointCaptureZoneVisual]) {
+        let groundY = max(Float(groundNode.presentation.position.y), 0.0)
+        if zones == renderedMissionWaypointCaptureZones,
+           let renderedGroundY = renderedMissionWaypointCaptureGroundY,
+           abs(renderedGroundY - groundY) <= 0.001 {
+            return
+        }
+        renderedMissionWaypointCaptureZones = zones
+        renderedMissionWaypointCaptureGroundY = groundY
+
         missionWaypointCaptureNode.childNodes.forEach { node in
             node.removeFromParentNode()
         }
@@ -647,7 +659,6 @@ final class DroneSceneController {
             return
         }
 
-        let groundY = max(Float(groundNode.presentation.position.y), 0.0)
         missionWaypointCaptureNode.isHidden = false
 
         for zone in zones {
@@ -1336,6 +1347,7 @@ final class DroneSceneController {
         }
 
         environmentObstacles = obstacles
+        environmentRevision &+= 1
 
         obstacleDebugProxyNodes.removeAll(keepingCapacity: false)
         collisionDebugNode.childNodes
@@ -2047,7 +2059,9 @@ final class DroneSceneController {
             to: (-settings.fpv.yawLimitDeg.degreesToRadians)...(settings.fpv.yawLimitDeg.degreesToRadians)
         )
         let fpvBaseYaw = atan2(fpvLocalForward.x, -fpvLocalForward.z)
-        fpvYawNode.eulerAngles.y = CGFloat(fpvBaseYaw + relativeYaw + userYaw)
+        let targetFpvYaw = fpvBaseYaw + relativeYaw + userYaw
+        let currentFpvYaw = Float(fpvYawNode.eulerAngles.y)
+        fpvYawNode.eulerAngles.y = CGFloat(currentFpvYaw + wrapAngle(targetFpvYaw - currentFpvYaw) * response)
 
         let gimbalPitch = (-state.velocity.y * 0.05).clamped(
             to: (-settings.fpv.pitchLimitDeg.degreesToRadians)...(settings.fpv.pitchLimitDeg.degreesToRadians)
@@ -2058,7 +2072,14 @@ final class DroneSceneController {
             to: (-settings.fpv.pitchLimitDeg.degreesToRadians)...(settings.fpv.pitchLimitDeg.degreesToRadians)
         )
         let localRoll = -state.orientation.x * stabilizer * 0.30
-        fpvPitchNode.eulerAngles = SCNVector3(localPitch + userPitch, 0.0, localRoll)
+        let targetFpvPitch = localPitch + userPitch
+        let currentFpvPitch = Float(fpvPitchNode.eulerAngles.x)
+        let currentFpvRoll = Float(fpvPitchNode.eulerAngles.z)
+        fpvPitchNode.eulerAngles = SCNVector3(
+            CGFloat(currentFpvPitch + (targetFpvPitch - currentFpvPitch) * response),
+            0.0,
+            CGFloat(currentFpvRoll + (localRoll - currentFpvRoll) * response)
+        )
 
         let fov = CGFloat(settings.fov.clamped(to: 30.0...110.0))
         followCameraNode.camera?.fieldOfView = fov

@@ -6,21 +6,29 @@ enum ReplayVideoExportMode: String, Codable, CaseIterable, Identifiable, Equatab
 
     var id: String { rawValue }
 
-    var displayName: String {
+    var titleKey: String {
         switch self {
         case .fast:
-            return "Fast"
+            return "replay.export_mode.fast"
         case .quality:
-            return "Quality"
+            return "replay.export_mode.quality"
+        }
+    }
+
+    var displayName: String {
+        L10n.s(titleKey, language: L10n.currentLanguage())
+    }
+
+    private var descriptionKey: String {
+        switch self {
+        case .fast:
+            return "replay.export_mode.fast.description"
+        case .quality:
+            return "replay.export_mode.quality.description"
         }
     }
 
     var description: String {
-        switch self {
-        case .fast:
-            return "Lightweight export. Lower heat, fewer details, faster output."
-        case .quality:
-            return "Detailed export. More scene details, slower rendering, higher CPU usage."
-        }
+        L10n.s(descriptionKey, language: L10n.currentLanguage())
     }
 }

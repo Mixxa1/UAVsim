@@ -2,6 +2,10 @@ import AppKit
 import SceneKit
 import simd
 
+private func localized(_ key: String) -> String {
+    L10n.s(key, language: L10n.currentLanguage())
+}
+
 // MARK: - Keyboard-routing window
 
 final class FullscreenReplayWindow: NSWindow {
@@ -26,13 +30,30 @@ final class FullscreenReplayWindow: NSWindow {
 final class ReplayInteractiveSCNView: SCNView {
     var onDrag:   ((Float, Float) -> Void)?
     var onScroll: ((Float) -> Void)?
+    var onGizmoMouseDown: ((CGPoint) -> Void)?
+    /// Return `true` if the drag was consumed by the gizmo, so the caller skips `onDrag`.
+    var onGizmoMouseDragged: ((Float, Float) -> Bool)?
+    var onGizmoMouseUp: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onGizmoMouseDown?(convert(event.locationInWindow, from: nil))
+        super.mouseDown(with: event)
+    }
 
     override func mouseDragged(with event: NSEvent) {
+        if onGizmoMouseDragged?(Float(event.deltaX), Float(event.deltaY)) == true {
+            return
+        }
         if let h = onDrag {
             h(Float(event.deltaX), Float(event.deltaY))
         } else {
             super.mouseDragged(with: event)
         }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onGizmoMouseUp?()
+        super.mouseUp(with: event)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -75,6 +96,8 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     private var cameraModePopup:  NSPopUpButton?
     private var topDownHeightLabel: NSTextField?
     private var topDownHeightSlider: NSSlider?
+    private var mountModeSegmented: NSSegmentedControl?
+    private var mountResetButton: NSButton?
     private var frameInfoLabel:   NSTextField?
     private var playPauseButton:  NSButton?
     private var stopButton:       NSButton?
@@ -98,7 +121,6 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     static func open(session: MissionReplaySession,
                      report: MissionReport?,
-                     availableDroneProfiles: [DroneModelProfile],
                      initialTime: TimeInterval,
                      initialCameraMode: ReplayCameraMode = .freeObserver,
                      selectedEvent: MissionReplayEvent? = nil) {
@@ -109,7 +131,6 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         host.build(
             session: session,
             report:  report,
-            availableDroneProfiles: availableDroneProfiles,
             initialTime: initialTime,
             initialCameraMode: initialCameraMode,
             selectedEvent: selectedEvent
@@ -120,7 +141,6 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     private func build(session: MissionReplaySession,
                        report: MissionReport?,
-                       availableDroneProfiles: [DroneModelProfile],
                        initialTime: TimeInterval,
                        initialCameraMode: ReplayCameraMode,
                        selectedEvent: MissionReplayEvent?) {
@@ -130,11 +150,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         let events = report?.events ?? session.events
         player.load(session: session)
         if initialTime > 0 { player.seek(to: initialTime) }
-        sceneController.loadSession(
-            session,
-            availableDroneProfiles: availableDroneProfiles,
-            events: events
-        )
+        sceneController.loadSession(session, events: events)
         sceneController.update(frame: player.currentFrame)
         sceneController.setSelectedEvent(selectedEvent ?? events.first)
         sceneController.setCameraMode(initialCameraMode)
@@ -173,6 +189,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         scnView.rendersContinuously      = true
         scnView.preferredFramesPerSecond = 60
         scnView.allowsCameraControl      = false
+        scnView.technique                = sceneController.wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
         scnView.autoresizingMask         = [.width, .height]
         scnView.onDrag = { [weak self] dx, dy in
             self?.sceneController.handleDragInput(dx: dx, dy: dy)
@@ -180,6 +197,25 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         scnView.onScroll = { [weak self] delta in
             self?.sceneController.handleScrollInput(delta: delta)
         }
+        scnView.onGizmoMouseDown = { [weak self, weak scnView] point in
+            guard let self, let scnView, self.sceneController.canInteractWithGizmo,
+                  let hit = ReplayGizmoInteraction.hitTestHandle(at: point, in: scnView) else { return }
+            self.sceneController.beginGizmoDrag(axis: hit.axis, kind: hit.kind)
+        }
+        scnView.onGizmoMouseDragged = { [weak self, weak scnView] dx, dy in
+            guard let self, let scnView, self.sceneController.isDraggingGizmoAxis,
+                  let ray = self.sceneController.gizmoAxisWorldRay() else { return false }
+            let delta = ReplayGizmoInteraction.axisDelta(
+                view: scnView,
+                worldOrigin: ray.origin,
+                worldDirection: ray.direction,
+                mouseDeltaX: dx,
+                mouseDeltaY: dy
+            )
+            self.sceneController.applyGizmoDrag(incrementalAxisDelta: delta)
+            return true
+        }
+        scnView.onGizmoMouseUp = { [weak self] in self?.sceneController.endGizmoDrag() }
         root.addSubview(scnView)
         sceneView = scnView
 
@@ -213,7 +249,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         parent.addSubview(bar)
         topBar = bar
 
-        let title = NSTextField(labelWithString: "Бортовой самописец")
+        let title = NSTextField(labelWithString: localized("replay.title"))
         title.font = .systemFont(ofSize: 13, weight: .bold)
         title.textColor = .white
         title.frame = NSRect(x: 16, y: 30, width: 260, height: 18)
@@ -227,7 +263,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(subtitle)
         subtitleLabel = subtitle
 
-        let cameraLabel = NSTextField(labelWithString: "Камера: \(sceneController.cameraMode.displayName)")
+        let cameraLabel = NSTextField(labelWithString: String(format: localized("replay.fullscreen.camera_format"), sceneController.cameraMode.displayName))
         cameraLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         cameraLabel.textColor = NSColor.white.withAlphaComponent(0.72)
         cameraLabel.frame = NSRect(
@@ -254,7 +290,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(cameraPopup)
         cameraModePopup = cameraPopup
 
-        let heightLabel = NSTextField(labelWithString: "Top height: \(Int(sceneController.topDownHeight)) m")
+        let heightLabel = NSTextField(labelWithString: String(format: localized("replay.fullscreen.height_format"), Int(sceneController.topDownHeight)))
         heightLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         heightLabel.textColor = NSColor.white.withAlphaComponent(0.72)
         heightLabel.frame = NSRect(x: 392, y: 30, width: 130, height: 16)
@@ -274,6 +310,31 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(heightSlider)
         topDownHeightSlider = heightSlider
 
+        let mountSegmented = NSSegmentedControl(
+            labels: [localized("replay.mount.edit"), localized("replay.mount.preview")],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(mountEditingChanged(_:))
+        )
+        mountSegmented.frame = NSRect(x: 392, y: 26, width: 150, height: 22)
+        mountSegmented.font = .systemFont(ofSize: 10, weight: .medium)
+        mountSegmented.selectedSegment = 0
+        mountSegmented.autoresizingMask = [.maxXMargin]
+        bar.addSubview(mountSegmented)
+        mountModeSegmented = mountSegmented
+
+        let mountReset = NSButton(
+            title: localized("replay.trim.reset"),
+            target: self,
+            action: #selector(mountResetTapped)
+        )
+        mountReset.bezelStyle = .rounded
+        mountReset.font = .systemFont(ofSize: 9, weight: .medium)
+        mountReset.frame = NSRect(x: 392, y: 5, width: 60, height: 18)
+        mountReset.autoresizingMask = [.maxXMargin]
+        bar.addSubview(mountReset)
+        mountResetButton = mountReset
+
         let badge = NSTextField(labelWithString: "")
         badge.font = .systemFont(ofSize: 10, weight: .bold)
         badge.textColor = .green
@@ -286,7 +347,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(badge)
         qualityBadge = badge
 
-        let hideBtn = NSButton(title: "Hide UI", target: self, action: #selector(hideOverlay))
+        let hideBtn = NSButton(title: localized("replay.fullscreen.hide_ui"), target: self, action: #selector(hideOverlay))
         hideBtn.bezelStyle = .rounded
         hideBtn.font = .systemFont(ofSize: 11, weight: .medium)
         hideBtn.frame = NSRect(
@@ -297,7 +358,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         bar.addSubview(hideBtn)
 
         if let xImg = NSImage(systemSymbolName: "xmark.circle.fill",
-                              accessibilityDescription: "Close") {
+                              accessibilityDescription: localized("replay.fullscreen.close_accessibility")) {
             let closeBtn = NSButton(image: xImg, target: self, action: #selector(closeRequested))
             closeBtn.isBordered = false
             closeBtn.contentTintColor = NSColor.white.withAlphaComponent(0.70)
@@ -372,8 +433,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         speedUpButton = speedUp
 
         // Hint label (right of speed up, below time label)
-        let hint = NSTextField(labelWithString:
-            "WASD move · Q/E vertical · Drag look · Scroll zoom · Space play/pause · R reset · Esc close")
+        let hint = NSTextField(labelWithString: localized("replay.fullscreen.keyboard_hints"))
         hint.font = .systemFont(ofSize: 9)
         hint.textColor = NSColor.white.withAlphaComponent(0.38)
         hint.alignment = .right
@@ -410,7 +470,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     private func buildShowUIButton(in parent: NSView) {
         guard let eye = NSImage(systemSymbolName: "eye.fill",
-                                accessibilityDescription: "Show UI") else { return }
+                                accessibilityDescription: localized("replay.fullscreen.show_ui_accessibility")) else { return }
         let btn = NSButton(image: eye, target: self, action: #selector(showOverlay))
         btn.isBordered = false
         btn.contentTintColor = NSColor.white.withAlphaComponent(0.55)
@@ -487,25 +547,39 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         case .partial:  color = .yellow
         case .fallback: color = NSColor(red: 0.9, green: 0.5, blue: 0.1, alpha: 1.0)
         }
-        qualityBadge?.stringValue = "● " + q.rawValue.uppercased()
+        qualityBadge?.stringValue = "● " + localized(q.titleKey).uppercased()
         qualityBadge?.textColor   = color
-        cameraModeLabel?.stringValue = "Камера: \(sceneController.cameraMode.displayName)"
+        cameraModeLabel?.stringValue = String(format: localized("replay.fullscreen.camera_format"), sceneController.cameraMode.displayName)
         selectCameraPopupMode(sceneController.cameraMode)
-        topDownHeightLabel?.stringValue = "Высота: \(Int(sceneController.topDownHeight)) м"
+        topDownHeightLabel?.stringValue = String(format: localized("replay.fullscreen.height_format"), Int(sceneController.topDownHeight))
         topDownHeightSlider?.doubleValue = Double(sceneController.topDownHeight)
         let isTopDown = sceneController.cameraMode == .topDown
         topDownHeightLabel?.isHidden = !isTopDown
         topDownHeightSlider?.isHidden = !isTopDown
+
+        let isOnboardMount = sceneController.cameraMode == .onboardMount
+        mountModeSegmented?.isHidden = !isOnboardMount
+        mountResetButton?.isHidden = !isOnboardMount
+        if isOnboardMount {
+            mountModeSegmented?.selectedSegment = sceneController.onboardMountIsEditing ? 0 : 1
+        }
 
         if let frame = player.currentFrame {
             let vel   = frame.velocity.simd
             let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).squareRoot()
             let bat   = frame.batteryPercent.map { String(format: "%.0f%%", $0) } ?? "—"
             let ap    = frame.autopilotDescription ?? "—"
-            var text  = String(format:
-                "X %.1f   Y %.1f m   Z %.1f   Spd %.1f m/s   Mode %@   AP %@   Bat %@",
-                frame.position.x, frame.position.y, frame.position.z, speed,
-                frame.flightModeDescription, ap, bat)
+            let speedLabel = localized("replay.frame.speed_short")
+            let modeLabel = localized("replay.frame.mode_short")
+            let apLabel = localized("replay.frame.autopilot_short")
+            let batLabel = localized("replay.frame.battery_short")
+            var text = "X \(String(format: "%.1f", frame.position.x))   " +
+                "Y \(String(format: "%.1f", frame.position.y)) m   " +
+                "Z \(String(format: "%.1f", frame.position.z))   " +
+                "\(speedLabel) \(String(format: "%.1f", speed)) m/s   " +
+                "\(modeLabel) \(frame.flightModeDescription)   " +
+                "\(apLabel) \(ap)   " +
+                "\(batLabel) \(bat)"
             if frame.warningCount > 0 {
                 text += "   ⚠ \(frame.warningCount)"
             }
@@ -593,6 +667,18 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         updateUI()
     }
 
+    @objc private func mountEditingChanged(_ sender: NSSegmentedControl) {
+        sceneController.setOnboardMountEditing(sender.selectedSegment == 0)
+        sceneController.update(frame: player.currentFrame)
+        updateUI()
+    }
+
+    @objc private func mountResetTapped() {
+        sceneController.resetOnboardMountOffset()
+        sceneController.update(frame: player.currentFrame)
+        updateUI()
+    }
+
     @objc private func sliderChanged(_ sender: NSSlider) {
         player.seek(to: sender.doubleValue)
         sceneController.update(frame: player.currentFrame)
@@ -631,7 +717,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     }
 
     private var availableCameraModes: [ReplayCameraMode] {
-        var modes: [ReplayCameraMode] = [.freeObserver, .chase, .orbit, .topDown, .fpvApproximation]
+        var modes: [ReplayCameraMode] = [.freeObserver, .chase, .orbit, .topDown, .fpvApproximation, .onboardMount]
         let events = session?.events ?? []
         if events.contains(where: { $0.type == .payloadReleased || $0.type == .payloadImpact }) {
             modes.append(.payloadFollow)
@@ -741,6 +827,9 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         sceneView?.delegate = nil
         sceneView?.onDrag = nil
         sceneView?.onScroll = nil
+        sceneView?.onGizmoMouseDown = nil
+        sceneView?.onGizmoMouseDragged = nil
+        sceneView?.onGizmoMouseUp = nil
 
         if let win = window {
             win.keyboardHandler = nil

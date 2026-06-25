@@ -39,7 +39,7 @@ final class MissionReplayRecorder {
             id: UUID(),
             timestamp: timestamp,
             type: .sessionStarted,
-            message: "Session started",
+            message: L10n.s("replay.event.session_started", language: L10n.currentLanguage()),
             position: nil
         )
         session.events.append(event)
@@ -54,7 +54,7 @@ final class MissionReplayRecorder {
             id: UUID(),
             timestamp: timestamp,
             type: .sessionStopped,
-            message: "Session stopped",
+            message: L10n.s("replay.event.session_stopped", language: L10n.currentLanguage()),
             position: nil
         )
         session.events.append(event)
@@ -80,7 +80,7 @@ final class MissionReplayRecorder {
                     id: UUID(),
                     timestamp: frame.timestamp,
                     type: .recordingLimitReached,
-                    message: "Recording limit reached: \(maxFrameCount) frames",
+                    message: L10n.f("replay.event.recording_limit_reached", language: L10n.currentLanguage(), maxFrameCount),
                     position: frame.position
                 )
                 session.events.append(event)

@@ -73,6 +73,10 @@ struct FixedWingAutopilotResult: Equatable {
     var remainingPathLengthMeters: Float
     var stallProtectionActive: Bool
     var hasCompletedRoute: Bool
+    /// True on the tick the aircraft crosses the waypoint's abeam plane
+    /// without entering its capture sphere. The route does not advance: the
+    /// controller keeps the waypoint active and turns back to reacquire it.
+    var missedActiveWaypoint: Bool
 }
 
 final class FixedWingAutopilot {
@@ -88,11 +92,13 @@ final class FixedWingAutopilot {
         // Vertical (pitch from altitude)
         static let altitudePitchGain: Float = 0.075        // rad pitch per meter of altitude error
         static let verticalDampingGain: Float = 0.18       // rad pitch per (m/s) vertical velocity
+        static let turnLiftCompensationGain: Float = 0.6   // rad pitch per unit (1/cos(bank) - 1)
         static let pitchFilterTau: Float = 0.45
         static let maxAltitudeBleedRateMps: Float = 4.5
         // Throttle (speed)
         static let throttleSpeedGain: Float = 0.085        // throttle per (m/s) speed error
         static let throttleAltitudeAssistGain: Float = 0.018
+        static let turnThrottleCompensationGain: Float = 0.3 // throttle per unit (1/cos(bank) - 1)
         static let throttleFilterTau: Float = 0.55
         static let throttleHoverSpan: ClosedRange<Float> = 0.32...0.95
         // Stall protection
@@ -113,6 +119,7 @@ final class FixedWingAutopilot {
         var legAnchor: SIMD2<Float> = .zero
         var hasLegAnchor: Bool = false
         var hasCompletedRoute: Bool = false
+        var missedActiveWaypoint: Bool = false
         var previousAircraftPlanar: SIMD2<Float> = .zero
         var hasPreviousAircraftPlanar: Bool = false
     }
@@ -137,6 +144,8 @@ final class FixedWingAutopilot {
         wing: FixedWingParameters,
         cruiseAirspeedOverride: Float?,
         targetAltitudeOverride: Float?,
+        missionMinAirspeed: Float? = nil,
+        missionMaxAirspeed: Float? = nil,
         input: FixedWingAutopilotInput
     ) -> FixedWingAutopilotResult? {
         guard !plan.waypoints.isEmpty else {
@@ -188,18 +197,56 @@ final class FixedWingAutopilot {
         let currentSpeed = max(0.0, input.aircraftAirspeed.isFinite ? input.aircraftAirspeed : 0.0)
 
         // Advance through any waypoints we have already crossed.
+        //
+        // `active.acceptanceRadius` is the same capture volume rendered on the
+        // tactical map and in the 3D scene. Guidance lookahead is intentionally
+        // larger, but it must not advance the route before this actual sphere
+        // is crossed. The swept-segment test still catches a fast fly-through
+        // that crosses the sphere between two ticks.
+        state.missedActiveWaypoint = false
         var advanceGuard = 0
         while advanceGuard < plan.waypoints.count {
             let active = plan.waypoints[state.activeWaypointIndex]
-            let acceptance = max(active.acceptanceRadius, wing.waypointAcceptanceRadiusMeters)
+            let captureRadius = max(active.acceptanceRadius, 4.0)
             let distanceToWaypoint = simd_length(aircraftPlanar - active.position)
             let crossedCaptureVolume = motionSegmentIntersectsCircle(
                 from: state.previousAircraftPlanar,
                 to: aircraftPlanar,
                 center: active.position,
-                radius: acceptance
+                radius: captureRadius
             )
-            let insideAcceptance = distanceToWaypoint <= acceptance
+            let insideAcceptance = distanceToWaypoint <= captureRadius
+
+            // Detect crossing the waypoint's abeam plane without entering its
+            // sphere. This is diagnostic only: a miss must never be counted as
+            // a completed waypoint. Guidance below will cap its carrot at the
+            // waypoint itself, causing a turn back and reacquisition.
+            let inboundDirection: SIMD2<Float> = {
+                if state.activeWaypointIndex > 0 {
+                    let raw = active.position - plan.waypoints[state.activeWaypointIndex - 1].position
+                    let length = simd_length(raw)
+                    if length > 0.001 {
+                        return raw / length
+                    }
+                }
+                // First waypoint (no preceding waypoint to define a leg): fall
+                // back to the aircraft's actual travel direction this tick, not
+                // a bearing-to-waypoint, so the abeam test reflects real motion.
+                let travel = aircraftPlanar - state.previousAircraftPlanar
+                let travelLength = simd_length(travel)
+                if travelLength > 0.0001 {
+                    return travel / travelLength
+                }
+                return forwardDirection(yaw: input.aircraftYawRadians)
+            }()
+            let previousAlong = simd_dot(state.previousAircraftPlanar - active.position, inboundDirection)
+            let currentAlong = simd_dot(aircraftPlanar - active.position, inboundDirection)
+            let crossedAbeamPlane = previousAlong < 0.0 && currentAlong >= 0.0
+            let overshotWithoutCapture = crossedAbeamPlane && !crossedCaptureVolume && !insideAcceptance
+
+            if overshotWithoutCapture {
+                state.missedActiveWaypoint = true
+            }
 
             if crossedCaptureVolume || insideAcceptance {
                 let isLast = state.activeWaypointIndex >= plan.waypoints.count - 1
@@ -259,7 +306,7 @@ final class FixedWingAutopilot {
         let speedForLookahead = max(currentSpeed, cruiseAirspeed * 0.6)
         let minimumTurnRadius = max(
             wing.waypointAcceptanceRadiusMeters * 1.4,
-            speedForLookahead / max(0.1, wing.nominalTurnRateRadPerSec)
+            wing.minimumTurnRadius(airspeed: speedForLookahead)
         )
         let lookaheadDistance = max(
             Tuning.lookaheadMinMeters,
@@ -308,7 +355,30 @@ final class FixedWingAutopilot {
         let desiredCourse = state.filteredCourseRad
         let courseError = shortestAngle(desiredCourse - input.aircraftYawRadians)
 
-        let maxBankRad = max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95
+        // Vertical target, resolved early so the bank limiter below can
+        // reference it (the rest of vertical guidance recomputes the same
+        // value further down — cheap, and keeps this section self-contained).
+        let earlyTargetAltitude = targetAltitudeOverride ?? activeWaypoint.altitude
+
+        // Low-altitude bank protection: pitch/throttle compensation alone
+        // can't fully erase the lift a steep bank costs, so while still
+        // climbing toward where the mission wants it to be, the aircraft
+        // shouldn't attempt a turn sharp enough to outrun its margin before
+        // getting there — the "banks while still low, sinks into the
+        // ground" failure mode seen repeatedly in testing. Deliberately
+        // measured against *this leg's own target altitude*, not a fixed
+        // absolute height: a mission that intentionally cruises at 15m
+        // should get full authority once it's actually at its own 15m
+        // cruise, not be permanently capped because 15m is "low" in some
+        // absolute sense — that previously made low-altitude missions
+        // unable to complete turns at all. The restriction now only bites
+        // while genuinely below profile (e.g. mid climb-out), and lifts as
+        // soon as the aircraft reaches the altitude it's already trying to
+        // hold.
+        let altitudeDeficit = max(0.0, earlyTargetAltitude - input.aircraftPosition.y)
+        let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
+            .clamped(to: 0.35...1.0)
+        let maxBankRad = max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95 * altitudeMarginFactor
         var rawBankRad = (courseError * Tuning.bankProportionalGain).clamped(to: -maxBankRad...maxBankRad)
         // Anti-windup: bleed the bank command toward zero when the heading
         // error is small. This prevents endless small corrections that look
@@ -320,7 +390,7 @@ final class FixedWingAutopilot {
         state.filteredBankRad = state.filteredBankRad + (rawBankRad - state.filteredBankRad) * bankAlpha
 
         // Vertical guidance — pitch + throttle.
-        let targetAltitude = targetAltitudeOverride ?? activeWaypoint.altitude
+        let targetAltitude = earlyTargetAltitude
         let altitudeError = targetAltitude - input.aircraftPosition.y
         let verticalVelocity = input.aircraftVelocity.y.isFinite ? input.aircraftVelocity.y : 0.0
         let bleed: Float = Tuning.maxAltitudeBleedRateMps
@@ -340,6 +410,17 @@ final class FixedWingAutopilot {
 
         let pitchAlpha = filterAlpha(tau: Tuning.pitchFilterTau, dt: input.deltaTime)
         state.filteredPitchRad = state.filteredPitchRad + (rawPitchRad - state.filteredPitchRad) * pitchAlpha
+        // Coordinated-turn lift compensation is applied *after* the pitch
+        // filter, not blended into the filtered term — bank itself reaches
+        // the lower-level PD loop after only the bank filter's lag (~0.32s);
+        // routing the compensation through the pitch filter too (~0.45s)
+        // would make it systematically trail the lift loss it's meant to
+        // cancel. A bank trades vertical lift for centripetal force (lift's
+        // vertical component falls by cos(bank)) — the old kinematic model
+        // never charged for this, so without this term the aircraft sinks
+        // every time it banks toward a waypoint.
+        let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
+        state.filteredPitchRad = (state.filteredPitchRad + bankLiftLossRad).clamped(to: -maxPitchDownRad...maxPitchUpRad)
 
         // Throttle: cruise + speed error + altitude assist when climbing.
         let approachScale: Float = {
@@ -354,7 +435,12 @@ final class FixedWingAutopilot {
             let blend = (distance / slow).clamped(to: 0.0...1.0)
             return Tuning.approachSpeedScale + (1.0 - Tuning.approachSpeedScale) * blend
         }()
-        let targetSpeed = (cruiseAirspeed * approachScale).clamped(to: stallSafeSpeed...wing.maxAirspeed)
+        // Mission speed bounds narrow the airframe's own safe envelope, never
+        // widen it — a mission can ask to cruise slower/faster within what's
+        // physically flyable, not below stall or above the airframe's max.
+        let missionSpeedFloor = max(stallSafeSpeed, missionMinAirspeed ?? stallSafeSpeed)
+        let missionSpeedCeiling = max(missionSpeedFloor, min(wing.maxAirspeed, missionMaxAirspeed ?? wing.maxAirspeed))
+        let targetSpeed = (cruiseAirspeed * approachScale).clamped(to: missionSpeedFloor...missionSpeedCeiling)
         let speedError = targetSpeed - currentSpeed
         let cruiseHover: Float = 0.55
         let altitudeBoost = max(0.0, altitudeError) * Tuning.throttleAltitudeAssistGain
@@ -367,7 +453,14 @@ final class FixedWingAutopilot {
         rawThrottle = rawThrottle.clamped(to: Tuning.throttleHoverSpan)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: input.deltaTime)
         state.filteredThrottle = state.filteredThrottle + (rawThrottle - state.filteredThrottle) * throttleAlpha
-        state.filteredThrottle = state.filteredThrottle.clamped(to: Tuning.throttleHoverSpan)
+        // Coordinated-turn drag compensation, applied post-filter — same
+        // reasoning as the pitch compensation above (throttle's own filter,
+        // 0.55s, is even slower, so this matters even more here). A banked
+        // turn needs more lift (1/cos(bank)), and induced drag grows with the
+        // square of that, so without extra throttle airspeed bleeds through
+        // the turn, costing even more lift on top of the bank's cosine loss.
+        let turnDragBoost = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnThrottleCompensationGain
+        state.filteredThrottle = (state.filteredThrottle + turnDragBoost).clamped(to: Tuning.throttleHoverSpan)
 
         let bankDeg = state.filteredBankRad.radiansToDegrees
         let pitchDeg = state.filteredPitchRad.radiansToDegrees
@@ -417,7 +510,8 @@ final class FixedWingAutopilot {
             alongTrackProgress: alongTrackProgress,
             remainingPathLengthMeters: remainingDistance,
             stallProtectionActive: stallProtectionActive,
-            hasCompletedRoute: state.hasCompletedRoute
+            hasCompletedRoute: state.hasCompletedRoute,
+            missedActiveWaypoint: state.missedActiveWaypoint
         )
     }
 
@@ -438,15 +532,24 @@ final class FixedWingAutopilot {
             return activeWaypoint.position
         }
 
-        let captureExitLead = max(
-            activeWaypoint.acceptanceRadius * 1.75,
-            lookaheadDistance,
+        let captureScale = max(
+            activeWaypoint.acceptanceRadius,
             4.0
         )
-        let throughCaptureDistance = legLength + captureExitLead
-        let desiredAlongTrack = max(
-            throughCaptureDistance,
-            max(0.0, alongTrack + lookaheadDistance)
+        let boundedLookahead = min(
+            lookaheadDistance,
+            max(captureScale * 3.0, legLength)
+        )
+        // The carrot may move forward along the inbound leg, but it stops at
+        // the waypoint center. Previously `max(...)` pushed it beyond the
+        // waypoint and then kept moving it ahead of the aircraft forever. With
+        // lateral error the aircraft followed a nearly parallel course and
+        // crossed the abeam plane outside the sphere. Capping at `legLength`
+        // progressively increases the intercept angle and, after an overshoot,
+        // commands a genuine turn back toward the sphere.
+        let desiredAlongTrack = min(
+            legLength,
+            max(0.0, alongTrack + boundedLookahead)
         )
         return legStart + legDirection * desiredAlongTrack
     }
