@@ -14,6 +14,8 @@ struct SceneViewportView: View {
         let overlayInset = viewModel.isParametersPanelVisible ? 18.0 : 12.0
         let payloadOpticsActive = viewModel.cameraConfiguration.mode == .payloadOptics
         let payloadOpticsState = viewModel.payloadCameraOpticsState
+        let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable
+        let rangefinderOpticsState = viewModel.rangefinderOpticsState
 
         ZStack(alignment: .topLeading) {
             DroneSceneViewRepresentable(
@@ -34,7 +36,7 @@ struct SceneViewportView: View {
             .blur(radius: payloadOpticsActive ? min(max(payloadOpticsState.blurRadius, 0.0), 8.0) : 0.0)
             .ignoresSafeArea()
 
-            if payloadOpticsActive {
+            if payloadOpticsActive, payloadOpticsState.isAvailable {
                 PayloadOpticsViewportOverlayView(
                     state: payloadOpticsState,
                     thermalState: viewModel.payloadThermalState
@@ -42,7 +44,12 @@ struct SceneViewportView: View {
                 .ignoresSafeArea()
             }
 
-            if payloadOpticsActive, payloadOpticsState.mode == .thermalStub {
+            if rangefinderOpticsActive {
+                RangefinderOpticsViewportOverlayView(state: rangefinderOpticsState)
+                    .ignoresSafeArea()
+            }
+
+            if payloadOpticsActive, payloadOpticsState.isAvailable, payloadOpticsState.mode == .thermalStub {
                 ThermalScaleBarView(thermalState: viewModel.payloadThermalState)
                     .padding(.trailing, overlayInset + 14)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -50,6 +57,7 @@ struct SceneViewportView: View {
             }
 
             if payloadOpticsActive,
+               payloadOpticsState.isAvailable,
                payloadOpticsState.mode == .thermalStub,
                viewModel.payloadThermalState.showDiagnostics {
                 ThermalDiagnosticsOverlayView(thermalState: viewModel.payloadThermalState)
@@ -394,6 +402,101 @@ private struct PayloadOpticsViewportOverlayView: View {
                 .shadow(color: reticleColor.opacity(state.focusLockPulse * 0.55), radius: 18)
         }
         .allowsHitTesting(false)
+    }
+}
+
+private struct RangefinderOpticsViewportOverlayView: View {
+    let state: PayloadRangefinderOpticsState
+
+    private var distanceText: String {
+        guard let distance = state.measuredDistanceMeters else {
+            return "-- m"
+        }
+        return String(format: "%.1f m", distance)
+    }
+
+    private var zoomText: String {
+        String(format: "%.1fx", state.zoomLevel)
+    }
+
+    private var overlayTint: Color {
+        state.isPowered ? Color(red: 1.0, green: 0.82, blue: 0.78) : Color.white.opacity(0.62)
+    }
+
+    private var reticleColor: Color {
+        state.isArmed ? Color.red.opacity(0.9) : overlayTint.opacity(0.8)
+    }
+
+    var body: some View {
+        ZStack {
+            if !state.isPowered {
+                Color.black.opacity(0.34)
+            }
+
+            PayloadOpticsCornerFrame()
+                .stroke(overlayTint.opacity(0.95), style: StrokeStyle(lineWidth: 2.0, lineCap: .square))
+                .padding(22)
+
+            CrosshairShape()
+                .stroke(reticleColor.opacity(0.92), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                .frame(width: 116, height: 116)
+
+            VStack(spacing: 0) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.feedLabel)
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        Text("ZOOM \(zoomText)")
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    }
+
+                    Spacer()
+
+                    if state.isArmed {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 12, height: 12)
+                            Text("LASER")
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.red.opacity(0.96))
+                        }
+                    }
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+
+                Spacer()
+
+                if !state.isPowered {
+                    statusPill(titleKey: "payload.rangefinder.powered_off", tint: GroundControlPalette.warning)
+                } else if !state.isAvailable {
+                    statusPill(titleKey: "payload.rangefinder.unavailable", tint: GroundControlPalette.warning)
+                }
+
+                Spacer()
+
+                Text("RANGE \(distanceText)")
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 28)
+            }
+            .foregroundStyle(overlayTint)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func statusPill(titleKey: String, tint: Color) -> some View {
+        Text(LocalizedStringKey(titleKey))
+            .font(.system(size: 24, weight: .bold, design: .monospaced))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.56), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            )
     }
 }
 

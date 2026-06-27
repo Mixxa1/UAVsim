@@ -83,6 +83,12 @@ final class DroneSceneController {
     private var payloadCameraStabilizationEuler = SIMD3<Float>(repeating: 0.0)
     private var payloadCameraTargetLockYaw: Float?
     private var payloadCameraTargetLockPitch: Float?
+    private let rangefinderRigNode = SCNNode()
+    private let rangefinderYawNode = SCNNode()
+    private let rangefinderPitchNode = SCNNode()
+    private var rangefinderBeamNode: SCNNode?
+    private var rangefinderCameraNode: SCNNode?
+    private var rangefinderCamera: SCNCamera?
     private let payloadDropCameraController = PayloadDropCameraController()
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
@@ -153,6 +159,7 @@ final class DroneSceneController {
     private var payloadCameraNode: SCNNode?
     private var payloadCamera: SCNCamera?
     private var payloadCameraOpticsState = PayloadCameraOpticsState()
+    private var rangefinderOpticsState = PayloadRangefinderOpticsState()
     private let fpvPayloadPresentationNode = SCNNode()
     private var droppedPayloadNodes: [UUID: SCNNode] = [:]
     private var droppedPayloadRuntime: [UUID: DroppedPayloadRuntime] = [:]
@@ -388,7 +395,7 @@ final class DroneSceneController {
         case .top:
             return topCameraNode
         case .payloadOptics:
-            return payloadCameraPointOfView() ?? followCameraNode
+            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? followCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
         case .spectator:
@@ -407,6 +414,14 @@ final class DroneSceneController {
         }
         ensurePayloadCameraNode()
         return payloadCameraNode
+    }
+
+    func rangefinderCameraPointOfView() -> SCNNode? {
+        guard rangefinderOpticsState.isAvailable else {
+            return nil
+        }
+        ensureRangefinderRig()
+        return rangefinderCameraNode
     }
 
     // MARK: - Thermal Rendering
@@ -2349,6 +2364,130 @@ final class DroneSceneController {
         payloadCamera?.fieldOfView = CGFloat(state.currentFieldOfViewDegrees)
         payloadCamera?.zNear = 0.015
         payloadCamera?.zFar = CameraClipping.payloadOpticsFar
+    }
+
+    func ensureRangefinderRig() {
+        if rangefinderYawNode.parent !== rangefinderRigNode {
+            rangefinderRigNode.name = "rangefinderRigNode"
+            rangefinderYawNode.name = "rangefinderYawNode"
+            rangefinderPitchNode.name = "rangefinderPitchNode"
+
+            rangefinderRigNode.removeFromParentNode()
+            rangefinderYawNode.removeFromParentNode()
+            rangefinderPitchNode.removeFromParentNode()
+
+            rangefinderRigNode.addChildNode(rangefinderYawNode)
+            rangefinderYawNode.addChildNode(rangefinderPitchNode)
+            rangefinderPitchNode.simdPosition = SIMD3<Float>(0.0, -0.02, 0.02)
+        }
+
+        if rangefinderBeamNode == nil {
+            let beamMaterial = SCNMaterial()
+            beamMaterial.lightingModel = .constant
+            beamMaterial.diffuse.contents = NSColor(calibratedRed: 1.0, green: 0.08, blue: 0.05, alpha: 1.0)
+            beamMaterial.emission.contents = NSColor(calibratedRed: 1.0, green: 0.12, blue: 0.08, alpha: 1.0)
+
+            let geometry = SCNCylinder(radius: 0.0035, height: 1.0)
+            geometry.radialSegmentCount = 8
+            geometry.firstMaterial = beamMaterial
+
+            let beam = SCNNode(geometry: geometry)
+            beam.name = "rangefinderBeamNode"
+            beam.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+            beam.isHidden = true
+            rangefinderPitchNode.addChildNode(beam)
+            rangefinderBeamNode = beam
+        }
+
+        if rangefinderCameraNode == nil {
+            let node = SCNNode()
+            node.name = "rangefinderCameraNode"
+
+            let camera = SCNCamera()
+            camera.fieldOfView = CGFloat(rangefinderOpticsState.currentFieldOfViewDegrees)
+            camera.zNear = 0.015
+            camera.zFar = CameraClipping.payloadOpticsFar
+            camera.categoryBitMask = RenderCategory.visibleInPayloadOptics
+            node.camera = camera
+
+            rangefinderPitchNode.addChildNode(node)
+            rangefinderCameraNode = node
+            rangefinderCamera = camera
+        }
+
+        if rangefinderRigNode.parent !== payloadMountNode {
+            rangefinderRigNode.removeFromParentNode()
+            payloadMountNode.addChildNode(rangefinderRigNode)
+        }
+    }
+
+    func updateRangefinderGimbal(state: PayloadRangefinderOpticsState) {
+        rangefinderOpticsState = state
+        ensureRangefinderRig()
+
+        rangefinderRigNode.isHidden = !state.isAvailable
+        rangefinderYawNode.eulerAngles.y = CGFloat(Float(state.gimbalYawDegrees).degreesToRadians)
+        rangefinderPitchNode.eulerAngles.x = CGFloat(Float(state.gimbalPitchDegrees).degreesToRadians)
+        rangefinderCamera?.fieldOfView = CGFloat(state.currentFieldOfViewDegrees)
+    }
+
+    func rangefinderTargetDistance(maxDistance: Double) -> Double? {
+        guard rangefinderOpticsState.isAvailable, rangefinderOpticsState.isPowered else {
+            return nil
+        }
+        ensureRangefinderRig()
+
+        let origin = rangefinderPitchNode.presentation.simdWorldPosition
+        let forward = simd_normalize(simd_act(
+            simd_quatf(rangefinderPitchNode.presentation.simdWorldTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        guard simd_length_squared(forward) > 0.000001 else {
+            return nil
+        }
+
+        let distanceLimit = max(1.0, Float(maxDistance))
+        let end = origin + forward * distanceLimit
+        let results = scene.rootNode.hitTestWithSegment(
+            from: SCNVector3(origin.x, origin.y, origin.z),
+            to: SCNVector3(end.x, end.y, end.z),
+            options: [
+                SCNHitTestOption.backFaceCulling.rawValue: false,
+                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue
+            ]
+        )
+
+        for result in results {
+            if isDescendant(result.node, of: droneNode) || isDescendant(result.node, of: rangefinderRigNode) {
+                continue
+            }
+
+            let hit = SIMD3<Float>(
+                Float(result.worldCoordinates.x),
+                Float(result.worldCoordinates.y),
+                Float(result.worldCoordinates.z)
+            )
+            return Double(simd_distance(origin, hit))
+        }
+
+        return nil
+    }
+
+    func updateRangefinderBeam(state: PayloadRangefinderOpticsState) {
+        ensureRangefinderRig()
+        guard let beam = rangefinderBeamNode else {
+            return
+        }
+
+        guard state.isAvailable, state.isPowered, state.isArmed else {
+            beam.isHidden = true
+            return
+        }
+
+        let length = max(0.01, Float(state.measuredDistanceMeters ?? state.maxRangeMeters))
+        beam.isHidden = false
+        (beam.geometry as? SCNCylinder)?.height = CGFloat(length)
+        beam.position = SCNVector3(0.0, 0.0, -length / 2.0)
     }
 
     private func stabilizedPayloadCameraEuler(for droneState: DroneState) -> SIMD3<Float> {

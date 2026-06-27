@@ -763,6 +763,8 @@ struct PayloadView: View {
             return "thermometer.medium"
         case .lidarModule:
             return "wave.3.right.circle.fill"
+        case .laserRangefinder:
+            return "dot.scope"
         case .rescuePack:
             return "cross.case.fill"
         case .sensorModule:
@@ -784,6 +786,8 @@ struct PayloadView: View {
             return Color(red: 0.99, green: 0.58, blue: 0.28)
         case .lidarModule:
             return Color(red: 0.70, green: 0.78, blue: 0.92)
+        case .laserRangefinder:
+            return Color(red: 0.94, green: 0.30, blue: 0.26)
         case .custom:
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         }

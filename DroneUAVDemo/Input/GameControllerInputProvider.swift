@@ -569,6 +569,14 @@ private extension InputAction {
             return 38
         case .uiFocusRight:
             return 39
+        case .selectThermalPaletteWhiteHot:
+            return 40
+        case .selectThermalPaletteBlackHot:
+            return 41
+        case .selectThermalPaletteIron:
+            return 42
+        case .toggleRangefinderArmed:
+            return 43
         }
     }
 }

@@ -28,7 +28,7 @@ final class KeyboardInputProvider: InputProvider {
             uiPointerY: 0.0,
             uiScrollX: 0.0,
             uiScrollY: 0.0,
-            precisionMode: false,
+            precisionMode: keyboardSnapshot.lookInput.precisionMode,
             boostMode: boostMode,
             actions: actions,
             source: sourceKind,

@@ -21,8 +21,9 @@ struct KeyboardLookInput {
     var yaw: Float
     var pitch: Float
     var speedBoost: Bool
+    var precisionMode: Bool
 
-    static let zero = KeyboardLookInput(yaw: 0.0, pitch: 0.0, speedBoost: false)
+    static let zero = KeyboardLookInput(yaw: 0.0, pitch: 0.0, speedBoost: false, precisionMode: false)
 }
 
 struct KeyboardInputSnapshot {
@@ -103,7 +104,12 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case cameraYawRight
     case cameraPitchUp
     case cameraPitchDown
+    case cameraLookPrecision
     case resetCameraOrientation
+    case thermalPaletteWhiteHot
+    case thermalPaletteBlackHot
+    case thermalPaletteIron
+    case toggleRangefinderArmed
 
     case toggleControlPanel
     case toggleMissionMap
@@ -119,7 +125,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone, .releasePayload:
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
-             .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .resetCameraOrientation:
+             .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .resetCameraOrientation,
+             .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed:
             return .camera
         case .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD:
             return .ui
@@ -132,10 +139,11 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         switch self {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
              .zoomIn, .zoomOut,
-             .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown:
+             .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision:
             return true
         case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .resetCameraOrientation,
+             .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed,
              .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
             return false
         }
@@ -197,8 +205,18 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.camera.pitch_up"
         case .cameraPitchDown:
             return "keybind.camera.pitch_down"
+        case .cameraLookPrecision:
+            return "keybind.camera.look_precision"
         case .resetCameraOrientation:
             return "keybind.camera.reset_orientation"
+        case .thermalPaletteWhiteHot:
+            return "keybind.camera.thermal_white_hot"
+        case .thermalPaletteBlackHot:
+            return "keybind.camera.thermal_black_hot"
+        case .thermalPaletteIron:
+            return "keybind.camera.thermal_iron"
+        case .toggleRangefinderArmed:
+            return "keybind.camera.rangefinder_arm"
         case .toggleControlPanel:
             return "keybind.ui.toggle_panel"
         case .toggleMissionMap:
@@ -250,8 +268,8 @@ struct KeyBindingProfile {
             .cameraModeOrbit: KeyBindingDescriptor(command: .cameraModeOrbit, keyCode: 20, keyLabel: "3"),
             .cameraModeFPV: KeyBindingDescriptor(command: .cameraModeFPV, keyCode: 21, keyLabel: "4"),
             .cameraModeTop: KeyBindingDescriptor(command: .cameraModeTop, keyCode: 23, keyLabel: "5"),
-            .cameraModePayloadOptics: KeyBindingDescriptor(command: .cameraModePayloadOptics, keyCode: 28, keyLabel: "8"),
-            .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 22, keyLabel: "6"),
+            .cameraModePayloadOptics: KeyBindingDescriptor(command: .cameraModePayloadOptics, keyCode: 31, keyLabel: "O"),
+            .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 29, keyLabel: "0"),
             .toggleFPV: KeyBindingDescriptor(command: .toggleFPV, keyCode: UInt16.max, keyLabel: "—"),
             .cycleCameraMode: KeyBindingDescriptor(command: .cycleCameraMode, keyCode: 8, keyLabel: "C"),
             .zoomIn: KeyBindingDescriptor(command: .zoomIn, keyCode: 24, keyLabel: "+"),
@@ -260,7 +278,12 @@ struct KeyBindingProfile {
             .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "→"),
             .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "↑"),
             .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "↓"),
+            .cameraLookPrecision: KeyBindingDescriptor(command: .cameraLookPrecision, keyCode: 58, keyLabel: "⌥"),
             .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V"),
+            .thermalPaletteWhiteHot: KeyBindingDescriptor(command: .thermalPaletteWhiteHot, keyCode: 22, keyLabel: "6"),
+            .thermalPaletteBlackHot: KeyBindingDescriptor(command: .thermalPaletteBlackHot, keyCode: 26, keyLabel: "7"),
+            .thermalPaletteIron: KeyBindingDescriptor(command: .thermalPaletteIron, keyCode: 28, keyLabel: "8"),
+            .toggleRangefinderArmed: KeyBindingDescriptor(command: .toggleRangefinderArmed, keyCode: 25, keyLabel: "9"),
             .toggleControlPanel: KeyBindingDescriptor(command: .toggleControlPanel, keyCode: UInt16.max, keyLabel: "—"),
             .toggleMissionMap: KeyBindingDescriptor(command: .toggleMissionMap, keyCode: 3, keyLabel: "F"),
             .togglePayloadPanel: KeyBindingDescriptor(command: .togglePayloadPanel, keyCode: 35, keyLabel: "P"),
@@ -339,6 +362,10 @@ enum InputAction: Equatable, Hashable {
     case toggleCompassOverlay
     case toggleThermalOverlay
     case toggleDamageOverlay
+    case selectThermalPaletteWhiteHot
+    case selectThermalPaletteBlackHot
+    case selectThermalPaletteIron
+    case toggleRangefinderArmed
     case cycleCameraMode
     case toggleControlPanel
     case toggleToolPanel
@@ -381,6 +408,7 @@ final class KeyboardInputService: KeyboardInputProviding {
     private static let reservedDirectShortcutKeyCodes: Set<UInt16> = [30, 33, 34, 40] // ] / [ / I / K
     private static let parametersPanelToggleKeyCode: UInt16 = 33 // [
     private static let toolPanelToggleKeyCode: UInt16 = 30 // ]
+    private static let cameraLookKeyCodes: Set<UInt16> = [123, 124, 125, 126] // ← / → / ↓ / ↑
 
     private var localKeyDownMonitor: Any?
     private var localKeyUpMonitor: Any?
@@ -414,8 +442,8 @@ final class KeyboardInputService: KeyboardInputProviding {
         .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
         .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
         .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
-        .cameraModePayloadOptics: KeyBindingDescriptor(command: .cameraModePayloadOptics, keyCode: 28, keyLabel: "8"),
-        .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 22, keyLabel: "6"),
+        .cameraModePayloadOptics: KeyBindingDescriptor(command: .cameraModePayloadOptics, keyCode: 31, keyLabel: "O"),
+        .cameraModePayload: KeyBindingDescriptor(command: .cameraModePayload, keyCode: 29, keyLabel: "0"),
         .cameraYawLeft: KeyBindingDescriptor(command: .cameraYawLeft, keyCode: 123, keyLabel: "←"),
         .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "→"),
         .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "↑"),
@@ -435,6 +463,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         sanitizeLegacyPanelToggleBinding()
         sanitizeCanonicalFlightCameraBindings()
         sanitizeMissionOverlayBindings()
+        sanitizeRangefinderAndThermalQuickBindings()
     }
 
     func start() {
@@ -518,8 +547,9 @@ final class KeyboardInputService: KeyboardInputProviding {
         let yaw: Float = (activeContinuousCommands.contains(.cameraYawRight) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.cameraYawLeft) ? 1.0 : 0.0)
         let pitch: Float = (activeContinuousCommands.contains(.cameraPitchDown) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.cameraPitchUp) ? 1.0 : 0.0)
         let speedBoost = activeContinuousCommands.contains(.accelerate)
+        let precisionMode = activeContinuousCommands.contains(.cameraLookPrecision)
 
-        return KeyboardLookInput(yaw: yaw, pitch: pitch, speedBoost: speedBoost)
+        return KeyboardLookInput(yaw: yaw, pitch: pitch, speedBoost: speedBoost, precisionMode: precisionMode)
     }
 
     func currentInputSnapshot() -> KeyboardInputSnapshot {
@@ -581,8 +611,12 @@ final class KeyboardInputService: KeyboardInputProviding {
             return event
         }
 
-        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {
-            return event
+        let blockingModifiers = event.modifierFlags.intersection([.command, .control, .option])
+        if !blockingModifiers.isEmpty {
+            let isOptionOnlyOnCameraLookKey = blockingModifiers == [.option] && Self.cameraLookKeyCodes.contains(event.keyCode)
+            if !isOptionOnlyOnCameraLookKey {
+                return event
+            }
         }
 
         guard processingMode == .flight || processingMode == .spectator else {
@@ -654,6 +688,14 @@ final class KeyboardInputService: KeyboardInputProviding {
                 activeContinuousCommands.remove(.accelerate)
             }
         }
+
+        if isCameraLookPrecisionBoundToOption {
+            if event.modifierFlags.contains(.option) {
+                activeContinuousCommands.insert(.cameraLookPrecision)
+            } else if !isCameraLookPrecisionHeldByOtherKey {
+                activeContinuousCommands.remove(.cameraLookPrecision)
+            }
+        }
         return event
     }
 
@@ -681,6 +723,16 @@ final class KeyboardInputService: KeyboardInputProviding {
         activeContinuousByKey
             .filter { $0.key != 56 && $0.key != 60 }
             .contains { $0.value.contains(.accelerate) }
+    }
+
+    private var isCameraLookPrecisionBoundToOption: Bool {
+        profile.commands(for: 58).contains(.cameraLookPrecision) || profile.commands(for: 61).contains(.cameraLookPrecision)
+    }
+
+    private var isCameraLookPrecisionHeldByOtherKey: Bool {
+        activeContinuousByKey
+            .filter { $0.key != 58 && $0.key != 61 }
+            .contains { $0.value.contains(.cameraLookPrecision) }
     }
 
     private func mapCommandToAction(_ command: KeyboardCommand) {
@@ -727,7 +779,15 @@ final class KeyboardInputService: KeyboardInputProviding {
             enqueueAction(.toggleDamageOverlay)
         case .toggleThermalOverlay:
             enqueueAction(.toggleThermalOverlay)
-        case .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown,
+        case .thermalPaletteWhiteHot:
+            enqueueAction(.selectThermalPaletteWhiteHot)
+        case .thermalPaletteBlackHot:
+            enqueueAction(.selectThermalPaletteBlackHot)
+        case .thermalPaletteIron:
+            enqueueAction(.selectThermalPaletteIron)
+        case .toggleRangefinderArmed:
+            enqueueAction(.toggleRangefinderArmed)
+        case .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision,
              .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate:
             break
         }
@@ -953,6 +1013,32 @@ final class KeyboardInputService: KeyboardInputProviding {
             profile.bindings[.toggleFPV] = unboundDescriptor
             didChange = true
         }
+
+        if didChange {
+            persistProfile()
+        }
+    }
+
+    private func sanitizeRangefinderAndThermalQuickBindings() {
+        var didChange = false
+
+        func apply(_ command: KeyboardCommand, keyCode: UInt16, keyLabel: String) {
+            let current = profile.bindings[command]
+            if current?.keyCode != keyCode || current?.keyLabel != keyLabel {
+                profile.rebind(command: command, keyCode: keyCode, keyLabel: keyLabel)
+                didChange = true
+            }
+        }
+
+        // Vacate the legacy "6"/"8" camera-mode slots first so the quick-select
+        // commands below can claim them without tripping the rebind conflict-swap.
+        apply(.cameraModePayload, keyCode: 29, keyLabel: "0")
+        apply(.cameraModePayloadOptics, keyCode: 31, keyLabel: "O")
+        apply(.thermalPaletteWhiteHot, keyCode: 22, keyLabel: "6")
+        apply(.thermalPaletteBlackHot, keyCode: 26, keyLabel: "7")
+        apply(.thermalPaletteIron, keyCode: 28, keyLabel: "8")
+        apply(.toggleRangefinderArmed, keyCode: 25, keyLabel: "9")
+        apply(.cameraLookPrecision, keyCode: 58, keyLabel: "⌥")
 
         if didChange {
             persistProfile()

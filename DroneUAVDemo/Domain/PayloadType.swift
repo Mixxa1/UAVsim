@@ -5,6 +5,7 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
     case cameraGimbal
     case thermalCamera
     case lidarModule
+    case laserRangefinder
     case rescuePack
     case sensorModule
     case radioRelay
@@ -22,6 +23,8 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return NSLocalizedString("payload.type.thermal_camera", comment: "")
         case .lidarModule:
             return NSLocalizedString("payload.type.lidar_module", comment: "")
+        case .laserRangefinder:
+            return NSLocalizedString("payload.type.laser_rangefinder", comment: "")
         case .rescuePack:
             return NSLocalizedString("payload.type.rescue_pack", comment: "")
         case .sensorModule:
@@ -43,6 +46,8 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return 0.80
         case .lidarModule:
             return 1.40
+        case .laserRangefinder:
+            return 0.55
         case .rescuePack:
             return 2.20
         case .sensorModule:
@@ -64,6 +69,8 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return .thermalCamera
         case .lidarModule:
             return .lidarModule
+        case .laserRangefinder:
+            return .laserRangefinder
         case .rescuePack:
             return .rescuePack
         case .sensorModule:

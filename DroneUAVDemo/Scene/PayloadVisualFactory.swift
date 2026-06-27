@@ -69,6 +69,26 @@ enum PayloadVisualFactory {
             let cap = cylinderNode(radius: 0.036 * sizeScale, height: 0.010 * sizeScale, material: accentMaterial)
             cap.position = SCNVector3(0.0, -0.010 * sizeScale, 0.0)
             standardPresentation.addChildNode(cap)
+        case .laserRangefinder:
+            let laserAccentMaterial = material(
+                diffuse: NSColor(calibratedRed: 0.62, green: 0.10, blue: 0.08, alpha: 1.0),
+                roughness: 0.36,
+                metalness: 0.30
+            )
+
+            let body = boxNode(size: SIMD3<Float>(0.064, 0.040, 0.052) * sizeScale, chamfer: 0.008 * sizeScale, material: shellMaterial)
+            body.position = SCNVector3(0.0, -0.028 * sizeScale, 0.0)
+            standardPresentation.addChildNode(body)
+
+            let aperture = cylinderNode(radius: 0.012 * sizeScale, height: 0.018 * sizeScale, material: darkMaterial)
+            aperture.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            aperture.position = SCNVector3(0.0, -0.034 * sizeScale, 0.034 * sizeScale)
+            standardPresentation.addChildNode(aperture)
+
+            let apertureRing = cylinderNode(radius: 0.014 * sizeScale, height: 0.004 * sizeScale, material: laserAccentMaterial)
+            apertureRing.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            apertureRing.position = SCNVector3(0.0, -0.034 * sizeScale, 0.027 * sizeScale)
+            standardPresentation.addChildNode(apertureRing)
         case .rescuePack:
             let pack = boxNode(size: SIMD3<Float>(0.11, 0.07, 0.09) * sizeScale, chamfer: 0.010 * sizeScale, material: shellMaterial)
             pack.position = SCNVector3(0.0, -0.040 * sizeScale, 0.0)

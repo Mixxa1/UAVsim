@@ -592,6 +592,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isCompassVisible: Bool
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
     @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
+    @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
     @Published private(set) var payloadThermalState: PayloadThermalState = .default
     @Published private(set) var payloadMissionSignals: [PayloadMissionSignal]
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
@@ -771,7 +772,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
-        if payloadCameraOpticsState.isAvailable || cameraConfiguration.mode == .payloadOptics {
+        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || cameraConfiguration.mode == .payloadOptics {
             modes.append(.payloadOptics)
         }
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
@@ -894,6 +895,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let fixedWingAutopilotController = FixedWingAutopilotController()
     private let fixedWingAssistController = FixedWingAssistController()
     private let payloadCameraController: PayloadCameraController
+    private let rangefinderController: PayloadRangefinderController
     private let tacticalMapCoordinator = TacticalMapCoordinator()
     private let missionDraftBuilder = MissionDraftBuilder()
     private let missionPreviewBuilder = MissionPreviewBuilder()
@@ -1275,6 +1277,7 @@ final class DroneSimulationViewModel: ObservableObject {
         flightControlRouter: FlightControlRouter = FlightControlRouter(),
         autoNavigationController: AutoNavigationController = AutoNavigationController(),
         payloadCameraController: PayloadCameraController = PayloadCameraController(),
+        rangefinderController: PayloadRangefinderController = PayloadRangefinderController(),
         remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
         initialProjectName: String? = nil,
@@ -1330,6 +1333,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.flightControlRouter = flightControlRouter
         self.autoNavigationController = autoNavigationController
         self.payloadCameraController = payloadCameraController
+        self.rangefinderController = rangefinderController
         self.compassViewModel = CompassViewModel()
 
         let abstract = AbstractDroneParameters.default
@@ -3145,7 +3149,7 @@ final class DroneSimulationViewModel: ObservableObject {
             _ = payloadCameraController.activatePayloadView(from: oldMode)
             sceneController.setPayloadCameraFocusReleaseID(payloadCameraController.trackedReleaseID)
         } else if mode == .payloadOptics {
-            guard payloadCameraOpticsState.isAvailable else {
+            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable else {
                 return
             }
         }
@@ -3248,6 +3252,40 @@ final class DroneSimulationViewModel: ObservableObject {
         publishPayloadCameraOpticsState()
     }
 
+    // MARK: - Laser rangefinder
+
+    func setRangefinderArmed(_ enabled: Bool) {
+        rangefinderController.setArmed(enabled)
+        refreshRangefinderStatus()
+    }
+
+    func adjustRangefinderGimbal(yawDeltaDegrees: Double, pitchDeltaDegrees: Double) {
+        rangefinderController.adjustGimbal(
+            yawDeltaDegrees: yawDeltaDegrees,
+            pitchDeltaDegrees: pitchDeltaDegrees
+        )
+        refreshRangefinderStatus()
+    }
+
+    func resetRangefinderGimbalOrientation() {
+        rangefinderController.resetGimbalOrientation()
+        refreshRangefinderStatus()
+    }
+
+    func setRangefinderZoom(_ value: Double) {
+        rangefinderController.setZoom(value)
+        refreshRangefinderStatus()
+    }
+
+    func resetRangefinderZoom() {
+        rangefinderController.setZoom(rangefinderController.opticsState.minZoom)
+        refreshRangefinderStatus()
+    }
+
+    func toggleRangefinderArmed() {
+        setRangefinderArmed(!rangefinderOpticsState.isArmed)
+    }
+
     // MARK: - Thermal camera
 
     /// Switch the payload camera between EO (`.optical`) and thermal (`.thermalStub`). Zoom /
@@ -3266,6 +3304,16 @@ final class DroneSimulationViewModel: ObservableObject {
         guard payloadThermalState.palette != palette else { return }
         payloadThermalState.palette = palette
         sceneController.setThermalPalette(palette)
+    }
+
+    /// Quick-select shortcut: jumps straight to the thermal sensor (if available) and applies
+    /// the requested palette in one keystroke, instead of requiring a manual mode switch first.
+    func activateThermalPalette(_ palette: ThermalPalette) {
+        guard isMountedThermalCapablePayload, payloadCameraOpticsState.isAvailable else { return }
+        if payloadCameraController.opticsState.mode != .thermalStub {
+            setPayloadCameraMode(.thermalStub)
+        }
+        setThermalPalette(palette)
     }
 
     func setThermalProfileSelection(_ selection: ThermalProfileSelection) {
@@ -5062,6 +5110,14 @@ final class DroneSimulationViewModel: ObservableObject {
                 toggleThermalOverlay()
             case .toggleDamageOverlay:
                 toggleDamageOverlay()
+            case .selectThermalPaletteWhiteHot:
+                activateThermalPalette(.whiteHot)
+            case .selectThermalPaletteBlackHot:
+                activateThermalPalette(.blackHot)
+            case .selectThermalPaletteIron:
+                activateThermalPalette(.iron)
+            case .toggleRangefinderArmed:
+                toggleRangefinderArmed()
             case .cycleCameraMode:
                 cycleCameraMode()
             case .toggleControlPanel:
@@ -5101,7 +5157,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let speedMultiplier: Float = controlState.boostMode ? 1.85 : 1.0
+        let speedMultiplier: Float = controlState.precisionMode ? 0.22 : (controlState.boostMode ? 1.85 : 1.0)
         let inputVelocity = SIMD2<Float>(
             Float(controlState.cameraPan),
             Float(controlState.cameraTilt)
@@ -5163,10 +5219,17 @@ final class DroneSimulationViewModel: ObservableObject {
 
             let yawSign: Float = cameraConfiguration.invertLookX ? -1.0 : 1.0
             let pitchSign: Float = cameraConfiguration.invertLookY ? -1.0 : 1.0
-            adjustPayloadGimbal(
-                yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
-                pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
-            )
+            if payloadCameraOpticsState.isAvailable {
+                adjustPayloadGimbal(
+                    yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
+                    pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
+                )
+            } else {
+                adjustRangefinderGimbal(
+                    yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
+                    pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
+                )
+            }
             return
         case .free, .follow, .orbit, .top, .payload, .spectator:
             cameraLookVelocity = .zero
@@ -5193,6 +5256,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if resetOrientation {
             if cameraConfiguration.mode == .payloadOptics {
                 resetPayloadGimbalOrientation()
+                resetRangefinderGimbalOrientation()
             }
             sceneController.resetCameraOrientation(for: cameraConfiguration.mode)
         }
@@ -5223,7 +5287,11 @@ final class DroneSimulationViewModel: ObservableObject {
         switch cameraConfiguration.mode {
         case .payloadOptics:
             let zoomUnitsPerSecond = 8.5 * speedMultiplier
-            setPayloadZoom(payloadCameraOpticsState.zoomLevel + zoomDirection * Double(deltaTime) * zoomUnitsPerSecond)
+            if payloadCameraOpticsState.isAvailable {
+                setPayloadZoom(payloadCameraOpticsState.zoomLevel + zoomDirection * Double(deltaTime) * zoomUnitsPerSecond)
+            } else if rangefinderOpticsState.isAvailable {
+                setRangefinderZoom(rangefinderOpticsState.zoomLevel + zoomDirection * Double(deltaTime) * zoomUnitsPerSecond)
+            }
         case .free:
             let zoomStep = 6.5 * speedMultiplier * Double(deltaTime) * Double(cameraConfiguration.free.zoomSensitivity)
             cameraConfiguration.free.distance = (cameraConfiguration.free.distance - Float(zoomDirection * zoomStep))
@@ -5258,7 +5326,11 @@ final class DroneSimulationViewModel: ObservableObject {
             cameraConfiguration.fov = (cameraConfiguration.fov + sign * 1.2).clamped(to: 30.0...110.0)
         case .payloadOptics:
             let delta = inward ? 0.5 : -0.5
-            setPayloadZoom(payloadCameraOpticsState.zoomLevel + delta)
+            if payloadCameraOpticsState.isAvailable {
+                setPayloadZoom(payloadCameraOpticsState.zoomLevel + delta)
+            } else if rangefinderOpticsState.isAvailable {
+                setRangefinderZoom(rangefinderOpticsState.zoomLevel + delta)
+            }
         case .payload:
             return
         case .spectator:
@@ -6470,9 +6542,41 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
+    }
+
+    /// Stricter than `isMountedPayloadCameraAvailable`: excludes mounted CAD payloads, since
+    /// those carry no `PayloadType` and the quick-select thermal binds must only fire when an
+    /// actual EO/thermal-capable payload is on the airframe.
+    private var isMountedThermalCapablePayload: Bool {
+        guard mountedCADPayload == nil else {
+            return false
+        }
+
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+
+        switch payloadDraftConfiguration.payloadType {
+        case .cameraGimbal, .thermalCamera, .custom:
+            return true
+        case .cargoBox, .lidarModule, .laserRangefinder, .rescuePack, .sensorModule, .radioRelay:
+            return false
+        }
+    }
+
+    private var isMountedRangefinderAvailable: Bool {
+        guard mountedCADPayload == nil else {
+            return false
+        }
+
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+
+        return payloadDraftConfiguration.payloadType == .laserRangefinder
     }
 
     private var payloadCameraFeedLabel: String {
@@ -6579,7 +6683,30 @@ final class DroneSimulationViewModel: ObservableObject {
                 payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
             }
         }
+        refreshRangefinderStatus()
         refreshFlightControlDiagnostics()
+    }
+
+    private func refreshRangefinderStatus() {
+        rangefinderController.setAvailability(
+            isAvailable: isMountedRangefinderAvailable,
+            isPowered: isMountedRangefinderAvailable
+        )
+        sceneController.updateRangefinderGimbal(state: rangefinderController.opticsState)
+        let distance = rangefinderController.opticsState.isArmed
+            ? sceneController.rangefinderTargetDistance(maxDistance: rangefinderController.opticsState.maxRangeMeters)
+            : nil
+        rangefinderController.updateMeasuredDistance(distance)
+        sceneController.updateRangefinderBeam(state: rangefinderController.opticsState)
+        rangefinderOpticsState = rangefinderController.opticsState
+
+        let rangefinderSignals = rangefinderController.consumeMissionSignals()
+        if !rangefinderSignals.isEmpty {
+            payloadMissionSignals.append(contentsOf: rangefinderSignals)
+            if payloadMissionSignals.count > 24 {
+                payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
+            }
+        }
     }
 
     private func buildWarnings() -> [String] {

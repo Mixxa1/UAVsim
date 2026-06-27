@@ -65,6 +65,10 @@ struct CameraModuleView: View {
                 payloadOpticsSection
             }
 
+            if viewModel.rangefinderOpticsState.isAvailable {
+                rangefinderSection
+            }
+
             ModuleSection(
                 titleKey: "module.camera.presets",
                 subtitleKey: "module.camera.presets.subtitle"
@@ -380,6 +384,100 @@ struct CameraModuleView: View {
                     payloadStatusBanner("payload.camera.powered_off", tint: GroundControlPalette.warning)
                 } else if !state.isAvailable {
                     payloadStatusBanner("payload.camera.unavailable", tint: GroundControlPalette.warning)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rangefinderSection: some View {
+        let state = viewModel.rangefinderOpticsState
+        let controlsEnabled = state.isAvailable && state.isPowered
+
+        ModuleSection(
+            titleKey: "payload.rangefinder.title",
+            subtitleKey: "payload.rangefinder.subtitle"
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                payloadActionButton(
+                    titleKey: state.isArmed ? "payload.rangefinder.disarm" : "payload.rangefinder.arm",
+                    systemImage: state.isArmed ? "scope" : "dot.scope",
+                    tint: Color.red,
+                    prominent: state.isArmed,
+                    isDisabled: !controlsEnabled
+                ) {
+                    viewModel.setRangefinderArmed(!state.isArmed)
+                }
+
+                ModuleSliderRow(
+                    titleKey: "payload.rangefinder.zoom",
+                    value: Binding(
+                        get: { state.zoomLevel },
+                        set: { viewModel.setRangefinderZoom($0) }
+                    ),
+                    range: state.minZoom...state.maxZoom,
+                    step: 0.1,
+                    formatter: Self.coordinateFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                ModuleSliderRow(
+                    titleKey: "payload.rangefinder.gimbal_yaw",
+                    value: Binding(
+                        get: { state.gimbalYawDegrees },
+                        set: { newValue in
+                            viewModel.adjustRangefinderGimbal(
+                                yawDeltaDegrees: newValue - state.gimbalYawDegrees,
+                                pitchDeltaDegrees: 0.0
+                            )
+                        }
+                    ),
+                    range: -180.0...180.0,
+                    step: 1.0,
+                    formatter: Self.angleFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                ModuleSliderRow(
+                    titleKey: "payload.rangefinder.gimbal_pitch",
+                    value: Binding(
+                        get: { state.gimbalPitchDegrees },
+                        set: { newValue in
+                            viewModel.adjustRangefinderGimbal(
+                                yawDeltaDegrees: 0.0,
+                                pitchDeltaDegrees: newValue - state.gimbalPitchDegrees
+                            )
+                        }
+                    ),
+                    range: -90.0...35.0,
+                    step: 1.0,
+                    formatter: Self.angleFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                LazyVGrid(columns: tileColumns, spacing: 8) {
+                    payloadMetricCard(
+                        titleKey: "payload.rangefinder.distance",
+                        value: state.measuredDistanceMeters.map { String(format: "%.1f m", $0) } ?? "-- m"
+                    )
+                    payloadActionButton(
+                        titleKey: "payload.rangefinder.reset_aim",
+                        systemImage: "arrow.counterclockwise",
+                        tint: GroundControlPalette.textSecondary,
+                        prominent: false,
+                        isDisabled: !controlsEnabled
+                    ) {
+                        viewModel.resetRangefinderGimbalOrientation()
+                    }
+                }
+
+                if !state.isPowered {
+                    payloadStatusBanner("payload.rangefinder.powered_off", tint: GroundControlPalette.warning)
+                } else if !state.isAvailable {
+                    payloadStatusBanner("payload.rangefinder.unavailable", tint: GroundControlPalette.warning)
                 }
             }
         }

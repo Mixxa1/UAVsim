@@ -96,6 +96,17 @@
 "payload.camera.out_of_focus" = "РАСФОКУС";
 "payload.camera.unavailable" = "Камера ПН недоступна";
 "payload.camera.powered_off" = "Камера ПН выключена";
+"payload.rangefinder.title" = "Лазерный дальномер";
+"payload.rangefinder.subtitle" = "Наведение и измерение расстояния до цели";
+"payload.rangefinder.arm" = "Лазер ВКЛ";
+"payload.rangefinder.disarm" = "Лазер ВЫКЛ";
+"payload.rangefinder.zoom" = "Зум";
+"payload.rangefinder.gimbal_yaw" = "Рысканье";
+"payload.rangefinder.gimbal_pitch" = "Тангаж";
+"payload.rangefinder.distance" = "Дистанция";
+"payload.rangefinder.reset_aim" = "Сбросить наведение";
+"payload.rangefinder.unavailable" = "Дальномер недоступен";
+"payload.rangefinder.powered_off" = "Дальномер выключен";
 
 // Тепловизионная камера
 "payload.camera.thermal.palette" = "Палитра";
@@ -457,6 +468,7 @@
 "payload.type.camera_gimbal" = "Камера";
 "payload.type.thermal_camera" = "Тепловизор";
 "payload.type.lidar_module" = "Лидар";
+"payload.type.laser_rangefinder" = "Лазерный дальномер";
 "payload.type.rescue_pack" = "Комплект первой помощи";
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";
@@ -484,14 +496,19 @@
 "keybind.camera.mode3" = "Камера 3 (Орбита)";
 "keybind.camera.mode4" = "Камера 4 (От первого лица)";
 "keybind.camera.mode5" = "Камера 5 (Вид сверху)";
-"keybind.camera.mode6" = "Камера 6 (Падение полезной нагрузки)";
-"keybind.camera.mode8" = "Камера 8 (EO-камера ПН)";
+"keybind.camera.mode6" = "Камера (Падение полезной нагрузки)";
+"keybind.camera.mode8" = "Камера (EO-камера/дальномер ПН)";
 "keybind.camera.toggle_fpv" = "Переключить от первого лица";
 "keybind.camera.cycle_mode" = "Смена режима камеры";
 "keybind.camera.zoom_in" = "Приблизить";
 "keybind.camera.zoom_out" = "Отдалить";
 "keybind.camera.yaw_left" = "Камера: влево";
 "keybind.camera.yaw_right" = "Камера: вправо";
+"keybind.camera.look_precision" = "Точное наведение камеры";
+"keybind.camera.thermal_white_hot" = "Тепловизор: White Hot";
+"keybind.camera.thermal_black_hot" = "Тепловизор: Black Hot";
+"keybind.camera.thermal_iron" = "Тепловизор: Iron";
+"keybind.camera.rangefinder_arm" = "Дальномер: лазер вкл/выкл";
 "keybind.camera.pitch_up" = "Камера: вверх";
 "keybind.camera.pitch_down" = "Камера: вниз";
 "keybind.camera.reset_orientation" = "Сброс ориентации камеры";

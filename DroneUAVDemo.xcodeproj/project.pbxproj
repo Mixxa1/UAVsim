@@ -69,6 +69,8 @@
 		100000000000000000000239 /* PayloadType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013C /* PayloadType.swift */; };
 		10000000000000000000023A /* PayloadConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013D /* PayloadConfiguration.swift */; };
 		10000000000000000000023B /* PayloadState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013E /* PayloadState.swift */; };
+		100000000000000000000423 /* PayloadRangefinderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000422 /* PayloadRangefinderState.swift */; };
+		100000000000000000000425 /* PayloadRangefinderController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000424 /* PayloadRangefinderController.swift */; };
 		10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013F /* PayloadCapabilityCheck.swift */; };
 		10000000000000000000023D /* VehicleMassModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000140 /* VehicleMassModel.swift */; };
 		10000000000000000000023E /* PayloadController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000141 /* PayloadController.swift */; };
@@ -375,6 +377,8 @@
 		10000000000000000000013C /* PayloadType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadType.swift; sourceTree = "<group>"; };
 		10000000000000000000013D /* PayloadConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadConfiguration.swift; sourceTree = "<group>"; };
 		10000000000000000000013E /* PayloadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadState.swift; sourceTree = "<group>"; };
+		100000000000000000000422 /* PayloadRangefinderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadRangefinderState.swift; sourceTree = "<group>"; };
+		100000000000000000000424 /* PayloadRangefinderController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadRangefinderController.swift; sourceTree = "<group>"; };
 		10000000000000000000013F /* PayloadCapabilityCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadCapabilityCheck.swift; sourceTree = "<group>"; };
 		100000000000000000000140 /* VehicleMassModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleMassModel.swift; sourceTree = "<group>"; };
 		100000000000000000000141 /* PayloadController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadController.swift; sourceTree = "<group>"; };
@@ -686,6 +690,8 @@
 				10000000000000000000013D /* PayloadConfiguration.swift */,
 				10000000000000000000013F /* PayloadCapabilityCheck.swift */,
 				10000000000000000000013E /* PayloadState.swift */,
+				100000000000000000000422 /* PayloadRangefinderState.swift */,
+				100000000000000000000424 /* PayloadRangefinderController.swift */,
 				100000000000000000000145 /* PayloadMountState.swift */,
 				100000000000000000000147 /* PayloadDataQualitySource.swift */,
 				10000000000000000000013C /* PayloadType.swift */,
@@ -1313,6 +1319,8 @@
 				100000000000000000000239 /* PayloadType.swift in Sources */,
 				10000000000000000000023A /* PayloadConfiguration.swift in Sources */,
 				10000000000000000000023B /* PayloadState.swift in Sources */,
+				100000000000000000000423 /* PayloadRangefinderState.swift in Sources */,
+				100000000000000000000425 /* PayloadRangefinderController.swift in Sources */,
 				10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */,
 				10000000000000000000023D /* VehicleMassModel.swift in Sources */,
 				10000000000000000000023E /* PayloadController.swift in Sources */,

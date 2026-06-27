@@ -96,6 +96,17 @@
 "payload.camera.out_of_focus" = "OUT OF FOCUS";
 "payload.camera.unavailable" = "Payload camera unavailable";
 "payload.camera.powered_off" = "Payload camera powered off";
+"payload.rangefinder.title" = "Laser Rangefinder";
+"payload.rangefinder.subtitle" = "Aim and measure distance to target";
+"payload.rangefinder.arm" = "Laser ON";
+"payload.rangefinder.disarm" = "Laser OFF";
+"payload.rangefinder.zoom" = "Zoom";
+"payload.rangefinder.gimbal_yaw" = "Yaw";
+"payload.rangefinder.gimbal_pitch" = "Pitch";
+"payload.rangefinder.distance" = "Distance";
+"payload.rangefinder.reset_aim" = "Reset Aim";
+"payload.rangefinder.unavailable" = "Rangefinder unavailable";
+"payload.rangefinder.powered_off" = "Rangefinder powered off";
 
 // Thermal camera
 "payload.camera.thermal.palette" = "Palette";
@@ -460,6 +471,7 @@
 "payload.type.camera_gimbal" = "Camera Gimbal";
 "payload.type.thermal_camera" = "Thermal Camera";
 "payload.type.lidar_module" = "LiDAR Module";
+"payload.type.laser_rangefinder" = "Laser Rangefinder";
 "payload.type.rescue_pack" = "Rescue Pack";
 "payload.type.sensor_module" = "Sensor Module";
 "payload.type.radio_relay" = "Radio Relay";
@@ -488,14 +500,19 @@
 "keybind.camera.mode3" = "Camera 3 (Orbit)";
 "keybind.camera.mode4" = "Camera 4 (FPV)";
 "keybind.camera.mode5" = "Camera 5 (Top)";
-"keybind.camera.mode6" = "Camera 6 (Payload Drop)";
-"keybind.camera.mode8" = "Camera 8 (Payload EO)";
+"keybind.camera.mode6" = "Camera (Payload Drop)";
+"keybind.camera.mode8" = "Camera (Payload EO/LRF)";
 "keybind.camera.toggle_fpv" = "Toggle FPV";
 "keybind.camera.cycle_mode" = "Cycle camera mode";
 "keybind.camera.zoom_in" = "Zoom in";
 "keybind.camera.zoom_out" = "Zoom out";
 "keybind.camera.yaw_left" = "Yaw left (camera)";
 "keybind.camera.yaw_right" = "Yaw right (camera)";
+"keybind.camera.look_precision" = "Precision camera look";
+"keybind.camera.thermal_white_hot" = "Thermal: White Hot";
+"keybind.camera.thermal_black_hot" = "Thermal: Black Hot";
+"keybind.camera.thermal_iron" = "Thermal: Iron";
+"keybind.camera.rangefinder_arm" = "Rangefinder: toggle laser";
 "keybind.camera.pitch_up" = "Pitch up (camera)";
 "keybind.camera.pitch_down" = "Pitch down (camera)";
 "keybind.camera.reset_orientation" = "Reset camera orientation";
