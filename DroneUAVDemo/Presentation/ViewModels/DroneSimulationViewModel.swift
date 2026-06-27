@@ -489,6 +489,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var diagSnapshotInCount: Int = 0
     private var diagSceneApplyCount: Int = 0
     private var diagRenderFrameCount: Int = 0
+    private var lastThermalDiagnosticsUpdate: TimeInterval = 0.0
     private var diagLastResetTime: TimeInterval = 0
     private var diagLastComputedHz = (out: 0.0, rx: 0.0, sceneApply: 0.0, renderFPS: 0.0)
     // Throttle @Published onlineInterpolatedRemoteStates; interval driven by policy.overlayPublishInterval.
@@ -591,6 +592,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isCompassVisible: Bool
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
     @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
+    @Published private(set) var payloadThermalState: PayloadThermalState = .default
     @Published private(set) var payloadMissionSignals: [PayloadMissionSignal]
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
     @Published private(set) var controllerInteractionMode: ControllerInteractionMode = .flight
@@ -3245,6 +3247,56 @@ final class DroneSimulationViewModel: ObservableObject {
         payloadCameraController.toggleRecording()
         publishPayloadCameraOpticsState()
     }
+
+    // MARK: - Thermal camera
+
+    /// Switch the payload camera between EO (`.optical`) and thermal (`.thermalStub`). Zoom /
+    /// focus / autofocus / stabilization are preserved — only the sensor sub-mode changes.
+    func setPayloadCameraMode(_ mode: PayloadCameraMode) {
+        // `.nightStub` is still unimplemented — ignore taps on it.
+        guard mode == .optical || mode == .thermalStub else { return }
+        guard payloadCameraController.opticsState.mode != mode else { return }
+        payloadCameraController.setPayloadCameraMode(mode)
+        publishPayloadCameraOpticsState()
+        payloadThermalState.isEnabled = mode == .thermalStub
+        payloadThermalState.isAvailable = payloadCameraOpticsState.isAvailable
+    }
+
+    func setThermalPalette(_ palette: ThermalPalette) {
+        guard payloadThermalState.palette != palette else { return }
+        payloadThermalState.palette = palette
+        sceneController.setThermalPalette(palette)
+    }
+
+    func setThermalProfileSelection(_ selection: ThermalProfileSelection) {
+        guard payloadThermalState.profileSelection != selection else { return }
+        payloadThermalState.profileSelection = selection
+        sceneController.setThermalProfileSelection(selection)
+    }
+
+    func setThermalContrast(_ value: Double) {
+        payloadThermalState.contrast = min(1.8, max(0.4, value))
+        sceneController.setThermalContrast(value)
+    }
+
+    func setThermalBrightness(_ value: Double) {
+        payloadThermalState.brightness = min(0.3, max(-0.3, value))
+        sceneController.setThermalBrightness(value)
+    }
+
+    func setThermalNoiseAmount(_ value: Double) {
+        payloadThermalState.noiseAmount = min(1.0, max(0.0, value))
+        sceneController.setThermalNoiseAmount(value)
+    }
+
+    func setThermalDiagnosticsVisible(_ visible: Bool) {
+        guard payloadThermalState.showDiagnostics != visible else { return }
+        payloadThermalState.showDiagnostics = visible
+    }
+
+    func toggleThermalDiagnostics() {
+        payloadThermalState.showDiagnostics.toggle()
+    }
     func setCameraSensitivityProfile(_ value: CameraSensitivityProfile) { cameraConfiguration.sensitivityProfile = value }
     func setOrbitDistance(_ value: Double) { cameraConfiguration.orbit.distance = Float(value).clamped(to: cameraConfiguration.orbit.minDistance...cameraConfiguration.orbit.maxDistance) }
     func setFollowOffsetX(_ value: Double) { cameraConfiguration.follow.lateralOffset = Float(value) }
@@ -3430,6 +3482,40 @@ final class DroneSimulationViewModel: ObservableObject {
             atTime: time,
             isActive: cameraMode == .payload
         )
+
+        // `SCNSceneRendererDelegate.renderer(_:updateAtTime:)` (this method's caller) is
+        // documented to run on SceneKit's own rendering thread, not necessarily the main thread.
+        // The thermal path below does AppKit drawing (NSImage.lockFocus / NSBezierPath / NSGradient
+        // in ThermalVariationTexture) and mutates @Published state — both require the main thread;
+        // calling lockFocus() off-main is a known hang/deadlock hazard. Hop explicitly rather than
+        // assume the caller's thread.
+        guard cameraMode == .payloadOptics else { return }
+        Task { @MainActor [weak self] in
+            self?.updateThermalForRenderFrame(atTime: time, cameraMode: cameraMode)
+        }
+    }
+
+    private func updateThermalForRenderFrame(atTime time: TimeInterval, cameraMode: CameraMode) {
+        let wantsThermal = cameraMode == .payloadOptics
+            && payloadCameraOpticsState.mode == .thermalStub
+            && payloadCameraOpticsState.isAvailable
+        sceneController.updateThermalPresentation(active: wantsThermal)
+
+        guard wantsThermal else { return }
+
+        // Diagnostics @ ~8 Hz, only mutating @Published when the snapshot actually changes.
+        if time - lastThermalDiagnosticsUpdate >= 0.12 {
+            lastThermalDiagnosticsUpdate = time
+            let diagnostics = sceneController.thermalDiagnostics(
+                includeCenterProbe: payloadThermalState.showDiagnostics
+            )
+            let resolved = sceneController.resolvedThermalProfile()
+            if diagnostics != payloadThermalState.diagnostics
+                || resolved != payloadThermalState.resolvedProfile {
+                payloadThermalState.diagnostics = diagnostics
+                payloadThermalState.resolvedProfile = resolved
+            }
+        }
     }
 
     func setActiveCameraDistance(_ value: Double) {
@@ -6403,6 +6489,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private func publishPayloadCameraOpticsState() {
         payloadCameraOpticsState = payloadCameraController.opticsState
         sceneController.setPayloadCameraOpticsState(payloadCameraOpticsState)
+        payloadThermalState.isAvailable = payloadCameraOpticsState.isAvailable
+        payloadThermalState.isEnabled = payloadCameraOpticsState.isAvailable
+            && payloadCameraOpticsState.mode == .thermalStub
     }
 
     private func refreshPayloadCameraStatus(deltaTime: TimeInterval = 0.0) {
@@ -11140,7 +11229,6 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let objects = sceneController.environmentMapDescriptors
             .filter { descriptor in
-                descriptor.kind != .distantBelt &&
                 abs(descriptor.position.x) <= extent + descriptor.boundingRadius &&
                 abs(descriptor.position.z) <= extent + descriptor.boundingRadius
             }

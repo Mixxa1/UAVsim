@@ -734,7 +734,8 @@ final class ScenePopulationService {
         case .city:
             ringCount = 0
         case .gridDemo:
-            ringCount = 2
+            // Bare debug map by design (see populate()'s early return for .gridDemo) — no belt.
+            ringCount = 0
         }
 
         for ringIndex in 0..<ringCount {
@@ -764,53 +765,20 @@ final class ScenePopulationService {
                         collidable: false
                     ))
 
-                case .city:
+                case .city, .cargoYard, .gridDemo:
                     continue
 
-                case .cargoYard:
-                    descriptors.append(makeDescriptor(
-                        kind: .distantBelt,
-                        biome: .cargoYard,
-                        position: SIMD3<Float>(x, 0.0, z),
-                        size: SIMD3<Float>(
-                            Float.random(in: 20.0...44.0, using: &generator),
-                            Float.random(in: 8.0...18.0, using: &generator),
-                            Float.random(in: 10.0...24.0, using: &generator)
-                        ),
-                        collidable: false
-                    ))
-
                 case .field:
-                    let kind: EnvironmentObjectKind = Float.random(in: 0.0...1.0, using: &generator) < 0.72 ? .distantBelt : .tree
-                    let size = kind == .distantBelt
-                        ? SIMD3<Float>(
-                            Float.random(in: 18.0...40.0, using: &generator),
-                            Float.random(in: 4.5...12.0, using: &generator),
-                            Float.random(in: 6.0...16.0, using: &generator)
-                        )
-                        : SIMD3<Float>(
-                            Float.random(in: 1.8...4.6, using: &generator),
-                            Float.random(in: 8.0...18.0, using: &generator),
-                            Float.random(in: 1.8...4.6, using: &generator)
-                        )
+                    let size = SIMD3<Float>(
+                        Float.random(in: 1.8...4.6, using: &generator),
+                        Float.random(in: 8.0...18.0, using: &generator),
+                        Float.random(in: 1.8...4.6, using: &generator)
+                    )
                     descriptors.append(makeDescriptor(
-                        kind: kind,
+                        kind: .tree,
                         biome: .field,
                         position: SIMD3<Float>(x, 0.0, z),
                         size: size,
-                        collidable: false
-                    ))
-
-                case .gridDemo:
-                    descriptors.append(makeDescriptor(
-                        kind: .distantBelt,
-                        biome: .gridDemo,
-                        position: SIMD3<Float>(x, 0.0, z),
-                        size: SIMD3<Float>(
-                            Float.random(in: 12.0...22.0, using: &generator),
-                            Float.random(in: 18.0...36.0, using: &generator),
-                            Float.random(in: 8.0...16.0, using: &generator)
-                        ),
                         collidable: false
                     ))
                 }
@@ -1245,8 +1213,6 @@ final class ScenePopulationService {
                 Float.random(in: 1.5...3.2, using: &generator),
                 Float.random(in: 0.8...1.6, using: &generator)
             )
-        case .distantBelt:
-            return SIMD3<Float>(16.0, 32.0, 8.0)
         }
     }
 }

@@ -204,7 +204,6 @@ enum EnvironmentObjectKind: String {
     case cargoContainer
     case rock
     case marker
-    case distantBelt
 }
 
 enum CargoContainerAssetKind: String, CaseIterable {

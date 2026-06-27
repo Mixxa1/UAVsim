@@ -97,6 +97,49 @@
 "payload.camera.unavailable" = "Камера ПН недоступна";
 "payload.camera.powered_off" = "Камера ПН выключена";
 
+// Тепловизионная камера
+"payload.camera.thermal.palette" = "Палитра";
+"payload.camera.thermal.profile" = "Тепловой профиль";
+"payload.camera.thermal.contrast" = "Контраст";
+"payload.camera.thermal.brightness" = "Яркость";
+"payload.camera.thermal.noise" = "Шум";
+"payload.camera.thermal.diagnostics" = "Показать диагностику";
+
+"payload.camera.thermal.palette.white_hot" = "White Hot";
+"payload.camera.thermal.palette.black_hot" = "Black Hot";
+"payload.camera.thermal.palette.iron" = "Iron";
+
+"payload.camera.thermal.profile.auto" = "Авто";
+"payload.camera.thermal.profile.neutral" = "Нейтральный";
+"payload.camera.thermal.profile.forest" = "Лес";
+"payload.camera.thermal.profile.field" = "Поле";
+"payload.camera.thermal.profile.city" = "Город";
+"payload.camera.thermal.profile.snow" = "Снег";
+"payload.camera.thermal.profile.water" = "Вода / берег";
+"payload.camera.thermal.profile.mountain" = "Горы";
+
+"payload.camera.thermal.class.sky" = "Небо";
+"payload.camera.thermal.class.snow" = "Снег";
+"payload.camera.thermal.class.ice" = "Лёд";
+"payload.camera.thermal.class.water" = "Вода";
+"payload.camera.thermal.class.terrain" = "Грунт";
+"payload.camera.thermal.class.grass" = "Трава";
+"payload.camera.thermal.class.foliage" = "Листва";
+"payload.camera.thermal.class.treeTrunk" = "Ствол дерева";
+"payload.camera.thermal.class.rock" = "Камень";
+"payload.camera.thermal.class.road" = "Дорога";
+"payload.camera.thermal.class.bareSoil" = "Голая земля";
+"payload.camera.thermal.class.building" = "Здание";
+"payload.camera.thermal.class.roof" = "Крыша";
+"payload.camera.thermal.class.concrete" = "Бетон";
+"payload.camera.thermal.class.metal" = "Металл";
+"payload.camera.thermal.class.asphalt" = "Асфальт";
+"payload.camera.thermal.class.glass" = "Стекло";
+"payload.camera.thermal.class.shadow" = "Тень";
+"payload.camera.thermal.class.generic" = "Прочее";
+
+"overlay.thermal_diagnostics.title" = "ТЕПЛОВАЯ ДИАГНОСТИКА";
+
 "command.reset" = "Сброс";
 "command.takeoff" = "Взлет";
 "command.land" = "Посадка";

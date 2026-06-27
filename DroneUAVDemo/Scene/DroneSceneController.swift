@@ -184,6 +184,21 @@ final class DroneSceneController {
     private var lastGeneratedCityKey: CityGenerationKey?
     private let snowDecorationsNode = SCNNode()
 
+    // MARK: Thermal camera
+    private var thermalRenderer: ThermalProxyRenderer?
+    private var thermalRenderingActive = false
+    private var thermalContext = ThermalEnvironmentContext.neutral
+    private var thermalPalette: ThermalPalette = .whiteHot
+    private var thermalProfileSelection: ThermalProfileSelection = .auto
+    private var thermalContrast: Double = 1.0
+    private var thermalBrightness: Double = 0.0
+    private var thermalNoiseAmount: Double = 0.5
+    private var thermalNormalization = ThermalNormalizationState.neutral
+    private var thermalSavedBackground: Any?
+    private var thermalSavedFogStart: CGFloat?
+    private var thermalSavedFogEnd: CGFloat?
+    private var thermalPresentationDirty = true
+
     private struct SupplementalCollisionObstacle {
         let obstacle: CollisionObstacle
         let highlightNode: SCNNode?
@@ -197,8 +212,12 @@ final class DroneSceneController {
     private enum RenderCategory {
         static let droppedPayload = 1 << 6
         static let mountedPayload = 1 << 7
-        static let visibleInFPV = Int.max & ~droppedPayload
-        static let visibleInPayloadOptics = Int.max & ~mountedPayload
+        // Thermal proxy geometry: only the payload camera in thermal mode renders it. Every
+        // other camera must clear this bit (cameras default to -1 = all bits set).
+        static let thermalProxy = ThermalRenderCategory.proxyBit
+        static let standardVisible = Int.max & ~thermalProxy
+        static let visibleInFPV = standardVisible & ~droppedPayload
+        static let visibleInPayloadOptics = standardVisible & ~mountedPayload
     }
 
     private enum CameraClipping {
@@ -388,6 +407,233 @@ final class DroneSceneController {
         }
         ensurePayloadCameraNode()
         return payloadCameraNode
+    }
+
+    // MARK: - Thermal Rendering
+
+    func setThermalPalette(_ palette: ThermalPalette) {
+        guard thermalPalette != palette else { return }
+        thermalPalette = palette
+        thermalPresentationDirty = true
+    }
+
+    func setThermalProfileSelection(_ selection: ThermalProfileSelection) {
+        guard thermalProfileSelection != selection else { return }
+        thermalProfileSelection = selection
+        thermalPresentationDirty = true
+    }
+
+    func setThermalContrast(_ value: Double) {
+        let clamped = min(1.8, max(0.4, value))
+        guard abs(thermalContrast - clamped) > 0.0001 else { return }
+        thermalContrast = clamped
+        thermalPresentationDirty = true
+    }
+
+    func setThermalBrightness(_ value: Double) {
+        let clamped = min(0.3, max(-0.3, value))
+        guard abs(thermalBrightness - clamped) > 0.0001 else { return }
+        thermalBrightness = clamped
+        thermalPresentationDirty = true
+    }
+
+    func setThermalNoiseAmount(_ value: Double) {
+        let clamped = min(1.0, max(0.0, value))
+        guard abs(thermalNoiseAmount - clamped) > 0.0001 else { return }
+        thermalNoiseAmount = clamped
+        thermalPresentationDirty = true
+    }
+
+    /// Mark the thermal scene stale (weather/environment changed). Cheap; the rebuild happens on
+    /// the next presentation while thermal is active.
+    func invalidateThermalScene() {
+        thermalRenderer?.invalidate()
+        thermalPresentationDirty = true
+    }
+
+    /// Per-frame gate. Toggles the payload camera between the real scene and the thermal proxy
+    /// scene (idempotent), and recolours only when something actually changed.
+    func updateThermalPresentation(active: Bool) {
+        if active != thermalRenderingActive {
+            thermalRenderingActive = active
+            if active {
+                activateThermalRendering()
+            } else {
+                deactivateThermalRendering()
+            }
+        }
+
+        guard thermalRenderingActive else { return }
+        if thermalPresentationDirty {
+            refreshThermalPresentation()
+            thermalPresentationDirty = false
+        }
+    }
+
+    private func ensureThermalRenderer() -> ThermalProxyRenderer {
+        if let thermalRenderer {
+            return thermalRenderer
+        }
+        let renderer = ThermalProxyRenderer(sceneRoot: scene.rootNode, groundNode: groundNode)
+        thermalRenderer = renderer
+        return renderer
+    }
+
+    private func activateThermalRendering() {
+        ensurePayloadCameraNode()
+        _ = ensureThermalRenderer()
+        thermalSavedBackground = scene.background.contents
+        thermalSavedFogStart = scene.fogStartDistance
+        thermalSavedFogEnd = scene.fogEndDistance
+        neutralizeFogForThermal()
+        payloadCamera?.categoryBitMask = RenderCategory.thermalProxy
+        thermalPresentationDirty = true
+    }
+
+    private func deactivateThermalRendering() {
+        payloadCamera?.categoryBitMask = RenderCategory.visibleInPayloadOptics
+        if let saved = thermalSavedBackground {
+            scene.background.contents = saved
+        }
+        thermalSavedBackground = nil
+        if let start = thermalSavedFogStart {
+            scene.fogStartDistance = start
+        }
+        if let end = thermalSavedFogEnd {
+            scene.fogEndDistance = end
+        }
+        thermalSavedFogStart = nil
+        thermalSavedFogEnd = nil
+    }
+
+    /// `scene.fog*` is a scene-wide property (not per-camera) — the EO atmospheric haze colour
+    /// (near-white for snow/fog presets) was blending into thermal proxy fragments by distance,
+    /// painting far snow/ground white regardless of its actual temperature. Thermal already
+    /// represents fog/haze degradation by widening the normalization band (less apparent
+    /// contrast), so the literal screen-space fog blend is pushed out beyond the payload camera's
+    /// far clip while thermal is active — it never reaches any rendered fragment.
+    private func neutralizeFogForThermal() {
+        scene.fogStartDistance = CameraClipping.payloadOpticsFar * 4
+        scene.fogEndDistance = CameraClipping.payloadOpticsFar * 6
+    }
+
+    private func refreshThermalPresentation() {
+        let renderer = ensureThermalRenderer()
+        let context = makeThermalContext()
+        thermalContext = context
+
+        let groundClass = groundThermalClass()
+        let population = renderer.normalizationPopulation(
+            groundClass: groundClass,
+            environmentRevision: environmentRevision
+        )
+        thermalNormalization = ThermalNormalizationModel.make(population: population, context: context)
+
+        renderer.updatePresentation(
+            context: context,
+            palette: thermalPalette,
+            contrast: thermalContrast,
+            brightness: thermalBrightness,
+            noiseAmount: thermalNoiseAmount,
+            normalization: thermalNormalization,
+            groundClass: groundClass,
+            environmentRevision: environmentRevision
+        )
+
+        // Sky/background: coldest class, mapped through the same range + palette.
+        let skyTemperature = ThermalMaterialModel.meanTemperature(for: .sky, context: context)
+        let skyColor = ThermalPaletteMapper.color(
+            forTemperature: skyTemperature,
+            displayMin: thermalNormalization.displayMinCelsius,
+            displayMax: thermalNormalization.displayMaxCelsius,
+            palette: thermalPalette,
+            contrast: thermalContrast,
+            brightness: thermalBrightness
+        )
+        scene.background.contents = skyColor
+    }
+
+    private func makeThermalContext() -> ThermalEnvironmentContext {
+        let terrainPreset = lastTerrainConfig?.preset ?? .field
+        let profile = ThermalSceneProfileResolver.resolve(
+            terrain: terrainPreset,
+            weather: currentWeather.preset,
+            selection: thermalProfileSelection
+        )
+        return ThermalEnvironmentAdapter.makeContext(
+            weather: currentWeather,
+            terrain: terrainPreset,
+            sceneProfile: profile
+        )
+    }
+
+    private func groundThermalClass() -> ThermalMaterialClass {
+        guard let terrain = lastTerrainConfig else { return .terrain }
+        switch terrain.preset {
+        case .gridDemo:
+            return .generic
+        case .city:
+            return .concrete
+        case .field, .forest, .cargoYard:
+            return currentWeather.preset == .snow ? .snow : .grass
+        }
+    }
+
+    /// Diagnostics snapshot for the debug overlay. The center probe casts a ray down the payload
+    /// camera's forward axis and reads the hit proxy's stored temperature/class.
+    func thermalDiagnostics(includeCenterProbe: Bool) -> ThermalDiagnosticsSnapshot {
+        var center: (cls: ThermalMaterialClass, temp: Double, name: String?)?
+        if includeCenterProbe, thermalRenderingActive {
+            center = thermalCenterProbe()
+        }
+
+        return ThermalDiagnosticsSnapshot(
+            ambientTemperatureCelsius: thermalContext.ambientTemperatureCelsius,
+            weatherKind: thermalContext.weatherKind,
+            sceneProfile: thermalContext.sceneProfile,
+            displayMinCelsius: thermalNormalization.displayMinCelsius,
+            displayMaxCelsius: thermalNormalization.displayMaxCelsius,
+            centerTemperatureCelsius: center?.temp,
+            centerMaterialClass: center?.cls,
+            centerNodeName: center?.name,
+            rainIntensity: thermalContext.rainIntensity,
+            snowIntensity: thermalContext.snowIntensity,
+            fogDensity: thermalContext.fogDensity,
+            cloudiness: thermalContext.cloudiness,
+            windSpeedMps: thermalContext.windSpeedMps,
+            sunExposure: thermalContext.sunExposure
+        )
+    }
+
+    func resolvedThermalProfile() -> ThermalSceneProfile {
+        thermalContext.sceneProfile
+    }
+
+    private func thermalCenterProbe() -> (cls: ThermalMaterialClass, temp: Double, name: String?)? {
+        guard let renderer = thermalRenderer, let payloadCameraNode else { return nil }
+        let origin = payloadCameraNode.presentation.simdWorldPosition
+        let forward = simd_normalize(simd_act(
+            simd_quatf(payloadCameraNode.presentation.simdWorldTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        guard simd_length_squared(forward) > 0.000001 else { return nil }
+
+        let end = origin + forward * Float(CameraClipping.payloadOpticsFar)
+        let results = scene.rootNode.hitTestWithSegment(
+            from: SCNVector3(origin.x, origin.y, origin.z),
+            to: SCNVector3(end.x, end.y, end.z),
+            options: [
+                SCNHitTestOption.categoryBitMask.rawValue: RenderCategory.thermalProxy,
+                SCNHitTestOption.backFaceCulling.rawValue: false,
+                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.closest.rawValue
+            ]
+        )
+        for result in results {
+            if let probe = renderer.probe(node: result.node) {
+                return (probe.materialClass, probe.temperatureCelsius, probe.name)
+            }
+        }
+        return nil
     }
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
@@ -1448,6 +1694,9 @@ final class DroneSceneController {
         if terrain.preset == .city {
             printCityGenerationDiagnostics(descriptors: descriptors)
         }
+
+        // Environment was rebuilt — thermal proxies are stale.
+        invalidateThermalScene()
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {
@@ -1473,6 +1722,9 @@ final class DroneSceneController {
                 weatherHazeDistribution: haze?.distribution ?? .groundHaze
             )
             scene.background.contents = backgroundImage
+            // Keep the thermal restore target current if the EO sky changed while thermal is
+            // active (the dirty flag re-paints the thermal sky on the next frame).
+            if thermalRenderingActive { thermalSavedBackground = backgroundImage }
             // applyTerrainVisualStyle keeps lightingEnvironment.contents in lockstep with the
             // visible sky on terrain changes; weather can change independently of terrain, so
             // without this the IBL ambient light kept using the pre-storm bright gradient even
@@ -1485,6 +1737,9 @@ final class DroneSceneController {
             }
             refreshGroundMaterial(for: terrain)
             buildSnowDecorations(for: terrain)
+
+            // Weather change re-creates tree/ground visuals → thermal proxies are stale.
+            invalidateThermalScene()
         }
     }
 
@@ -1524,6 +1779,14 @@ final class DroneSceneController {
             case .normal, .wind:
                 break
             }
+        }
+
+        // Keep the thermal restore target current, then re-neutralize so the EO haze colour just
+        // applied above never reaches the thermal proxies (see neutralizeFogForThermal).
+        if thermalRenderingActive {
+            thermalSavedFogStart = scene.fogStartDistance
+            thermalSavedFogEnd = scene.fogEndDistance
+            neutralizeFogForThermal()
         }
     }
 
@@ -2018,7 +2281,7 @@ final class DroneSceneController {
         camera.fieldOfView = CGFloat(fov)
         camera.zNear = 0.01
         camera.zFar = CameraClipping.standardFar
-        camera.categoryBitMask = hidesDroppedPayload ? RenderCategory.visibleInFPV : Int.max
+        camera.categoryBitMask = hidesDroppedPayload ? RenderCategory.visibleInFPV : RenderCategory.standardVisible
         node.camera = camera
     }
 
@@ -2712,6 +2975,7 @@ final class DroneSceneController {
         }
 
         scene.background.contents = backgroundImage
+        if thermalRenderingActive { thermalSavedBackground = backgroundImage }
         scene.lightingEnvironment.contents = backgroundImage
 
         if let geometry = groundNode.geometry {
@@ -3511,18 +3775,6 @@ final class DroneSceneController {
                 baseY: 0.0,
                 topY: height
             )
-
-        case .distantBelt:
-            let width = max(4.0, descriptor.size.x)
-            let depth = max(4.0, descriptor.size.z)
-            let height = max(2.0, descriptor.size.y)
-            return ObstacleProxySpec(
-                localCenterY: height * 0.5,
-                analysisRadius: max(width, depth) * 0.5,
-                source: "belt.box",
-                baseY: 0.0,
-                topY: height
-            )
         }
     }
 
@@ -3576,7 +3828,7 @@ final class DroneSceneController {
                 source: "crate.top"
             )]
 
-        case .tree, .pole, .cargoContainer, .rock, .marker, .distantBelt:
+        case .tree, .pole, .cargoContainer, .rock, .marker:
             return []
         }
     }

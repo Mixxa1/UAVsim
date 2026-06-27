@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import simd
 
@@ -34,8 +35,28 @@ struct SceneViewportView: View {
             .ignoresSafeArea()
 
             if payloadOpticsActive {
-                PayloadOpticsViewportOverlayView(state: payloadOpticsState)
-                    .ignoresSafeArea()
+                PayloadOpticsViewportOverlayView(
+                    state: payloadOpticsState,
+                    thermalState: viewModel.payloadThermalState
+                )
+                .ignoresSafeArea()
+            }
+
+            if payloadOpticsActive, payloadOpticsState.mode == .thermalStub {
+                ThermalScaleBarView(thermalState: viewModel.payloadThermalState)
+                    .padding(.trailing, overlayInset + 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .allowsHitTesting(false)
+            }
+
+            if payloadOpticsActive,
+               payloadOpticsState.mode == .thermalStub,
+               viewModel.payloadThermalState.showDiagnostics {
+                ThermalDiagnosticsOverlayView(thermalState: viewModel.payloadThermalState)
+                    .padding(.leading, overlayInset)
+                    .padding(.bottom, overlayInset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .allowsHitTesting(false)
             }
 
             if viewModel.isSpectatorMode || payloadOpticsActive {
@@ -235,6 +256,11 @@ private struct PayloadCameraStatusOverlayView: View {
 
 private struct PayloadOpticsViewportOverlayView: View {
     let state: PayloadCameraOpticsState
+    var thermalState: PayloadThermalState = .default
+
+    private var feedLabel: String {
+        state.mode == .thermalStub ? thermalState.palette.feedLabel : state.feedLabel
+    }
 
     private var targetText: String {
         guard let target = state.targetDistanceMeters else {
@@ -291,7 +317,7 @@ private struct PayloadOpticsViewportOverlayView: View {
             VStack(spacing: 0) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(state.feedLabel)
+                        Text(feedLabel)
                             .font(.system(size: 22, weight: .bold, design: .monospaced))
                         Text("ZOOM \(zoomText)")
                             .font(.system(size: 18, weight: .semibold, design: .monospaced))
@@ -367,6 +393,144 @@ private struct PayloadOpticsViewportOverlayView: View {
                 .frame(width: 116, height: 116)
                 .shadow(color: reticleColor.opacity(state.focusLockPulse * 0.55), radius: 18)
         }
+        .allowsHitTesting(false)
+    }
+}
+
+private struct ThermalDiagnosticsOverlayView: View {
+    let thermalState: PayloadThermalState
+
+    private var diag: ThermalDiagnosticsSnapshot { thermalState.diagnostics }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("overlay.thermal_diagnostics.title")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(Color(red: 0.78, green: 0.94, blue: 1.0))
+
+            row("AMBIENT", String(format: "%.1f C", diag.ambientTemperatureCelsius))
+            row("WEATHER", diag.weatherKind.uppercased())
+            row("PROFILE", localized(thermalState.resolvedProfile.titleKey).uppercased())
+            row("RANGE", String(format: "%.0f...%.0f C", diag.displayMinCelsius, diag.displayMaxCelsius))
+
+            Divider().background(Color.white.opacity(0.2))
+
+            if let temp = diag.centerTemperatureCelsius {
+                row("CENTER T", String(format: "%.1f C", temp))
+            } else {
+                row("CENTER T", "--")
+            }
+            if let cls = diag.centerMaterialClass {
+                row("CENTER", localized(cls.titleKey).uppercased())
+            } else {
+                row("CENTER", "--")
+            }
+            if let name = diag.centerNodeName {
+                row("NODE", name)
+            }
+
+            Divider().background(Color.white.opacity(0.2))
+
+            row("SUN", String(format: "%.0f%%", diag.sunExposure * 100.0))
+            row("RAIN/SNOW", String(format: "%.0f / %.0f%%", diag.rainIntensity * 100.0, diag.snowIntensity * 100.0))
+            row("FOG/CLOUD", String(format: "%.0f / %.0f%%", diag.fogDensity * 100.0, diag.cloudiness * 100.0))
+            row("WIND", String(format: "%.1f m/s", diag.windSpeedMps))
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .frame(maxWidth: 280, alignment: .leading)
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .foregroundStyle(Color.white.opacity(0.6))
+                .frame(width: 92, alignment: .leading)
+            Text(value)
+                .foregroundStyle(Color.white.opacity(0.95))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+    }
+
+    private func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
+    }
+}
+
+/// Permanent thermal HUD legend (matches a real IR camera's on-screen scale bar) — a continuous
+/// palette gradient from `displayMin` (bottom) to `displayMax` (top) with evenly spaced °C ticks.
+/// Always visible while thermal is active, independent of the diagnostics toggle.
+private struct ThermalScaleBarView: View {
+    let thermalState: PayloadThermalState
+
+    private let tickCount = 6
+    private let sampleCount = 48
+    private let barHeight: CGFloat = 220
+
+    private var diag: ThermalDiagnosticsSnapshot { thermalState.diagnostics }
+
+    private var span: Double {
+        max(0.5, diag.displayMaxCelsius - diag.displayMinCelsius)
+    }
+
+    private var gradientStops: [Gradient.Stop] {
+        (0...sampleCount).map { index in
+            let fraction = Double(index) / Double(sampleCount)
+            let temperature = diag.displayMinCelsius + fraction * span
+            let color = ThermalPaletteMapper.color(
+                forTemperature: temperature,
+                displayMin: diag.displayMinCelsius,
+                displayMax: diag.displayMaxCelsius,
+                palette: thermalState.palette,
+                contrast: thermalState.contrast,
+                brightness: thermalState.brightness
+            )
+            return Gradient.Stop(color: Color(nsColor: color), location: fraction)
+        }
+    }
+
+    /// Tick temperatures, highest first (so the first label lines up with the top of the bar).
+    private var tickValues: [Double] {
+        (0..<tickCount).reversed().map { index in
+            let fraction = Double(index) / Double(tickCount - 1)
+            return diag.displayMinCelsius + fraction * span
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 6) {
+            VStack(spacing: 0) {
+                ForEach(Array(tickValues.enumerated()), id: \.offset) { _, value in
+                    Text(String(format: "%.0f°", value))
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .frame(maxHeight: .infinity, alignment: .center)
+                }
+            }
+            .frame(height: barHeight)
+
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(stops: gradientStops),
+                        startPoint: .bottom,
+                        endPoint: .top
+                    )
+                )
+                .frame(width: 14, height: barHeight)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .stroke(Color.white.opacity(0.45), lineWidth: 1)
+                )
+        }
+        .padding(8)
+        .background(Color.black.opacity(0.32), in: RoundedRectangle(cornerRadius: 8))
         .allowsHitTesting(false)
     }
 }
@@ -975,8 +1139,6 @@ struct TerrainMapCanvas: View {
             path.closeSubpath()
             context.fill(path, with: .color(Color(red: 0.31, green: 0.73, blue: 0.86).opacity(0.80)))
             context.stroke(path, with: .color(Color.black.opacity(0.20)), lineWidth: 0.6)
-        case .distantBelt:
-            break
         }
     }
 

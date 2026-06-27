@@ -46,7 +46,7 @@ enum EnvironmentObjectFactory {
             }
             placeholdersHidden += 1
             return emptyNode(for: descriptor)
-        case .building, .distantBelt:
+        case .building:
             return EnvironmentProceduralVisualFactory.makeNode(for: descriptor, quality: quality)
         }
     }

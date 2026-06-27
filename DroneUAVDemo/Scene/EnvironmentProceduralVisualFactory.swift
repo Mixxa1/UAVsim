@@ -26,8 +26,6 @@ enum EnvironmentProceduralVisualFactory {
             return makeRockNode(descriptor: descriptor)
         case .marker:
             return makeMarkerNode(descriptor: descriptor)
-        case .distantBelt:
-            return makeDistantMaskNode(descriptor: descriptor)
         }
     }
 
@@ -55,10 +53,6 @@ enum EnvironmentProceduralVisualFactory {
             )
         case .marker:
             return makeSimplifiedMarkerNode(descriptor: descriptor)
-        case .distantBelt:
-            let node = makeDistantMaskNode(descriptor: descriptor)
-            configureLightweightEnvironmentNode(node)
-            return node
         }
     }
 
@@ -639,83 +633,6 @@ enum EnvironmentProceduralVisualFactory {
         node.position = SCNVector3(descriptor.position.x, descriptor.position.y + descriptor.size.y / 2.0, descriptor.position.z)
         node.name = "obstacle_marker_\(descriptor.id.uuidString)"
         return node
-    }
-
-    private static func makeDistantMaskNode(descriptor: EnvironmentObjectDescriptor) -> SCNNode {
-        var rng = DeterministicRNG(seed: descriptorSeed(descriptor))
-
-        let root = SCNNode()
-        root.name = "distant_mask_\(descriptor.id.uuidString)"
-        root.position = SCNVector3(descriptor.position.x, descriptor.position.y, descriptor.position.z)
-        root.eulerAngles = SCNVector3(0, rng.nextFloat() * .pi * 2.0, 0)
-
-        switch descriptor.biome {
-        case .forest:
-            for index in 0..<3 {
-                let cone = SCNNode(geometry: lowPolyCone(
-                    topRadius: 0.02,
-                    bottomRadius: descriptor.size.x * (0.34 + Float(index) * 0.10),
-                    height: descriptor.size.y * (0.36 + Float(index) * 0.18)
-                ))
-                cone.position = SCNVector3(
-                    Float(index - 1) * descriptor.size.x * 0.18,
-                    descriptor.size.y * (0.16 + Float(index) * 0.20),
-                    0
-                )
-                cone.geometry?.materials = [EnvironmentProceduralMaterials.farForestMaterial]
-                root.addChildNode(cone)
-            }
-
-        case .city:
-            let blockCount = 3 + Int(rng.next() % 3)
-            for index in 0..<blockCount {
-                let height = descriptor.size.y * (0.42 + Float(index) * 0.10) * (0.84 + rng.nextFloat() * 0.24)
-                let width = descriptor.size.x * (0.18 + rng.nextFloat() * 0.18)
-                let block = SCNNode(geometry: SCNBox(
-                    width: CGFloat(width),
-                    height: CGFloat(height),
-                    length: CGFloat(descriptor.size.z * 0.16),
-                    chamferRadius: CGFloat(width * 0.03)
-                ))
-                block.position = SCNVector3(
-                    (Float(index) - Float(blockCount - 1) * 0.5) * descriptor.size.x * 0.20,
-                    height * 0.5,
-                    0
-                )
-                block.geometry?.materials = [EnvironmentProceduralMaterials.farCityMaterial]
-                root.addChildNode(block)
-            }
-
-        case .cargoYard:
-            let blockCount = 2 + Int(rng.next() % 3)
-            for index in 0..<blockCount {
-                let width = descriptor.size.x * (0.22 + rng.nextFloat() * 0.18)
-                let height = descriptor.size.y * (0.52 + rng.nextFloat() * 0.24)
-                let depth = descriptor.size.z * (0.26 + rng.nextFloat() * 0.14)
-                let block = SCNNode(geometry: SCNBox(
-                    width: CGFloat(width),
-                    height: CGFloat(height),
-                    length: CGFloat(depth),
-                    chamferRadius: CGFloat(min(width, depth) * 0.04)
-                ))
-                block.position = SCNVector3(
-                    (Float(index) - Float(blockCount - 1) * 0.5) * descriptor.size.x * 0.24,
-                    height * 0.5,
-                    0
-                )
-                block.geometry?.materials = [EnvironmentProceduralMaterials.farCargoMaterial]
-                root.addChildNode(block)
-            }
-
-        case .field, .gridDemo:
-            let mound = SCNNode(geometry: lowPolySphere(radius: descriptor.size.x * 0.40))
-            mound.scale = SCNVector3(1.6, 0.42, 1.0)
-            mound.position = SCNVector3(0, descriptor.size.y * 0.18, 0)
-            mound.geometry?.materials = [EnvironmentProceduralMaterials.farFieldMaterial]
-            root.addChildNode(mound)
-        }
-
-        return root
     }
 
     private static func lowPolySphere(radius: Float) -> SCNSphere {

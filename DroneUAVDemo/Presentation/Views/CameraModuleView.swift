@@ -273,6 +273,10 @@ struct CameraModuleView: View {
                     }
                 }
 
+                if state.mode == .thermalStub {
+                    thermalControls(enabled: controlsEnabled)
+                }
+
                 LazyVGrid(columns: tileColumns, spacing: 8) {
                     ForEach(PayloadCameraStabilizationMode.allCases) { mode in
                         stabilizationModeChip(mode: mode, isSelected: state.stabilizationMode == mode) {
@@ -508,23 +512,165 @@ struct CameraModuleView: View {
         NSLocalizedString(key, comment: "")
     }
 
-    private func payloadModeChip(mode: PayloadCameraMode, isSelected: Bool) -> some View {
-        let isEnabled = mode == .optical
+    @ViewBuilder
+    private func thermalControls(enabled: Bool) -> some View {
+        let thermal = viewModel.payloadThermalState
 
-        return Text(payloadModeTitle(for: mode))
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("payload.camera.thermal.palette")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            HStack(spacing: 8) {
+                ForEach(ThermalPalette.allCases) { palette in
+                    thermalPaletteChip(palette: palette, isSelected: thermal.palette == palette)
+                }
+            }
+
+            HStack {
+                Text("payload.camera.thermal.profile")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                Spacer()
+                thermalProfileMenu(selection: thermal.profileSelection)
+            }
+
+            ModuleSliderRow(
+                titleKey: "payload.camera.thermal.contrast",
+                value: Binding(
+                    get: { thermal.contrast },
+                    set: { viewModel.setThermalContrast($0) }
+                ),
+                range: 0.4...1.8,
+                step: 0.05,
+                formatter: Self.scalarFormatter
+            )
+
+            ModuleSliderRow(
+                titleKey: "payload.camera.thermal.brightness",
+                value: Binding(
+                    get: { thermal.brightness },
+                    set: { viewModel.setThermalBrightness($0) }
+                ),
+                range: -0.3...0.3,
+                step: 0.02,
+                formatter: Self.scalarFormatter
+            )
+
+            ModuleSliderRow(
+                titleKey: "payload.camera.thermal.noise",
+                value: Binding(
+                    get: { thermal.noiseAmount },
+                    set: { viewModel.setThermalNoiseAmount($0) }
+                ),
+                range: 0.0...1.0,
+                step: 0.05,
+                formatter: Self.scalarFormatter
+            )
+
+            Toggle(isOn: Binding(
+                get: { thermal.showDiagnostics },
+                set: { viewModel.setThermalDiagnosticsVisible($0) }
+            )) {
+                Text("payload.camera.thermal.diagnostics")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(GroundControlPalette.textPrimary)
+            }
+            .tint(GroundControlPalette.accent)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(GroundControlPalette.inset)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.border, lineWidth: 1)
+        )
+        .opacity(enabled ? 1.0 : 0.5)
+        .disabled(!enabled)
+    }
+
+    private func thermalPaletteChip(palette: ThermalPalette, isSelected: Bool) -> some View {
+        Button {
+            viewModel.setThermalPalette(palette)
+        } label: {
+            Text(LocalizedStringKey(palette.titleKey))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(isSelected ? GroundControlPalette.accent.opacity(0.20) : GroundControlPalette.panelRaised)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(isSelected ? GroundControlPalette.accent.opacity(0.55) : GroundControlPalette.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func thermalProfileMenu(selection: ThermalProfileSelection) -> some View {
+        Menu {
+            ForEach(ThermalProfileSelection.allCases) { option in
+                Button {
+                    viewModel.setThermalProfileSelection(option)
+                } label: {
+                    if option == selection {
+                        Label(localized(option.titleKey), systemImage: "checkmark")
+                    } else {
+                        Text(localized(option.titleKey))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(localized(selection.titleKey))
+                    .font(.caption.weight(.semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+            }
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? GroundControlPalette.accent.opacity(0.20) : GroundControlPalette.inset)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(GroundControlPalette.panelRaised)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? GroundControlPalette.accent.opacity(0.55) : GroundControlPalette.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
             )
-            .opacity(isEnabled ? 1.0 : 0.42)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func payloadModeChip(mode: PayloadCameraMode, isSelected: Bool) -> some View {
+        // EO + Thermal are live; Night is still unimplemented (dimmed, non-interactive).
+        let isEnabled = mode == .optical || mode == .thermalStub
+
+        return Button {
+            viewModel.setPayloadCameraMode(mode)
+        } label: {
+            Text(payloadModeTitle(for: mode))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(isSelected ? GroundControlPalette.accent.opacity(0.20) : GroundControlPalette.inset)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(isSelected ? GroundControlPalette.accent.opacity(0.55) : GroundControlPalette.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1.0 : 0.42)
     }
 
     private func payloadMetricCard(titleKey: String, value: String) -> some View {

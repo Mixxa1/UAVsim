@@ -298,6 +298,16 @@
 		B20410000000000000000006 /* Free_Ship_Container.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000006 /* Free_Ship_Container.usdz */; };
 		B20410000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz */; };
 		B20410000000000000000008 /* Shipping_Containers.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000008 /* Shipping_Containers.usdz */; };
+		7C0F0000000000000000B001 /* ThermalDomainModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F001 /* ThermalDomainModels.swift */; };
+		7C0F0000000000000000B002 /* ThermalEnvironmentAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F002 /* ThermalEnvironmentAdapter.swift */; };
+		7C0F0000000000000000B003 /* ThermalSceneProfileResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F003 /* ThermalSceneProfileResolver.swift */; };
+		7C0F0000000000000000B004 /* ThermalMaterialModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F004 /* ThermalMaterialModel.swift */; };
+		7C0F0000000000000000B005 /* ThermalNormalizationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F005 /* ThermalNormalizationModel.swift */; };
+		7C0F0000000000000000B006 /* ThermalPaletteMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F006 /* ThermalPaletteMapper.swift */; };
+		7C0F0000000000000000B007 /* ThermalVariationTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F007 /* ThermalVariationTexture.swift */; };
+		7C0F0000000000000000B008 /* ThermalSurfaceClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F008 /* ThermalSurfaceClassifier.swift */; };
+		7C0F0000000000000000B009 /* ThermalProxyRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F009 /* ThermalProxyRenderer.swift */; };
+		7C0F0000000000000000B00A /* ThermalRealTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F00A /* ThermalRealTexture.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -596,6 +606,16 @@
 		B20400000000000000000007 /* Sea_cargo_container_-_LegendaryGameDev.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Sea_cargo_container_-_LegendaryGameDev.usdz"; sourceTree = "<group>"; };
 		B20400000000000000000008 /* Shipping_Containers.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Cargo/Shipping_Containers.usdz"; sourceTree = "<group>"; };
 		C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		7C0F0000000000000000F001 /* ThermalDomainModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalDomainModels.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F002 /* ThermalEnvironmentAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalEnvironmentAdapter.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F003 /* ThermalSceneProfileResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalSceneProfileResolver.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F004 /* ThermalMaterialModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalMaterialModel.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F005 /* ThermalNormalizationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalNormalizationModel.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F006 /* ThermalPaletteMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalPaletteMapper.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F007 /* ThermalVariationTexture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalVariationTexture.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F008 /* ThermalSurfaceClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalSurfaceClassifier.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F009 /* ThermalProxyRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalProxyRenderer.swift; sourceTree = "<group>"; };
+		7C0F0000000000000000F00A /* ThermalRealTexture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalRealTexture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -824,6 +844,7 @@
 				100000000000000000000134 /* UAVVisualFactory.swift */,
 				100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */,
 				1000000000000000000002DE /* MissionReplaySceneController.swift */,
+				7C0F000000000000000000F0 /* Thermal */,
 			);
 			path = Scene;
 			sourceTree = "<group>";
@@ -1035,6 +1056,23 @@
 				C6CCCC252F87BA77008CAEB7 /* SwiftUI.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		7C0F000000000000000000F0 /* Thermal */ = {
+			isa = PBXGroup;
+			children = (
+				7C0F0000000000000000F001 /* ThermalDomainModels.swift */,
+				7C0F0000000000000000F002 /* ThermalEnvironmentAdapter.swift */,
+				7C0F0000000000000000F003 /* ThermalSceneProfileResolver.swift */,
+				7C0F0000000000000000F004 /* ThermalMaterialModel.swift */,
+				7C0F0000000000000000F005 /* ThermalNormalizationModel.swift */,
+				7C0F0000000000000000F006 /* ThermalPaletteMapper.swift */,
+				7C0F0000000000000000F007 /* ThermalVariationTexture.swift */,
+				7C0F0000000000000000F008 /* ThermalSurfaceClassifier.swift */,
+				7C0F0000000000000000F009 /* ThermalProxyRenderer.swift */,
+				7C0F0000000000000000F00A /* ThermalRealTexture.swift */,
+			);
+			path = Thermal;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1397,6 +1435,16 @@
 				100000000000000000000392 /* OnlineVehicleSnapshotInterpolator.swift in Sources */,
 				100000000000000000000390 /* OnlineTrialNetworkBridge.swift in Sources */,
 				1000000000000000000002F7 /* ReplayTimelineEditorView.swift in Sources */,
+				7C0F0000000000000000B001 /* ThermalDomainModels.swift in Sources */,
+				7C0F0000000000000000B002 /* ThermalEnvironmentAdapter.swift in Sources */,
+				7C0F0000000000000000B003 /* ThermalSceneProfileResolver.swift in Sources */,
+				7C0F0000000000000000B004 /* ThermalMaterialModel.swift in Sources */,
+				7C0F0000000000000000B005 /* ThermalNormalizationModel.swift in Sources */,
+				7C0F0000000000000000B006 /* ThermalPaletteMapper.swift in Sources */,
+				7C0F0000000000000000B007 /* ThermalVariationTexture.swift in Sources */,
+				7C0F0000000000000000B008 /* ThermalSurfaceClassifier.swift in Sources */,
+				7C0F0000000000000000B009 /* ThermalProxyRenderer.swift in Sources */,
+				7C0F0000000000000000B00A /* ThermalRealTexture.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

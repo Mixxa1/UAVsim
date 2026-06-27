@@ -158,42 +158,6 @@ enum EnvironmentProceduralMaterials {
         return material
     }
 
-    static var farForestMaterial: SCNMaterial {
-        cachedStaticMaterial(
-            key: "farForest",
-            diffuse: NSColor(calibratedRed: 0.10, green: 0.19, blue: 0.11, alpha: 1.0),
-            roughness: 0.96,
-            metalness: 0.0
-        )
-    }
-
-    static var farCityMaterial: SCNMaterial {
-        cachedStaticMaterial(
-            key: "farCity",
-            diffuse: NSColor(calibratedRed: 0.22, green: 0.25, blue: 0.30, alpha: 0.98),
-            roughness: 0.84,
-            metalness: 0.04
-        )
-    }
-
-    static var farCargoMaterial: SCNMaterial {
-        cachedStaticMaterial(
-            key: "farCargo",
-            diffuse: NSColor(calibratedRed: 0.34, green: 0.32, blue: 0.28, alpha: 0.98),
-            roughness: 0.88,
-            metalness: 0.03
-        )
-    }
-
-    static var farFieldMaterial: SCNMaterial {
-        cachedStaticMaterial(
-            key: "farField",
-            diffuse: NSColor(calibratedRed: 0.34, green: 0.38, blue: 0.18, alpha: 0.96),
-            roughness: 0.92,
-            metalness: 0.0
-        )
-    }
-
     private static func cachedStaticMaterial(
         key: String,
         diffuse: NSColor,

@@ -804,8 +804,6 @@ private struct TacticalMapCanvas: View {
                 context.fill(path, with: .color(Color(red: 0.72, green: 0.34, blue: 0.18).opacity(0.72)))
             case .crate, .pole, .marker:
                 continue
-            case .distantBelt:
-                break
             }
         }
     }

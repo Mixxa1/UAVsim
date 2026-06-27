@@ -97,6 +97,49 @@
 "payload.camera.unavailable" = "Payload camera unavailable";
 "payload.camera.powered_off" = "Payload camera powered off";
 
+// Thermal camera
+"payload.camera.thermal.palette" = "Palette";
+"payload.camera.thermal.profile" = "Thermal profile";
+"payload.camera.thermal.contrast" = "Contrast";
+"payload.camera.thermal.brightness" = "Brightness";
+"payload.camera.thermal.noise" = "Noise";
+"payload.camera.thermal.diagnostics" = "Show diagnostics";
+
+"payload.camera.thermal.palette.white_hot" = "White Hot";
+"payload.camera.thermal.palette.black_hot" = "Black Hot";
+"payload.camera.thermal.palette.iron" = "Iron";
+
+"payload.camera.thermal.profile.auto" = "Auto";
+"payload.camera.thermal.profile.neutral" = "Neutral";
+"payload.camera.thermal.profile.forest" = "Forest";
+"payload.camera.thermal.profile.field" = "Field";
+"payload.camera.thermal.profile.city" = "City";
+"payload.camera.thermal.profile.snow" = "Snow";
+"payload.camera.thermal.profile.water" = "Water / Coast";
+"payload.camera.thermal.profile.mountain" = "Mountain";
+
+"payload.camera.thermal.class.sky" = "Sky";
+"payload.camera.thermal.class.snow" = "Snow";
+"payload.camera.thermal.class.ice" = "Ice";
+"payload.camera.thermal.class.water" = "Water";
+"payload.camera.thermal.class.terrain" = "Terrain";
+"payload.camera.thermal.class.grass" = "Grass";
+"payload.camera.thermal.class.foliage" = "Foliage";
+"payload.camera.thermal.class.treeTrunk" = "Tree trunk";
+"payload.camera.thermal.class.rock" = "Rock";
+"payload.camera.thermal.class.road" = "Road";
+"payload.camera.thermal.class.bareSoil" = "Bare soil";
+"payload.camera.thermal.class.building" = "Building";
+"payload.camera.thermal.class.roof" = "Roof";
+"payload.camera.thermal.class.concrete" = "Concrete";
+"payload.camera.thermal.class.metal" = "Metal";
+"payload.camera.thermal.class.asphalt" = "Asphalt";
+"payload.camera.thermal.class.glass" = "Glass";
+"payload.camera.thermal.class.shadow" = "Shadow";
+"payload.camera.thermal.class.generic" = "Generic";
+
+"overlay.thermal_diagnostics.title" = "THERMAL DIAGNOSTICS";
+
 "command.reset" = "Reset";
 "command.takeoff" = "Takeoff";
 "command.land" = "Land";
