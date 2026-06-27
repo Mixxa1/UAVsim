@@ -518,6 +518,15 @@ final class DroneSceneController {
     }
 
     private func refreshThermalPresentation() {
+        #if DEBUG
+        let thermalRefreshStartTime = CACurrentMediaTime()
+        defer {
+            let elapsedMs = (CACurrentMediaTime() - thermalRefreshStartTime) * 1000.0
+            if elapsedMs > 4.0 {
+                print("[Thermal] refreshThermalPresentation total: \(String(format: "%.1f", elapsedMs)) ms")
+            }
+        }
+        #endif
         let renderer = ensureThermalRenderer()
         let context = makeThermalContext()
         thermalContext = context

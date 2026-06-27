@@ -1,3 +1,4 @@
+import QuartzCore
 import SceneKit
 import simd
 
@@ -134,7 +135,14 @@ final class ThermalProxyRenderer {
         invalidate()
         builtRevision = environmentRevision
         builtGroundClass = groundClass
+        #if DEBUG
+        let startTime = CACurrentMediaTime()
         build(groundClass: groundClass)
+        let elapsedMs = (CACurrentMediaTime() - startTime) * 1000.0
+        print("[Thermal] proxy rebuild: \(proxies.count) proxies in \(String(format: "%.1f", elapsedMs)) ms")
+        #else
+        build(groundClass: groundClass)
+        #endif
         hasBuilt = true
     }
 
@@ -189,6 +197,15 @@ final class ThermalProxyRenderer {
             var cls = ThermalSurfaceClassifier.classify(node: node, contextHint: baseClass)
             if node === trunkNode, cls == .foliage { cls = .treeTrunk }
             if node === roofNode, cls == .building { cls = .roof }
+            // A sub-mesh's own node/material name wins over contextHint by design (it's how
+            // trunk/roof disambiguation above works) — but that backfires when an unrelated asset
+            // reuses a generic word for an internal part name. Confirmed via live diagnostics:
+            // Container_18_MB.usdz's main body sub-mesh is literally named "Wall" (a real asset
+            // detail, not a thermal hint), which matches the building bucket's "wall" keyword
+            // before the classifier ever reaches the (correct) "container" texture-filename token
+            // — reading the whole container face as ЗДАНИЕ/building instead of metal. A metal
+            // container's internal "wall"/"door" part is still metal, never masonry.
+            if baseClass == .metal, cls == .building { cls = .metal }
 
             addProxy(
                 for: node,
@@ -345,19 +362,24 @@ final class ThermalProxyRenderer {
         nodes.max { centerY($0) < centerY($1) }
     }
 
+    /// World-space Y of the node's own anchor point. Deliberately avoids `node.boundingBox`:
+    /// on a dense city building (hundreds of sub-meshes per asset), calling it this many times
+    /// synchronously while the live SCNView is concurrently rendering the same scene graph hits
+    /// severe contention on an internal SceneKit lock — confirmed live via Xcode's debugger, the
+    /// thread sat in `__psynch_mutexwait` inside `SCNBoundingVolume.boundingBox.getter` indefinitely
+    /// on the city map. `simdWorldPosition` is pure transform-chain math (no bounding-volume
+    /// computation, no lock) and is already used elsewhere in this file without issue. It isn't the
+    /// exact mesh center, but for "which sibling sits lowest/highest" disambiguation, each sub-
+    /// mesh's own anchor ordering matches its visual position closely enough.
     private func centerY(_ node: SCNNode) -> Float {
-        let (minB, maxB) = node.boundingBox
-        let localCenter = SCNVector3((minB.x + maxB.x) * 0.5, (minB.y + maxB.y) * 0.5, (minB.z + maxB.z) * 0.5)
-        return Float(node.presentation.convertPosition(localCenter, to: nil).y)
+        node.simdWorldPosition.y
     }
 
+    /// Coarse population weight, intentionally NOT area-accurate — see `centerY`'s note on why
+    /// `node.boundingBox` is unsafe to call this many times here. A flat per-proxy weight still
+    /// lets denser classes (more sub-meshes) dominate the percentile appropriately.
     private func horizontalFootprint(of node: SCNNode) -> Double {
-        let (minB, maxB) = node.boundingBox
-        let scale = node.simdWorldTransform.columns.0
-        let scaleMagnitude = Double(simd_length(SIMD3<Float>(scale.x, scale.y, scale.z)))
-        let dx = Double(maxB.x - minB.x) * max(0.01, scaleMagnitude)
-        let dz = Double(maxB.z - minB.z) * max(0.01, scaleMagnitude)
-        return max(0.25, dx * dz)
+        1.0
     }
 
     private func variationFromWorldPosition(_ position: SIMD3<Float>) -> Double {

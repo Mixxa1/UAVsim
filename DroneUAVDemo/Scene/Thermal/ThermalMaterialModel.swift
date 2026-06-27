@@ -39,7 +39,13 @@ enum ThermalMaterialModel {
         case .concrete:
             return props(materialClass, baseline: 3.0, amp: 2.4, sun: 6.0, rain: 4.0, snow: 6.0, wind: 1.0, night: 4.0, lo: -7, hi: 13)
         case .metal:
-            return props(materialClass, baseline: 1.0, amp: 3.2, sun: 7.0, rain: 6.0, snow: 9.0, wind: 4.0, night: 6.0, lo: -10, hi: 14)
+            // Spec: metal cools rapidly under snow/wind — snow sensitivity kept the highest of any
+            // class, sun-heating brought below road/roof's (a thin cargo-container wall doesn't
+            // out-heat thick asphalt/concrete). Without this, metal containers under snow weather
+            // landed almost exactly at the normalization band's midpoint — read as "hot" magenta/red
+            // in iron despite being well below freezing (confirmed by hand-computing against a
+            // cargoYard+snow screenshot).
+            return props(materialClass, baseline: 1.0, amp: 3.2, sun: 5.0, rain: 6.0, snow: 13.0, wind: 4.0, night: 6.0, lo: -10, hi: 14)
         case .glass:
             return props(materialClass, baseline: 0, amp: 2.0, sun: 4.0, rain: 3.0, snow: 4.0, wind: 2.0, night: 4.0, lo: -8, hi: 9)
         case .shadow:

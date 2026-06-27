@@ -69,7 +69,12 @@ enum ThermalSurfaceClassifier {
 
         if has("snow_patch", "snow_footstep", "snowfall", "snow") { return .snow }
         if has("ice", "frost", "glacier") { return .ice }
-        if has("water", "lake", "river", "sea", "ocean", "pond", "puddle") { return .water }
+        // "sea" deliberately excluded: a bare 3-letter substring collides with real, unrelated
+        // assets in this project — "seaCargoContainer"/"Sea_cargo_container_...usdz" (a metal
+        // shipping container, confirmed misclassified as water) and "Seamless_Brittle_Stone.usdz"
+        // (the city's concrete texture, "**Sea**mless"). No real water asset exists in this
+        // project (verified by search), so dropping it loses nothing.
+        if has("water", "lake", "river", "ocean", "pond", "puddle") { return .water }
 
         if has("roof", "rooftop") { return .roof }
         if has("road", "asphalt", "street", "tarmac", "pavement") { return .asphalt }

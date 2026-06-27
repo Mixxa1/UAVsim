@@ -10,14 +10,15 @@ import Foundation
 enum ThermalEnvironmentAdapter {
 
     /// Per-preset ambient temperature: (value at 0 intensity, value at full intensity).
-    /// Snow is cold even at 0 intensity because `refreshGroundMaterial` switches the ground to
-    /// snow purely on `preset == .snow`, independent of the intensity slider.
+    /// Snow's floor (0% intensity) is already well below freezing, not just "cool" — matching
+    /// `refreshGroundMaterial`/tree-kind switching, which both key on `preset == .snow` alone,
+    /// independent of the intensity slider (selecting Snow always means snow, even at 0%).
     private static func ambientRange(for preset: WeatherPreset) -> (calm: Double, severe: Double) {
         switch preset {
         case .normal: return (18.0, 16.0)
         case .wind: return (15.0, 11.0)
         case .rain: return (13.0, 5.0)
-        case .snow: return (0.0, -12.0)
+        case .snow: return (-6.0, -12.0)
         case .fog: return (11.0, 6.0)
         case .smog: return (13.0, 9.0)
         case .thunderstorm: return (12.0, 6.0)
@@ -51,7 +52,11 @@ enum ThermalEnvironmentAdapter {
 
         let snow: Double
         switch preset {
-        case .snow: snow = (0.45 + 0.55 * intensity).clampedUnit
+        // High floor: city/cargoYard's high-baseline classes (roof/road/concrete/metal) need
+        // strong snow-cooling even at 0% intensity to read as cold — a low floor left them
+        // reading warm/orange even though the much-colder ambient alone wasn't enough (confirmed
+        // by hand-computing normalized values against a live screenshot of a city+snow scene).
+        case .snow: snow = (0.70 + 0.30 * intensity).clampedUnit
         default: snow = 0.0
         }
 
@@ -90,8 +95,11 @@ enum ThermalEnvironmentAdapter {
 
         let snowCoverage = snow > 0.0 ? (0.45 + 0.55 * intensity).clampedUnit : 0.0
 
-        // Effective solar heating: knocked down by cloud cover, zeroed at night.
-        let sunExposure = isNight ? 0.0 : max(0.0, 1.0 - cloudiness * 0.75)
+        // Effective solar heating: knocked down by cloud cover, zeroed at night. Full (not
+        // dampened) cloud-cover suppression — at the snow/rain preset's high cloudiness this
+        // keeps roofs/roads from heating up almost as much as on a clear day, which a partial
+        // (×0.75) damping let happen (a sunlit roof under snow weather isn't physically sensible).
+        let sunExposure = isNight ? 0.0 : max(0.0, 1.0 - cloudiness)
 
         let visibility = max(60.0, Double(weather.effectiveFactors.visibilityFactor) * 4000.0)
 
