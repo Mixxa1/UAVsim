@@ -120,9 +120,6 @@ final class MissionDebriefService {
         if plan.zones.contains(where: { $0.type == .dropZone }) {
             return "mission.debrief.type.delivery"
         }
-        if plan.zones.contains(where: { $0.type == .noFlyZone }) {
-            return "mission.debrief.type.constrained"
-        }
         return "mission.debrief.type.route"
     }
 }

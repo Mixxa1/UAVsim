@@ -570,6 +570,11 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var vehicleMassModel: VehicleMassModel
     @Published private(set) var payloadStatusMessageKey: String?
     @Published private(set) var simulationLaunchConfiguration: SimulationLaunchConfiguration?
+    // Mission scenario (SAR) runtime state, surfaced for the in-sim HUD.
+    @Published private(set) var missionScenarioObjectiveState: MissionScenarioObjectiveState?
+    @Published private(set) var missionScenarioRemainingSeconds: Double = 0.0
+    @Published private(set) var missionScenarioDetectionProgress: Double = 0.0
+    @Published private(set) var missionScenarioOutcome: MissionScenarioOutcome?
     @Published private(set) var mountedCADPayload: MountedCADPayload?
     @Published private(set) var lastPayloadImpact: TerrainMapPayloadImpact?
     @Published private(set) var signalState: UAVSignalState
@@ -902,6 +907,12 @@ final class DroneSimulationViewModel: ObservableObject {
     private let missionPlanBuilder = MissionPlanBuilder()
     private let missionExecutionBinder = MissionExecutionBinder()
     private let missionExecutionCoordinator = MissionExecutionCoordinator()
+    // Mission scenario (SAR) state.
+    private let missionScenarioConfiguration: MissionScenarioConfiguration?
+    private var missionScenarioRuntime: MissionScenarioRuntime?
+    private var missionScenarioTargetWorldPosition: SIMD3<Float>?
+    private var didBootstrapMissionScenario = false
+    private var didReportMissionScenarioOutcome = false
     private let missionAutopilotAdapter = MissionAutopilotAdapter()
     private let missionGuidanceTargetResolver = MissionGuidanceTargetResolver()
     private let fixedWingFlyableRouteBuilder = FixedWingFlyableRouteBuilder()
@@ -1287,8 +1298,10 @@ final class DroneSimulationViewModel: ObservableObject {
         localOnlineParticipant: LocalOnlineParticipant? = nil,
         onlineRuntimeContext: OnlineTrialRuntimeContext? = nil,
         onlineSnapshotTransport: OnlineTrialSnapshotTransport? = nil,
-        onlineSharedEventTransport: OnlineSharedEventTransport? = nil
+        onlineSharedEventTransport: OnlineSharedEventTransport? = nil,
+        missionScenarioContext: MissionScenarioConfiguration? = nil
     ) {
+        self.missionScenarioConfiguration = missionScenarioContext
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
         self.controllerSettingsStore = controllerSettingsStore
@@ -1340,7 +1353,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.abstractParameters = abstract
         let repository = LIPODroneModelRepository(abstractParameters: abstract)
         let models = repository.allProfiles
-        let requestedProfileID = launchConfiguration?.selectedUAVProfile
+        let requestedProfileID = launchConfiguration?.selectedUAVProfile ?? missionScenarioContext?.selectedUAVProfileID
         let selectedProfile = requestedProfileID.flatMap { requestedID in
             let canonicalID = LIPODroneModelRepository.canonicalModelID(requestedID)
             return models.first { $0.id == canonicalID }
@@ -3952,6 +3965,78 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Mission scenario (SAR)
+
+    var hasMissionScenario: Bool { missionScenarioConfiguration != nil }
+
+    var activeMissionScenarioKind: MissionScenarioKind? {
+        missionScenarioConfiguration?.parameters.kind
+    }
+
+    /// One-time setup when the view model was launched with a mission scenario: applies the
+    /// environment (terrain/weather/time-of-day), installs the payload, then spawns the scenario
+    /// and starts the runtime. Runs on the first tick so the scene graph is fully constructed.
+    private func bootstrapMissionScenarioIfNeeded() {
+        guard !didBootstrapMissionScenario, let config = missionScenarioConfiguration else { return }
+        didBootstrapMissionScenario = true
+
+        let params = config.parameters
+        setTerrainPreset(params.terrain)
+        setWeatherPreset(params.weather)
+        setWeatherIntensity(Double(params.weatherIntensity))
+        sceneController.applyMissionTimeOfDay(params.timeOfDay)
+
+        setPayloadType(config.payloadType)
+        attachPayload()
+
+        let dock = sceneController.currentDockSpawnPoint()
+        let placement = MissionScenarioPlacement.generate(
+            parameters: params,
+            worldHalfExtent: terrain.worldHalfExtent,
+            dockPosition: SIMD2<Float>(dock.x, dock.z)
+        )
+        let target = sceneController.spawnMissionSearchScenario(placement: placement)
+        missionScenarioTargetWorldPosition = target
+        missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
+        publishMissionScenarioState()
+    }
+
+    private func updateMissionScenarioRuntime(deltaTime: TimeInterval) {
+        guard var runtime = missionScenarioRuntime,
+              runtime.isActive,
+              let target = missionScenarioTargetWorldPosition else { return }
+
+        let sample = sceneController.payloadCameraMissionSample(targetWorldPosition: target)
+        runtime.tick(deltaTime: deltaTime, sample: sample)
+        missionScenarioRuntime = runtime
+        publishMissionScenarioState()
+
+        if let outcome = runtime.outcome {
+            handleMissionScenarioOutcome(outcome)
+        }
+    }
+
+    private func publishMissionScenarioState() {
+        guard let runtime = missionScenarioRuntime else { return }
+        missionScenarioObjectiveState = runtime.objectiveState
+        missionScenarioRemainingSeconds = runtime.remainingClampedSeconds
+        missionScenarioDetectionProgress = runtime.detectionProgress
+        missionScenarioOutcome = runtime.outcome
+    }
+
+    private func handleMissionScenarioOutcome(_ outcome: MissionScenarioOutcome) {
+        guard !didReportMissionScenarioOutcome else { return }
+        didReportMissionScenarioOutcome = true
+        switch outcome {
+        case let .success(elapsed):
+            print("[MissionScenario] target detected after \(String(format: "%.1f", elapsed))s")
+        case .failureTimeout:
+            print("[MissionScenario] failed — time limit reached")
+        case .aborted:
+            print("[MissionScenario] aborted")
+        }
+    }
+
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
@@ -3983,6 +4068,8 @@ final class DroneSimulationViewModel: ObservableObject {
             }
             backgroundTickSkipCounter = 0
         }
+
+        bootstrapMissionScenarioIfNeeded()
 
         guard let lastTimestamp else {
             self.lastTimestamp = now
@@ -4287,6 +4374,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshCompassOverlay()
         refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
         syncPayloadLifecycleEvents()
+        updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
         publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 
@@ -8172,32 +8260,10 @@ final class DroneSimulationViewModel: ObservableObject {
             return nil
         }
 
-        var candidateRoute = compactedOriginal
-        var wasRerouted = false
+        let candidateRoute = compactedOriginal
+        let wasRerouted = false
         let noFlyZones = zones.filter { $0.type == .noFlyZone && $0.radius > 0.0 }
         let protectedNoFlyZones = fixedWingProtectedNoFlyZones(noFlyZones)
-
-        if !protectedNoFlyZones.isEmpty,
-           planarPathIntersectsNoFly(compactedOriginal, zones: protectedNoFlyZones) {
-            if let rerouted = missionPreviewBuilder.routePathAvoidingNoFly(
-                points: compactedOriginal,
-                zones: protectedNoFlyZones,
-                viewport: viewport
-            ) {
-                candidateRoute = compactedPlanarPath(rerouted)
-                wasRerouted = !samePlanarRoute(compactedOriginal, candidateRoute)
-            } else if let gridReroute = gridSafeFixedWingRoute(
-                from: compactedOriginal,
-                protectedNoFlyZones: protectedNoFlyZones,
-                viewport: viewport,
-                targetAltitude: targetAltitude
-            ) {
-                candidateRoute = gridReroute
-                wasRerouted = true
-            } else {
-                return nil
-            }
-        }
 
         let obstacles = navigationObstacles(including: protectedNoFlyZones)
         guard fixedWingPathNeedsObstacleReroute(
@@ -8461,18 +8527,6 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let compactedOutput = compactedPlanarPath(output)
-        if let cleanedOutput = missionPreviewBuilder.routePathAvoidingNoFly(
-            points: compactedOutput,
-            zones: noFlyZones,
-            viewport: viewport
-        ) {
-            return fixedWingPathNeedsObstacleReroute(
-                cleanedOutput,
-                obstacles: obstacles,
-                targetAltitude: targetAltitude
-            ) ? nil : cleanedOutput
-        }
-
         if planarPathIntersectsNoFly(compactedOutput, zones: noFlyZones) ||
             fixedWingPathNeedsObstacleReroute(
                 compactedOutput,

@@ -98,17 +98,6 @@ final class MissionDraftBuilder {
         let clampedCenter = viewport.clampedToWorld(center)
         let defaultRadius = defaultRadius(for: draft, viewport: viewport)
 
-        if type == .noFlyZone {
-            nextDraft.zones.append(
-                MissionZone(
-                    type: type,
-                    center: clampedCenter,
-                    radius: defaultRadius
-                )
-            )
-            return nextDraft
-        }
-
         if let index = nextDraft.zones.firstIndex(where: { $0.type == type }) {
             nextDraft.zones[index].center = clampedCenter
             if nextDraft.zones[index].radius <= 0.0 {

@@ -265,6 +265,12 @@
 		100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000405 /* EnvironmentDebugOptions.swift */; };
 		100000000000000000000406 /* CreditsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000407 /* CreditsView.swift */; };
 		100000000000000000000408 /* Pine_Tree.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000409 /* Pine_Tree.usdz */; };
+		100000000000000000000A01 /* ManAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A02 /* ManAssetLoader.swift */; };
+		100000000000000000000A05 /* MissionScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A06 /* MissionScenario.swift */; };
+		100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A08 /* MissionScenarioRuntime.swift */; };
+		100000000000000000000A09 /* MissionSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0A /* MissionSetupView.swift */; };
+		100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0C /* MissionScenarioHUDView.swift */; };
+		100000000000000000000A03 /* Man.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A04 /* Man.usdz */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
 		10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040E /* SnowTerrainMaterialLoader.swift */; };
@@ -574,6 +580,12 @@
 		100000000000000000000405 /* EnvironmentDebugOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentDebugOptions.swift; sourceTree = "<group>"; };
 		100000000000000000000407 /* CreditsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditsView.swift; sourceTree = "<group>"; };
 		100000000000000000000409 /* Pine_Tree.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Pine_Tree.usdz"; sourceTree = "<group>"; };
+		100000000000000000000A02 /* ManAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManAssetLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000A06 /* MissionScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenario.swift; sourceTree = "<group>"; };
+		100000000000000000000A08 /* MissionScenarioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioRuntime.swift; sourceTree = "<group>"; };
+		100000000000000000000A0A /* MissionSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSetupView.swift; sourceTree = "<group>"; };
+		100000000000000000000A0C /* MissionScenarioHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioHUDView.swift; sourceTree = "<group>"; };
+		100000000000000000000A04 /* Man.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Man.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
 		10000000000000000000040E /* SnowTerrainMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowTerrainMaterialLoader.swift; sourceTree = "<group>"; };
@@ -707,6 +719,7 @@
 				10000000000000000000018F /* MissionDebrief.swift */,
 				1000000000000000000002A7 /* MissionLeg.swift */,
 				100000000000000000000179 /* MissionPlan.swift */,
+				100000000000000000000A06 /* MissionScenario.swift */,
 				100000000000000000000175 /* MissionPlanStatus.swift */,
 				100000000000000000000158 /* MissionPlanningState.swift */,
 				10000000000000000000018C /* MissionEvent.swift */,
@@ -790,6 +803,7 @@
 				10000000000000000000017C /* MissionPlanValidator.swift */,
 				10000000000000000000017E /* MissionProgressTracker.swift */,
 				10000000000000000000016D /* MissionPreviewBuilder.swift */,
+				100000000000000000000A08 /* MissionScenarioRuntime.swift */,
 				100000000000000000000186 /* MissionAuthorityGuard.swift */,
 				1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */,
 				1000000000000000000002BE /* FixedWingFlyablePath.swift */,
@@ -827,6 +841,7 @@
 				100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */,
 				100000000000000000000405 /* EnvironmentDebugOptions.swift */,
 				100000000000000000000401 /* PineTreeAssetLoader.swift */,
+				100000000000000000000A02 /* ManAssetLoader.swift */,
 				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
 				B20400000000000000000002 /* AsphaltMaterialLoader.swift */,
 				B20400000000000000000001 /* CargoContainerAssetLoader.swift */,
@@ -881,6 +896,8 @@
 				10000000000000000000014C /* FlightOpsModuleView.swift */,
 				10000000000000000000014E /* CameraModuleView.swift */,
 				10000000000000000000014F /* ScenarioModuleView.swift */,
+				100000000000000000000A0A /* MissionSetupView.swift */,
+				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
@@ -990,6 +1007,7 @@
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
+				100000000000000000000A04 /* Man.usdz */,
 				10000000000000000000040B /* Generic_grass.usdz */,
 				100000000000000000000416 /* Snow04.usdz */,
 				B20400000000000000000003 /* Asphalt13.usdz */,
@@ -1145,6 +1163,7 @@
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
+				100000000000000000000A03 /* Man.usdz in Resources */,
 				10000000000000000000040A /* Generic_grass.usdz in Resources */,
 				100000000000000000000417 /* Snow04.usdz in Resources */,
 				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,
@@ -1236,6 +1255,7 @@
 				100000000000000000000258 /* EnvironmentProceduralVisualFactory.swift in Sources */,
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
 				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
+				100000000000000000000A01 /* ManAssetLoader.swift in Sources */,
 				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,
 				B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */,
 				B20410000000000000000001 /* CargoContainerAssetLoader.swift in Sources */,
@@ -1278,6 +1298,7 @@
 				1000000000000000000002B0 /* MissionLeg.swift in Sources */,
 				100000000000000000000285 /* MissionOutcome.swift in Sources */,
 				100000000000000000000270 /* MissionPlan.swift in Sources */,
+				100000000000000000000A05 /* MissionScenario.swift in Sources */,
 				10000000000000000000026C /* MissionPlanStatus.swift in Sources */,
 				100000000000000000000255 /* MissionPlanningState.swift in Sources */,
 				100000000000000000000256 /* MissionMapView.swift in Sources */,
@@ -1338,6 +1359,8 @@
 				10000000000000000000024A /* UAVCatalogModuleView.swift in Sources */,
 				10000000000000000000024B /* CameraModuleView.swift in Sources */,
 				10000000000000000000024C /* ScenarioModuleView.swift in Sources */,
+				100000000000000000000A09 /* MissionSetupView.swift in Sources */,
+				100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */,
 				10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */,
 				100000000000000000000262 /* MissionDraftBuilder.swift in Sources */,
 				100000000000000000000263 /* MissionDraftValidator.swift in Sources */,
@@ -1356,6 +1379,7 @@
 				10000000000000000000028B /* MissionPersistenceAdapter.swift in Sources */,
 				100000000000000000000275 /* MissionProgressTracker.swift in Sources */,
 				100000000000000000000264 /* MissionPreviewBuilder.swift in Sources */,
+				100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */,
 				10000000000000000000027D /* MissionAuthorityGuard.swift in Sources */,
 				1000000000000000000002BD /* MissionGuidanceTargetResolver.swift in Sources */,
 				1000000000000000000002BF /* FixedWingFlyablePath.swift in Sources */,

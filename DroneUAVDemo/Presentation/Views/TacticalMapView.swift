@@ -390,8 +390,6 @@ private struct TacticalMapLegendView: View {
                 legendRow(color: GroundControlPalette.success, key: "tactical.map.legend.safe_return")
             case .dropZone:
                 legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.drop_zone")
-            case .noFlyZone:
-                legendRow(color: GroundControlPalette.danger, key: "tactical.map.legend.no_fly")
             }
 
             if snapshot.payloadImpact != nil {
@@ -645,7 +643,7 @@ private struct TacticalMapCanvas: View {
         in context: inout GraphicsContext,
         projection: TerrainMapProjection
     ) {
-        for zone in state.workingDraft.zones {
+        for zone in state.workingDraft.zones where zone.type == .dropZone {
             let center = projection.project(zone.center)
             let radius = projection.projectedRadiusSize(for: zone.radius)
             let rect = CGRect(
@@ -655,32 +653,15 @@ private struct TacticalMapCanvas: View {
                 height: radius.height * 2.0
             )
 
-            switch zone.type {
-            case .dropZone:
-                context.fill(Path(ellipseIn: rect), with: .color(GroundControlPalette.warning.opacity(0.14)))
-                context.stroke(Path(ellipseIn: rect), with: .color(GroundControlPalette.warning.opacity(0.92)), lineWidth: 1.6)
-                context.draw(
-                    Text(String(format: NSLocalizedString("tactical.map.overlay.drop_zone_radius", comment: ""), zone.radius))
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(GroundControlPalette.warning),
-                    at: CGPoint(x: rect.midX, y: rect.maxY + 10),
-                    anchor: .center
-                )
-            case .noFlyZone:
-                context.fill(Path(ellipseIn: rect), with: .color(GroundControlPalette.danger.opacity(0.14)))
-                context.stroke(
-                    Path(ellipseIn: rect),
-                    with: .color(GroundControlPalette.danger.opacity(0.92)),
-                    style: StrokeStyle(lineWidth: 1.4, dash: [4.0, 3.0])
-                )
-                context.draw(
-                    Text(String(localized: "tactical.map.overlay.no_fly"))
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(GroundControlPalette.danger),
-                    at: CGPoint(x: rect.midX, y: rect.minY + 10),
-                    anchor: .center
-                )
-            }
+            context.fill(Path(ellipseIn: rect), with: .color(GroundControlPalette.warning.opacity(0.14)))
+            context.stroke(Path(ellipseIn: rect), with: .color(GroundControlPalette.warning.opacity(0.92)), lineWidth: 1.6)
+            context.draw(
+                Text(String(format: NSLocalizedString("tactical.map.overlay.drop_zone_radius", comment: ""), zone.radius))
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(GroundControlPalette.warning),
+                at: CGPoint(x: rect.midX, y: rect.maxY + 10),
+                anchor: .center
+            )
         }
     }
 

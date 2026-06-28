@@ -861,7 +861,6 @@ struct TerrainMapCanvas: View {
             if let dropZone {
                 drawDropZone(dropZone, in: &context, projection: projection)
             }
-            drawNoFlyZones(in: &context, projection: projection)
             drawMissionRoute(in: &context, projection: projection)
             drawActiveLeg(in: &context, projection: projection)
             drawPredictedPath(in: &context, projection: projection)
@@ -1135,32 +1134,6 @@ struct TerrainMapCanvas: View {
             with: .color(GroundControlPalette.borderStrong.opacity(0.86)),
             style: StrokeStyle(lineWidth: 1.25, lineCap: .round, lineJoin: .round, dash: [4.0, 3.0])
         )
-    }
-
-    private func drawNoFlyZones(
-        in context: inout GraphicsContext,
-        projection: TerrainMapProjection
-    ) {
-        for zone in snapshot.noFlyZones {
-            let center = projection.project(zone.center)
-            let radius = projection.projectedRadius(for: zone.radius)
-            let rect = CGRect(
-                x: center.x - radius,
-                y: center.y - radius,
-                width: radius * 2.0,
-                height: radius * 2.0
-            )
-
-            context.fill(
-                Path(ellipseIn: rect),
-                with: .color(GroundControlPalette.danger.opacity(0.08))
-            )
-            context.stroke(
-                Path(ellipseIn: rect),
-                with: .color(GroundControlPalette.danger.opacity(0.86)),
-                style: StrokeStyle(lineWidth: 1.6, dash: [5, 4])
-            )
-        }
     }
 
     private func drawDropZone(

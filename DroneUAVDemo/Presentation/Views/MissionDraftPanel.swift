@@ -163,7 +163,6 @@ struct MissionDraftPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("tactical.map.section.zones")
             zoneControl(type: .dropZone)
-            zoneControl(type: .noFlyZone)
         }
     }
 
@@ -468,7 +467,7 @@ struct MissionDraftPanel: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundStyle(GroundControlPalette.textPrimary)
                 Spacer(minLength: 8)
-                Text(zoneBadgeTitle(type: type, zoneCount: zoneCount))
+                Text(zoneBadgeTitle(zoneCount: zoneCount))
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(zone == nil ? GroundControlPalette.textSecondary : GroundControlPalette.textPrimary)
                     .padding(.horizontal, 8)
@@ -490,13 +489,7 @@ struct MissionDraftPanel: View {
                     step: 0.5
                 )
                 .disabled(draftEditingLocked)
-                Text(
-                    zoneDescription(
-                        for: type,
-                        zone: zone,
-                        zoneCount: zoneCount
-                    )
-                )
+                Text(zoneDescription(for: zone))
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(GroundControlPalette.textSecondary)
             } else {
@@ -507,34 +500,16 @@ struct MissionDraftPanel: View {
         }
     }
 
-    private func zoneBadgeTitle(type: MissionZoneType, zoneCount: Int) -> String {
+    private func zoneBadgeTitle(zoneCount: Int) -> String {
         guard zoneCount > 0 else {
             return String(localized: "mission.status.value.none")
-        }
-
-        if type == .noFlyZone {
-            return "\(zoneCount)x"
         }
 
         return String(localized: "mission.plan.status.ready")
     }
 
-    private func zoneDescription(
-        for type: MissionZoneType,
-        zone: MissionZone,
-        zoneCount: Int
-    ) -> String {
-        if type == .noFlyZone && zoneCount > 1 {
-            return String(
-                format: String(localized: "tactical.map.zone.radius.value.multiple"),
-                zone.radius,
-                zone.center.x,
-                zone.center.y,
-                zoneCount
-            )
-        }
-
-        return String(
+    private func zoneDescription(for zone: MissionZone) -> String {
+        String(
             format: String(localized: "tactical.map.zone.radius.value"),
             zone.radius,
             zone.center.x,

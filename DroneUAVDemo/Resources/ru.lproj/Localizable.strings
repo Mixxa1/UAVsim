@@ -1031,11 +1031,9 @@
 "tactical.map.mode.waypoint" = "ТОЧКИ";
 "tactical.map.mode.launch_object" = "СТАРТ";
 "tactical.map.mode.drop_zone" = "ЗОНА СБРОСА";
-"tactical.map.mode.no_fly_zone" = "NO-FLY";
 "tactical.map.instruction.waypoint" = "Кликните по карте, чтобы добавить следующую точку маршрута.";
 "tactical.map.instruction.launch_object" = "Кликните по карте, чтобы поставить или заменить стартовый объект и задать коридор запуска.";
 "tactical.map.instruction.drop_zone" = "Кликните по карте, чтобы поставить или переместить зону сброса.";
-"tactical.map.instruction.no_fly_zone" = "Кликните по карте, чтобы поставить ещё одну запретную зону.";
 "tactical.map.section.status" = "СТАТУС ЧЕРНОВИКА";
 "tactical.map.section.route" = "ПРЕДПРОСМОТР МАРШРУТА";
 "tactical.map.section.zones" = "ЗОНЫ";
@@ -1044,7 +1042,6 @@
 "tactical.map.zone.no_fly_zone" = "Запретная зона";
 "tactical.map.zone.empty" = "Зона не задана.";
 "tactical.map.zone.radius.value" = "%.1f м | x %.1f | y %.1f";
-"tactical.map.zone.radius.value.multiple" = "%.1f м | x %.1f | y %.1f | зон %d";
 "tactical.map.metric.span" = "КАРТА";
 "tactical.map.metric.drop_zone" = "СБРОС";
 "tactical.map.metric.link_status" = "СВЯЗЬ";
@@ -1085,7 +1082,6 @@
 "tactical.map.legend.launch_corridor" = "Стартовый коридор";
 "tactical.map.legend.safe_return" = "Контур безопасного возврата";
 "tactical.map.legend.drop_zone" = "Зона сброса";
-"tactical.map.legend.no_fly" = "Запретная зона";
 "tactical.map.legend.payload_impact" = "Маркер impact event";
 "tactical.map.overlay.payload_impact" = "Событие контакта";
 "tactical.map.overlay.payload_on_target" = "Контакт в целевой зоне";
@@ -1095,7 +1091,6 @@
 "tactical.map.overlay.safe_return" = "Безопасный возврат";
 "tactical.map.overlay.link" = "Связь";
 "tactical.map.overlay.drop_zone_radius" = "Зона сброса";
-"tactical.map.overlay.no_fly" = "No-Fly";
 "tactical.map.route.empty" = "Черновик маршрута пуст.";
 "tactical.map.badge.draft_dirty" = "ЧЕРНОВИК ИЗМЕНЁН";
 "tactical.map.badge.draft_synced" = "ЧЕРНОВИК СОХРАНЁН";
@@ -1136,7 +1131,6 @@
 "tactical.map.issue.waypoint_spacing" = "Соседние точки маршрута расположены слишком близко друг к другу.";
 "tactical.map.issue.zone_radius_invalid" = "Радиус одной из зон выходит за допустимый инженерный диапазон.";
 "tactical.map.issue.zone_out_of_bounds" = "Одна или несколько зон выходят за технические границы мира.";
-"tactical.map.issue.route_intersects_no_fly" = "Маршрут миссии пересекает хотя бы одну запретную зону.";
 "tactical.map.issue.invalid_altitude_window" = "Ограничения по высоте заданы некорректно: минимальная высота не должна превышать максимальную.";
 "tactical.map.issue.target_altitude_out_of_range" = "Расчётная высота выполнения миссии выходит за заданный диапазон.";
 "tactical.map.issue.invalid_speed_window" = "Ограничения по скорости заданы некорректно или выходят за возможности текущего БЛА.";
@@ -1146,7 +1140,6 @@
 "tactical.map.issue.link_degraded" = "Маршрут заходит в зону деградации связи.";
 "tactical.map.issue.launch_object_required" = "Для выбранного режима запуска нужен стартовый объект на tactical map.";
 "tactical.map.issue.launch_object_out_of_bounds" = "Стартовый объект находится вне текущих границ tactical map.";
-"tactical.map.issue.launch_object_conflicts_no_fly" = "Стартовый объект или его коридор конфликтует с no-fly зоной.";
 "tactical.map.issue.launch_corridor_invalid" = "Стартовый коридор слишком рано выходит за пределы миссии или сразу пересекает границу.";
 "tactical.map.issue.launch_space_insufficient" = "Для выбранной семантики запуска вокруг стартового объекта недостаточно прямого пространства.";
 "tactical.map.issue.map_tight" = "Текущий размер карты тесен для выбранного профиля БЛА.";
@@ -1350,7 +1343,6 @@
 "mission.status.field.waypoint_count" = "ТОЧКИ";
 "mission.status.field.route_length" = "ДЛИНА";
 "mission.status.field.drop_zone" = "СБРОС";
-"mission.status.field.no_fly_status" = "NO-FLY";
 "mission.status.field.link_quality" = "КАЧЕСТВО СВЯЗИ";
 "mission.status.field.home_distance" = "ДО HOME";
 "mission.status.field.edge_distance" = "ДО КРАЯ";
@@ -1371,9 +1363,6 @@
 "mission.status.value.none" = "Нет";
 "mission.status.value.route" = "Маршрут";
 "mission.status.value.delivery" = "Сброс";
-"mission.status.value.route_restricted" = "Маршрут с ограничениями";
-"mission.status.value.delivery_restricted" = "Сброс с ограничениями";
-"mission.status.value.zone_count" = "%d зон";
 "mission.status.value.issue_count" = "%d проблем";
 "mission.status.value.validated" = "Валидирован";
 "mission.status.value.feasible" = "Выполнима";
@@ -1487,7 +1476,6 @@
 "mission.debrief.metric.critical" = "CRITICAL";
 "mission.debrief.type.route" = "Маршрутная миссия";
 "mission.debrief.type.delivery" = "Миссия доставки";
-"mission.debrief.type.constrained" = "Миссия с ограничениями";
 "mission.debrief.verdict.success" = "Миссия завершена по плану.";
 "mission.debrief.verdict.partial_success" = "Миссия завершена частично или с деградацией.";
 "mission.debrief.verdict.aborted" = "Миссия прервана оператором.";
@@ -2387,3 +2375,36 @@
 "replay.event.session_started" = "Сессия начата";
 "replay.event.session_stopped" = "Сессия завершена";
 "replay.event.recording_limit_reached" = "Достигнут лимит записи: %d кадров";
+
+// MARK: - Полётные задания
+"mission.menu.entry" = "Полётные задания";
+"mission.project.name" = "Полётное задание";
+"mission.scenario.search_and_rescue.title" = "Поиск человека";
+"mission.scenario.search_and_rescue.subtitle" = "Найдите пропавшего человека в секторе поиска.";
+"mission.time_of_day.day" = "День";
+"mission.time_of_day.dusk" = "Сумерки";
+"mission.time_of_day.night" = "Ночь";
+"mission.difficulty.easy" = "Лёгкая";
+"mission.difficulty.medium" = "Средняя";
+"mission.difficulty.hard" = "Сложная";
+"mission.setup.title" = "Настройка миссии";
+"mission.setup.subtitle" = "Настройте сценарий и запустите полёт.";
+"mission.setup.section.scenario" = "Сценарий";
+"mission.setup.section.parameters" = "Параметры";
+"mission.setup.section.platform" = "Платформа";
+"mission.setup.difficulty" = "Сложность";
+"mission.setup.time_of_day" = "Время суток";
+"mission.setup.terrain" = "Карта";
+"mission.setup.weather" = "Погода";
+"mission.setup.weather_intensity" = "Интенсивность погоды";
+"mission.setup.time_limit" = "Ограничение времени";
+"mission.setup.time_limit.value" = "%d мин";
+"mission.setup.uav" = "БЛА";
+"mission.setup.payload" = "Нагрузка";
+"mission.setup.payload.hint" = "Для поиска человека нужна тепловизионная или оптическая камера.";
+"mission.setup.start" = "Начать";
+"mission.hud.objective.search" = "Найдите человека в секторе поиска.";
+"mission.hud.locking" = "Захват цели…";
+"mission.hud.outcome.success" = "Цель обнаружена";
+"mission.hud.outcome.failure" = "Миссия провалена — время вышло";
+"mission.hud.outcome.aborted" = "Миссия прервана";

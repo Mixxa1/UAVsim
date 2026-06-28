@@ -108,6 +108,10 @@ final class DroneSceneController {
     private var renderedMissionWaypointCaptureGroundY: Float?
     private let launchAssetNode = SCNNode()
     private let onlineTrialPlaceholderRootNode = SCNNode()
+    // Mission scenarios (SAR etc.): root for spawned scenario entities + the active target.
+    private let missionScenarioRootNode = SCNNode()
+    private var missionTargetNode: SCNNode?
+    private var missionTimeOfDay: TimeOfDay = .day
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
     // v1.4.4: timestamp for computing deltaTime inside applyOnlineInterpolatedRemoteStates.
@@ -357,6 +361,9 @@ final class DroneSceneController {
         onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
         scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
 
+        missionScenarioRootNode.name = "missionScenarioRootNode"
+        scene.rootNode.addChildNode(missionScenarioRootNode)
+
         snowDecorationsNode.name = "environment.snowDecorations"
         scene.rootNode.addChildNode(snowDecorationsNode)
 
@@ -587,7 +594,9 @@ final class DroneSceneController {
         return ThermalEnvironmentAdapter.makeContext(
             weather: currentWeather,
             terrain: terrainPreset,
-            sceneProfile: profile
+            sceneProfile: profile,
+            isNight: missionTimeOfDay.isNight,
+            timeOfDayHours: missionTimeOfDay.timeOfDayHours
         )
     }
 
@@ -3126,6 +3135,14 @@ final class DroneSceneController {
         if thermalRenderingActive { thermalSavedBackground = backgroundImage }
         scene.lightingEnvironment.contents = backgroundImage
 
+        // Night missions: override the bright sky with a dark sky so the scene reads as night;
+        // the IBL gradient stays but its intensity is already lowered in applyLightingProfile.
+        if missionTimeOfDay == .night {
+            let nightSky = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.085, alpha: 1.0)
+            scene.background.contents = nightSky
+            if thermalRenderingActive { thermalSavedBackground = nightSky }
+        }
+
         if let geometry = groundNode.geometry {
             let mapSizeMeters = terrain.scenicHalfExtent * 2.0
             let groundMaterial: SCNMaterial
@@ -3328,9 +3345,171 @@ final class DroneSceneController {
             environmentIntensity = 0.96
         }
 
-        sunLightNode.light?.intensity = sunIntensity
-        sunLightNode.light?.color = sunColor
-        scene.lightingEnvironment.intensity = environmentIntensity
+        // Layer mission time-of-day on top of the per-terrain daylight baseline so night reads
+        // dark (and stays dark across any lighting re-application) without separate dusk gradients.
+        let sunFactor = CGFloat(missionTimeOfDay.sunIntensityMultiplier)
+        let envFactor = CGFloat(missionTimeOfDay.ambientIntensityMultiplier)
+        sunLightNode.light?.intensity = sunIntensity * sunFactor
+        sunLightNode.light?.color = missionTimeOfDay == .day
+            ? sunColor
+            : nightTintedSunColor(sunColor, timeOfDay: missionTimeOfDay)
+        scene.lightingEnvironment.intensity = environmentIntensity * envFactor
+    }
+
+    private func nightTintedSunColor(_ base: NSColor, timeOfDay: TimeOfDay) -> NSColor {
+        guard let rgb = base.usingColorSpace(.deviceRGB) else { return base }
+        switch timeOfDay {
+        case .day:
+            return base
+        case .dusk:
+            // Warm, low sun.
+            return NSColor(calibratedRed: min(1.0, rgb.redComponent * 1.05),
+                           green: rgb.greenComponent * 0.82,
+                           blue: rgb.blueComponent * 0.62,
+                           alpha: 1.0)
+        case .night:
+            // Cool moonlight.
+            return NSColor(calibratedRed: rgb.redComponent * 0.55,
+                           green: rgb.greenComponent * 0.62,
+                           blue: min(1.0, rgb.blueComponent * 0.95),
+                           alpha: 1.0)
+        }
+    }
+
+    /// Applies a mission time-of-day setting: re-runs lighting/sky for the current terrain and
+    /// refreshes the thermal context so `isNight`/`timeOfDayHours` flow into the thermal pipeline.
+    func applyMissionTimeOfDay(_ timeOfDay: TimeOfDay) {
+        missionTimeOfDay = timeOfDay
+        if let terrain = lastTerrainConfig {
+            applyTerrainVisualStyle(terrain)
+        } else {
+            applyLightingProfile(for: lastTerrainConfig?.preset ?? .field)
+        }
+        refreshThermalContextForTimeOfDay()
+    }
+
+    private func refreshThermalContextForTimeOfDay() {
+        thermalContext = makeThermalContext()
+    }
+
+    // MARK: - Mission scenario entities
+
+    /// Spawns the search-and-rescue scenario: a ground ring marking the search sector and the
+    /// target person at the resolved position. Returns the person's chest-height world position
+    /// for detection sampling.
+    @discardableResult
+    func spawnMissionSearchScenario(placement: MissionScenarioPlacement) -> SIMD3<Float> {
+        clearMissionScenario()
+        let groundY: Float = 0.0
+
+        let ring = makeSearchSectorRing(radius: placement.sectorRadius)
+        ring.position = SCNVector3(placement.sectorCenter.x, groundY + 0.05, placement.sectorCenter.y)
+        missionScenarioRootNode.addChildNode(ring)
+
+        var rng = SystemRandomNumberGenerator()
+        let yaw = Float.random(in: 0...(2.0 * .pi), using: &rng)
+        let person = ManAssetLoader.shared.makePersonNode(targetHeightMeters: 1.8, yaw: yaw)
+        person.position = SCNVector3(placement.targetPosition.x, groundY, placement.targetPosition.y)
+        person.name = "mission.target.person"
+        missionScenarioRootNode.addChildNode(person)
+        missionTargetNode = person
+
+        return SIMD3<Float>(placement.targetPosition.x, groundY + 1.0, placement.targetPosition.y)
+    }
+
+    func clearMissionScenario() {
+        missionScenarioRootNode.childNodes.forEach { $0.removeFromParentNode() }
+        missionTargetNode = nil
+    }
+
+    private func makeSearchSectorRing(radius: Float) -> SCNNode {
+        let torus = SCNTorus(
+            ringRadius: CGFloat(radius),
+            pipeRadius: CGFloat(max(0.6, radius * 0.012))
+        )
+        let material = SCNMaterial()
+        material.diffuse.contents = NSColor.systemTeal.withAlphaComponent(0.55)
+        material.emission.contents = NSColor.systemTeal.withAlphaComponent(0.30)
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        torus.firstMaterial = material
+        let node = SCNNode(geometry: torus)
+        node.name = "mission.search_sector"
+        node.castsShadow = false
+        return node
+    }
+
+    /// Samples target geometry relative to the payload camera for the mission runtime.
+    /// Returns `nil` when there is no active payload camera or scenario target.
+    func payloadCameraMissionSample(targetWorldPosition: SIMD3<Float>) -> MissionTargetDetectionSample? {
+        guard let cameraNode = payloadCameraNode, missionTargetNode != nil else {
+            return nil
+        }
+        let presentation = cameraNode.presentation
+        let camPos = presentation.simdWorldPosition
+        let worldTransform = presentation.simdWorldTransform
+        // SceneKit cameras look down their local -Z axis.
+        let forwardColumn = SIMD3<Float>(
+            worldTransform.columns.2.x,
+            worldTransform.columns.2.y,
+            worldTransform.columns.2.z
+        )
+        let forward = simd_normalize(-forwardColumn)
+
+        let toTarget = targetWorldPosition - camPos
+        let distance = simd_length(toTarget)
+        guard distance > 0.001 else {
+            return MissionTargetDetectionSample(
+                distanceMeters: 0.0,
+                angleFromCameraAxisDegrees: 0.0,
+                lineOfSightClear: true
+            )
+        }
+        let direction = toTarget / distance
+        let cosAngle = max(-1.0, min(1.0, simd_dot(forward, direction)))
+        let angleDegrees = acos(cosAngle) * 180.0 / .pi
+
+        let losClear = isLineOfSightClearToMissionTarget(from: camPos, to: targetWorldPosition)
+        return MissionTargetDetectionSample(
+            distanceMeters: distance,
+            angleFromCameraAxisDegrees: angleDegrees,
+            lineOfSightClear: losClear
+        )
+    }
+
+    private func isLineOfSightClearToMissionTarget(from: SIMD3<Float>, to: SIMD3<Float>) -> Bool {
+        let results = scene.rootNode.hitTestWithSegment(
+            from: SCNVector3(from.x, from.y, from.z),
+            to: SCNVector3(to.x, to.y, to.z),
+            options: [
+                SCNHitTestOption.backFaceCulling.rawValue: false,
+                SCNHitTestOption.ignoreHiddenNodes.rawValue: true
+            ]
+        )
+        let targetDistance = simd_distance(from, to)
+        for result in results {
+            if nodeIsDescendant(result.node, of: missionTargetNode) { continue }
+            if nodeIsDescendant(result.node, of: droneNode) { continue }
+            let hit = SIMD3<Float>(
+                Float(result.worldCoordinates.x),
+                Float(result.worldCoordinates.y),
+                Float(result.worldCoordinates.z)
+            )
+            if simd_distance(from, hit) < targetDistance - 0.5 {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func nodeIsDescendant(_ node: SCNNode, of ancestor: SCNNode?) -> Bool {
+        guard let ancestor else { return false }
+        var current: SCNNode? = node
+        while let candidate = current {
+            if candidate === ancestor { return true }
+            current = candidate.parent
+        }
+        return false
     }
 
     private func configureWorldSurfaceGeometry(for terrain: TerrainConfiguration) {

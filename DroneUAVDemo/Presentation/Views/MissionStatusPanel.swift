@@ -28,7 +28,6 @@ struct MissionStatusPanel: View {
                 fieldCard("mission.status.field.waypoint_count", value: waypointCountText)
                 fieldCard("mission.status.field.route_length", value: routeLengthText)
                 fieldCard("mission.status.field.drop_zone", value: dropZoneText)
-                fieldCard("mission.status.field.no_fly_status", value: noFlyStatusText)
                 fieldCard("mission.status.field.link_quality", value: linkQualityText)
                 fieldCard("mission.status.field.home_distance", value: homeDistanceText)
                 fieldCard("mission.status.field.edge_distance", value: edgeDistanceText)
@@ -66,14 +65,8 @@ struct MissionStatusPanel: View {
 
     private var missionTypeText: String {
         let draft = tacticalState.workingDraft
-        if draft.dropZone != nil, !draft.noFlyZones.isEmpty {
-            return localized("mission.status.value.delivery_restricted")
-        }
         if draft.dropZone != nil {
             return localized("mission.status.value.delivery")
-        }
-        if !draft.noFlyZones.isEmpty {
-            return localized("mission.status.value.route_restricted")
         }
         if draft.hasWaypoints {
             return localized("mission.status.value.route")
@@ -98,14 +91,6 @@ struct MissionStatusPanel: View {
             return localized("mission.status.value.none")
         }
         return meters(dropZone.radius)
-    }
-
-    private var noFlyStatusText: String {
-        let count = tacticalState.workingDraft.noFlyZones.count
-        guard count > 0 else {
-            return localized("mission.status.value.none")
-        }
-        return String(format: localized("mission.status.value.zone_count"), count)
     }
 
     private var linkQualityText: String {

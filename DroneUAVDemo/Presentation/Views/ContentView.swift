@@ -253,6 +253,20 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         )
     }
 
+    lazy var missionUAVProfiles: [DroneModelProfile] = {
+        LIPODroneModelRepository(abstractParameters: .default).allProfiles
+    }()
+
+    func launchMission(config: MissionScenarioConfiguration) {
+        activeSimulation?.stopRuntimeForExit()
+        activeSimulation = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectStorage.createProjectID(),
+            initialProjectName: NSLocalizedString("mission.project.name", comment: ""),
+            missionScenarioContext: config
+        )
+    }
+
     func openProject(_ summary: ProjectRecordSummary) {
         let vm = DroneSimulationViewModel(
             projectStorage: projectStorage,
@@ -1020,6 +1034,7 @@ struct ContentView: View {
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
     @State private var isOnlineTrialsPresented: Bool = false
+    @State private var isMissionSetupPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -1196,6 +1211,15 @@ struct ContentView: View {
                                 lanSessionViewModel.markRuntimeHandoffCompleted()
                             }
                         )
+                    } else if isMissionSetupPresented {
+                        MissionSetupView(
+                            availableProfiles: appShell.missionUAVProfiles,
+                            onCancel: { isMissionSetupPresented = false },
+                            onStart: { config in
+                                isMissionSetupPresented = false
+                                appShell.launchMission(config: config)
+                            }
+                        )
                     } else {
                         startScreenActions
                     }
@@ -1253,6 +1277,10 @@ struct ContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            }
+
+            startMenuButton(title: NSLocalizedString("mission.menu.entry", comment: ""), systemImage: "target") {
+                isMissionSetupPresented = true
             }
 
             HStack(spacing: 12) {
@@ -1375,6 +1403,13 @@ struct ContentView: View {
                                 viewModel.recoverSignal()
                             }
                         )
+                    }
+
+                    if viewModel.hasMissionScenario {
+                        MissionScenarioHUDView(viewModel: viewModel)
+                            .padding(.top, 64)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .allowsHitTesting(false)
                     }
 
                 }

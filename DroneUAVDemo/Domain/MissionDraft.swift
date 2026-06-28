@@ -136,14 +136,6 @@ struct MissionDraft: Equatable {
         zones.first { $0.type == .dropZone }
     }
 
-    var noFlyZones: [MissionZone] {
-        zones.filter { $0.type == .noFlyZone }
-    }
-
-    var noFlyZone: MissionZone? {
-        noFlyZones.last
-    }
-
     var effectiveLaunchObjectType: MissionLaunchObjectType? {
         launchObject?.type ?? selectedLaunchMode.defaultLaunchObjectType
     }

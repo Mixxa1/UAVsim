@@ -130,20 +130,6 @@ final class MissionDraftValidator {
             }
         }
 
-        if draft.noFlyZones.contains(where: { noFlyZone in
-            noFlyZone.contains(viewport.dockPosition) ||
-                draft.waypoints.contains(where: { noFlyZone.contains($0.position) }) ||
-                previewRouteIntersectsNoFly(previewRoute, zone: noFlyZone)
-        }) {
-            issues.append(
-                MissionDraftIssue(
-                    severity: .error,
-                    reason: .routeInvalid,
-                    messageKey: "tactical.map.issue.route_intersects_no_fly"
-                )
-            )
-        }
-
         if let dropZone = draft.dropZone,
            !viewport.isWithinWorldBounds(dropZone.center, tolerance: 0.05) {
             issues.append(
@@ -272,14 +258,6 @@ final class MissionDraftValidator {
             )
         }
 
-        if draft.noFlyZones.contains(where: { $0.contains(launchObject.position, tolerance: 0.05) }) {
-            return MissionDraftIssue(
-                severity: .error,
-                reason: .routeInvalid,
-                messageKey: "tactical.map.issue.launch_object_conflicts_no_fly"
-            )
-        }
-
         let corridorLength = launchCorridorLength(
             for: draft.selectedLaunchMode,
             viewport: viewport
@@ -295,21 +273,6 @@ final class MissionDraftValidator {
                 severity: .error,
                 reason: .routeInvalid,
                 messageKey: "tactical.map.issue.launch_corridor_invalid"
-            )
-        }
-
-        if draft.noFlyZones.contains(where: { zone in
-            segmentIntersectsCircle(
-                from: launchObject.position,
-                to: corridorEnd,
-                center: zone.center,
-                radius: max(0.0, zone.radius - 0.05)
-            )
-        }) {
-            return MissionDraftIssue(
-                severity: .error,
-                reason: .routeInvalid,
-                messageKey: "tactical.map.issue.launch_object_conflicts_no_fly"
             )
         }
 
@@ -353,50 +316,6 @@ final class MissionDraftValidator {
         return issues.filter { issue in
             seen.insert(issue.id).inserted
         }
-    }
-
-    private func previewRouteIntersectsNoFly(
-        _ previewRoute: MissionPreviewRoute?,
-        zone: MissionZone
-    ) -> Bool {
-        guard let previewRoute else {
-            return false
-        }
-
-        for point in previewRoute.points where zone.contains(point, tolerance: -0.05) {
-            return true
-        }
-
-        for pair in zip(previewRoute.points, previewRoute.points.dropFirst()) {
-            if segmentIntersectsCircle(
-                from: pair.0,
-                to: pair.1,
-                center: zone.center,
-                radius: max(0.0, zone.radius - 0.05)
-            ) {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    private func segmentIntersectsCircle(
-        from start: SIMD2<Float>,
-        to end: SIMD2<Float>,
-        center: SIMD2<Float>,
-        radius: Float
-    ) -> Bool {
-        let delta = end - start
-        let lengthSquared = simd_length_squared(delta)
-        guard lengthSquared > 0.0001 else {
-            return simd_distance(start, center) <= radius
-        }
-
-        let t = simd_dot(center - start, delta) / lengthSquared
-        let clampedT = min(1.0, max(0.0, t))
-        let closestPoint = start + delta * clampedT
-        return simd_distance(closestPoint, center) <= radius
     }
 
     private func missionReturnDistance(
