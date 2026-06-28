@@ -103,6 +103,8 @@
 "payload.rangefinder.zoom" = "Зум";
 "payload.rangefinder.gimbal_yaw" = "Рысканье";
 "payload.rangefinder.gimbal_pitch" = "Тангаж";
+"payload.gimbal.yaw_short" = "РЫСК.";
+"payload.gimbal.pitch_short" = "ТАНГАЖ";
 "payload.rangefinder.distance" = "Дистанция";
 "payload.rangefinder.reset_aim" = "Сбросить наведение";
 "payload.rangefinder.unavailable" = "Дальномер недоступен";
@@ -148,6 +150,7 @@
 "payload.camera.thermal.class.glass" = "Стекло";
 "payload.camera.thermal.class.shadow" = "Тень";
 "payload.camera.thermal.class.generic" = "Прочее";
+"payload.camera.thermal.class.body" = "Тепло тела";
 
 "overlay.thermal_diagnostics.title" = "ТЕПЛОВАЯ ДИАГНОСТИКА";
 
@@ -948,6 +951,9 @@
 
 "module.scenario.title" = "СЦЕНАРИЙ";
 "module.scenario.toolbar_title" = "Сценарий";
+"module.scenario.locked_by_mission" = "Заблокировано — условия заданы в настройке миссии.";
+"module.uav_catalog.locked_by_mission" = "Заблокировано — БЛА выбран в настройке миссии.";
+"payload.locked_by_mission" = "Заблокировано — нагрузка выбрана в настройке миссии.";
 "module.scenario.subtitle" = "Погода, местность и габариты рабочей зоны";
 "module.scenario.weather" = "Погодный профиль";
 "module.scenario.weather.subtitle" = "Пресеты и интенсивность внешних условий";
@@ -2387,6 +2393,9 @@
 "mission.difficulty.easy" = "Лёгкая";
 "mission.difficulty.medium" = "Средняя";
 "mission.difficulty.hard" = "Сложная";
+"mission.terrain_density.sparse" = "Редкий";
+"mission.terrain_density.medium" = "Средний";
+"mission.terrain_density.dense" = "Густой";
 "mission.setup.title" = "Настройка миссии";
 "mission.setup.subtitle" = "Настройте сценарий и запустите полёт.";
 "mission.setup.section.scenario" = "Сценарий";
@@ -2395,6 +2404,7 @@
 "mission.setup.difficulty" = "Сложность";
 "mission.setup.time_of_day" = "Время суток";
 "mission.setup.terrain" = "Карта";
+"mission.setup.terrain_density" = "Густота карты";
 "mission.setup.weather" = "Погода";
 "mission.setup.weather_intensity" = "Интенсивность погоды";
 "mission.setup.time_limit" = "Ограничение времени";

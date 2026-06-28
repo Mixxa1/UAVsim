@@ -270,6 +270,7 @@
 		100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A08 /* MissionScenarioRuntime.swift */; };
 		100000000000000000000A09 /* MissionSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0A /* MissionSetupView.swift */; };
 		100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0C /* MissionScenarioHUDView.swift */; };
+		100000000000000000000A0D /* PayloadGimbalSliderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0E /* PayloadGimbalSliderControls.swift */; };
 		100000000000000000000A03 /* Man.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A04 /* Man.usdz */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
@@ -585,6 +586,7 @@
 		100000000000000000000A08 /* MissionScenarioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioRuntime.swift; sourceTree = "<group>"; };
 		100000000000000000000A0A /* MissionSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSetupView.swift; sourceTree = "<group>"; };
 		100000000000000000000A0C /* MissionScenarioHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioHUDView.swift; sourceTree = "<group>"; };
+		100000000000000000000A0E /* PayloadGimbalSliderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadGimbalSliderControls.swift; sourceTree = "<group>"; };
 		100000000000000000000A04 /* Man.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Man.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
@@ -898,6 +900,7 @@
 				10000000000000000000014F /* ScenarioModuleView.swift */,
 				100000000000000000000A0A /* MissionSetupView.swift */,
 				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
+				100000000000000000000A0E /* PayloadGimbalSliderControls.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
@@ -1361,6 +1364,7 @@
 				10000000000000000000024C /* ScenarioModuleView.swift in Sources */,
 				100000000000000000000A09 /* MissionSetupView.swift in Sources */,
 				100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */,
+				100000000000000000000A0D /* PayloadGimbalSliderControls.swift in Sources */,
 				10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */,
 				100000000000000000000262 /* MissionDraftBuilder.swift in Sources */,
 				100000000000000000000263 /* MissionDraftValidator.swift in Sources */,

@@ -35,6 +35,10 @@ struct ScenarioModuleView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if viewModel.hasMissionScenario {
+                MissionLockBanner(messageKey: "module.scenario.locked_by_mission")
+            }
+
             ModuleSection(
                 titleKey: "module.scenario.weather",
                 subtitleKey: "module.scenario.weather.subtitle"
@@ -158,6 +162,10 @@ struct ScenarioModuleView: View {
                 }
             }
         }
+        // Mission scenarios fix weather/terrain/time-of-day at setup time — editing them live
+        // mid-flight would silently invalidate the briefed conditions, so this whole module is
+        // read-only for the duration of an active mission.
+        .disabled(viewModel.hasMissionScenario)
     }
 
     private func weatherIcon(for preset: WeatherPreset) -> String {

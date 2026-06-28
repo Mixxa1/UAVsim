@@ -8,15 +8,19 @@ struct MissionDetectionTuning: Equatable {
     var dwellSeconds: Double
 
     static func make(for payload: PayloadType) -> MissionDetectionTuning {
+        // Must comfortably exceed the largest search-sector radius (320 m on hard difficulty) —
+        // the payload camera zooms up to 50x specifically to resolve targets at that range (the
+        // optics HUD's own FOCUS/TARGET readout routinely shows 200+ m as a normal, expected
+        // operating distance), so a short hard cap made "hard" missions undetectable by design.
         switch payload {
         case .thermalCamera:
-            // Thermal: a warm body stands out, so a generous cone but shorter effective range.
-            return MissionDetectionTuning(maxRangeMeters: 150.0, coneHalfAngleDegrees: 24.0, dwellSeconds: 0.7)
+            // Thermal: a warm body stands out, so a generous cone and long effective range.
+            return MissionDetectionTuning(maxRangeMeters: 380.0, coneHalfAngleDegrees: 24.0, dwellSeconds: 0.7)
         case .cameraGimbal:
             // Optical: longer reach, tighter cone, slightly longer confirmation in daylight.
-            return MissionDetectionTuning(maxRangeMeters: 200.0, coneHalfAngleDegrees: 20.0, dwellSeconds: 0.8)
+            return MissionDetectionTuning(maxRangeMeters: 420.0, coneHalfAngleDegrees: 20.0, dwellSeconds: 0.8)
         default:
-            return MissionDetectionTuning(maxRangeMeters: 160.0, coneHalfAngleDegrees: 22.0, dwellSeconds: 0.8)
+            return MissionDetectionTuning(maxRangeMeters: 400.0, coneHalfAngleDegrees: 22.0, dwellSeconds: 0.8)
         }
     }
 }

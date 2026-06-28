@@ -364,6 +364,28 @@ struct StatusBadge: View {
     }
 }
 
+/// Shown above module controls that mission parameters lock for the duration of an active
+/// mission (UAV/payload/scenario conditions are all decided in mission setup, not mid-flight).
+struct MissionLockBanner: View {
+    let messageKey: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            Text(LocalizedStringKey(messageKey))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 struct ModuleSliderRow: View {
     let titleKey: String
     let value: Binding<Double>

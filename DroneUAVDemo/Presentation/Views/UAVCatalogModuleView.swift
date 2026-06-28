@@ -9,6 +9,10 @@ struct UAVCatalogModuleView: View {
         let selectionState = viewModel.uavCatalogSelectionState
 
         VStack(alignment: .leading, spacing: 14) {
+            if viewModel.hasMissionScenario {
+                MissionLockBanner(messageKey: "module.uav_catalog.locked_by_mission")
+            }
+
             ModuleSection(
                 titleKey: "module.uav_catalog.selection",
                 subtitleKey: "module.uav_catalog.selection.subtitle"
@@ -49,6 +53,10 @@ struct UAVCatalogModuleView: View {
                         showAbstractEditor = true
                     }
                 )
+                // The aircraft is locked in at mission setup; switching mid-mission would silently
+                // invalidate whatever briefed conditions (payload compatibility, performance) the
+                // mission was set up around.
+                .disabled(viewModel.hasMissionScenario)
             }
         }
         .sheet(isPresented: $showAbstractEditor) {

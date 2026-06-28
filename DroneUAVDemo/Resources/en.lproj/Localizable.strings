@@ -103,6 +103,8 @@
 "payload.rangefinder.zoom" = "Zoom";
 "payload.rangefinder.gimbal_yaw" = "Yaw";
 "payload.rangefinder.gimbal_pitch" = "Pitch";
+"payload.gimbal.yaw_short" = "YAW";
+"payload.gimbal.pitch_short" = "PITCH";
 "payload.rangefinder.distance" = "Distance";
 "payload.rangefinder.reset_aim" = "Reset Aim";
 "payload.rangefinder.unavailable" = "Rangefinder unavailable";
@@ -148,6 +150,7 @@
 "payload.camera.thermal.class.glass" = "Glass";
 "payload.camera.thermal.class.shadow" = "Shadow";
 "payload.camera.thermal.class.generic" = "Generic";
+"payload.camera.thermal.class.body" = "Body heat";
 
 "overlay.thermal_diagnostics.title" = "THERMAL DIAGNOSTICS";
 
@@ -953,6 +956,9 @@
 
 "module.scenario.title" = "SCENARIO";
 "module.scenario.toolbar_title" = "Scenario";
+"module.scenario.locked_by_mission" = "Locked — conditions were set in mission setup.";
+"module.uav_catalog.locked_by_mission" = "Locked — aircraft was chosen in mission setup.";
+"payload.locked_by_mission" = "Locked — payload was chosen in mission setup.";
 "module.scenario.subtitle" = "Weather, terrain and boundary envelope";
 "module.scenario.weather" = "Weather Profile";
 "module.scenario.weather.subtitle" = "Preset severity and wind conditions";
@@ -2392,6 +2398,9 @@
 "mission.difficulty.easy" = "Easy";
 "mission.difficulty.medium" = "Medium";
 "mission.difficulty.hard" = "Hard";
+"mission.terrain_density.sparse" = "Sparse";
+"mission.terrain_density.medium" = "Medium";
+"mission.terrain_density.dense" = "Dense";
 "mission.setup.title" = "Mission Setup";
 "mission.setup.subtitle" = "Configure the scenario, then launch the flight.";
 "mission.setup.section.scenario" = "Scenario";
@@ -2400,6 +2409,7 @@
 "mission.setup.difficulty" = "Difficulty";
 "mission.setup.time_of_day" = "Time of day";
 "mission.setup.terrain" = "Map";
+"mission.setup.terrain_density" = "Map density";
 "mission.setup.weather" = "Weather";
 "mission.setup.weather_intensity" = "Weather intensity";
 "mission.setup.time_limit" = "Time limit";

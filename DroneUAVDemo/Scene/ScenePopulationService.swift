@@ -76,6 +76,9 @@ final class ScenePopulationService {
                 areaScale: areaScale,
                 safeSpawn: terrain.safeSpawnRadius,
                 extent: extent,
+                densityBoost: terrain.missionDensityBoost ? 1.1 : 1.0,
+                sectorCenter: terrain.missionSearchSectorCenter,
+                sectorRadius: terrain.missionSearchSectorRadius,
                 generator: &generator
             )
         case .cargoYard:
@@ -91,13 +94,26 @@ final class ScenePopulationService {
             collidableDescriptors = []
         }
 
+        // generateForest mixes truly-collidable objects with a non-collidable decorative scatter
+        // (cheap visual-only filler — see TerrainConfiguration.missionSearchSectorCenter). Only the
+        // collidable subset competes for the fixed object-count cap below; decorative descriptors
+        // bypass it entirely, same as the boundary belt.
+        let decorativeDescriptors = collidableDescriptors.filter { !$0.isCollidable }
+        collidableDescriptors = collidableDescriptors.filter { $0.isCollidable }
+
+        let preCapCount = collidableDescriptors.count
+        let preCapTreeCount = collidableDescriptors.filter { $0.kind == .tree }.count
         collidableDescriptors = cappedCollidableDescriptors(collidableDescriptors, for: terrain)
+        // Temporary diagnostic for the mission forest-density investigation — remove once
+        // resolved. Logs what actually got generated/capped, since the formulas compute a much
+        // higher count on paper than testing has shown on screen.
+        print("[Density] preset=\(terrain.preset) mapScale=\(terrain.mapScale) density=\(terrain.density) boost=\(terrain.missionDensityBoost) preCap=\(preCapCount) preCapTrees=\(preCapTreeCount) cap=\(maxCollidableObjectCount(for: terrain)) postCap=\(collidableDescriptors.count) postCapTrees=\(collidableDescriptors.filter { $0.kind == .tree }.count) decorative=\(decorativeDescriptors.count)")
 
         let beltDescriptors = generateBoundaryBelt(
             terrain: terrain,
             generator: &generator
         )
-        let allDescriptors = collidableDescriptors + beltDescriptors
+        let allDescriptors = collidableDescriptors + decorativeDescriptors + beltDescriptors
 
         // Re-establish treeVisualsNode after clearing containerNode children
         containerNode.addChildNode(treeVisualsNode)
@@ -171,7 +187,13 @@ final class ScenePopulationService {
             baseLimit = 620
         }
 
-        return max(180, Int((baseLimit * multiplier).rounded()))
+        // Mission terrain gets a small cap bump as a safety margin above generateForest's own
+        // densityBoost — most of the "search sector reads as real forest cover" effect now comes
+        // from concentrating generation spatially around the sector (sector-bias split, ~4-5x
+        // effective density there for free) rather than from brute-forcing the whole budget up,
+        // which is what the old ×1.8 was compensating for before that split existed.
+        let boost = terrain.missionDensityBoost ? 1.2 : 1.0
+        return max(180, Int((baseLimit * multiplier * boost).rounded()))
     }
 
     private func generateField(
@@ -339,6 +361,9 @@ final class ScenePopulationService {
         areaScale: Float,
         safeSpawn: Float,
         extent: Float,
+        densityBoost: Float = 1.0,
+        sectorCenter: SIMD2<Float>? = nil,
+        sectorRadius: Float? = nil,
         generator: inout SeededRandomGenerator
     ) -> [EnvironmentObjectDescriptor] {
         var descriptors: [EnvironmentObjectDescriptor] = []
@@ -358,34 +383,72 @@ final class ScenePopulationService {
             ))
         }
 
-        let clusterCount = min(28, max(10, Int((10.0 + density * 7.0) * featureScale)))
-        for _ in 0..<clusterCount {
-            let center = randomPosition(extent: extent * 0.84, safeSpawn: safeSpawn + 14.0, generator: &generator)
-            if isInsideClearing(center, clearings: clearings) {
-                continue
-            }
+        // When a mission search sector is set, the collidable/decorative budget concentrates
+        // around it (plus a halo so it doesn't end abruptly) instead of spreading uniformly over
+        // the whole map — the object budget is finite regardless of map size, so spreading it
+        // over a huge map reads as dense only at the fixed-count horizon belt and sparse where
+        // the mission actually happens. A thin baseline still covers the rest of the map so the
+        // dock-to-sector corridor isn't bare.
+        let hasSector = sectorCenter != nil && sectorRadius != nil
+        let sectorBiasCenter = sectorCenter ?? .zero
+        // ×1.15, not a bigger halo — a wider bias square spreads the same sector-share count over
+        // more area, which reads as *less* dense per m² right where it matters. Tight halo just
+        // avoids a razor-sharp edge at the sector boundary.
+        let sectorBiasExtent = sectorRadius.map { $0 * 1.15 } ?? (extent * 0.84)
 
-            let radius = Float.random(in: 14.0...30.0, using: &generator)
-            let count = max(10, Int(Float.random(in: 12.0...24.0, using: &generator) * max(0.70, density) * 1.05))
-            appendCluster(
-                count: count,
-                center: center,
-                radius: radius,
-                terrain: .forest,
-                safeSpawn: safeSpawn,
-                overlapPadding: 1.0,
-                occupied: &occupied,
-                descriptors: &descriptors,
-                generator: &generator
-            ) { rng in
-                let pick = Float.random(in: 0.0...1.0, using: &rng)
-                if pick < 0.95 { return .tree }
-                if pick < 0.985 { return .pole }
-                return .crate
-            } placementValidator: { position in
-                !self.isInsideClearing(position, clearings: clearings)
+        func splitCount(_ total: Int, sectorShare: Float) -> (sector: Int, baseline: Int) {
+            guard hasSector else { return (0, total) }
+            let sectorPart = Int((Float(total) * sectorShare).rounded())
+            return (sectorPart, total - sectorPart)
+        }
+
+        // densityBoost (mission-only, see TerrainConfiguration.missionDensityBoost) scales both
+        // how many clusters get placed and how many trees fill each one — the normal 28/24 caps
+        // are tuned for the freeform-flight object budget, not for "search sector should read as
+        // real forest cover".
+        let clusterCount = min(Int(28 * densityBoost), max(10, Int((10.0 + density * 7.0) * featureScale * densityBoost)))
+        // Collision checking (CollisionAnalysisService.analyze/firstSweptCollision) is an
+        // unconditional O(n) scan over *every* collidable obstacle every tick — there's no
+        // distance culling and obstacle nodes carry no SCNPhysicsBody, so SceneKit can't broad-
+        // phase it either. A collidable tree the player will never fly near (outside the search
+        // sector, in a manual-flight scenario with no autopilot routing around it — see
+        // [[project_missions_vision_and_nfz_removal]]) is pure tax on that scan. So almost all of
+        // the collidable budget now goes to the sector, and whatever's left outside is generated
+        // non-collidable (still renders, just doesn't enter the obstacle list).
+        let clusterSplit = splitCount(clusterCount, sectorShare: 0.95)
+
+        func placeClusterBatch(count: Int, batchCenter: SIMD2<Float>, batchExtent: Float, collidable: Bool, generator: inout SeededRandomGenerator) {
+            for _ in 0..<count {
+                let center = randomPosition(extent: batchExtent, safeSpawn: safeSpawn + 14.0, center: batchCenter, generator: &generator)
+                if isInsideClearing(center, clearings: clearings) {
+                    continue
+                }
+
+                let radius = Float.random(in: 14.0...30.0, using: &generator)
+                let count = max(10, Int(Float.random(in: 12.0...24.0, using: &generator) * max(0.70, density) * 1.05 * densityBoost))
+                appendCluster(
+                    count: count,
+                    center: center,
+                    radius: radius,
+                    terrain: .forest,
+                    safeSpawn: safeSpawn,
+                    overlapPadding: 1.0,
+                    occupied: &occupied,
+                    descriptors: &descriptors,
+                    generator: &generator,
+                    collidable: collidable
+                ) { rng in
+                    let pick = Float.random(in: 0.0...1.0, using: &rng)
+                    if pick < 0.95 { return .tree }
+                    if pick < 0.985 { return .pole }
+                    return .crate
+                } placementValidator: { position in
+                    !self.isInsideClearing(position, clearings: clearings)
+                }
             }
         }
+        placeClusterBatch(count: clusterSplit.sector, batchCenter: sectorBiasCenter, batchExtent: sectorBiasExtent, collidable: true, generator: &generator)
+        placeClusterBatch(count: clusterSplit.baseline, batchCenter: .zero, batchExtent: extent * 0.84, collidable: false, generator: &generator)
 
         for clearing in clearings.dropFirst() {
             let outcropCount = Int.random(in: 1...3, using: &generator)
@@ -425,9 +488,32 @@ final class ScenePopulationService {
             }
         }
 
-        let fillCount = min(420, max(120, Int(190.0 * max(0.55, density) * featureScale)))
+        let fillPickKind: (inout SeededRandomGenerator) -> EnvironmentObjectKind = { rng in
+            let pick = Float.random(in: 0.0...1.0, using: &rng)
+            if pick < 0.95 { return .tree }
+            if pick < 0.975 { return .pole }
+            if pick < 0.995 { return .crate }
+            return .rock
+        }
+        let fillCount = min(Int(420 * densityBoost), max(120, Int(190.0 * max(0.55, density) * featureScale * densityBoost)))
+        let fillSplit = splitCount(fillCount, sectorShare: 0.95)
         appendScatter(
-            count: fillCount,
+            count: fillSplit.sector,
+            extent: sectorBiasExtent,
+            safeSpawn: safeSpawn,
+            overlapPadding: 1.02,
+            terrain: .forest,
+            occupied: &occupied,
+            descriptors: &descriptors,
+            generator: &generator,
+            center: sectorBiasCenter,
+            placementValidator: { position in
+                !self.isInsideClearing(position, clearings: clearings)
+            },
+            pickKind: fillPickKind
+        )
+        appendScatter(
+            count: fillSplit.baseline,
             extent: extent * 0.88,
             safeSpawn: safeSpawn,
             overlapPadding: 1.02,
@@ -435,20 +521,47 @@ final class ScenePopulationService {
             occupied: &occupied,
             descriptors: &descriptors,
             generator: &generator,
+            collidable: false,
             placementValidator: { position in
                 !self.isInsideClearing(position, clearings: clearings)
-            }
-        ) { rng in
-            let pick = Float.random(in: 0.0...1.0, using: &rng)
-            if pick < 0.95 { return .tree }
-            if pick < 0.975 { return .pole }
-            if pick < 0.995 { return .crate }
-            return .rock
-        }
+            },
+            pickKind: fillPickKind
+        )
 
-        let decorativeForestCount = min(520, max(160, Int(220.0 * featureScale)))
+        // Decorative (non-collidable) trees are "free" against the collision/pathfinding budget,
+        // so near the sector we lean on them hard for visual density — this is the layer the user
+        // asked to redirect toward the search area instead of spreading thin over the whole map.
+        let decorativePickKind: (inout SeededRandomGenerator) -> EnvironmentObjectKind = { rng in
+            let pick = Float.random(in: 0.0...1.0, using: &rng)
+            if pick < 0.992 { return .tree }
+            return .crate
+        }
+        // Decorative trees are free against the collision cap, but not against render/FPS cost —
+        // pushing the ceiling too high (was 1,100) cost real frame time for very little extra
+        // sector density once spacing/overlap rejection saturates. Trading a lower ceiling for a
+        // tighter, higher-share placement keeps the per-m² density in the sector similar while
+        // cutting total node count.
+        let decorativeBaseCount = min(520, max(160, Int(220.0 * featureScale)))
+        let decorativeForestCount = hasSector ? min(820, Int(Float(decorativeBaseCount) * 1.4)) : decorativeBaseCount
+        let decorativeSplit = splitCount(decorativeForestCount, sectorShare: 0.92)
         appendScatter(
-            count: decorativeForestCount,
+            count: decorativeSplit.sector,
+            extent: sectorBiasExtent,
+            safeSpawn: safeSpawn,
+            overlapPadding: 0.98,
+            terrain: .forest,
+            occupied: &occupied,
+            descriptors: &descriptors,
+            generator: &generator,
+            collidable: false,
+            center: sectorBiasCenter,
+            placementValidator: { position in
+                !self.isInsideClearing(position, clearings: clearings)
+            },
+            pickKind: decorativePickKind
+        )
+        appendScatter(
+            count: decorativeSplit.baseline,
             extent: extent * 0.94,
             safeSpawn: safeSpawn,
             overlapPadding: 0.98,
@@ -459,12 +572,21 @@ final class ScenePopulationService {
             collidable: false,
             placementValidator: { position in
                 !self.isInsideClearing(position, clearings: clearings)
-            }
-        ) { rng in
-            let pick = Float.random(in: 0.0...1.0, using: &rng)
-            if pick < 0.992 { return .tree }
-            return .crate
+            },
+            pickKind: decorativePickKind
+        )
+
+        #if DEBUG
+        if hasSector {
+            let treeDescriptors = descriptors.filter { $0.kind == .tree }
+            let inSectorCount = treeDescriptors.filter { simd_distance(SIMD2<Float>($0.position.x, $0.position.z), sectorBiasCenter) <= sectorBiasExtent }.count
+            let sectorAreaM2 = sectorBiasExtent * sectorBiasExtent * 4.0
+            let outsideAreaM2 = max(1.0, (extent * 2.0) * (extent * 2.0) - sectorAreaM2)
+            let inSectorDensity = Float(inSectorCount) / max(1.0, sectorAreaM2) * 1000.0
+            let outsideDensity = Float(treeDescriptors.count - inSectorCount) / outsideAreaM2 * 1000.0
+            print("[Density] sector-check trees=\(treeDescriptors.count) inSector=\(inSectorCount) outside=\(treeDescriptors.count - inSectorCount) inSectorPer1000m2=\(String(format: "%.2f", inSectorDensity)) outsidePer1000m2=\(String(format: "%.2f", outsideDensity))")
         }
+        #endif
 
         return descriptors
     }
@@ -798,6 +920,7 @@ final class ScenePopulationService {
         descriptors: inout [EnvironmentObjectDescriptor],
         generator: inout SeededRandomGenerator,
         collidable: Bool = true,
+        center: SIMD2<Float> = .zero,
         placementValidator: ((SIMD2<Float>) -> Bool)? = nil,
         pickKind: (inout SeededRandomGenerator) -> EnvironmentObjectKind
     ) {
@@ -809,7 +932,7 @@ final class ScenePopulationService {
                 break
             }
 
-            let position = SIMD2<Float>(
+            let position = center + SIMD2<Float>(
                 Float.random(in: -extent...extent, using: &generator),
                 Float.random(in: -extent...extent, using: &generator)
             )
@@ -917,10 +1040,11 @@ final class ScenePopulationService {
     private func randomPosition(
         extent: Float,
         safeSpawn: Float,
+        center: SIMD2<Float> = .zero,
         generator: inout SeededRandomGenerator
     ) -> SIMD2<Float> {
         for _ in 0..<48 {
-            let candidate = SIMD2<Float>(
+            let candidate = center + SIMD2<Float>(
                 Float.random(in: -extent...extent, using: &generator),
                 Float.random(in: -extent...extent, using: &generator)
             )
@@ -930,7 +1054,7 @@ final class ScenePopulationService {
         }
 
         let angle = Float.random(in: 0.0...(.pi * 2.0), using: &generator)
-        return SIMD2<Float>(cos(angle), sin(angle)) * safeSpawn
+        return center + SIMD2<Float>(cos(angle), sin(angle)) * safeSpawn
     }
 
     private func isInsideClearing(

@@ -5,26 +5,36 @@ struct SceneSetup {
     let scene: SCNScene
     let cameraNode: SCNNode
     let sunLightNode: SCNNode
+    let ambientLightNode: SCNNode
+    let fillLightNode: SCNNode
     let groundNode: SCNNode
     let gridNode: SCNNode
     let axesNode: SCNNode
 }
 
 enum SceneFactory {
+    /// Baseline intensities for the always-on ambient/fill lights — referenced by
+    /// `DroneSceneController.applyLightingProfile` so night/dusk can dim them in lockstep with
+    /// the sun instead of leaving them at a fixed, time-of-day-blind brightness.
+    static let ambientLightBaseIntensity: CGFloat = 300
+    static let fillLightBaseIntensity: CGFloat = 340
+
     static func makeScene() -> SceneSetup {
         let scene = SCNScene()
         scene.background.contents = NSColor(calibratedRed: 0.07, green: 0.10, blue: 0.14, alpha: 1.0)
 
         let cameraNode = makeCameraNode()
         let sunLightNode = makeDirectionalLightNode()
+        let ambientLightNode = makeAmbientLightNode()
+        let fillLightNode = makeFillLightNode()
         let groundNode = makeGroundNode()
         let gridNode = makeGridNode()
         let axesNode = makeAxesNode()
 
         scene.rootNode.addChildNode(cameraNode)
-        scene.rootNode.addChildNode(makeAmbientLightNode())
+        scene.rootNode.addChildNode(ambientLightNode)
         scene.rootNode.addChildNode(sunLightNode)
-        scene.rootNode.addChildNode(makeFillLightNode())
+        scene.rootNode.addChildNode(fillLightNode)
         scene.rootNode.addChildNode(groundNode)
         scene.rootNode.addChildNode(gridNode)
         scene.rootNode.addChildNode(axesNode)
@@ -33,6 +43,8 @@ enum SceneFactory {
             scene: scene,
             cameraNode: cameraNode,
             sunLightNode: sunLightNode,
+            ambientLightNode: ambientLightNode,
+            fillLightNode: fillLightNode,
             groundNode: groundNode,
             gridNode: gridNode,
             axesNode: axesNode
@@ -53,9 +65,10 @@ enum SceneFactory {
 
     private static func makeAmbientLightNode() -> SCNNode {
         let node = SCNNode()
+        node.name = "ambientLightNode"
         let light = SCNLight()
         light.type = .ambient
-        light.intensity = 300
+        light.intensity = ambientLightBaseIntensity
         light.color = NSColor(calibratedRed: 0.79, green: 0.82, blue: 0.88, alpha: 1.0)
         node.light = light
         return node
@@ -81,9 +94,10 @@ enum SceneFactory {
 
     private static func makeFillLightNode() -> SCNNode {
         let node = SCNNode()
+        node.name = "fillLightNode"
         let light = SCNLight()
         light.type = .omni
-        light.intensity = 340
+        light.intensity = fillLightBaseIntensity
         light.color = NSColor(calibratedRed: 0.68, green: 0.77, blue: 1.0, alpha: 1.0)
         node.light = light
         node.position = SCNVector3(-20, 16, -12)

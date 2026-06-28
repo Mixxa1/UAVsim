@@ -96,6 +96,8 @@ final class DroneSceneController {
 
     private let sunLightNode: SCNNode
     private let defaultSunLightPosition: SCNVector3
+    private let ambientLightNode: SCNNode
+    private let fillLightNode: SCNNode
     private let gridNode: SCNNode
     private let axesNode: SCNNode
     private let groundNode: SCNNode
@@ -246,6 +248,7 @@ final class DroneSceneController {
     private var activeProfile: DroneModelProfile
     private var currentWeather: WeatherModel = .normal
     private var payloadOpticsShadowQualityActive = false
+    private var lastPayloadOpticsShadowWeatherPreset: WeatherPreset?
     private var areWorldBoundsVisible: Bool = false
     private(set) var dockSpawnPosition = SIMD3<Float>(0.0, 0.0, 0.0)
     private let dockDeckSurfaceHeight: Float = 0.037
@@ -259,6 +262,8 @@ final class DroneSceneController {
         self.freeCameraNode = setup.cameraNode
         self.sunLightNode = setup.sunLightNode
         self.defaultSunLightPosition = setup.sunLightNode.position
+        self.ambientLightNode = setup.ambientLightNode
+        self.fillLightNode = setup.fillLightNode
         self.gridNode = setup.gridNode
         self.axesNode = setup.axesNode
         self.groundNode = setup.groundNode
@@ -497,6 +502,9 @@ final class DroneSceneController {
             return thermalRenderer
         }
         let renderer = ThermalProxyRenderer(sceneRoot: scene.rootNode, groundNode: groundNode)
+        // The renderer is created lazily on first thermal activation, which can happen before or
+        // after a mission scenario spawns its target — hand it whatever target is current now.
+        renderer.setMissionTarget(missionTargetNode)
         thermalRenderer = renderer
         return renderer
     }
@@ -1754,15 +1762,19 @@ final class DroneSceneController {
                 weatherFogStrength: haze?.strength ?? 0,
                 weatherHazeDistribution: haze?.distribution ?? .groundHaze
             )
-            scene.background.contents = backgroundImage
+            let resolvedBackground = nightOverriddenBackground(backgroundImage)
+            scene.background.contents = resolvedBackground
             // Keep the thermal restore target current if the EO sky changed while thermal is
             // active (the dirty flag re-paints the thermal sky on the next frame).
-            if thermalRenderingActive { thermalSavedBackground = backgroundImage }
+            if thermalRenderingActive { thermalSavedBackground = resolvedBackground }
             // applyTerrainVisualStyle keeps lightingEnvironment.contents in lockstep with the
             // visible sky on terrain changes; weather can change independently of terrain, so
             // without this the IBL ambient light kept using the pre-storm bright gradient even
-            // though the visible sky had already gone dark.
-            scene.lightingEnvironment.contents = backgroundImage
+            // though the visible sky had already gone dark. Night uses the same dark override as
+            // the background — a bright daytime gradient merely turned down in intensity still
+            // floods diffuse surfaces (grass, trees) with a sky-bright dome of fill light, which
+            // reads as "lit", not dark.
+            scene.lightingEnvironment.contents = resolvedBackground
 
             let isSnow = weather.preset == .snow
             if terrain.preset != .city {
@@ -3131,17 +3143,13 @@ final class DroneSceneController {
             axesNode.isHidden = true
         }
 
-        scene.background.contents = backgroundImage
-        if thermalRenderingActive { thermalSavedBackground = backgroundImage }
-        scene.lightingEnvironment.contents = backgroundImage
-
-        // Night missions: override the bright sky with a dark sky so the scene reads as night;
-        // the IBL gradient stays but its intensity is already lowered in applyLightingProfile.
-        if missionTimeOfDay == .night {
-            let nightSky = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.085, alpha: 1.0)
-            scene.background.contents = nightSky
-            if thermalRenderingActive { thermalSavedBackground = nightSky }
-        }
+        let resolvedBackground = nightOverriddenBackground(backgroundImage)
+        scene.background.contents = resolvedBackground
+        if thermalRenderingActive { thermalSavedBackground = resolvedBackground }
+        // Night uses the same dark override as the background for IBL too — a bright daytime
+        // gradient merely turned down in intensity still floods diffuse surfaces with a
+        // sky-bright dome of fill light, which reads as "lit", not dark.
+        scene.lightingEnvironment.contents = resolvedBackground
 
         if let geometry = groundNode.geometry {
             let mapSizeMeters = terrain.scenicHalfExtent * 2.0
@@ -3347,6 +3355,9 @@ final class DroneSceneController {
 
         // Layer mission time-of-day on top of the per-terrain daylight baseline so night reads
         // dark (and stays dark across any lighting re-application) without separate dusk gradients.
+        // Reverted from literal 0 back to the (small, non-zero) multiplier values: a separate
+        // test isolating variables is needed before trying absolute zero again — see the
+        // dedicated [[project_missions_increment1_bugfixes]] memory note on the FPV-mode crash.
         let sunFactor = CGFloat(missionTimeOfDay.sunIntensityMultiplier)
         let envFactor = CGFloat(missionTimeOfDay.ambientIntensityMultiplier)
         sunLightNode.light?.intensity = sunIntensity * sunFactor
@@ -3354,6 +3365,47 @@ final class DroneSceneController {
             ? sunColor
             : nightTintedSunColor(sunColor, timeOfDay: missionTimeOfDay)
         scene.lightingEnvironment.intensity = environmentIntensity * envFactor
+        // SceneFactory's always-on ambient + omni fill lights are independent of terrain/weather
+        // and were never part of this day/night model — at fixed intensity they alone (300+340)
+        // dwarf the dimmed sun, which is why earlier night passes that only touched the sun/IBL
+        // stayed bright. Dim them in lockstep with the IBL ambient factor.
+        ambientLightNode.light?.intensity = SceneFactory.ambientLightBaseIntensity * envFactor
+        fillLightNode.light?.intensity = SceneFactory.fillLightBaseIntensity * envFactor
+
+        if missionTimeOfDay == .night {
+            print("[Mission] night lighting applied: sun=\(sunLightNode.light?.intensity ?? -1) env=\(scene.lightingEnvironment.intensity) bg=\(String(describing: scene.background.contents)) lightingEnvContents=\(String(describing: scene.lightingEnvironment.contents))")
+            dumpAllSceneLights()
+            dumpGroundMaterial()
+        }
+    }
+
+    /// Temporary diagnostic: dumps the ground material's actual rendering-relevant properties, so
+    /// "scene still looks lit with every light at 0" can be traced to a material override (e.g.
+    /// emission, an unlit lighting model, or a baked-bright albedo) rather than guessed at.
+    /// Remove once night brightness is confirmed fixed.
+    private func dumpGroundMaterial() {
+        guard let material = groundNode.geometry?.firstMaterial else {
+            print("[Mission] ground material: <none>")
+            return
+        }
+        print("[Mission] ground material: lightingModel=\(material.lightingModel.rawValue) emission=\(String(describing: material.emission.contents)) ambient=\(String(describing: material.ambient.contents)) locksAmbientWithDiffuse=\(material.locksAmbientWithDiffuse) diffuse=\(String(describing: material.diffuse.contents))")
+    }
+
+    /// Temporary diagnostic: lists every SCNLight in the scene graph with its type/intensity, so
+    /// an unexpectedly-bright night can be traced to a light source the night dimming code never
+    /// considered (rather than guessing). Remove once night brightness is confirmed fixed.
+    private func dumpAllSceneLights() {
+        var lines: [String] = []
+        func walk(_ node: SCNNode) {
+            if let light = node.light {
+                lines.append("  \(node.name ?? "<unnamed>"): type=\(light.type.rawValue) intensity=\(light.intensity) hidden=\(node.isHidden)")
+            }
+            for child in node.childNodes {
+                walk(child)
+            }
+        }
+        walk(scene.rootNode)
+        print("[Mission] scene lights (\(lines.count)):\n" + lines.joined(separator: "\n"))
     }
 
     private func nightTintedSunColor(_ base: NSColor, timeOfDay: TimeOfDay) -> NSColor {
@@ -3374,6 +3426,16 @@ final class DroneSceneController {
                            blue: min(1.0, rgb.blueComponent * 0.95),
                            alpha: 1.0)
         }
+    }
+
+    /// Single source of truth for "what should the visible (non-thermal) sky actually look like
+    /// right now" — both `applyTerrainVisualStyle` and `applyWeatherVisual` recompute the EO sky
+    /// background independently (terrain vs. weather change at different times), so the night
+    /// override has to live here and be called from both, or whichever ran most recently silently
+    /// wins and undoes the other's night sky / thermal-restore snapshot.
+    private func nightOverriddenBackground(_ base: Any) -> Any {
+        guard missionTimeOfDay == .night else { return base }
+        return NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.085, alpha: 1.0)
     }
 
     /// Applies a mission time-of-day setting: re-runs lighting/sky for the current terrain and
@@ -3413,6 +3475,7 @@ final class DroneSceneController {
         person.name = "mission.target.person"
         missionScenarioRootNode.addChildNode(person)
         missionTargetNode = person
+        thermalRenderer?.setMissionTarget(person)
 
         return SIMD3<Float>(placement.targetPosition.x, groundY + 1.0, placement.targetPosition.y)
     }
@@ -3420,6 +3483,7 @@ final class DroneSceneController {
     func clearMissionScenario() {
         missionScenarioRootNode.childNodes.forEach { $0.removeFromParentNode() }
         missionTargetNode = nil
+        thermalRenderer?.setMissionTarget(nil)
     }
 
     private func makeSearchSectorRing(radius: Float) -> SCNNode {
@@ -3432,6 +3496,13 @@ final class DroneSceneController {
         material.emission.contents = NSColor.systemTeal.withAlphaComponent(0.30)
         material.lightingModel = .constant
         material.isDoubleSided = true
+        // Ground overlay marker, same treatment as the payload-impact mark: skip the depth
+        // buffer entirely so this large ring never occludes or gets occluded by real geometry's
+        // depth, which is also what the sun's shadow pass reads — leaving it out keeps shadows
+        // from trees/the drone falling normally across the sector instead of getting clipped by
+        // (or rendering artifacts from) the ring's own geometry.
+        material.readsFromDepthBuffer = false
+        material.writesToDepthBuffer = false
         torus.firstMaterial = material
         let node = SCNNode(geometry: torus)
         node.name = "mission.search_sector"
@@ -3441,7 +3512,16 @@ final class DroneSceneController {
 
     /// Samples target geometry relative to the payload camera for the mission runtime.
     /// Returns `nil` when there is no active payload camera or scenario target.
-    func payloadCameraMissionSample(targetWorldPosition: SIMD3<Float>) -> MissionTargetDetectionSample? {
+    ///
+    /// `maxRangeMeters`/`coneHalfAngleDegrees` gate the expensive line-of-sight raycast: this
+    /// runs every simulation tick, so the full-scene `hitTestWithSegment` below must only fire
+    /// once the target is already plausibly in view, not on every tick regardless of where the
+    /// camera happens to be pointed.
+    func payloadCameraMissionSample(
+        targetWorldPosition: SIMD3<Float>,
+        maxRangeMeters: Float,
+        coneHalfAngleDegrees: Float
+    ) -> MissionTargetDetectionSample? {
         guard let cameraNode = payloadCameraNode, missionTargetNode != nil else {
             return nil
         }
@@ -3468,6 +3548,14 @@ final class DroneSceneController {
         let direction = toTarget / distance
         let cosAngle = max(-1.0, min(1.0, simd_dot(forward, direction)))
         let angleDegrees = acos(cosAngle) * 180.0 / .pi
+
+        guard distance <= maxRangeMeters, angleDegrees <= coneHalfAngleDegrees else {
+            return MissionTargetDetectionSample(
+                distanceMeters: distance,
+                angleFromCameraAxisDegrees: angleDegrees,
+                lineOfSightClear: false
+            )
+        }
 
         let losClear = isLineOfSightClearToMissionTarget(from: camPos, to: targetWorldPosition)
         return MissionTargetDetectionSample(
@@ -4517,44 +4605,59 @@ final class DroneSceneController {
         }
 
         if isActive {
-            let projection = payloadOpticsShadowProjection()
+            // This used to write every SCNLight shadow knob unconditionally on every frame while
+            // payload optics stayed active — measured as a real per-frame cost in Debug (each
+            // SCNLight property write has Metal-side bookkeeping/validation overhead, and most of
+            // these values are constant for the whole time payload optics is active). Now the
+            // constant config only gets (re-)written on the transition into this mode.
+            if !payloadOpticsShadowQualityActive {
+                light.castsShadow = true
+                light.automaticallyAdjustsShadowProjection = false
+                light.maximumShadowDistance = CameraClipping.payloadOpticsFar
+                light.sampleDistributedShadowMaps = false
+                light.shadowCascadeCount = 1
+                light.shadowCascadeSplittingFactor = 0.15
+                // Was 4096/32 — measured FPS drop in payload view at that resolution/sample count;
+                // 2048/16 keeps shadows visibly sharper than the non-payload default (1536/12)
+                // without the cost of the full 4096/32 pass.
+                light.shadowMapSize = CGSize(width: 2048, height: 2048)
+                light.shadowSampleCount = 16
+                light.shadowBias = 0.62
+                light.zNear = 1
+                light.zFar = CameraClipping.payloadOpticsFar + 500
+                payloadOpticsShadowQualityActive = true
+            }
 
-            light.castsShadow = true
-            light.automaticallyAdjustsShadowProjection = false
-            light.maximumShadowDistance = CameraClipping.payloadOpticsFar
-            light.sampleDistributedShadowMaps = false
-            light.shadowCascadeCount = 1
-            light.shadowCascadeSplittingFactor = 0.15
-            light.shadowMapSize = CGSize(width: 4096, height: 4096)
-            light.shadowSampleCount = 32
-            light.shadowBias = 0.62
-            light.zNear = 1
-            light.zFar = CameraClipping.payloadOpticsFar + 500
+            // These genuinely need to track the camera every frame (zoom/aim changes the useful
+            // shadow frustum), so they stay outside the one-time block above.
+            let projection = payloadOpticsShadowProjection()
             light.orthographicScale = projection.scale
             sunLightNode.simdPosition = projection.lightPosition
 
-            switch weather.preset {
-            case .thunderstorm:
-                light.shadowRadius = 7.0
-                light.shadowColor = NSColor.black.withAlphaComponent(0.20)
-            case .fog, .smog, .snow:
-                light.shadowRadius = 4.5
-                light.shadowColor = NSColor.black.withAlphaComponent(0.24)
-            case .rain:
-                light.shadowRadius = 3.4
-                light.shadowColor = NSColor.black.withAlphaComponent(0.28)
-            case .normal, .wind:
-                light.shadowRadius = 1.6
-                light.shadowColor = NSColor.black.withAlphaComponent(0.42)
+            if weather.preset != lastPayloadOpticsShadowWeatherPreset {
+                lastPayloadOpticsShadowWeatherPreset = weather.preset
+                switch weather.preset {
+                case .thunderstorm:
+                    light.shadowRadius = 7.0
+                    light.shadowColor = NSColor.black.withAlphaComponent(0.20)
+                case .fog, .smog, .snow:
+                    light.shadowRadius = 4.5
+                    light.shadowColor = NSColor.black.withAlphaComponent(0.24)
+                case .rain:
+                    light.shadowRadius = 3.4
+                    light.shadowColor = NSColor.black.withAlphaComponent(0.28)
+                case .normal, .wind:
+                    light.shadowRadius = 1.6
+                    light.shadowColor = NSColor.black.withAlphaComponent(0.42)
+                }
             }
-
-            payloadOpticsShadowQualityActive = true
             return
         }
 
         guard payloadOpticsShadowQualityActive else {
             return
         }
+        lastPayloadOpticsShadowWeatherPreset = nil
 
         light.automaticallyAdjustsShadowProjection = true
         light.maximumShadowDistance = 100

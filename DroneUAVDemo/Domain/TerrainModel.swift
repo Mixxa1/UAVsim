@@ -275,6 +275,17 @@ struct TerrainConfiguration {
     var density: Float
     var seed: UInt64
     var safeSpawnRadius: Float
+    /// Raises both the generated object count and the collidable-object cap in
+    /// `ScenePopulationService` — off by default (and for every existing flow); set for mission
+    /// terrain only, where "this looks like real forest cover" matters more than the normal
+    /// freeform-flight object budget.
+    var missionDensityBoost: Bool = false
+    /// When set (mission only), concentrates forest generation around this point/radius instead
+    /// of spreading uniformly over the whole map — the collidable-object budget is finite
+    /// regardless of map size, so without this it gets diluted across terrain the search sector
+    /// doesn't even cover, while the sector itself reads sparse.
+    var missionSearchSectorCenter: SIMD2<Float>?
+    var missionSearchSectorRadius: Float?
 
     var worldHalfExtent: Float {
         mapScale.worldHalfExtentMeters

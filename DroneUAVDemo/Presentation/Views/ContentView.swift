@@ -1369,14 +1369,33 @@ struct ContentView: View {
                             Divider()
                         }
 
-                        SceneViewportView(
-                            viewModel: viewModel,
-                            trialPhase: lanSessionViewModel.state.trialPhase,
-                            recentSharedEvents: lanSessionViewModel.sharedEvents,
-                            onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
-                            onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
-                        )
-                            .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
+                        ZStack(alignment: .top) {
+                            SceneViewportView(
+                                viewModel: viewModel,
+                                trialPhase: lanSessionViewModel.state.trialPhase,
+                                recentSharedEvents: lanSessionViewModel.sharedEvents,
+                                onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
+                                onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
+                            )
+
+                            if viewModel.hasMissionScenario {
+                                MissionScenarioHUDView(viewModel: viewModel)
+                                    .padding(.top, 12)
+                                    .allowsHitTesting(false)
+                            }
+
+                            if viewModel.cameraConfiguration.mode == .payloadOptics {
+                                VStack {
+                                    Spacer()
+                                    HStack {
+                                        Spacer()
+                                        PayloadGimbalSliderControls(viewModel: viewModel)
+                                            .padding(16)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(minWidth: 640, maxWidth: .infinity, minHeight: 420, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -1403,13 +1422,6 @@ struct ContentView: View {
                                 viewModel.recoverSignal()
                             }
                         )
-                    }
-
-                    if viewModel.hasMissionScenario {
-                        MissionScenarioHUDView(viewModel: viewModel)
-                            .padding(.top, 64)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .allowsHitTesting(false)
                     }
 
                 }
@@ -1817,25 +1829,35 @@ struct ContentView: View {
                     showsIndicators: false,
                     isPrimary: true
                 ) {
-                    PayloadView(
-                        configuration: viewModel.payloadDraftConfiguration,
-                        payloadState: viewModel.payloadState,
-                        payloadMountState: viewModel.payloadMountState,
-                        capabilityCheck: viewModel.payloadCapabilityCheck,
-                        massModel: viewModel.vehicleMassModel,
-                        statusMessageKey: viewModel.payloadStatusMessageKey,
-                        activeUAVProfile: viewModel.activeUAVProfile,
-                        mountedCADPayload: viewModel.mountedCADPayload,
-                        onTypeChange: viewModel.setPayloadType,
-                        onMassChange: viewModel.setPayloadMass,
-                        onCustomNameChange: viewModel.setPayloadCustomName,
-                        onAttach: viewModel.attachPayload,
-                        onRelease: viewModel.releasePayload,
-                        onRemove: viewModel.removePayload,
-                        onClose: {
-                            viewModel.setPayloadPanelVisible(false)
+                    VStack(alignment: .leading, spacing: 10) {
+                        if viewModel.hasMissionScenario {
+                            MissionLockBanner(messageKey: "payload.locked_by_mission")
                         }
-                    )
+
+                        // The payload (type/mass/attach/release/remove) is locked in at mission
+                        // setup; changing it mid-mission would silently invalidate the briefed
+                        // detection equipment the mission was set up around.
+                        PayloadView(
+                            configuration: viewModel.payloadDraftConfiguration,
+                            payloadState: viewModel.payloadState,
+                            payloadMountState: viewModel.payloadMountState,
+                            capabilityCheck: viewModel.payloadCapabilityCheck,
+                            massModel: viewModel.vehicleMassModel,
+                            statusMessageKey: viewModel.payloadStatusMessageKey,
+                            activeUAVProfile: viewModel.activeUAVProfile,
+                            mountedCADPayload: viewModel.mountedCADPayload,
+                            onTypeChange: viewModel.setPayloadType,
+                            onMassChange: viewModel.setPayloadMass,
+                            onCustomNameChange: viewModel.setPayloadCustomName,
+                            onAttach: viewModel.attachPayload,
+                            onRelease: viewModel.releasePayload,
+                            onRemove: viewModel.removePayload,
+                            onClose: {
+                                viewModel.setPayloadPanelVisible(false)
+                            }
+                        )
+                        .disabled(viewModel.hasMissionScenario)
+                    }
                     .frame(maxWidth: 1040)
                     .padding(.horizontal, 28)
                     .padding(.top, viewModel.isToolPanelVisible ? 132 : 88)

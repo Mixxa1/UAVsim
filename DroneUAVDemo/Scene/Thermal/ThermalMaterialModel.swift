@@ -52,6 +52,11 @@ enum ThermalMaterialModel {
             return props(materialClass, baseline: -3.0, amp: 2.0, sun: 0.5, rain: 3.0, snow: 5.0, wind: 1.5, night: 2.0, lo: -12, hi: 4)
         case .generic:
             return props(materialClass, baseline: 1.0, amp: 2.2, sun: 3.0, rain: 3.0, snow: 5.0, wind: 1.5, night: 2.5, lo: -8, hi: 9)
+        case .body:
+            // Never reached through `apparentTemperature` (special-cased below to bypass the
+            // ambient-relative formula a living body doesn't follow), but kept exhaustive/sane
+            // in case something probes this class directly.
+            return props(materialClass, baseline: 16.0, amp: 1.0, sun: 0.5, rain: 1.0, snow: 1.0, wind: 0.5, night: 1.0, lo: 10, hi: 18)
         }
     }
 
@@ -63,6 +68,17 @@ enum ThermalMaterialModel {
         context: ThermalEnvironmentContext,
         variation: Double
     ) -> Double {
+        // A living body maintains a roughly constant clothed-skin surface temperature
+        // regardless of ambient air temperature — unlike every other (passive-material) class,
+        // it does not follow the `ambient + offset` model below. Small night/rain coupling for
+        // realism, but it must always read warm against the environment in any weather.
+        if materialClass == .body {
+            let base = 31.0 + variation * 2.5
+            let night = context.isNight ? 1.5 : 0.0
+            let rain = context.rainIntensity * 2.0
+            return base - night - rain
+        }
+
         let p = properties(for: materialClass)
         let ambient = context.ambientTemperatureCelsius
 

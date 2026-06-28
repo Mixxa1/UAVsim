@@ -37,6 +37,7 @@ final class ThermalProxyRenderer {
 
     private weak var sceneRoot: SCNNode?
     private weak var groundNode: SCNNode?
+    private weak var missionTargetNode: SCNNode?
 
     private var proxies: [ProxyEntry] = []
     private var proxyByID: [ObjectIdentifier: Int] = [:]   // proxy node id -> index in proxies
@@ -71,6 +72,14 @@ final class ThermalProxyRenderer {
         proxyByID.removeAll(keepingCapacity: true)
         hasBuilt = false
         builtGroundClass = nil
+    }
+
+    /// Registers (or clears, when `nil`) the mission scenario's detectable target — e.g. the
+    /// search-and-rescue person — so it gets a `.body`-class thermal proxy alongside the
+    /// environment. Forces a rebuild so the target shows up on the next render.
+    func setMissionTarget(_ node: SCNNode?) {
+        missionTargetNode = node
+        invalidate()
     }
 
     func clear() {
@@ -164,6 +173,14 @@ final class ThermalProxyRenderer {
             for objectRoot in root.childNodes {
                 if proxies.count >= maxProxies { return }
                 buildObject(objectRoot)
+            }
+        }
+
+        if let missionTargetNode {
+            var geometryNodes: [SCNNode] = []
+            collectGeometryNodes(missionTargetNode, into: &geometryNodes)
+            for node in geometryNodes {
+                addProxy(for: node, materialClass: .body, rootName: "mission.target.person", variation: 0.0)
             }
         }
     }

@@ -3982,6 +3982,29 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let params = config.parameters
         setTerrainPreset(params.terrain)
+        // Search missions need real cover to search through — the terrain preset's generic
+        // default density (0.72 for forest) reads too sparse for "the target could be behind any
+        // of these trees" to feel true. Player picks the density preset in MissionSetupView
+        // (MissionTerrainDensity); the small mission boost on top (see
+        // TerrainConfiguration.missionDensityBoost) is now just a safety margin, not the main
+        // lever — most of the visible density now comes from concentrating generation around the
+        // search sector (see ScenePopulationService.generateForest's sector-bias split) rather
+        // than from maxing out density/cap multipliers across the whole map.
+        terrain.missionDensityBoost = true
+        setTerrainDensity(Double(params.terrainDensity.densityValue))
+        // Object count is capped at a fixed pool regardless of map size (see
+        // ScenePopulationService.maxCollidableObjectCount, a collision/pathfinding performance
+        // ceiling) — so density alone barely helps if the map is much bigger than the search
+        // sector; that fixed pool just spreads thinner. Shrink the map to fit the sector instead,
+        // which makes the same tree count read as a real forest. Mutating mapScale directly
+        // (rather than calling setTerrainMapScale) skips its resetAfter:true, which would wipe
+        // the drone back to spawn mid-bootstrap.
+        let recommendedScale = params.difficulty.recommendedMapScale
+        if terrain.mapScale != recommendedScale {
+            terrain.mapScale = recommendedScale
+            terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: recommendedScale)
+            scheduleTerrainRegeneration(resetAfter: false)
+        }
         setWeatherPreset(params.weather)
         setWeatherIntensity(Double(params.weatherIntensity))
         sceneController.applyMissionTimeOfDay(params.timeOfDay)
@@ -3995,6 +4018,11 @@ final class DroneSimulationViewModel: ObservableObject {
             worldHalfExtent: terrain.worldHalfExtent,
             dockPosition: SIMD2<Float>(dock.x, dock.z)
         )
+        // Concentrate forest generation around the sector instead of the whole map — set before
+        // the still-pending debounced regen (scheduled above) fires, so this terrain mutation
+        // rides along with the others into the same regeneration pass.
+        terrain.missionSearchSectorCenter = placement.sectorCenter
+        terrain.missionSearchSectorRadius = placement.sectorRadius
         let target = sceneController.spawnMissionSearchScenario(placement: placement)
         missionScenarioTargetWorldPosition = target
         missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
@@ -4006,7 +4034,29 @@ final class DroneSimulationViewModel: ObservableObject {
               runtime.isActive,
               let target = missionScenarioTargetWorldPosition else { return }
 
-        let sample = sceneController.payloadCameraMissionSample(targetWorldPosition: target)
+        // Detection requires the operator to actually be watching the payload feed — the gimbal
+        // is slaved to drone body orientation (it has no independent mouse-look; aim comes from
+        // yaw/pitch sliders in the Camera module) plus a small fixed offset, so without this gate
+        // the target could be "found" just by flying near it while looking through any other
+        // camera, with nobody ever looking at the payload picture.
+        let isWatchingPayloadFeed = cameraConfiguration.mode == .payloadOptics && isMountedPayloadCameraAvailable
+        // Detection must mean "crosshair is actually on the target", not "target is somewhere in
+        // the wide-FOV frame" — 0.7x half-FOV (tried previously) still covered most of the
+        // picture at wide zoom. 0.08x requires the target to sit within ~8% of the frame's half
+        // extent from center: a real, deliberate aim, not just generic framing. Floored so very
+        // high zoom (FOV ~1°) doesn't demand literally sub-pixel precision.
+        let liveFovHalfAngle = Float(payloadCameraController.opticsState.currentFieldOfViewDegrees) * 0.5
+        let effectiveConeHalfAngle = min(
+            runtime.tuning.coneHalfAngleDegrees,
+            max(0.3, liveFovHalfAngle * 0.08)
+        )
+        let sample = isWatchingPayloadFeed
+            ? sceneController.payloadCameraMissionSample(
+                targetWorldPosition: target,
+                maxRangeMeters: runtime.tuning.maxRangeMeters,
+                coneHalfAngleDegrees: effectiveConeHalfAngle
+            )
+            : nil
         runtime.tick(deltaTime: deltaTime, sample: sample)
         missionScenarioRuntime = runtime
         publishMissionScenarioState()

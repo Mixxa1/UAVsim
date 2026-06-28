@@ -120,6 +120,7 @@ enum ThermalMaterialClass: String, CaseIterable, Codable {
     case glass
     case shadow
     case generic
+    case body
 
     var titleKey: String { "payload.camera.thermal.class.\(rawValue)" }
 }

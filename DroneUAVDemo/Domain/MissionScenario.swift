@@ -94,11 +94,12 @@ enum TimeOfDay: String, CaseIterable, Identifiable, Hashable {
         case .dusk:
             return 0.45
         case .night:
-            return 0.08
+            return 0.01
         }
     }
 
-    /// Multiplier applied to ambient/IBL exposure so night reads dark but not pitch black.
+    /// Multiplier applied to ambient/IBL exposure. Night is intentionally near-black — the
+    /// scenario's whole premise is that you can't see, hence thermal/searchlight equipment.
     var ambientIntensityMultiplier: Double {
         switch self {
         case .day:
@@ -106,7 +107,7 @@ enum TimeOfDay: String, CaseIterable, Identifiable, Hashable {
         case .dusk:
             return 0.55
         case .night:
-            return 0.22
+            return 0.015
         }
     }
 }
@@ -166,6 +167,58 @@ enum MissionDifficulty: String, CaseIterable, Identifiable, Hashable {
             return 4
         }
     }
+
+    /// World map scale to generate at. Tree/object count is capped (a fixed pool spread over the
+    /// whole map, regardless of preset — see `ScenePopulationService.maxCollidableObjectCount`,
+    /// a deliberate collision/pathfinding performance ceiling), so a map much bigger than the
+    /// search sector spreads that fixed pool thin and the forest reads as sparse no matter how
+    /// high density is set. Picking the smallest map that still comfortably fits the sector (plus
+    /// dock/corridor room) keeps the same object count but visually denser.
+    var recommendedMapScale: MapScale {
+        switch self {
+        case .easy, .medium:
+            return .x8
+        case .hard:
+            return .x16
+        }
+    }
+}
+
+// MARK: - Terrain density (pre-launch, user-editable)
+
+/// Player-facing density preset for mission terrain generation. Exposed in `MissionSetupView`
+/// instead of the raw 0...1 `TerrainConfiguration.density` value, since the mission flow already
+/// concentrates most of the generated forest into the search sector (see
+/// `ScenePopulationService.generateForest`'s sector-bias split) — this just lets the player trade
+/// a bit of that sector density for fewer objects if they want it, rather than always maxing out.
+enum MissionTerrainDensity: String, CaseIterable, Identifiable, Hashable {
+    case sparse
+    case medium
+    case dense
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .sparse:
+            return "mission.terrain_density.sparse"
+        case .medium:
+            return "mission.terrain_density.medium"
+        case .dense:
+            return "mission.terrain_density.dense"
+        }
+    }
+
+    var densityValue: Float {
+        switch self {
+        case .sparse:
+            return 0.5
+        case .medium:
+            return 0.75
+        case .dense:
+            return 1.0
+        }
+    }
 }
 
 // MARK: - Parameters (pre-launch, user-editable)
@@ -173,6 +226,7 @@ enum MissionDifficulty: String, CaseIterable, Identifiable, Hashable {
 struct MissionScenarioParameters: Equatable {
     var kind: MissionScenarioKind
     var terrain: TerrainPreset
+    var terrainDensity: MissionTerrainDensity
     var difficulty: MissionDifficulty
     var weather: WeatherPreset
     var weatherIntensity: Float
@@ -183,6 +237,7 @@ struct MissionScenarioParameters: Equatable {
     init(
         kind: MissionScenarioKind = .searchAndRescue,
         terrain: TerrainPreset = .forest,
+        terrainDensity: MissionTerrainDensity = .dense,
         difficulty: MissionDifficulty = .medium,
         weather: WeatherPreset = .normal,
         weatherIntensity: Float = 0.3,
@@ -192,6 +247,7 @@ struct MissionScenarioParameters: Equatable {
     ) {
         self.kind = kind
         self.terrain = terrain
+        self.terrainDensity = terrainDensity
         self.difficulty = difficulty
         self.weather = weather
         self.weatherIntensity = weatherIntensity

@@ -10,6 +10,7 @@ struct MissionSetupView: View {
     @State private var kind: MissionScenarioKind = .searchAndRescue
     @State private var difficulty: MissionDifficulty = .medium
     @State private var terrain: TerrainPreset = .forest
+    @State private var terrainDensity: MissionTerrainDensity = .dense
     @State private var weather: WeatherPreset = .normal
     @State private var weatherIntensity: Double = 0.3
     @State private var timeOfDay: TimeOfDay = .day
@@ -127,6 +128,16 @@ struct MissionSetupView: View {
                     .tint(.white)
                 }
 
+                labeledRow("mission.setup.terrain_density") {
+                    Picker("", selection: $terrainDensity) {
+                        ForEach(MissionTerrainDensity.allCases) { value in
+                            Text(LocalizedStringKey(value.titleKey)).tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
                 labeledRow("mission.setup.weather") {
                     Picker("", selection: $weather) {
                         ForEach(WeatherPreset.allCases) { preset in
@@ -234,6 +245,7 @@ struct MissionSetupView: View {
         let parameters = MissionScenarioParameters(
             kind: kind,
             terrain: terrain,
+            terrainDensity: terrainDensity,
             difficulty: difficulty,
             weather: weather,
             weatherIntensity: Float(weatherIntensity),
