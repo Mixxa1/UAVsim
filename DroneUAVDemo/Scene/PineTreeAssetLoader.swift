@@ -74,7 +74,10 @@ final class PineTreeAssetLoader {
 
     private func enableShadowsRecursively(_ node: SCNNode) {
         node.castsShadow = true
-        node.geometry?.materials.forEach { $0.isDoubleSided = true }
+        // Single-sided foliage — see SeasonalTreeAssetLoader for the rationale: double-sided
+        // foliage doubled the per-tree fragment/fill work, the dominant constant GPU/overdraw cost
+        // at 3000-tree forest density. Shadows (separate property) stay on.
+        node.geometry?.materials.forEach { $0.isDoubleSided = false }
         for child in node.childNodes {
             enableShadowsRecursively(child)
         }

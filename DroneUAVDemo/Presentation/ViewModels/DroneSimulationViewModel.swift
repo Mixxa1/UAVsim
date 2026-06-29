@@ -11542,8 +11542,19 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func navigationObstacles(including noFlyZones: [MissionZone]) -> [CollisionObstacle] {
+        // Trees carry two real-time collision parts (a slim trunk + the canopy) so the drone gets
+        // an accurate fly-into-the-trunk response. For *navigation* the trunk is redundant — it
+        // sits entirely inside the canopy's planar footprint, so rasterizing it blocks no extra
+        // grid cells; it only doubles the obstacle count that the per-tick fixed-wing forward-
+        // avoidance probe feeds into ensureGrid()/obstacleHash() on every arc segment. That
+        // doubling (once tree collision became mesh-fitted) is what tipped manual fixed-wing flight
+        // into multi-second grid-rebuild freezes. Dropping trunk parts here restores the nav
+        // obstacle count to one-per-tree (canopy only) — exactly what the autopilot saw before the
+        // mesh-fitted change, which the user already confirmed routes fine. Real-time collision in
+        // tick() still uses the full `environmentObstacles` list, so trunk collision is unaffected.
+        let base = sceneController.environmentObstacles.filter { $0.source != "tree.trunk" }
         guard !noFlyZones.isEmpty else {
-            return sceneController.environmentObstacles
+            return base
         }
 
         let zoneTop = max(terrain.maxFlightAltitude + 4.0, 12.0)
@@ -11557,7 +11568,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 topY: zoneTop
             )
         }
-        return sceneController.environmentObstacles + zoneObstacles
+        return base + zoneObstacles
     }
 
     private func missionWaypointAcceptanceRadiusMeters() -> Float {

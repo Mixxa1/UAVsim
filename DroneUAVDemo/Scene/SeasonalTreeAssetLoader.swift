@@ -97,7 +97,12 @@ final class SeasonalTreeAssetLoader {
 
     private func enableShadowsRecursively(_ node: SCNNode) {
         node.castsShadow = true
-        node.geometry?.materials.forEach { $0.isDoubleSided = true }
+        // Single-sided foliage: forcing isDoubleSided=true rendered both faces of every (often
+        // alpha-tested, overlapping) foliage surface — ~2x the fragment/fill work per tree, the
+        // dominant constant GPU/overdraw cost at the current 3000-tree forest density (and the
+        // reason removing shadows changed nothing — fill, not the shadow pass, was the heat). The
+        // canopy is viewed from outside, so back-faces add cost without adding visible cover.
+        node.geometry?.materials.forEach { $0.isDoubleSided = false }
         for child in node.childNodes {
             enableShadowsRecursively(child)
         }

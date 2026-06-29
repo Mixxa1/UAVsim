@@ -168,19 +168,24 @@ final class ThermalProxyRenderer {
             )
         }
 
-        for rootName in environmentRootNames {
-            guard let root = findNode(named: rootName, under: sceneRoot) else { continue }
-            for objectRoot in root.childNodes {
-                if proxies.count >= maxProxies { return }
-                buildObject(objectRoot)
-            }
-        }
-
+        // Mission target BEFORE the environment loop: it's the single most important thermal
+        // object (the whole point of the search), so it must never be starved by the proxy budget.
+        // The environment loop's `proxies.count >= maxProxies` early-return used to drop the target
+        // entirely once tree counts grew large enough to exhaust `maxProxies` first — that's why
+        // the person vanished from thermal after the forest-density work.
         if let missionTargetNode {
             var geometryNodes: [SCNNode] = []
             collectGeometryNodes(missionTargetNode, into: &geometryNodes)
             for node in geometryNodes {
                 addProxy(for: node, materialClass: .body, rootName: "mission.target.person", variation: 0.0)
+            }
+        }
+
+        for rootName in environmentRootNames {
+            guard let root = findNode(named: rootName, under: sceneRoot) else { continue }
+            for objectRoot in root.childNodes {
+                if proxies.count >= maxProxies { return }
+                buildObject(objectRoot)
             }
         }
     }
