@@ -76,7 +76,7 @@ final class ScenePopulationService {
                 areaScale: areaScale,
                 safeSpawn: terrain.safeSpawnRadius,
                 extent: extent,
-                densityBoost: terrain.missionDensityBoost ? 1.1 : 1.0,
+                densityBoost: terrain.missionDensityBoost ? 1.15 : 1.0,
                 sectorCenter: terrain.missionSearchSectorCenter,
                 sectorRadius: terrain.missionSearchSectorRadius,
                 generator: &generator
@@ -371,16 +371,58 @@ final class ScenePopulationService {
         let coverageScale = max(1.0, extent / 96.0)
         let featureScale = min(1.85, max(1.05, areaScale * 0.62 + min(coverageScale, 2.5) * 0.24))
 
+        // Only as much clearance as the dock itself needs — the old +16.0 padding left a bare
+        // ring around takeoff wide enough to read as "nothing nearby" once the sector-bias split
+        // thinned the rest of the baseline. A dedicated ring just outside this (below) puts trees
+        // back in view immediately, without re-opening that whole radius to random placement.
+        let dockClearingRadius = safeSpawn + 6.0
         var clearings: [(center: SIMD2<Float>, radius: Float)] = [
-            (SIMD2<Float>(repeating: 0.0), safeSpawn + 16.0)
+            (SIMD2<Float>(repeating: 0.0), dockClearingRadius)
         ]
 
-        let extraClearings = max(2, Int((1.0 + featureScale * 0.8).rounded(.down)))
+        // Fewer, smaller, and (when a sector exists) kept away from it — these are purely for
+        // "the forest isn't a uniform wall" variety, and stacking them with the sector concept
+        // worked against the "dense forest, no empty space" goal: a stray clearing could land
+        // right in the area the player is meant to search.
+        let extraClearings = max(1, Int((0.5 + featureScale * 0.5).rounded(.down)))
         for _ in 0..<extraClearings {
-            clearings.append((
-                randomPosition(extent: extent * 0.68, safeSpawn: safeSpawn + 24.0, generator: &generator),
-                Float.random(in: 10.0...22.0, using: &generator)
-            ))
+            var candidate = randomPosition(extent: extent * 0.68, safeSpawn: safeSpawn + 24.0, generator: &generator)
+            if let sectorCenter, let sectorRadius, simd_distance(candidate, sectorCenter) < sectorRadius * 1.3 {
+                let awayAngle = atan2(candidate.y - sectorCenter.y, candidate.x - sectorCenter.x)
+                candidate = sectorCenter + SIMD2<Float>(cos(awayAngle), sin(awayAngle)) * (sectorRadius * 1.6)
+            }
+            clearings.append((candidate, Float.random(in: 8.0...14.0, using: &generator)))
+        }
+
+        // Guarantee the dock's immediate surroundings read as forest, regardless of how the
+        // random sector/baseline split happens to land — non-collidable (zero FPS/pathfinding
+        // cost, see [[project_missions_increment1_bugfixes]]), so this is purely cosmetic.
+        let dockRingInner = dockClearingRadius
+        let dockRingOuter = dockClearingRadius + 55.0
+        var dockRingAttempts = 0
+        var dockRingPlaced = 0
+        let dockRingTarget = 28
+        while dockRingAttempts < dockRingTarget * 20, dockRingPlaced < dockRingTarget {
+            dockRingAttempts += 1
+            let angle = Float.random(in: 0.0...(.pi * 2.0), using: &generator)
+            let radius = Float.random(in: dockRingInner...dockRingOuter, using: &generator)
+            let position = SIMD2<Float>(cos(angle) * radius, sin(angle) * radius)
+            if isInsideClearing(position, clearings: clearings.dropFirst().map { $0 }) {
+                continue
+            }
+            if appendPlacedObject(
+                kind: .tree,
+                terrain: .forest,
+                position: position,
+                safeSpawn: dockRingInner,
+                overlapPadding: 1.0,
+                occupied: &occupied,
+                descriptors: &descriptors,
+                generator: &generator,
+                collidable: false
+            ) {
+                dockRingPlaced += 1
+            }
         }
 
         // When a mission search sector is set, the collidable/decorative budget concentrates
@@ -391,10 +433,33 @@ final class ScenePopulationService {
         // dock-to-sector corridor isn't bare.
         let hasSector = sectorCenter != nil && sectorRadius != nil
         let sectorBiasCenter = sectorCenter ?? .zero
-        // ×1.15, not a bigger halo — a wider bias square spreads the same sector-share count over
-        // more area, which reads as *less* dense per m² right where it matters. Tight halo just
-        // avoids a razor-sharp edge at the sector boundary.
-        let sectorBiasExtent = sectorRadius.map { $0 * 1.15 } ?? (extent * 0.84)
+        // Dense placement now spans the *entire* search sector, not a shrunken inner core — a
+        // 0.58×radius core only covered ~34% of the sector's *area* (area scales with r²), so
+        // two-thirds of the area the player is actually meant to search was barely forested at
+        // all. Matching cluster-interior density (~10-13 trees/1000m²) uniformly across the full
+        // sector would still need far more fill/decorative budget than is safe for render cost,
+        // so coverage now wins over peak density — see the decorative multiplier below, bumped to
+        // compensate for the ~3x larger area without returning to the count that previously cost
+        // frame time.
+        let denseCoreRadius = sectorRadius
+        // ×1.15 halo on the (now smaller) core, not the full sector — avoids a razor-sharp edge
+        // at the dense-core boundary without diluting density back out to the old, larger area.
+        let sectorBiasExtent = denseCoreRadius.map { $0 * 1.15 } ?? (extent * 0.84)
+
+        // A hard `distance <= sectorBiasExtent` cutoff alone reads as a planted forest island —
+        // a perfect circle of trees against bare ground. Taper acceptance probability down across
+        // the outer 30% of the radius instead of cutting it off at 100%→0% in one step. Uses a
+        // position hash (not the shared RNG) so it can be called from `placementValidator`
+        // closures, which only see a position, with no generator access.
+        func coreEdgeAccepts(_ position: SIMD2<Float>) -> Bool {
+            let normalizedDistance = simd_distance(position, sectorBiasCenter) / sectorBiasExtent
+            guard normalizedDistance > 0.7 else { return true }
+            guard normalizedDistance <= 1.0 else { return false }
+            let falloff = 1.0 - (normalizedDistance - 0.7) / 0.3
+            let hash = sin(position.x * 12.9898 + position.y * 78.233) * 43758.5453
+            let pseudoRandom = hash - hash.rounded(.down)
+            return pseudoRandom <= falloff
+        }
 
         func splitCount(_ total: Int, sectorShare: Float) -> (sector: Int, baseline: Int) {
             guard hasSector else { return (0, total) }
@@ -417,9 +482,17 @@ final class ScenePopulationService {
         // non-collidable (still renders, just doesn't enter the obstacle list).
         let clusterSplit = splitCount(clusterCount, sectorShare: 0.95)
 
-        func placeClusterBatch(count: Int, batchCenter: SIMD2<Float>, batchExtent: Float, collidable: Bool, generator: inout SeededRandomGenerator) {
+        func placeClusterBatch(count: Int, batchCenter: SIMD2<Float>, batchExtent: Float, collidable: Bool, applyCoreEdgeTaper: Bool, generator: inout SeededRandomGenerator) {
             for _ in 0..<count {
                 let center = randomPosition(extent: batchExtent, safeSpawn: safeSpawn + 14.0, center: batchCenter, generator: &generator)
+                // randomPosition samples a square; without this the dense core reads as a literal
+                // square blob on the tactical map instead of a round patch of forest.
+                if simd_distance(center, batchCenter) > batchExtent {
+                    continue
+                }
+                if applyCoreEdgeTaper, !coreEdgeAccepts(center) {
+                    continue
+                }
                 if isInsideClearing(center, clearings: clearings) {
                     continue
                 }
@@ -447,8 +520,8 @@ final class ScenePopulationService {
                 }
             }
         }
-        placeClusterBatch(count: clusterSplit.sector, batchCenter: sectorBiasCenter, batchExtent: sectorBiasExtent, collidable: true, generator: &generator)
-        placeClusterBatch(count: clusterSplit.baseline, batchCenter: .zero, batchExtent: extent * 0.84, collidable: false, generator: &generator)
+        placeClusterBatch(count: clusterSplit.sector, batchCenter: sectorBiasCenter, batchExtent: sectorBiasExtent, collidable: true, applyCoreEdgeTaper: true, generator: &generator)
+        placeClusterBatch(count: clusterSplit.baseline, batchCenter: .zero, batchExtent: extent * 0.84, collidable: false, applyCoreEdgeTaper: false, generator: &generator)
 
         for clearing in clearings.dropFirst() {
             let outcropCount = Int.random(in: 1...3, using: &generator)
@@ -508,7 +581,8 @@ final class ScenePopulationService {
             generator: &generator,
             center: sectorBiasCenter,
             placementValidator: { position in
-                !self.isInsideClearing(position, clearings: clearings)
+                guard coreEdgeAccepts(position) else { return false }
+                return !self.isInsideClearing(position, clearings: clearings)
             },
             pickKind: fillPickKind
         )
@@ -523,7 +597,8 @@ final class ScenePopulationService {
             generator: &generator,
             collidable: false,
             placementValidator: { position in
-                !self.isInsideClearing(position, clearings: clearings)
+                guard simd_distance(position, .zero) <= extent * 0.88 else { return false }
+                return !self.isInsideClearing(position, clearings: clearings)
             },
             pickKind: fillPickKind
         )
@@ -537,12 +612,13 @@ final class ScenePopulationService {
             return .crate
         }
         // Decorative trees are free against the collision cap, but not against render/FPS cost —
-        // pushing the ceiling too high (was 1,100) cost real frame time for very little extra
-        // sector density once spacing/overlap rejection saturates. Trading a lower ceiling for a
-        // tighter, higher-share placement keeps the per-m² density in the sector similar while
-        // cutting total node count.
+        // pushing the raw *count* too high (was 1,100) cost real frame time regardless of area.
+        // User reported a (minor) FPS regression right after this multiplier went to 4.0 to cover
+        // the full sector — pulled back to 3.6 since render cost, not collision-scan, is the most
+        // likely driver of *this* drop (the collidable layer's own counts didn't change in that
+        // round — see densityBoost above, reduced separately for the collision-scan side).
         let decorativeBaseCount = min(520, max(160, Int(220.0 * featureScale)))
-        let decorativeForestCount = hasSector ? min(820, Int(Float(decorativeBaseCount) * 1.4)) : decorativeBaseCount
+        let decorativeForestCount = hasSector ? min(2_200, Int(Float(decorativeBaseCount) * 3.6)) : decorativeBaseCount
         let decorativeSplit = splitCount(decorativeForestCount, sectorShare: 0.92)
         appendScatter(
             count: decorativeSplit.sector,
@@ -556,7 +632,8 @@ final class ScenePopulationService {
             collidable: false,
             center: sectorBiasCenter,
             placementValidator: { position in
-                !self.isInsideClearing(position, clearings: clearings)
+                guard coreEdgeAccepts(position) else { return false }
+                return !self.isInsideClearing(position, clearings: clearings)
             },
             pickKind: decorativePickKind
         )
@@ -571,16 +648,67 @@ final class ScenePopulationService {
             generator: &generator,
             collidable: false,
             placementValidator: { position in
-                !self.isInsideClearing(position, clearings: clearings)
+                guard simd_distance(position, .zero) <= extent * 0.94 else { return false }
+                return !self.isInsideClearing(position, clearings: clearings)
             },
             pickKind: decorativePickKind
         )
+
+        // Gap fill for the dense core: clusters/fill/decorative above are independent random
+        // sampling, which statistically leaves small zero-coverage patches even at a healthy
+        // average density (visible as "bald spots" on the tactical map) — no individual layer
+        // guarantees a maximum gap size. A jittered grid does: one non-collidable tree attempt
+        // per ~16m cell, so no point in the core is more than half a cell-diagonal from a
+        // guaranteed placement. Cells that land in an already-dense area just get rejected by the
+        // normal overlap check, so this only adds trees where the random layers left empty.
+        // Rows are brick-staggered (offset by half a cell on alternating rows) and jitter is
+        // almost the full cell width — a plain unstaggered grid with modest jitter still reads as
+        // visible planted rows from above, which is exactly what a *natural* forest shouldn't
+        // look like.
+        if hasSector {
+            let cellSize: Float = 16.0
+            let cellsPerSide = max(1, Int((sectorBiasExtent * 2.0 / cellSize).rounded(.up)) + 1)
+            let gridOrigin = sectorBiasCenter - SIMD2<Float>(repeating: Float(cellsPerSide) * cellSize * 0.5)
+            for row in 0..<cellsPerSide {
+                let rowStagger: Float = row.isMultiple(of: 2) ? 0.0 : cellSize * 0.5
+                for col in 0..<cellsPerSide {
+                    let cellCenter = gridOrigin + SIMD2<Float>(
+                        (Float(col) + 0.5) * cellSize + rowStagger,
+                        (Float(row) + 0.5) * cellSize
+                    )
+                    guard simd_distance(cellCenter, sectorBiasCenter) <= sectorBiasExtent else {
+                        continue
+                    }
+                    let position = cellCenter + SIMD2<Float>(
+                        Float.random(in: -cellSize * 0.47...cellSize * 0.47, using: &generator),
+                        Float.random(in: -cellSize * 0.47...cellSize * 0.47, using: &generator)
+                    )
+                    guard coreEdgeAccepts(position) else {
+                        continue
+                    }
+                    guard !isInsideClearing(position, clearings: clearings) else {
+                        continue
+                    }
+                    _ = appendPlacedObject(
+                        kind: .tree,
+                        terrain: .forest,
+                        position: position,
+                        safeSpawn: safeSpawn,
+                        overlapPadding: 0.5,
+                        occupied: &occupied,
+                        descriptors: &descriptors,
+                        generator: &generator,
+                        collidable: false
+                    )
+                }
+            }
+        }
 
         #if DEBUG
         if hasSector {
             let treeDescriptors = descriptors.filter { $0.kind == .tree }
             let inSectorCount = treeDescriptors.filter { simd_distance(SIMD2<Float>($0.position.x, $0.position.z), sectorBiasCenter) <= sectorBiasExtent }.count
-            let sectorAreaM2 = sectorBiasExtent * sectorBiasExtent * 4.0
+            let sectorAreaM2 = Float.pi * sectorBiasExtent * sectorBiasExtent
             let outsideAreaM2 = max(1.0, (extent * 2.0) * (extent * 2.0) - sectorAreaM2)
             let inSectorDensity = Float(inSectorCount) / max(1.0, sectorAreaM2) * 1000.0
             let outsideDensity = Float(treeDescriptors.count - inSectorCount) / outsideAreaM2 * 1000.0
