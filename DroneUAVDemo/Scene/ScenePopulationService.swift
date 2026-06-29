@@ -1213,8 +1213,48 @@ final class ScenePopulationService {
             yawRadians: yawRadians,
             size: size,
             boundingRadius: max(size.x, max(size.y, size.z)) * 0.55,
-            isCollidable: collidable
+            isCollidable: collidable,
+            collisionParts: kind == .tree ? treeCollisionParts(size: size) : []
         )
+    }
+
+    // Mesh-fitted tree collision, mirroring the container approach (`cargoCollisionParts`): instead
+    // of one fat ~canopy-radius cylinder floating at treetop height (which both left the trunk
+    // pass-through at low altitude AND made you "collide" with empty air around the canopy), shape
+    // the collision to the actual pine form — a slim trunk box for the full lower height plus a
+    // tighter canopy box on the upper portion. Two parts only (not a multi-box cone taper): each
+    // part is one more entry in the per-tick O(n) collision scan, and only *collidable* trees
+    // (sector interior) ever become obstacles — decorative trees carry these too but are never
+    // turned into CollisionObstacles (see DroneSceneController: `where descriptor.isCollidable`).
+    //
+    // Sources keep the "tree" substring on purpose: the autopilot's nav-grid inflation
+    // (`AutoPathPlannerService.obstacleInflation`) and the planner's box-aware rasterization key
+    // off that substring, so routing still treats these as trees with the same safety margin —
+    // just following the accurate trunk+canopy footprint instead of the old cylinder. `false`
+    // supportsLanding so drones never try to perch on a tree collision box.
+    private func treeCollisionParts(size: SIMD3<Float>) -> [EnvironmentCollisionPart] {
+        let canopyBaseY = size.y * 0.40
+        let trunkTopY = size.y * 0.46            // slight overlap into the canopy, no vertical gap
+        let trunkWidth = max(0.7, size.x * 0.22) // real trunk footprint, not the canopy span
+        let trunkDepth = max(0.7, size.z * 0.22)
+        let canopyHeight = size.y - canopyBaseY
+        let canopyWidth = size.x * 0.86          // actual footprint, vs the old 1.18× inflated cylinder
+        let canopyDepth = size.z * 0.86
+
+        return [
+            EnvironmentCollisionPart(
+                localCenter: SIMD3<Float>(0.0, trunkTopY * 0.5, 0.0),
+                size: SIMD3<Float>(trunkWidth, trunkTopY, trunkDepth),
+                source: "tree.trunk",
+                supportsLanding: false
+            ),
+            EnvironmentCollisionPart(
+                localCenter: SIMD3<Float>(0.0, canopyBaseY + canopyHeight * 0.5, 0.0),
+                size: SIMD3<Float>(canopyWidth, canopyHeight, canopyDepth),
+                source: "tree.canopy",
+                supportsLanding: false
+            )
+        ]
     }
 
     private func makeCargoContainerDescriptor(
