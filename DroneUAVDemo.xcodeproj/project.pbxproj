@@ -271,6 +271,8 @@
 		100000000000000000000A09 /* MissionSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0A /* MissionSetupView.swift */; };
 		100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0C /* MissionScenarioHUDView.swift */; };
 		100000000000000000000A0D /* PayloadGimbalSliderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0E /* PayloadGimbalSliderControls.swift */; };
+		100000000000000000000A0F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A10 /* SettingsView.swift */; };
+		100000000000000000000A11 /* AppGraphicsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A12 /* AppGraphicsSettings.swift */; };
 		100000000000000000000A03 /* Man.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A04 /* Man.usdz */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
@@ -356,6 +358,7 @@
 		10000000000000000000011F /* DroneFleetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneFleetManager.swift; sourceTree = "<group>"; };
 		100000000000000000000120 /* DroneSceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneViewRepresentable.swift; sourceTree = "<group>"; };
 		100000000000000000000121 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		100000000000000000000A12 /* AppGraphicsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGraphicsSettings.swift; sourceTree = "<group>"; };
 		1000000000000000000003A1 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		100000000000000000000122 /* AutoPathPlannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPathPlannerService.swift; sourceTree = "<group>"; };
 		100000000000000000000123 /* AbstractModelEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbstractModelEditorView.swift; sourceTree = "<group>"; };
@@ -587,6 +590,7 @@
 		100000000000000000000A0A /* MissionSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSetupView.swift; sourceTree = "<group>"; };
 		100000000000000000000A0C /* MissionScenarioHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioHUDView.swift; sourceTree = "<group>"; };
 		100000000000000000000A0E /* PayloadGimbalSliderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadGimbalSliderControls.swift; sourceTree = "<group>"; };
+		100000000000000000000A10 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		100000000000000000000A04 /* Man.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Man.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
@@ -687,6 +691,7 @@
 				10000000000000000000037E /* Networking */,
 				100000000000000000000380 /* OnlineTrials */,
 				100000000000000000000121 /* AppLanguage.swift */,
+				100000000000000000000A12 /* AppGraphicsSettings.swift */,
 				1000000000000000000003A1 /* L10n.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
@@ -901,6 +906,7 @@
 				100000000000000000000A0A /* MissionSetupView.swift */,
 				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
 				100000000000000000000A0E /* PayloadGimbalSliderControls.swift */,
+				100000000000000000000A10 /* SettingsView.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
@@ -1279,6 +1285,7 @@
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,
 				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
 				100000000000000000000221 /* AppLanguage.swift in Sources */,
+				100000000000000000000A11 /* AppGraphicsSettings.swift in Sources */,
 				1000000000000000000003A2 /* L10n.swift in Sources */,
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
 				10000000000000000000024F /* AutoNavigationController.swift in Sources */,
@@ -1365,6 +1372,7 @@
 				100000000000000000000A09 /* MissionSetupView.swift in Sources */,
 				100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */,
 				100000000000000000000A0D /* PayloadGimbalSliderControls.swift in Sources */,
+				100000000000000000000A0F /* SettingsView.swift in Sources */,
 				10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */,
 				100000000000000000000262 /* MissionDraftBuilder.swift in Sources */,
 				100000000000000000000263 /* MissionDraftValidator.swift in Sources */,

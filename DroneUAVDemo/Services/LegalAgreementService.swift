@@ -3,6 +3,7 @@ import Foundation
 enum LegalDocumentKind: String, Codable, Equatable, Hashable {
     case eula
     case tos
+    case license
 }
 
 struct LegalDocumentBundle: Codable, Equatable {
@@ -10,15 +11,33 @@ struct LegalDocumentBundle: Codable, Equatable {
     var documents: [LegalDocument]
 }
 
-struct LegalDocument: Codable, Identifiable, Equatable {
-    var kind: LegalDocumentKind
-    var version: String
+/// One language's rendering of a legal document. Keyed by language code ("en"/"ru") in JSON.
+struct LocalizedLegalContent: Codable, Equatable {
     var title: String
     var subtitle: String?
     var body: [String]
+}
+
+struct LegalDocument: Codable, Identifiable, Equatable {
+    var kind: LegalDocumentKind
+    var version: String
+    var localized: [String: LocalizedLegalContent]
 
     var id: String {
         "\(kind.rawValue)-\(version)"
+    }
+
+    /// Returns the content for the given language, falling back to English then any available
+    /// language so a missing translation never yields an empty document.
+    func content(for language: AppLanguage) -> LocalizedLegalContent {
+        if let exact = localized[language.legalLanguageCode] {
+            return exact
+        }
+        if let english = localized["en"] {
+            return english
+        }
+        return localized.values.first
+            ?? LocalizedLegalContent(title: kind.rawValue, subtitle: nil, body: [])
     }
 }
 

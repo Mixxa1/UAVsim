@@ -28,4 +28,18 @@ enum AppLanguage: String, CaseIterable, Identifiable {
             return "language.russian"
         }
     }
+
+    /// "en"/"ru" code used to pick localized content from data files (e.g. bilingual legal
+    /// documents). `.system` resolves from the OS preferred language, defaulting to English.
+    var legalLanguageCode: String {
+        switch self {
+        case .english:
+            return "en"
+        case .russian:
+            return "ru"
+        case .system:
+            let preferred = Locale.preferredLanguages.first ?? "en"
+            return preferred.hasPrefix("ru") ? "ru" : "en"
+        }
+    }
 }

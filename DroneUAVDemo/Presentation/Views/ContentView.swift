@@ -140,6 +140,22 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         }
     }
 
+    /// Applies a window-size preset to the app's bound main window (more reliable than
+    /// `NSApp.mainWindow` from a detached settings view). Lowers the content min-size first so a
+    /// smaller preset isn't clamped by the current screen's layout minimum.
+    func applyWindowSizePreset(_ preset: WindowSizePreset) {
+        guard let size = preset.contentSize else { return }
+        let target = window ?? NSApp.mainWindow ?? NSApp.keyWindow
+        guard let target else { return }
+        target.styleMask.insert(.resizable)
+        target.contentMinSize = NSSize(
+            width: min(target.contentMinSize.width, size.width),
+            height: min(target.contentMinSize.height, size.height)
+        )
+        target.setContentSize(size)
+        target.center()
+    }
+
     func refreshProjects() {
         projects = projectStorage.listProjects()
     }
@@ -1035,6 +1051,7 @@ struct ContentView: View {
     @State private var isReplayCenterPresented: Bool = false
     @State private var isOnlineTrialsPresented: Bool = false
     @State private var isMissionSetupPresented: Bool = false
+    @State private var isSettingsPresented: Bool = false
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -1220,6 +1237,12 @@ struct ContentView: View {
                                 appShell.launchMission(config: config)
                             }
                         )
+                    } else if isSettingsPresented {
+                        SettingsView(
+                            onClose: { isSettingsPresented = false },
+                            onApplyWindowSize: { appShell.applyWindowSizePreset($0) }
+                        )
+                        .environment(\.locale, selectedLanguage.locale)
                     } else {
                         startScreenActions
                     }
@@ -1279,27 +1302,39 @@ struct ContentView: View {
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             }
 
-            startMenuButton(title: NSLocalizedString("mission.menu.entry", comment: ""), systemImage: "target") {
-                isMissionSetupPresented = true
-            }
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    startMenuButton(title: NSLocalizedString("mission.menu.entry", comment: ""), systemImage: "target") {
+                        isMissionSetupPresented = true
+                    }
 
-            HStack(spacing: 12) {
-                startMenuButton(title: "Мульти-испытания", systemImage: "network") {
-                    // v1.5.1: when no project is active the simulation defaults to
-                    // UAVReferenceCatalog.defaultProfileID; pass the same fallback so
-                    // remote replica assignments match the local UAV that will be used.
-                    lanSessionViewModel.updateLocalVehicleProfileID(
-                        appShell.activeSimulation?.selectedDroneProfile.id
-                            ?? UAVReferenceCatalog.defaultProfileID
-                    )
-                    isOnlineTrialsPresented = true
+                    startMenuButton(title: "Мульти-испытания", systemImage: "network") {
+                        // v1.5.1: when no project is active the simulation defaults to
+                        // UAVReferenceCatalog.defaultProfileID; pass the same fallback so
+                        // remote replica assignments match the local UAV that will be used.
+                        lanSessionViewModel.updateLocalVehicleProfileID(
+                            appShell.activeSimulation?.selectedDroneProfile.id
+                                ?? UAVReferenceCatalog.defaultProfileID
+                        )
+                        isOnlineTrialsPresented = true
+                    }
                 }
 
-                startMenuButton(title: "Самописец", systemImage: "archivebox") {
-                    startScreenReplayLibrary.refresh()
-                    isReplayCenterPresented = true
+                HStack(spacing: 12) {
+                    startMenuButton(title: "Самописец", systemImage: "archivebox") {
+                        startScreenReplayLibrary.refresh()
+                        isReplayCenterPresented = true
+                    }
+
+                    startMenuButton(
+                        title: NSLocalizedString("settings.menu.entry", comment: ""),
+                        systemImage: "gearshape"
+                    ) {
+                        isSettingsPresented = true
+                    }
                 }
             }
+            .frame(width: 460)
             .onChange(of: isReplayCenterPresented) { _, new in
                 guard new else { return }
                 isReplayCenterPresented = false
@@ -1323,6 +1358,7 @@ struct ContentView: View {
             .foregroundStyle(.white.opacity(0.88))
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
             .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)

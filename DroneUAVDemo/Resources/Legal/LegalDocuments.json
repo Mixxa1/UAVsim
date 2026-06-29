@@ -1,29 +1,107 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "documents": [
     {
       "kind": "eula",
-      "version": "2026.06.04",
-      "title": "End User License Agreement",
-      "subtitle": "Лицензионное соглашение конечного пользователя",
-      "body": [
-        "DroneUAVDemo is provided as an educational and engineering simulation tool.",
-        "This application is not certified flight control software.",
-        "The user is responsible for using the application in accordance with applicable laws, safety rules and local regulations.",
-        "The software is provided without warranty."
-      ]
+      "version": "2026.06.29.1",
+      "localized": {
+        "en": {
+          "title": "End User License Agreement",
+          "subtitle": "End User License Agreement",
+          "body": [
+            "DroneUAVDemo is provided as an educational and engineering simulation tool.",
+            "This application is not certified flight control software and must not be used to operate real aircraft.",
+            "The software is provided not \"as is\" but on an as-updated basis; the current version may differ in mechanics from previous ones.",
+            "The licensor does not guarantee that the software will:",
+            "• operate without errors, failures, freezes or data loss;",
+            "• be compatible with all devices, macOS versions, libraries, drivers or external components;",
+            "• meet a user's individual expectations;",
+            "• provide accuracy of simulation, calculations, visualization, routes, telemetry or CAD operations;",
+            "• be suitable for use in real aviation, engineering, manufacturing, rescue, military, commercial or safety-critical tasks.",
+            "You are responsible for using the application in accordance with applicable laws, safety rules and local regulations."
+          ]
+        },
+        "ru": {
+          "title": "Лицензионное соглашение конечного пользователя",
+          "subtitle": "End User License Agreement",
+          "body": [
+            "DroneUAVDemo предоставляется как образовательный и инженерный симулятор.",
+            "Приложение не является сертифицированным программным обеспечением управления полётом и не предназначено для управления реальными воздушными судами.",
+            "Программное обеспечение предоставляется не «как есть», а по мере обновления; текущая версия может отличаться по механике от предыдущих.",
+            "Лицензиар не гарантирует, что программа:",
+            "• будет работать без ошибок, сбоев, зависаний или потери данных;",
+            "• будет совместима со всеми устройствами, версиями macOS, библиотеками, драйверами или внешними компонентами;",
+            "• будет соответствовать индивидуальным ожиданиям пользователя;",
+            "• будет обеспечивать точность симуляции, расчётов, визуализации, маршрутов, телеметрии или CAD-операций;",
+            "• будет пригодна для использования в реальных авиационных, инженерных, производственных, спасательных, военных, коммерческих или критически важных задачах.",
+            "Вы несёте ответственность за использование приложения в соответствии с применимым законодательством, правилами безопасности и местными нормами."
+          ]
+        }
+      }
     },
     {
       "kind": "tos",
-      "version": "2026.06.04",
-      "title": "Terms of Service",
-      "subtitle": "Условия использования",
-      "body": [
-        "By using DroneUAVDemo, you agree to these terms.",
-        "The application is intended for UAV simulation, mission planning experiments, CAD prototyping and educational use.",
-        "The application must not be used as a certified aviation, navigation or operational control system.",
-        "Deleting the local acceptance record will require accepting these terms again."
-      ]
+      "version": "2026.06.29.1",
+      "localized": {
+        "en": {
+          "title": "Terms of Service",
+          "subtitle": "Terms of Service",
+          "body": [
+            "By using DroneUAVDemo, you agree to these terms.",
+            "The application is intended for UAV simulation, mission-planning experiments, CAD prototyping and educational use.",
+            "The user is prohibited from using DroneUAVDemo for:",
+            "• operating real unmanned aerial vehicles, or preparing, calculating, planning or performing real flights;",
+            "• making decisions related to the safety of people, property, transport, air traffic, buildings, structures or infrastructure;",
+            "• operation within systems where a software error could cause harm to life, health, property, the environment, or a violation of law;",
+            "• developing, tuning or testing real targeting, guidance, hazardous-payload delivery systems or other potentially dangerous scenarios.",
+            "All routes, trajectories, warnings, and mass / payload / collision / battery / telemetry / signal / camera / CAD-geometry calculations and any other data shown in the application are strictly simulational, demonstrational and educational in nature.",
+            "The user is solely responsible for compliance with applicable law in any activity involving real unmanned aerial vehicles, aviation, radio communication, personal data, data export, safety and other regulated areas.",
+            "Deleting the local acceptance record will require accepting these terms again."
+          ]
+        },
+        "ru": {
+          "title": "Условия использования",
+          "subtitle": "Terms of Service",
+          "body": [
+            "Используя DroneUAVDemo, вы принимаете настоящие условия.",
+            "Приложение предназначено для симуляции БЛА, экспериментов с планированием миссий, CAD-прототипирования и образовательных целей.",
+            "Пользователю запрещается использовать DroneUAVDemo для:",
+            "• управления реальными беспилотными летательными аппаратами, а также подготовки, расчёта, планирования или выполнения реальных полётов;",
+            "• принятия решений, связанных с безопасностью людей, имущества, транспорта, воздушного движения, зданий, сооружений или инфраструктуры;",
+            "• эксплуатации в составе систем, где ошибка программы может привести к причинению вреда жизни, здоровью, имуществу, окружающей среде или нарушению закона;",
+            "• разработки, настройки или проверки систем реального поражения, наведения, доставки опасных объектов или иных потенциально опасных сценариев.",
+            "Все маршруты, траектории, предупреждения, расчёты массы, полезной нагрузки, столкновений, батареи, телеметрии, сигнала, камеры, CAD-геометрии и иные данные, отображаемые в программе, имеют исключительно симуляционный, демонстрационный и учебный характер.",
+            "Пользователь самостоятельно несёт ответственность за соблюдение применимого законодательства при любых действиях, связанных с реальными беспилотными летательными аппаратами, авиацией, радиосвязью, персональными данными, экспортом данных, безопасностью и иными регулируемыми областями.",
+            "Удаление локальной записи о принятии потребует повторного принятия условий."
+          ]
+        }
+      }
+    },
+    {
+      "kind": "license",
+      "version": "2026.06.29.1",
+      "localized": {
+        "en": {
+          "title": "License & Copyright",
+          "subtitle": "License & Copyright",
+          "body": [
+            "© 2026 Mixxa1. All rights reserved.",
+            "DroneUAVDemo, including its source code, assets and design, is the property of the licensor (Mixxa1).",
+            "Copying, redistribution, modification or commercial use of the application without the licensor's written permission is prohibited.",
+            "Third-party 3D models are used under their respective Creative Commons Attribution licenses; see the Credits section for the full attributions."
+          ]
+        },
+        "ru": {
+          "title": "Лицензия и авторские права",
+          "subtitle": "License & Copyright",
+          "body": [
+            "© 2026 Mixxa1. Все права защищены.",
+            "DroneUAVDemo, включая исходный код, ассеты и дизайн, является собственностью лицензиара (Mixxa1).",
+            "Копирование, распространение, модификация или коммерческое использование приложения без письменного разрешения лицензиара запрещены.",
+            "Сторонние 3D-модели используются по соответствующим лицензиям Creative Commons Attribution; полные атрибуции приведены в разделе «Авторские права»."
+          ]
+        }
+      }
     }
   ]
 }

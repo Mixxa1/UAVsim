@@ -2220,6 +2220,31 @@
 "credits.source" = "Source";
 "credits.changes" = "Changes";
 "credits.menu" = "Credits";
+"credits.copyright_line" = "© 2026 Mixxa1. DroneUAVDemo and its assets are the property of the licensor (Mixxa1). Copying or redistribution without a written license is prohibited. Third-party models are used under Creative Commons Attribution — see below.";
+
+// MARK: - Settings
+"settings.menu.entry" = "Settings";
+"settings.title" = "Settings";
+"settings.subtitle" = "Graphics, resolution, language and legal information.";
+"settings.section.video" = "Video / Graphics";
+"settings.section.resolution" = "Resolution";
+"settings.section.language" = "Language";
+"settings.section.credits" = "Credits";
+"settings.section.legal" = "License & Legal";
+"settings.graphics.quality" = "Graphics quality";
+"settings.graphics.low" = "Low";
+"settings.graphics.medium" = "Medium";
+"settings.graphics.high" = "High";
+"settings.graphics.heat_warning" = "High settings render at full detail (4× MSAA, full shadows, full forest density). On a laptop this can noticeably warm the machine and lower FPS.";
+"settings.graphics.apply_note" = "Graphics changes apply the next time a scene loads.";
+"settings.window_size" = "Window size";
+"settings.window_size.hd720" = "1280 × 720";
+"settings.window_size.fhd1080" = "1920 × 1080";
+"settings.window_size.qhd1440" = "2560 × 1440";
+"settings.window_size.native" = "Current size";
+"settings.render_scale" = "Render scale";
+"settings.render_scale.hint" = "Lower values render fewer pixels and upscale — reduces GPU load and heat.";
+"settings.fullscreen" = "Toggle full screen";
 
 "replay.title" = "Flight Recorder";
 "replay.no_selection" = "Select a recording to view its report";

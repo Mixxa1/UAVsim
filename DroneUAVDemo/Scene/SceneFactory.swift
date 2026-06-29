@@ -77,10 +77,13 @@ enum SceneFactory {
     private static func makeDirectionalLightNode() -> SCNNode {
         let node = SCNNode()
         let light = SCNLight()
+        let quality = AppGraphicsSettings.quality
         light.type = .directional
         light.intensity = 1680
         light.color = NSColor(calibratedRed: 1.0, green: 0.97, blue: 0.92, alpha: 1.0)
-        light.castsShadow = true
+        // Graphics tier gates shadows: `.low` drops the shadow-map pass entirely (a real GPU cost
+        // at forest density); higher tiers keep it.
+        light.castsShadow = quality.environmentShadowsEnabled
         light.shadowMode = .deferred
         light.shadowRadius = 1.0
         light.shadowSampleCount = 12

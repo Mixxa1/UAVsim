@@ -768,7 +768,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var shouldPromptBeforeExit: Bool {
-        !simulationRunMode.isOnlineTrial
+        // Online trials and mission scenarios are transient runs, not saveable projects — exiting
+        // them should return to the menu directly, without the "save your project?" prompt (which
+        // otherwise made the mission Exit button appear to do nothing useful).
+        !simulationRunMode.isOnlineTrial && !hasMissionScenario
     }
 
     var availableCameraModes: [CameraMode] {

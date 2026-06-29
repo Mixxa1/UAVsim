@@ -2215,6 +2215,31 @@
 "credits.source" = "Источник";
 "credits.changes" = "Изменения";
 "credits.menu" = "Авторство";
+"credits.copyright_line" = "© 2026 Mixxa1. DroneUAVDemo и его ассеты являются собственностью лицензиара (Mixxa1). Копирование или распространение без письменной лицензии запрещены. Сторонние модели используются по Creative Commons Attribution — см. ниже.";
+
+// MARK: - Настройки
+"settings.menu.entry" = "Настройки";
+"settings.title" = "Настройки";
+"settings.subtitle" = "Графика, разрешение, язык и юридическая информация.";
+"settings.section.video" = "Видео / Графика";
+"settings.section.resolution" = "Разрешение";
+"settings.section.language" = "Язык";
+"settings.section.credits" = "Авторские права";
+"settings.section.legal" = "Лицензия и право";
+"settings.graphics.quality" = "Качество графики";
+"settings.graphics.low" = "Низкое";
+"settings.graphics.medium" = "Среднее";
+"settings.graphics.high" = "Высокое";
+"settings.graphics.heat_warning" = "Высокие настройки рендерят с полной детализацией (4× MSAA, полные тени, полная густота леса). На ноутбуке это может заметно нагревать устройство и снижать FPS.";
+"settings.graphics.apply_note" = "Изменения графики применяются при следующей загрузке сцены.";
+"settings.window_size" = "Размер окна";
+"settings.window_size.hd720" = "1280 × 720";
+"settings.window_size.fhd1080" = "1920 × 1080";
+"settings.window_size.qhd1440" = "2560 × 1440";
+"settings.window_size.native" = "Текущий размер";
+"settings.render_scale" = "Масштаб рендера";
+"settings.render_scale.hint" = "Меньшие значения рендерят меньше пикселей с апскейлом — снижают нагрузку на GPU и нагрев.";
+"settings.fullscreen" = "Полный экран";
 
 "replay.title" = "Бортовой самописец";
 "replay.no_selection" = "Выберите запись для просмотра отчёта";

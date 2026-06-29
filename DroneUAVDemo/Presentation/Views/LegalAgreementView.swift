@@ -76,13 +76,14 @@ struct LegalAgreementView: View {
     }
 
     private func documentBlock(_ document: LegalDocument) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let content = document.content(for: L10n.currentLanguage())
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(document.title)
+                Text(content.title)
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                if let subtitle = document.subtitle {
+                if let subtitle = content.subtitle {
                     Text(subtitle)
                         .font(.headline)
                         .foregroundStyle(.secondary)
@@ -93,7 +94,7 @@ struct LegalAgreementView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            ForEach(document.body, id: \.self) { paragraph in
+            ForEach(content.body, id: \.self) { paragraph in
                 Text(paragraph)
                     .font(.body)
                     .textSelection(.enabled)

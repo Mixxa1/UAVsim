@@ -298,15 +298,19 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SCNView {
         let view = FocusableSCNView()
+        let quality = AppGraphicsSettings.quality
         view.scene = scene
-        view.antialiasingMode = .multisampling2X
+        view.antialiasingMode = quality.antialiasingMode
         let policy = renderPolicyOverride ?? SceneRenderPolicy.policy(for: activityState)
         view.renderPolicy = policy
         view.backgroundColor = .black
         view.delegate = context.coordinator
         view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
         view.usesUnboundedMouseLook = isInteractive && cameraMode == .spectator
-        view.technique = wantsWeatherDepthOfField ? WeatherDepthOfFieldTechnique.shared : nil
+        // DOF post-process honors both the weather request and the graphics tier (low disables it).
+        view.technique = (wantsWeatherDepthOfField && quality.weatherDepthOfFieldEnabled)
+            ? WeatherDepthOfFieldTechnique.shared : nil
+        applyRenderScale(to: view)
 
         configureCameraControl(on: view)
 
@@ -320,10 +324,15 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
-        let wantsTechnique = wantsWeatherDepthOfField
+        let quality = AppGraphicsSettings.quality
+        let wantsTechnique = wantsWeatherDepthOfField && quality.weatherDepthOfFieldEnabled
         if wantsTechnique != (view.technique != nil) {
             view.technique = wantsTechnique ? WeatherDepthOfFieldTechnique.shared : nil
         }
+        if view.antialiasingMode != quality.antialiasingMode {
+            view.antialiasingMode = quality.antialiasingMode
+        }
+        applyRenderScale(to: view)
 
         if view.scene !== scene {
             view.scene = scene
@@ -346,6 +355,20 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
             view.rendersContinuously = policy.rendersContinuously
         }
         configureCameraControl(on: view)
+    }
+
+    /// Best-effort internal render scale: drops the backing layer's contentsScale below the
+    /// screen's native factor so the GPU renders fewer pixels and upscales — a direct fill/heat
+    /// lever. Public SCNView has no dedicated render-scale API, so this rides on the Metal layer's
+    /// contentsScale; if a future macOS/SceneKit version ignores it, it degrades harmlessly to
+    /// native resolution (the reliable graphics levers are AA/shadows/tree-count/DOF).
+    private func applyRenderScale(to view: SCNView) {
+        let scale = CGFloat(min(1.0, max(0.5, AppGraphicsSettings.renderScale)))
+        let backing = view.window?.backingScaleFactor ?? view.layer?.contentsScale ?? 2.0
+        let target = backing * scale
+        if let layer = view.layer, abs(layer.contentsScale - target) > 0.001 {
+            layer.contentsScale = target
+        }
     }
 
     private func configureCameraControl(on view: SCNView) {

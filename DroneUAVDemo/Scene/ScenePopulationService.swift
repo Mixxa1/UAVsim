@@ -618,7 +618,11 @@ final class ScenePopulationService {
         // likely driver of *this* drop (the collidable layer's own counts didn't change in that
         // round — see densityBoost above, reduced separately for the collision-scan side).
         let decorativeBaseCount = min(520, max(160, Int(220.0 * featureScale)))
-        let decorativeForestCount = hasSector ? min(2_200, Int(Float(decorativeBaseCount) * 3.6)) : decorativeBaseCount
+        let decorativeRaw = hasSector ? min(2_200, Int(Float(decorativeBaseCount) * 3.6)) : decorativeBaseCount
+        // Graphics quality scales the decorative (non-collidable, visual-only) layer — the bulk of
+        // forest render cost. Collidable trees are untouched so collision/gameplay is identical
+        // across presets. `.high` = ×1.0 (full density), lower tiers thin it for weaker hardware.
+        let decorativeForestCount = max(0, Int(Float(decorativeRaw) * AppGraphicsSettings.quality.decorativeTreeMultiplier))
         let decorativeSplit = splitCount(decorativeForestCount, sectorShare: 0.92)
         appendScatter(
             count: decorativeSplit.sector,

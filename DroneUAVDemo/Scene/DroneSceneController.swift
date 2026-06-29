@@ -4611,7 +4611,8 @@ final class DroneSceneController {
             // these values are constant for the whole time payload optics is active). Now the
             // constant config only gets (re-)written on the transition into this mode.
             if !payloadOpticsShadowQualityActive {
-                light.castsShadow = true
+                // Respect the graphics tier — at `.low` shadows stay off even in payload optics.
+                light.castsShadow = AppGraphicsSettings.quality.environmentShadowsEnabled
                 light.automaticallyAdjustsShadowProjection = false
                 light.maximumShadowDistance = CameraClipping.payloadOpticsFar
                 light.sampleDistributedShadowMaps = false
