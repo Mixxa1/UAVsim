@@ -13,10 +13,11 @@ enum GraphicsQualityPreset: String, CaseIterable, Identifiable {
 
     var titleKey: String { "settings.graphics.\(rawValue)" }
 
-    /// Multiplier on the decorative (non-collidable) tree count, relative to the `.high` baseline
-    /// (which equals the current full density). The decorative layer is the bulk of the forest's
-    /// render cost, so this is the main density-vs-performance lever.
-    var decorativeTreeMultiplier: Float {
+    /// Multiplier on the visual-density tree layer, relative to the `.high` baseline (which equals
+    /// the current full density). This layer is the bulk of the forest's render cost, so this is
+    /// the main density-vs-performance lever; collision proxies are generated only for trees that
+    /// remain visible at the selected quality.
+    var visualTreeMultiplier: Float {
         switch self {
         case .low:
             return 0.45

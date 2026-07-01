@@ -160,6 +160,115 @@ struct CollisionObstacle {
     }
 }
 
+struct CollisionObstacleSpatialIndex {
+    private struct CellKey: Hashable {
+        let x: Int
+        let z: Int
+    }
+
+    static let empty = CollisionObstacleSpatialIndex(obstacles: [])
+
+    private let cellSize: Float
+    private let cells: [CellKey: [CollisionObstacle]]
+
+    init(
+        obstacles: [CollisionObstacle],
+        cellSize: Float = 32.0
+    ) {
+        self.cellSize = max(4.0, cellSize)
+
+        var nextCells: [CellKey: [CollisionObstacle]] = [:]
+        nextCells.reserveCapacity(max(16, obstacles.count))
+        for obstacle in obstacles {
+            let radius = max(0.0, obstacle.radius)
+            let minCell = Self.cellKey(
+                x: obstacle.center.x - radius,
+                z: obstacle.center.z - radius,
+                cellSize: self.cellSize
+            )
+            let maxCell = Self.cellKey(
+                x: obstacle.center.x + radius,
+                z: obstacle.center.z + radius,
+                cellSize: self.cellSize
+            )
+
+            for x in minCell.x...maxCell.x {
+                for z in minCell.z...maxCell.z {
+                    nextCells[CellKey(x: x, z: z), default: []].append(obstacle)
+                }
+            }
+        }
+        cells = nextCells
+    }
+
+    func query(
+        near position: SIMD3<Float>,
+        radius: Float
+    ) -> [CollisionObstacle] {
+        let clampedRadius = max(0.0, radius)
+        return query(
+            minX: position.x - clampedRadius,
+            maxX: position.x + clampedRadius,
+            minZ: position.z - clampedRadius,
+            maxZ: position.z + clampedRadius
+        )
+    }
+
+    func query(
+        from start: SIMD3<Float>,
+        to end: SIMD3<Float>,
+        margin: Float
+    ) -> [CollisionObstacle] {
+        let clampedMargin = max(0.0, margin)
+        return query(
+            minX: min(start.x, end.x) - clampedMargin,
+            maxX: max(start.x, end.x) + clampedMargin,
+            minZ: min(start.z, end.z) - clampedMargin,
+            maxZ: max(start.z, end.z) + clampedMargin
+        )
+    }
+
+    private func query(
+        minX: Float,
+        maxX: Float,
+        minZ: Float,
+        maxZ: Float
+    ) -> [CollisionObstacle] {
+        guard !cells.isEmpty else {
+            return []
+        }
+
+        let minCell = Self.cellKey(x: minX, z: minZ, cellSize: cellSize)
+        let maxCell = Self.cellKey(x: maxX, z: maxZ, cellSize: cellSize)
+        var results: [CollisionObstacle] = []
+        var seen: Set<UUID> = []
+
+        for x in minCell.x...maxCell.x {
+            for z in minCell.z...maxCell.z {
+                guard let bucket = cells[CellKey(x: x, z: z)] else {
+                    continue
+                }
+                for obstacle in bucket where seen.insert(obstacle.id).inserted {
+                    results.append(obstacle)
+                }
+            }
+        }
+
+        return results
+    }
+
+    private static func cellKey(
+        x: Float,
+        z: Float,
+        cellSize: Float
+    ) -> CellKey {
+        CellKey(
+            x: Int((x / cellSize).rounded(.down)),
+            z: Int((z / cellSize).rounded(.down))
+        )
+    }
+}
+
 struct CollisionSweepResult {
     let obstacle: CollisionObstacle
     let contactPoint: SIMD3<Float>
@@ -178,6 +287,10 @@ struct CollisionAnalysisInput {
 final class CollisionAnalysisService {
     private let broadPhaseDistance: Float = 26.0
     private let maxCandidateCount = 48
+
+    var spatialQueryRadius: Float {
+        broadPhaseDistance + 12.0
+    }
 
     func analyze(input: CollisionAnalysisInput) -> CollisionAnalysisSnapshot {
         guard !input.obstacles.isEmpty else {
@@ -238,8 +351,24 @@ final class CollisionAnalysisService {
             let clearance: Float
             let direction: SIMD3<Float>
             let contactNormal: SIMD3<Float>
+            let isTreeObstacle = obstacle.source.contains("tree")
+            let treeHorizontalAvoidanceClearance = max(0.45, input.droneRadius * 0.45)
+            let shouldAvoidTreeHorizontally = isTreeObstacle &&
+                horizontalClearance <= treeHorizontalAvoidanceClearance
 
-            if horizontalClearance <= 0.0 {
+            if shouldAvoidTreeHorizontally {
+                clearance = horizontalClearance
+                direction = SIMD3<Float>(
+                    planarContact.towardObstacle.x,
+                    0.0,
+                    planarContact.towardObstacle.y
+                )
+                contactNormal = SIMD3<Float>(
+                    planarContact.outwardNormal.x,
+                    0.0,
+                    planarContact.outwardNormal.y
+                )
+            } else if horizontalClearance <= 0.0 {
                 let verticalPenetration = obstacle.verticalPenetration(
                     toDroneCenterY: input.dronePosition.y,
                     droneRadius: input.droneRadius

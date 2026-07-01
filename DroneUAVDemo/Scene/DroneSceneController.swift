@@ -175,6 +175,7 @@ final class DroneSceneController {
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
+    private var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty
     private(set) var environmentMapDescriptors: [EnvironmentObjectDescriptor] = []
     private(set) var environmentRevision: UInt64 = 0
     private var supportSurfaces: [SupportSurfaceDescriptor] = []
@@ -1717,6 +1718,7 @@ final class DroneSceneController {
         }
 
         environmentObstacles = obstacles
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: obstacles)
         environmentRevision &+= 1
 
         obstacleDebugProxyNodes.removeAll(keepingCapacity: false)
@@ -1738,6 +1740,21 @@ final class DroneSceneController {
 
         // Environment was rebuilt — thermal proxies are stale.
         invalidateThermalScene()
+    }
+
+    func nearbyEnvironmentObstacles(
+        near position: SIMD3<Float>,
+        radius: Float
+    ) -> [CollisionObstacle] {
+        environmentObstacleIndex.query(near: position, radius: radius)
+    }
+
+    func nearbyEnvironmentObstacles(
+        from start: SIMD3<Float>,
+        to end: SIMD3<Float>,
+        margin: Float
+    ) -> [CollisionObstacle] {
+        environmentObstacleIndex.query(from: start, to: end, margin: margin)
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {

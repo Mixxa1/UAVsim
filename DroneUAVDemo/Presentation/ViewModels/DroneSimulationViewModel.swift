@@ -1020,6 +1020,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private var activeRouteTargetAltitude: Float?
     private var activeRouteTargetAltitudeMarkerID: UUID?
     private var multirotorMarkerLastPlanTick: UInt64?
+    private var multirotorAvoidanceLateralOffset: Float = 0.0
+    private var multirotorAvoidanceHoldUntilTick: UInt64 = 0
     private var missionObservation = MissionObservationAccumulator()
     private var externalControllerOverlayActive: Bool = false
     private var activeFixedWingGuidanceSource: FixedWingGuidanceSource = .none
@@ -4235,6 +4237,11 @@ final class DroneSimulationViewModel: ObservableObject {
 
         _ = updateFleetStatus(deltaTime: dt)
 
+        let collisionCandidateRadius = collisionService.spatialQueryRadius
+        let prePhysicsCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
+            near: state.position,
+            radius: collisionCandidateRadius
+        )
         let prePhysicsCollisionAnalysis = collisionService.analyze(
             input: CollisionAnalysisInput(
                 dronePosition: state.position,
@@ -4242,7 +4249,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 droneRadius: selectedDroneProfile.collisionRadius,
                 // Fleet spacing is handled separately; feeding wingmen back into leader
                 // collision avoidance makes formation flight self-block on map guidance.
-                obstacles: sceneController.environmentObstacles,
+                obstacles: prePhysicsCollisionObstacles,
                 weather: weather
             )
         )
@@ -4276,11 +4283,16 @@ final class DroneSimulationViewModel: ObservableObject {
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
 
         let postPhysicsCollisionAnalysis: CollisionAnalysisSnapshot
+        let sweptCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
+            from: previousState.position,
+            to: state.position,
+            margin: selectedDroneProfile.collisionRadius + 1.0
+        )
         if let sweptCollision = collisionService.firstSweptCollision(
             from: previousState.position,
             to: state.position,
             droneRadius: selectedDroneProfile.collisionRadius,
-            obstacles: sceneController.environmentObstacles
+            obstacles: sweptCollisionObstacles
         ) {
             let separation = max(0.025, selectedDroneProfile.collisionRadius * 0.06)
             state.position = sweptCollision.contactPoint + sweptCollision.contactNormal * separation
@@ -4294,12 +4306,16 @@ final class DroneSimulationViewModel: ObservableObject {
                 contactNormal: sweptCollision.contactNormal
             )
         } else {
+            let postPhysicsCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
+                near: state.position,
+                radius: collisionCandidateRadius
+            )
             postPhysicsCollisionAnalysis = collisionService.analyze(
                 input: CollisionAnalysisInput(
                     dronePosition: state.position,
                     droneVelocity: state.velocity,
                     droneRadius: selectedDroneProfile.collisionRadius,
-                    obstacles: sceneController.environmentObstacles,
+                    obstacles: postPhysicsCollisionObstacles,
                     weather: weather
                 )
             )
@@ -4341,12 +4357,16 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         if needsCollisionAnalysisRefresh {
+            let refreshedCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
+                near: state.position,
+                radius: collisionCandidateRadius
+            )
             collisionAnalysis = collisionService.analyze(
                 input: CollisionAnalysisInput(
                     dronePosition: state.position,
                     droneVelocity: state.velocity,
                     droneRadius: selectedDroneProfile.collisionRadius,
-                    obstacles: sceneController.environmentObstacles,
+                    obstacles: refreshedCollisionObstacles,
                     weather: weather
                 )
             )
@@ -4922,8 +4942,10 @@ final class DroneSimulationViewModel: ObservableObject {
             updateControlValues({ values in
                 values.x += Double(away.x * 1.4)
                 values.z += Double(away.z * 1.4)
-                values.y = max(values.y, Double(state.position.y + 0.45))
-                values.throttle = max(values.throttle, 0.56)
+                values.throttle = max(
+                    values.throttle,
+                    Double(resolvedFlightBaseline(for: mode).hoverLockThrottle)
+                )
             }, markManual: false)
         case .emergencyStop:
             activateEmergencyStop()
@@ -5545,10 +5567,22 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         autoNavigationController.cancel()
+        let finalGoal = clampToWorldBounds(marker.worldPosition(altitude: travelAltitude))
+        let adjustedTarget = multirotorCollisionAvoidanceTarget(
+            nominalTarget: pathTarget,
+            finalGoal: finalGoal,
+            travelAltitude: travelAltitude
+        ) ?? pathTarget
+        let isAvoidingObstacle = simd_distance(
+            SIMD2<Float>(adjustedTarget.x, adjustedTarget.z),
+            SIMD2<Float>(pathTarget.x, pathTarget.z)
+        ) > 0.05
         applyAutopilotTrackingControl(
-            target: pathTarget,
+            target: adjustedTarget,
             targetAltitude: travelAltitude,
-            speedScale: multirotorMarkerSpeedScale(),
+            speedScale: isAvoidingObstacle
+                ? min(multirotorMarkerSpeedScale(), 0.72)
+                : multirotorMarkerSpeedScale(),
             yawAlignToHome: false,
             deltaTime: deltaTime
         )
@@ -5654,6 +5688,173 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         return plannedTarget
+    }
+
+    private func multirotorCollisionAvoidanceTarget(
+        nominalTarget: SIMD3<Float>,
+        finalGoal: SIMD3<Float>,
+        travelAltitude: Float
+    ) -> SIMD3<Float>? {
+        guard selectedDroneProfile.airframeClass == .multirotor,
+              collisionAnalysis.riskScore >= 0.30,
+              let obstacleID = collisionAnalysis.nearestObstacleID,
+              let obstacle = sceneController.obstacle(for: obstacleID),
+              obstacle.source.contains("tree") else {
+            multirotorAvoidanceLateralOffset = 0.0
+            return nil
+        }
+
+        let current = SIMD2<Float>(state.position.x, state.position.z)
+        let nominal = SIMD2<Float>(nominalTarget.x, nominalTarget.z)
+        let finalPlanar = SIMD2<Float>(finalGoal.x, finalGoal.z)
+        var routeVector = nominal - current
+
+        if simd_length_squared(routeVector) < 0.04 {
+            routeVector = finalPlanar - current
+        }
+        if simd_length_squared(routeVector) < 0.04 {
+            let planarVelocity = SIMD2<Float>(state.velocity.x, state.velocity.z)
+            if simd_length_squared(planarVelocity) > 0.01 {
+                routeVector = planarVelocity
+            }
+        }
+
+        guard simd_length_squared(routeVector) > 0.0001 else {
+            return nil
+        }
+
+        let routeDirection = simd_normalize(routeVector)
+        let sideAxis = SIMD2<Float>(-routeDirection.y, routeDirection.x)
+        let forwardWindow = max(10.0, multirotorMarkerLookaheadDistance() + obstacle.radius)
+        let immediateRisk = collisionAnalysis.nearestObstacleDistance < 2.4 ||
+            collisionAnalysis.riskScore >= 0.55
+        let nearbyTrees = sceneController.nearbyEnvironmentObstacles(
+            near: state.position,
+            radius: max(28.0, forwardWindow + obstacle.radius + 10.0)
+        ).filter { $0.source.contains("tree") }
+
+        func routeCoordinates(for tree: CollisionObstacle) -> (along: Float, lateral: Float) {
+            let treeVector = tree.planarCenter - current
+            return (
+                simd_dot(treeVector, routeDirection),
+                simd_dot(treeVector, sideAxis)
+            )
+        }
+
+        let routeThreatened = nearbyTrees.contains { tree in
+            let coordinates = routeCoordinates(for: tree)
+            let protectedWidth = tree.radius + selectedDroneProfile.collisionRadius + 2.2
+            return coordinates.along > -protectedWidth &&
+                coordinates.along < forwardWindow &&
+                abs(coordinates.lateral) <= protectedWidth
+        }
+
+        guard immediateRisk || routeThreatened else {
+            multirotorAvoidanceLateralOffset = 0.0
+            return nil
+        }
+
+        let nearestCoordinates = routeCoordinates(for: obstacle)
+        let preferredSign: Float = nearestCoordinates.lateral >= 0.0 ? -1.0 : 1.0
+        let sideDistance = max(
+            6.0,
+            obstacle.radius + selectedDroneProfile.collisionRadius * 2.2 + 3.0
+        )
+        let remainingDistance = max(2.5, simd_distance(current, finalPlanar))
+        let forwardStep = min(
+            remainingDistance,
+            immediateRisk
+                ? max(4.0, min(7.0, nearestCoordinates.along + 2.5))
+                : max(4.0, min(8.0, nearestCoordinates.along + 3.0))
+        )
+        let smallOffset = min(2.4, sideDistance * 0.40)
+        let mediumOffset = min(4.2, sideDistance * 0.70)
+        let candidateOffsets: [Float] = [
+            0.0,
+            preferredSign * smallOffset,
+            -preferredSign * smallOffset,
+            preferredSign * mediumOffset,
+            -preferredSign * mediumOffset,
+            preferredSign * sideDistance,
+            -preferredSign * sideDistance
+        ]
+        let requiredClearance = max(0.35, selectedDroneProfile.collisionRadius * 0.25)
+
+        func clearance(at point: SIMD2<Float>) -> Float {
+            nearbyTrees.reduce(Float.greatestFiniteMagnitude) { partial, tree in
+                min(
+                    partial,
+                    tree.planarSignedDistance(to: point) - selectedDroneProfile.collisionRadius
+                )
+            }
+        }
+
+        func segmentClearance(to target: SIMD2<Float>) -> Float {
+            var minimumClearance = Float.greatestFiniteMagnitude
+            let segment = target - current
+            for sample in [Float(0.20), Float(0.45), Float(0.70), Float(0.95)] {
+                minimumClearance = min(
+                    minimumClearance,
+                    clearance(at: current + segment * sample)
+                )
+            }
+            return minimumClearance
+        }
+
+        func candidateScore(offset: Float) -> (target: SIMD2<Float>, clearance: Float, score: Float) {
+            let candidate = current +
+                routeDirection * forwardStep +
+                sideAxis * offset
+            let candidateClearance = min(clearance(at: candidate), segmentClearance(to: candidate))
+            let clearanceScore = min(candidateClearance, 6.0) * 2.2
+            let unsafePenalty = candidateClearance < requiredClearance
+                ? (requiredClearance - candidateClearance) * 18.0
+                : 0.0
+            let centerBonus: Float = abs(offset) < 0.10 && candidateClearance >= requiredClearance + 0.55
+                ? 4.0
+                : 0.0
+            let progressScore = simd_dot(candidate - current, routeDirection) * 0.20 -
+                simd_distance(candidate, finalPlanar) * 0.025
+            let offsetPenalty = abs(offset) * 0.22
+            let preferenceScore: Float = offset.sign == preferredSign.sign ? 0.35 : 0.0
+            let holdBonus: Float
+            if simulationTickCounter <= multirotorAvoidanceHoldUntilTick {
+                let distanceFromHeldOffset = abs(offset - multirotorAvoidanceLateralOffset)
+                holdBonus = max(0.0, 2.0 - distanceFromHeldOffset * 0.45)
+            } else {
+                holdBonus = 0.0
+            }
+
+            return (
+                target: candidate,
+                clearance: candidateClearance,
+                score: clearanceScore + centerBonus + progressScore + preferenceScore + holdBonus -
+                    offsetPenalty - unsafePenalty
+            )
+        }
+
+        let scoredCandidates = candidateOffsets.map { offset in
+            (offset: offset, result: candidateScore(offset: offset))
+        }
+        guard let bestCandidate = scoredCandidates.max(by: { $0.result.score < $1.result.score }) else {
+            multirotorAvoidanceLateralOffset = 0.0
+            return nil
+        }
+
+        if abs(bestCandidate.offset) < 0.10,
+           bestCandidate.result.clearance >= requiredClearance {
+            multirotorAvoidanceLateralOffset = 0.0
+            multirotorAvoidanceHoldUntilTick = simulationTickCounter + 8
+            return nil
+        }
+
+        multirotorAvoidanceLateralOffset = bestCandidate.offset
+        multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
+        return clampToWorldBounds(SIMD3<Float>(
+            bestCandidate.result.target.x,
+            travelAltitude,
+            bestCandidate.result.target.y
+        ))
     }
 
     private func shouldRefreshMultirotorMarkerPath(for reason: String) -> Bool {
@@ -6418,6 +6619,8 @@ final class DroneSimulationViewModel: ObservableObject {
         activeRouteTargetAltitude = nil
         activeRouteTargetAltitudeMarkerID = nil
         multirotorMarkerLastPlanTick = nil
+        multirotorAvoidanceLateralOffset = 0.0
+        multirotorAvoidanceHoldUntilTick = 0
         multicopterAutopilotController.reset()
     }
 

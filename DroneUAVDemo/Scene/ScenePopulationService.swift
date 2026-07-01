@@ -94,10 +94,9 @@ final class ScenePopulationService {
             collidableDescriptors = []
         }
 
-        // generateForest mixes truly-collidable objects with a non-collidable decorative scatter
-        // (cheap visual-only filler — see TerrainConfiguration.missionSearchSectorCenter). Only the
-        // collidable subset competes for the fixed object-count cap below; decorative descriptors
-        // bypass it entirely, same as the boundary belt.
+        // Some generators can still return visual-only descriptors, but the main forest layer is
+        // gameplay-collidable. Runtime collision uses a spatial index, so the cap below is no
+        // longer the primary forest-performance lever.
         let decorativeDescriptors = collidableDescriptors.filter { !$0.isCollidable }
         collidableDescriptors = collidableDescriptors.filter { $0.isCollidable }
 
@@ -180,7 +179,7 @@ final class ScenePopulationService {
         case .field:
             baseLimit = 420
         case .forest:
-            baseLimit = 720
+            baseLimit = 4_200
         case .cargoYard:
             baseLimit = 1_100
         case .city:
@@ -395,8 +394,9 @@ final class ScenePopulationService {
         }
 
         // Guarantee the dock's immediate surroundings read as forest, regardless of how the
-        // random sector/baseline split happens to land — non-collidable (zero FPS/pathfinding
-        // cost, see [[project_missions_increment1_bugfixes]]), so this is purely cosmetic.
+        // random sector/baseline split happens to land. These trees are real obstacles too; the
+        // collision broad phase keeps their runtime cost local instead of charging every frame for
+        // the whole forest.
         let dockRingInner = dockClearingRadius
         let dockRingOuter = dockClearingRadius + 55.0
         var dockRingAttempts = 0
@@ -419,13 +419,13 @@ final class ScenePopulationService {
                 occupied: &occupied,
                 descriptors: &descriptors,
                 generator: &generator,
-                collidable: false
+                collidable: true
             ) {
                 dockRingPlaced += 1
             }
         }
 
-        // When a mission search sector is set, the collidable/decorative budget concentrates
+        // When a mission search sector is set, the forest density budget concentrates
         // around it (plus a halo so it doesn't end abruptly) instead of spreading uniformly over
         // the whole map — the object budget is finite regardless of map size, so spreading it
         // over a huge map reads as dense only at the fixed-count horizon belt and sparse where
@@ -437,8 +437,8 @@ final class ScenePopulationService {
         // 0.58×radius core only covered ~34% of the sector's *area* (area scales with r²), so
         // two-thirds of the area the player is actually meant to search was barely forested at
         // all. Matching cluster-interior density (~10-13 trees/1000m²) uniformly across the full
-        // sector would still need far more fill/decorative budget than is safe for render cost,
-        // so coverage now wins over peak density — see the decorative multiplier below, bumped to
+        // sector would still need far more fill budget than is safe for render cost, so coverage
+        // now wins over peak density — see the visual-density multiplier below, bumped to
         // compensate for the ~3x larger area without returning to the count that previously cost
         // frame time.
         let denseCoreRadius = sectorRadius
@@ -472,14 +472,9 @@ final class ScenePopulationService {
         // are tuned for the freeform-flight object budget, not for "search sector should read as
         // real forest cover".
         let clusterCount = min(Int(28 * densityBoost), max(10, Int((10.0 + density * 7.0) * featureScale * densityBoost)))
-        // Collision checking (CollisionAnalysisService.analyze/firstSweptCollision) is an
-        // unconditional O(n) scan over *every* collidable obstacle every tick — there's no
-        // distance culling and obstacle nodes carry no SCNPhysicsBody, so SceneKit can't broad-
-        // phase it either. A collidable tree the player will never fly near (outside the search
-        // sector, in a manual-flight scenario with no autopilot routing around it — see
-        // [[project_missions_vision_and_nfz_removal]]) is pure tax on that scan. So almost all of
-        // the collidable budget now goes to the sector, and whatever's left outside is generated
-        // non-collidable (still renders, just doesn't enter the obstacle list).
+        // Runtime collision is indexed spatially, so mission forests no longer need to fake
+        // performance by making the outside-sector baseline visual-only. Keep the sector-bias for
+        // density, but let every visible forest tree become a gameplay obstacle.
         let clusterSplit = splitCount(clusterCount, sectorShare: 0.95)
 
         func placeClusterBatch(count: Int, batchCenter: SIMD2<Float>, batchExtent: Float, collidable: Bool, applyCoreEdgeTaper: Bool, generator: inout SeededRandomGenerator) {
@@ -521,7 +516,7 @@ final class ScenePopulationService {
             }
         }
         placeClusterBatch(count: clusterSplit.sector, batchCenter: sectorBiasCenter, batchExtent: sectorBiasExtent, collidable: true, applyCoreEdgeTaper: true, generator: &generator)
-        placeClusterBatch(count: clusterSplit.baseline, batchCenter: .zero, batchExtent: extent * 0.84, collidable: false, applyCoreEdgeTaper: false, generator: &generator)
+        placeClusterBatch(count: clusterSplit.baseline, batchCenter: .zero, batchExtent: extent * 0.84, collidable: true, applyCoreEdgeTaper: false, generator: &generator)
 
         for clearing in clearings.dropFirst() {
             let outcropCount = Int.random(in: 1...3, using: &generator)
@@ -595,7 +590,7 @@ final class ScenePopulationService {
             occupied: &occupied,
             descriptors: &descriptors,
             generator: &generator,
-            collidable: false,
+            collidable: true,
             placementValidator: { position in
                 guard simd_distance(position, .zero) <= extent * 0.88 else { return false }
                 return !self.isInsideClearing(position, clearings: clearings)
@@ -603,26 +598,26 @@ final class ScenePopulationService {
             pickKind: fillPickKind
         )
 
-        // Decorative (non-collidable) trees are "free" against the collision/pathfinding budget,
-        // so near the sector we lean on them hard for visual density — this is the layer the user
-        // asked to redirect toward the search area instead of spreading thin over the whole map.
+        // Visual-density trees are quality-scaled for render cost, but they are still real
+        // gameplay obstacles. The per-frame collision cost is kept stable by the obstacle spatial
+        // index instead of by making visible trunks pass-through.
         let decorativePickKind: (inout SeededRandomGenerator) -> EnvironmentObjectKind = { rng in
             let pick = Float.random(in: 0.0...1.0, using: &rng)
             if pick < 0.992 { return .tree }
             return .crate
         }
-        // Decorative trees are free against the collision cap, but not against render/FPS cost —
-        // pushing the raw *count* too high (was 1,100) cost real frame time regardless of area.
+        // These trees are not free against render/FPS cost — pushing the raw *count* too high
+        // (was 1,100) cost real frame time regardless of area.
         // User reported a (minor) FPS regression right after this multiplier went to 4.0 to cover
         // the full sector — pulled back to 3.6 since render cost, not collision-scan, is the most
         // likely driver of *this* drop (the collidable layer's own counts didn't change in that
         // round — see densityBoost above, reduced separately for the collision-scan side).
         let decorativeBaseCount = min(520, max(160, Int(220.0 * featureScale)))
         let decorativeRaw = hasSector ? min(2_200, Int(Float(decorativeBaseCount) * 3.6)) : decorativeBaseCount
-        // Graphics quality scales the decorative (non-collidable, visual-only) layer — the bulk of
-        // forest render cost. Collidable trees are untouched so collision/gameplay is identical
-        // across presets. `.high` = ×1.0 (full density), lower tiers thin it for weaker hardware.
-        let decorativeForestCount = max(0, Int(Float(decorativeRaw) * AppGraphicsSettings.quality.decorativeTreeMultiplier))
+        // Graphics quality scales the visual-density layer — the bulk of forest render cost.
+        // Every tree that remains visible also remains collidable. `.high` = ×1.0 (full density),
+        // lower tiers thin both visuals and matching collision proxies for weaker hardware.
+        let decorativeForestCount = max(0, Int(Float(decorativeRaw) * AppGraphicsSettings.quality.visualTreeMultiplier))
         let decorativeSplit = splitCount(decorativeForestCount, sectorShare: 0.92)
         appendScatter(
             count: decorativeSplit.sector,
@@ -633,7 +628,7 @@ final class ScenePopulationService {
             occupied: &occupied,
             descriptors: &descriptors,
             generator: &generator,
-            collidable: false,
+            collidable: true,
             center: sectorBiasCenter,
             placementValidator: { position in
                 guard coreEdgeAccepts(position) else { return false }
@@ -650,7 +645,7 @@ final class ScenePopulationService {
             occupied: &occupied,
             descriptors: &descriptors,
             generator: &generator,
-            collidable: false,
+            collidable: true,
             placementValidator: { position in
                 guard simd_distance(position, .zero) <= extent * 0.94 else { return false }
                 return !self.isInsideClearing(position, clearings: clearings)
@@ -658,10 +653,10 @@ final class ScenePopulationService {
             pickKind: decorativePickKind
         )
 
-        // Gap fill for the dense core: clusters/fill/decorative above are independent random
+        // Gap fill for the dense core: clusters/fill/visual-density trees above are independent random
         // sampling, which statistically leaves small zero-coverage patches even at a healthy
         // average density (visible as "bald spots" on the tactical map) — no individual layer
-        // guarantees a maximum gap size. A jittered grid does: one non-collidable tree attempt
+        // guarantees a maximum gap size. A jittered grid does: one tree attempt
         // per ~16m cell, so no point in the core is more than half a cell-diagonal from a
         // guaranteed placement. Cells that land in an already-dense area just get rejected by the
         // normal overlap check, so this only adds trees where the random layers left empty.
@@ -702,7 +697,7 @@ final class ScenePopulationService {
                         occupied: &occupied,
                         descriptors: &descriptors,
                         generator: &generator,
-                        collidable: false
+                        collidable: true
                     )
                 }
             }
@@ -1227,9 +1222,8 @@ final class ScenePopulationService {
     // pass-through at low altitude AND made you "collide" with empty air around the canopy), shape
     // the collision to the actual pine form — a slim trunk box for the full lower height plus a
     // tighter canopy box on the upper portion. Two parts only (not a multi-box cone taper): each
-    // part is one more entry in the per-tick O(n) collision scan, and only *collidable* trees
-    // (sector interior) ever become obstacles — decorative trees carry these too but are never
-    // turned into CollisionObstacles (see DroneSceneController: `where descriptor.isCollidable`).
+    // part is one more entry in the obstacle list, and runtime collision relies on
+    // CollisionObstacleSpatialIndex to avoid scanning the whole forest every tick.
     //
     // Sources keep the "tree" substring on purpose: the autopilot's nav-grid inflation
     // (`AutoPathPlannerService.obstacleInflation`) and the planner's box-aware rasterization key
