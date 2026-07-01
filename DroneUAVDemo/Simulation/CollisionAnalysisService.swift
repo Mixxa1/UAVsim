@@ -240,17 +240,41 @@ final class CollisionAnalysisService {
             let contactNormal: SIMD3<Float>
 
             if horizontalClearance <= 0.0 {
-                // Within the obstacle's horizontal footprint: this is the "resting on top/
-                // bottom" case (e.g. landed on a container roof), not a side hit. Using the
-                // horizontal face distance here would report the distance to the box's edge
-                // (often meters) as "penetration" even when just touching the surface.
-                clearance = obstacle.verticalPenetration(
+                let verticalPenetration = obstacle.verticalPenetration(
                     toDroneCenterY: input.dronePosition.y,
                     droneRadius: input.droneRadius
                 )
-                let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
-                direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
-                contactNormal = -direction
+                let horizontalPenetrationDepth = max(0.0, -horizontalClearance)
+                let verticalPenetrationDepth = max(0.0, -verticalPenetration)
+                let shouldResolveVertically = verticalPenetrationDepth <= max(0.02, horizontalPenetrationDepth)
+
+                if verticalGap > 0.0 {
+                    clearance = verticalGap
+                    let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                    direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
+                    contactNormal = -direction
+                } else if shouldResolveVertically {
+                    // Resting on / hitting the top or bottom face (container roof, slab, etc.).
+                    // For tall obstacles like tree trunks this only wins when the vertical
+                    // penetration is actually shallower than the side penetration; otherwise the
+                    // normal must stay horizontal or the copter tries to climb through the tree.
+                    clearance = verticalPenetration
+                    let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                    direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
+                    contactNormal = -direction
+                } else {
+                    clearance = horizontalClearance
+                    direction = SIMD3<Float>(
+                        planarContact.towardObstacle.x,
+                        0.0,
+                        planarContact.towardObstacle.y
+                    )
+                    contactNormal = SIMD3<Float>(
+                        planarContact.outwardNormal.x,
+                        0.0,
+                        planarContact.outwardNormal.y
+                    )
+                }
             } else if verticalGap <= 0.0 {
                 clearance = horizontalClearance
                 direction = SIMD3<Float>(

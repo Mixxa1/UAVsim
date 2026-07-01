@@ -54,6 +54,7 @@ final class AutoPathPlannerService {
 
     private struct PlanSignature: Equatable {
         let modeTag: String
+        let startCell: NavigationGrid.Cell
         let goalCell: NavigationGrid.Cell
     }
 
@@ -113,7 +114,11 @@ final class AutoPathPlannerService {
             cell(forWorldXZ: SIMD2<Float>(position.x, position.z))
         }
 
-        func nearestFreeCell(to world: SIMD3<Float>, maxSearchRadius: Int = 24) -> Cell? {
+        func nearestFreeCell(
+            to world: SIMD3<Float>,
+            preferredToward preferredWorld: SIMD3<Float>? = nil,
+            maxSearchRadius: Int = 24
+        ) -> Cell? {
             guard let seed = cell(forWorld: world) else {
                 return nil
             }
@@ -121,24 +126,53 @@ final class AutoPathPlannerService {
                 return seed
             }
 
+            let worldPlanar = SIMD2<Float>(world.x, world.z)
+            let preferredPlanar = preferredWorld.map { SIMD2<Float>($0.x, $0.z) }
+
             for ring in 1...maxSearchRadius {
                 let x0 = seed.x - ring
                 let x1 = seed.x + ring
                 let z0 = seed.z - ring
                 let z1 = seed.z + ring
+
+                var bestCell: Cell?
+                var bestDistance = Float.greatestFiniteMagnitude
+                var bestPreferredDistance = Float.greatestFiniteMagnitude
+
+                func consider(_ cell: Cell) {
+                    guard contains(cell), !isBlocked(cell) else {
+                        return
+                    }
+
+                    let candidateWorld = worldXZ(for: cell)
+                    let distance = simd_length_squared(candidateWorld - worldPlanar)
+                    let preferredDistance = preferredPlanar.map {
+                        simd_length_squared(candidateWorld - $0)
+                    } ?? 0.0
+                    let isCloser = distance < bestDistance - 0.0001
+                    let isBetterTie = abs(distance - bestDistance) <= 0.0001 &&
+                        preferredDistance < bestPreferredDistance
+
+                    if isCloser || isBetterTie {
+                        bestCell = cell
+                        bestDistance = distance
+                        bestPreferredDistance = preferredDistance
+                    }
+                }
+
                 for x in x0...x1 {
-                    let top = Cell(x: x, z: z0)
-                    if contains(top), !isBlocked(top) { return top }
-                    let bottom = Cell(x: x, z: z1)
-                    if contains(bottom), !isBlocked(bottom) { return bottom }
+                    consider(Cell(x: x, z: z0))
+                    consider(Cell(x: x, z: z1))
                 }
                 if z1 - z0 > 1 {
                     for z in (z0 + 1)..<z1 {
-                        let left = Cell(x: x0, z: z)
-                        if contains(left), !isBlocked(left) { return left }
-                        let right = Cell(x: x1, z: z)
-                        if contains(right), !isBlocked(right) { return right }
+                        consider(Cell(x: x0, z: z))
+                        consider(Cell(x: x1, z: z))
                     }
+                }
+
+                if let bestCell {
+                    return bestCell
                 }
             }
             return nil
@@ -265,8 +299,8 @@ final class AutoPathPlannerService {
             return
         }
 
-        guard let startCell = grid.nearestFreeCell(to: start),
-              let goalCell = grid.nearestFreeCell(to: goal) else {
+        guard let startCell = grid.nearestFreeCell(to: start, preferredToward: goal),
+              let goalCell = grid.nearestFreeCell(to: goal, preferredToward: start) else {
             status = .blocked
             statusReason = "no_free_start_or_goal"
             waypoints.removeAll(keepingCapacity: false)
@@ -278,10 +312,23 @@ final class AutoPathPlannerService {
 
         let nextPlanSignature = PlanSignature(
             modeTag: modeTag,
+            startCell: startCell,
             goalCell: goalCell
         )
 
-        let shouldReplan = forceRecompute || planSignature != nextPlanSignature || waypoints.isEmpty || status == .blocked
+        let previousPlanSignature = planSignature
+        let startMovedAwayFromCachedPath =
+            previousPlanSignature?.modeTag == modeTag &&
+            previousPlanSignature?.goalCell == goalCell &&
+            previousPlanSignature?.startCell != startCell &&
+            distanceToPath2D(currentPosition: start) > max(1.8, grid.cellSize * 1.25)
+        let shouldReplan =
+            forceRecompute ||
+            previousPlanSignature?.modeTag != modeTag ||
+            previousPlanSignature?.goalCell != goalCell ||
+            waypoints.isEmpty ||
+            status == .blocked ||
+            startMovedAwayFromCachedPath
         guard shouldReplan else {
             status = .valid
             statusReason = "cached"
@@ -329,13 +376,21 @@ final class AutoPathPlannerService {
         lastPlanDurationMs = (planEnd - planStart) * 1000.0
     }
 
-    func updateProgress(currentPosition: SIMD3<Float>, arrivalRadius: Float = 1.8) {
+    func updateProgress(
+        currentPosition: SIMD3<Float>,
+        arrivalRadius: Float = 1.8,
+        planarOnly: Bool = false
+    ) {
         guard !waypoints.isEmpty else { return }
         let radius = max(0.4, arrivalRadius)
+        let currentPlanar = SIMD2<Float>(currentPosition.x, currentPosition.z)
 
         while currentIndex < (waypoints.count - 1) {
             let target = waypoints[currentIndex]
-            if simd_distance(currentPosition, target) <= radius {
+            let distance = planarOnly
+                ? simd_distance(currentPlanar, SIMD2<Float>(target.x, target.z))
+                : simd_distance(currentPosition, target)
+            if distance <= radius {
                 currentIndex += 1
             } else {
                 break
@@ -346,6 +401,30 @@ final class AutoPathPlannerService {
     func currentTarget() -> SIMD3<Float>? {
         guard !waypoints.isEmpty else { return nil }
         return waypoints[min(currentIndex, max(0, waypoints.count - 1))]
+    }
+
+    func lookaheadTarget(currentPosition: SIMD3<Float>, minimumDistance: Float) -> SIMD3<Float>? {
+        guard !waypoints.isEmpty else { return nil }
+
+        let clampedIndex = min(currentIndex, max(0, waypoints.count - 1))
+        var remaining = max(0.0, minimumDistance)
+        var previous = currentPosition
+
+        for index in clampedIndex..<waypoints.count {
+            let waypoint = waypoints[index]
+            let segment = waypoint - previous
+            let segmentLength = simd_length(segment)
+
+            if segmentLength >= max(0.001, remaining) {
+                let t = remaining / segmentLength
+                return previous + segment * t
+            }
+
+            remaining -= segmentLength
+            previous = waypoint
+        }
+
+        return waypoints.last
     }
 
     func replanReasonIfNeeded(
@@ -400,8 +479,8 @@ final class AutoPathPlannerService {
     ) -> NavigationDirectPathAssessment {
         guard ensureGrid(terrain: terrain, obstacles: obstacles, droneRadius: droneRadius),
               let grid,
-              let startCell = grid.nearestFreeCell(to: start),
-              let goalCell = grid.nearestFreeCell(to: goal) else {
+              let startCell = grid.nearestFreeCell(to: start, preferredToward: goal),
+              let goalCell = grid.nearestFreeCell(to: goal, preferredToward: start) else {
             return .unavailable
         }
 
@@ -577,7 +656,9 @@ final class AutoPathPlannerService {
         }
 
         let densityAdjustment: Float = terrain.density > 0.75 ? 0.28 : (terrain.density > 0.55 ? 0.14 : 0.0)
-        return base + densityAdjustment
+        let worldWidth = terrain.worldHalfExtent * 2.0
+        let gridBudgetCellSize = worldWidth / 520.0
+        return max(base + densityAdjustment, gridBudgetCellSize)
     }
 
     private func astar(

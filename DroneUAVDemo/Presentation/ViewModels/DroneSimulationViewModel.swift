@@ -1017,6 +1017,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private var missionSafetyState: MissionSafetyState = .idle
     private var fixedWingMissionArbiterDecision: FixedWingMissionArbiterDecision = .nominal
     private var activeRouteTargetSource: ActiveRouteTargetSource = .none
+    private var activeRouteTargetAltitude: Float?
+    private var activeRouteTargetAltitudeMarkerID: UUID?
+    private var multirotorMarkerLastPlanTick: UInt64?
     private var missionObservation = MissionObservationAccumulator()
     private var externalControllerOverlayActive: Bool = false
     private var activeFixedWingGuidanceSource: FixedWingGuidanceSource = .none
@@ -4897,6 +4900,10 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        if isMultirotorMarkerRouteCollisionManagedByPlanner {
+            return
+        }
+
         switch collisionAnalysis.emergencyAction {
         case .none, .slowDown:
             return
@@ -4923,6 +4930,13 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    private var isMultirotorMarkerRouteCollisionManagedByPlanner: Bool {
+        selectedDroneProfile.airframeClass == .multirotor &&
+            mode == .autoPath &&
+            targetMarkerState != nil &&
+            activeRouteTargetSource != .none
+    }
+
     private func applyResolvedFlightControls(
         deltaTime: Float,
         controlState: ResolvedControlState
@@ -4946,14 +4960,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         manualYawIntent = route.yawInput.intent * (route.yawInput.speedBoost ? 1.35 : 1.0)
         let maxAltitude = Double(terrain.maxFlightAltitude)
-        var effectiveAxis = route.axisInput
-        var markerDirective: AutoNavigationDirective?
-        let markerObstacleAvoidanceActive = route.authority == .markerGuidance &&
-            selectedDroneProfile.airframeClass == .multirotor &&
-            collisionAnalysis.emergencyAction == .avoid
-        let isMarkerGuidanceMultirotor = route.authority == .markerGuidance &&
-            selectedDroneProfile.airframeClass == .multirotor &&
-            !markerObstacleAvoidanceActive
+        let effectiveAxis = route.axisInput
 
         if route.authority == .manual, mode == .hover {
             setFlightMode(.manual, reason: "manual_input_exit_hover")
@@ -4968,18 +4975,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if route.shouldAttemptMarkerGuidance,
            selectedDroneProfile.airframeClass == .multirotor {
-            markerDirective = updateTargetMarkerAutoNavigation(deltaTime: deltaTime)
-            if let directive = markerDirective {
-                effectiveAxis = keyboardAxisInput(from: directive)
-                if isMarkerGuidanceMultirotor {
-                    effectiveAxis = KeyboardAxisInput(
-                        forward: effectiveAxis.forward,
-                        strafe: effectiveAxis.strafe,
-                        vertical: 0.0,
-                        speedBoost: effectiveAxis.speedBoost
-                    )
-                }
-            }
+            _ = applyMultirotorTargetMarkerGuidance(deltaTime: deltaTime)
+            return
         }
 
         let hasEffectiveYawInput = abs(route.yawInput.intent) > 0.001
@@ -5171,25 +5168,12 @@ final class DroneSimulationViewModel: ObservableObject {
         let climb = effectiveAxis.vertical * (effectiveAxis.speedBoost ? 5.4 : 3.0) * deltaTime
         let pitchScale: Float = effectiveControlMode == .acro ? 52.0 : 28.0
         let rollScale: Float = effectiveControlMode == .acro ? 52.0 : 26.0
-        let autoAltitudeTarget = markerObstacleAvoidanceActive
-            ? nil
-            : markerDirective.map { Double($0.targetAltitude).clamped(to: 0.0...maxAltitude) }
-        let hoverBaselineThrottle = Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle)
 
         updateControlValues({ values in
-            if let autoAltitudeTarget {
-                values.y = autoAltitudeTarget
-            } else {
-                values.y = (values.y + Double(climb)).clamped(to: 0.0...maxAltitude)
-            }
+            values.y = (values.y + Double(climb)).clamped(to: 0.0...maxAltitude)
 
-            if isMarkerGuidanceMultirotor && markerDirective != nil {
-                let throttleTarget = hoverBaselineThrottle.clamped(to: 0.0...1.0)
-                values.throttle = values.throttle + (throttleTarget - values.throttle) * 0.18
-            } else {
-                let verticalThrottleDelta = Double(effectiveAxis.vertical) * (effectiveAxis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
-                values.throttle = (values.throttle + verticalThrottleDelta).clamped(to: 0.0...1.0)
-            }
+            let verticalThrottleDelta = Double(effectiveAxis.vertical) * (effectiveAxis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
+            values.throttle = (values.throttle + verticalThrottleDelta).clamped(to: 0.0...1.0)
             values.yaw = Double(state.orientation.z.radiansToDegrees)
 
             switch effectiveControlMode {
@@ -5531,10 +5515,10 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func updateTargetMarkerAutoNavigation(deltaTime: Float) -> AutoNavigationDirective? {
-        guard targetMarkerState != nil else {
+    private func applyMultirotorTargetMarkerGuidance(deltaTime: Float) -> Bool {
+        guard let marker = targetMarkerState else {
             navigationSnapshot = .idle
-            return nil
+            return false
         }
 
         guard canStartTargetMarkerAutoNavigation else {
@@ -5543,103 +5527,187 @@ final class DroneSimulationViewModel: ObservableObject {
             if mode == .autoPath {
                 setFlightMode(.manual, reason: "marker_auto_navigation_unavailable")
             }
-            return nil
-        }
-
-        let travelAltitude = targetMarkerTravelAltitude()
-        if !autoNavigationController.isActive {
-            autoNavigationController.start(safeTravelAltitude: travelAltitude)
-        }
-
-        let input = AutoNavigationUpdateInput(
-            position: state.position,
-            velocity: state.velocity,
-            currentYawRadians: state.orientation.z,
-            physicalState: physicalState,
-            airframeClass: selectedDroneProfile.airframeClass,
-            fixedWingParameters: selectedDroneProfile.fixedWingParameters,
-            deltaTime: deltaTime,
-            safeTravelAltitude: travelAltitude
-        )
-
-        guard let directive = autoNavigationController.update(with: input) else {
-            navigationSnapshot = .idle
-            switch autoNavigationController.consumeCompletionReason() {
-            case .reachedTarget:
-                finishTargetMarkerAutoNavigation()
-            case .cancelled, .none:
-                if mode == .autoPath {
-                    setFlightMode(.manual, reason: "marker_auto_navigation_cancelled")
-                }
-            }
-            return nil
-        }
-
-        if shouldStabilizeMarkerArrivalWithHover(directive) {
-            navigationSnapshot = .idle
-            hover()
-            return nil
-        }
-
-        navigationSnapshot = NavigationPathSnapshot(
-            status: .valid,
-            currentWaypointIndex: 0,
-            remainingWaypoints: 1,
-            pathLengthMeters: directive.distanceToTarget,
-            remainingDistanceMeters: directive.distanceToTarget,
-            waypoints: [directive.targetWorldPosition],
-            start: state.position,
-            goal: directive.targetWorldPosition,
-            reason: "target_marker"
-        )
-        return directive
-    }
-
-    private func shouldStabilizeMarkerArrivalWithHover(_ directive: AutoNavigationDirective) -> Bool {
-        guard selectedDroneProfile.airframeClass == .multirotor,
-              mode == .autoPath,
-              autoNavigationController.phase == .hold else {
             return false
         }
 
+        let travelAltitude = targetMarkerTravelAltitude()
+        guard let pathTarget = prepareMultirotorMarkerPath(
+            marker: marker,
+            travelAltitude: travelAltitude
+        ) else {
+            return false
+        }
+
+        if shouldFinishMultirotorMarkerGuidance(marker: marker) {
+            navigationSnapshot = .idle
+            finishTargetMarkerAutoNavigation()
+            return true
+        }
+
+        autoNavigationController.cancel()
+        applyAutopilotTrackingControl(
+            target: pathTarget,
+            targetAltitude: travelAltitude,
+            speedScale: multirotorMarkerSpeedScale(),
+            yawAlignToHome: false,
+            deltaTime: deltaTime
+        )
+        return true
+    }
+
+    private func prepareMultirotorMarkerPath(
+        marker: TargetMarkerState,
+        travelAltitude: Float
+    ) -> SIMD3<Float>? {
+        let finalGoal = clampToWorldBounds(marker.worldPosition(altitude: travelAltitude))
+        autoPathPlanner.updateProgress(
+            currentPosition: state.position,
+            arrivalRadius: 1.35,
+            planarOnly: true
+        )
+
+        var replanReason = autoPathPlanner.replanReasonIfNeeded(
+            currentPosition: state.position,
+            collisionRisk: collisionAnalysis.riskScore,
+            deviationTolerance: max(2.2, terrain.worldHalfExtent * 0.025)
+        )
+        if replanReason == nil,
+           collisionAnalysis.riskScore >= 0.42 {
+            replanReason = "route_collision_risk"
+        }
+
+        if let replanReason,
+           shouldRefreshMultirotorMarkerPath(for: replanReason) {
+            autoPathPlanner.planIfNeeded(
+                start: state.position,
+                goal: finalGoal,
+                terrain: terrain,
+                obstacles: navigationObstaclesIncludingNoFlyZones(),
+                droneRadius: selectedDroneProfile.collisionRadius,
+                modeTag: activeRouteTargetSource == .mission ? "multirotor_mission_marker" : "multirotor_marker",
+                forceRecompute: replanReason != "no_waypoints",
+                reason: replanReason
+            )
+            multirotorMarkerLastPlanTick = simulationTickCounter
+            autoPathPlanner.updateProgress(
+                currentPosition: state.position,
+                arrivalRadius: 1.35,
+                planarOnly: true
+            )
+        }
+
+        navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
+
+        let finalDistance = marker.distance(from: currentPlanarPosition())
+        let plannedTarget = finalDistance <= multirotorMarkerFinalApproachDistance()
+            ? finalGoal
+            : autoPathPlanner.lookaheadTarget(
+                currentPosition: state.position,
+                minimumDistance: multirotorMarkerLookaheadDistance()
+            )
+
+        guard let plannedTarget else {
+            autoNavigationController.cancel()
+            let hoverThrottle = Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle)
+            updateControlValues({ values in
+                values.x = Double(state.position.x)
+                values.y = Double(max(state.position.y, min(travelAltitude, terrain.maxFlightAltitude - 2.0)))
+                values.z = Double(state.position.z)
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.yaw = Double(state.orientation.z.radiansToDegrees)
+                values.throttle = max(values.throttle, hoverThrottle)
+            }, markManual: false)
+            return nil
+        }
+
+        return correctedMultirotorMarkerPathTarget(
+            plannedTarget,
+            finalGoal: finalGoal,
+            currentDistanceToGoal: finalDistance
+        )
+    }
+
+    private func correctedMultirotorMarkerPathTarget(
+        _ plannedTarget: SIMD3<Float>,
+        finalGoal: SIMD3<Float>,
+        currentDistanceToGoal: Float
+    ) -> SIMD3<Float> {
+        let plannedDistanceToGoal = simd_distance(
+            SIMD2<Float>(plannedTarget.x, plannedTarget.z),
+            SIMD2<Float>(finalGoal.x, finalGoal.z)
+        )
+        let allowedRegression = max(3.0, multirotorMarkerLookaheadDistance() * 0.45)
+        guard plannedDistanceToGoal > currentDistanceToGoal + allowedRegression else {
+            return plannedTarget
+        }
+
+        let directAssessment = autoPathPlanner.assessDirectPath(
+            from: state.position,
+            to: finalGoal,
+            terrain: terrain,
+            obstacles: navigationObstaclesIncludingNoFlyZones(),
+            droneRadius: selectedDroneProfile.collisionRadius
+        )
+        if !directAssessment.blocked && directAssessment.maxPenalty < 0.36 {
+            return finalGoal
+        }
+
+        return plannedTarget
+    }
+
+    private func shouldRefreshMultirotorMarkerPath(for reason: String) -> Bool {
+        if reason == "no_waypoints" {
+            return true
+        }
+
+        let minimumInterval: UInt64 = (reason == "high_collision_risk" || reason == "route_collision_risk") ? 8 : 18
+        guard let lastTick = multirotorMarkerLastPlanTick else {
+            return true
+        }
+        return simulationTickCounter >= lastTick + minimumInterval
+    }
+
+    private func multirotorMarkerLookaheadDistance() -> Float {
+        let horizontalSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        return (10.0 + horizontalSpeed * 1.2).clamped(to: 10.0...18.0)
+    }
+
+    private func multirotorMarkerFinalApproachDistance() -> Float {
+        max(7.5, multirotorMarkerLookaheadDistance() * 0.65)
+    }
+
+    private func multirotorMarkerSpeedScale() -> Float {
+        switch collisionAnalysis.riskScore {
+        case 0.72...:
+            return 0.62
+        case 0.55..<0.72:
+            return 0.76
+        default:
+            return 1.0
+        }
+    }
+
+    private func shouldFinishMultirotorMarkerGuidance(marker: TargetMarkerState) -> Bool {
+        guard activeRouteTargetSource != .mission else {
+            return false
+        }
         let horizontalSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
         let verticalSpeed = abs(state.velocity.y)
         let hoverHandoffRadius: Float
 
         if let dropZone = missionPlanState.dropZone,
            missionPlanState.isDeliveryMissionReady,
-           let targetMarkerState,
-           simd_distance(targetMarkerState.position, dropZone.center) <= 0.001 {
+           simd_distance(marker.position, dropZone.center) <= 0.001 {
             let releaseRadius = min(dropZone.radius, max(0.8, dropZone.radius * 0.24))
             hoverHandoffRadius = max(0.85, min(1.35, releaseRadius))
         } else {
             hoverHandoffRadius = 0.85
         }
 
-        return directive.distanceToTarget <= hoverHandoffRadius &&
+        return marker.distance(from: currentPlanarPosition()) <= hoverHandoffRadius &&
             horizontalSpeed <= 0.95 &&
             verticalSpeed <= 0.55
-    }
-
-    private func keyboardAxisInput(from directive: AutoNavigationDirective) -> KeyboardAxisInput {
-        let axisIntent = directive.axisIntent
-        let speedEnvelope = missionAutopilotAdapter.controlEnvelope(
-            for: activeMissionAutopilotPlan,
-            currentHorizontalSpeed: simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)),
-            profileMaxSpeed: selectedDroneProfile.maxHorizontalSpeedMps
-        )
-        let shouldBoostForMissionSpeed = directive.distanceToTarget > 1.5 &&
-            autoNavigationController.phase != .hold &&
-            speedEnvelope.forceSpeedBoost
-        let speedBoost = autoNavigationController.phase == .takeoff ||
-            abs(axisIntent.vertical) > 0.72 ||
-            shouldBoostForMissionSpeed
-        return KeyboardAxisInput(
-            forward: (axisIntent.forward * speedEnvelope.axisScale).clamped(to: -1.0...1.0),
-            strafe: (axisIntent.strafe * speedEnvelope.axisScale).clamped(to: -1.0...1.0),
-            vertical: axisIntent.vertical.clamped(to: -1.0...1.0),
-            speedBoost: speedBoost
-        )
     }
 
     private func finishTargetMarkerAutoNavigation() {
@@ -5788,7 +5856,8 @@ final class DroneSimulationViewModel: ObservableObject {
             currentPosition: state.position,
             arrivalRadius: selectedDroneProfile.airframeClass == .multirotor
                 ? 1.6
-                : max(3.4, selectedDroneProfile.fixedWingParameters?.waypointAcceptanceRadiusMeters ?? 3.4)
+                : max(3.4, selectedDroneProfile.fixedWingParameters?.waypointAcceptanceRadiusMeters ?? 3.4),
+            planarOnly: selectedDroneProfile.airframeClass == .multirotor
         )
         navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
 
@@ -5894,7 +5963,8 @@ final class DroneSimulationViewModel: ObservableObject {
                     : max(
                         6.4,
                         (selectedDroneProfile.fixedWingParameters?.waypointAcceptanceRadiusMeters ?? 3.6) * 1.45
-                    )
+                    ),
+                planarOnly: selectedDroneProfile.airframeClass == .multirotor
             )
             navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
 
@@ -6341,6 +6411,14 @@ final class DroneSimulationViewModel: ObservableObject {
         autoNavigationController.cancel()
         navigationSnapshot = .idle
         resetFixedWingAutopilotCommands()
+        resetActiveRouteTargetGuidanceCache()
+    }
+
+    private func resetActiveRouteTargetGuidanceCache() {
+        activeRouteTargetAltitude = nil
+        activeRouteTargetAltitudeMarkerID = nil
+        multirotorMarkerLastPlanTick = nil
+        multicopterAutopilotController.reset()
     }
 
     private var activeMissionAutopilotPlan: MissionPlan? {
@@ -6349,6 +6427,14 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func targetMarkerTravelAltitude() -> Float {
         let executionCeiling = max(6.0, terrain.maxFlightAltitude - 2.0)
+        if selectedDroneProfile.airframeClass == .multirotor,
+           let marker = targetMarkerState,
+           activeRouteTargetSource != .none,
+           activeRouteTargetAltitudeMarkerID == marker.id,
+           let cachedAltitude = activeRouteTargetAltitude {
+            return cachedAltitude.clamped(to: 0.0...executionCeiling)
+        }
+
         let baselineAltitude: Float
         switch selectedDroneProfile.airframeClass {
         case .multirotor:
@@ -6362,11 +6448,20 @@ final class DroneSimulationViewModel: ObservableObject {
                 max(10.0, homePosition.y + 8.0, state.position.y + 3.4)
             )
         }
-        return missionAutopilotAdapter.resolvedTravelAltitude(
+        let resolvedAltitude = missionAutopilotAdapter.resolvedTravelAltitude(
             for: activeMissionAutopilotPlan,
             baselineAltitude: baselineAltitude,
             terrainMaxAltitude: executionCeiling
         )
+        if selectedDroneProfile.airframeClass == .multirotor,
+           let marker = targetMarkerState,
+           activeRouteTargetSource != .none {
+            let clampedAltitude = resolvedAltitude.clamped(to: 0.0...executionCeiling)
+            activeRouteTargetAltitudeMarkerID = marker.id
+            activeRouteTargetAltitude = clampedAltitude
+            return clampedAltitude
+        }
+        return resolvedAltitude
     }
 
     private func buildFlightInputState(from controlState: ResolvedControlState) -> FlightInputState {
@@ -6594,9 +6689,41 @@ final class DroneSimulationViewModel: ObservableObject {
         if let synthesizedStatus = currentFixedWingAutoNavigationStatus() {
             return synthesizedStatus
         }
+        if let synthesizedStatus = currentMultirotorMarkerNavigationStatus() {
+            return synthesizedStatus
+        }
         let safePosition = finiteVector(state.position, fallback: lastFiniteState.position)
         return autoNavigationController.status(
             from: SIMD2<Float>(safePosition.x, safePosition.z)
+        )
+    }
+
+    private func currentMultirotorMarkerNavigationStatus() -> AutoNavigationStatus? {
+        guard selectedDroneProfile.airframeClass == .multirotor,
+              mode == .autoPath,
+              let marker = targetMarkerState else {
+            return nil
+        }
+
+        let planarPosition = currentPlanarPosition()
+        let distance = marker.distance(from: planarPosition)
+        let bearing = marker.bearingDegrees(from: planarPosition)
+        let travelAltitude = targetMarkerTravelAltitude()
+        let phase: AutoNavigationPhase
+        if distance <= 1.2 {
+            phase = .hold
+        } else if physicalState.isGroundRestState || state.position.y < travelAltitude - 1.2 {
+            phase = .takeoff
+        } else {
+            phase = distance > 9.5 ? .cruise : .approach
+        }
+
+        return AutoNavigationStatus(
+            isActive: true,
+            phase: phase,
+            distanceToTarget: distance,
+            bearingDegrees: bearing,
+            hasTarget: true
         )
     }
 
@@ -12015,6 +12142,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         activeRouteTargetSource = acceptedMarker == nil ? .none : source
         targetMarkerState = acceptedMarker
+        resetActiveRouteTargetGuidanceCache()
 
         if let acceptedMarker {
             autoNavigationController.replaceTarget(acceptedMarker)

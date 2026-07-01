@@ -31,6 +31,9 @@ private enum MulticopterRouteTuning {
     static let maxYawRateDegPerSec: Float = 75.0 // matches a comfortable J/L feel
     static let forwardSlowdownAngleRadians: Float = 0.78 // ~45 degrees: pitch limited
     static let holdRadiusMeters: Float = 0.6     // do not chase noise inside this radius
+    static let lateralPositionGain: Float = 1.15
+    static let lateralVelocityDamping: Float = 2.1
+    static let brakingSpeedThreshold: Float = 0.12
 }
 
 final class MulticopterAutopilotController {
@@ -57,20 +60,24 @@ final class MulticopterAutopilotController {
             safeTarget.z - safeState.position.z
         )
         let headingDistance = simd_length(headingVector)
+        let planarVelocity = SIMD2<Float>(safeState.velocity.x, safeState.velocity.z)
+        let planarSpeed = simd_length(planarVelocity)
 
         // Hold position for invalid / extremely-close targets instead of
         // letting the controller spin a noisy bearing into a roll/pitch
         // command (this is what allowed the multicopter to "fly off" when
         // a stray marker landed under itself).
-        let targetIsUsable = headingDistance.isFinite &&
+        let targetHasBearing = headingDistance.isFinite &&
             headingDistance >= MulticopterRouteTuning.holdRadiusMeters
+        let targetIsUsable = targetHasBearing ||
+            (headingDistance.isFinite && planarSpeed > MulticopterRouteTuning.brakingSpeedThreshold)
 
         let yawDegrees = resolvedYawDegrees(
             context: context,
             safeState: safeState,
             headingVector: headingVector,
             headingDistance: headingDistance,
-            targetIsUsable: targetIsUsable
+            targetIsUsable: targetHasBearing
         )
 
         let controlScale = context.speedScale.isFinite ? context.speedScale : 1.0
@@ -94,15 +101,25 @@ final class MulticopterAutopilotController {
             // Soft slowdown when the nose is far from the heading: the more
             // the drone needs to turn, the less translational thrust we ask
             // for. This avoids the "drift sideways while turning" feel.
-            let yawErrorRadians = computeYawError(
-                fromYaw: safeState.orientation.z,
-                desiredYawRadians: yawRadiansForDirection(headingVector)
-            )
-            let alignmentScale = forwardScaleFromYawError(yawErrorRadians)
-            let scaledHeadingX = headingVector.x * alignmentScale
-            let scaledHeadingY = headingVector.y * alignmentScale
-            lateralRoll = clampFloat(-scaledHeadingX * 0.95 * controlScale, to: -16.0...16.0)
-            lateralPitch = clampFloat(scaledHeadingY * 0.95 * controlScale, to: -16.0...16.0)
+            let alignmentScale: Float
+            if targetHasBearing {
+                let yawErrorRadians = computeYawError(
+                    fromYaw: safeState.orientation.z,
+                    desiredYawRadians: yawRadiansForDirection(headingVector)
+                )
+                alignmentScale = forwardScaleFromYawError(yawErrorRadians)
+            } else {
+                alignmentScale = 1.0
+            }
+
+            let worldIntent = headingVector * alignmentScale -
+                planarVelocity * MulticopterRouteTuning.lateralVelocityDamping
+            let bodyAxes = bodyPlanarAxes(forYaw: safeState.orientation.z)
+            let localForwardIntent = simd_dot(worldIntent, bodyAxes.forward)
+            let localRightIntent = simd_dot(worldIntent, bodyAxes.right)
+            let lateralGain = MulticopterRouteTuning.lateralPositionGain * controlScale
+            lateralRoll = clampFloat(-localRightIntent * lateralGain, to: -16.0...16.0)
+            lateralPitch = clampFloat(-localForwardIntent * lateralGain, to: -16.0...16.0)
         } else {
             lateralRoll = 0.0
             lateralPitch = 0.0
@@ -234,11 +251,17 @@ final class MulticopterAutopilotController {
     }
 
     private func yawRadiansForDirection(_ direction: SIMD2<Float>) -> Float {
-        // Match the existing convention used elsewhere in the project where
-        // body-forward aligns with -Z (see SimpleDronePhysicsEngine line 445
-        // and AutoNavigationController.bodyForwardWorld).
+        // Match the physics convention: yaw 0 points body-forward along -Z.
         let yaw = atan2(-direction.x, -direction.y)
         return yaw.isFinite ? yaw : 0.0
+    }
+
+    private func bodyPlanarAxes(forYaw yaw: Float) -> (forward: SIMD2<Float>, right: SIMD2<Float>) {
+        let safeYaw = yaw.isFinite ? yaw : 0.0
+        return (
+            forward: SIMD2<Float>(-sin(safeYaw), -cos(safeYaw)),
+            right: SIMD2<Float>(cos(safeYaw), -sin(safeYaw))
+        )
     }
 
     private func computeYawError(
