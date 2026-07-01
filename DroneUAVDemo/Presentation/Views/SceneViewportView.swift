@@ -850,11 +850,13 @@ struct TerrainMapCanvas: View {
                 zoomFactor: zoomFactor
             )
 
-            context.fill(
-                Path(projection.mapRect),
-                with: .color(mapBackgroundColor.opacity(0.98))
-            )
+            drawMapBase(in: &context, projection: projection)
             context.clip(to: Path(projection.mapRect))
+            drawSatelliteTexture(in: &context, projection: projection)
+            drawSceneTerrainDetails(in: &context, projection: projection)
+            for object in snapshot.objects {
+                drawObject(object, in: &context, projection: projection)
+            }
             drawGrid(in: &context, projection: projection)
             drawOperationalEnvelope(in: &context, projection: projection)
             drawTrail(in: &context, projection: projection)
@@ -870,10 +872,6 @@ struct TerrainMapCanvas: View {
                 drawTargetLink(to: targetMarkerPosition, in: &context, projection: projection)
             }
 
-            for object in snapshot.objects {
-                drawObject(object, in: &context, projection: projection)
-            }
-
             drawDock(in: &context, projection: projection)
             if let targetMarkerPosition = routeTargetPosition ?? snapshot.targetMarkerPosition {
                 drawTargetMarker(at: targetMarkerPosition, in: &context, projection: projection)
@@ -886,6 +884,23 @@ struct TerrainMapCanvas: View {
                 lineWidth: 1.2
             )
         }
+    }
+
+    private func drawMapBase(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let rect = projection.mapRect
+        context.fill(Path(rect), with: .color(mapBackgroundColor.opacity(0.98)))
+
+        context.fill(
+            Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * 0.55)),
+            with: .color(Color.white.opacity(0.025))
+        )
+        context.fill(
+            Path(CGRect(x: rect.minX, y: rect.midY, width: rect.width, height: rect.height * 0.5)),
+            with: .color(Color.black.opacity(0.06))
+        )
     }
 
     private var mapBackgroundColor: Color {
@@ -903,34 +918,196 @@ struct TerrainMapCanvas: View {
         }
     }
 
+    private func drawSatelliteTexture(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        let texture = TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset)
+        let image = Image(decorative: texture, scale: 1.0, orientation: .up)
+        let halfExtent = max(1.0, snapshot.worldHalfExtent)
+        let worldRect = projection.projectedRect(
+            origin: SIMD2<Float>(-halfExtent, -halfExtent),
+            size: SIMD2<Float>(halfExtent * 2.0, halfExtent * 2.0)
+        )
+        context.draw(image, in: worldRect.integral.insetBy(dx: -0.5, dy: -0.5))
+        context.fill(Path(projection.mapRect), with: .color(satelliteColorGrade.opacity(0.18)))
+    }
+
+    private var satelliteColorGrade: Color {
+        switch snapshot.preset {
+        case .city:
+            return Color(red: 0.10, green: 0.11, blue: 0.10)
+        case .cargoYard:
+            return Color(red: 0.08, green: 0.09, blue: 0.09)
+        case .forest:
+            return Color(red: 0.03, green: 0.10, blue: 0.04)
+        case .field:
+            return Color(red: 0.06, green: 0.12, blue: 0.04)
+        case .gridDemo:
+            return Color(red: 0.05, green: 0.07, blue: 0.06)
+        }
+    }
+
+    private func drawSceneTerrainDetails(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard snapshot.preset == .field || snapshot.preset == .forest else {
+            return
+        }
+
+        let coverageScale = max(1.0, snapshot.worldHalfExtent / 96.0)
+        let detailScale = max(0.9, snapshot.mapScale.populationBudgetFactor * 0.58 + coverageScale * 0.42)
+        let halfExtent = snapshot.worldHalfExtent * 0.92
+        let isForest = snapshot.preset == .forest
+        let primaryCount = isForest
+            ? max(14, Int(12.0 + detailScale * 5.0))
+            : max(5, Int(4.0 + detailScale * 1.8))
+        let accentCount = isForest
+            ? max(7, Int(5.0 + detailScale * 2.4))
+            : max(2, Int(1.0 + detailScale * 0.8))
+        let shadowCount = isForest
+            ? max(8, Int(6.0 + detailScale * 2.2))
+            : 0
+        let seedOffset: UInt64 = isForest ? 0xF057 : 0xF13D
+        var generator = TerrainMapTerrainDetailRandom(seed: snapshot.terrainSeed &+ seedOffset)
+
+        for index in 0..<primaryCount {
+            drawTerrainDetailPatch(
+                width: Float.random(in: isForest ? 10.0...24.0 : 14.0...30.0, using: &generator),
+                height: Float.random(in: isForest ? 8.0...20.0 : 10.0...22.0, using: &generator),
+                halfExtent: halfExtent,
+                color: index % 4 == 0 ? terrainAccentColor(isForest: isForest) : terrainPrimaryColor(isForest: isForest),
+                projection: projection,
+                generator: &generator,
+                context: &context
+            )
+        }
+
+        for _ in 0..<accentCount {
+            drawTerrainDetailPatch(
+                width: Float.random(in: 8.0...18.0, using: &generator),
+                height: Float.random(in: 7.0...16.0, using: &generator),
+                halfExtent: halfExtent,
+                color: terrainAccentColor(isForest: isForest),
+                projection: projection,
+                generator: &generator,
+                context: &context
+            )
+        }
+
+        for _ in 0..<shadowCount {
+            drawTerrainDetailPatch(
+                width: Float.random(in: 5.0...11.0, using: &generator),
+                height: Float.random(in: 4.0...10.0, using: &generator),
+                halfExtent: halfExtent,
+                color: Color.black.opacity(0.16),
+                projection: projection,
+                generator: &generator,
+                context: &context
+            )
+        }
+    }
+
+    private func drawTerrainDetailPatch(
+        width: Float,
+        height: Float,
+        halfExtent: Float,
+        color: Color,
+        projection: TerrainMapProjection,
+        generator: inout TerrainMapTerrainDetailRandom,
+        context: inout GraphicsContext
+    ) {
+        let position = SIMD2<Float>(
+            Float.random(in: -halfExtent...halfExtent, using: &generator),
+            Float.random(in: -halfExtent...halfExtent, using: &generator)
+        )
+        let rotation = CGFloat(Float.random(in: 0.0...(.pi * 2.0), using: &generator))
+        let center = projection.project(position)
+        let size = projection.projectedSize(for: SIMD2<Float>(width, height))
+        let rect = CGRect(
+            x: -size.width * 0.5,
+            y: -size.height * 0.5,
+            width: size.width,
+            height: size.height
+        )
+        let path = Path(ellipseIn: rect)
+            .applying(CGAffineTransform(translationX: center.x, y: center.y).rotated(by: rotation))
+        context.fill(path, with: .color(color))
+    }
+
+    private func terrainPrimaryColor(isForest: Bool) -> Color {
+        isForest
+            ? Color(red: 0.18, green: 0.17, blue: 0.11).opacity(0.18)
+            : Color(red: 0.45, green: 0.40, blue: 0.21).opacity(0.12)
+    }
+
+    private func terrainAccentColor(isForest: Bool) -> Color {
+        isForest
+            ? Color(red: 0.18, green: 0.24, blue: 0.12).opacity(0.15)
+            : Color(red: 0.38, green: 0.44, blue: 0.20).opacity(0.10)
+    }
+
     private func drawGrid(
         in context: inout GraphicsContext,
         projection: TerrainMapProjection
     ) {
-        var gridPath = Path()
-        let divisions = 4
+        let divisions = max(1, MapViewportState.tacticalSectorDivisions)
+        let halfExtent = max(1.0, snapshot.worldHalfExtent)
+        let sectorStep = (halfExtent * 2.0) / Float(divisions)
+        let subdivisionCount = gridSubdivisionCount(for: sectorStep, projection: projection)
+        let minorStep = sectorStep / Float(subdivisionCount)
+        let lineCount = divisions * subdivisionCount
+        var minorPath = Path()
+        var majorPath = Path()
 
-        for index in 1..<divisions {
-            let ratio = CGFloat(index) / CGFloat(divisions)
-            let x = projection.mapRect.minX + projection.mapRect.width * ratio
-            let y = projection.mapRect.minY + projection.mapRect.height * ratio
-
-            gridPath.move(to: CGPoint(x: x, y: projection.mapRect.minY))
-            gridPath.addLine(to: CGPoint(x: x, y: projection.mapRect.maxY))
-            gridPath.move(to: CGPoint(x: projection.mapRect.minX, y: y))
-            gridPath.addLine(to: CGPoint(x: projection.mapRect.maxX, y: y))
+        for index in 0...lineCount {
+            let worldCoordinate = -halfExtent + Float(index) * minorStep
+            if index % subdivisionCount == 0 {
+                appendGridLine(coordinate: worldCoordinate, halfExtent: halfExtent, to: &majorPath, projection: projection)
+            } else {
+                appendGridLine(coordinate: worldCoordinate, halfExtent: halfExtent, to: &minorPath, projection: projection)
+            }
         }
 
-        gridPath.move(to: CGPoint(x: projection.mapRect.midX, y: projection.mapRect.minY))
-        gridPath.addLine(to: CGPoint(x: projection.mapRect.midX, y: projection.mapRect.maxY))
-        gridPath.move(to: CGPoint(x: projection.mapRect.minX, y: projection.mapRect.midY))
-        gridPath.addLine(to: CGPoint(x: projection.mapRect.maxX, y: projection.mapRect.midY))
-
         context.stroke(
-            gridPath,
-            with: .color(GroundControlPalette.border.opacity(0.72)),
-            lineWidth: 0.8
+            minorPath,
+            with: .color(Color.white.opacity(0.075)),
+            lineWidth: 0.5
         )
+        context.stroke(
+            majorPath,
+            with: .color(Color.white.opacity(0.25)),
+            lineWidth: 0.85
+        )
+    }
+
+    private func appendGridLine(
+        coordinate: Float,
+        halfExtent: Float,
+        to path: inout Path,
+        projection: TerrainMapProjection
+    ) {
+        path.move(to: projection.project(SIMD2<Float>(coordinate, -halfExtent)))
+        path.addLine(to: projection.project(SIMD2<Float>(coordinate, halfExtent)))
+        path.move(to: projection.project(SIMD2<Float>(-halfExtent, coordinate)))
+        path.addLine(to: projection.project(SIMD2<Float>(halfExtent, coordinate)))
+    }
+
+    private func gridSubdivisionCount(
+        for sectorStep: Float,
+        projection: TerrainMapProjection
+    ) -> Int {
+        let origin = projection.project(.zero)
+        let next = projection.project(SIMD2<Float>(sectorStep, 0.0))
+        let projectedStep = abs(next.x - origin.x)
+        if projectedStep > 200.0 {
+            return 4
+        }
+        if projectedStep > 110.0 {
+            return 2
+        }
+        return 1
     }
 
     private func drawTrail(
@@ -958,7 +1135,7 @@ struct TerrainMapCanvas: View {
         in context: inout GraphicsContext,
         projection: TerrainMapProjection
     ) {
-        let center = projection.project(.zero)
+        let center = projection.project(snapshot.dockPosition)
         drawRadius(snapshot.hardWorldBoundsRadius, color: GroundControlPalette.danger.opacity(0.36), style: StrokeStyle(lineWidth: 0.9, dash: [3, 6]), center: center, projection: projection, context: &context)
         drawRadius(snapshot.degradedLinkRadius, color: GroundControlPalette.warning.opacity(0.52), style: StrokeStyle(lineWidth: 1.0, dash: [5, 4]), center: center, projection: projection, context: &context)
         drawRadius(snapshot.linkQualityRadius, color: Color(red: 0.37, green: 0.73, blue: 0.96).opacity(0.78), style: StrokeStyle(lineWidth: 1.15, dash: [5, 4]), center: center, projection: projection, context: &context)
@@ -1178,12 +1355,14 @@ struct TerrainMapCanvas: View {
         switch object.kind {
         case .building:
             let path = Path(roundedRect: rect, cornerRadius: 1.5, style: .continuous)
-            context.fill(path, with: .color(Color(red: 0.56, green: 0.60, blue: 0.66).opacity(0.82)))
-            context.stroke(path, with: .color(Color.black.opacity(0.30)), lineWidth: 0.9)
+            context.fill(
+                Path(roundedRect: rect.offsetBy(dx: 1.0, dy: 1.3), cornerRadius: 1.5, style: .continuous),
+                with: .color(Color.black.opacity(0.30))
+            )
+            context.fill(path, with: .color(Color(red: 0.58, green: 0.60, blue: 0.56).opacity(0.76)))
+            context.stroke(path, with: .color(Color.white.opacity(0.14)), lineWidth: 0.6)
         case .tree:
-            let path = Path(ellipseIn: rect)
-            context.fill(path, with: .color(Color(red: 0.29, green: 0.56, blue: 0.30).opacity(0.72)))
-            context.stroke(path, with: .color(Color.black.opacity(0.18)), lineWidth: 0.5)
+            drawMapTree(object, center: center, size: size, context: &context)
         case .rock:
             let rockRect = rect.insetBy(dx: -0.4, dy: 0.2)
             let path = Path(ellipseIn: rockRect)
@@ -1216,6 +1395,48 @@ struct TerrainMapCanvas: View {
             context.fill(path, with: .color(Color(red: 0.31, green: 0.73, blue: 0.86).opacity(0.80)))
             context.stroke(path, with: .color(Color.black.opacity(0.20)), lineWidth: 0.6)
         }
+    }
+
+    private func drawMapTree(
+        _ object: DroneSimulationViewModel.TerrainMapObject,
+        center: CGPoint,
+        size: CGSize,
+        context: inout GraphicsContext
+    ) {
+        let isForest = snapshot.preset == .forest
+        let width = max(isForest ? 5.5 : 3.0, size.width * (isForest ? 1.15 : 0.58))
+        let height = max(isForest ? 5.0 : 3.0, size.height * (isForest ? 1.05 : 0.52))
+        let baseRect = CGRect(
+            x: center.x - width * 0.5,
+            y: center.y - height * 0.5,
+            width: width,
+            height: height
+        )
+        let shadowRect = baseRect.offsetBy(
+            dx: 0.8 + treeNoise(object, salt: 17.0) * 0.8,
+            dy: 1.0 + treeNoise(object, salt: 31.0) * 0.8
+        )
+        context.fill(
+            Path(ellipseIn: shadowRect),
+            with: .color(Color.black.opacity(isForest ? 0.20 : 0.12))
+        )
+        context.fill(
+            Path(ellipseIn: baseRect),
+            with: .color(Color(red: 0.04, green: 0.13, blue: 0.05).opacity(isForest ? 0.42 : 0.22))
+        )
+    }
+
+    private func treeNoise(
+        _ object: DroneSimulationViewModel.TerrainMapObject,
+        salt: CGFloat
+    ) -> CGFloat {
+        let value = sin(
+            CGFloat(object.position.x) * 12.9898
+                + CGFloat(object.position.y) * 78.233
+                + CGFloat(object.footprint.x) * 37.719
+                + salt
+        ) * 43758.5453
+        return value - floor(value)
     }
 
     private func drawDock(

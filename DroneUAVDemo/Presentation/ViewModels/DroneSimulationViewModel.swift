@@ -399,6 +399,7 @@ extension DroneSimulationViewModel {
         let preset: TerrainPreset
         let mapScale: MapScale
         let worldHalfExtent: Float
+        let terrainSeed: UInt64
         let operationalRadius: Float
         let linkQualityRadius: Float
         let degradedLinkRadius: Float
@@ -425,6 +426,7 @@ extension DroneSimulationViewModel {
             preset: TerrainConfiguration.default.preset,
             mapScale: TerrainConfiguration.default.mapScale,
             worldHalfExtent: TerrainConfiguration.default.worldHalfExtent,
+            terrainSeed: TerrainConfiguration.default.seed,
             operationalRadius: 0.0,
             linkQualityRadius: 0.0,
             degradedLinkRadius: 0.0,
@@ -11718,6 +11720,7 @@ final class DroneSimulationViewModel: ObservableObject {
             preset: terrain.preset,
             mapScale: terrain.mapScale,
             worldHalfExtent: extent,
+            terrainSeed: terrain.seed,
             operationalRadius: operationalStatus.operationalRadiusM,
             linkQualityRadius: operationalStatus.linkQualityRadiusM,
             degradedLinkRadius: operationalStatus.degradedLinkRadiusM,
@@ -11793,8 +11796,11 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let objects = sceneController.environmentMapDescriptors
             .filter { descriptor in
-                abs(descriptor.position.x) <= extent + descriptor.boundingRadius &&
-                abs(descriptor.position.z) <= extent + descriptor.boundingRadius
+                guard shouldShowEnvironmentObjectOnMap(descriptor.kind) else {
+                    return false
+                }
+                return abs(descriptor.position.x) <= extent + descriptor.boundingRadius &&
+                    abs(descriptor.position.z) <= extent + descriptor.boundingRadius
             }
             .map { descriptor in
                 TerrainMapObject(
@@ -11815,6 +11821,15 @@ final class DroneSimulationViewModel: ObservableObject {
         terrainMapObjectsCacheExtentBucket = extentBucket
         terrainMapObjectsCache = objects
         return objects
+    }
+
+    private func shouldShowEnvironmentObjectOnMap(_ kind: EnvironmentObjectKind) -> Bool {
+        switch kind {
+        case .tree, .building, .cargoContainer:
+            return true
+        case .pole, .rock, .crate, .marker:
+            return EnvironmentDebugOptions.showPlaceholderObjects
+        }
     }
 
     private func terrainMapStaticOverlayKey(extent: Float) -> TerrainMapStaticOverlayKey {
