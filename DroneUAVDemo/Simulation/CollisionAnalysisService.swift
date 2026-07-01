@@ -353,7 +353,9 @@ final class CollisionAnalysisService {
             let contactNormal: SIMD3<Float>
             let isTreeObstacle = obstacle.source.contains("tree")
             let treeHorizontalAvoidanceClearance = max(0.45, input.droneRadius * 0.45)
+            let treeVerticalAvoidanceClearance = max(0.18, input.droneRadius * 0.55)
             let shouldAvoidTreeHorizontally = isTreeObstacle &&
+                verticalGap <= treeVerticalAvoidanceClearance &&
                 horizontalClearance <= treeHorizontalAvoidanceClearance
 
             if shouldAvoidTreeHorizontally {
