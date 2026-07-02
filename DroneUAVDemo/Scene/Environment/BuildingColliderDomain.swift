@@ -2,7 +2,7 @@ import SceneKit
 
 // MARK: - Collider role
 
-enum BuildingColliderRole: String, Codable, CaseIterable {
+enum BuildingColliderRole: String, Codable, CaseIterable, Hashable {
     case floor
     case wall
     case roof
@@ -166,7 +166,6 @@ final class BuildingColliderRegistry {
     }
 
     func colliderInfo(for node: SCNNode) -> BuildingColliderInstance? {
-        guard let name = node.name else { return nil }
         lock.lock()
         defer { lock.unlock() }
         for (_, parts) in entries {
@@ -255,7 +254,6 @@ enum BuildingSweptCollision {
         }
 
         let rayDir = direction / travelLength
-        let segmentEnd = currentPosition
 
         var bestHitFraction: Float = 1.0
         var bestResult = SweptCollisionResult(

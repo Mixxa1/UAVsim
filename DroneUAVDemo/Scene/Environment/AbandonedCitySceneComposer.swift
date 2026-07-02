@@ -1,4 +1,3 @@
-import AppKit
 import SceneKit
 
 struct AbandonedCityCompositionResult {
@@ -8,6 +7,11 @@ struct AbandonedCityCompositionResult {
 
 final class AbandonedCitySceneComposer {
     static let rootName = "environment.abandonedCity.root"
+
+    private enum PhysicsCategory {
+        static let environment = 1 << 1
+        static let drone = 1 << 2
+    }
 
     private static let legacyRootNames: Set<String> = [
         "environment.city.root",
@@ -24,7 +28,9 @@ final class AbandonedCitySceneComposer {
 
     private let buildingLoader: AbandonedCityBuildingLoader
 
-    init(buildingLoader: AbandonedCityBuildingLoader = .shared) {
+    init(
+        buildingLoader: AbandonedCityBuildingLoader = .shared
+    ) {
         self.buildingLoader = buildingLoader
     }
 
@@ -33,6 +39,8 @@ final class AbandonedCitySceneComposer {
         terrain: TerrainConfiguration
     ) -> AbandonedCityCompositionResult {
         let removedCount = removeLegacyRoots(from: sceneRoot)
+        BuildingColliderRegistry.shared.reset()
+
         let root = SCNNode()
         root.name = Self.rootName
         sceneRoot.addChildNode(root)
@@ -58,7 +66,7 @@ final class AbandonedCitySceneComposer {
         )
         var descriptors: [EnvironmentObjectDescriptor] = []
         var nodesByID: [UUID: SCNNode] = [:]
-        var collisionBoxes = 0
+        var meshColliders = 0
 
         for placement in layout.placements {
             guard let buildingNode = buildingLoader.makeBuildingNode(
@@ -70,7 +78,24 @@ final class AbandonedCitySceneComposer {
             }
 
             buildingNode.simdPosition = placement.position
-            buildingNode.addChildNode(makeCollisionNode(for: placement))
+            let collisionMeshParts = buildingLoader.collisionMeshParts(
+                kind: placement.kind,
+                targetHeightMeters: placement.targetHeightMeters
+            )
+            let supportSurfaceTriangleParts = buildingLoader.supportSurfaceTriangleParts(
+                kind: placement.kind,
+                targetHeightMeters: placement.targetHeightMeters
+            )
+            if let meshCollisionNode = makeMeshCollisionNode(for: placement) {
+                buildingNode.addChildNode(meshCollisionNode)
+                meshColliders += 1
+            }
+            if let collisionDebugNode = buildingLoader.makeCollisionDebugNode(
+                kind: placement.kind,
+                targetHeightMeters: placement.targetHeightMeters
+            ) {
+                buildingNode.addChildNode(collisionDebugNode)
+            }
             root.addChildNode(buildingNode)
 
             let descriptor = EnvironmentObjectDescriptor(
@@ -88,11 +113,15 @@ final class AbandonedCitySceneComposer {
                     placement.normalizedSize.x,
                     placement.normalizedSize.z
                 ) * 0.5,
-                isCollidable: true
+                isCollidable: true,
+                collisionParts: [],
+                supportSurfaceParts: [],
+                collisionMeshParts: collisionMeshParts,
+                supportSurfaceTriangleParts: supportSurfaceTriangleParts,
+                usesScenePhysicsCollision: true
             )
             descriptors.append(descriptor)
             nodesByID[placement.id] = buildingNode
-            collisionBoxes += 1
         }
 
         #if DEBUG
@@ -102,7 +131,7 @@ final class AbandonedCitySceneComposer {
         print("[AbandonedCity] skippedSpawnOverlap=\(layout.skippedSpawnOverlap)")
         print("[AbandonedCity] skippedFootprintOverlap=\(layout.skippedFootprintOverlap)")
         print("[AbandonedCity] skippedOutOfBounds=\(layout.skippedOutOfBounds)")
-        print("[AbandonedCity] collisionBoxes=\(collisionBoxes)")
+        print("[AbandonedCity] meshColliders=\(meshColliders)")
         print("[AbandonedCity] treesSkipped=true roadsSkipped=true placeholdersSkipped=true")
         if descriptors.count < AbandonedCityOptions.minimumBuildingCount(for: terrain.mapScale) {
             print("[AbandonedCity] WARNING placed buildings below minimum count")
@@ -136,40 +165,40 @@ final class AbandonedCitySceneComposer {
         }
     }
 
-    private func makeCollisionNode(
+    private func makeMeshCollisionNode(
         for placement: AbandonedCityPlacement
-    ) -> SCNNode {
-        let width = max(1.0, placement.normalizedSize.x)
-        let height = max(1.0, placement.normalizedSize.y)
-        let depth = max(1.0, placement.normalizedSize.z)
-        let box = SCNBox(
-            width: CGFloat(width),
-            height: CGFloat(height),
-            length: CGFloat(depth),
-            chamferRadius: 0.0
-        )
-        let material = SCNMaterial()
-        material.lightingModel = .constant
-        material.diffuse.contents = NSColor.systemRed
-        material.transparency = AbandonedCityOptions.enableDebugCollisionBoxes ? 0.22 : 0.0
-        material.writesToDepthBuffer = false
-        box.materials = [material]
+    ) -> SCNNode? {
+        guard let shape = buildingLoader.makeCollisionShape(
+            kind: placement.kind,
+            targetHeightMeters: placement.targetHeightMeters
+        ) else {
+            return nil
+        }
 
-        let node = SCNNode(geometry: box)
-        node.name = "environment.abandonedCity.collision.\(placement.kind.rawValue).\(placement.id.uuidString)"
-        node.position = SCNVector3(0.0, height * 0.5, 0.0)
-        let shape = SCNPhysicsShape(
-            geometry: box,
-            options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.boundingBox]
-        )
+        let node = SCNNode()
+        node.name = "environment.abandonedCity.meshCollision.\(placement.kind.rawValue).\(placement.id.uuidString)"
         let body = SCNPhysicsBody(type: .static, shape: shape)
         body.isAffectedByGravity = false
         body.friction = 0.82
         body.restitution = 0.0
-        body.categoryBitMask = 1 << 1
-        body.collisionBitMask = 1 << 2
-        body.contactTestBitMask = 1 << 2
+        body.categoryBitMask = PhysicsCategory.environment |
+            BuildingPhysicsCategory.allBuildingParts
+        body.collisionBitMask = PhysicsCategory.drone
+        body.contactTestBitMask = PhysicsCategory.drone
         node.physicsBody = body
+        BuildingColliderRegistry.shared.register(
+            buildingID: placement.id,
+            instance: BuildingColliderInstance(
+                partID: "mesh",
+                role: .wall,
+                hitPoints: 9999.0,
+                crashSpeedThreshold: 3.0,
+                isBreakable: false,
+                blocksUAV: true,
+                node: node,
+                buildingID: placement.id
+            )
+        )
         return node
     }
 }

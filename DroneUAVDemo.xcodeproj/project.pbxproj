@@ -301,6 +301,7 @@
 		A15310000000000000000008 /* Abandoned_House_AspectStudios.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */; };
 		A15310000000000000000009 /* Abandoned_House_Sengchor.usdz in Resources */ = {isa = PBXBuildFile; fileRef = A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */; };
 		A1531000000000000000000A /* brittle_stone_albedo.png in Resources */ = {isa = PBXBuildFile; fileRef = A1530000000000000000000A /* brittle_stone_albedo.png */; };
+		A1531000000000000000000B /* BuildingColliderDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1530000000000000000000B /* BuildingColliderDomain.swift */; };
 		B20410000000000000000001 /* CargoContainerAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000001 /* CargoContainerAssetLoader.swift */; };
 		B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000002 /* AsphaltMaterialLoader.swift */; };
 		B20410000000000000000003 /* Asphalt13.usdz in Resources */ = {isa = PBXBuildFile; fileRef = B20400000000000000000003 /* Asphalt13.usdz */; };
@@ -619,6 +620,7 @@
 		A15300000000000000000008 /* Abandoned_House_AspectStudios.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_House_AspectStudios.usdz"; sourceTree = "<group>"; };
 		A15300000000000000000009 /* Abandoned_House_Sengchor.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Urban/Abandoned/Abandoned_House_Sengchor.usdz"; sourceTree = "<group>"; };
 		A1530000000000000000000A /* brittle_stone_albedo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Textures/Urban/Abandoned/brittle_stone_albedo.png"; sourceTree = "<group>"; };
+		A1530000000000000000000B /* BuildingColliderDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Environment/BuildingColliderDomain.swift"; sourceTree = "<group>"; };
 		B20400000000000000000001 /* CargoContainerAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CargoContainerAssetLoader.swift; sourceTree = "<group>"; };
 		B20400000000000000000002 /* AsphaltMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsphaltMaterialLoader.swift; sourceTree = "<group>"; };
 		B20400000000000000000003 /* Asphalt13.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Asphalt13.usdz"; sourceTree = "<group>"; };
@@ -864,6 +866,7 @@
 				A15300000000000000000003 /* AbandonedCityMaterialLoader.swift */,
 				A15300000000000000000004 /* AbandonedCityLayout.swift */,
 				A15300000000000000000005 /* AbandonedCitySceneComposer.swift */,
+				A1530000000000000000000B /* BuildingColliderDomain.swift */,
 				100000000000000000000142 /* FPVCameraAnchor.swift */,
 				100000000000000000000143 /* PayloadVisualFactory.swift */,
 				100000000000000000000157 /* PayloadDropCameraController.swift */,
@@ -1280,6 +1283,7 @@
 				A15310000000000000000003 /* AbandonedCityMaterialLoader.swift in Sources */,
 				A15310000000000000000004 /* AbandonedCityLayout.swift in Sources */,
 				A15310000000000000000005 /* AbandonedCitySceneComposer.swift in Sources */,
+				A1531000000000000000000B /* BuildingColliderDomain.swift in Sources */,
 				100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */,
 				10000000000000000000021E /* DroneFleetModel.swift in Sources */,
 				10000000000000000000021F /* DroneFleetManager.swift in Sources */,

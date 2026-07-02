@@ -269,6 +269,44 @@ struct EnvironmentCollisionPart {
     }
 }
 
+struct EnvironmentSupportSurfacePart {
+    let localCenter: SIMD3<Float>
+    let halfExtents: SIMD2<Float>
+    let yawRadians: Float
+    let normal: SIMD3<Float>
+    let source: String
+}
+
+struct EnvironmentCollisionMeshTriangle {
+    let point0: SIMD3<Float>
+    let point1: SIMD3<Float>
+    let point2: SIMD3<Float>
+}
+
+struct EnvironmentCollisionMeshPart {
+    let id: UUID
+    let triangles: [EnvironmentCollisionMeshTriangle]
+    let source: String
+
+    init(
+        id: UUID = UUID(),
+        triangles: [EnvironmentCollisionMeshTriangle],
+        source: String
+    ) {
+        self.id = id
+        self.triangles = triangles
+        self.source = source
+    }
+}
+
+struct EnvironmentSupportSurfaceTrianglePart {
+    let point0: SIMD3<Float>
+    let point1: SIMD3<Float>
+    let point2: SIMD3<Float>
+    let normal: SIMD3<Float>
+    let source: String
+}
+
 struct TerrainConfiguration {
     var preset: TerrainPreset
     var mapScale: MapScale
@@ -334,6 +372,10 @@ struct EnvironmentObjectDescriptor: Identifiable {
     let isCollidable: Bool
     let cargoAsset: CargoContainerAssetKind?
     let collisionParts: [EnvironmentCollisionPart]
+    let supportSurfaceParts: [EnvironmentSupportSurfacePart]
+    let collisionMeshParts: [EnvironmentCollisionMeshPart]
+    let supportSurfaceTriangleParts: [EnvironmentSupportSurfaceTrianglePart]
+    let usesScenePhysicsCollision: Bool
 
     init(
         id: UUID,
@@ -345,7 +387,11 @@ struct EnvironmentObjectDescriptor: Identifiable {
         boundingRadius: Float,
         isCollidable: Bool,
         cargoAsset: CargoContainerAssetKind? = nil,
-        collisionParts: [EnvironmentCollisionPart] = []
+        collisionParts: [EnvironmentCollisionPart] = [],
+        supportSurfaceParts: [EnvironmentSupportSurfacePart] = [],
+        collisionMeshParts: [EnvironmentCollisionMeshPart] = [],
+        supportSurfaceTriangleParts: [EnvironmentSupportSurfaceTrianglePart] = [],
+        usesScenePhysicsCollision: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -357,5 +403,9 @@ struct EnvironmentObjectDescriptor: Identifiable {
         self.isCollidable = isCollidable
         self.cargoAsset = cargoAsset
         self.collisionParts = collisionParts
+        self.supportSurfaceParts = supportSurfaceParts
+        self.collisionMeshParts = collisionMeshParts
+        self.supportSurfaceTriangleParts = supportSurfaceTriangleParts
+        self.usesScenePhysicsCollision = usesScenePhysicsCollision
     }
 }

@@ -1,6 +1,35 @@
 import Foundation
 import simd
 
+struct CollisionMeshTriangle {
+    let point0: SIMD3<Float>
+    let point1: SIMD3<Float>
+    let point2: SIMD3<Float>
+    let normal: SIMD3<Float>
+    let minimum: SIMD3<Float>
+    let maximum: SIMD3<Float>
+
+    init?(
+        point0: SIMD3<Float>,
+        point1: SIMD3<Float>,
+        point2: SIMD3<Float>
+    ) {
+        let rawNormal = simd_cross(point1 - point0, point2 - point0)
+        guard point0.x.isFinite, point0.y.isFinite, point0.z.isFinite,
+              point1.x.isFinite, point1.y.isFinite, point1.z.isFinite,
+              point2.x.isFinite, point2.y.isFinite, point2.z.isFinite,
+              simd_length_squared(rawNormal) > 0.000001 else {
+            return nil
+        }
+        self.point0 = point0
+        self.point1 = point1
+        self.point2 = point2
+        self.normal = simd_normalize(rawNormal)
+        self.minimum = simd_min(simd_min(point0, point1), point2)
+        self.maximum = simd_max(simd_max(point0, point1), point2)
+    }
+}
+
 struct CollisionObstacle {
     let id: UUID
     let center: SIMD3<Float>
@@ -10,6 +39,7 @@ struct CollisionObstacle {
     let topY: Float
     let planarHalfExtents: SIMD2<Float>?
     let yawRadians: Float
+    let meshTriangles: [CollisionMeshTriangle]?
 
     init(
         id: UUID,
@@ -19,7 +49,8 @@ struct CollisionObstacle {
         baseY: Float? = nil,
         topY: Float? = nil,
         planarHalfExtents: SIMD2<Float>? = nil,
-        yawRadians: Float = 0.0
+        yawRadians: Float = 0.0,
+        meshTriangles: [CollisionMeshTriangle]? = nil
     ) {
         self.id = id
         self.center = center
@@ -41,10 +72,15 @@ struct CollisionObstacle {
         self.topY = max(resolvedBase, resolvedTop)
         self.planarHalfExtents = planarHalfExtents
         self.yawRadians = yawRadians
+        self.meshTriangles = meshTriangles
     }
 
     var planarCenter: SIMD2<Float> {
         SIMD2<Float>(center.x, center.z)
+    }
+
+    var hasMeshCollision: Bool {
+        meshTriangles?.isEmpty == false
     }
 
     // `centerY`/`droneCenterY` below is actually the drone's ground/gear reference height —
@@ -303,18 +339,11 @@ final class CollisionAnalysisService {
         candidates.reserveCapacity(maxCandidateCount)
 
         for obstacle in input.obstacles {
-            let planarDelta = obstacle.planarCenter - dronePlanar
-            let planarDistanceSq = simd_length_squared(planarDelta)
             let verticalGap = obstacle.verticalGap(
                 toDroneCenterY: input.dronePosition.y,
                 droneRadius: input.droneRadius
             )
-            let planarGap: Float
-            if planarDistanceSq <= broadPhaseDistanceSq {
-                planarGap = 0.0
-            } else {
-                planarGap = sqrt(planarDistanceSq) - broadPhaseDistance
-            }
+            let planarGap = max(0.0, obstacle.planarSignedDistance(to: dronePlanar))
             let combinedGapSq = planarGap * planarGap + verticalGap * verticalGap
             guard combinedGapSq <= broadPhaseDistanceSq else {
                 continue
@@ -339,61 +368,39 @@ final class CollisionAnalysisService {
 
         for candidate in candidates {
             let obstacle = candidate.obstacle
-            let planarContact = obstacle.planarContact(
-                to: dronePlanar,
-                droneRadius: input.droneRadius
-            )
-            let horizontalClearance = planarContact.clearance
-            let verticalGap = obstacle.verticalGap(
-                toDroneCenterY: input.dronePosition.y,
-                droneRadius: input.droneRadius
-            )
             let clearance: Float
             let direction: SIMD3<Float>
             let contactNormal: SIMD3<Float>
-            let isTreeObstacle = obstacle.source.contains("tree")
-            let treeHorizontalAvoidanceClearance = max(0.45, input.droneRadius * 0.45)
-            let treeVerticalAvoidanceClearance = max(0.18, input.droneRadius * 0.55)
-            let shouldAvoidTreeHorizontally = isTreeObstacle &&
-                verticalGap <= treeVerticalAvoidanceClearance &&
-                horizontalClearance <= treeHorizontalAvoidanceClearance
 
-            if shouldAvoidTreeHorizontally {
-                clearance = horizontalClearance
-                direction = SIMD3<Float>(
-                    planarContact.towardObstacle.x,
-                    0.0,
-                    planarContact.towardObstacle.y
+            if obstacle.hasMeshCollision {
+                guard let meshContact = nearestMeshContact(
+                    obstacle: obstacle,
+                    dronePosition: input.dronePosition,
+                    droneRadius: input.droneRadius
+                ) else {
+                    continue
+                }
+                clearance = meshContact.clearance
+                direction = meshContact.direction
+                contactNormal = meshContact.contactNormal
+            } else {
+                let planarContact = obstacle.planarContact(
+                    to: dronePlanar,
+                    droneRadius: input.droneRadius
                 )
-                contactNormal = SIMD3<Float>(
-                    planarContact.outwardNormal.x,
-                    0.0,
-                    planarContact.outwardNormal.y
-                )
-            } else if horizontalClearance <= 0.0 {
-                let verticalPenetration = obstacle.verticalPenetration(
+                let horizontalClearance = planarContact.clearance
+                let verticalGap = obstacle.verticalGap(
                     toDroneCenterY: input.dronePosition.y,
                     droneRadius: input.droneRadius
                 )
-                let horizontalPenetrationDepth = max(0.0, -horizontalClearance)
-                let verticalPenetrationDepth = max(0.0, -verticalPenetration)
-                let shouldResolveVertically = verticalPenetrationDepth <= max(0.02, horizontalPenetrationDepth)
+                let isTreeObstacle = obstacle.source.contains("tree")
+                let treeHorizontalAvoidanceClearance = max(0.45, input.droneRadius * 0.45)
+                let treeVerticalAvoidanceClearance = max(0.18, input.droneRadius * 0.55)
+                let shouldAvoidTreeHorizontally = isTreeObstacle &&
+                    verticalGap <= treeVerticalAvoidanceClearance &&
+                    horizontalClearance <= treeHorizontalAvoidanceClearance
 
-                if verticalGap > 0.0 {
-                    clearance = verticalGap
-                    let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
-                    direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
-                    contactNormal = -direction
-                } else if shouldResolveVertically {
-                    // Resting on / hitting the top or bottom face (container roof, slab, etc.).
-                    // For tall obstacles like tree trunks this only wins when the vertical
-                    // penetration is actually shallower than the side penetration; otherwise the
-                    // normal must stay horizontal or the copter tries to climb through the tree.
-                    clearance = verticalPenetration
-                    let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
-                    direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
-                    contactNormal = -direction
-                } else {
+                if shouldAvoidTreeHorizontally {
                     clearance = horizontalClearance
                     direction = SIMD3<Float>(
                         planarContact.towardObstacle.x,
@@ -405,32 +412,68 @@ final class CollisionAnalysisService {
                         0.0,
                         planarContact.outwardNormal.y
                     )
-                }
-            } else if verticalGap <= 0.0 {
-                clearance = horizontalClearance
-                direction = SIMD3<Float>(
-                    planarContact.towardObstacle.x,
-                    0.0,
-                    planarContact.towardObstacle.y
-                )
-                contactNormal = SIMD3<Float>(
-                    planarContact.outwardNormal.x,
-                    0.0,
-                    planarContact.outwardNormal.y
-                )
-            } else {
-                clearance = simd_length(SIMD2<Float>(horizontalClearance, verticalGap))
+                } else if horizontalClearance <= 0.0 {
+                    let verticalPenetration = obstacle.verticalPenetration(
+                        toDroneCenterY: input.dronePosition.y,
+                        droneRadius: input.droneRadius
+                    )
+                    let horizontalPenetrationDepth = max(0.0, -horizontalClearance)
+                    let verticalPenetrationDepth = max(0.0, -verticalPenetration)
+                    let shouldResolveVertically = verticalPenetrationDepth <= max(0.02, horizontalPenetrationDepth)
 
-                let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
-                let composite = SIMD3<Float>(
-                    planarContact.towardObstacle.x * horizontalClearance,
-                    verticalDirection * verticalGap,
-                    planarContact.towardObstacle.y * horizontalClearance
-                )
-                direction = simd_length_squared(composite) > 0.0001
-                    ? simd_normalize(composite)
-                    : SIMD3<Float>(0.0, 0.0, 1.0)
-                contactNormal = -direction
+                    if verticalGap > 0.0 {
+                        clearance = verticalGap
+                        let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                        direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
+                        contactNormal = -direction
+                    } else if shouldResolveVertically {
+                        // Resting on / hitting the top or bottom face (container roof, slab, etc.).
+                        // For tall obstacles like tree trunks this only wins when the vertical
+                        // penetration is actually shallower than the side penetration; otherwise the
+                        // normal must stay horizontal or the copter tries to climb through the tree.
+                        clearance = verticalPenetration
+                        let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                        direction = SIMD3<Float>(0.0, verticalDirection, 0.0)
+                        contactNormal = -direction
+                    } else {
+                        clearance = horizontalClearance
+                        direction = SIMD3<Float>(
+                            planarContact.towardObstacle.x,
+                            0.0,
+                            planarContact.towardObstacle.y
+                        )
+                        contactNormal = SIMD3<Float>(
+                            planarContact.outwardNormal.x,
+                            0.0,
+                            planarContact.outwardNormal.y
+                        )
+                    }
+                } else if verticalGap <= 0.0 {
+                    clearance = horizontalClearance
+                    direction = SIMD3<Float>(
+                        planarContact.towardObstacle.x,
+                        0.0,
+                        planarContact.towardObstacle.y
+                    )
+                    contactNormal = SIMD3<Float>(
+                        planarContact.outwardNormal.x,
+                        0.0,
+                        planarContact.outwardNormal.y
+                    )
+                } else {
+                    clearance = simd_length(SIMD2<Float>(horizontalClearance, verticalGap))
+
+                    let verticalDirection: Float = obstacle.center.y >= input.dronePosition.y ? 1.0 : -1.0
+                    let composite = SIMD3<Float>(
+                        planarContact.towardObstacle.x * horizontalClearance,
+                        verticalDirection * verticalGap,
+                        planarContact.towardObstacle.y * horizontalClearance
+                    )
+                    direction = simd_length_squared(composite) > 0.0001
+                        ? simd_normalize(composite)
+                        : SIMD3<Float>(0.0, 0.0, 1.0)
+                    contactNormal = -direction
+                }
             }
 
             if clearance < nearestDistance {
@@ -505,19 +548,282 @@ final class CollisionAnalysisService {
 
         var best: CollisionSweepResult?
         for obstacle in obstacles {
-            guard let halfExtents = obstacle.planarHalfExtents,
-                  let hit = sweepSphereAgainstBox(
+            let hit: CollisionSweepResult?
+            if obstacle.hasMeshCollision {
+                hit = sweepSphereAgainstMesh(
+                    from: start,
+                    to: end,
+                    radius: droneRadius,
+                    obstacle: obstacle
+                )
+            } else if let halfExtents = obstacle.planarHalfExtents {
+                hit = sweepSphereAgainstBox(
                     from: start,
                     to: end,
                     radius: droneRadius,
                     obstacle: obstacle,
                     halfExtents: halfExtents
-                  ),
+                )
+            } else {
+                hit = nil
+            }
+            guard let hit,
                   best == nil || hit.hitFraction < (best?.hitFraction ?? 1.0) else {
                 continue
             }
             best = hit
         }
+        return best
+    }
+
+    private func nearestMeshContact(
+        obstacle: CollisionObstacle,
+        dronePosition: SIMD3<Float>,
+        droneRadius: Float
+    ) -> (clearance: Float, direction: SIMD3<Float>, contactNormal: SIMD3<Float>)? {
+        guard let triangles = obstacle.meshTriangles,
+              !triangles.isEmpty else {
+            return nil
+        }
+
+        let sphereCenter = dronePosition + SIMD3<Float>(0.0, droneRadius, 0.0)
+        let queryPadding = droneRadius + 12.0
+        var bestDistanceSq = Float.greatestFiniteMagnitude
+        var bestPoint = sphereCenter
+        var bestNormal = SIMD3<Float>(0.0, 1.0, 0.0)
+
+        for triangle in triangles {
+            guard sphereCenter.x >= triangle.minimum.x - queryPadding,
+                  sphereCenter.x <= triangle.maximum.x + queryPadding,
+                  sphereCenter.y >= triangle.minimum.y - queryPadding,
+                  sphereCenter.y <= triangle.maximum.y + queryPadding,
+                  sphereCenter.z >= triangle.minimum.z - queryPadding,
+                  sphereCenter.z <= triangle.maximum.z + queryPadding else {
+                continue
+            }
+
+            let closest = closestPoint(on: triangle, to: sphereCenter)
+            let delta = sphereCenter - closest
+            let distanceSq = simd_length_squared(delta)
+            guard distanceSq < bestDistanceSq else {
+                continue
+            }
+            bestDistanceSq = distanceSq
+            bestPoint = closest
+            bestNormal = orientedNormal(
+                triangle: triangle,
+                sphereCenter: sphereCenter,
+                fallbackDirection: delta
+            )
+        }
+
+        guard bestDistanceSq.isFinite else {
+            return nil
+        }
+
+        let distance = sqrt(max(0.0, bestDistanceSq))
+        let normal = distance > 0.0001
+            ? simd_normalize(sphereCenter - bestPoint)
+            : bestNormal
+        return (
+            distance - droneRadius,
+            -normal,
+            normal
+        )
+    }
+
+    private func sweepSphereAgainstMesh(
+        from start: SIMD3<Float>,
+        to end: SIMD3<Float>,
+        radius: Float,
+        obstacle: CollisionObstacle
+    ) -> CollisionSweepResult? {
+        guard let triangles = obstacle.meshTriangles,
+              !triangles.isEmpty else {
+            return nil
+        }
+
+        let centerStart = start + SIMD3<Float>(0.0, radius, 0.0)
+        let centerEnd = end + SIMD3<Float>(0.0, radius, 0.0)
+        let movement = centerEnd - centerStart
+        var best: CollisionSweepResult?
+
+        for triangle in triangles {
+            guard segmentBoundsMayIntersectTriangle(
+                from: centerStart,
+                to: centerEnd,
+                radius: radius,
+                triangle: triangle
+            ) else {
+                continue
+            }
+
+            if let planeHit = spherePlaneTriangleHit(
+                from: centerStart,
+                movement: movement,
+                radius: radius,
+                triangle: triangle
+            ), best == nil || planeHit.fraction < (best?.hitFraction ?? 1.0) {
+                best = CollisionSweepResult(
+                    obstacle: obstacle,
+                    contactPoint: start + (end - start) * planeHit.fraction,
+                    contactNormal: planeHit.normal,
+                    hitFraction: planeHit.fraction
+                )
+            }
+
+            if let edgeHit = sphereEdgeTriangleHit(
+                from: centerStart,
+                to: centerEnd,
+                radius: radius,
+                triangle: triangle
+            ), best == nil || edgeHit.fraction < (best?.hitFraction ?? 1.0) {
+                best = CollisionSweepResult(
+                    obstacle: obstacle,
+                    contactPoint: start + (end - start) * edgeHit.fraction,
+                    contactNormal: edgeHit.normal,
+                    hitFraction: edgeHit.fraction
+                )
+            }
+        }
+
+        return best
+    }
+
+    private func segmentBoundsMayIntersectTriangle(
+        from start: SIMD3<Float>,
+        to end: SIMD3<Float>,
+        radius: Float,
+        triangle: CollisionMeshTriangle
+    ) -> Bool {
+        let segmentMinimum = simd_min(start, end) - SIMD3<Float>(repeating: radius)
+        let segmentMaximum = simd_max(start, end) + SIMD3<Float>(repeating: radius)
+        return segmentMaximum.x >= triangle.minimum.x &&
+            segmentMinimum.x <= triangle.maximum.x &&
+            segmentMaximum.y >= triangle.minimum.y &&
+            segmentMinimum.y <= triangle.maximum.y &&
+            segmentMaximum.z >= triangle.minimum.z &&
+            segmentMinimum.z <= triangle.maximum.z
+    }
+
+    private func spherePlaneTriangleHit(
+        from start: SIMD3<Float>,
+        movement: SIMD3<Float>,
+        radius: Float,
+        triangle: CollisionMeshTriangle
+    ) -> (fraction: Float, normal: SIMD3<Float>)? {
+        let signedStart = simd_dot(start - triangle.point0, triangle.normal)
+        let signedEnd = simd_dot(start + movement - triangle.point0, triangle.normal)
+        var candidates: [(fraction: Float, normal: SIMD3<Float>)] = []
+
+        addPlaneCrossing(
+            targetDistance: radius,
+            signedStart: signedStart,
+            signedEnd: signedEnd,
+            normal: triangle.normal,
+            candidates: &candidates
+        )
+        addPlaneCrossing(
+            targetDistance: -radius,
+            signedStart: signedStart,
+            signedEnd: signedEnd,
+            normal: -triangle.normal,
+            candidates: &candidates
+        )
+        if abs(signedStart) <= radius {
+            candidates.append((
+                fraction: 0.0,
+                normal: signedStart >= 0.0 ? triangle.normal : -triangle.normal
+            ))
+        }
+
+        for candidate in candidates.sorted(by: { $0.fraction < $1.fraction }) {
+            let center = start + movement * candidate.fraction
+            let surfacePoint = center - candidate.normal * radius
+            if point(surfacePoint, isInside: triangle, tolerance: 0.015) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private func addPlaneCrossing(
+        targetDistance: Float,
+        signedStart: Float,
+        signedEnd: Float,
+        normal: SIMD3<Float>,
+        candidates: inout [(fraction: Float, normal: SIMD3<Float>)]
+    ) {
+        let denominator = signedEnd - signedStart
+        guard abs(denominator) > 0.000001 else {
+            return
+        }
+        let fraction = (targetDistance - signedStart) / denominator
+        guard fraction >= 0.0, fraction <= 1.0 else {
+            return
+        }
+        candidates.append((fraction, normal))
+    }
+
+    private func sphereEdgeTriangleHit(
+        from start: SIMD3<Float>,
+        to end: SIMD3<Float>,
+        radius: Float,
+        triangle: CollisionMeshTriangle
+    ) -> (fraction: Float, normal: SIMD3<Float>)? {
+        let edges = [
+            (triangle.point0, triangle.point1),
+            (triangle.point1, triangle.point2),
+            (triangle.point2, triangle.point0)
+        ]
+        var best: (fraction: Float, normal: SIMD3<Float>)?
+
+        let endpointChecks = [
+            (fraction: Float(0.0), point: start),
+            (fraction: Float(1.0), point: end)
+        ]
+        for endpoint in endpointChecks {
+            let closest = closestPoint(on: triangle, to: endpoint.point)
+            let delta = endpoint.point - closest
+            let distanceSq = simd_length_squared(delta)
+            guard distanceSq <= radius * radius else {
+                continue
+            }
+            let normal = distanceSq > 0.000001
+                ? simd_normalize(delta)
+                : orientedNormal(
+                    triangle: triangle,
+                    sphereCenter: endpoint.point,
+                    fallbackDirection: delta
+                )
+            if best == nil || endpoint.fraction < (best?.fraction ?? 1.0) {
+                best = (endpoint.fraction, normal)
+            }
+        }
+
+        for edge in edges {
+            let closest = closestPointsBetweenSegments(
+                start0: start,
+                end0: end,
+                start1: edge.0,
+                end1: edge.1
+            )
+            guard closest.distanceSquared <= radius * radius else {
+                continue
+            }
+            let delta = closest.point0 - closest.point1
+            let normal = simd_length_squared(delta) > 0.000001
+                ? simd_normalize(delta)
+                : orientedNormal(
+                    triangle: triangle,
+                    sphereCenter: closest.point0,
+                    fallbackDirection: delta
+                )
+            if best == nil || closest.fraction0 < (best?.fraction ?? 1.0) {
+                best = (closest.fraction0, normal)
+            }
+        }
+
         return best
     }
 
@@ -633,6 +939,164 @@ final class CollisionAnalysisService {
             return nil
         }
         return (entry, entryNormal)
+    }
+
+    private func closestPoint(
+        on triangle: CollisionMeshTriangle,
+        to point: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        let a = triangle.point0
+        let b = triangle.point1
+        let c = triangle.point2
+        let ab = b - a
+        let ac = c - a
+        let ap = point - a
+
+        let d1 = simd_dot(ab, ap)
+        let d2 = simd_dot(ac, ap)
+        if d1 <= 0.0, d2 <= 0.0 {
+            return a
+        }
+
+        let bp = point - b
+        let d3 = simd_dot(ab, bp)
+        let d4 = simd_dot(ac, bp)
+        if d3 >= 0.0, d4 <= d3 {
+            return b
+        }
+
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0.0, d1 >= 0.0, d3 <= 0.0 {
+            let v = d1 / (d1 - d3)
+            return a + ab * v
+        }
+
+        let cp = point - c
+        let d5 = simd_dot(ab, cp)
+        let d6 = simd_dot(ac, cp)
+        if d6 >= 0.0, d5 <= d6 {
+            return c
+        }
+
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0.0, d2 >= 0.0, d6 <= 0.0 {
+            let w = d2 / (d2 - d6)
+            return a + ac * w
+        }
+
+        let va = d3 * d6 - d5 * d4
+        if va <= 0.0, d4 - d3 >= 0.0, d5 - d6 >= 0.0 {
+            let w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+            return b + (c - b) * w
+        }
+
+        let denominator = 1.0 / (va + vb + vc)
+        let v = vb * denominator
+        let w = vc * denominator
+        return a + ab * v + ac * w
+    }
+
+    private func point(
+        _ point: SIMD3<Float>,
+        isInside triangle: CollisionMeshTriangle,
+        tolerance: Float
+    ) -> Bool {
+        let v0 = triangle.point1 - triangle.point0
+        let v1 = triangle.point2 - triangle.point0
+        let v2 = point - triangle.point0
+
+        let dot00 = simd_dot(v0, v0)
+        let dot01 = simd_dot(v0, v1)
+        let dot02 = simd_dot(v0, v2)
+        let dot11 = simd_dot(v1, v1)
+        let dot12 = simd_dot(v1, v2)
+        let denominator = dot00 * dot11 - dot01 * dot01
+        guard abs(denominator) > 0.000001 else {
+            return false
+        }
+
+        let inverse = 1.0 / denominator
+        let u = (dot11 * dot02 - dot01 * dot12) * inverse
+        let v = (dot00 * dot12 - dot01 * dot02) * inverse
+        return u >= -tolerance &&
+            v >= -tolerance &&
+            u + v <= 1.0 + tolerance
+    }
+
+    private func closestPointsBetweenSegments(
+        start0: SIMD3<Float>,
+        end0: SIMD3<Float>,
+        start1: SIMD3<Float>,
+        end1: SIMD3<Float>
+    ) -> (
+        fraction0: Float,
+        point0: SIMD3<Float>,
+        point1: SIMD3<Float>,
+        distanceSquared: Float
+    ) {
+        let d0 = end0 - start0
+        let d1 = end1 - start1
+        let r = start0 - start1
+        let a = simd_dot(d0, d0)
+        let e = simd_dot(d1, d1)
+        let f = simd_dot(d1, r)
+        var s: Float = 0.0
+        var t: Float = 0.0
+
+        if a <= 0.000001, e <= 0.000001 {
+            let delta = start0 - start1
+            return (0.0, start0, start1, simd_length_squared(delta))
+        }
+
+        if a <= 0.000001 {
+            s = 0.0
+            t = (f / e).clamped(to: 0.0...1.0)
+        } else {
+            let c = simd_dot(d0, r)
+            if e <= 0.000001 {
+                t = 0.0
+                s = (-c / a).clamped(to: 0.0...1.0)
+            } else {
+                let b = simd_dot(d0, d1)
+                let denominator = a * e - b * b
+                if abs(denominator) > 0.000001 {
+                    s = ((b * f - c * e) / denominator).clamped(to: 0.0...1.0)
+                } else {
+                    s = 0.0
+                }
+                let tNominal = b * s + f
+                if tNominal < 0.0 {
+                    t = 0.0
+                    s = (-c / a).clamped(to: 0.0...1.0)
+                } else if tNominal > e {
+                    t = 1.0
+                    s = ((b - c) / a).clamped(to: 0.0...1.0)
+                } else {
+                    t = tNominal / e
+                }
+            }
+        }
+
+        let point0 = start0 + d0 * s
+        let point1 = start1 + d1 * t
+        return (
+            s,
+            point0,
+            point1,
+            simd_length_squared(point0 - point1)
+        )
+    }
+
+    private func orientedNormal(
+        triangle: CollisionMeshTriangle,
+        sphereCenter: SIMD3<Float>,
+        fallbackDirection: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        if simd_length_squared(fallbackDirection) > 0.000001 {
+            return simd_normalize(fallbackDirection)
+        }
+        let signedDistance = simd_dot(sphereCenter - triangle.point0, triangle.normal)
+        return signedDistance >= 0.0 ? triangle.normal : -triangle.normal
     }
 
     // Matches SceneKit's actual eulerAngles.y direction — see the note on

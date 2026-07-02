@@ -54,8 +54,19 @@ private struct CityCleanupStats {
         let center: SIMD2<Float>
         let halfExtents: SIMD2<Float>
         let yawRadians: Float
-        let topY: Float
+        let planePoint: SIMD3<Float>
+        let normal: SIMD3<Float>
+        let triangle: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)?
         let source: String
+
+        func height(at point: SIMD2<Float>) -> Float? {
+            guard abs(normal.y) > 0.001 else {
+                return nil
+            }
+            return planePoint.y -
+                (normal.x * (point.x - planePoint.x) +
+                 normal.z * (point.y - planePoint.z)) / normal.y
+        }
     }
 
     private struct ObstacleProxySpec {
@@ -183,6 +194,7 @@ final class DroneSceneController {
     private var wingmanVisuals: [UUID: WingmanVisual] = [:]
     private var obstacleSourceByID: [UUID: String] = [:]
     private let collisionDebugNode = SCNNode()
+    private var abandonedCityCollisionDebugVisible = false
     private var obstacleDebugProxyNodes: [UUID: SCNNode] = [:]
     private let nearestContactNode = SCNNode()
     private let pathDebugNode = SCNNode()
@@ -1726,6 +1738,7 @@ final class DroneSceneController {
             .filter { $0 !== nearestContactNode }
             .forEach { $0.removeFromParentNode() }
         nearestContactNode.isHidden = true
+        abandonedCityCollisionDebugVisible = false
 
         pathDebugSignature = 0
         rebuildPathDebug(path: [])
@@ -2093,11 +2106,13 @@ final class DroneSceneController {
         guard enabled else {
             collisionDebugNode.isHidden = true
             nearestContactNode.isHidden = true
+            setAbandonedCityCollisionDebugVisible(false)
             return
         }
 
         ensureCollisionDebugMarkers()
         collisionDebugNode.isHidden = false
+        setAbandonedCityCollisionDebugVisible(true)
 
         let highlightColor: NSColor
         switch risk.emergencyAction {
@@ -2214,14 +2229,15 @@ final class DroneSceneController {
     ) -> Float? {
         var bestHeight: Float?
         for surface in supportSurfaces {
-            guard surface.topY <= maximumHeight + 0.08 else {
-                continue
-            }
             guard planarPoint(planarPosition, intersects: surface, clearanceRadius: clearanceRadius) else {
                 continue
             }
-            if bestHeight == nil || surface.topY > (bestHeight ?? -.greatestFiniteMagnitude) {
-                bestHeight = surface.topY
+            guard let surfaceHeight = surface.height(at: planarPosition),
+                  surfaceHeight <= maximumHeight + 0.08 else {
+                continue
+            }
+            if bestHeight == nil || surfaceHeight > (bestHeight ?? -.greatestFiniteMagnitude) {
+                bestHeight = surfaceHeight
             }
         }
         return bestHeight
@@ -4078,6 +4094,9 @@ final class DroneSceneController {
         descriptor: EnvironmentObjectDescriptor
     ) -> [CollisionObstacle] {
         node.physicsBody = nil
+        if descriptor.usesScenePhysicsCollision {
+            return configureMeshObstacleCollisionProxies(for: descriptor)
+        }
         guard !descriptor.collisionParts.isEmpty else {
             return [configureDefaultObstacleCollisionProxy(for: descriptor)]
         }
@@ -4108,6 +4127,60 @@ final class DroneSceneController {
                     yawRadians: descriptor.yawRadians + part.yawRadians
                 )
             }
+    }
+
+    private func configureMeshObstacleCollisionProxies(
+        for descriptor: EnvironmentObjectDescriptor
+    ) -> [CollisionObstacle] {
+        descriptor.collisionMeshParts.compactMap { part in
+            var triangles: [CollisionMeshTriangle] = []
+            triangles.reserveCapacity(part.triangles.count)
+            var hasBounds = false
+            var minimum = SIMD3<Float>(repeating: 0.0)
+            var maximum = SIMD3<Float>(repeating: 0.0)
+
+            for sourceTriangle in part.triangles {
+                let point0 = worldPoint(for: sourceTriangle.point0, descriptor: descriptor)
+                let point1 = worldPoint(for: sourceTriangle.point1, descriptor: descriptor)
+                let point2 = worldPoint(for: sourceTriangle.point2, descriptor: descriptor)
+                guard let triangle = CollisionMeshTriangle(
+                    point0: point0,
+                    point1: point1,
+                    point2: point2
+                ) else {
+                    continue
+                }
+                triangles.append(triangle)
+                if hasBounds {
+                    minimum = simd_min(minimum, triangle.minimum)
+                    maximum = simd_max(maximum, triangle.maximum)
+                } else {
+                    minimum = triangle.minimum
+                    maximum = triangle.maximum
+                    hasBounds = true
+                }
+            }
+
+            guard hasBounds, !triangles.isEmpty else {
+                return nil
+            }
+            let center = (minimum + maximum) * 0.5
+            let planarHalfExtents = SIMD2<Float>(
+                max(0.05, (maximum.x - minimum.x) * 0.5),
+                max(0.05, (maximum.z - minimum.z) * 0.5)
+            )
+            return CollisionObstacle(
+                id: part.id,
+                center: center,
+                radius: simd_length(planarHalfExtents),
+                source: part.source,
+                baseY: minimum.y,
+                topY: maximum.y,
+                planarHalfExtents: nil,
+                yawRadians: 0.0,
+                meshTriangles: triangles
+            )
+        }
     }
 
     private func configureDefaultObstacleCollisionProxy(
@@ -4213,6 +4286,83 @@ final class DroneSceneController {
     private func supportSurfaceDescriptors(
         for descriptor: EnvironmentObjectDescriptor
     ) -> [SupportSurfaceDescriptor] {
+        if !descriptor.supportSurfaceTriangleParts.isEmpty {
+            return descriptor.supportSurfaceTriangleParts.compactMap { part in
+                let point0 = worldPoint(for: part.point0, descriptor: descriptor)
+                let point1 = worldPoint(for: part.point1, descriptor: descriptor)
+                let point2 = worldPoint(for: part.point2, descriptor: descriptor)
+                let rawNormal = simd_cross(point1 - point0, point2 - point0)
+                guard simd_length_squared(rawNormal) > 0.000001 else {
+                    return nil
+                }
+                var normal = simd_normalize(rawNormal)
+                if normal.y < 0.0 {
+                    normal = -normal
+                }
+                guard normal.y > 0.001 else {
+                    return nil
+                }
+                let center3D = (point0 + point1 + point2) / 3.0
+                let planarMinimum = simd_min(
+                    simd_min(SIMD2<Float>(point0.x, point0.z), SIMD2<Float>(point1.x, point1.z)),
+                    SIMD2<Float>(point2.x, point2.z)
+                )
+                let planarMaximum = simd_max(
+                    simd_max(SIMD2<Float>(point0.x, point0.z), SIMD2<Float>(point1.x, point1.z)),
+                    SIMD2<Float>(point2.x, point2.z)
+                )
+                return SupportSurfaceDescriptor(
+                    center: SIMD2<Float>(center3D.x, center3D.z),
+                    halfExtents: simd_max(
+                        (planarMaximum - planarMinimum) * 0.5,
+                        SIMD2<Float>(repeating: 0.02)
+                    ),
+                    yawRadians: 0.0,
+                    planePoint: center3D,
+                    normal: normal,
+                    triangle: (point0, point1, point2),
+                    source: part.source
+                )
+            }
+        }
+
+        if !descriptor.supportSurfaceParts.isEmpty {
+            return descriptor.supportSurfaceParts.compactMap { part in
+                let planarOffset = rotatePlanar(
+                    SIMD2<Float>(part.localCenter.x, part.localCenter.z),
+                    radians: descriptor.yawRadians
+                )
+                let normalOffset = rotatePlanar(
+                    SIMD2<Float>(part.normal.x, part.normal.z),
+                    radians: descriptor.yawRadians + part.yawRadians
+                )
+                let normal = simd_normalize(SIMD3<Float>(
+                    normalOffset.x,
+                    part.normal.y,
+                    normalOffset.y
+                ))
+                guard normal.y > 0.001 else {
+                    return nil
+                }
+                return SupportSurfaceDescriptor(
+                    center: SIMD2<Float>(
+                        descriptor.position.x + planarOffset.x,
+                        descriptor.position.z + planarOffset.y
+                    ),
+                    halfExtents: part.halfExtents,
+                    yawRadians: descriptor.yawRadians + part.yawRadians,
+                    planePoint: SIMD3<Float>(
+                        descriptor.position.x + planarOffset.x,
+                        descriptor.position.y + part.localCenter.y,
+                        descriptor.position.z + planarOffset.y
+                    ),
+                    normal: normal,
+                    triangle: nil,
+                    source: part.source
+                )
+            }
+        }
+
         if !descriptor.collisionParts.isEmpty {
             return descriptor.collisionParts.compactMap { part in
                 guard part.supportsLanding else {
@@ -4232,10 +4382,20 @@ final class DroneSceneController {
                         part.size.z * 0.5
                     ),
                     yawRadians: descriptor.yawRadians + part.yawRadians,
-                    topY: descriptor.position.y + part.localCenter.y + part.size.y * 0.5,
+                    planePoint: SIMD3<Float>(
+                        descriptor.position.x + offset.x,
+                        descriptor.position.y + part.localCenter.y + part.size.y * 0.5,
+                        descriptor.position.z + offset.y
+                    ),
+                    normal: SIMD3<Float>(0.0, 1.0, 0.0),
+                    triangle: nil,
                     source: part.source
                 )
             }
+        }
+
+        if descriptor.usesScenePhysicsCollision {
+            return []
         }
 
         switch descriptor.kind {
@@ -4247,7 +4407,13 @@ final class DroneSceneController {
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(width * 1.02, depth * 1.02),
                 yawRadians: descriptor.yawRadians,
-                topY: descriptor.position.y + height,
+                planePoint: SIMD3<Float>(
+                    descriptor.position.x,
+                    descriptor.position.y + height,
+                    descriptor.position.z
+                ),
+                normal: SIMD3<Float>(0.0, 1.0, 0.0),
+                triangle: nil,
                 source: "abandonedBuilding.bounds"
             )]
 
@@ -4256,7 +4422,13 @@ final class DroneSceneController {
                 center: SIMD2<Float>(descriptor.position.x, descriptor.position.z),
                 halfExtents: SIMD2<Float>(descriptor.size.x * 0.52, descriptor.size.z * 0.52),
                 yawRadians: descriptor.yawRadians,
-                topY: descriptor.position.y + descriptor.size.y,
+                planePoint: SIMD3<Float>(
+                    descriptor.position.x,
+                    descriptor.position.y + descriptor.size.y,
+                    descriptor.position.z
+                ),
+                normal: SIMD3<Float>(0.0, 1.0, 0.0),
+                triangle: nil,
                 source: "crate.top"
             )]
 
@@ -4279,6 +4451,21 @@ final class DroneSceneController {
         return SIMD2<Float>(
             value.x * cosine + value.y * sine,
             -value.x * sine + value.y * cosine
+        )
+    }
+
+    private func worldPoint(
+        for localPoint: SIMD3<Float>,
+        descriptor: EnvironmentObjectDescriptor
+    ) -> SIMD3<Float> {
+        let planar = rotatePlanar(
+            SIMD2<Float>(localPoint.x, localPoint.z),
+            radians: descriptor.yawRadians
+        )
+        return SIMD3<Float>(
+            descriptor.position.x + planar.x,
+            descriptor.position.y + localPoint.y,
+            descriptor.position.z + planar.y
         )
     }
 
@@ -4392,6 +4579,15 @@ final class DroneSceneController {
         intersects surface: SupportSurfaceDescriptor,
         clearanceRadius: Float
     ) -> Bool {
+        if let triangle = surface.triangle {
+            return planarPoint(
+                point,
+                isInsideTriangle: SIMD2<Float>(triangle.0.x, triangle.0.z),
+                SIMD2<Float>(triangle.1.x, triangle.1.z),
+                SIMD2<Float>(triangle.2.x, triangle.2.z)
+            )
+        }
+
         let delta = point - surface.center
         let cosine = cos(-surface.yawRadians)
         let sine = sin(-surface.yawRadians)
@@ -4401,6 +4597,32 @@ final class DroneSceneController {
         )
         return abs(local.x) <= surface.halfExtents.x + clearanceRadius &&
             abs(local.y) <= surface.halfExtents.y + clearanceRadius
+    }
+
+    private func planarPoint(
+        _ point: SIMD2<Float>,
+        isInsideTriangle point0: SIMD2<Float>,
+        _ point1: SIMD2<Float>,
+        _ point2: SIMD2<Float>
+    ) -> Bool {
+        let area = triangleEdge(point0, point1, point2)
+        guard abs(area) > 0.000001 else {
+            return false
+        }
+        let w0 = triangleEdge(point1, point2, point) / area
+        let w1 = triangleEdge(point2, point0, point) / area
+        let w2 = triangleEdge(point0, point1, point) / area
+        let tolerance: Float = -0.002
+        return w0 >= tolerance && w1 >= tolerance && w2 >= tolerance
+    }
+
+    private func triangleEdge(
+        _ point0: SIMD2<Float>,
+        _ point1: SIMD2<Float>,
+        _ point2: SIMD2<Float>
+    ) -> Float {
+        (point1.x - point0.x) * (point2.y - point0.y) -
+            (point1.y - point0.y) * (point2.x - point0.x)
     }
 
     private func applyComponentOverlays(damage: DamageState, thermal: ThermalState, mode: DiagnosticOverlayMode) {
@@ -4797,6 +5019,9 @@ final class DroneSceneController {
         }
 
         for obstacle in environmentObstacles {
+            if obstacle.hasMeshCollision {
+                continue
+            }
             let marker: SCNNode
             if let halfExtents = obstacle.planarHalfExtents {
                 marker = SCNNode(geometry: SCNBox(
@@ -4826,6 +5051,29 @@ final class DroneSceneController {
             marker.geometry?.firstMaterial?.readsFromDepthBuffer = false
             collisionDebugNode.addChildNode(marker)
             obstacleDebugProxyNodes[obstacle.id] = marker
+        }
+    }
+
+    private func setAbandonedCityCollisionDebugVisible(_ isVisible: Bool) {
+        guard abandonedCityCollisionDebugVisible != isVisible else {
+            return
+        }
+        abandonedCityCollisionDebugVisible = isVisible
+        setAbandonedCityCollisionDebugVisible(
+            isVisible,
+            in: scene.rootNode
+        )
+    }
+
+    private func setAbandonedCityCollisionDebugVisible(
+        _ isVisible: Bool,
+        in node: SCNNode
+    ) {
+        if node.name?.hasPrefix("environment.abandonedCity.collisionDebugMesh.") == true {
+            node.isHidden = !isVisible
+        }
+        for child in node.childNodes {
+            setAbandonedCityCollisionDebugVisible(isVisible, in: child)
         }
     }
 
