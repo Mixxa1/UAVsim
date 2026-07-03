@@ -1213,7 +1213,7 @@ final class ScenePopulationService {
             size: size,
             boundingRadius: max(size.x, max(size.y, size.z)) * 0.55,
             isCollidable: collidable,
-            collisionParts: kind == .tree ? treeCollisionParts(size: size) : []
+            collisionParts: kind == .tree ? Self.treeCollisionParts(size: size) : []
         )
     }
 
@@ -1230,7 +1230,7 @@ final class ScenePopulationService {
     // off that substring, so routing still treats these as trees with the same safety margin —
     // just following the accurate trunk+canopy footprint instead of the old cylinder. `false`
     // supportsLanding so drones never try to perch on a tree collision box.
-    private func treeCollisionParts(size: SIMD3<Float>) -> [EnvironmentCollisionPart] {
+    static func treeCollisionParts(size: SIMD3<Float>) -> [EnvironmentCollisionPart] {
         let canopyBaseY = size.y * 0.40
         let trunkTopY = size.y * 0.46            // slight overlap into the canopy, no vertical gap
         let trunkWidth = max(0.7, size.x * 0.22) // real trunk footprint, not the canopy span

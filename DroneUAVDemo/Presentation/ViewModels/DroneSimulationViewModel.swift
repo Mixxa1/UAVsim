@@ -576,6 +576,11 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var missionScenarioObjectiveState: MissionScenarioObjectiveState?
     @Published private(set) var missionScenarioRemainingSeconds: Double = 0.0
     @Published private(set) var missionScenarioDetectionProgress: Double = 0.0
+    @Published private(set) var fireResponseObjectiveState: FireResponseObjectiveState?
+    @Published private(set) var fireResponseRemainingSeconds: Double = 0.0
+    @Published private(set) var fireResponseBurningCount: Int = 0
+    @Published private(set) var fireResponseTotalCount: Int = 0
+    @Published private(set) var fireResponseOutcome: FireResponseOutcome?
     @Published private(set) var missionScenarioOutcome: MissionScenarioOutcome?
     @Published private(set) var mountedCADPayload: MountedCADPayload?
     @Published private(set) var lastPayloadImpact: TerrainMapPayloadImpact?
@@ -918,6 +923,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private var missionScenarioTargetWorldPosition: SIMD3<Float>?
     private var didBootstrapMissionScenario = false
     private var didReportMissionScenarioOutcome = false
+    private var fireResponseRuntime: FireResponseRuntime?
+    private var didReportFireResponseOutcome = false
     private let missionAutopilotAdapter = MissionAutopilotAdapter()
     private let missionGuidanceTargetResolver = MissionGuidanceTargetResolver()
     private let fixedWingFlyableRouteBuilder = FixedWingFlyableRouteBuilder()
@@ -4023,20 +4030,34 @@ final class DroneSimulationViewModel: ObservableObject {
         attachPayload()
 
         let dock = sceneController.currentDockSpawnPoint()
-        let placement = MissionScenarioPlacement.generate(
-            parameters: params,
-            worldHalfExtent: terrain.worldHalfExtent,
-            dockPosition: SIMD2<Float>(dock.x, dock.z)
-        )
-        // Concentrate forest generation around the sector instead of the whole map — set before
-        // the still-pending debounced regen (scheduled above) fires, so this terrain mutation
-        // rides along with the others into the same regeneration pass.
-        terrain.missionSearchSectorCenter = placement.sectorCenter
-        terrain.missionSearchSectorRadius = placement.sectorRadius
-        let target = sceneController.spawnMissionSearchScenario(placement: placement)
-        missionScenarioTargetWorldPosition = target
-        missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
-        publishMissionScenarioState()
+        // Concentrate forest generation around the sector/zone instead of the whole map — set
+        // before the still-pending debounced regen (scheduled above) fires, so this terrain
+        // mutation rides along with the others into the same regeneration pass.
+        switch params.kind {
+        case .searchAndRescue:
+            let placement = MissionScenarioPlacement.generate(
+                parameters: params,
+                worldHalfExtent: terrain.worldHalfExtent,
+                dockPosition: SIMD2<Float>(dock.x, dock.z)
+            )
+            terrain.missionSearchSectorCenter = placement.sectorCenter
+            terrain.missionSearchSectorRadius = placement.sectorRadius
+            let target = sceneController.spawnMissionSearchScenario(placement: placement)
+            missionScenarioTargetWorldPosition = target
+            missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
+            publishMissionScenarioState()
+        case .fireResponse:
+            let placement = FireZonePlacement.generate(
+                parameters: params,
+                worldHalfExtent: terrain.worldHalfExtent,
+                dockPosition: SIMD2<Float>(dock.x, dock.z)
+            )
+            terrain.missionSearchSectorCenter = placement.zoneCenter
+            terrain.missionSearchSectorRadius = placement.zoneRadius
+            sceneController.spawnFireResponseScenario(placement: placement)
+            fireResponseRuntime = FireResponseRuntime(configuration: config, placement: placement)
+            publishFireResponseState()
+        }
     }
 
     private func updateMissionScenarioRuntime(deltaTime: TimeInterval) {
@@ -4094,6 +4115,61 @@ final class DroneSimulationViewModel: ObservableObject {
             print("[MissionScenario] failed — time limit reached")
         case .aborted:
             print("[MissionScenario] aborted")
+        }
+    }
+
+    // MARK: - Mission scenario (Fire Response)
+
+    /// Increment 1: aiming/spraying don't exist yet (the hose payload lands in a later
+    /// increment) — only the spread half of the loop runs each tick, so the mechanic is testable
+    /// before real aiming exists. `debugExtinguishNearestFireResponseTree()` is the temporary
+    /// manual stand-in for the suppression path.
+    private func updateFireResponseRuntime(deltaTime: TimeInterval) {
+        guard var runtime = fireResponseRuntime, runtime.isActive else { return }
+
+        runtime.tick(deltaTime: deltaTime, aimedFireIndex: nil, isSpraying: false)
+        fireResponseRuntime = runtime
+        sceneController.updateFireResponseVisuals(treeStatuses: runtime.treeStatuses)
+        publishFireResponseState()
+
+        if let outcome = runtime.outcome {
+            handleFireResponseOutcome(outcome)
+        }
+    }
+
+    private func publishFireResponseState() {
+        guard let runtime = fireResponseRuntime else { return }
+        fireResponseObjectiveState = runtime.objectiveState
+        fireResponseRemainingSeconds = runtime.remainingClampedSeconds
+        fireResponseBurningCount = runtime.burningCount
+        fireResponseTotalCount = runtime.treeStatuses.count
+        fireResponseOutcome = runtime.outcome
+    }
+
+    private func handleFireResponseOutcome(_ outcome: FireResponseOutcome) {
+        guard !didReportFireResponseOutcome else { return }
+        didReportFireResponseOutcome = true
+        switch outcome {
+        case let .success(elapsed):
+            print("[FireResponse] all fires extinguished after \(String(format: "%.1f", elapsed))s")
+        case .failureTimeout:
+            print("[FireResponse] failed — time limit reached")
+        case .aborted:
+            print("[FireResponse] aborted")
+        }
+    }
+
+    /// Increment-1 manual test hook: extinguishes the fire nearest the drone's current position,
+    /// bypassing the (not-yet-built) hose-aim requirement. Exposed for a temporary HUD debug
+    /// button; removed once the real hose payload lands.
+    func debugExtinguishNearestFireResponseTree() {
+        guard var runtime = fireResponseRuntime, runtime.isActive else { return }
+        runtime.debugExtinguishNearestFire(to: currentPlanarPosition())
+        fireResponseRuntime = runtime
+        sceneController.updateFireResponseVisuals(treeStatuses: runtime.treeStatuses)
+        publishFireResponseState()
+        if let outcome = runtime.outcome {
+            handleFireResponseOutcome(outcome)
         }
     }
 
@@ -4461,6 +4537,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
         syncPayloadLifecycleEvents()
         updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
+        updateFireResponseRuntime(deltaTime: TimeInterval(dt))
         publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 

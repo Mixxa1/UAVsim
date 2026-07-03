@@ -2412,6 +2412,8 @@
 "mission.project.name" = "Полётное задание";
 "mission.scenario.search_and_rescue.title" = "Поиск человека";
 "mission.scenario.search_and_rescue.subtitle" = "Найдите пропавшего человека в секторе поиска.";
+"mission.scenario.fire_response.title" = "Пожарная миссия";
+"mission.scenario.fire_response.subtitle" = "Потушите очаги возгорания в зоне, пока пожар не вышел из-под контроля.";
 "mission.time_of_day.day" = "День";
 "mission.time_of_day.dusk" = "Сумерки";
 "mission.time_of_day.night" = "Ночь";
@@ -2437,9 +2439,13 @@
 "mission.setup.uav" = "БЛА";
 "mission.setup.payload" = "Нагрузка";
 "mission.setup.payload.hint" = "Для поиска человека нужна тепловизионная или оптическая камера.";
+"mission.setup.payload.hint.fire_response" = "Для тушения пожара нужно оборудование пожаротушения.";
 "mission.setup.start" = "Начать";
 "mission.hud.objective.search" = "Найдите человека в секторе поиска.";
 "mission.hud.locking" = "Захват цели…";
 "mission.hud.outcome.success" = "Цель обнаружена";
 "mission.hud.outcome.failure" = "Миссия провалена — время вышло";
 "mission.hud.outcome.aborted" = "Миссия прервана";
+"mission.hud.objective.fire_response" = "Потушите все очаги в зоне, пока не закончилось время.";
+"mission.hud.fires_remaining" = "Горит: %d/%d";
+"mission.hud.fire_response.debug_extinguish" = "Потушить ближайший (debug)";

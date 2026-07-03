@@ -3,10 +3,10 @@ import simd
 
 // MARK: - Scenario kind
 
-/// A mission scenario type. Increment 1 ships search-and-rescue; `.fireResponse`
-/// is reserved for the next increment (fire dynamics / hose / Fire_Truck).
+/// A mission scenario type.
 enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
     case searchAndRescue
+    case fireResponse
 
     var id: String { rawValue }
 
@@ -14,6 +14,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .searchAndRescue:
             return "mission.scenario.search_and_rescue.title"
+        case .fireResponse:
+            return "mission.scenario.fire_response.title"
         }
     }
 
@@ -21,6 +23,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .searchAndRescue:
             return "mission.scenario.search_and_rescue.subtitle"
+        case .fireResponse:
+            return "mission.scenario.fire_response.subtitle"
         }
     }
 
@@ -28,6 +32,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .searchAndRescue:
             return "figure.wave"
+        case .fireResponse:
+            return "flame.fill"
         }
     }
 
@@ -36,6 +42,10 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .searchAndRescue:
             return [.thermalCamera, .cameraGimbal]
+        case .fireResponse:
+            // Placeholder until the dedicated `.fireHose` payload lands in increment 2 (hose
+            // aiming/suppression) — increment 1 only exercises the spread/timeout runtime loop.
+            return [.rescuePack]
         }
     }
 }
@@ -165,6 +175,68 @@ enum MissionDifficulty: String, CaseIterable, Identifiable, Hashable {
             return 3
         case .hard:
             return 4
+        }
+    }
+
+    /// Radius of the fire zone (`.fireResponse`). Deliberately more compact than
+    /// `searchRadiusMeters` so multiple simultaneous fires read as one zone, not a scavenger hunt.
+    var fireZoneRadiusMeters: Float {
+        switch self {
+        case .easy:
+            return 90.0
+        case .medium:
+            return 130.0
+        case .hard:
+            return 180.0
+        }
+    }
+
+    /// Total trees seeded in the fire zone (a fixed pool; `initialFireCount` of them start lit).
+    var fireTreeCount: Int {
+        switch self {
+        case .easy:
+            return 6
+        case .medium:
+            return 9
+        case .hard:
+            return 13
+        }
+    }
+
+    /// How many trees in the zone start pre-ignited.
+    var initialFireCount: Int {
+        switch self {
+        case .easy:
+            return 2
+        case .medium:
+            return 3
+        case .hard:
+            return 4
+        }
+    }
+
+    /// How long an unattended burning tree takes before it ignites its nearest unburned
+    /// neighbor. Shorter = harder (less time to react before the fire escalates).
+    var fireSpreadIntervalSeconds: Double {
+        switch self {
+        case .easy:
+            return 45.0
+        case .medium:
+            return 35.0
+        case .hard:
+            return 25.0
+        }
+    }
+
+    /// Maximum distance a burning tree can ignite an unburned neighbor across.
+    var fireSpreadRadiusMeters: Float {
+        switch self {
+        case .easy:
+            return 12.0
+        case .medium:
+            return 14.0
+        case .hard:
+            return 16.0
         }
     }
 

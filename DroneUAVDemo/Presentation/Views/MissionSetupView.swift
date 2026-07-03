@@ -26,6 +26,15 @@ struct MissionSetupView: View {
         kind.compatiblePayloads
     }
 
+    private var payloadHintKey: String {
+        switch kind {
+        case .searchAndRescue:
+            return "mission.setup.payload.hint"
+        case .fireResponse:
+            return "mission.setup.payload.hint.fire_response"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -54,6 +63,11 @@ struct MissionSetupView: View {
                 payload = compatiblePayloads.first ?? .thermalCamera
             }
         }
+        .onChange(of: kind) { _, _ in
+            if !compatiblePayloads.contains(payload) {
+                payload = compatiblePayloads.first ?? .thermalCamera
+            }
+        }
     }
 
     // MARK: Sections
@@ -74,19 +88,29 @@ struct MissionSetupView: View {
 
     private var scenarioSection: some View {
         sectionCard(titleKey: "mission.setup.section.scenario") {
-            HStack(spacing: 12) {
-                Image(systemName: kind.iconSystemName)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(LocalizedStringKey(kind.titleKey))
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text(LocalizedStringKey(kind.subtitleKey))
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+            VStack(alignment: .leading, spacing: 14) {
+                Picker("", selection: $kind) {
+                    ForEach(MissionScenarioKind.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
                 }
-                Spacer()
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                HStack(spacing: 12) {
+                    Image(systemName: kind.iconSystemName)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(LocalizedStringKey(kind.titleKey))
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        Text(LocalizedStringKey(kind.subtitleKey))
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    Spacer()
+                }
             }
         }
     }
@@ -198,7 +222,7 @@ struct MissionSetupView: View {
                     .tint(.white)
                 }
 
-                Text("mission.setup.payload.hint")
+                Text(LocalizedStringKey(payloadHintKey))
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)

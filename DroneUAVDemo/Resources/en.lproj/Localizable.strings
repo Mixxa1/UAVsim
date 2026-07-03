@@ -2417,6 +2417,8 @@
 "mission.project.name" = "Flight Mission";
 "mission.scenario.search_and_rescue.title" = "Search & Rescue";
 "mission.scenario.search_and_rescue.subtitle" = "Find the missing person inside the search sector.";
+"mission.scenario.fire_response.title" = "Fire Response";
+"mission.scenario.fire_response.subtitle" = "Suppress the fires in the zone before they spread out of control.";
 "mission.time_of_day.day" = "Day";
 "mission.time_of_day.dusk" = "Dusk";
 "mission.time_of_day.night" = "Night";
@@ -2442,9 +2444,13 @@
 "mission.setup.uav" = "UAV";
 "mission.setup.payload" = "Payload";
 "mission.setup.payload.hint" = "Search and rescue needs a thermal or optical camera to spot the target.";
+"mission.setup.payload.hint.fire_response" = "Fire response needs suppression equipment to put out burning trees.";
 "mission.setup.start" = "Start";
 "mission.hud.objective.search" = "Locate the person in the search sector.";
 "mission.hud.locking" = "Acquiring target…";
 "mission.hud.outcome.success" = "Target found";
 "mission.hud.outcome.failure" = "Mission failed — time elapsed";
 "mission.hud.outcome.aborted" = "Mission aborted";
+"mission.hud.objective.fire_response" = "Suppress every fire in the zone before time runs out.";
+"mission.hud.fires_remaining" = "%d/%d fires burning";
+"mission.hud.fire_response.debug_extinguish" = "Extinguish nearest (debug)";

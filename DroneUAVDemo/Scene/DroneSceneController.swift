@@ -124,6 +124,12 @@ final class DroneSceneController {
     // Mission scenarios (SAR etc.): root for spawned scenario entities + the active target.
     private let missionScenarioRootNode = SCNNode()
     private var missionTargetNode: SCNNode?
+    // Fire-response scenario: dedicated tree nodes + placeholder burn-state markers, kept
+    // entirely outside ScenePopulationService's ambient forest (see FireResponseScenario plan) so
+    // charring a tree never interacts with weather-driven forest visual refreshes.
+    private(set) var fireTreeNodes: [SCNNode] = []
+    private var fireTreeMarkerNodes: [SCNNode] = []
+    private var fireTreeObstacleIDs: Set<UUID> = []
     private var missionTimeOfDay: TimeOfDay = .day
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
@@ -3533,6 +3539,120 @@ final class DroneSceneController {
         missionScenarioRootNode.childNodes.forEach { $0.removeFromParentNode() }
         missionTargetNode = nil
         thermalRenderer?.setMissionTarget(nil)
+
+        fireTreeNodes.removeAll(keepingCapacity: false)
+        fireTreeMarkerNodes.removeAll(keepingCapacity: false)
+        if !fireTreeObstacleIDs.isEmpty {
+            environmentObstacles.removeAll { fireTreeObstacleIDs.contains($0.id) }
+            obstacleMap = obstacleMap.filter { !fireTreeObstacleIDs.contains($0.key) }
+            obstacleSourceByID = obstacleSourceByID.filter { !fireTreeObstacleIDs.contains($0.key) }
+            environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+            fireTreeObstacleIDs.removeAll(keepingCapacity: false)
+        }
+    }
+
+    /// Spawns the fire-response scenario: a pool of trees in a zone, each with a placeholder
+    /// burn-state marker (increment 1 — replaced by real flame/smoke VFX in a later increment).
+    /// Trees are dedicated nodes outside `ScenePopulationService`'s ambient forest, but are
+    /// registered as real collision obstacles (appended to, not replacing, the ambient forest's
+    /// obstacle list) so they behave like any other tree for flight collision.
+    ///
+    /// Returns each tree's mid-canopy world position, used both for suppression aiming and as the
+    /// scene-layer anchor for per-tree VFX.
+    @discardableResult
+    func spawnFireResponseScenario(placement: FireZonePlacement) -> [SIMD3<Float>] {
+        clearMissionScenario()
+        let groundY: Float = 0.0
+
+        var rng = SystemRandomNumberGenerator()
+        var newObstacles: [CollisionObstacle] = []
+        var treeNodes: [SCNNode] = []
+        var markerNodes: [SCNNode] = []
+        var anchorPositions: [SIMD3<Float>] = []
+
+        for position in placement.treePositions {
+            let heightMeters = Float.random(in: 14.0...22.0, using: &rng)
+            let yaw = Float.random(in: 0...(2.0 * .pi), using: &rng)
+            let tree = PineTreeAssetLoader.shared.makeTreeNode(targetHeightMeters: heightMeters, yaw: yaw) ?? SCNNode()
+            tree.position = SCNVector3(position.x, groundY, position.y)
+            tree.name = "mission.fire_tree"
+            missionScenarioRootNode.addChildNode(tree)
+            treeNodes.append(tree)
+
+            let marker = makeFireStatusMarkerNode()
+            marker.position = SCNVector3(0, heightMeters * 0.62, 0)
+            tree.addChildNode(marker)
+            markerNodes.append(marker)
+
+            let size = SIMD3<Float>(heightMeters * 0.30, heightMeters, heightMeters * 0.30)
+            let descriptor = EnvironmentObjectDescriptor(
+                id: UUID(),
+                kind: .tree,
+                biome: .forest,
+                position: SIMD3<Float>(position.x, groundY, position.y),
+                yawRadians: yaw,
+                size: size,
+                boundingRadius: max(size.x, size.z) * 0.56,
+                isCollidable: true,
+                collisionParts: ScenePopulationService.treeCollisionParts(size: size)
+            )
+            let descriptorObstacles = configureObstacleCollisionProxies(for: tree, descriptor: descriptor)
+            for obstacle in descriptorObstacles {
+                obstacleMap[obstacle.id] = tree
+                obstacleSourceByID[obstacle.id] = obstacle.source
+                fireTreeObstacleIDs.insert(obstacle.id)
+            }
+            newObstacles.append(contentsOf: descriptorObstacles)
+
+            anchorPositions.append(SIMD3<Float>(position.x, groundY + heightMeters * 0.5, position.y))
+        }
+
+        fireTreeNodes = treeNodes
+        fireTreeMarkerNodes = markerNodes
+
+        environmentObstacles.append(contentsOf: newObstacles)
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+        environmentRevision &+= 1
+
+        return anchorPositions
+    }
+
+    /// Placeholder burn-state marker (increment 1 only — a small emissive sphere above the
+    /// canopy). Real flipbook flame/smoke VFX replaces this in a later increment; the marker just
+    /// needs to clearly read as "unburned / burning / charred" for the runtime to be testable.
+    private func makeFireStatusMarkerNode() -> SCNNode {
+        let sphere = SCNSphere(radius: 0.9)
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = NSColor.clear
+        material.emission.contents = NSColor.clear
+        sphere.firstMaterial = material
+        let node = SCNNode(geometry: sphere)
+        node.name = "mission.fire_tree.marker"
+        node.castsShadow = false
+        node.isHidden = true
+        return node
+    }
+
+    /// Updates each fire tree's placeholder marker to reflect its current burn state. Called once
+    /// per tick from the simulation view model alongside the fire-response runtime tick.
+    func updateFireResponseVisuals(treeStatuses: [FireTreeStatus]) {
+        for (index, status) in treeStatuses.enumerated() where index < fireTreeMarkerNodes.count {
+            let marker = fireTreeMarkerNodes[index]
+            let material = marker.geometry?.firstMaterial
+            switch status {
+            case .unburned:
+                marker.isHidden = true
+            case .burning:
+                marker.isHidden = false
+                material?.diffuse.contents = NSColor.systemOrange
+                material?.emission.contents = NSColor.systemOrange.withAlphaComponent(0.85)
+            case .charred:
+                marker.isHidden = false
+                material?.diffuse.contents = NSColor(calibratedWhite: 0.12, alpha: 1.0)
+                material?.emission.contents = NSColor.clear
+            }
+        }
     }
 
     private func makeSearchSectorRing(radius: Float) -> SCNNode {

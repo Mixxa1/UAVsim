@@ -268,6 +268,8 @@
 		100000000000000000000A01 /* ManAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A02 /* ManAssetLoader.swift */; };
 		100000000000000000000A05 /* MissionScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A06 /* MissionScenario.swift */; };
 		100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A08 /* MissionScenarioRuntime.swift */; };
+		100000000000000000000A13 /* FireResponseScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A14 /* FireResponseScenario.swift */; };
+		100000000000000000000A15 /* FireResponseRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A16 /* FireResponseRuntime.swift */; };
 		100000000000000000000A09 /* MissionSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0A /* MissionSetupView.swift */; };
 		100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0C /* MissionScenarioHUDView.swift */; };
 		100000000000000000000A0D /* PayloadGimbalSliderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A0E /* PayloadGimbalSliderControls.swift */; };
@@ -588,6 +590,8 @@
 		100000000000000000000A02 /* ManAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000A06 /* MissionScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenario.swift; sourceTree = "<group>"; };
 		100000000000000000000A08 /* MissionScenarioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioRuntime.swift; sourceTree = "<group>"; };
+		100000000000000000000A14 /* FireResponseScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireResponseScenario.swift; sourceTree = "<group>"; };
+		100000000000000000000A16 /* FireResponseRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireResponseRuntime.swift; sourceTree = "<group>"; };
 		100000000000000000000A0A /* MissionSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionSetupView.swift; sourceTree = "<group>"; };
 		100000000000000000000A0C /* MissionScenarioHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioHUDView.swift; sourceTree = "<group>"; };
 		100000000000000000000A0E /* PayloadGimbalSliderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadGimbalSliderControls.swift; sourceTree = "<group>"; };
@@ -729,6 +733,7 @@
 				1000000000000000000002A7 /* MissionLeg.swift */,
 				100000000000000000000179 /* MissionPlan.swift */,
 				100000000000000000000A06 /* MissionScenario.swift */,
+				100000000000000000000A14 /* FireResponseScenario.swift */,
 				100000000000000000000175 /* MissionPlanStatus.swift */,
 				100000000000000000000158 /* MissionPlanningState.swift */,
 				10000000000000000000018C /* MissionEvent.swift */,
@@ -813,6 +818,7 @@
 				10000000000000000000017E /* MissionProgressTracker.swift */,
 				10000000000000000000016D /* MissionPreviewBuilder.swift */,
 				100000000000000000000A08 /* MissionScenarioRuntime.swift */,
+				100000000000000000000A16 /* FireResponseRuntime.swift */,
 				100000000000000000000186 /* MissionAuthorityGuard.swift */,
 				1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */,
 				1000000000000000000002BE /* FixedWingFlyablePath.swift */,
@@ -1313,6 +1319,7 @@
 				100000000000000000000285 /* MissionOutcome.swift in Sources */,
 				100000000000000000000270 /* MissionPlan.swift in Sources */,
 				100000000000000000000A05 /* MissionScenario.swift in Sources */,
+				100000000000000000000A13 /* FireResponseScenario.swift in Sources */,
 				10000000000000000000026C /* MissionPlanStatus.swift in Sources */,
 				100000000000000000000255 /* MissionPlanningState.swift in Sources */,
 				100000000000000000000256 /* MissionMapView.swift in Sources */,
@@ -1396,6 +1403,7 @@
 				100000000000000000000275 /* MissionProgressTracker.swift in Sources */,
 				100000000000000000000264 /* MissionPreviewBuilder.swift in Sources */,
 				100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */,
+				100000000000000000000A15 /* FireResponseRuntime.swift in Sources */,
 				10000000000000000000027D /* MissionAuthorityGuard.swift in Sources */,
 				1000000000000000000002BD /* MissionGuidanceTargetResolver.swift in Sources */,
 				1000000000000000000002BF /* FixedWingFlyablePath.swift in Sources */,

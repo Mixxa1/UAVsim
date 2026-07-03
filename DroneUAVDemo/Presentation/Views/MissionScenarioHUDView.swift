@@ -5,11 +5,19 @@ import SwiftUI
 struct MissionScenarioHUDView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
 
+    private var isFireResponse: Bool { viewModel.activeMissionScenarioKind == .fireResponse }
+
     var body: some View {
         if viewModel.hasMissionScenario {
             VStack(spacing: 8) {
                 header
-                if let outcome = viewModel.missionScenarioOutcome {
+                if isFireResponse {
+                    if let outcome = viewModel.fireResponseOutcome {
+                        fireOutcomeBanner(outcome)
+                    } else {
+                        fireObjectiveRow
+                    }
+                } else if let outcome = viewModel.missionScenarioOutcome {
                     outcomeBanner(outcome)
                 } else {
                     objectiveRow
@@ -35,9 +43,76 @@ struct MissionScenarioHUDView: View {
                     .foregroundStyle(.white)
             }
             Spacer()
-            Text(timeString(viewModel.missionScenarioRemainingSeconds))
+            Text(timeString(isFireResponse ? viewModel.fireResponseRemainingSeconds : viewModel.missionScenarioRemainingSeconds))
                 .font(.callout.weight(.bold).monospacedDigit())
                 .foregroundStyle(timerColor)
+        }
+    }
+
+    // MARK: - Fire response
+
+    private var fireObjectiveRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("mission.hud.objective.fire_response")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.8))
+
+            HStack {
+                Text(String(
+                    format: NSLocalizedString("mission.hud.fires_remaining", comment: ""),
+                    viewModel.fireResponseBurningCount,
+                    viewModel.fireResponseTotalCount
+                ))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(viewModel.fireResponseBurningCount > 0 ? GroundControlPalette.warning : .white)
+                Spacer()
+            }
+
+            // Increment-1 manual test hook — extinguishes the nearest fire without needing the
+            // (not-yet-built) hose payload. Removed once the real hose aiming lands.
+            Button(action: viewModel.debugExtinguishNearestFireResponseTree) {
+                Text("mission.hud.fire_response.debug_extinguish")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func fireOutcomeBanner(_ outcome: FireResponseOutcome) -> some View {
+        let (titleKey, tint): (String, Color) = {
+            switch outcome {
+            case .success:
+                return ("mission.hud.outcome.success", GroundControlPalette.success)
+            case .failureTimeout:
+                return ("mission.hud.outcome.failure", GroundControlPalette.danger)
+            case .aborted:
+                return ("mission.hud.outcome.aborted", GroundControlPalette.textSecondary)
+            }
+        }()
+        return HStack(spacing: 8) {
+            Image(systemName: fireOutcomeIcon(outcome))
+                .foregroundStyle(tint)
+            Text(LocalizedStringKey(titleKey))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func fireOutcomeIcon(_ outcome: FireResponseOutcome) -> String {
+        switch outcome {
+        case .success: return "checkmark.seal.fill"
+        case .failureTimeout: return "xmark.octagon.fill"
+        case .aborted: return "minus.circle.fill"
         }
     }
 
@@ -94,6 +169,10 @@ struct MissionScenarioHUDView: View {
     }
 
     private var timerColor: Color {
+        if isFireResponse {
+            if viewModel.fireResponseOutcome != nil { return .white.opacity(0.7) }
+            return viewModel.fireResponseRemainingSeconds <= 30 ? GroundControlPalette.danger : .white
+        }
         if viewModel.missionScenarioOutcome != nil { return .white.opacity(0.7) }
         return viewModel.missionScenarioRemainingSeconds <= 30 ? GroundControlPalette.danger : .white
     }
