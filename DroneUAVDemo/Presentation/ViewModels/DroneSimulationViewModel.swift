@@ -4230,6 +4230,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         collisionCooldown = max(0.0, collisionCooldown - dt)
+        supportReacquireBlockTimer = max(0.0, supportReacquireBlockTimer - dt)
         decayFixedWingAssistOverrideTimers(deltaTime: dt)
 
         applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
@@ -13367,10 +13368,19 @@ final class DroneSimulationViewModel: ObservableObject {
         supportSurfaceY(for: position, maximumHeight: position.y)
     }
 
+    /// Planar tolerance for "is there support under the drone" queries. Deliberately small: support
+    /// is only reported while the drone's centre of gravity is actually over the surface. The old
+    /// ~collision-radius expansion (0.36 m) let the floor clamp keep holding the aircraft after it
+    /// slid past a roof edge, leaving it parked on empty air beside the eave — once the CG passes
+    /// the edge the drone must lose support and simply descend, like a real airframe tipping off.
+    private var supportQueryClearanceRadius: Float {
+        max(0.05, selectedDroneProfile.collisionRadius * 0.12)
+    }
+
     private func supportSurfaceY(for position: SIMD3<Float>, maximumHeight: Float) -> Float {
         sceneController.supportSurfaceHeight(
             at: SIMD2<Float>(position.x, position.z),
-            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48),
+            clearanceRadius: supportQueryClearanceRadius,
             maximumHeight: maximumHeight
         ) ?? 0.0
     }
@@ -13378,7 +13388,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private func supportSurfaceContact(for position: SIMD3<Float>) -> (height: Float, normal: SIMD3<Float>)? {
         sceneController.supportSurfaceContact(
             at: SIMD2<Float>(position.x, position.z),
-            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48),
+            clearanceRadius: supportQueryClearanceRadius,
             maximumHeight: position.y
         )
     }
@@ -13394,7 +13404,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// seats on the actual crest it is standing on.
     private func fittedSupportPlaneNormal(at position: SIMD3<Float>) -> SIMD3<Float>? {
         let footprint = max(0.3, selectedDroneProfile.collisionRadius * 1.2)
-        let clearanceRadius = max(0.36, selectedDroneProfile.collisionRadius * 0.48)
+        let clearanceRadius = supportQueryClearanceRadius
         // Allow samples a little above the centre so the up-slope side of the footprint is not
         // rejected by the height guard on a real incline.
         let maximumHeight = position.y + max(0.35, footprint)
@@ -13469,6 +13479,13 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private var restSupportNormalLatch: (position: SIMD2<Float>, normal: SIMD3<Float>)?
+
+    /// Set when a resting drone loses its elevated support (CG slid past a roof edge). While
+    /// positive, elevated-support re-acquisition is suppressed so the falling airframe can't be
+    /// re-caught by the same roof plane a few centimetres down — that fall/snap-up cycle reads
+    /// as the drone pogo-bouncing in place at the eave. Once it has fallen clear, the height
+    /// guard in the support queries keeps the roof invisible from below anyway.
+    private var supportReacquireBlockTimer: Float = 0.0
 
     /// The support normal is latched at touchdown and reused while the drone stays parked on
     /// roughly the same spot. Re-deriving it every tick fed the conform target with sampling
@@ -13550,6 +13567,11 @@ final class DroneSimulationViewModel: ObservableObject {
     /// the drone is actually grounded is handled solely by `applyGroundedSafetyIfNeeded`, which
     /// mirrors the physics engine's own y=0 ground-rest contract at the elevated height.
     private func applySupportSurfaceConstraint(previousState: DroneState) {
+        // See supportReacquireBlockTimer: a drone that just slid off a roof edge must fall clear,
+        // not get re-clamped to the plane it left.
+        guard supportReacquireBlockTimer <= 0.0 else {
+            return
+        }
         let supportY = supportSurfaceY(
             for: state.position,
             maximumHeight: max(previousState.position.y, state.position.y) +
@@ -13821,6 +13843,18 @@ final class DroneSimulationViewModel: ObservableObject {
         let contact = supportSurfaceContact(for: state.position)
         let supportY = contact?.height ?? 0.0
         guard state.position.y <= supportY + 0.08 else {
+            // A resting drone whose support VANISHED (as opposed to one climbing away from a
+            // still-present surface) has slid past a roof edge — arm the re-acquisition block.
+            if restSupportNormalLatch != nil, contact == nil {
+                supportReacquireBlockTimer = 0.6
+            }
+            restSupportNormalLatch = nil
+            return
+        }
+        if supportReacquireBlockTimer > 0.0, supportY > 0.0 {
+            // Just slid off an eave: let the airframe fall clear of the plane instead of
+            // re-settling onto it a few centimetres down (pogo-bounce). Flat-ground settling
+            // (supportY == 0) is unaffected.
             restSupportNormalLatch = nil
             return
         }
