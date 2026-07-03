@@ -162,11 +162,13 @@ final class AbandonedCityBuildingLoader {
             sourceHeight: Float(template.sourceBounds.y),
             targetHeightMeters: targetHeightMeters
         )
+        let sourceHeight = template.sourceTriangleBounds.reduce(Float.zero) { max($0, $1.maximum.y) }
         let triangles = template.sourceTriangleBounds.compactMap { triangle in
             scaledCollisionMeshTriangle(
                 triangle,
                 scale: scale,
-                groundSinkMeters: asset.groundSinkMeters
+                groundSinkMeters: asset.groundSinkMeters,
+                supportsLanding: shouldUseAsSupportSurface(triangle, sourceHeight: sourceHeight)
             )
         }
         guard !triangles.isEmpty else {
@@ -714,7 +716,8 @@ final class AbandonedCityBuildingLoader {
     private func scaledCollisionMeshTriangle(
         _ triangle: AbandonedCitySourceTriangleBounds,
         scale: Float,
-        groundSinkMeters: Float
+        groundSinkMeters: Float,
+        supportsLanding: Bool
     ) -> EnvironmentCollisionMeshTriangle? {
         let point0 = scaledLocalPoint(
             triangle.point0,
@@ -742,7 +745,8 @@ final class AbandonedCityBuildingLoader {
         return EnvironmentCollisionMeshTriangle(
             point0: point0,
             point1: point1,
-            point2: point2
+            point2: point2,
+            supportsLanding: supportsLanding
         )
     }
 
@@ -863,29 +867,27 @@ final class AbandonedCityBuildingLoader {
         _ triangle: AbandonedCitySourceTriangleBounds,
         sourceHeight: Float
     ) -> Bool {
+        // ONE uniform geometric rule for every building model, so all roofs get exactly the same
+        // landing treatment that already worked for the shingle/tile model. Support eligibility is
+        // decided purely by GEOMETRY — how upward-facing a face is and how high it sits on the
+        // structure — with no per-material or per-role special-casing. The old name/role gate
+        // dropped whole models (wood/plank barns, corrugated "iron" sheds, steep A-frames) onto the
+        // raw collision path, which is what made "other models" misbehave. Faces may be wound
+        // either way, so the absolute up-component measures how horizontal (landable) the face is.
         let name = triangle.sourceName.lowercased()
-        if name.contains("roof") || name.contains("shingle") || name.contains("tile") {
-            return true
-        }
-        if name.contains("wood") ||
-            name.contains("plank") ||
-            name.contains("handle") ||
-            name.contains("glass") ||
-            name.contains("environment") ||
-            name.contains("iron") ||
-            name.contains("ground") {
+        // Glass stays non-landable (see-through) regardless of orientation.
+        if name.contains("glass") || triangle.role == .glass {
             return false
         }
 
+        let upwardNormalY = abs(triangle.normal.y)
         let centerY = (triangle.point0.y + triangle.point1.y + triangle.point2.y) / 3.0
-        switch triangle.role {
-        case .roof, .landingSurface:
-            return centerY > sourceHeight * 0.50
-        case .floor:
-            return centerY > sourceHeight * 0.45
-        case .wall, .beam, .railing, .door, .glass, .debris:
-            return false
-        }
+        let heightFraction = sourceHeight > 0.0001 ? centerY / sourceHeight : 0.0
+
+        // Upward-facing (excludes near-vertical walls / fences / beam sides, which sit near 0) and
+        // in the upper part of the structure (excludes interior floors and ground). The 0.18 bar
+        // matches what the shingle/tile roofs used and admits even steep A-frame slopes (~79°).
+        return upwardNormalY > 0.18 && heightFraction > 0.30
     }
 
     private func addSupportSurfaceCandidate(

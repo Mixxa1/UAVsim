@@ -8,11 +8,13 @@ struct CollisionMeshTriangle {
     let normal: SIMD3<Float>
     let minimum: SIMD3<Float>
     let maximum: SIMD3<Float>
+    let supportsLandingSurface: Bool
 
     init?(
         point0: SIMD3<Float>,
         point1: SIMD3<Float>,
-        point2: SIMD3<Float>
+        point2: SIMD3<Float>,
+        supportsLandingSurface: Bool = false
     ) {
         let rawNormal = simd_cross(point1 - point0, point2 - point0)
         guard point0.x.isFinite, point0.y.isFinite, point0.z.isFinite,
@@ -27,6 +29,7 @@ struct CollisionMeshTriangle {
         self.normal = simd_normalize(rawNormal)
         self.minimum = simd_min(simd_min(point0, point1), point2)
         self.maximum = simd_max(simd_max(point0, point1), point2)
+        self.supportsLandingSurface = supportsLandingSurface
     }
 }
 
@@ -310,6 +313,7 @@ struct CollisionSweepResult {
     let contactPoint: SIMD3<Float>
     let contactNormal: SIMD3<Float>
     let hitFraction: Float
+    let isSupportSurfaceContact: Bool
 }
 
 struct CollisionAnalysisInput {
@@ -376,6 +380,7 @@ final class CollisionAnalysisService {
                 guard let meshContact = nearestMeshContact(
                     obstacle: obstacle,
                     dronePosition: input.dronePosition,
+                    droneVelocity: input.droneVelocity,
                     droneRadius: input.droneRadius
                 ) else {
                     continue
@@ -579,6 +584,7 @@ final class CollisionAnalysisService {
     private func nearestMeshContact(
         obstacle: CollisionObstacle,
         dronePosition: SIMD3<Float>,
+        droneVelocity: SIMD3<Float>,
         droneRadius: Float
     ) -> (clearance: Float, direction: SIMD3<Float>, contactNormal: SIMD3<Float>)? {
         guard let triangles = obstacle.meshTriangles,
@@ -603,6 +609,15 @@ final class CollisionAnalysisService {
             }
 
             let closest = closestPoint(on: triangle, to: sphereCenter)
+            if isPassiveTopSupportMeshContact(
+                triangle: triangle,
+                sphereCenter: sphereCenter,
+                sphereRadius: droneRadius,
+                droneVelocity: droneVelocity
+            ) {
+                continue
+            }
+
             let delta = sphereCenter - closest
             let distanceSq = simd_length_squared(delta)
             guard distanceSq < bestDistanceSq else {
@@ -668,7 +683,8 @@ final class CollisionAnalysisService {
                     obstacle: obstacle,
                     contactPoint: start + (end - start) * planeHit.fraction,
                     contactNormal: planeHit.normal,
-                    hitFraction: planeHit.fraction
+                    hitFraction: planeHit.fraction,
+                    isSupportSurfaceContact: planeHit.isSupportSurfaceContact
                 )
             }
 
@@ -682,7 +698,8 @@ final class CollisionAnalysisService {
                     obstacle: obstacle,
                     contactPoint: start + (end - start) * edgeHit.fraction,
                     contactNormal: edgeHit.normal,
-                    hitFraction: edgeHit.fraction
+                    hitFraction: edgeHit.fraction,
+                    isSupportSurfaceContact: false
                 )
             }
         }
@@ -711,7 +728,7 @@ final class CollisionAnalysisService {
         movement: SIMD3<Float>,
         radius: Float,
         triangle: CollisionMeshTriangle
-    ) -> (fraction: Float, normal: SIMD3<Float>)? {
+    ) -> (fraction: Float, normal: SIMD3<Float>, isSupportSurfaceContact: Bool)? {
         let signedStart = simd_dot(start - triangle.point0, triangle.normal)
         let signedEnd = simd_dot(start + movement - triangle.point0, triangle.normal)
         var candidates: [(fraction: Float, normal: SIMD3<Float>)] = []
@@ -741,7 +758,22 @@ final class CollisionAnalysisService {
             let center = start + movement * candidate.fraction
             let surfacePoint = center - candidate.normal * radius
             if point(surfacePoint, isInside: triangle, tolerance: 0.015) {
-                return candidate
+                if isPassiveTopSupportSweepContact(
+                    triangle: triangle,
+                    sphereCenter: center,
+                    sphereRadius: radius,
+                    contactNormal: candidate.normal,
+                    movement: movement
+                ) {
+                    continue
+                }
+                return (
+                    candidate.fraction,
+                    candidate.normal,
+                    triangle.supportsLandingSurface &&
+                        candidate.normal.y > 0.35 &&
+                        simd_dot(movement, candidate.normal) < -0.001
+                )
             }
         }
         return nil
@@ -771,6 +803,15 @@ final class CollisionAnalysisService {
         radius: Float,
         triangle: CollisionMeshTriangle
     ) -> (fraction: Float, normal: SIMD3<Float>)? {
+        if isPassiveTopSupportEdgeSweep(
+            triangle: triangle,
+            start: start,
+            end: end,
+            sphereRadius: radius
+        ) {
+            return nil
+        }
+
         let edges = [
             (triangle.point0, triangle.point1),
             (triangle.point1, triangle.point2),
@@ -825,6 +866,95 @@ final class CollisionAnalysisService {
         }
 
         return best
+    }
+
+    private func isPassiveTopSupportMeshContact(
+        triangle: CollisionMeshTriangle,
+        sphereCenter: SIMD3<Float>,
+        sphereRadius: Float,
+        droneVelocity: SIMD3<Float>
+    ) -> Bool {
+        guard triangle.supportsLandingSurface else {
+            return false
+        }
+        let upwardNormal = triangle.normal.y >= 0.0 ? triangle.normal : -triangle.normal
+        guard upwardNormal.y > 0.35 else {
+            return false
+        }
+
+        let normalSpeed = simd_dot(droneVelocity, upwardNormal)
+        guard normalSpeed >= -3.0 else {
+            return false
+        }
+
+        let signedDistance = simd_dot(sphereCenter - triangle.point0, upwardNormal)
+        let supportTolerance = max(0.07, sphereRadius * 0.16)
+        let supportBand = max(0.24, sphereRadius * 0.58)
+        guard signedDistance >= sphereRadius - supportTolerance,
+              signedDistance <= sphereRadius + supportBand else {
+            return false
+        }
+
+        let surfacePoint = sphereCenter - upwardNormal * signedDistance
+        return point(surfacePoint, isInside: triangle, tolerance: 0.045)
+    }
+
+    private func isPassiveTopSupportSweepContact(
+        triangle: CollisionMeshTriangle,
+        sphereCenter: SIMD3<Float>,
+        sphereRadius: Float,
+        contactNormal: SIMD3<Float>,
+        movement: SIMD3<Float>
+    ) -> Bool {
+        guard triangle.supportsLandingSurface else {
+            return false
+        }
+        guard contactNormal.y > 0.35,
+              simd_dot(movement, contactNormal) >= -0.001 else {
+            return false
+        }
+
+        let signedDistance = simd_dot(sphereCenter - triangle.point0, contactNormal)
+        let supportTolerance = max(0.06, sphereRadius * 0.14)
+        let supportBand = max(0.20, sphereRadius * 0.48)
+        guard signedDistance >= sphereRadius - supportTolerance,
+              signedDistance <= sphereRadius + supportBand else {
+            return false
+        }
+
+        let surfacePoint = sphereCenter - contactNormal * signedDistance
+        return point(surfacePoint, isInside: triangle, tolerance: 0.04)
+    }
+
+    private func isPassiveTopSupportEdgeSweep(
+        triangle: CollisionMeshTriangle,
+        start: SIMD3<Float>,
+        end: SIMD3<Float>,
+        sphereRadius: Float
+    ) -> Bool {
+        guard triangle.supportsLandingSurface else {
+            return false
+        }
+        let upwardNormal = triangle.normal.y >= 0.0 ? triangle.normal : -triangle.normal
+        guard upwardNormal.y > 0.35,
+              simd_dot(end - start, upwardNormal) >= -0.001 else {
+            return false
+        }
+
+        let supportTolerance = max(0.07, sphereRadius * 0.16)
+        let supportBand = max(0.24, sphereRadius * 0.58)
+        for center in [start, end] {
+            let signedDistance = simd_dot(center - triangle.point0, upwardNormal)
+            guard signedDistance >= sphereRadius - supportTolerance,
+                  signedDistance <= sphereRadius + supportBand else {
+                continue
+            }
+            let surfacePoint = center - upwardNormal * signedDistance
+            if point(surfacePoint, isInside: triangle, tolerance: 0.08) {
+                return true
+            }
+        }
+        return false
     }
 
     private func sweepSphereAgainstBox(
@@ -891,7 +1021,8 @@ final class CollisionAnalysisService {
             obstacle: obstacle,
             contactPoint: start + (end - start) * slabHit.fraction,
             contactNormal: normal,
-            hitFraction: slabHit.fraction
+            hitFraction: slabHit.fraction,
+            isSupportSurfaceContact: false
         )
     }
 

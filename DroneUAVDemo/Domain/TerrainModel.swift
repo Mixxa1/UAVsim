@@ -281,6 +281,7 @@ struct EnvironmentCollisionMeshTriangle {
     let point0: SIMD3<Float>
     let point1: SIMD3<Float>
     let point2: SIMD3<Float>
+    let supportsLanding: Bool
 }
 
 struct EnvironmentCollisionMeshPart {

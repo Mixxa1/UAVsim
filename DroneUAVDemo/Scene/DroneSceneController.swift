@@ -2227,7 +2227,23 @@ final class DroneSceneController {
         clearanceRadius: Float,
         maximumHeight: Float
     ) -> Float? {
-        var bestHeight: Float?
+        supportSurfaceContact(
+            at: planarPosition,
+            clearanceRadius: clearanceRadius,
+            maximumHeight: maximumHeight
+        )?.height
+    }
+
+    /// Highest support surface under `planarPosition` together with its world-space
+    /// up-normal (y > 0). Flat tops (container/crate/building bounds) return (0, 1, 0);
+    /// pitched building-roof triangles return the actual slope normal so a resting drone
+    /// can be laid flush against the incline instead of hovering level over it.
+    func supportSurfaceContact(
+        at planarPosition: SIMD2<Float>,
+        clearanceRadius: Float,
+        maximumHeight: Float
+    ) -> (height: Float, normal: SIMD3<Float>)? {
+        var best: (height: Float, normal: SIMD3<Float>)?
         for surface in supportSurfaces {
             guard planarPoint(planarPosition, intersects: surface, clearanceRadius: clearanceRadius) else {
                 continue
@@ -2236,11 +2252,11 @@ final class DroneSceneController {
                   surfaceHeight <= maximumHeight + 0.08 else {
                 continue
             }
-            if bestHeight == nil || surfaceHeight > (bestHeight ?? -.greatestFiniteMagnitude) {
-                bestHeight = surfaceHeight
+            if best == nil || surfaceHeight > best!.height {
+                best = (surfaceHeight, surface.normal)
             }
         }
-        return bestHeight
+        return best
     }
 
     private func pathSignature(path: [SIMD3<Float>], currentWaypointIndex: Int) -> Int {
@@ -4146,7 +4162,8 @@ final class DroneSceneController {
                 guard let triangle = CollisionMeshTriangle(
                     point0: point0,
                     point1: point1,
-                    point2: point2
+                    point2: point2,
+                    supportsLandingSurface: sourceTriangle.supportsLanding
                 ) else {
                     continue
                 }
@@ -4584,7 +4601,8 @@ final class DroneSceneController {
                 point,
                 isInsideTriangle: SIMD2<Float>(triangle.0.x, triangle.0.z),
                 SIMD2<Float>(triangle.1.x, triangle.1.z),
-                SIMD2<Float>(triangle.2.x, triangle.2.z)
+                SIMD2<Float>(triangle.2.x, triangle.2.z),
+                clearanceRadius: clearanceRadius
             )
         }
 
@@ -4599,11 +4617,21 @@ final class DroneSceneController {
             abs(local.y) <= surface.halfExtents.y + clearanceRadius
     }
 
+    // `clearanceRadius` mirrors the box-surface branch above, which grows its footprint by the
+    // same margin: without it, a rooftop assembled from mesh triangles only reports support
+    // height within ~2mm of a triangle edge, so the drone's collision radius (tens of cm) finds
+    // no support the moment its center nears a roof edge or an inter-triangle seam — even though
+    // the mesh-collision system (which uses a much looser 0.015-0.045 tolerance) already treats
+    // that spot as a valid landing contact. That mismatch is what stranded landed drones at roof
+    // edges: the tick falls back to the hard-collision path, which re-teleports position onto the
+    // same contact point every frame, reads as "stuck jittering," and can accumulate enough
+    // pseudo-impact severity to force-disarm.
     private func planarPoint(
         _ point: SIMD2<Float>,
         isInsideTriangle point0: SIMD2<Float>,
         _ point1: SIMD2<Float>,
-        _ point2: SIMD2<Float>
+        _ point2: SIMD2<Float>,
+        clearanceRadius: Float
     ) -> Bool {
         let area = triangleEdge(point0, point1, point2)
         guard abs(area) > 0.000001 else {
@@ -4613,7 +4641,31 @@ final class DroneSceneController {
         let w1 = triangleEdge(point2, point0, point) / area
         let w2 = triangleEdge(point0, point1, point) / area
         let tolerance: Float = -0.002
-        return w0 >= tolerance && w1 >= tolerance && w2 >= tolerance
+        if w0 >= tolerance && w1 >= tolerance && w2 >= tolerance {
+            return true
+        }
+        guard clearanceRadius > 0.0 else {
+            return false
+        }
+        let clearanceSq = clearanceRadius * clearanceRadius
+        return distanceSquared(from: point, toSegment: point0, point1) <= clearanceSq ||
+            distanceSquared(from: point, toSegment: point1, point2) <= clearanceSq ||
+            distanceSquared(from: point, toSegment: point2, point0) <= clearanceSq
+    }
+
+    private func distanceSquared(
+        from point: SIMD2<Float>,
+        toSegment segmentStart: SIMD2<Float>,
+        _ segmentEnd: SIMD2<Float>
+    ) -> Float {
+        let segment = segmentEnd - segmentStart
+        let lengthSquared = simd_length_squared(segment)
+        guard lengthSquared > 0.000001 else {
+            return simd_length_squared(point - segmentStart)
+        }
+        let t = min(1.0, max(0.0, simd_dot(point - segmentStart, segment) / lengthSquared))
+        let closest = segmentStart + segment * t
+        return simd_length_squared(point - closest)
     }
 
     private func triangleEdge(

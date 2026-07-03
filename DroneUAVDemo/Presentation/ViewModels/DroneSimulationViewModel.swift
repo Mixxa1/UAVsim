@@ -4296,17 +4296,26 @@ final class DroneSimulationViewModel: ObservableObject {
             droneRadius: selectedDroneProfile.collisionRadius,
             obstacles: sweptCollisionObstacles
         ) {
-            let separation = max(0.025, selectedDroneProfile.collisionRadius * 0.06)
-            state.position = sweptCollision.contactPoint + sweptCollision.contactNormal * separation
-            postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
-                riskScore: 1.0,
-                nearestObstacleDistance: -separation,
-                nearestObstacleID: sweptCollision.obstacle.id,
-                nearestObstacleSource: sweptCollision.obstacle.source,
-                timeToCollision: 0.0,
-                emergencyAction: .emergencyStop,
-                contactNormal: sweptCollision.contactNormal
-            )
+            if sweptCollision.isSupportSurfaceContact {
+                // Descent onto a roof / container top: this is a landing, not a wall
+                // strike. The support-surface floor clamp (applySupportSurfaceConstraint)
+                // has already placed the gear on the surface and applyGroundedSafetyIfNeeded
+                // settles it. Teleporting to the contact point + emergencyStop here is what
+                // fought those and produced the roof-edge jitter, so treat it as safe.
+                postPhysicsCollisionAnalysis = .safe
+            } else {
+                let separation = max(0.025, selectedDroneProfile.collisionRadius * 0.06)
+                state.position = sweptCollision.contactPoint + sweptCollision.contactNormal * separation
+                postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
+                    riskScore: 1.0,
+                    nearestObstacleDistance: -separation,
+                    nearestObstacleID: sweptCollision.obstacle.id,
+                    nearestObstacleSource: sweptCollision.obstacle.source,
+                    timeToCollision: 0.0,
+                    emergencyAction: .emergencyStop,
+                    contactNormal: sweptCollision.contactNormal
+                )
+            }
         } else {
             let postPhysicsCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
                 near: state.position,
@@ -4325,28 +4334,11 @@ final class DroneSimulationViewModel: ObservableObject {
 
         collisionAnalysis = postPhysicsCollisionAnalysis
         var needsCollisionAnalysisRefresh = false
+        // Top faces of support surfaces (roofs, container/crate tops) are excluded from the
+        // collision analysis (see CollisionAnalysisService.isPassiveTopSupport*), and the
+        // support-surface floor clamp has already seated a landed drone, so any penetration
+        // reported here is a genuine wall / underside strike.
         if postPhysicsCollisionAnalysis.nearestObstacleDistance <= -0.02 {
-            #if DEBUG
-            if let source = postPhysicsCollisionAnalysis.nearestObstacleSource, source.hasPrefix("container.") {
-                var obstacleInfo = ""
-                if let id = postPhysicsCollisionAnalysis.nearestObstacleID,
-                   let obstacle = sceneController.obstacle(for: id) {
-                    obstacleInfo =
-                        " obstacleCenter=\(obstacle.center)" +
-                        " planarHalfExtents=\(String(describing: obstacle.planarHalfExtents))" +
-                        " baseY=\(obstacle.baseY) topY=\(obstacle.topY)" +
-                        " yawRadians=\(obstacle.yawRadians)"
-                }
-                print(
-                    "[ContainerCollision] source=\(source) " +
-                    "dist=\(postPhysicsCollisionAnalysis.nearestObstacleDistance) " +
-                    "speed=\(simd_length(state.velocity)) " +
-                    "dronePos=\(state.position) " +
-                    "normal=\(postPhysicsCollisionAnalysis.contactNormal ?? SIMD3<Float>(repeating: .nan))" +
-                    obstacleInfo
-                )
-            }
-            #endif
             if simd_length(state.velocity) > 0.45, collisionCooldown <= 0.0 {
                 handleObstacleCollision(using: postPhysicsCollisionAnalysis)
                 collisionCooldown = collisionCooldownDuration(for: postPhysicsCollisionAnalysis.nearestObstacleSource)
@@ -4376,6 +4368,21 @@ final class DroneSimulationViewModel: ObservableObject {
 
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         applyGroundedSafetyIfNeeded(deltaTime: dt)
+
+        #if DEBUG
+        // Launch detector: a sudden upward position jump with low vertical velocity is a teleport
+        // (collision push-out / support snap), not real climb — the "thrown up several meters" bug.
+        let verticalJump = state.position.y - previousState.position.y
+        if verticalJump > 0.5, state.velocity.y < verticalJump / dt * 0.5 {
+            print(
+                "[LaunchDetect] up-jump dy=\(verticalJump) prevY=\(previousState.position.y) " +
+                "newY=\(state.position.y) velY=\(state.velocity.y) physState=\(physicalState) " +
+                "collisionSource=\(collisionAnalysis.nearestObstacleSource ?? "n/a") " +
+                "dist=\(collisionAnalysis.nearestObstacleDistance)"
+            )
+        }
+        #endif
+
         handleModeTransitions()
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
         updateSignalLossSequence(deltaTime: dt)
@@ -4780,10 +4787,17 @@ final class DroneSimulationViewModel: ObservableObject {
         )
 
         let penetration = max(0.0, -analysis.nearestObstacleDistance)
-        if penetration > 0.0001,
-           let obstacleID = analysis.nearestObstacleID,
-           let obstacle = sceneController.obstacle(for: obstacleID) {
-            let away = horizontalPushNormal(awayFrom: obstacle)
+        if penetration > 0.0001 {
+            let away: SIMD3<Float>
+            if let contactNormal = analysis.contactNormal,
+               simd_length_squared(contactNormal) > 0.0001 {
+                away = simd_normalize(contactNormal)
+            } else if let obstacleID = analysis.nearestObstacleID,
+                      let obstacle = sceneController.obstacle(for: obstacleID) {
+                away = horizontalPushNormal(awayFrom: obstacle)
+            } else {
+                away = SIMD3<Float>(0.0, 0.0, 1.0)
+            }
             let pushDistance = penetration + max(0.04, selectedDroneProfile.collisionRadius * 0.10)
             state.position += away * pushDistance
         }
@@ -13350,37 +13364,212 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func supportSurfaceY(for position: SIMD3<Float>) -> Float {
+        supportSurfaceY(for: position, maximumHeight: position.y)
+    }
+
+    private func supportSurfaceY(for position: SIMD3<Float>, maximumHeight: Float) -> Float {
         sceneController.supportSurfaceHeight(
             at: SIMD2<Float>(position.x, position.z),
             clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48),
-            maximumHeight: position.y
+            maximumHeight: maximumHeight
         ) ?? 0.0
+    }
+
+    private func supportSurfaceContact(for position: SIMD3<Float>) -> (height: Float, normal: SIMD3<Float>)? {
+        sceneController.supportSurfaceContact(
+            at: SIMD2<Float>(position.x, position.z),
+            clearanceRadius: max(0.36, selectedDroneProfile.collisionRadius * 0.48),
+            maximumHeight: position.y
+        )
+    }
+
+    /// Rest-attitude support normal from a least-squares plane fit over the footprint HEIGHTS
+    /// (centre + 8 compass points at ~one footprint radius). Fitting heights — rather than
+    /// averaging the normals of whichever triangle happens to top each sample — matches what the
+    /// gear physically rests on: corrugated-sheet ribs and uneven planks collapse to the sheet's
+    /// overall plane, a ridge straddle fits ~level, and a smooth slope reproduces that slope
+    /// exactly (the shingle-roof behaviour, now for every model). Samples far below the highest
+    /// contact (holes between planks exposing interior floors) can't carry the airframe and are
+    /// dropped before fitting. Height queries stay single-point elsewhere so the drone still
+    /// seats on the actual crest it is standing on.
+    private func fittedSupportPlaneNormal(at position: SIMD3<Float>) -> SIMD3<Float>? {
+        let footprint = max(0.3, selectedDroneProfile.collisionRadius * 1.2)
+        let clearanceRadius = max(0.36, selectedDroneProfile.collisionRadius * 0.48)
+        // Allow samples a little above the centre so the up-slope side of the footprint is not
+        // rejected by the height guard on a real incline.
+        let maximumHeight = position.y + max(0.35, footprint)
+        let diagonal = footprint * 0.7071
+        let offsets: [SIMD2<Float>] = [
+            SIMD2<Float>(0.0, 0.0),
+            SIMD2<Float>(footprint, 0.0),
+            SIMD2<Float>(-footprint, 0.0),
+            SIMD2<Float>(0.0, footprint),
+            SIMD2<Float>(0.0, -footprint),
+            SIMD2<Float>(diagonal, diagonal),
+            SIMD2<Float>(diagonal, -diagonal),
+            SIMD2<Float>(-diagonal, diagonal),
+            SIMD2<Float>(-diagonal, -diagonal)
+        ]
+
+        var samples: [(x: Float, z: Float, height: Float)] = []
+        samples.reserveCapacity(offsets.count)
+        var highestContact = -Float.greatestFiniteMagnitude
+        for offset in offsets {
+            guard let contact = sceneController.supportSurfaceContact(
+                at: SIMD2<Float>(position.x + offset.x, position.z + offset.y),
+                clearanceRadius: clearanceRadius,
+                maximumHeight: maximumHeight
+            ) else {
+                continue
+            }
+            samples.append((offset.x, offset.y, contact.height))
+            highestContact = max(highestContact, contact.height)
+        }
+        guard !samples.isEmpty else {
+            return nil
+        }
+        // A contact well below the crest is seen through a gap, not something the gear rests on.
+        let restBand = max(0.5, footprint * 1.5)
+        samples.removeAll { highestContact - $0.height > restBand }
+        guard samples.count >= 3 else {
+            return SIMD3<Float>(0.0, 1.0, 0.0)
+        }
+
+        let count = Float(samples.count)
+        var meanX: Float = 0.0, meanZ: Float = 0.0, meanH: Float = 0.0
+        for sample in samples {
+            meanX += sample.x
+            meanZ += sample.z
+            meanH += sample.height
+        }
+        meanX /= count
+        meanZ /= count
+        meanH /= count
+
+        var sxx: Float = 0.0, szz: Float = 0.0, sxz: Float = 0.0
+        var sxh: Float = 0.0, szh: Float = 0.0
+        for sample in samples {
+            let dx = sample.x - meanX
+            let dz = sample.z - meanZ
+            let dh = sample.height - meanH
+            sxx += dx * dx
+            szz += dz * dz
+            sxz += dx * dz
+            sxh += dx * dh
+            szh += dz * dh
+        }
+        let determinant = sxx * szz - sxz * sxz
+        guard abs(determinant) > 0.0001 else {
+            return SIMD3<Float>(0.0, 1.0, 0.0)
+        }
+        // h(x, z) = slopeX·x + slopeZ·z + c  →  plane normal ∝ (−slopeX, 1, −slopeZ).
+        let slopeX = (sxh * szz - szh * sxz) / determinant
+        let slopeZ = (szh * sxx - sxh * sxz) / determinant
+        return simd_normalize(SIMD3<Float>(-slopeX, 1.0, -slopeZ))
+    }
+
+    private var restSupportNormalLatch: (position: SIMD2<Float>, normal: SIMD3<Float>)?
+
+    /// The support normal is latched at touchdown and reused while the drone stays parked on
+    /// roughly the same spot. Re-deriving it every tick fed the conform target with sampling
+    /// noise — on corrugated sheets the rib faces flip the queried normal side-to-side under
+    /// millimetre drift, so the target attitude lurched left/right each tick and the copter
+    /// visibly "danced". Latching breaks that tilt→thrust→drift feedback: the pose is decided
+    /// once from the fitted contact plane and only re-derived after the drone leaves the
+    /// surface or slides to a new patch.
+    private func latchedRestSupportNormal() -> SIMD3<Float>? {
+        let planar = SIMD2<Float>(state.position.x, state.position.z)
+        let footprint = max(0.3, selectedDroneProfile.collisionRadius * 1.2)
+        if let latch = restSupportNormalLatch,
+           simd_distance(latch.position, planar) <= footprint * 0.75 {
+            return latch.normal
+        }
+        guard let normal = fittedSupportPlaneNormal(at: state.position) else {
+            restSupportNormalLatch = nil
+            return nil
+        }
+        restSupportNormalLatch = (planar, normal)
+        return normal
+    }
+
+    /// Roll/pitch (in the project's `yaw * pitch * roll` Euler convention, i.e.
+    /// `orientation = (roll.x, pitch.y, yaw.z)`) that lays the drone flush against a
+    /// support surface with the given world-space up-normal, accounting for current yaw.
+    /// A flat surface (or `nil`) yields level `(0, 0)`, so ground / flat tops are unchanged.
+    private func restAttitudeTargets(surfaceNormal: SIMD3<Float>?) -> (roll: Float, pitch: Float) {
+        guard let rawNormal = surfaceNormal,
+              simd_length_squared(rawNormal) > 0.0001 else {
+            return (0.0, 0.0)
+        }
+        var normal = simd_normalize(rawNormal)
+        if normal.y < 0.0 {
+            normal = -normal
+        }
+        // Near-flat surface: keep level to avoid pointless micro-tilt.
+        guard normal.y < 0.9995 else {
+            return (0.0, 0.0)
+        }
+
+        // Cap the TOTAL tilt from vertical before deriving roll/pitch. Clamping roll and pitch
+        // independently (the old approach) let them stack — e.g. 0.7 + 0.7 ≈ 54° on a roof viewed
+        // diagonally — which laid the copter right over on steep barn roofs. Capping the normal's
+        // deviation from vertical bounds the visible lean in every direction to one gentle value.
+        let maxTilt: Float = 0.52 // ~30°
+        let tiltFromVertical = acos(min(1.0, max(-1.0, normal.y)))
+        if tiltFromVertical > maxTilt {
+            let horizontal = SIMD2<Float>(normal.x, normal.z)
+            let horizontalLength = simd_length(horizontal)
+            if horizontalLength > 0.0001 {
+                let cappedHorizontal = (horizontal / horizontalLength) * sin(maxTilt)
+                normal = SIMD3<Float>(cappedHorizontal.x, cos(maxTilt), cappedHorizontal.y)
+            }
+        }
+
+        let yaw = state.orientation.z
+        let cosYaw = cos(yaw)
+        let sinYaw = sin(yaw)
+        // Un-yaw the normal into the drone's heading frame, then invert the body-up
+        // expression up = (-sinRoll, cosRoll·cosPitch, cosRoll·sinPitch).
+        let localX = normal.x * cosYaw - normal.z * sinYaw
+        let localZ = normal.x * sinYaw + normal.z * cosYaw
+        let roll = -asin(min(1.0, max(-1.0, localX)))
+        let cosRoll = max(0.2, cos(roll))
+        let pitch = asin(min(1.0, max(-1.0, localZ / cosRoll)))
+        return (roll, pitch)
     }
 
     private func heightAboveSupportSurface(for position: SIMD3<Float>) -> Float {
         position.y - supportSurfaceY(for: position)
     }
 
+    /// Treats an elevated support surface (building roof, container / crate top) as a hard
+    /// floor: the drone's gear reference is never allowed to sink below the surface under its
+    /// current XZ. This is intentionally the *only* per-tick position constraint for such
+    /// surfaces — it does not damp horizontal motion, level attitude, or force the drone down,
+    /// so flying across a roof or taking off from one is unobstructed. Resting/settling once
+    /// the drone is actually grounded is handled solely by `applyGroundedSafetyIfNeeded`, which
+    /// mirrors the physics engine's own y=0 ground-rest contract at the elevated height.
     private func applySupportSurfaceConstraint(previousState: DroneState) {
-        let supportY = supportSurfaceY(for: state.position)
-        guard supportY > 0.0 else {
+        let supportY = supportSurfaceY(
+            for: state.position,
+            maximumHeight: max(previousState.position.y, state.position.y) +
+                max(0.18, selectedDroneProfile.collisionRadius * 0.50)
+        )
+        guard supportY > 0.0, state.position.y < supportY else {
             return
         }
 
-        let wasAboveSurface = previousState.position.y > supportY + 0.06
-        let nearSurface = state.position.y <= supportY + 0.14
-        let descending = state.velocity.y <= 0.24 || previousState.position.y >= state.position.y
-        guard nearSurface, descending else {
+        // Only clamp a drone that was resting on / descending onto the surface. A drone that
+        // is genuinely below it (e.g. flew in under an overhang) must not be shoved up through
+        // the surface, so require it to have been at or above the surface on the previous tick.
+        let comeFromAboveTolerance = max(0.05, selectedDroneProfile.collisionRadius * 0.5)
+        guard previousState.position.y >= supportY - comeFromAboveTolerance else {
             return
         }
 
-        if state.position.y < supportY || wasAboveSurface {
-            state.position.y = max(state.position.y, supportY)
-            if state.velocity.y < 0.0 {
-                state.velocity.y = 0.0
-            }
-            state.velocity.x *= 0.96
-            state.velocity.z *= 0.96
+        state.position.y = supportY
+        if state.velocity.y < 0.0 {
+            state.velocity.y = 0.0
         }
     }
 
@@ -13609,6 +13798,18 @@ final class DroneSimulationViewModel: ObservableObject {
             nextPhysicalState = physicalState
         }
 
+        #if DEBUG
+        if nextPhysicalState == .crashed, physicalState != .crashed {
+            print(
+                "[CrashDetect] → crashed: impactSev=\(impactSeverityAccumulator) " +
+                "damageCritical=\(damageState.isFlightCritical) " +
+                "severeAttitudeOnGround=\(severeAttitudeOnGround) groundContact=\(groundContactAccumulator) " +
+                "ori=\(state.orientation) pos=\(state.position) supportY=\(supportY) " +
+                "vel=\(state.velocity) source=\(lastCollisionSource)"
+            )
+        }
+        #endif
+
         transitionPhysicalState(nextPhysicalState)
 
         if nextPhysicalState == .crashed, isArmed {
@@ -13617,17 +13818,51 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func applyGroundedSafetyIfNeeded(deltaTime: Float) {
-        let supportY = supportSurfaceY(for: state.position)
+        let contact = supportSurfaceContact(for: state.position)
+        let supportY = contact?.height ?? 0.0
         guard state.position.y <= supportY + 0.08 else {
+            restSupportNormalLatch = nil
             return
         }
 
-        let requestedThrottle = max(Float(controlValues.throttle), state.throttle, state.motorThrottle)
+        let commandedThrottle = Float(controlValues.throttle)
+        let requestedThrottle = max(commandedThrottle, state.throttle, state.motorThrottle)
         let idleHoldThreshold = resolvedFlightBaseline(for: mode).groundedIdleThreshold
+        let takeoffThreshold = resolvedFlightBaseline(for: mode).groundedTakeoffThreshold
+        let onElevatedSupport = contact != nil && supportY > 0.0
+        // Pilot intent (commanded throttle), not the lagging motor spin-down, decides whether the
+        // aircraft is settling or leaving. Using the motor/state throttle kept the slope conform
+        // switched off while the rotors were still winding down through a landing — the drone
+        // jittered level until they finally dropped below the threshold.
+        let spoolingUpForTakeoff = commandedThrottle >= takeoffThreshold
+
+        var holdRestAttitude = false
 
         switch physicalState {
-        case .airborne, .takeoffTransition, .landing:
+        case .takeoffTransition:
+            restSupportNormalLatch = nil
             return
+        case .airborne, .landing:
+            // Bridge the touchdown gap: once genuinely in contact with an elevated support
+            // surface (and not spooling up to leave), conform + gently settle even before the
+            // state machine reports .armedOnGround/.landed — that needs ~0.28 s of stable
+            // contact, during which the physics step keeps leveling the attitude while the floor
+            // clamp holds Y, so the drone visibly jitters on the slope until it fully stops.
+            // Flat-ground landings stay on the engine's own ground handling as before.
+            guard selectedDroneProfile.airframeClass == .multirotor,
+                  onElevatedSupport,
+                  !spoolingUpForTakeoff else {
+                restSupportNormalLatch = nil
+                return
+            }
+            state.position.y = supportY
+            if state.velocity.y < 0.0 {
+                state.velocity.y = 0.0
+            }
+            state.velocity.x *= max(0.0, 1.0 - deltaTime * 10.0)
+            state.velocity.z *= max(0.0, 1.0 - deltaTime * 10.0)
+            state.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - deltaTime * 12.0))
+            holdRestAttitude = true
         case .crashed:
             state.position.y = supportY
             state.velocity.x *= max(0.0, 1.0 - deltaTime * 12.0)
@@ -13647,8 +13882,12 @@ final class DroneSimulationViewModel: ObservableObject {
             state.velocity.z *= max(0.0, 1.0 - deltaTime * 14.0)
             state.velocity.y = 0.0
             state.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - deltaTime * 18.0))
-            state.orientation.x = approach(current: state.orientation.x, target: 0.0, rate: 5.8, dt: deltaTime)
-            state.orientation.y = approach(current: state.orientation.y, target: 0.0, rate: 5.8, dt: deltaTime)
+
+            // Hold the resting attitude across the whole parked throttle range (a drone sitting on
+            // a surface still carries idle-to-near-hover throttle); release only when the pilot
+            // actually commands takeoff throttle, matching the .takeoffTransition flip so there is
+            // no conform/release flip-flop.
+            holdRestAttitude = physicalState == .disarmed || !spoolingUpForTakeoff
 
             if physicalState == .disarmed {
                 state.throttle = 0.0
@@ -13660,6 +13899,22 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
+        // Touchdown-latched, plane-fitted contact normal (see latchedRestSupportNormal); a roof
+        // ridge fits ~level, corrugated ribs and uneven planks collapse to their overall plane.
+        // Fixed-wing keeps its own level belly-landing behaviour.
+        let restAttitude: (roll: Float, pitch: Float)
+        if holdRestAttitude, selectedDroneProfile.airframeClass == .multirotor {
+            restAttitude = restAttitudeTargets(surfaceNormal: latchedRestSupportNormal())
+        } else {
+            restSupportNormalLatch = nil
+            restAttitude = (0.0, 0.0)
+        }
+
+        if holdRestAttitude {
+            state.orientation.x = approach(current: state.orientation.x, target: restAttitude.roll, rate: 5.8, dt: deltaTime)
+            state.orientation.y = approach(current: state.orientation.y, target: restAttitude.pitch, rate: 5.8, dt: deltaTime)
+        }
+
         if simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)) < 0.02 {
             state.velocity.x = 0.0
             state.velocity.z = 0.0
@@ -13667,8 +13922,10 @@ final class DroneSimulationViewModel: ObservableObject {
         if simd_length(state.angularVelocity) < 0.02 {
             state.angularVelocity = .zero
         }
-        if abs(state.orientation.x) < 0.0005 { state.orientation.x = 0.0 }
-        if abs(state.orientation.y) < 0.0005 { state.orientation.y = 0.0 }
+        if holdRestAttitude {
+            if abs(state.orientation.x - restAttitude.roll) < 0.0005 { state.orientation.x = restAttitude.roll }
+            if abs(state.orientation.y - restAttitude.pitch) < 0.0005 { state.orientation.y = restAttitude.pitch }
+        }
         resyncFixedWingAttitudeFromEuler()
     }
 
