@@ -127,6 +127,9 @@
 "payload.hose.mass_follows_rig" = "Масса определяется длиной × диаметром рукава и не редактируется напрямую.";
 "payload.hose.tether_taut" = "ТРОС НАТЯНУТ";
 "payload.hose.tether_distance" = "ТРОС %.0f / %.0f м";
+"payload.hose.extinguishing" = "Тушение…";
+"payload.hose.throw_distance" = "ДАЛЬНОСТЬ %.0f м";
+"payload.hose.spraying_status" = "ПОДАЧА ПЕНЫ";
 
 // Тепловизионная камера
 "payload.camera.thermal.palette" = "Палитра";
@@ -532,7 +535,7 @@
 "keybind.camera.thermal_black_hot" = "Тепловизор: Black Hot";
 "keybind.camera.thermal_iron" = "Тепловизор: Iron";
 "keybind.camera.rangefinder_arm" = "Дальномер: лазер вкл/выкл";
-"keybind.camera.hose_spray" = "Рукав: подача пены вкл/выкл";
+"keybind.camera.hose_spray" = "Рукав: удерживать для подачи пены";
 "keybind.camera.pitch_up" = "Камера: вверх";
 "keybind.camera.pitch_down" = "Камера: вниз";
 "keybind.camera.reset_orientation" = "Сброс ориентации камеры";

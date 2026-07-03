@@ -540,20 +540,24 @@ private struct HoseAimViewportOverlayView: View {
                 Color.black.opacity(0.34)
             }
 
-            PayloadOpticsCornerFrame()
-                .stroke(overlayTint.opacity(0.95), style: StrokeStyle(lineWidth: 2.0, lineCap: .square))
-                .padding(22)
-
-            CrosshairShape()
-                .stroke(reticleColor, style: StrokeStyle(lineWidth: isOnTarget ? 3.0 : 2.2, lineCap: .round))
-                .frame(width: 116, height: 116)
+            // A plain aim bead for the nozzle, not a camera viewfinder — this is manual hand-eye
+            // aiming of a physical stream, not an optical device that locks onto a target for you.
+            Circle()
+                .stroke(reticleColor, lineWidth: isOnTarget ? 2.2 : 1.6)
+                .frame(width: isOnTarget ? 22 : 16, height: isOnTarget ? 22 : 16)
+            Circle()
+                .fill(reticleColor)
+                .frame(width: 3, height: 3)
 
             VStack(spacing: 0) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(state.feedLabel)
                             .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        Text(String(format: "THROW %.0f m", state.nozzleThrowMeters))
+                        Text(String(
+                            format: NSLocalizedString("payload.hose.throw_distance", comment: ""),
+                            state.nozzleThrowMeters
+                        ))
                             .font(.system(size: 18, weight: .semibold, design: .monospaced))
                         if isTetherActive {
                             Text(String(
@@ -574,7 +578,7 @@ private struct HoseAimViewportOverlayView: View {
                                 Circle()
                                     .fill(Color.white)
                                     .frame(width: 12, height: 12)
-                                Text("SPRAYING")
+                                Text(LocalizedStringKey("payload.hose.spraying_status"))
                                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                                     .foregroundStyle(Color.white.opacity(0.96))
                             }
@@ -598,15 +602,6 @@ private struct HoseAimViewportOverlayView: View {
                     statusPill(titleKey: "payload.hose.powered_off", tint: GroundControlPalette.warning)
                 } else if !state.isAvailable {
                     statusPill(titleKey: "payload.hose.unavailable", tint: GroundControlPalette.warning)
-                } else if isOnTarget {
-                    VStack(spacing: 4) {
-                        Text("mission.hud.locking")
-                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                        ProgressView(value: min(1.0, state.suppressionProgress))
-                            .tint(Color.white)
-                            .frame(width: 160)
-                    }
-                    .foregroundStyle(.white)
                 }
 
                 Spacer()

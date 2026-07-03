@@ -116,6 +116,7 @@ final class InputManager {
             uiScrollY: applyDeadzone(to: targetSnapshot.uiScrollY),
             precisionMode: targetSnapshot.precisionMode,
             boostMode: targetSnapshot.boostMode,
+            isHoseSprayHeld: targetSnapshot.isHoseSprayHeld,
             actions: actions,
             dominantSource: dominantSnapshot?.source
         )

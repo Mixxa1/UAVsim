@@ -127,6 +127,9 @@
 "payload.hose.mass_follows_rig" = "Mass follows hose length × diameter, not independently editable.";
 "payload.hose.tether_taut" = "TETHER TAUT";
 "payload.hose.tether_distance" = "TETHER %.0f / %.0f m";
+"payload.hose.extinguishing" = "Extinguishing…";
+"payload.hose.throw_distance" = "THROW %.0f m";
+"payload.hose.spraying_status" = "SPRAYING";
 
 // Thermal camera
 "payload.camera.thermal.palette" = "Palette";
@@ -536,7 +539,7 @@
 "keybind.camera.thermal_black_hot" = "Thermal: Black Hot";
 "keybind.camera.thermal_iron" = "Thermal: Iron";
 "keybind.camera.rangefinder_arm" = "Rangefinder: toggle laser";
-"keybind.camera.hose_spray" = "Fire hose: toggle spray";
+"keybind.camera.hose_spray" = "Fire hose: hold to spray";
 "keybind.camera.pitch_up" = "Pitch up (camera)";
 "keybind.camera.pitch_down" = "Pitch down (camera)";
 "keybind.camera.reset_orientation" = "Reset camera orientation";

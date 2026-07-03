@@ -14,6 +14,7 @@ struct ResolvedControlState {
 
     var precisionMode: Bool
     var boostMode: Bool
+    var isHoseSprayHeld: Bool
     var actions: [InputAction]
     var dominantSource: InputSourceKind?
 
@@ -51,6 +52,7 @@ struct ResolvedControlState {
         uiScrollY: 0.0,
         precisionMode: false,
         boostMode: false,
+        isHoseSprayHeld: false,
         actions: [],
         dominantSource: nil
     )

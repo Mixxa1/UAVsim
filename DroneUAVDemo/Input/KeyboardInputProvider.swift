@@ -17,6 +17,7 @@ final class KeyboardInputProvider: InputProvider {
         let boostMode = keyboardSnapshot.axisInput.speedBoost ||
             keyboardSnapshot.yawInput.speedBoost ||
             keyboardSnapshot.lookInput.speedBoost
+        let isHoseSprayHeld = keyboardSnapshot.activeContinuousCommands.contains(.sprayHoseTrigger)
         let nextSnapshot = InputSnapshot(
             yaw: Double(keyboardSnapshot.yawInput.intent),
             pitch: Double(keyboardSnapshot.axisInput.forward),
@@ -30,6 +31,7 @@ final class KeyboardInputProvider: InputProvider {
             uiScrollY: 0.0,
             precisionMode: keyboardSnapshot.lookInput.precisionMode,
             boostMode: boostMode,
+            isHoseSprayHeld: isHoseSprayHeld,
             actions: actions,
             source: sourceKind,
             timestamp: Date().timeIntervalSince1970,

@@ -3358,13 +3358,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
     // MARK: - Fire hose
 
+    /// Spraying tracks the physical hold-state of the spray trigger key each tick (see
+    /// `processInputActions`, which calls this every frame with `controlState.isHoseSprayHeld`) —
+    /// a real hose sprays only while the trigger is held, not "press once to leave it running."
     func setHoseSpraying(_ enabled: Bool) {
         hoseController.setSpraying(enabled)
         refreshHoseAimStatus()
-    }
-
-    func toggleHoseSpraying() {
-        setHoseSpraying(!hoseOpticsState.isSpraying)
     }
 
     func adjustHoseGimbal(yawDeltaDegrees: Double, pitchDeltaDegrees: Double) {
@@ -4117,13 +4116,21 @@ final class DroneSimulationViewModel: ObservableObject {
             missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
             publishMissionScenarioState()
         case .fireResponse:
+            let riggedTetherLength: Float = config.payloadType == .fireHose ? config.fireHoseLengthMeters : FireHoseDiameterClass.standard.lengthRangeMeters.upperBound
             let placement = FireZonePlacement.generate(
                 parameters: params,
                 worldHalfExtent: terrain.worldHalfExtent,
-                dockPosition: SIMD2<Float>(dock.x, dock.z)
+                dockPosition: SIMD2<Float>(dock.x, dock.z),
+                tetherLengthMeters: riggedTetherLength
             )
-            terrain.missionSearchSectorCenter = placement.zoneCenter
-            terrain.missionSearchSectorRadius = placement.zoneRadius
+            // Deliberately NOT setting terrain.missionSearchSectorCenter/Radius here (unlike SAR):
+            // ScenePopulationService's sector-bias concentrates a near-fixed ambient-forest object
+            // budget (~26 clusters × 12-24 trees each) into that radius regardless of how small it
+            // is — fine for SAR's 90-320m search sectors, but the hose-tether-derived fire zone
+            // can be a small fraction of that (as low as a few meters for a short narrow hose),
+            // which crammed hundreds of overlapping ambient trees on top of the dedicated fire
+            // trees. The fire zone already gets its own dense, guaranteed tree population from
+            // `spawnFireResponseScenario`; the ambient forest doesn't need to also pile in.
             sceneController.spawnFireResponseScenario(placement: placement)
             fireResponseRuntime = FireResponseRuntime(configuration: config, placement: placement)
             publishFireResponseState()
@@ -5379,6 +5386,10 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        // A real hose sprays only while the trigger is physically held, not "toggle it on and
+        // walk away" — tracked every tick from the held-key state, not the one-shot action queue.
+        setHoseSpraying(controlState.isHoseSprayHeld)
+
         for action in controlState.actions {
             switch action {
             case .requestHover:
@@ -5429,8 +5440,6 @@ final class DroneSimulationViewModel: ObservableObject {
                 activateThermalPalette(.iron)
             case .toggleRangefinderArmed:
                 toggleRangefinderArmed()
-            case .toggleHoseSpraying:
-                toggleHoseSpraying()
             case .cycleCameraMode:
                 cycleCameraMode()
             case .toggleControlPanel:
@@ -7014,6 +7023,7 @@ final class DroneSimulationViewModel: ObservableObject {
             uiScrollY: snapshot.uiScrollY,
             precisionMode: snapshot.precisionMode,
             boostMode: snapshot.boostMode,
+            isHoseSprayHeld: snapshot.isHoseSprayHeld,
             actions: snapshot.actions,
             dominantSource: .gameController
         )
@@ -7378,6 +7388,7 @@ final class DroneSimulationViewModel: ObservableObject {
             progress: fireResponseRuntime?.suppressionProgress(for: aimedIndex) ?? 0.0
         )
         hoseOpticsState = hoseController.opticsState
+        sceneController.updateHoseSprayStreamVisual(isSpraying: hoseOpticsState.isSpraying)
 
         let hoseSignals = hoseController.consumeMissionSignals()
         if !hoseSignals.isEmpty {

@@ -157,6 +157,7 @@ final class RemoteInputProvider: InputProvider {
             uiScrollY: 0.0,
             precisionMode: packet.precisionMode,
             boostMode: packet.boostMode,
+            isHoseSprayHeld: false,
             actions: [],
             source: sourceKind,
             timestamp: packet.timestamp,

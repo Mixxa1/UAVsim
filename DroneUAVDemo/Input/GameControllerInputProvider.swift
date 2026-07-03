@@ -112,6 +112,7 @@ final class GameControllerInputProvider: InputProvider {
         let uiScrollY = rightStickY
         let boostMode = false
         let precisionMode = false
+        let isHoseSprayHeld = false
 
         let nextSnapshot = InputSnapshot(
             yaw: Double(yaw),
@@ -126,6 +127,7 @@ final class GameControllerInputProvider: InputProvider {
             uiScrollY: Double(uiScrollY),
             precisionMode: precisionMode,
             boostMode: boostMode,
+            isHoseSprayHeld: isHoseSprayHeld,
             actions: actions,
             source: sourceKind,
             timestamp: Date().timeIntervalSince1970,
@@ -577,8 +579,6 @@ private extension InputAction {
             return 42
         case .toggleRangefinderArmed:
             return 43
-        case .toggleHoseSpraying:
-            return 44
         }
     }
 }

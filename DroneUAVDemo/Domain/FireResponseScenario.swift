@@ -12,45 +12,86 @@ struct FireZonePlacement: Equatable {
     var zoneRadius: Float
     var treePositions: [SIMD2<Float>]
     var initiallyBurningIndices: Set<Int>
+    /// Distance from the tree disc's edge to the parked truck (see
+    /// `DroneSceneController.spawnFireTruckDecoration`) — computed here, not a fixed constant,
+    /// so the truck's actual placement always matches what `zoneRadius` was derived against.
+    var truckStandoffMeters: Float
 
     /// Deterministically derives the fire zone + tree pool from the scenario seed and the
     /// playable world bounds. Mirrors `MissionScenarioPlacement.generate`'s algorithm (keep the
     /// zone away from the world edge and the dock, disc-sample positions inside it).
+    ///
+    /// `tetherLengthMeters` is the rigged hose's physical length — every tree MUST be reachable
+    /// from the truck within this distance (hard requirement, not a soft bias), since the hose
+    /// tether hard-clamps the drone's flight radius around the truck at runtime.
+    ///
+    /// Difficulty controls how much of that reach gets used, not just how big the zone is: easy
+    /// keeps the fire cluster close to the truck (comfortable margin, generous spread), hard
+    /// pushes it out to near the tether's absolute limit (a tight, high-stakes cluster with
+    /// almost no slack) — a deliberate escalation, not an accident of capping. `fireZoneRadiusMeters`
+    /// is still an upper bound on cluster spread, but at hard difficulty with a long hose it's
+    /// essentially never the binding constraint — the tether geometry is.
     static func generate(
         parameters: MissionScenarioParameters,
         worldHalfExtent: Float,
-        dockPosition: SIMD2<Float>
+        dockPosition: SIMD2<Float>,
+        tetherLengthMeters: Float
     ) -> FireZonePlacement {
         // Salted so a fire-response mission doesn't reuse the exact same sector as a
         // search-and-rescue mission would for the same seed.
         var rng = MissionSeededGenerator(seed: parameters.seed &+ 0x4649_5245_5A4F_4E45)
-        let radius = parameters.difficulty.fireZoneRadiusMeters
 
-        let safeExtent = max(radius + 20.0, worldHalfExtent * 0.7)
-        let centerSpan = max(0.0, safeExtent - radius)
+        // `bandDistance` is how far the fire cluster's center sits from the truck — a
+        // difficulty-scaled fraction of the tether's safe interior (reserving a small
+        // `nozzleSlack` so the runtime clamp never has to bind exactly at the drone's current
+        // position). `clusterRadius` is how far individual trees scatter from that center; it
+        // absorbs whatever's left of the tether budget after `bandDistance`, so it shrinks
+        // automatically as bandDistance approaches the limit (hard difficulty: a tight cluster
+        // right at the edge of reach) and grows when there's slack to spare (easy difficulty).
+        let nozzleSlack: Float = 3.0
+        let safeLimit = max(4.0, tetherLengthMeters - nozzleSlack)
+        let bandFractionRange: ClosedRange<Float>
+        switch parameters.difficulty {
+        case .easy:
+            bandFractionRange = 0.20...0.35
+        case .medium:
+            bandFractionRange = 0.50...0.65
+        case .hard:
+            bandFractionRange = 0.90...0.97
+        }
+        let bandDistance = safeLimit * Float.random(in: bandFractionRange, using: &rng)
+        let clusterRadiusFloor: Float = 1.0
+        let radius = min(parameters.difficulty.fireZoneRadiusMeters, max(clusterRadiusFloor, safeLimit - bandDistance))
+        // Gap from the cluster's near edge (facing the truck) out to the truck itself — derived
+        // so `standoff + radius == bandDistance` exactly, keeping `spawnFireTruckDecoration`'s
+        // placement consistent with what this reachability math assumed.
+        let standoff = max(0.0, bandDistance - radius)
+
+        let reachExtent = bandDistance + radius
+        let safeExtent = max(reachExtent + 20.0, worldHalfExtent * 0.7)
+        let centerSpan = max(0.0, safeExtent - reachExtent)
 
         func randomOffset(_ span: Float) -> Float {
             span <= 0.0 ? 0.0 : Float.random(in: -span...span, using: &rng)
         }
 
-        // Place the zone center at least ~1 zone-radius from the dock so the operator has to
-        // actually transit to the fire.
+        // Place the zone center far enough from the dock that the truck — which parks
+        // `bandDistance` back toward the dock from the cluster — fits comfortably between them,
+        // so the operator has to actually transit to the fire.
         var zoneCenter = dockPosition
         for _ in 0..<8 {
             let candidate = SIMD2<Float>(randomOffset(centerSpan), randomOffset(centerSpan))
-            if simd_distance(candidate, dockPosition) >= radius * 0.9 {
+            if simd_distance(candidate, dockPosition) >= bandDistance + 10.0 {
                 zoneCenter = candidate
                 break
             }
             zoneCenter = candidate
         }
 
-        // The fire truck parks just outside the zone, on the side facing the dock (see
-        // `DroneSceneController.spawnFireTruckDecoration`) — since the hose's tether length caps
-        // how far the drone can get from the truck, trees should be biased toward that same side
-        // rather than scattered a full 360° around the zone (which could put a tree on the far
-        // side beyond even the longest hose's reach). A ±100° arc keeps the whole zone reachable
-        // while still reading as "the crew staged toward the accessible flank," not a full circle.
+        // The fire truck parks between the dock and the cluster, `bandDistance` back from the
+        // cluster's center — purely a flavor bias now (crew staged toward the accessible flank),
+        // not load-bearing for the reachability guarantee above, which already holds for any
+        // angle up to the full 180°.
         let toDock = dockPosition - zoneCenter
         let truckFacingAngle: Float = simd_length(toDock) > 0.001 ? atan2(toDock.y, toDock.x) : 0.0
         let angleSpread: Float = 100.0 * .pi / 180.0
@@ -74,7 +115,8 @@ struct FireZonePlacement: Equatable {
             zoneCenter: zoneCenter,
             zoneRadius: radius,
             treePositions: treePositions,
-            initiallyBurningIndices: initiallyBurningIndices
+            initiallyBurningIndices: initiallyBurningIndices,
+            truckStandoffMeters: standoff
         )
     }
 }

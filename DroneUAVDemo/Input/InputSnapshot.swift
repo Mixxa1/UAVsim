@@ -14,6 +14,7 @@ struct InputSnapshot {
 
     var precisionMode: Bool
     var boostMode: Bool
+    var isHoseSprayHeld: Bool
     var actions: [InputAction]
 
     var source: InputSourceKind
@@ -50,6 +51,7 @@ struct InputSnapshot {
             uiScrollY: 0.0,
             precisionMode: false,
             boostMode: false,
+            isHoseSprayHeld: false,
             actions: [],
             source: source,
             timestamp: timestamp,
