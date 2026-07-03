@@ -1884,6 +1884,7 @@ struct ContentView: View {
                             mountedCADPayload: viewModel.mountedCADPayload,
                             onTypeChange: viewModel.setPayloadType,
                             onMassChange: viewModel.setPayloadMass,
+                            onHoseRiggingChange: viewModel.setFireHoseRigging,
                             onCustomNameChange: viewModel.setPayloadCustomName,
                             onAttach: viewModel.attachPayload,
                             onRelease: viewModel.releasePayload,

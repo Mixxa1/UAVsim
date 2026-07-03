@@ -71,6 +71,8 @@
 		10000000000000000000023B /* PayloadState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013E /* PayloadState.swift */; };
 		100000000000000000000423 /* PayloadRangefinderState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000422 /* PayloadRangefinderState.swift */; };
 		100000000000000000000425 /* PayloadRangefinderController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000424 /* PayloadRangefinderController.swift */; };
+		100000000000000000000A17 /* PayloadFireHoseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A18 /* PayloadFireHoseState.swift */; };
+		100000000000000000000A19 /* PayloadFireHoseController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1A /* PayloadFireHoseController.swift */; };
 		10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013F /* PayloadCapabilityCheck.swift */; };
 		10000000000000000000023D /* VehicleMassModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000140 /* VehicleMassModel.swift */; };
 		10000000000000000000023E /* PayloadController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000141 /* PayloadController.swift */; };
@@ -276,6 +278,8 @@
 		100000000000000000000A0F /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A10 /* SettingsView.swift */; };
 		100000000000000000000A11 /* AppGraphicsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A12 /* AppGraphicsSettings.swift */; };
 		100000000000000000000A03 /* Man.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A04 /* Man.usdz */; };
+		100000000000000000000A1B /* Fire_Truck.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1C /* Fire_Truck.usdz */; };
+		100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1E /* FireTruckAssetLoader.swift */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
 		10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040E /* SnowTerrainMaterialLoader.swift */; };
@@ -392,6 +396,8 @@
 		10000000000000000000013E /* PayloadState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadState.swift; sourceTree = "<group>"; };
 		100000000000000000000422 /* PayloadRangefinderState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadRangefinderState.swift; sourceTree = "<group>"; };
 		100000000000000000000424 /* PayloadRangefinderController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadRangefinderController.swift; sourceTree = "<group>"; };
+		100000000000000000000A18 /* PayloadFireHoseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireHoseState.swift; sourceTree = "<group>"; };
+		100000000000000000000A1A /* PayloadFireHoseController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireHoseController.swift; sourceTree = "<group>"; };
 		10000000000000000000013F /* PayloadCapabilityCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadCapabilityCheck.swift; sourceTree = "<group>"; };
 		100000000000000000000140 /* VehicleMassModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleMassModel.swift; sourceTree = "<group>"; };
 		100000000000000000000141 /* PayloadController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadController.swift; sourceTree = "<group>"; };
@@ -583,6 +589,7 @@
 		100000000000000000000391 /* OnlineVehicleSnapshotInterpolator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineVehicleSnapshotInterpolator.swift; sourceTree = "<group>"; };
 		10000000000000000000038F /* OnlineTrialNetworkBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialNetworkBridge.swift; sourceTree = "<group>"; };
 		100000000000000000000401 /* PineTreeAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PineTreeAssetLoader.swift; sourceTree = "<group>"; };
+		100000000000000000000A1E /* FireTruckAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireTruckAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000403 /* GenericGrassMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericGrassMaterialLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000405 /* EnvironmentDebugOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentDebugOptions.swift; sourceTree = "<group>"; };
 		100000000000000000000407 /* CreditsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditsView.swift; sourceTree = "<group>"; };
@@ -597,6 +604,7 @@
 		100000000000000000000A0E /* PayloadGimbalSliderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadGimbalSliderControls.swift; sourceTree = "<group>"; };
 		100000000000000000000A10 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		100000000000000000000A04 /* Man.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Man.usdz"; sourceTree = "<group>"; };
+		100000000000000000000A1C /* Fire_Truck.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Fire_Truck.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
 		10000000000000000000040E /* SnowTerrainMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowTerrainMaterialLoader.swift; sourceTree = "<group>"; };
@@ -717,6 +725,8 @@
 				10000000000000000000013E /* PayloadState.swift */,
 				100000000000000000000422 /* PayloadRangefinderState.swift */,
 				100000000000000000000424 /* PayloadRangefinderController.swift */,
+				100000000000000000000A18 /* PayloadFireHoseState.swift */,
+				100000000000000000000A1A /* PayloadFireHoseController.swift */,
 				100000000000000000000145 /* PayloadMountState.swift */,
 				100000000000000000000147 /* PayloadDataQualitySource.swift */,
 				10000000000000000000013C /* PayloadType.swift */,
@@ -856,6 +866,7 @@
 				100000000000000000000161 /* EnvironmentProceduralVisualFactory.swift */,
 				100000000000000000000405 /* EnvironmentDebugOptions.swift */,
 				100000000000000000000401 /* PineTreeAssetLoader.swift */,
+				100000000000000000000A1E /* FireTruckAssetLoader.swift */,
 				100000000000000000000A02 /* ManAssetLoader.swift */,
 				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
 				B20400000000000000000002 /* AsphaltMaterialLoader.swift */,
@@ -1026,6 +1037,7 @@
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
 				100000000000000000000A04 /* Man.usdz */,
+				100000000000000000000A1C /* Fire_Truck.usdz */,
 				10000000000000000000040B /* Generic_grass.usdz */,
 				100000000000000000000416 /* Snow04.usdz */,
 				B20400000000000000000003 /* Asphalt13.usdz */,
@@ -1182,6 +1194,7 @@
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
 				100000000000000000000A03 /* Man.usdz in Resources */,
+				100000000000000000000A1B /* Fire_Truck.usdz in Resources */,
 				10000000000000000000040A /* Generic_grass.usdz in Resources */,
 				100000000000000000000417 /* Snow04.usdz in Resources */,
 				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,
@@ -1273,6 +1286,7 @@
 				100000000000000000000258 /* EnvironmentProceduralVisualFactory.swift in Sources */,
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
 				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
+				100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */,
 				100000000000000000000A01 /* ManAssetLoader.swift in Sources */,
 				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,
 				B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */,
@@ -1363,6 +1377,8 @@
 				10000000000000000000023B /* PayloadState.swift in Sources */,
 				100000000000000000000423 /* PayloadRangefinderState.swift in Sources */,
 				100000000000000000000425 /* PayloadRangefinderController.swift in Sources */,
+				100000000000000000000A17 /* PayloadFireHoseState.swift in Sources */,
+				100000000000000000000A19 /* PayloadFireHoseController.swift in Sources */,
 				10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */,
 				10000000000000000000023D /* VehicleMassModel.swift in Sources */,
 				10000000000000000000023E /* PayloadController.swift in Sources */,

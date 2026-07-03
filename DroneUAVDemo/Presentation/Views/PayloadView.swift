@@ -12,6 +12,7 @@ struct PayloadView: View {
 
     let onTypeChange: (PayloadType) -> Void
     let onMassChange: (Double) -> Void
+    let onHoseRiggingChange: (FireHoseDiameterClass, Double) -> Void
     let onCustomNameChange: (String) -> Void
     let onAttach: () -> Void
     let onRelease: () -> Void
@@ -119,6 +120,10 @@ struct PayloadView: View {
         VStack(alignment: .leading, spacing: 14) {
             tilesConsole
             massConsole
+
+            if configuration.payloadType == .fireHose {
+                hoseRiggingConsole
+            }
 
             if configuration.payloadType == .custom {
                 customNameConsole
@@ -324,6 +329,10 @@ struct PayloadView: View {
         .background(chromePanel(accent: Color.cyan.opacity(0.34)))
     }
 
+    private var isMassEditable: Bool {
+        configuration.payloadType != .fireHose
+    }
+
     private var massConsole: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(titleKey: "payload.mass")
@@ -343,6 +352,7 @@ struct PayloadView: View {
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .disabled(!isMassEditable)
                     .controllerTextInputTarget(
                         id: "payload.mass.input",
                         title: String(localized: "payload.mass"),
@@ -365,12 +375,14 @@ struct PayloadView: View {
                 .padding(.vertical, 12)
                 .background(valueFieldBackground(isFocused: isMassFieldFocused))
 
-                HStack(spacing: 8) {
-                    adjustMassButton(symbol: "minus") {
-                        adjustMass(by: -0.25)
-                    }
-                    adjustMassButton(symbol: "plus") {
-                        adjustMass(by: 0.25)
+                if isMassEditable {
+                    HStack(spacing: 8) {
+                        adjustMassButton(symbol: "minus") {
+                            adjustMass(by: -0.25)
+                        }
+                        adjustMassButton(symbol: "plus") {
+                            adjustMass(by: 0.25)
+                        }
                     }
                 }
 
@@ -380,9 +392,53 @@ struct PayloadView: View {
                 )
                 .frame(width: 170)
             }
+
+            if !isMassEditable {
+                Text("payload.hose.mass_follows_rig")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(14)
         .background(chromePanel(accent: Color.orange.opacity(0.34)))
+    }
+
+    private var hoseRiggingConsole: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(titleKey: "payload.hose.title")
+
+            Picker("", selection: Binding(
+                get: { configuration.fireHoseDiameterClass },
+                set: { onHoseRiggingChange($0, Double(configuration.fireHoseLengthMeters)) }
+            )) {
+                ForEach(FireHoseDiameterClass.allCases) { value in
+                    Text(LocalizedStringKey(value.titleKey)).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("payload.hose.length")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Text(String(format: "%.0f m", configuration.fireHoseLengthMeters))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                }
+                Slider(
+                    value: Binding(
+                        get: { Double(configuration.fireHoseLengthMeters) },
+                        set: { onHoseRiggingChange(configuration.fireHoseDiameterClass, $0) }
+                    ),
+                    in: Double(configuration.fireHoseDiameterClass.lengthRangeMeters.lowerBound)...Double(configuration.fireHoseDiameterClass.lengthRangeMeters.upperBound),
+                    step: Double(configuration.fireHoseDiameterClass.lengthStepMeters)
+                )
+            }
+        }
+        .padding(14)
+        .background(chromePanel(accent: Color.red.opacity(0.34)))
     }
 
     private var customNameConsole: some View {
@@ -765,6 +821,8 @@ struct PayloadView: View {
             return "wave.3.right.circle.fill"
         case .laserRangefinder:
             return "dot.scope"
+        case .fireHose:
+            return "drop.fill"
         case .rescuePack:
             return "cross.case.fill"
         case .sensorModule:
@@ -788,6 +846,8 @@ struct PayloadView: View {
             return Color(red: 0.70, green: 0.78, blue: 0.92)
         case .laserRangefinder:
             return Color(red: 0.94, green: 0.30, blue: 0.26)
+        case .fireHose:
+            return Color(red: 0.86, green: 0.22, blue: 0.10)
         case .custom:
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         }

@@ -55,6 +55,7 @@ enum PayloadMissionSignal: Equatable {
     case outOfFocus(errorMeters: Double)
     case rangefinderPowered(Bool)
     case rangeMeasured(distanceMeters: Double)
+    case hosePowered(Bool)
 }
 
 struct PayloadCameraOpticsState: Codable, Equatable {

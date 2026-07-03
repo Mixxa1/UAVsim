@@ -110,6 +110,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case thermalPaletteBlackHot
     case thermalPaletteIron
     case toggleRangefinderArmed
+    case toggleHoseSpraying
 
     case toggleControlPanel
     case toggleMissionMap
@@ -126,7 +127,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .resetCameraOrientation,
-             .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed:
+             .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed, .toggleHoseSpraying:
             return .camera
         case .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD:
             return .ui
@@ -143,7 +144,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return true
         case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .resetCameraOrientation,
-             .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed,
+             .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed, .toggleHoseSpraying,
              .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
             return false
         }
@@ -217,6 +218,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.camera.thermal_iron"
         case .toggleRangefinderArmed:
             return "keybind.camera.rangefinder_arm"
+        case .toggleHoseSpraying:
+            return "keybind.camera.hose_spray"
         case .toggleControlPanel:
             return "keybind.ui.toggle_panel"
         case .toggleMissionMap:
@@ -284,6 +287,7 @@ struct KeyBindingProfile {
             .thermalPaletteBlackHot: KeyBindingDescriptor(command: .thermalPaletteBlackHot, keyCode: 26, keyLabel: "7"),
             .thermalPaletteIron: KeyBindingDescriptor(command: .thermalPaletteIron, keyCode: 28, keyLabel: "8"),
             .toggleRangefinderArmed: KeyBindingDescriptor(command: .toggleRangefinderArmed, keyCode: 25, keyLabel: "9"),
+            .toggleHoseSpraying: KeyBindingDescriptor(command: .toggleHoseSpraying, keyCode: 6, keyLabel: "Z"),
             .toggleControlPanel: KeyBindingDescriptor(command: .toggleControlPanel, keyCode: UInt16.max, keyLabel: "—"),
             .toggleMissionMap: KeyBindingDescriptor(command: .toggleMissionMap, keyCode: 3, keyLabel: "F"),
             .togglePayloadPanel: KeyBindingDescriptor(command: .togglePayloadPanel, keyCode: 35, keyLabel: "P"),
@@ -366,6 +370,7 @@ enum InputAction: Equatable, Hashable {
     case selectThermalPaletteBlackHot
     case selectThermalPaletteIron
     case toggleRangefinderArmed
+    case toggleHoseSpraying
     case cycleCameraMode
     case toggleControlPanel
     case toggleToolPanel
@@ -787,6 +792,8 @@ final class KeyboardInputService: KeyboardInputProviding {
             enqueueAction(.selectThermalPaletteIron)
         case .toggleRangefinderArmed:
             enqueueAction(.toggleRangefinderArmed)
+        case .toggleHoseSpraying:
+            enqueueAction(.toggleHoseSpraying)
         case .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision,
              .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate:
             break
@@ -1038,6 +1045,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         apply(.thermalPaletteBlackHot, keyCode: 26, keyLabel: "7")
         apply(.thermalPaletteIron, keyCode: 28, keyLabel: "8")
         apply(.toggleRangefinderArmed, keyCode: 25, keyLabel: "9")
+        apply(.toggleHoseSpraying, keyCode: 6, keyLabel: "Z")
         apply(.cameraLookPrecision, keyCode: 58, keyLabel: "⌥")
 
         if didChange {

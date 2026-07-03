@@ -17,6 +17,10 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
     case hermes900
     case ft5Los
     case lightFixedWingSurvey
+    case wildfireEmber40
+    case pyroliftTalon60
+    case colossusCA8Vulcan
+    case colossusCA12Atlas
 
     var title: String {
         switch self {
@@ -52,6 +56,14 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
             return "FT5 Łoś"
         case .lightFixedWingSurvey:
             return "Light fixed-wing survey"
+        case .wildfireEmber40:
+            return "Wildfire Robotics Ember 40"
+        case .pyroliftTalon60:
+            return "Pyrolift Systems Talon 60"
+        case .colossusCA8Vulcan:
+            return "Colossus Aerial CA-8 Vulcan"
+        case .colossusCA12Atlas:
+            return "Colossus Aerial CA-12 Atlas"
         }
     }
 }

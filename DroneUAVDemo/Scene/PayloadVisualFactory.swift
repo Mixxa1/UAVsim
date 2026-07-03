@@ -89,6 +89,27 @@ enum PayloadVisualFactory {
             apertureRing.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
             apertureRing.position = SCNVector3(0.0, -0.034 * sizeScale, 0.027 * sizeScale)
             standardPresentation.addChildNode(apertureRing)
+        case .fireHose:
+            let hoseAccentMaterial = material(
+                diffuse: NSColor(calibratedRed: 0.62, green: 0.14, blue: 0.06, alpha: 1.0),
+                roughness: 0.5,
+                metalness: 0.24
+            )
+
+            let reel = cylinderNode(radius: 0.034 * sizeScale, height: 0.046 * sizeScale, material: shellMaterial)
+            reel.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            reel.position = SCNVector3(0.0, -0.030 * sizeScale, 0.0)
+            standardPresentation.addChildNode(reel)
+
+            let reelBand = cylinderNode(radius: 0.036 * sizeScale, height: 0.008 * sizeScale, material: hoseAccentMaterial)
+            reelBand.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            reelBand.position = SCNVector3(0.0, -0.030 * sizeScale, 0.0)
+            standardPresentation.addChildNode(reelBand)
+
+            let nozzle = cylinderNode(radius: 0.010 * sizeScale, height: 0.030 * sizeScale, material: darkMaterial)
+            nozzle.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            nozzle.position = SCNVector3(0.0, -0.036 * sizeScale, 0.038 * sizeScale)
+            standardPresentation.addChildNode(nozzle)
         case .rescuePack:
             let pack = boxNode(size: SIMD3<Float>(0.11, 0.07, 0.09) * sizeScale, chamfer: 0.010 * sizeScale, material: shellMaterial)
             pack.position = SCNVector3(0.0, -0.040 * sizeScale, 0.0)

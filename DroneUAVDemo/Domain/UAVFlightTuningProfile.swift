@@ -170,6 +170,50 @@ struct UAVFlightTuningProfile: Hashable {
                 payloadThrustCompensationFactor: 0.62,
                 source: source
             )
+        case .wildfireEmber40:
+            return multicopter(
+                referenceMass: referenceMass,
+                hoverThrottleBaseline: 0.60,
+                stabilizationThrustBaseline: 1.72,
+                verticalResponseFactor: 0.79,
+                throttleAuthority: 0.74,
+                maneuverPenaltyFactor: 0.38,
+                payloadThrustCompensationFactor: 0.50,
+                source: source
+            )
+        case .pyroliftTalon60:
+            return multicopter(
+                referenceMass: referenceMass,
+                hoverThrottleBaseline: 0.66,
+                stabilizationThrustBaseline: 1.60,
+                verticalResponseFactor: 0.68,
+                throttleAuthority: 0.62,
+                maneuverPenaltyFactor: 0.48,
+                payloadThrustCompensationFactor: 0.60,
+                source: source
+            )
+        case .colossusCA8Vulcan:
+            return multicopter(
+                referenceMass: referenceMass,
+                hoverThrottleBaseline: 0.71,
+                stabilizationThrustBaseline: 1.54,
+                verticalResponseFactor: 0.58,
+                throttleAuthority: 0.56,
+                maneuverPenaltyFactor: 0.54,
+                payloadThrustCompensationFactor: 0.66,
+                source: source
+            )
+        case .colossusCA12Atlas:
+            return multicopter(
+                referenceMass: referenceMass,
+                hoverThrottleBaseline: 0.75,
+                stabilizationThrustBaseline: 1.48,
+                verticalResponseFactor: 0.50,
+                throttleAuthority: 0.50,
+                maneuverPenaltyFactor: 0.60,
+                payloadThrustCompensationFactor: 0.72,
+                source: source
+            )
         case .avidrone490TL:
             return helicopter(
                 referenceMass: referenceMass,

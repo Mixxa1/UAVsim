@@ -43,9 +43,7 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
         case .searchAndRescue:
             return [.thermalCamera, .cameraGimbal]
         case .fireResponse:
-            // Placeholder until the dedicated `.fireHose` payload lands in increment 2 (hose
-            // aiming/suppression) — increment 1 only exercises the spread/timeout runtime loop.
-            return [.rescuePack]
+            return [.fireHose]
         }
     }
 }
@@ -338,6 +336,9 @@ struct MissionScenarioConfiguration: Equatable {
     var parameters: MissionScenarioParameters
     var selectedUAVProfileID: String
     var payloadType: PayloadType
+    /// Only meaningful when `payloadType == .fireHose` — the rigging chosen at Mission Setup.
+    var fireHoseDiameterClass: FireHoseDiameterClass = .standard
+    var fireHoseLengthMeters: Float = 30.0
 }
 
 // MARK: - Derived placement (computed at launch from parameters + world)

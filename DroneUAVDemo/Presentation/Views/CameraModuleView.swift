@@ -69,6 +69,10 @@ struct CameraModuleView: View {
                 rangefinderSection
             }
 
+            if viewModel.hoseOpticsState.isAvailable {
+                hoseAimSection
+            }
+
             ModuleSection(
                 titleKey: "module.camera.presets",
                 subtitleKey: "module.camera.presets.subtitle"
@@ -478,6 +482,86 @@ struct CameraModuleView: View {
                     payloadStatusBanner("payload.rangefinder.powered_off", tint: GroundControlPalette.warning)
                 } else if !state.isAvailable {
                     payloadStatusBanner("payload.rangefinder.unavailable", tint: GroundControlPalette.warning)
+                }
+            }
+        }
+    }
+
+    private var hoseAimSection: some View {
+        let state = viewModel.hoseOpticsState
+        let controlsEnabled = state.isAvailable && state.isPowered
+
+        return ModuleSection(
+            titleKey: "payload.hose.title",
+            subtitleKey: "payload.hose.subtitle"
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                payloadActionButton(
+                    titleKey: state.isSpraying ? "payload.hose.stop_spray" : "payload.hose.spray",
+                    systemImage: state.isSpraying ? "drop.circle.fill" : "drop.fill",
+                    tint: Color(red: 0.86, green: 0.22, blue: 0.10),
+                    prominent: state.isSpraying,
+                    isDisabled: !controlsEnabled
+                ) {
+                    viewModel.setHoseSpraying(!state.isSpraying)
+                }
+
+                ModuleSliderRow(
+                    titleKey: "payload.hose.gimbal_yaw",
+                    value: Binding(
+                        get: { state.gimbalYawDegrees },
+                        set: { newValue in
+                            viewModel.adjustHoseGimbal(
+                                yawDeltaDegrees: newValue - state.gimbalYawDegrees,
+                                pitchDeltaDegrees: 0.0
+                            )
+                        }
+                    ),
+                    range: -180.0...180.0,
+                    step: 1.0,
+                    formatter: Self.angleFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                ModuleSliderRow(
+                    titleKey: "payload.hose.gimbal_pitch",
+                    value: Binding(
+                        get: { state.gimbalPitchDegrees },
+                        set: { newValue in
+                            viewModel.adjustHoseGimbal(
+                                yawDeltaDegrees: 0.0,
+                                pitchDeltaDegrees: newValue - state.gimbalPitchDegrees
+                            )
+                        }
+                    ),
+                    range: -90.0...35.0,
+                    step: 1.0,
+                    formatter: Self.angleFormatter
+                )
+                .disabled(!controlsEnabled)
+                .opacity(controlsEnabled ? 1.0 : 0.5)
+
+                LazyVGrid(columns: tileColumns, spacing: 8) {
+                    payloadMetricCard(
+                        titleKey: "payload.hose.fires_remaining",
+                        value: "\(viewModel.fireResponseBurningCount)/\(viewModel.fireResponseTotalCount)"
+                    )
+                    payloadActionButton(
+                        titleKey: "payload.hose.reset_aim",
+                        systemImage: "arrow.counterclockwise",
+                        tint: GroundControlPalette.textSecondary,
+                        prominent: false,
+                        isDisabled: !controlsEnabled
+                    ) {
+                        viewModel.resetHoseGimbalOrientation()
+                    }
+                }
+
+                if !state.isPowered {
+                    payloadStatusBanner("payload.hose.powered_off", tint: GroundControlPalette.warning)
+                } else if !state.isAvailable {
+                    payloadStatusBanner("payload.hose.unavailable", tint: GroundControlPalette.warning)
                 }
             }
         }

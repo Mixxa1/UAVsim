@@ -109,6 +109,24 @@
 "payload.rangefinder.reset_aim" = "Reset Aim";
 "payload.rangefinder.unavailable" = "Rangefinder unavailable";
 "payload.rangefinder.powered_off" = "Rangefinder powered off";
+"payload.hose.unavailable" = "Fire hose unavailable";
+"payload.hose.powered_off" = "Fire hose powered off";
+"payload.hose.title" = "Fire Hose";
+"payload.hose.subtitle" = "Aim the nozzle and spray to suppress fires";
+"payload.hose.spray" = "Spray ON";
+"payload.hose.stop_spray" = "Spray OFF";
+"payload.hose.gimbal_yaw" = "Yaw";
+"payload.hose.gimbal_pitch" = "Pitch";
+"payload.hose.fires_remaining" = "Fires Burning";
+"payload.hose.reset_aim" = "Reset Aim";
+"payload.hose.diameter_class" = "Hose Diameter";
+"payload.hose.diameter.narrow" = "Narrow";
+"payload.hose.diameter.standard" = "Standard";
+"payload.hose.length" = "Hose Length";
+"payload.hose.rig_mass" = "Rig mass: %.0f kg";
+"payload.hose.mass_follows_rig" = "Mass follows hose length × diameter, not independently editable.";
+"payload.hose.tether_taut" = "TETHER TAUT";
+"payload.hose.tether_distance" = "TETHER %.0f / %.0f m";
 
 // Thermal camera
 "payload.camera.thermal.palette" = "Palette";
@@ -475,6 +493,7 @@
 "payload.type.thermal_camera" = "Thermal Camera";
 "payload.type.lidar_module" = "LiDAR Module";
 "payload.type.laser_rangefinder" = "Laser Rangefinder";
+"payload.type.fire_hose" = "Fire Hose";
 "payload.type.rescue_pack" = "Rescue Pack";
 "payload.type.sensor_module" = "Sensor Module";
 "payload.type.radio_relay" = "Radio Relay";
@@ -495,6 +514,7 @@
 "warning.emergency_descent" = "Emergency descent";
 "warning.crash_state" = "Crash state";
 "warning.signal_lost_impact" = "Signal lost: impact damage";
+"warning.hose_tether_taut" = "Fire hose tether taut — at maximum reach from the truck";
 "damage.severity.nominal" = "Nominal";
 "damage.severity.light" = "Light";
 "damage.severity.medium" = "Medium";
@@ -516,6 +536,7 @@
 "keybind.camera.thermal_black_hot" = "Thermal: Black Hot";
 "keybind.camera.thermal_iron" = "Thermal: Iron";
 "keybind.camera.rangefinder_arm" = "Rangefinder: toggle laser";
+"keybind.camera.hose_spray" = "Fire hose: toggle spray";
 "keybind.camera.pitch_up" = "Pitch up (camera)";
 "keybind.camera.pitch_down" = "Pitch down (camera)";
 "keybind.camera.reset_orientation" = "Reset camera orientation";
@@ -730,6 +751,7 @@
 "uav.filter.mass.light" = "Light";
 "uav.filter.mass.medium" = "Medium";
 "uav.filter.mass.heavy" = "Heavy";
+"uav.filter.mass.superheavy" = "Superheavy";
 
 "uav.vehicle.multicopter" = "Multicopter";
 "uav.vehicle.fixed_wing" = "Fixed-Wing";
@@ -742,6 +764,7 @@
 "uav.mass.light" = "Light";
 "uav.mass.medium" = "Medium";
 "uav.mass.heavy" = "Heavy";
+"uav.mass.superheavy" = "Superheavy";
 "uav.mass.custom" = "Custom";
 
 "uav.spec.verified" = "Verified";
@@ -2442,6 +2465,7 @@
 "mission.setup.time_limit" = "Time limit";
 "mission.setup.time_limit.value" = "%d min";
 "mission.setup.uav" = "UAV";
+"mission.setup.uav.none_compatible" = "No available UAV can carry this payload's mass.";
 "mission.setup.payload" = "Payload";
 "mission.setup.payload.hint" = "Search and rescue needs a thermal or optical camera to spot the target.";
 "mission.setup.payload.hint.fire_response" = "Fire response needs suppression equipment to put out burning trees.";

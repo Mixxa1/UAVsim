@@ -6,6 +6,7 @@ enum PayloadVisualPreset: String, Hashable {
     case thermalCamera
     case lidarModule
     case laserRangefinder
+    case fireHose
     case rescuePack
     case sensorModule
     case radioRelay

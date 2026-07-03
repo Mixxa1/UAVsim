@@ -895,6 +895,102 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 cameraPreset: DroneCameraPreset(fpvFov: 76.0, followDistance: 21.0, followHeight: 7.4),
                 collisionRadiusMeters: 0.96
             )
+        case .wildfireEmber40:
+            return RuntimeTuning(
+                fallbackTakeoffMass: 48.5,
+                fallbackDimensions: DroneDimensionsMM(x: 2600, y: 2600, z: 950),
+                maxHorizontalSpeedMps: 19.0,
+                maxAscentSpeedMps: 4.2,
+                maxDescentSpeedMps: 3.4,
+                maxFlightTimeMin: 22.0,
+                maxHoverTimeMin: 19.0,
+                maxWindResistanceMps: 11.0,
+                batteryEnergyWh: 3800.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .atlasProTriple,
+                operationalCategory: .multirotor,
+                airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
+                fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.58,
+                hoverThrottle: 0.60,
+                cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 17.5, followHeight: 6.1),
+                collisionRadiusMeters: 0.66
+            )
+        case .pyroliftTalon60:
+            return RuntimeTuning(
+                fallbackTakeoffMass: 100.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3000, y: 3000, z: 1050),
+                maxHorizontalSpeedMps: 19.0,
+                maxAscentSpeedMps: 3.8,
+                maxDescentSpeedMps: 3.0,
+                maxFlightTimeMin: 16.0,
+                maxHoverTimeMin: 14.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 8000.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .atlasProTriple,
+                operationalCategory: .multirotor,
+                airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
+                fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.50,
+                hoverThrottle: 0.64,
+                cameraPreset: DroneCameraPreset(fpvFov: 77.0, followDistance: 19.5, followHeight: 6.8),
+                collisionRadiusMeters: 0.86
+            )
+        case .colossusCA8Vulcan:
+            return RuntimeTuning(
+                fallbackTakeoffMass: 325.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3600, y: 3600, z: 1300),
+                maxHorizontalSpeedMps: 15.0,
+                maxAscentSpeedMps: 3.0,
+                maxDescentSpeedMps: 2.4,
+                maxFlightTimeMin: 12.0,
+                maxHoverTimeMin: 10.0,
+                maxWindResistanceMps: 13.0,
+                batteryEnergyWh: 14000.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .atlasProTriple,
+                operationalCategory: .multirotor,
+                airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
+                fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.42,
+                hoverThrottle: 0.69,
+                cameraPreset: DroneCameraPreset(fpvFov: 74.0, followDistance: 24.0, followHeight: 8.2),
+                collisionRadiusMeters: 1.15
+            )
+        case .colossusCA12Atlas:
+            return RuntimeTuning(
+                fallbackTakeoffMass: 445.0,
+                fallbackDimensions: DroneDimensionsMM(x: 4200, y: 4200, z: 1500),
+                maxHorizontalSpeedMps: 13.0,
+                maxAscentSpeedMps: 2.6,
+                maxDescentSpeedMps: 2.0,
+                maxFlightTimeMin: 10.0,
+                maxHoverTimeMin: 8.0,
+                maxWindResistanceMps: 15.0,
+                batteryEnergyWh: 19000.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .atlasProTriple,
+                operationalCategory: .multirotor,
+                airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
+                fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.36,
+                hoverThrottle: 0.73,
+                cameraPreset: DroneCameraPreset(fpvFov: 72.0, followDistance: 28.0, followHeight: 9.4),
+                collisionRadiusMeters: 1.40
+            )
         case .avidrone490TL:
             return RuntimeTuning(
                 fallbackTakeoffMass: 57.0,
@@ -2021,8 +2117,10 @@ private enum UAVOperationalProfileResolver {
                 return .light
             case ..<120.0:
                 return .medium
-            default:
+            case ..<250.0:
                 return .heavy
+            default:
+                return .superheavy
             }
         }
     }

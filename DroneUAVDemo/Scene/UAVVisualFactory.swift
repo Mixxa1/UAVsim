@@ -163,6 +163,14 @@ enum UAVVisualFactory {
             return buildFT5Los(payloadMountOffset: payloadMountOffset)
         case .lightFixedWingSurvey:
             return buildLightFixedWingSurvey(payloadMountOffset: payloadMountOffset)
+        case .wildfireEmber40:
+            return buildWildfireEmber40(payloadMountOffset: payloadMountOffset)
+        case .pyroliftTalon60:
+            return buildPyroliftTalon60(payloadMountOffset: payloadMountOffset)
+        case .colossusCA8Vulcan:
+            return buildColossusCA8Vulcan(payloadMountOffset: payloadMountOffset)
+        case .colossusCA12Atlas:
+            return buildColossusCA12Atlas(payloadMountOffset: payloadMountOffset)
         }
     }
 
@@ -1255,6 +1263,456 @@ enum UAVVisualFactory {
         let fpvAnchor = SCNNode()
         fpvAnchor.name = "fpvCameraAnchor"
         fpvAnchor.position = SCNVector3(0.0, -0.04, 0.24)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: propellers,
+            propellerSpinDirections: spinDirections,
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    private static func buildWildfireEmber40(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.wildfireEmber40"
+
+        let carbonMaterial = material(diffuse: NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.10, alpha: 1.0), roughness: 0.42, metalness: 0.30)
+        let frameMaterial = material(diffuse: NSColor(calibratedRed: 0.35, green: 0.34, blue: 0.28, alpha: 1.0), roughness: 0.38, metalness: 0.36)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.96, green: 0.78, blue: 0.12, alpha: 1.0), roughness: 0.32, metalness: 0.12)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.22, metalness: 0.08)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let hubRing = torusNode(ringRadius: 0.16, pipeRadius: 0.016, material: frameMaterial)
+        hubRing.position = SCNVector3(0.0, 0.04, 0.0)
+        root.addChildNode(hubRing)
+        append(hubRing, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let centerSection = boxNode(size: SIMD3<Float>(0.16, 0.09, 0.16), chamfer: 0.010, material: carbonMaterial)
+        root.addChildNode(centerSection)
+        append(centerSection, to: .battery, componentNodes: &componentNodes)
+
+        let reelDrum = cylinderNode(radius: 0.070, height: 0.16, material: accentMaterial)
+        reelDrum.eulerAngles = SCNVector3(0.0, 0.0, Float.pi / 2.0)
+        reelDrum.position = SCNVector3(0.0, -0.11, 0.0)
+        root.addChildNode(reelDrum)
+        append(reelDrum, to: .escPower, componentNodes: &componentNodes)
+
+        // Hexagonal spoke ring — 6 arms at 60° increments; the four damage-component quadrant
+        // buckets are reused twice each (same convention as buildGriff30's 8-rotor layout).
+        let hexRadius: Float = 0.60
+        let hexAngles: [Float] = [0, 60, 120, 180, 240, 300].map { $0 * .pi / 180.0 }
+        let hexBuckets: [DamageComponent] = [.armFL, .armFR, .armRR, .armRR, .armRL, .armFL]
+        let motorBuckets: [DamageComponent] = [.motorFL, .motorFR, .motorRR, .motorRR, .motorRL, .motorFL]
+        let propBuckets: [DamageComponent] = [.propellerFL, .propellerFR, .propellerRR, .propellerRR, .propellerRL, .propellerFL]
+        let rotorPoints: [SIMD3<Float>] = hexAngles.map { angle in
+            SIMD3<Float>(sin(angle) * hexRadius, 0.09, cos(angle) * hexRadius)
+        }
+
+        var propellers: [SCNNode] = []
+        var spinDirections: [Float] = []
+
+        for (index, point) in rotorPoints.enumerated() {
+            let arm = beamNode(start: SIMD3<Float>(0.0, 0.03, 0.0), end: point, radius: 0.016, material: carbonMaterial)
+            root.addChildNode(arm)
+            append(arm, to: hexBuckets[index], componentNodes: &componentNodes)
+
+            let motor = cylinderNode(radius: 0.036, height: 0.030, material: frameMaterial)
+            motor.position = SCNVector3(point.x, point.y, point.z)
+            root.addChildNode(motor)
+            append(motor, to: motorBuckets[index], componentNodes: &componentNodes)
+
+            let propeller = topPropellerNode(material: rotorMaterial, radius: 0.15)
+            propeller.position = SCNVector3(point.x, point.y + 0.026, point.z)
+            propeller.name = "propeller.wildfireEmber40.\(index)"
+            root.addChildNode(propeller)
+            propellers.append(propeller)
+            spinDirections.append(index % 2 == 0 ? 1.0 : -1.0)
+            append(propeller, to: propBuckets[index], componentNodes: &componentNodes)
+        }
+
+        for side: Float in [-1.0, 1.0] {
+            let leg = beamNode(
+                start: SIMD3<Float>(0.10 * side, -0.02, 0.0),
+                end: SIMD3<Float>(0.24 * side, -0.24, 0.0),
+                radius: 0.010,
+                material: accentMaterial
+            )
+            root.addChildNode(leg)
+        }
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.02, 0.15)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: propellers,
+            propellerSpinDirections: spinDirections,
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    private static func buildPyroliftTalon60(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.pyroliftTalon60"
+
+        let carbonMaterial = material(diffuse: NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.12, alpha: 1.0), roughness: 0.44, metalness: 0.32)
+        let frameMaterial = material(diffuse: NSColor(calibratedWhite: 0.86, alpha: 1.0), roughness: 0.34, metalness: 0.24)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.80, green: 0.10, blue: 0.08, alpha: 1.0), roughness: 0.30, metalness: 0.18)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.22, metalness: 0.08)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let hubRing = torusNode(ringRadius: 0.24, pipeRadius: 0.022, material: frameMaterial)
+        hubRing.position = SCNVector3(0.0, 0.06, 0.0)
+        root.addChildNode(hubRing)
+        append(hubRing, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let centerSection = boxNode(size: SIMD3<Float>(0.22, 0.12, 0.22), chamfer: 0.012, material: carbonMaterial)
+        root.addChildNode(centerSection)
+        append(centerSection, to: .battery, componentNodes: &componentNodes)
+
+        let cargoDeck = boxNode(size: SIMD3<Float>(0.30, 0.09, 0.30), chamfer: 0.012, material: accentMaterial)
+        cargoDeck.position = SCNVector3(0.0, -0.16, 0.0)
+        root.addChildNode(cargoDeck)
+        append(cargoDeck, to: .escPower, componentNodes: &componentNodes)
+
+        let reelDrum = cylinderNode(radius: 0.095, height: 0.22, material: frameMaterial)
+        reelDrum.eulerAngles = SCNVector3(0.0, 0.0, Float.pi / 2.0)
+        reelDrum.position = SCNVector3(0.0, -0.26, 0.0)
+        root.addChildNode(reelDrum)
+
+        let nozzleTurret = cylinderNode(radius: 0.030, height: 0.10, material: accentMaterial)
+        nozzleTurret.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        nozzleTurret.position = SCNVector3(0.0, -0.16, 0.22)
+        root.addChildNode(nozzleTurret)
+
+        let hexRadius: Float = 0.78
+        let hexAngles: [Float] = [0, 60, 120, 180, 240, 300].map { $0 * .pi / 180.0 }
+        let hexBuckets: [DamageComponent] = [.armFL, .armFR, .armRR, .armRR, .armRL, .armFL]
+        let motorBuckets: [DamageComponent] = [.motorFL, .motorFR, .motorRR, .motorRR, .motorRL, .motorFL]
+        let propBuckets: [DamageComponent] = [.propellerFL, .propellerFR, .propellerRR, .propellerRR, .propellerRL, .propellerFL]
+        let rotorPoints: [SIMD3<Float>] = hexAngles.map { angle in
+            SIMD3<Float>(sin(angle) * hexRadius, 0.13, cos(angle) * hexRadius)
+        }
+
+        var propellers: [SCNNode] = []
+        var spinDirections: [Float] = []
+
+        for (index, point) in rotorPoints.enumerated() {
+            let arm = beamNode(start: SIMD3<Float>(0.0, 0.05, 0.0), end: point, radius: 0.022, material: carbonMaterial)
+            root.addChildNode(arm)
+            append(arm, to: hexBuckets[index], componentNodes: &componentNodes)
+
+            let motor = cylinderNode(radius: 0.050, height: 0.040, material: frameMaterial)
+            motor.position = SCNVector3(point.x, point.y, point.z)
+            root.addChildNode(motor)
+            append(motor, to: motorBuckets[index], componentNodes: &componentNodes)
+
+            let propeller = topPropellerNode(material: rotorMaterial, radius: 0.22)
+            propeller.position = SCNVector3(point.x, point.y + 0.032, point.z)
+            propeller.name = "propeller.pyroliftTalon60.\(index)"
+            root.addChildNode(propeller)
+            propellers.append(propeller)
+            spinDirections.append(index % 2 == 0 ? 1.0 : -1.0)
+            append(propeller, to: propBuckets[index], componentNodes: &componentNodes)
+        }
+
+        for side: Float in [-1.0, 1.0] {
+            let skid = beamNode(
+                start: SIMD3<Float>(0.20 * side, -0.20, -0.26),
+                end: SIMD3<Float>(0.20 * side, -0.20, 0.26),
+                radius: 0.016,
+                material: frameMaterial
+            )
+            let strut = beamNode(
+                start: SIMD3<Float>(0.16 * side, -0.16, 0.0),
+                end: SIMD3<Float>(0.20 * side, -0.20, 0.0),
+                radius: 0.016,
+                material: frameMaterial
+            )
+            root.addChildNode(skid)
+            root.addChildNode(strut)
+        }
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.04, 0.20)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: propellers,
+            propellerSpinDirections: spinDirections,
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    private static func buildColossusCA8Vulcan(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.colossusCA8Vulcan"
+
+        let carbonMaterial = material(diffuse: NSColor(calibratedRed: 0.09, green: 0.09, blue: 0.10, alpha: 1.0), roughness: 0.46, metalness: 0.32)
+        let frameMaterial = material(diffuse: NSColor(calibratedRed: 0.26, green: 0.26, blue: 0.27, alpha: 1.0), roughness: 0.38, metalness: 0.44)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.94, green: 0.44, blue: 0.06, alpha: 1.0), roughness: 0.32, metalness: 0.14)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.22, metalness: 0.08)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let chassis = boxNode(size: SIMD3<Float>(0.42, 0.20, 0.42), chamfer: 0.020, material: carbonMaterial)
+        root.addChildNode(chassis)
+        append(chassis, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let hazardBand = boxNode(size: SIMD3<Float>(0.44, 0.04, 0.44), chamfer: 0.012, material: accentMaterial)
+        hazardBand.position = SCNVector3(0.0, 0.06, 0.0)
+        root.addChildNode(hazardBand)
+        append(hazardBand, to: .battery, componentNodes: &componentNodes)
+
+        let cargoDeck = boxNode(size: SIMD3<Float>(0.46, 0.10, 0.46), chamfer: 0.014, material: frameMaterial)
+        cargoDeck.position = SCNVector3(0.0, -0.20, 0.0)
+        root.addChildNode(cargoDeck)
+        append(cargoDeck, to: .escPower, componentNodes: &componentNodes)
+
+        let reelDrum = cylinderNode(radius: 0.12, height: 0.30, material: accentMaterial)
+        reelDrum.eulerAngles = SCNVector3(0.0, 0.0, Float.pi / 2.0)
+        reelDrum.position = SCNVector3(0.0, -0.34, 0.0)
+        root.addChildNode(reelDrum)
+
+        // 4 arms, each carrying a coaxial (upper+lower) motor/propeller pair — 8 rotors total,
+        // distinct from Griff 30/60's true 8-single-motor-arm layout (mirrors buildFreeflyAltaX's
+        // coaxial convention, scaled up).
+        let armTips: [(DamageComponent, DamageComponent, DamageComponent, SIMD3<Float>)] = [
+            (.armFL, .motorFL, .propellerFL, SIMD3<Float>(-0.86, 0.10, 0.86)),
+            (.armFR, .motorFR, .propellerFR, SIMD3<Float>(0.86, 0.10, 0.86)),
+            (.armRL, .motorRL, .propellerRL, SIMD3<Float>(-0.86, 0.10, -0.86)),
+            (.armRR, .motorRR, .propellerRR, SIMD3<Float>(0.86, 0.10, -0.86))
+        ]
+
+        var propellers: [SCNNode] = []
+        var spinDirections: [Float] = []
+
+        for (index, armTip) in armTips.enumerated() {
+            let arm = beamNode(start: SIMD3<Float>(0.0, 0.06, 0.0), end: armTip.3, radius: 0.032, material: carbonMaterial)
+            root.addChildNode(arm)
+            append(arm, to: armTip.0, componentNodes: &componentNodes)
+
+            let knuckle = sphereNode(radius: 0.056, material: frameMaterial)
+            knuckle.position = SCNVector3(armTip.3.x * 0.74, armTip.3.y * 0.74, armTip.3.z * 0.74)
+            root.addChildNode(knuckle)
+
+            let upperMotor = cylinderNode(radius: 0.062, height: 0.046, material: frameMaterial)
+            upperMotor.position = SCNVector3(armTip.3.x, armTip.3.y + 0.052, armTip.3.z)
+            root.addChildNode(upperMotor)
+            append(upperMotor, to: armTip.1, componentNodes: &componentNodes)
+
+            let lowerMotor = cylinderNode(radius: 0.062, height: 0.046, material: frameMaterial)
+            lowerMotor.position = SCNVector3(armTip.3.x, armTip.3.y - 0.014, armTip.3.z)
+            root.addChildNode(lowerMotor)
+            append(lowerMotor, to: armTip.1, componentNodes: &componentNodes)
+
+            let upperPropeller = topPropellerNode(material: rotorMaterial, radius: 0.26)
+            upperPropeller.position = SCNVector3(armTip.3.x, armTip.3.y + 0.092, armTip.3.z)
+            upperPropeller.name = "propeller.colossusCA8Vulcan.upper.\(index)"
+            root.addChildNode(upperPropeller)
+            propellers.append(upperPropeller)
+            spinDirections.append(index % 2 == 0 ? 1.0 : -1.0)
+            append(upperPropeller, to: armTip.2, componentNodes: &componentNodes)
+
+            let lowerPropeller = topPropellerNode(material: rotorMaterial, radius: 0.26)
+            lowerPropeller.position = SCNVector3(armTip.3.x, armTip.3.y - 0.056, armTip.3.z)
+            lowerPropeller.name = "propeller.colossusCA8Vulcan.lower.\(index)"
+            root.addChildNode(lowerPropeller)
+            propellers.append(lowerPropeller)
+            spinDirections.append(index % 2 == 0 ? -1.0 : 1.0)
+            append(lowerPropeller, to: armTip.2, componentNodes: &componentNodes)
+        }
+
+        for side: Float in [-1.0, 1.0] {
+            let skidFront = beamNode(
+                start: SIMD3<Float>(0.44 * side, -0.06, 0.30),
+                end: SIMD3<Float>(0.64 * side, -0.42, 0.30),
+                radius: 0.024,
+                material: accentMaterial
+            )
+            let skidRear = beamNode(
+                start: SIMD3<Float>(0.44 * side, -0.06, -0.30),
+                end: SIMD3<Float>(0.64 * side, -0.42, -0.30),
+                radius: 0.024,
+                material: accentMaterial
+            )
+            let rail = beamNode(
+                start: SIMD3<Float>(0.64 * side, -0.42, -0.36),
+                end: SIMD3<Float>(0.64 * side, -0.42, 0.36),
+                radius: 0.020,
+                material: accentMaterial
+            )
+            root.addChildNode(skidFront)
+            root.addChildNode(skidRear)
+            root.addChildNode(rail)
+        }
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.06, 0.28)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: propellers,
+            propellerSpinDirections: spinDirections,
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    private static func buildColossusCA12Atlas(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.colossusCA12Atlas"
+
+        let carbonMaterial = material(diffuse: NSColor(calibratedRed: 0.42, green: 0.43, blue: 0.45, alpha: 1.0), roughness: 0.40, metalness: 0.52)
+        let frameMaterial = material(diffuse: NSColor(calibratedRed: 0.30, green: 0.31, blue: 0.33, alpha: 1.0), roughness: 0.34, metalness: 0.48)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.96, green: 0.46, blue: 0.05, alpha: 1.0), roughness: 0.30, metalness: 0.16)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.22, metalness: 0.08)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let upperRing = torusNode(ringRadius: 0.40, pipeRadius: 0.032, material: frameMaterial)
+        upperRing.position = SCNVector3(0.0, 0.12, 0.0)
+        root.addChildNode(upperRing)
+        append(upperRing, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let lowerRing = torusNode(ringRadius: 0.30, pipeRadius: 0.026, material: carbonMaterial)
+        lowerRing.position = SCNVector3(0.0, -0.02, 0.0)
+        root.addChildNode(lowerRing)
+        append(lowerRing, to: .battery, componentNodes: &componentNodes)
+
+        let centerSection = boxNode(size: SIMD3<Float>(0.36, 0.20, 0.36), chamfer: 0.018, material: carbonMaterial)
+        root.addChildNode(centerSection)
+        append(centerSection, to: .battery, componentNodes: &componentNodes)
+
+        let flatbedDeck = boxNode(size: SIMD3<Float>(0.44, 0.10, 0.44), chamfer: 0.014, material: accentMaterial)
+        flatbedDeck.position = SCNVector3(0.0, -0.24, 0.0)
+        root.addChildNode(flatbedDeck)
+        append(flatbedDeck, to: .escPower, componentNodes: &componentNodes)
+
+        let reelDrum = cylinderNode(radius: 0.14, height: 0.34, material: frameMaterial)
+        reelDrum.eulerAngles = SCNVector3(0.0, 0.0, Float.pi / 2.0)
+        reelDrum.position = SCNVector3(0.0, -0.40, 0.0)
+        root.addChildNode(reelDrum)
+
+        let monitorTurretBase = sphereNode(radius: 0.050, material: accentMaterial)
+        monitorTurretBase.position = SCNVector3(0.0, -0.24, 0.30)
+        root.addChildNode(monitorTurretBase)
+
+        let monitorNozzle = cylinderNode(radius: 0.026, height: 0.14, material: frameMaterial)
+        monitorNozzle.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        monitorNozzle.position = SCNVector3(0.0, -0.24, 0.40)
+        root.addChildNode(monitorNozzle)
+
+        // 6 arms, each carrying a coaxial (upper+lower) motor/propeller pair — 12 rotors total,
+        // the flagship of the family (mirrors buildFreeflyAltaX's coaxial convention across a
+        // hexagonal spread instead of 4 arms).
+        let hexRadius: Float = 1.02
+        let hexAngles: [Float] = [0, 60, 120, 180, 240, 300].map { $0 * .pi / 180.0 }
+        let hexBuckets: [DamageComponent] = [.armFL, .armFR, .armRR, .armRR, .armRL, .armFL]
+        let motorBuckets: [DamageComponent] = [.motorFL, .motorFR, .motorRR, .motorRR, .motorRL, .motorFL]
+        let propBuckets: [DamageComponent] = [.propellerFL, .propellerFR, .propellerRR, .propellerRR, .propellerRL, .propellerFL]
+        let armTips: [SIMD3<Float>] = hexAngles.map { angle in
+            SIMD3<Float>(sin(angle) * hexRadius, 0.16, cos(angle) * hexRadius)
+        }
+
+        var propellers: [SCNNode] = []
+        var spinDirections: [Float] = []
+
+        for (index, tip) in armTips.enumerated() {
+            let arm = beamNode(start: SIMD3<Float>(0.0, 0.10, 0.0), end: tip, radius: 0.040, material: carbonMaterial)
+            root.addChildNode(arm)
+            append(arm, to: hexBuckets[index], componentNodes: &componentNodes)
+
+            let knuckle = sphereNode(radius: 0.066, material: frameMaterial)
+            knuckle.position = SCNVector3(tip.x * 0.76, tip.y * 0.76, tip.z * 0.76)
+            root.addChildNode(knuckle)
+
+            let upperMotor = cylinderNode(radius: 0.068, height: 0.050, material: frameMaterial)
+            upperMotor.position = SCNVector3(tip.x, tip.y + 0.056, tip.z)
+            root.addChildNode(upperMotor)
+            append(upperMotor, to: motorBuckets[index], componentNodes: &componentNodes)
+
+            let lowerMotor = cylinderNode(radius: 0.068, height: 0.050, material: frameMaterial)
+            lowerMotor.position = SCNVector3(tip.x, tip.y - 0.016, tip.z)
+            root.addChildNode(lowerMotor)
+            append(lowerMotor, to: motorBuckets[index], componentNodes: &componentNodes)
+
+            let upperPropeller = topPropellerNode(material: rotorMaterial, radius: 0.30)
+            upperPropeller.position = SCNVector3(tip.x, tip.y + 0.100, tip.z)
+            upperPropeller.name = "propeller.colossusCA12Atlas.upper.\(index)"
+            root.addChildNode(upperPropeller)
+            propellers.append(upperPropeller)
+            spinDirections.append(index % 2 == 0 ? 1.0 : -1.0)
+            append(upperPropeller, to: propBuckets[index], componentNodes: &componentNodes)
+
+            let lowerPropeller = topPropellerNode(material: rotorMaterial, radius: 0.30)
+            lowerPropeller.position = SCNVector3(tip.x, tip.y - 0.062, tip.z)
+            lowerPropeller.name = "propeller.colossusCA12Atlas.lower.\(index)"
+            root.addChildNode(lowerPropeller)
+            propellers.append(lowerPropeller)
+            spinDirections.append(index % 2 == 0 ? -1.0 : 1.0)
+            append(lowerPropeller, to: propBuckets[index], componentNodes: &componentNodes)
+        }
+
+        for side: Float in [-1.0, 1.0] {
+            let skidFront = beamNode(
+                start: SIMD3<Float>(0.50 * side, -0.08, 0.36),
+                end: SIMD3<Float>(0.74 * side, -0.50, 0.36),
+                radius: 0.028,
+                material: frameMaterial
+            )
+            let skidRear = beamNode(
+                start: SIMD3<Float>(0.50 * side, -0.08, -0.36),
+                end: SIMD3<Float>(0.74 * side, -0.50, -0.36),
+                radius: 0.028,
+                material: frameMaterial
+            )
+            let rail = beamNode(
+                start: SIMD3<Float>(0.74 * side, -0.50, -0.42),
+                end: SIMD3<Float>(0.74 * side, -0.50, 0.42),
+                radius: 0.024,
+                material: frameMaterial
+            )
+            root.addChildNode(skidFront)
+            root.addChildNode(skidRear)
+            root.addChildNode(rail)
+        }
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.08, 0.34)
         root.addChildNode(fpvAnchor)
         append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
 

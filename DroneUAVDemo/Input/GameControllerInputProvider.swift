@@ -577,6 +577,8 @@ private extension InputAction {
             return 42
         case .toggleRangefinderArmed:
             return 43
+        case .toggleHoseSpraying:
+            return 44
         }
     }
 }

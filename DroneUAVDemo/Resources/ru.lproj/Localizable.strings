@@ -109,6 +109,24 @@
 "payload.rangefinder.reset_aim" = "Сбросить наведение";
 "payload.rangefinder.unavailable" = "Дальномер недоступен";
 "payload.rangefinder.powered_off" = "Дальномер выключен";
+"payload.hose.unavailable" = "Пожарный рукав недоступен";
+"payload.hose.powered_off" = "Пожарный рукав выключен";
+"payload.hose.title" = "Пожарный рукав";
+"payload.hose.subtitle" = "Наведите насадку и подайте пену для тушения";
+"payload.hose.spray" = "Подача ВКЛ";
+"payload.hose.stop_spray" = "Подача ВЫКЛ";
+"payload.hose.gimbal_yaw" = "Рысканье";
+"payload.hose.gimbal_pitch" = "Тангаж";
+"payload.hose.fires_remaining" = "Горит очагов";
+"payload.hose.reset_aim" = "Сбросить наведение";
+"payload.hose.diameter_class" = "Диаметр рукава";
+"payload.hose.diameter.narrow" = "Узкий";
+"payload.hose.diameter.standard" = "Стандартный";
+"payload.hose.length" = "Длина рукава";
+"payload.hose.rig_mass" = "Масса оснастки: %.0f кг";
+"payload.hose.mass_follows_rig" = "Масса определяется длиной × диаметром рукава и не редактируется напрямую.";
+"payload.hose.tether_taut" = "ТРОС НАТЯНУТ";
+"payload.hose.tether_distance" = "ТРОС %.0f / %.0f м";
 
 // Тепловизионная камера
 "payload.camera.thermal.palette" = "Палитра";
@@ -472,6 +490,7 @@
 "payload.type.thermal_camera" = "Тепловизор";
 "payload.type.lidar_module" = "Лидар";
 "payload.type.laser_rangefinder" = "Лазерный дальномер";
+"payload.type.fire_hose" = "Пожарный рукав";
 "payload.type.rescue_pack" = "Комплект первой помощи";
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";
@@ -491,6 +510,7 @@
 "warning.emergency_descent" = "Аварийное снижение";
 "warning.crash_state" = "Состояние крушения";
 "warning.signal_lost_impact" = "Сигнал потерян: ударное повреждение";
+"warning.hose_tether_taut" = "Трос рукава натянут — достигнут предел удаления от машины";
 "damage.severity.nominal" = "Норма";
 "damage.severity.light" = "Легкие";
 "damage.severity.medium" = "Средние";
@@ -512,6 +532,7 @@
 "keybind.camera.thermal_black_hot" = "Тепловизор: Black Hot";
 "keybind.camera.thermal_iron" = "Тепловизор: Iron";
 "keybind.camera.rangefinder_arm" = "Дальномер: лазер вкл/выкл";
+"keybind.camera.hose_spray" = "Рукав: подача пены вкл/выкл";
 "keybind.camera.pitch_up" = "Камера: вверх";
 "keybind.camera.pitch_down" = "Камера: вниз";
 "keybind.camera.reset_orientation" = "Сброс ориентации камеры";
@@ -725,6 +746,7 @@
 "uav.filter.mass.light" = "Легкие";
 "uav.filter.mass.medium" = "Средние";
 "uav.filter.mass.heavy" = "Тяжелые";
+"uav.filter.mass.superheavy" = "Сверхтяжелые";
 
 "uav.vehicle.multicopter" = "Мультикоптер";
 "uav.vehicle.fixed_wing" = "Самолетный";
@@ -737,6 +759,7 @@
 "uav.mass.light" = "Легкий";
 "uav.mass.medium" = "Средний";
 "uav.mass.heavy" = "Тяжелый";
+"uav.mass.superheavy" = "Сверхтяжелый";
 "uav.mass.custom" = "Пользовательский";
 
 "uav.spec.verified" = "Проверен";
@@ -2437,6 +2460,7 @@
 "mission.setup.time_limit" = "Ограничение времени";
 "mission.setup.time_limit.value" = "%d мин";
 "mission.setup.uav" = "БЛА";
+"mission.setup.uav.none_compatible" = "Ни один доступный БЛА не может нести эту нагрузку по массе.";
 "mission.setup.payload" = "Нагрузка";
 "mission.setup.payload.hint" = "Для поиска человека нужна тепловизионная или оптическая камера.";
 "mission.setup.payload.hint.fire_response" = "Для тушения пожара нужно оборудование пожаротушения.";

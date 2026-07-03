@@ -17,9 +17,27 @@ struct MissionSetupView: View {
     @State private var timeLimitMinutes: Int = MissionDifficulty.medium.defaultTimeLimitMinutes
     @State private var selectedProfileID: String = ""
     @State private var payload: PayloadType = .thermalCamera
+    @State private var hoseDiameterClass: FireHoseDiameterClass = .standard
+    @State private var hoseLengthMeters: Double = 30.0
+
+    /// UAV profiles that can actually carry `payload`'s mass (and stay within max takeoff mass) —
+    /// without this, picking a heavy payload (e.g. the fire hose) against the default/first
+    /// profile could silently fail to attach, leaving the operator stuck looking at a fallback
+    /// camera with no visible cause. For the fire hose, the *rigged* mass (length × diameter
+    /// class) is what matters, not the flat default — so the picker narrows live as the operator
+    /// drags the length slider.
+    private var compatibleProfiles: [DroneModelProfile] {
+        var configuration = PayloadConfiguration(payloadType: payload)
+        if payload == .fireHose {
+            configuration.payloadMass = hoseDiameterClass.massForLength(Float(hoseLengthMeters))
+        }
+        return availableProfiles.filter {
+            PayloadController.capabilityCheck(for: configuration, profile: $0.resolvedUAVProfile).isAllowed
+        }
+    }
 
     private var resolvedProfile: DroneModelProfile? {
-        availableProfiles.first { $0.id == selectedProfileID } ?? availableProfiles.first
+        compatibleProfiles.first { $0.id == selectedProfileID } ?? compatibleProfiles.first
     }
 
     private var compatiblePayloads: [PayloadType] {
@@ -42,7 +60,6 @@ struct MissionSetupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     scenarioSection
-                    parametersSection
                     platformSection
                 }
                 .padding(20)
@@ -62,10 +79,29 @@ struct MissionSetupView: View {
             if !compatiblePayloads.contains(payload) {
                 payload = compatiblePayloads.first ?? .thermalCamera
             }
+            if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
+                selectedProfileID = compatibleProfiles.first?.id ?? ""
+            }
         }
         .onChange(of: kind) { _, _ in
             if !compatiblePayloads.contains(payload) {
                 payload = compatiblePayloads.first ?? .thermalCamera
+            }
+        }
+        .onChange(of: payload) { _, _ in
+            if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
+                selectedProfileID = compatibleProfiles.first?.id ?? ""
+            }
+        }
+        .onChange(of: hoseDiameterClass) { _, newValue in
+            hoseLengthMeters = Double(Float(hoseLengthMeters).clamped(to: newValue.lengthRangeMeters))
+            if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
+                selectedProfileID = compatibleProfiles.first?.id ?? ""
+            }
+        }
+        .onChange(of: hoseLengthMeters) { _, _ in
+            if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
+                selectedProfileID = compatibleProfiles.first?.id ?? ""
             }
         }
     }
@@ -86,6 +122,9 @@ struct MissionSetupView: View {
         .background(Color.white.opacity(0.04))
     }
 
+    /// Scenario picker + description, with that scenario's parameters opening directly below it in
+    /// the same card — picking a mission and immediately seeing (and tuning) its own parameters
+    /// reads more practical than a disconnected "Parameters" card further down the screen.
     private var scenarioSection: some View {
         sectionCard(titleKey: "mission.setup.section.scenario") {
             VStack(alignment: .leading, spacing: 14) {
@@ -111,87 +150,96 @@ struct MissionSetupView: View {
                     }
                     Spacer()
                 }
+
+                Divider().overlay(Color.white.opacity(0.12))
+
+                Text("mission.setup.section.parameters")
+                    .font(.caption.weight(.bold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.white.opacity(0.6))
+
+                parametersFields
             }
+            .animation(.easeInOut(duration: 0.2), value: kind)
         }
     }
 
-    private var parametersSection: some View {
-        sectionCard(titleKey: "mission.setup.section.parameters") {
-            VStack(alignment: .leading, spacing: 14) {
-                labeledRow("mission.setup.difficulty") {
-                    Picker("", selection: $difficulty) {
-                        ForEach(MissionDifficulty.allCases) { value in
-                            Text(LocalizedStringKey(value.titleKey)).tag(value)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .onChange(of: difficulty) { _, newValue in
-                        timeLimitMinutes = newValue.defaultTimeLimitMinutes
+    @ViewBuilder
+    private var parametersFields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            labeledRow("mission.setup.difficulty") {
+                Picker("", selection: $difficulty) {
+                    ForEach(MissionDifficulty.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
                     }
                 }
-
-                labeledRow("mission.setup.time_of_day") {
-                    Picker("", selection: $timeOfDay) {
-                        ForEach(TimeOfDay.allCases) { value in
-                            Text(LocalizedStringKey(value.titleKey)).tag(value)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: difficulty) { _, newValue in
+                    timeLimitMinutes = newValue.defaultTimeLimitMinutes
                 }
+            }
 
-                labeledRow("mission.setup.terrain") {
-                    Picker("", selection: $terrain) {
-                        ForEach(TerrainPreset.available(for: resolvedProfile?.airframeClass ?? .multirotor)) { preset in
-                            Text(LocalizedStringKey(preset.titleKey)).tag(preset)
-                        }
+            labeledRow("mission.setup.time_of_day") {
+                Picker("", selection: $timeOfDay) {
+                    ForEach(TimeOfDay.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .tint(.white)
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
 
-                labeledRow("mission.setup.terrain_density") {
-                    Picker("", selection: $terrainDensity) {
-                        ForEach(MissionTerrainDensity.allCases) { value in
-                            Text(LocalizedStringKey(value.titleKey)).tag(value)
-                        }
+            labeledRow("mission.setup.terrain") {
+                Picker("", selection: $terrain) {
+                    ForEach(TerrainPreset.available(for: resolvedProfile?.airframeClass ?? .multirotor)) { preset in
+                        Text(LocalizedStringKey(preset.titleKey)).tag(preset)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(.white)
+            }
 
-                labeledRow("mission.setup.weather") {
-                    Picker("", selection: $weather) {
-                        ForEach(WeatherPreset.allCases) { preset in
-                            Text(LocalizedStringKey(preset.titleKey)).tag(preset)
-                        }
+            labeledRow("mission.setup.terrain_density") {
+                Picker("", selection: $terrainDensity) {
+                    ForEach(MissionTerrainDensity.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .tint(.white)
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("mission.setup.weather_intensity")
-                            .font(.caption).foregroundStyle(.white.opacity(0.8))
-                        Spacer()
-                        Text(String(format: "%.0f%%", weatherIntensity * 100))
-                            .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+            labeledRow("mission.setup.weather") {
+                Picker("", selection: $weather) {
+                    ForEach(WeatherPreset.allCases) { preset in
+                        Text(LocalizedStringKey(preset.titleKey)).tag(preset)
                     }
-                    Slider(value: $weatherIntensity, in: 0...1, step: 0.01)
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(.white)
+            }
 
-                Stepper(value: $timeLimitMinutes, in: 3...30) {
-                    HStack {
-                        Text("mission.setup.time_limit")
-                            .font(.caption).foregroundStyle(.white.opacity(0.8))
-                        Spacer()
-                        Text(String(format: NSLocalizedString("mission.setup.time_limit.value", comment: ""), timeLimitMinutes))
-                            .font(.caption.monospacedDigit()).foregroundStyle(.white)
-                    }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("mission.setup.weather_intensity")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Text(String(format: "%.0f%%", weatherIntensity * 100))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                }
+                Slider(value: $weatherIntensity, in: 0...1, step: 0.01)
+            }
+
+            Stepper(value: $timeLimitMinutes, in: 3...30) {
+                HStack {
+                    Text("mission.setup.time_limit")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Text(String(format: NSLocalizedString("mission.setup.time_limit.value", comment: ""), timeLimitMinutes))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white)
                 }
             }
         }
@@ -202,13 +250,20 @@ struct MissionSetupView: View {
             VStack(alignment: .leading, spacing: 14) {
                 labeledRow("mission.setup.uav") {
                     Picker("", selection: $selectedProfileID) {
-                        ForEach(availableProfiles) { profile in
+                        ForEach(compatibleProfiles) { profile in
                             Text(profile.uiDisplayName).tag(profile.id)
                         }
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .tint(.white)
+                }
+
+                if compatibleProfiles.isEmpty {
+                    Text("mission.setup.uav.none_compatible")
+                        .font(.caption2)
+                        .foregroundStyle(GroundControlPalette.danger)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 labeledRow("mission.setup.payload") {
@@ -226,6 +281,43 @@ struct MissionSetupView: View {
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
+
+                if payload == .fireHose {
+                    hoseRiggingFields
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var hoseRiggingFields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            labeledRow("payload.hose.diameter_class") {
+                Picker("", selection: $hoseDiameterClass) {
+                    ForEach(FireHoseDiameterClass.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("payload.hose.length")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Text(String(format: "%.0f m", hoseLengthMeters))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                }
+                Slider(
+                    value: $hoseLengthMeters,
+                    in: Double(hoseDiameterClass.lengthRangeMeters.lowerBound)...Double(hoseDiameterClass.lengthRangeMeters.upperBound),
+                    step: Double(hoseDiameterClass.lengthStepMeters)
+                )
+                Text(String(format: NSLocalizedString("payload.hose.rig_mass", comment: ""), hoseDiameterClass.massForLength(Float(hoseLengthMeters))))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
             }
         }
     }
@@ -279,7 +371,9 @@ struct MissionSetupView: View {
         let config = MissionScenarioConfiguration(
             parameters: parameters,
             selectedUAVProfileID: profile.id,
-            payloadType: payload
+            payloadType: payload,
+            fireHoseDiameterClass: hoseDiameterClass,
+            fireHoseLengthMeters: Float(hoseLengthMeters)
         )
         onStart(config)
     }
@@ -289,6 +383,7 @@ struct MissionSetupView: View {
         case .thermalCamera: return "payload.type.thermal_camera"
         case .cameraGimbal: return "payload.type.camera_gimbal"
         case .laserRangefinder: return "payload.type.laser_rangefinder"
+        case .fireHose: return "payload.type.fire_hose"
         case .lidarModule: return "payload.type.lidar_module"
         case .cargoBox: return "payload.type.cargo_box"
         case .rescuePack: return "payload.type.rescue_pack"
@@ -328,5 +423,11 @@ struct MissionSetupView: View {
                 .font(.caption).foregroundStyle(.white.opacity(0.8))
             content()
         }
+    }
+}
+
+private extension Float {
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }

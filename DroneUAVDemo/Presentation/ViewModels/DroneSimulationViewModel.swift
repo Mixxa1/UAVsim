@@ -605,6 +605,15 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
     @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
     @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
+    @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
+    /// Whether the hose-tether constraint is currently in effect (a fire-response mission with an
+    /// attached, available hose payload) — false in every other scenario/payload combination.
+    @Published private(set) var isHoseTetherActive = false
+    /// True the instant the drone is being held at the tether's radius — a real taut rope, not a
+    /// warning-only state.
+    @Published private(set) var isHoseTetherTaut = false
+    @Published private(set) var hoseTetherDistanceMeters: Float = 0.0
+    @Published private(set) var hoseTetherLimitMeters: Float = 0.0
     @Published private(set) var payloadThermalState: PayloadThermalState = .default
     @Published private(set) var payloadMissionSignals: [PayloadMissionSignal]
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
@@ -787,7 +796,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
-        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || cameraConfiguration.mode == .payloadOptics {
+        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable || cameraConfiguration.mode == .payloadOptics {
             modes.append(.payloadOptics)
         }
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
@@ -911,6 +920,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let fixedWingAssistController = FixedWingAssistController()
     private let payloadCameraController: PayloadCameraController
     private let rangefinderController: PayloadRangefinderController
+    private let hoseController: PayloadFireHoseController
     private let tacticalMapCoordinator = TacticalMapCoordinator()
     private let missionDraftBuilder = MissionDraftBuilder()
     private let missionPreviewBuilder = MissionPreviewBuilder()
@@ -1306,6 +1316,7 @@ final class DroneSimulationViewModel: ObservableObject {
         autoNavigationController: AutoNavigationController = AutoNavigationController(),
         payloadCameraController: PayloadCameraController = PayloadCameraController(),
         rangefinderController: PayloadRangefinderController = PayloadRangefinderController(),
+        hoseController: PayloadFireHoseController = PayloadFireHoseController(),
         remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
         initialProjectName: String? = nil,
@@ -1364,6 +1375,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.autoNavigationController = autoNavigationController
         self.payloadCameraController = payloadCameraController
         self.rangefinderController = rangefinderController
+        self.hoseController = hoseController
         self.compassViewModel = CompassViewModel()
 
         let abstract = AbstractDroneParameters.default
@@ -1924,7 +1936,15 @@ final class DroneSimulationViewModel: ObservableObject {
 
         payloadDraftConfiguration.payloadType = type
         payloadDraftConfiguration.visualPreset = type.defaultVisualPreset
-        payloadDraftConfiguration.payloadMass = type.defaultMass
+        if type == .fireHose {
+            // Seed a default rig — a real hose's mass follows length × diameter class, not a
+            // flat constant, so reset both alongside the type switch.
+            payloadDraftConfiguration.fireHoseDiameterClass = .standard
+            payloadDraftConfiguration.fireHoseLengthMeters = 30.0
+            payloadDraftConfiguration.payloadMass = FireHoseDiameterClass.standard.massForLength(30.0)
+        } else {
+            payloadDraftConfiguration.payloadMass = type.defaultMass
+        }
         if type != .custom {
             payloadDraftConfiguration.customName = ""
         }
@@ -1942,6 +1962,26 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         payloadDraftConfiguration.payloadMass = clamped
+        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
+        payloadStatusMessageKey = nil
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    /// Rigs the fire-hose payload with a given diameter class and length, recomputing its mass
+    /// as length × diameter-class kg/meter + fixed reel/nozzle hardware overhead — a real hose's
+    /// mass isn't independently editable the way other payloads' is.
+    func setFireHoseRigging(diameterClass: FireHoseDiameterClass, lengthMeters: Double) {
+        guard canControlLocalVehicle else { return }
+        let clampedLength = Float(lengthMeters).clamped(to: diameterClass.lengthRangeMeters)
+        guard payloadDraftConfiguration.fireHoseDiameterClass != diameterClass
+            || abs(payloadDraftConfiguration.fireHoseLengthMeters - clampedLength) > 0.001 else {
+            return
+        }
+
+        payloadDraftConfiguration.fireHoseDiameterClass = diameterClass
+        payloadDraftConfiguration.fireHoseLengthMeters = clampedLength
+        payloadDraftConfiguration.payloadMass = diameterClass.massForLength(clampedLength)
         payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
         payloadStatusMessageKey = nil
         refreshPayloadRuntimeState()
@@ -3179,7 +3219,7 @@ final class DroneSimulationViewModel: ObservableObject {
             _ = payloadCameraController.activatePayloadView(from: oldMode)
             sceneController.setPayloadCameraFocusReleaseID(payloadCameraController.trackedReleaseID)
         } else if mode == .payloadOptics {
-            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable else {
+            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable else {
                 return
             }
         }
@@ -3314,6 +3354,30 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func toggleRangefinderArmed() {
         setRangefinderArmed(!rangefinderOpticsState.isArmed)
+    }
+
+    // MARK: - Fire hose
+
+    func setHoseSpraying(_ enabled: Bool) {
+        hoseController.setSpraying(enabled)
+        refreshHoseAimStatus()
+    }
+
+    func toggleHoseSpraying() {
+        setHoseSpraying(!hoseOpticsState.isSpraying)
+    }
+
+    func adjustHoseGimbal(yawDeltaDegrees: Double, pitchDeltaDegrees: Double) {
+        hoseController.adjustGimbal(
+            yawDeltaDegrees: yawDeltaDegrees,
+            pitchDeltaDegrees: pitchDeltaDegrees
+        )
+        refreshHoseAimStatus()
+    }
+
+    func resetHoseGimbalOrientation() {
+        hoseController.resetGimbalOrientation()
+        refreshHoseAimStatus()
     }
 
     // MARK: - Thermal camera
@@ -4027,6 +4091,12 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.applyMissionTimeOfDay(params.timeOfDay)
 
         setPayloadType(config.payloadType)
+        if config.payloadType == .fireHose {
+            setFireHoseRigging(
+                diameterClass: config.fireHoseDiameterClass,
+                lengthMeters: Double(config.fireHoseLengthMeters)
+            )
+        }
         attachPayload()
 
         let dock = sceneController.currentDockSpawnPoint()
@@ -4120,14 +4190,14 @@ final class DroneSimulationViewModel: ObservableObject {
 
     // MARK: - Mission scenario (Fire Response)
 
-    /// Increment 1: aiming/spraying don't exist yet (the hose payload lands in a later
-    /// increment) — only the spread half of the loop runs each tick, so the mechanic is testable
-    /// before real aiming exists. `debugExtinguishNearestFireResponseTree()` is the temporary
-    /// manual stand-in for the suppression path.
     private func updateFireResponseRuntime(deltaTime: TimeInterval) {
         guard var runtime = fireResponseRuntime, runtime.isActive else { return }
 
-        runtime.tick(deltaTime: deltaTime, aimedFireIndex: nil, isSpraying: false)
+        runtime.tick(
+            deltaTime: deltaTime,
+            aimedFireIndex: hoseOpticsState.aimedFireTreeIndex,
+            isSpraying: hoseOpticsState.isSpraying
+        )
         fireResponseRuntime = runtime
         sceneController.updateFireResponseVisuals(treeStatuses: runtime.treeStatuses)
         publishFireResponseState()
@@ -5359,6 +5429,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 activateThermalPalette(.iron)
             case .toggleRangefinderArmed:
                 toggleRangefinderArmed()
+            case .toggleHoseSpraying:
+                toggleHoseSpraying()
             case .cycleCameraMode:
                 cycleCameraMode()
             case .toggleControlPanel:
@@ -5465,8 +5537,13 @@ final class DroneSimulationViewModel: ObservableObject {
                     yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
                     pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
                 )
-            } else {
+            } else if rangefinderOpticsState.isAvailable {
                 adjustRangefinderGimbal(
+                    yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
+                    pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
+                )
+            } else {
+                adjustHoseGimbal(
                     yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
                     pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
                 )
@@ -7107,7 +7184,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -7127,7 +7204,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -7142,6 +7219,18 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         return payloadDraftConfiguration.payloadType == .laserRangefinder
+    }
+
+    private var isMountedHoseAvailable: Bool {
+        guard mountedCADPayload == nil else {
+            return false
+        }
+
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+
+        return payloadDraftConfiguration.payloadType == .fireHose
     }
 
     private var payloadCameraFeedLabel: String {
@@ -7249,6 +7338,7 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
         refreshRangefinderStatus()
+        refreshHoseAimStatus()
         refreshFlightControlDiagnostics()
     }
 
@@ -7268,6 +7358,30 @@ final class DroneSimulationViewModel: ObservableObject {
         let rangefinderSignals = rangefinderController.consumeMissionSignals()
         if !rangefinderSignals.isEmpty {
             payloadMissionSignals.append(contentsOf: rangefinderSignals)
+            if payloadMissionSignals.count > 24 {
+                payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
+            }
+        }
+    }
+
+    private func refreshHoseAimStatus() {
+        hoseController.setAvailability(
+            isAvailable: isMountedHoseAvailable,
+            isPowered: isMountedHoseAvailable
+        )
+        sceneController.updateHoseGimbal(state: hoseController.opticsState)
+        let aimedIndex = hoseController.opticsState.isAvailable
+            ? sceneController.hoseFireSuppressionSample(fireTreeNodes: sceneController.fireTreeNodes)
+            : nil
+        hoseController.updateAimedFire(
+            index: aimedIndex,
+            progress: fireResponseRuntime?.suppressionProgress(for: aimedIndex) ?? 0.0
+        )
+        hoseOpticsState = hoseController.opticsState
+
+        let hoseSignals = hoseController.consumeMissionSignals()
+        if !hoseSignals.isEmpty {
+            payloadMissionSignals.append(contentsOf: hoseSignals)
             if payloadMissionSignals.count > 24 {
                 payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
             }
@@ -7295,6 +7409,9 @@ final class DroneSimulationViewModel: ObservableObject {
             output.append(contentsOf: mountedCADPayload.runtimeWarningKeys(
                 maxPayloadMass: activeUAVProfile?.payloadDataResolution.maxPayloadMass
             ))
+        }
+        if isHoseTetherTaut {
+            output.append("warning.hose_tether_taut")
         }
         return Array(NSOrderedSet(array: output)) as? [String] ?? output
     }
@@ -7853,7 +7970,9 @@ final class DroneSimulationViewModel: ObservableObject {
         return installedPayloadConfiguration.payloadType == payloadDraftConfiguration.payloadType &&
             installedPayloadConfiguration.customName == payloadDraftConfiguration.customName &&
             abs(installedPayloadConfiguration.payloadMass - payloadDraftConfiguration.payloadMass) <= 0.0001 &&
-            installedPayloadConfiguration.visualPreset == payloadDraftConfiguration.visualPreset
+            installedPayloadConfiguration.visualPreset == payloadDraftConfiguration.visualPreset &&
+            installedPayloadConfiguration.fireHoseDiameterClass == payloadDraftConfiguration.fireHoseDiameterClass &&
+            abs(installedPayloadConfiguration.fireHoseLengthMeters - payloadDraftConfiguration.fireHoseLengthMeters) <= 0.001
     }
 
     private func resolvePayloadMountState() -> PayloadMountState {
@@ -13434,7 +13553,48 @@ final class DroneSimulationViewModel: ObservableObject {
             controlValues.z = controlValues.z.clamped(to: -Double(halfExtent)...Double(halfExtent))
         }
 
+        enforceHoseTetherConstraint()
+
         lastFiniteState = state
+    }
+
+    /// A real fire hose is a fixed-length physical line to the ground truck's pump — it cannot
+    /// stretch. Mirrors the altitude-ceiling clamp above (hard position stop + zero the offending
+    /// velocity component), generalized from a 1-D vertical wall to a 3-D spherical one centered
+    /// on the truck, rather than the world-bounds geofence's "lose signal after a countdown"
+    /// pattern — a taut rope stops the drone immediately, it doesn't cut its signal.
+    private func enforceHoseTetherConstraint() {
+        guard activeMissionScenarioKind == .fireResponse,
+              isMountedHoseAvailable,
+              let installed = installedPayloadConfiguration,
+              let truckPosition = sceneController.currentFireTruckWorldPosition() else {
+            isHoseTetherActive = false
+            isHoseTetherTaut = false
+            hoseTetherDistanceMeters = 0.0
+            hoseTetherLimitMeters = 0.0
+            return
+        }
+
+        let tetherLength = max(1.0, installed.fireHoseLengthMeters)
+        let toTruck = state.position - truckPosition
+        let distance = simd_length(toTruck)
+
+        isHoseTetherActive = true
+        hoseTetherLimitMeters = tetherLength
+        hoseTetherDistanceMeters = min(distance, tetherLength)
+
+        guard distance > tetherLength, distance > 0.0001 else {
+            isHoseTetherTaut = false
+            return
+        }
+
+        isHoseTetherTaut = true
+        let radial = toTruck / distance
+        state.position = truckPosition + radial * tetherLength
+        let outwardSpeed = simd_dot(state.velocity, radial)
+        if outwardSpeed > 0.0 {
+            state.velocity -= radial * outwardSpeed
+        }
     }
 
     private func isFinite(_ value: SIMD3<Float>) -> Bool {

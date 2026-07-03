@@ -14,8 +14,10 @@ struct SceneViewportView: View {
         let overlayInset = viewModel.isParametersPanelVisible ? 18.0 : 12.0
         let payloadOpticsActive = viewModel.cameraConfiguration.mode == .payloadOptics
         let payloadOpticsState = viewModel.payloadCameraOpticsState
-        let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable
         let rangefinderOpticsState = viewModel.rangefinderOpticsState
+        let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && rangefinderOpticsState.isAvailable
+        let hoseOpticsState = viewModel.hoseOpticsState
+        let hoseOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && hoseOpticsState.isAvailable
 
         ZStack(alignment: .topLeading) {
             DroneSceneViewRepresentable(
@@ -47,6 +49,19 @@ struct SceneViewportView: View {
             if rangefinderOpticsActive {
                 RangefinderOpticsViewportOverlayView(state: rangefinderOpticsState)
                     .ignoresSafeArea()
+            }
+
+            if hoseOpticsActive {
+                HoseAimViewportOverlayView(
+                    state: hoseOpticsState,
+                    burningCount: viewModel.fireResponseBurningCount,
+                    totalCount: viewModel.fireResponseTotalCount,
+                    isTetherActive: viewModel.isHoseTetherActive,
+                    isTetherTaut: viewModel.isHoseTetherTaut,
+                    tetherDistanceMeters: viewModel.hoseTetherDistanceMeters,
+                    tetherLimitMeters: viewModel.hoseTetherLimitMeters
+                )
+                .ignoresSafeArea()
             }
 
             if payloadOpticsActive, payloadOpticsState.isAvailable, payloadOpticsState.mode == .thermalStub {
@@ -477,6 +492,126 @@ private struct RangefinderOpticsViewportOverlayView: View {
                 Spacer()
 
                 Text("RANGE \(distanceText)")
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 28)
+            }
+            .foregroundStyle(overlayTint)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func statusPill(titleKey: String, tint: Color) -> some View {
+        Text(LocalizedStringKey(titleKey))
+            .font(.system(size: 24, weight: .bold, design: .monospaced))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.56), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.45), lineWidth: 1)
+            )
+    }
+}
+
+private struct HoseAimViewportOverlayView: View {
+    let state: PayloadFireHoseOpticsState
+    let burningCount: Int
+    let totalCount: Int
+    let isTetherActive: Bool
+    let isTetherTaut: Bool
+    let tetherDistanceMeters: Float
+    let tetherLimitMeters: Float
+
+    private var overlayTint: Color {
+        state.isPowered ? Color(red: 0.80, green: 0.92, blue: 1.0) : Color.white.opacity(0.62)
+    }
+
+    private var reticleColor: Color {
+        state.isSpraying ? Color.white.opacity(0.95) : Color(red: 0.35, green: 0.85, blue: 0.95).opacity(0.85)
+    }
+
+    private var isOnTarget: Bool { state.aimedFireTreeIndex != nil }
+
+    var body: some View {
+        ZStack {
+            if !state.isPowered {
+                Color.black.opacity(0.34)
+            }
+
+            PayloadOpticsCornerFrame()
+                .stroke(overlayTint.opacity(0.95), style: StrokeStyle(lineWidth: 2.0, lineCap: .square))
+                .padding(22)
+
+            CrosshairShape()
+                .stroke(reticleColor, style: StrokeStyle(lineWidth: isOnTarget ? 3.0 : 2.2, lineCap: .round))
+                .frame(width: 116, height: 116)
+
+            VStack(spacing: 0) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.feedLabel)
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        Text(String(format: "THROW %.0f m", state.nozzleThrowMeters))
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                        if isTetherActive {
+                            Text(String(
+                                format: NSLocalizedString("payload.hose.tether_distance", comment: ""),
+                                tetherDistanceMeters,
+                                tetherLimitMeters
+                            ))
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(isTetherTaut ? Color.red.opacity(0.95) : overlayTint)
+                        }
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if state.isSpraying {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(Color.white)
+                                    .frame(width: 12, height: 12)
+                                Text("SPRAYING")
+                                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(Color.white.opacity(0.96))
+                            }
+                        }
+                        if isTetherTaut {
+                            Text(LocalizedStringKey("payload.hose.tether_taut"))
+                                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Color.red.opacity(0.85), in: Capsule())
+                        }
+                    }
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 28)
+
+                Spacer()
+
+                if !state.isPowered {
+                    statusPill(titleKey: "payload.hose.powered_off", tint: GroundControlPalette.warning)
+                } else if !state.isAvailable {
+                    statusPill(titleKey: "payload.hose.unavailable", tint: GroundControlPalette.warning)
+                } else if isOnTarget {
+                    VStack(spacing: 4) {
+                        Text("mission.hud.locking")
+                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        ProgressView(value: min(1.0, state.suppressionProgress))
+                            .tint(Color.white)
+                            .frame(width: 160)
+                    }
+                    .foregroundStyle(.white)
+                }
+
+                Spacer()
+
+                Text(String(format: NSLocalizedString("mission.hud.fires_remaining", comment: ""), burningCount, totalCount))
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.bottom, 28)

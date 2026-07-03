@@ -6,5 +6,6 @@ enum UAVMassCategory: String, CaseIterable, Hashable {
     case light
     case medium
     case heavy
+    case superheavy
     case custom
 }

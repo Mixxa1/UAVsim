@@ -100,6 +100,12 @@ final class DroneSceneController {
     private var rangefinderBeamNode: SCNNode?
     private var rangefinderCameraNode: SCNNode?
     private var rangefinderCamera: SCNCamera?
+    private let hoseRigNode = SCNNode()
+    private let hoseYawNode = SCNNode()
+    private let hosePitchNode = SCNNode()
+    private var hoseBodyNode: SCNNode?
+    private var hoseCameraNode: SCNNode?
+    private var hoseCamera: SCNCamera?
     private let payloadDropCameraController = PayloadDropCameraController()
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
@@ -130,6 +136,7 @@ final class DroneSceneController {
     private(set) var fireTreeNodes: [SCNNode] = []
     private var fireTreeMarkerNodes: [SCNNode] = []
     private var fireTreeObstacleIDs: Set<UUID> = []
+    private var fireTruckNode: SCNNode?
     private var missionTimeOfDay: TimeOfDay = .day
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
@@ -183,6 +190,7 @@ final class DroneSceneController {
     private var payloadCamera: SCNCamera?
     private var payloadCameraOpticsState = PayloadCameraOpticsState()
     private var rangefinderOpticsState = PayloadRangefinderOpticsState()
+    private var hoseOpticsState = PayloadFireHoseOpticsState()
     private let fpvPayloadPresentationNode = SCNNode()
     private var droppedPayloadNodes: [UUID: SCNNode] = [:]
     private var droppedPayloadRuntime: [UUID: DroppedPayloadRuntime] = [:]
@@ -426,7 +434,7 @@ final class DroneSceneController {
         case .top:
             return topCameraNode
         case .payloadOptics:
-            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? followCameraNode
+            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? hoseCameraPointOfView() ?? followCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
         case .spectator:
@@ -453,6 +461,14 @@ final class DroneSceneController {
         }
         ensureRangefinderRig()
         return rangefinderCameraNode
+    }
+
+    func hoseCameraPointOfView() -> SCNNode? {
+        guard hoseOpticsState.isAvailable else {
+            return nil
+        }
+        ensureHoseRig()
+        return hoseCameraNode
     }
 
     // MARK: - Thermal Rendering
@@ -698,6 +714,12 @@ final class DroneSceneController {
 
     func currentDockSpawnPoint() -> SIMD3<Float> {
         dockSpawnPosition
+    }
+
+    /// World position of the fire-response scenario's parked truck, if one is currently spawned —
+    /// the fixed anchor point the hose's physical tether length is measured from.
+    func currentFireTruckWorldPosition() -> SIMD3<Float>? {
+        fireTruckNode?.simdWorldPosition
     }
 
     func configureOnlineTrialPlaceholders(_ fleetState: OnlineTrialFleetState?) {
@@ -2566,6 +2588,131 @@ final class DroneSceneController {
         beam.position = SCNVector3(0.0, 0.0, -length / 2.0)
     }
 
+    // MARK: - Fire hose rig
+
+    func ensureHoseRig() {
+        if hoseYawNode.parent !== hoseRigNode {
+            hoseRigNode.name = "hoseRigNode"
+            hoseYawNode.name = "hoseYawNode"
+            hosePitchNode.name = "hosePitchNode"
+
+            hoseRigNode.removeFromParentNode()
+            hoseYawNode.removeFromParentNode()
+            hosePitchNode.removeFromParentNode()
+
+            hoseRigNode.addChildNode(hoseYawNode)
+            hoseYawNode.addChildNode(hosePitchNode)
+            hosePitchNode.simdPosition = SIMD3<Float>(0.0, -0.02, 0.02)
+        }
+
+        if hoseBodyNode == nil {
+            let bodyMaterial = SCNMaterial()
+            bodyMaterial.lightingModel = .physicallyBased
+            bodyMaterial.diffuse.contents = NSColor(calibratedRed: 0.55, green: 0.12, blue: 0.08, alpha: 1.0)
+            bodyMaterial.roughness.contents = 0.85
+
+            let geometry = SCNCylinder(radius: 0.045, height: 1.0)
+            geometry.radialSegmentCount = 10
+            geometry.firstMaterial = bodyMaterial
+
+            let body = SCNNode(geometry: geometry)
+            body.name = "hoseBodyNode"
+            body.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+            body.isHidden = true
+            hosePitchNode.addChildNode(body)
+            hoseBodyNode = body
+        }
+
+        if hoseCameraNode == nil {
+            let node = SCNNode()
+            node.name = "hoseCameraNode"
+
+            let camera = SCNCamera()
+            camera.fieldOfView = 45.0
+            camera.zNear = 0.015
+            camera.zFar = CameraClipping.payloadOpticsFar
+            camera.categoryBitMask = RenderCategory.visibleInPayloadOptics
+            node.camera = camera
+
+            hosePitchNode.addChildNode(node)
+            hoseCameraNode = node
+            hoseCamera = camera
+        }
+
+        if hoseRigNode.parent !== payloadMountNode {
+            hoseRigNode.removeFromParentNode()
+            payloadMountNode.addChildNode(hoseRigNode)
+        }
+    }
+
+    func updateHoseGimbal(state: PayloadFireHoseOpticsState) {
+        hoseOpticsState = state
+        ensureHoseRig()
+
+        hoseRigNode.isHidden = !state.isAvailable
+        hoseYawNode.eulerAngles.y = CGFloat(Float(state.gimbalYawDegrees).degreesToRadians)
+        hosePitchNode.eulerAngles.x = CGFloat(Float(state.gimbalPitchDegrees).degreesToRadians)
+
+        guard let body = hoseBodyNode else { return }
+        guard state.isAvailable, state.isPowered else {
+            body.isHidden = true
+            return
+        }
+        // Cosmetic only — the hose reads as a short nozzle stub mounted on the drone (like the
+        // rangefinder's beam when idle), not a rigid boom stretched out to the full nozzle throw.
+        // It extends a little further while actively spraying at a real target, to read as a
+        // hose stream rather than a fixed antenna; `hoseFireSuppressionSample`'s raycast (using
+        // the full `nozzleThrowMeters`) is what actually governs suppression range, independent of
+        // this visual length.
+        let stubLength: Float = 0.35
+        let sprayStreamLength: Float = 2.5
+        let length = (state.isSpraying && state.aimedFireTreeIndex != nil) ? sprayStreamLength : stubLength
+        body.isHidden = false
+        (body.geometry as? SCNCylinder)?.height = CGFloat(length)
+        body.position = SCNVector3(0.0, 0.0, -length / 2.0)
+    }
+
+    /// Raycasts along the hose nozzle's current aim direction, out to its fixed spray-throw
+    /// distance (nozzle pump pressure, not hose length). Returns
+    /// the index into `fireTreeNodes` of the first thing hit, if (and only if) that first hit is
+    /// one of the tracked fire trees — a tree partially screened by terrain/another tree in front
+    /// of it is correctly not aimable, same LOS spirit as the payload camera's mission sample.
+    func hoseFireSuppressionSample(fireTreeNodes: [SCNNode]) -> Int? {
+        guard hoseOpticsState.isAvailable, hoseOpticsState.isPowered, !fireTreeNodes.isEmpty else {
+            return nil
+        }
+        ensureHoseRig()
+
+        let origin = hosePitchNode.presentation.simdWorldPosition
+        let forward = simd_normalize(simd_act(
+            simd_quatf(hosePitchNode.presentation.simdWorldTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        guard simd_length_squared(forward) > 0.000001 else {
+            return nil
+        }
+
+        let reach = max(1.0, Float(hoseOpticsState.nozzleThrowMeters))
+        let end = origin + forward * reach
+        let results = scene.rootNode.hitTestWithSegment(
+            from: SCNVector3(origin.x, origin.y, origin.z),
+            to: SCNVector3(end.x, end.y, end.z),
+            options: [
+                SCNHitTestOption.backFaceCulling.rawValue: false,
+                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue
+            ]
+        )
+
+        for result in results {
+            if isDescendant(result.node, of: droneNode) || isDescendant(result.node, of: hoseRigNode) {
+                continue
+            }
+            return fireTreeNodes.firstIndex { isDescendant(result.node, of: $0) }
+        }
+
+        return nil
+    }
+
     private func stabilizedPayloadCameraEuler(for droneState: DroneState) -> SIMD3<Float> {
         let strength = Float(payloadCameraOpticsState.stabilizationStrength).clamped(to: 0.0...1.0)
         guard strength > 0.001 else {
@@ -3542,6 +3689,7 @@ final class DroneSceneController {
 
         fireTreeNodes.removeAll(keepingCapacity: false)
         fireTreeMarkerNodes.removeAll(keepingCapacity: false)
+        fireTruckNode = nil
         if !fireTreeObstacleIDs.isEmpty {
             environmentObstacles.removeAll { fireTreeObstacleIDs.contains($0.id) }
             obstacleMap = obstacleMap.filter { !fireTreeObstacleIDs.contains($0.key) }
@@ -3610,11 +3758,64 @@ final class DroneSceneController {
         fireTreeNodes = treeNodes
         fireTreeMarkerNodes = markerNodes
 
+        let truckObstacle = spawnFireTruckDecoration(placement: placement, groundY: groundY)
+        if let truckObstacle {
+            newObstacles.append(truckObstacle)
+        }
+
         environmentObstacles.append(contentsOf: newObstacles)
         environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
         environmentRevision &+= 1
 
         return anchorPositions
+    }
+
+    /// Parks a static, purely decorative `Fire_Truck.usdz` just outside the fire zone, facing the
+    /// blaze — set dressing that explains where the drone's suppression foam is conceptually
+    /// coming from, without any tether/hose-source gameplay mechanic. Registered as a single-box
+    /// collision obstacle so the drone doesn't clip through it, same as any other obstacle.
+    @discardableResult
+    private func spawnFireTruckDecoration(placement: FireZonePlacement, groundY: Float) -> CollisionObstacle? {
+        let dock = currentDockSpawnPoint()
+        let dockPlanar = SIMD2<Float>(dock.x, dock.z)
+        let toDock = dockPlanar - placement.zoneCenter
+        let direction = simd_length(toDock) > 0.001 ? simd_normalize(toDock) : SIMD2<Float>(1.0, 0.0)
+        let truckPosition2D = placement.zoneCenter + direction * (placement.zoneRadius + 12.0)
+
+        let toZoneCenter = placement.zoneCenter - truckPosition2D
+        let yaw = simd_length(toZoneCenter) > 0.001 ? atan2(toZoneCenter.x, toZoneCenter.y) : 0.0
+
+        let truck = FireTruckAssetLoader.shared.makeTruckNode(targetHeightMeters: 3.0, yaw: yaw)
+        truck.position = SCNVector3(truckPosition2D.x, groundY, truckPosition2D.y)
+        missionScenarioRootNode.addChildNode(truck)
+        fireTruckNode = truck
+
+        let size = SIMD3<Float>(7.0, 3.0, 2.5)
+        let descriptor = EnvironmentObjectDescriptor(
+            id: UUID(),
+            kind: .crate,
+            biome: .forest,
+            position: SIMD3<Float>(truckPosition2D.x, groundY, truckPosition2D.y),
+            yawRadians: yaw,
+            size: size,
+            boundingRadius: max(size.x, size.z) * 0.56,
+            isCollidable: true,
+            collisionParts: [
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, size.y * 0.5, 0.0),
+                    size: size,
+                    source: "fire_truck",
+                    supportsLanding: false
+                )
+            ]
+        )
+        let descriptorObstacles = configureObstacleCollisionProxies(for: truck, descriptor: descriptor)
+        for obstacle in descriptorObstacles {
+            obstacleMap[obstacle.id] = truck
+            obstacleSourceByID[obstacle.id] = obstacle.source
+            fireTreeObstacleIDs.insert(obstacle.id)
+        }
+        return descriptorObstacles.first
     }
 
     /// Placeholder burn-state marker (increment 1 only — a small emissive sphere above the

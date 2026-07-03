@@ -47,6 +47,7 @@ enum UAVMassCategoryFilter: String, CaseIterable, Identifiable, Hashable {
     case light
     case medium
     case heavy
+    case superheavy
 
     var id: String { rawValue }
 
@@ -64,6 +65,8 @@ enum UAVMassCategoryFilter: String, CaseIterable, Identifiable, Hashable {
             return NSLocalizedString("uav.filter.mass.medium", comment: "")
         case .heavy:
             return NSLocalizedString("uav.filter.mass.heavy", comment: "")
+        case .superheavy:
+            return NSLocalizedString("uav.filter.mass.superheavy", comment: "")
         }
     }
 
@@ -81,6 +84,8 @@ enum UAVMassCategoryFilter: String, CaseIterable, Identifiable, Hashable {
             return profile.massCategory == .medium
         case .heavy:
             return profile.massCategory == .heavy
+        case .superheavy:
+            return profile.massCategory == .superheavy
         }
     }
 }
@@ -120,6 +125,8 @@ extension UAVMassCategory {
             return NSLocalizedString("uav.mass.medium", comment: "")
         case .heavy:
             return NSLocalizedString("uav.mass.heavy", comment: "")
+        case .superheavy:
+            return NSLocalizedString("uav.mass.superheavy", comment: "")
         case .custom:
             return NSLocalizedString("uav.mass.custom", comment: "")
         }
