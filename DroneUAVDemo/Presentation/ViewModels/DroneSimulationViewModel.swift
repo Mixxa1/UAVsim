@@ -607,6 +607,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
     @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
     @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
+    @Published private(set) var capsuleState = PayloadFireCapsuleState()
     /// Whether the hose-tether constraint is currently in effect (a fire-response mission with an
     /// attached, available hose payload) — false in every other scenario/payload combination.
     @Published private(set) var isHoseTetherActive = false
@@ -797,7 +798,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
-        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable || cameraConfiguration.mode == .payloadOptics {
+        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable || cameraConfiguration.mode == .payloadOptics {
             modes.append(.payloadOptics)
         }
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
@@ -922,6 +923,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let payloadCameraController: PayloadCameraController
     private let rangefinderController: PayloadRangefinderController
     private let hoseController: PayloadFireHoseController
+    private let capsuleController: PayloadFireCapsuleController
     private let tacticalMapCoordinator = TacticalMapCoordinator()
     private let missionDraftBuilder = MissionDraftBuilder()
     private let missionPreviewBuilder = MissionPreviewBuilder()
@@ -1318,6 +1320,7 @@ final class DroneSimulationViewModel: ObservableObject {
         payloadCameraController: PayloadCameraController = PayloadCameraController(),
         rangefinderController: PayloadRangefinderController = PayloadRangefinderController(),
         hoseController: PayloadFireHoseController = PayloadFireHoseController(),
+        capsuleController: PayloadFireCapsuleController = PayloadFireCapsuleController(),
         remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
         initialProjectName: String? = nil,
@@ -1377,6 +1380,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.payloadCameraController = payloadCameraController
         self.rangefinderController = rangefinderController
         self.hoseController = hoseController
+        self.capsuleController = capsuleController
         self.compassViewModel = CompassViewModel()
 
         let abstract = AbstractDroneParameters.default
@@ -1989,6 +1993,25 @@ final class DroneSimulationViewModel: ObservableObject {
         hasUnsavedChanges = true
     }
 
+    /// Rigs the fire-capsule launcher with a given capsule size and count, recomputing its mass as
+    /// hardware overhead + count × per-capsule kg — mirrors `setFireHoseRigging`'s exact shape.
+    func setFireCapsuleRigging(size: FireCapsuleSize, count: Int) {
+        guard canControlLocalVehicle else { return }
+        let clampedCount = min(max(count, FireCapsuleTuning.countRange.lowerBound), FireCapsuleTuning.countRange.upperBound)
+        guard payloadDraftConfiguration.fireCapsuleSize != size
+            || payloadDraftConfiguration.fireCapsuleCount != clampedCount else {
+            return
+        }
+
+        payloadDraftConfiguration.fireCapsuleSize = size
+        payloadDraftConfiguration.fireCapsuleCount = clampedCount
+        payloadDraftConfiguration.payloadMass = FireCapsuleTuning.totalMass(size: size, count: clampedCount)
+        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
+        payloadStatusMessageKey = nil
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
     func setPayloadCustomName(_ value: String) {
         guard canControlLocalVehicle else { return }
         guard payloadDraftConfiguration.customName != value else {
@@ -2061,6 +2084,14 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func releasePayload() {
         guard canControlLocalVehicle else { return }
+        // The capsule launcher stays mounted and fires one capsule at a time out of an ammo
+        // count — deliberately NOT the single-ownership attach-once/drop-once flow below (that
+        // flow fully detaches `installedPayloadConfiguration`, which would "use up" the whole
+        // launcher on the first drop). Same drop keybind, different mechanic underneath.
+        if installedPayloadConfiguration?.payloadType == .fireCapsuleLauncher {
+            dropFireCapsule()
+            return
+        }
         guard installedPayloadConfiguration != nil, payloadState == .attached else {
             payloadStatusMessageKey = "payload.message.no_payload_attached"
             refreshPayloadRuntimeState()
@@ -2100,6 +2131,54 @@ final class DroneSimulationViewModel: ObservableObject {
             ])
         }
         hasUnsavedChanges = true
+    }
+
+    /// Fires one capsule from the mounted fire-capsule launcher. Unlike `releasePayload()` above,
+    /// the launcher itself never gets detached here — only the ammo count decrements. Impact
+    /// suppression uses the same read-mutate-write pattern as `debugExtinguishNearestFireResponseTree`.
+    private func dropFireCapsule() {
+        guard capsuleController.consumeCapsule() else {
+            payloadStatusMessageKey = "payload.capsule.empty"
+            refreshPayloadRuntimeState()
+            return
+        }
+
+        capsuleState = capsuleController.state
+        let size = capsuleController.state.capsuleSize
+        payloadStatusMessageKey = "payload.capsule.dropped_status"
+        refreshPayloadRuntimeState()
+
+        sceneController.dropFireCapsule(size: size) { [weak self] impactPosition in
+            guard let self else { return }
+            guard var runtime = self.fireResponseRuntime, runtime.isActive else { return }
+            runtime.extinguishTreesInRadius(
+                center: SIMD2<Float>(impactPosition.x, impactPosition.z),
+                radiusMeters: size.blastRadiusMeters
+            )
+            self.fireResponseRuntime = runtime
+            self.sceneController.updateFireResponseVisuals(
+                treeStatuses: runtime.treeStatuses,
+                viewerWorldPosition: finiteVector(self.state.position, fallback: self.lastFiniteState.position)
+            )
+            self.publishFireResponseState()
+            if let outcome = runtime.outcome {
+                self.handleFireResponseOutcome(outcome)
+            }
+        }
+
+        if missionEventRecorder.currentTimeline != nil {
+            recordMissionEvents([
+                missionEventMapper.payloadTriggeredEvent(
+                    missionID: currentMissionPlan?.id,
+                    projectID: currentProjectID,
+                    projectName: currentProjectName,
+                    payloadState: payloadState,
+                    statusSnapshot: missionStatusSnapshot,
+                    batteryState: batteryState,
+                    detailKey: payloadStatusMessageKey
+                )
+            ])
+        }
     }
 
     func arm() {
@@ -3220,7 +3299,7 @@ final class DroneSimulationViewModel: ObservableObject {
             _ = payloadCameraController.activatePayloadView(from: oldMode)
             sceneController.setPayloadCameraFocusReleaseID(payloadCameraController.trackedReleaseID)
         } else if mode == .payloadOptics {
-            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable else {
+            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable else {
                 return
             }
         }
@@ -4120,6 +4199,11 @@ final class DroneSimulationViewModel: ObservableObject {
                 diameterClass: config.fireHoseDiameterClass,
                 lengthMeters: Double(config.fireHoseLengthMeters)
             )
+        } else if config.payloadType == .fireCapsuleLauncher {
+            setFireCapsuleRigging(
+                size: config.fireCapsuleSize,
+                count: config.fireCapsuleCount
+            )
         }
         attachPayload()
 
@@ -4141,7 +4225,21 @@ final class DroneSimulationViewModel: ObservableObject {
             missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
             publishMissionScenarioState()
         case .fireResponse:
-            let riggedTetherLength: Float = config.payloadType == .fireHose ? config.fireHoseLengthMeters : FireHoseDiameterClass.standard.lengthRangeMeters.upperBound
+            // Only the hose has a real physical tether to the truck. The capsule launcher has no
+            // such hard constraint, but it still needs a real, difficulty-scaled "operational
+            // reach" here — a recharge system depends on the truck sitting a meaningful (and
+            // harder-scaling) distance from the fire, so a fallback to the world's own half-extent
+            // would place the truck absurdly far away regardless of difficulty. Any other payload
+            // (no tether, no recharge logistics) still falls back to the unconstrained half-extent.
+            let riggedTetherLength: Float
+            switch config.payloadType {
+            case .fireHose:
+                riggedTetherLength = config.fireHoseLengthMeters
+            case .fireCapsuleLauncher:
+                riggedTetherLength = FireCapsuleTuning.truckOperationalReachMeters(for: params.difficulty)
+            default:
+                riggedTetherLength = terrain.worldHalfExtent
+            }
             let placement = FireZonePlacement.generate(
                 parameters: params,
                 worldHalfExtent: terrain.worldHalfExtent,
@@ -7225,7 +7323,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -7245,7 +7343,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -7272,6 +7370,18 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         return payloadDraftConfiguration.payloadType == .fireHose
+    }
+
+    private var isMountedCapsuleLauncherAvailable: Bool {
+        guard mountedCADPayload == nil else {
+            return false
+        }
+
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+
+        return payloadDraftConfiguration.payloadType == .fireCapsuleLauncher
     }
 
     private var payloadCameraFeedLabel: String {
@@ -7380,7 +7490,60 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         refreshRangefinderStatus()
         refreshHoseAimStatus()
+        refreshCapsuleLauncherStatus(deltaTime: deltaTime)
         refreshFlightControlDiagnostics()
+    }
+
+    /// No aim/raycast needed at all (unlike the hose) — the launcher just needs to know it's
+    /// mounted, keep its ammo/rig state in sync, run the truck-recharge timer, and keep the
+    /// ground-projected blast-radius reticle plus the bombardier camera rig following the drone.
+    /// Cheap enough to run unconditionally every tick.
+    private func refreshCapsuleLauncherStatus(deltaTime: TimeInterval = 0.0) {
+        capsuleController.setAvailability(
+            isAvailable: isMountedCapsuleLauncherAvailable,
+            isPowered: isMountedCapsuleLauncherAvailable,
+            rigSize: payloadDraftConfiguration.fireCapsuleSize,
+            rigCount: payloadDraftConfiguration.fireCapsuleCount
+        )
+        capsuleController.updateRecharge(
+            isEligible: isCapsuleRechargeEligible(),
+            secondsPerCapsule: FireCapsuleTuning.rechargeSecondsPerCapsule(
+                for: missionScenarioConfiguration?.parameters.difficulty ?? .medium
+            ),
+            deltaTime: deltaTime
+        )
+        capsuleState = capsuleController.state
+        sceneController.setCapsuleLauncherOpticsAvailability(capsuleState.isAvailable)
+
+        if capsuleState.isAvailable {
+            sceneController.setFireCapsuleTargetReticle(
+                dronePlanarPosition: currentPlanarPosition(),
+                radiusMeters: capsuleState.capsuleSize.blastRadiusMeters
+            )
+        } else {
+            sceneController.setFireCapsuleTargetReticle(dronePlanarPosition: nil, radiusMeters: 0)
+        }
+
+        let capsuleSignals = capsuleController.consumeMissionSignals()
+        if !capsuleSignals.isEmpty {
+            payloadMissionSignals.append(contentsOf: capsuleSignals)
+            if payloadMissionSignals.count > 24 {
+                payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
+            }
+        }
+    }
+
+    /// The drone must actually LAND (not just hover) within a small radius of the fire truck to
+    /// reload — mirrors `enforceHoseTetherConstraint`'s distance-to-truck calc, but only reads
+    /// distance, doesn't clamp position (there's no physical tether for the capsule launcher).
+    private func isCapsuleRechargeEligible() -> Bool {
+        guard activeMissionScenarioKind == .fireResponse,
+              capsuleController.state.isAvailable,
+              physicalState == .landed,
+              let truckPosition = sceneController.currentFireTruckWorldPosition() else {
+            return false
+        }
+        return simd_length(state.position - truckPosition) <= FireCapsuleTuning.rechargeZoneRadiusMeters
     }
 
     private func refreshRangefinderStatus() {
@@ -8037,7 +8200,9 @@ final class DroneSimulationViewModel: ObservableObject {
             abs(installedPayloadConfiguration.payloadMass - payloadDraftConfiguration.payloadMass) <= 0.0001 &&
             installedPayloadConfiguration.visualPreset == payloadDraftConfiguration.visualPreset &&
             installedPayloadConfiguration.fireHoseDiameterClass == payloadDraftConfiguration.fireHoseDiameterClass &&
-            abs(installedPayloadConfiguration.fireHoseLengthMeters - payloadDraftConfiguration.fireHoseLengthMeters) <= 0.001
+            abs(installedPayloadConfiguration.fireHoseLengthMeters - payloadDraftConfiguration.fireHoseLengthMeters) <= 0.001 &&
+            installedPayloadConfiguration.fireCapsuleSize == payloadDraftConfiguration.fireCapsuleSize &&
+            installedPayloadConfiguration.fireCapsuleCount == payloadDraftConfiguration.fireCapsuleCount
     }
 
     private func resolvePayloadMountState() -> PayloadMountState {

@@ -13,6 +13,7 @@ struct PayloadView: View {
     let onTypeChange: (PayloadType) -> Void
     let onMassChange: (Double) -> Void
     let onHoseRiggingChange: (FireHoseDiameterClass, Double) -> Void
+    let onCapsuleRiggingChange: (FireCapsuleSize, Int) -> Void
     let onCustomNameChange: (String) -> Void
     let onAttach: () -> Void
     let onRelease: () -> Void
@@ -123,6 +124,10 @@ struct PayloadView: View {
 
             if configuration.payloadType == .fireHose {
                 hoseRiggingConsole
+            }
+
+            if configuration.payloadType == .fireCapsuleLauncher {
+                capsuleRiggingConsole
             }
 
             if configuration.payloadType == .custom {
@@ -330,7 +335,7 @@ struct PayloadView: View {
     }
 
     private var isMassEditable: Bool {
-        configuration.payloadType != .fireHose
+        configuration.payloadType != .fireHose && configuration.payloadType != .fireCapsuleLauncher
     }
 
     private var massConsole: some View {
@@ -393,8 +398,13 @@ struct PayloadView: View {
                 .frame(width: 170)
             }
 
-            if !isMassEditable {
+            if configuration.payloadType == .fireHose {
                 Text("payload.hose.mass_follows_rig")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if configuration.payloadType == .fireCapsuleLauncher {
+                Text("payload.capsule.mass_follows_rig")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
@@ -439,6 +449,43 @@ struct PayloadView: View {
         }
         .padding(14)
         .background(chromePanel(accent: Color.red.opacity(0.34)))
+    }
+
+    private var capsuleRiggingConsole: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(titleKey: "payload.capsule.title")
+
+            Picker("", selection: Binding(
+                get: { configuration.fireCapsuleSize },
+                set: { onCapsuleRiggingChange($0, configuration.fireCapsuleCount) }
+            )) {
+                ForEach(FireCapsuleSize.allCases) { value in
+                    Text(LocalizedStringKey(value.titleKey)).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("payload.capsule.count")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Text("\(configuration.fireCapsuleCount)")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                }
+                Slider(
+                    value: Binding(
+                        get: { Double(configuration.fireCapsuleCount) },
+                        set: { onCapsuleRiggingChange(configuration.fireCapsuleSize, Int($0.rounded())) }
+                    ),
+                    in: Double(FireCapsuleTuning.countRange.lowerBound)...Double(FireCapsuleTuning.countRange.upperBound),
+                    step: 1
+                )
+            }
+        }
+        .padding(14)
+        .background(chromePanel(accent: Color.orange.opacity(0.34)))
     }
 
     private var customNameConsole: some View {
@@ -823,6 +870,8 @@ struct PayloadView: View {
             return "dot.scope"
         case .fireHose:
             return "drop.fill"
+        case .fireCapsuleLauncher:
+            return "circle.hexagongrid.fill"
         case .rescuePack:
             return "cross.case.fill"
         case .sensorModule:
@@ -848,6 +897,8 @@ struct PayloadView: View {
             return Color(red: 0.94, green: 0.30, blue: 0.26)
         case .fireHose:
             return Color(red: 0.86, green: 0.22, blue: 0.10)
+        case .fireCapsuleLauncher:
+            return Color(red: 0.90, green: 0.42, blue: 0.16)
         case .custom:
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         }

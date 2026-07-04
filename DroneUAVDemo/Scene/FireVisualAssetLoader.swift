@@ -149,6 +149,60 @@ final class FireVisualAssetLoader {
         return node
     }
 
+    /// One-shot capsule-burst visual — a grey/white powder-cloud puff that scales up to roughly
+    /// the capsule's actual blast radius and fades out, then removes itself. Distinct from
+    /// `makeFoamBurstNode()` (pure white, fixed small size, for the hose's per-tree charring
+    /// moment) since this needs to communicate the capsule's actual area of effect, which varies
+    /// by rigged capsule size.
+    func makeCapsuleBurstNode(blastRadiusMeters: Float) -> SCNNode {
+        let baseRadius: Float = 0.3
+        let sphere = SCNSphere(radius: CGFloat(baseRadius))
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = NSColor(calibratedWhite: 0.86, alpha: 1.0)
+        material.emission.contents = NSColor(calibratedWhite: 0.86, alpha: 0.35)
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+        sphere.firstMaterial = material
+
+        let node = SCNNode(geometry: sphere)
+        node.name = "mission.fire_capsule.burst"
+        node.castsShadow = false
+        node.opacity = 0.85
+
+        let targetScale = CGFloat(max(1.0, blastRadiusMeters / baseRadius))
+        let grow = SCNAction.scale(to: targetScale, duration: 0.4)
+        grow.timingMode = .easeOut
+        let fade = SCNAction.sequence([SCNAction.wait(duration: 0.2), SCNAction.fadeOut(duration: 0.4)])
+        node.runAction(.sequence([.group([grow, fade]), .removeFromParentNode()]))
+        return node
+    }
+
+    /// Persistent, growing foam-coating visual — one per fire tree, scaled externally by the
+    /// caller as suppression progress advances (0 = invisible, 1 = fully grown). This is the
+    /// visible "how close is THIS tree to being out" read the player asked for in place of a HUD
+    /// progress bar: a real accumulating blob at the fire itself instead of a number on screen.
+    /// Stays at whatever size it reached rather than resetting or disappearing once a tree is
+    /// fully suppressed — reads as foam residue left behind, not a UI element that vanishes.
+    func makeFoamAccumulationNode() -> SCNNode {
+        let sphere = SCNSphere(radius: 1.0)
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = NSColor.white
+        material.emission.contents = NSColor.white.withAlphaComponent(0.12)
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+        material.transparency = 0.9
+        sphere.firstMaterial = material
+
+        let node = SCNNode(geometry: sphere)
+        node.name = "mission.fire_tree.foam_accumulation"
+        node.castsShadow = false
+        node.isHidden = true
+        node.scale = SCNVector3(0.001, 0.001, 0.001)
+        return node
+    }
+
     // MARK: - Flame flipbook
 
     private func runFlipbookAnimation(on node: SCNNode, material: SCNMaterial) {

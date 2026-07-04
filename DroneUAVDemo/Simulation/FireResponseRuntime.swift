@@ -113,6 +113,21 @@ struct FireResponseRuntime {
         spreadCountdowns.removeValue(forKey: index)
     }
 
+    /// Instant area-of-effect suppression for the fire-capsule payload: a capsule bursts on impact
+    /// and clears everything burning within its blast radius at once, unlike the hose's single
+    /// continuously-aimed target. Trees are planted flat (`groundY = 0.0` in
+    /// `DroneSceneController.spawnFireResponseScenario`), so a pure 2D XZ distance check is exactly
+    /// right — no canopy-height/raycast concern.
+    mutating func extinguishTreesInRadius(center: SIMD2<Float>, radiusMeters: Float) {
+        guard isActive, objectiveState == .active else { return }
+        for index in treeStatuses.indices {
+            guard case .burning = treeStatuses[index] else { continue }
+            guard simd_distance(center, placement.treePositions[index]) <= radiusMeters else { continue }
+            treeStatuses[index] = .charred
+            spreadCountdowns.removeValue(forKey: index)
+        }
+    }
+
     // MARK: - Suppression
 
     private mutating func applySuppression(deltaTime: Double, aimedFireIndex: Int?, isSpraying: Bool) {

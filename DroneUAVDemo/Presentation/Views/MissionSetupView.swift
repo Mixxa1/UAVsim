@@ -19,6 +19,8 @@ struct MissionSetupView: View {
     @State private var payload: PayloadType = .thermalCamera
     @State private var hoseDiameterClass: FireHoseDiameterClass = .standard
     @State private var hoseLengthMeters: Double = 30.0
+    @State private var capsuleSize: FireCapsuleSize = .medium
+    @State private var capsuleCount: Int = 2
 
     /// UAV profiles that can actually carry `payload`'s mass (and stay within max takeoff mass) —
     /// without this, picking a heavy payload (e.g. the fire hose) against the default/first
@@ -30,6 +32,8 @@ struct MissionSetupView: View {
         var configuration = PayloadConfiguration(payloadType: payload)
         if payload == .fireHose {
             configuration.payloadMass = hoseDiameterClass.massForLength(Float(hoseLengthMeters))
+        } else if payload == .fireCapsuleLauncher {
+            configuration.payloadMass = FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)
         }
         return availableProfiles.filter {
             PayloadController.capabilityCheck(for: configuration, profile: $0.resolvedUAVProfile).isAllowed
@@ -111,6 +115,16 @@ struct MissionSetupView: View {
             }
         }
         .onChange(of: hoseLengthMeters) { _, _ in
+            if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
+                selectedProfileID = compatibleProfiles.first?.id ?? ""
+            }
+        }
+        .onChange(of: capsuleSize) { _, _ in
+            if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
+                selectedProfileID = compatibleProfiles.first?.id ?? ""
+            }
+        }
+        .onChange(of: capsuleCount) { _, _ in
             if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
                 selectedProfileID = compatibleProfiles.first?.id ?? ""
             }
@@ -296,6 +310,9 @@ struct MissionSetupView: View {
                 if payload == .fireHose {
                     hoseRiggingFields
                 }
+                if payload == .fireCapsuleLauncher {
+                    capsuleRiggingFields
+                }
             }
         }
     }
@@ -327,6 +344,42 @@ struct MissionSetupView: View {
                     step: Double(hoseDiameterClass.lengthStepMeters)
                 )
                 Text(String(format: NSLocalizedString("payload.hose.rig_mass", comment: ""), hoseDiameterClass.massForLength(Float(hoseLengthMeters))))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var capsuleRiggingFields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            labeledRow("payload.capsule.size_class") {
+                Picker("", selection: $capsuleSize) {
+                    ForEach(FireCapsuleSize.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("payload.capsule.count")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                    Spacer()
+                    Text("\(capsuleCount)")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                }
+                Slider(
+                    value: Binding(
+                        get: { Double(capsuleCount) },
+                        set: { capsuleCount = Int($0.rounded()) }
+                    ),
+                    in: Double(FireCapsuleTuning.countRange.lowerBound)...Double(FireCapsuleTuning.countRange.upperBound),
+                    step: 1
+                )
+                Text(String(format: NSLocalizedString("payload.capsule.rig_mass", comment: ""), FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)))
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
             }
@@ -384,7 +437,9 @@ struct MissionSetupView: View {
             selectedUAVProfileID: profile.id,
             payloadType: payload,
             fireHoseDiameterClass: hoseDiameterClass,
-            fireHoseLengthMeters: Float(hoseLengthMeters)
+            fireHoseLengthMeters: Float(hoseLengthMeters),
+            fireCapsuleSize: capsuleSize,
+            fireCapsuleCount: capsuleCount
         )
         onStart(config)
     }
@@ -395,6 +450,7 @@ struct MissionSetupView: View {
         case .cameraGimbal: return "payload.type.camera_gimbal"
         case .laserRangefinder: return "payload.type.laser_rangefinder"
         case .fireHose: return "payload.type.fire_hose"
+        case .fireCapsuleLauncher: return "payload.type.fire_capsule_launcher"
         case .lidarModule: return "payload.type.lidar_module"
         case .cargoBox: return "payload.type.cargo_box"
         case .rescuePack: return "payload.type.rescue_pack"

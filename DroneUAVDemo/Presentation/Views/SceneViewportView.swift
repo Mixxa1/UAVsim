@@ -18,6 +18,8 @@ struct SceneViewportView: View {
         let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && rangefinderOpticsState.isAvailable
         let hoseOpticsState = viewModel.hoseOpticsState
         let hoseOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && hoseOpticsState.isAvailable
+        let capsuleState = viewModel.capsuleState
+        let capsuleOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && !hoseOpticsState.isAvailable && capsuleState.isAvailable
 
         ZStack(alignment: .topLeading) {
             DroneSceneViewRepresentable(
@@ -62,6 +64,22 @@ struct SceneViewportView: View {
                     tetherLimitMeters: viewModel.hoseTetherLimitMeters
                 )
                 .ignoresSafeArea()
+            }
+
+            if capsuleOpticsActive {
+                CapsuleBombardierOpticsOverlayView(state: capsuleState)
+                    .ignoresSafeArea()
+            }
+
+            // Kept visible in every OTHER camera mode too (not just the bombardier view) — the
+            // ground-projected blast-radius reticle (`DroneSceneController.setFireCapsuleTargetReticle`)
+            // is real 3D scene geometry, visible from any camera, so ammo/rig status shouldn't be
+            // hidden just because the operator isn't using the dedicated bombardier camera right now.
+            if capsuleState.isAvailable, !capsuleOpticsActive {
+                FireCapsuleStatusHUDView(state: capsuleState)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, overlayInset + 10)
+                    .allowsHitTesting(false)
             }
 
             if payloadOpticsActive, payloadOpticsState.isAvailable, payloadOpticsState.mode == .thermalStub {
@@ -627,6 +645,137 @@ private struct HoseAimViewportOverlayView: View {
                 Capsule()
                     .stroke(tint.opacity(0.45), lineWidth: 1)
             )
+    }
+}
+
+/// Small always-visible ammo/rig status strip for the fire-capsule launcher, shown in every camera
+/// mode except the dedicated bombardier camera (which has its own, richer readout) — deliberately
+/// NOT a camera-viewfinder-style overlay (no corner frame, no crosshair) here, just a simple status
+/// readout, matching how a real ammo counter works.
+private struct FireCapsuleStatusHUDView: View {
+    let state: PayloadFireCapsuleState
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundStyle(state.remainingCapsules > 0 ? Color.white : Color.red.opacity(0.85))
+
+            Text(LocalizedStringKey(state.capsuleSize.titleKey))
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.75))
+
+            Text(String(format: "%.0f m", state.capsuleSize.blastRadiusMeters))
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.orange.opacity(0.85))
+
+            if state.isRecharging {
+                Text(LocalizedStringKey("payload.capsule.reloading"))
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.yellow.opacity(0.9))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.5), in: Capsule())
+        .overlay(
+            Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+/// Bombardier camera reticle for the fire-capsule launcher — a scope-style aiming view (circular
+/// vignette, mil-ruler ticks scaled to the rigged capsule's blast radius, center crosshair) shown
+/// through `DroneSceneController`'s fixed nadir `capsuleCameraNode`. Unlike the hose/rangefinder
+/// overlays, there's no aim state to reflect (no yaw/pitch, no lock-on) — the crosshair is always
+/// exactly the true impact point, since the capsule's fall has zero forward-throw. This is the
+/// direct answer to "improve the capsule marker": a dedicated aiming view instead of only the
+/// ground-projected ring (which stays, visible from every other camera mode too).
+private struct CapsuleBombardierOpticsOverlayView: View {
+    let state: PayloadFireCapsuleState
+
+    private var blastRadius: Float { max(0.1, state.capsuleSize.blastRadiusMeters) }
+    private var tickMultipliers: [Float] { [-2.0, -1.0, 0.0, 1.0, 2.0] }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let shortSide = min(geometry.size.width, geometry.size.height)
+            let vignetteDiameter = shortSide * 0.92
+            let rulerHalfWidth = shortSide * 0.32
+
+            ZStack {
+                // Circular vignette: a stroked ring plus a radial darkening toward the frame edges.
+                RadialGradient(
+                    colors: [Color.clear, Color.black.opacity(0.55)],
+                    center: .center,
+                    startRadius: vignetteDiameter * 0.32,
+                    endRadius: max(geometry.size.width, geometry.size.height) * 0.72
+                )
+                .allowsHitTesting(false)
+
+                Circle()
+                    .stroke(Color(red: 0.95, green: 0.62, blue: 0.30).opacity(0.75), lineWidth: 2.0)
+                    .frame(width: vignetteDiameter, height: vignetteDiameter)
+
+                // Horizontal mil-ruler, ticks scaled to the rigged capsule's actual blast radius so
+                // the operator can visually judge whether nearby trees fall inside the burst.
+                ZStack {
+                    Rectangle()
+                        .fill(Color(red: 0.95, green: 0.62, blue: 0.30).opacity(0.6))
+                        .frame(width: rulerHalfWidth * 2.0, height: 1.5)
+
+                    ForEach(Array(tickMultipliers.enumerated()), id: \.offset) { _, multiplier in
+                        let x = CGFloat(multiplier / 2.0) * rulerHalfWidth
+                        VStack(spacing: 2) {
+                            Rectangle()
+                                .fill(Color(red: 0.95, green: 0.62, blue: 0.30).opacity(0.85))
+                                .frame(width: 1.5, height: multiplier == 0.0 ? 16 : 10)
+                            Text(String(format: "%.0fm", multiplier * blastRadius))
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(Color(red: 0.95, green: 0.62, blue: 0.30).opacity(0.85))
+                        }
+                        .offset(x: x)
+                    }
+                }
+
+                CrosshairShape()
+                    .stroke(Color.white.opacity(0.92), style: StrokeStyle(lineWidth: 2.0, lineCap: .round))
+                    .frame(width: 40, height: 40)
+
+                VStack {
+                    Spacer()
+                    VStack(spacing: 6) {
+                        HStack(spacing: 14) {
+                            Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
+                                .foregroundStyle(state.remainingCapsules > 0 ? Color.white : Color.red.opacity(0.9))
+                            Text(LocalizedStringKey(state.capsuleSize.titleKey))
+                                .foregroundStyle(Color.white.opacity(0.75))
+                            Text(String(format: "%.0f m", state.capsuleSize.blastRadiusMeters))
+                                .foregroundStyle(Color.orange.opacity(0.85))
+                        }
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+
+                        if state.isRecharging {
+                            VStack(spacing: 4) {
+                                Text(String(
+                                    format: NSLocalizedString("payload.capsule.recharge_progress", comment: ""),
+                                    state.rechargeProgress01 * 100.0
+                                ))
+                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.yellow.opacity(0.9))
+
+                                ProgressView(value: state.rechargeProgress01)
+                                    .frame(width: 160)
+                                    .tint(Color.yellow.opacity(0.85))
+                            }
+                        }
+                    }
+                    .padding(.bottom, 40)
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .allowsHitTesting(false)
     }
 }
 

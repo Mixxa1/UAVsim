@@ -7,6 +7,7 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
     case lidarModule
     case laserRangefinder
     case fireHose
+    case fireCapsuleLauncher
     case rescuePack
     case sensorModule
     case radioRelay
@@ -28,6 +29,8 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return NSLocalizedString("payload.type.laser_rangefinder", comment: "")
         case .fireHose:
             return NSLocalizedString("payload.type.fire_hose", comment: "")
+        case .fireCapsuleLauncher:
+            return NSLocalizedString("payload.type.fire_capsule_launcher", comment: "")
         case .rescuePack:
             return NSLocalizedString("payload.type.rescue_pack", comment: "")
         case .sensorModule:
@@ -56,6 +59,11 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             // matches a 30m standard-diameter rig (FireHoseDiameterClass.standard.massForLength(30)).
             // The actual configured mass varies with the rigged hose length/diameter class.
             return 59.0
+        case .fireCapsuleLauncher:
+            // Reference/baseline mass — matches a 2-capsule medium rig
+            // (FireCapsuleTuning.totalMass(size: .medium, count: 2)). The actual configured mass
+            // varies with the rigged capsule size/count.
+            return 6.0
         case .rescuePack:
             return 2.20
         case .sensorModule:
@@ -81,6 +89,8 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return .laserRangefinder
         case .fireHose:
             return .fireHose
+        case .fireCapsuleLauncher:
+            return .fireCapsuleLauncher
         case .rescuePack:
             return .rescuePack
         case .sensorModule:

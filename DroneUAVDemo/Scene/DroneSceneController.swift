@@ -108,6 +108,14 @@ final class DroneSceneController {
     private var hoseCamera: SCNCamera?
     private var hoseStreamNode: SCNNode?
     private var hoseImpactNode: SCNNode?
+    // Capsule bombardier camera — deliberately no yaw/pitch rig unlike the hose/rangefinder above:
+    // the launcher has no aim mechanic at all, it's a fixed nadir view (see `dropFireCapsule`'s
+    // zero-forward-throw fall kinematics, which makes a straight-down view always show the true
+    // impact point at screen center regardless of drone speed).
+    private let capsuleCameraRigNode = SCNNode()
+    private var capsuleCameraNode: SCNNode?
+    private var capsuleCamera: SCNCamera?
+    private var capsuleLauncherOpticsAvailable = false
     private let payloadDropCameraController = PayloadDropCameraController()
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
@@ -144,6 +152,7 @@ final class DroneSceneController {
     // that same scaled tree node (see the flame/smoke scale-parenting fix in
     // `spawnFireResponseScenario` for the fuller explanation of why that parenting is wrong).
     private var fireTreeHeightsMeters: [Float] = []
+    private var fireTreeFoamAccumulationNodes: [SCNNode] = []
     private var lastFireTreeStatuses: [FireTreeStatus] = []
     private var fireTreeObstacleIDs: Set<UUID> = []
     private var fireTruckNode: SCNNode?
@@ -207,6 +216,17 @@ final class DroneSceneController {
     private var pendingPayloadLifecycleEvents: [PayloadLifecycleEvent] = []
     private var payloadCameraFocusReleaseID: UUID?
     private var payloadImpactNodes: [UUID: SCNNode] = [:]
+    // Fire-capsule drops are deliberately tracked separately from the generic dropped-payload
+    // system above — that system is single-ownership (attach once, drop once, gone for good; see
+    // `releasePayloadVisual`), while the capsule launcher stays mounted and fires one capsule at a
+    // time out of an ammo count. Keeping this dict (and `fireCapsuleTargetReticleNode` below)
+    // fully separate also means a capsule drop can never be picked up by
+    // `resolvedPayloadCameraRuntime()`'s "most recent release" fallback and hijack the unrelated
+    // `.payload` chase-cam.
+    private var fireCapsuleDropNodes: [UUID: SCNNode] = [:]
+    private var fireCapsuleTargetReticleNode: SCNNode?
+    private var fireCapsuleTargetReticleRingNode: SCNNode?
+    private var fireCapsuleTargetReticleDiscNode: SCNNode?
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
@@ -444,7 +464,7 @@ final class DroneSceneController {
         case .top:
             return topCameraNode
         case .payloadOptics:
-            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? hoseCameraPointOfView() ?? followCameraNode
+            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? hoseCameraPointOfView() ?? capsuleCameraPointOfView() ?? followCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
         case .spectator:
@@ -471,6 +491,53 @@ final class DroneSceneController {
         }
         ensureRangefinderRig()
         return rangefinderCameraNode
+    }
+
+    // MARK: - Capsule bombardier camera
+
+    private func ensureCapsuleCameraRig() {
+        if capsuleCameraRigNode.name == nil {
+            capsuleCameraRigNode.name = "capsuleCameraRigNode"
+            // Same R_x(-90°) rotation used elsewhere in this file (e.g. `hoseBodyNode`) to
+            // reorient a node's default forward axis — here it turns the camera's default -Z
+            // "forward" into -Y "straight down", a fixed nadir view with no yaw/pitch gimbal.
+            capsuleCameraRigNode.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+        }
+
+        if capsuleCameraNode == nil {
+            let node = SCNNode()
+            node.name = "capsuleCameraNode"
+
+            let camera = SCNCamera()
+            camera.fieldOfView = 60.0
+            camera.zNear = 0.015
+            camera.zFar = CameraClipping.payloadOpticsFar
+            camera.categoryBitMask = RenderCategory.visibleInPayloadOptics
+            node.camera = camera
+
+            capsuleCameraRigNode.addChildNode(node)
+            capsuleCameraNode = node
+            capsuleCamera = camera
+        }
+
+        if capsuleCameraRigNode.parent !== payloadMountNode {
+            capsuleCameraRigNode.removeFromParentNode()
+            payloadMountNode.addChildNode(capsuleCameraRigNode)
+        }
+    }
+
+    func setCapsuleLauncherOpticsAvailability(_ isAvailable: Bool) {
+        capsuleLauncherOpticsAvailable = isAvailable
+        ensureCapsuleCameraRig()
+        capsuleCameraRigNode.isHidden = !isAvailable
+    }
+
+    func capsuleCameraPointOfView() -> SCNNode? {
+        guard capsuleLauncherOpticsAvailable else {
+            return nil
+        }
+        ensureCapsuleCameraRig()
+        return capsuleCameraNode
     }
 
     func hoseCameraPointOfView() -> SCNNode? {
@@ -1430,6 +1497,145 @@ final class DroneSceneController {
         return releaseID
     }
 
+    /// Fires one capsule from the (still-mounted) fire-capsule launcher — deliberately independent
+    /// of `releasePayloadVisual()` above: that function's whole design is single-ownership (attach
+    /// once, drop once, the payload is gone for good), while the launcher stays mounted and this
+    /// gets called repeatedly, once per remaining round of ammo. The fall kinematics are the same
+    /// technique (constant-gravity `SCNAction.customAction`, no real physics body) but kept as an
+    /// independent copy rather than a shared refactor, to avoid touching the already-proven
+    /// cargo/hose drop path at all.
+    @discardableResult
+    func dropFireCapsule(size: FireCapsuleSize, onImpact: @escaping (SIMD3<Float>) -> Void) -> UUID {
+        let dropID = UUID()
+        let capsuleNode = makeFireCapsuleProjectileNode()
+        let startPosition = payloadMountNode.presentation.simdWorldPosition
+        capsuleNode.simdWorldPosition = startPosition
+        scene.rootNode.addChildNode(capsuleNode)
+        applyCategoryBitMask(RenderCategory.droppedPayload, to: capsuleNode)
+        fireCapsuleDropNodes[dropID] = capsuleNode
+
+        let landedY = min(startPosition.y, max(Float(groundNode.presentation.position.y) + 0.04, 0.04))
+        let dropHeight = max(0.0, startPosition.y - landedY)
+        let gravity: Float = 9.8
+        let unconstrainedDuration = sqrt(max(0.0001, (2.0 * dropHeight) / gravity))
+        let fallDuration = Double(dropHeight > 0.01 ? unconstrainedDuration.clamped(to: 0.18...8.0) : 0.08)
+
+        let fallAction = SCNAction.customAction(duration: fallDuration) { node, elapsedTime in
+            let elapsed = Float(elapsedTime)
+            let distance = min(dropHeight, 0.5 * gravity * elapsed * elapsed)
+            let nextY = max(landedY, startPosition.y - distance)
+            node.simdWorldPosition = SIMD3<Float>(startPosition.x, nextY, startPosition.z)
+        }
+
+        let landedAction = SCNAction.run { [weak self] _ in
+            guard let self else { return }
+            let impactPosition = SIMD3<Float>(startPosition.x, landedY, startPosition.z)
+            capsuleNode.simdWorldPosition = impactPosition
+            self.spawnFireCapsuleBurstVisual(at: impactPosition, blastRadiusMeters: size.blastRadiusMeters)
+            // `SCNAction.run` closures are NOT guaranteed to execute on the main thread (same
+            // hazard as `SCNSceneRendererDelegate.renderer(_:updateAtTime:)`, see
+            // `handleSceneRenderFrame`'s own hop for the same reason). `onImpact` mutates the view
+            // model's `@Published` state — calling it directly here caused exactly the crash this
+            // comment is warning about: Combine's "Publishing changes from background threads is
+            // not allowed" + the app hanging with the main thread stuck in `__ulock_wait2`,
+            // contending with a background thread for the same object's internal lock. Hopping to
+            // the main thread here, at the one place this closure is actually invoked from a
+            // non-main context, is more robust than trusting every future caller to hop themselves.
+            DispatchQueue.main.async {
+                onImpact(impactPosition)
+            }
+        }
+
+        let cleanupAction = SCNAction.run { [weak self, weak capsuleNode] _ in
+            capsuleNode?.removeAllActions()
+            capsuleNode?.removeFromParentNode()
+            self?.fireCapsuleDropNodes.removeValue(forKey: dropID)
+        }
+
+        capsuleNode.runAction(
+            .sequence([fallAction, landedAction, .wait(duration: 0.5), cleanupAction]),
+            forKey: "fireCapsuleDropLifecycle"
+        )
+
+        return dropID
+    }
+
+    private func makeFireCapsuleProjectileNode() -> SCNNode {
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        material.diffuse.contents = NSColor(calibratedWhite: 0.92, alpha: 1.0)
+        material.roughness.contents = 0.3
+        material.metalness.contents = 0.1
+
+        let sphere = SCNSphere(radius: 0.06)
+        sphere.firstMaterial = material
+
+        let node = SCNNode(geometry: sphere)
+        node.name = "mission.fire_capsule.projectile"
+        node.castsShadow = true
+        return node
+    }
+
+    private func spawnFireCapsuleBurstVisual(at position: SIMD3<Float>, blastRadiusMeters: Float) {
+        let burst = FireVisualAssetLoader.shared.makeCapsuleBurstNode(blastRadiusMeters: blastRadiusMeters)
+        burst.simdPosition = position
+        missionScenarioRootNode.addChildNode(burst)
+    }
+
+    /// Ground-projected reticle showing where a dropped capsule would land and how large its
+    /// blast radius is — real 3D scene geometry (mirroring `setMissionDropZone`'s exact technique),
+    /// not a screen-space camera overlay, so it's visible from every camera mode automatically
+    /// with none of the render-category/shadow-quality/blur coupling a dedicated payload-optics
+    /// camera mode would need. `dronePlanarPosition == nil` hides it (no capsule launcher mounted).
+    func setFireCapsuleTargetReticle(dronePlanarPosition: SIMD2<Float>?, radiusMeters: Float) {
+        guard let dronePlanarPosition else {
+            fireCapsuleTargetReticleNode?.isHidden = true
+            return
+        }
+
+        let node: SCNNode
+        if let existing = fireCapsuleTargetReticleNode {
+            node = existing
+        } else {
+            node = SCNNode()
+            node.name = "mission.fire_capsule.target_reticle"
+
+            let ringMaterial = SCNMaterial()
+            ringMaterial.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.65)
+            ringMaterial.emission.contents = NSColor.systemOrange.withAlphaComponent(0.35)
+            ringMaterial.lightingModel = .constant
+            ringMaterial.isDoubleSided = true
+            let ringNode = SCNNode(geometry: SCNTorus(ringRadius: 1.0, pipeRadius: 0.05))
+            ringNode.geometry?.firstMaterial = ringMaterial
+            ringNode.name = "mission.fire_capsule.target_reticle.ring"
+            ringNode.castsShadow = false
+            node.addChildNode(ringNode)
+            fireCapsuleTargetReticleRingNode = ringNode
+
+            let discMaterial = SCNMaterial()
+            discMaterial.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.14)
+            discMaterial.lightingModel = .constant
+            discMaterial.isDoubleSided = true
+            discMaterial.writesToDepthBuffer = false
+            let discNode = SCNNode(geometry: SCNCylinder(radius: 1.0, height: 0.006))
+            discNode.geometry?.firstMaterial = discMaterial
+            discNode.name = "mission.fire_capsule.target_reticle.disc"
+            discNode.castsShadow = false
+            node.addChildNode(discNode)
+            fireCapsuleTargetReticleDiscNode = discNode
+
+            missionScenarioRootNode.addChildNode(node)
+            fireCapsuleTargetReticleNode = node
+        }
+
+        (fireCapsuleTargetReticleRingNode?.geometry as? SCNTorus)?.ringRadius = CGFloat(radiusMeters)
+        (fireCapsuleTargetReticleDiscNode?.geometry as? SCNCylinder)?.radius = CGFloat(radiusMeters)
+
+        let groundY = max(Float(groundNode.presentation.position.y) + 0.03, 0.03)
+        node.simdPosition = SIMD3<Float>(dronePlanarPosition.x, groundY, dronePlanarPosition.y)
+        node.isHidden = false
+    }
+
     func clearDroppedPayloadVisuals() {
         for node in droppedPayloadNodes.values {
             node.removeAllActions()
@@ -1439,9 +1645,18 @@ final class DroneSceneController {
             node.removeAllActions()
             node.removeFromParentNode()
         }
+        for node in fireCapsuleDropNodes.values {
+            node.removeAllActions()
+            node.removeFromParentNode()
+        }
         droppedPayloadNodes.removeAll(keepingCapacity: false)
         droppedPayloadRuntime.removeAll(keepingCapacity: false)
         payloadImpactNodes.removeAll(keepingCapacity: false)
+        fireCapsuleDropNodes.removeAll(keepingCapacity: false)
+        fireCapsuleTargetReticleNode?.removeFromParentNode()
+        fireCapsuleTargetReticleNode = nil
+        fireCapsuleTargetReticleRingNode = nil
+        fireCapsuleTargetReticleDiscNode = nil
         payloadCameraFocusReleaseID = nil
         payloadDropCameraController.reset()
         pendingPayloadLifecycleEvents.removeAll(keepingCapacity: false)
@@ -3776,6 +3991,7 @@ final class DroneSceneController {
         fireTreeFlameNodes.removeAll(keepingCapacity: false)
         fireTreeSmokeNodes.removeAll(keepingCapacity: false)
         fireTreeHeightsMeters.removeAll(keepingCapacity: false)
+        fireTreeFoamAccumulationNodes.removeAll(keepingCapacity: false)
         lastFireTreeStatuses.removeAll(keepingCapacity: false)
         fireTruckNode = nil
         if !fireTreeObstacleIDs.isEmpty {
@@ -3810,6 +4026,7 @@ final class DroneSceneController {
         var treeNodes: [SCNNode] = []
         var flameNodes: [SCNNode] = []
         var smokeNodes: [SCNNode] = []
+        var foamAccumulationNodes: [SCNNode] = []
         var heightsMeters: [Float] = []
         var anchorPositions: [SIMD3<Float>] = []
 
@@ -3847,6 +4064,13 @@ final class DroneSceneController {
             missionScenarioRootNode.addChildNode(smoke)
             smokeNodes.append(smoke)
 
+            // Same anchor as the flame — the foam visually grows over the fire itself as
+            // suppression progress advances, in place of a HUD progress bar.
+            let foamAccumulation = FireVisualAssetLoader.shared.makeFoamAccumulationNode()
+            foamAccumulation.position = SCNVector3(tree.position.x, tree.position.y + CGFloat(heightMeters * 0.58), tree.position.z)
+            missionScenarioRootNode.addChildNode(foamAccumulation)
+            foamAccumulationNodes.append(foamAccumulation)
+
             let size = SIMD3<Float>(heightMeters * 0.30, heightMeters, heightMeters * 0.30)
             let descriptor = EnvironmentObjectDescriptor(
                 id: UUID(),
@@ -3874,6 +4098,7 @@ final class DroneSceneController {
         fireTreeFlameNodes = flameNodes
         fireTreeSmokeNodes = smokeNodes
         fireTreeHeightsMeters = heightsMeters
+        fireTreeFoamAccumulationNodes = foamAccumulationNodes
         lastFireTreeStatuses = Array(repeating: .unburned, count: treeNodes.count)
 
         let truckObstacle = spawnFireTruckDecoration(placement: placement, groundY: groundY)
@@ -3963,7 +4188,9 @@ final class DroneSceneController {
     /// (already-independent, see `makeMaterialsIndependent`) materials and triggers a one-shot
     /// foam-impact burst. Called once per tick from the simulation view model alongside the
     /// fire-response runtime tick. `viewerWorldPosition` (the drone's own position — a fine proxy
-    /// for the payload-optics camera mounted on it) drives the flame's overdraw LOD below.
+    /// for the payload-optics camera mounted on it) drives the smoke's overdraw LOD below (the
+    /// flame itself is always fully visible while burning — no distance-based plane hiding, since
+    /// that used to visibly pop planes in/out as the viewer's distance crossed a threshold).
     func updateFireResponseVisuals(treeStatuses: [FireTreeStatus], viewerWorldPosition: SIMD3<Float>) {
         for (index, status) in treeStatuses.enumerated() where index < fireTreeNodes.count {
             let previousStatus = index < lastFireTreeStatuses.count ? lastFireTreeStatuses[index] : .unburned
@@ -3974,18 +4201,22 @@ final class DroneSceneController {
             case .unburned:
                 flame?.isHidden = true
                 smoke?.isHidden = true
-            case .burning:
+            case .burning(_, let suppressionProgress):
                 flame?.isHidden = false
                 smoke?.isHidden = false
-                if let flame {
-                    applyFlameOverdrawLOD(flame, viewerWorldPosition: viewerWorldPosition)
-                }
                 if let smoke {
                     applySmokeOverdrawLOD(smoke, viewerWorldPosition: viewerWorldPosition)
+                }
+                if index < fireTreeFoamAccumulationNodes.count {
+                    let fraction = Float(min(1.0, suppressionProgress / FireHoseTuning.default.suppressionDwellSeconds))
+                    updateFoamAccumulation(fireTreeFoamAccumulationNodes[index], fraction: fraction)
                 }
             case .charred:
                 flame?.isHidden = true
                 smoke?.isHidden = true
+                if index < fireTreeFoamAccumulationNodes.count {
+                    updateFoamAccumulation(fireTreeFoamAccumulationNodes[index], fraction: 1.0)
+                }
                 if previousStatus != .charred {
                     let treeNode = fireTreeNodes[index]
                     darkenMaterialsRecursively(treeNode)
@@ -4011,36 +4242,29 @@ final class DroneSceneController {
         lastFireTreeStatuses = treeStatuses
     }
 
-    /// Cuts the flame cross-billboard's overdraw cost as the viewer closes in. The 3 additively-
-    /// blended, depth-non-writing planes per tree are cheap from a distance (each covers only a
-    /// small share of screen pixels), but expensive up close — the hose payload-optics camera
-    /// flying right up to a burning tree is exactly the case a user reported as newly laggy after
-    /// the raycast-frequency fix above, and unlike that fix this cost scales with on-screen
-    /// footprint, not tick frequency, so gating by distance (not camera mode) is what actually
-    /// targets it. The full 3-plane wraparound read is mainly useful for a readable silhouette
-    /// from a distance anyway — at point-blank range a single plane already fills most of the
-    /// frame, so the extra 2 mostly just triple-shade the same overlapping pixels for little
-    /// additional visual benefit.
-    private func applyFlameOverdrawLOD(_ flame: SCNNode, viewerWorldPosition: SIMD3<Float>) {
-        let distance = simd_distance(viewerWorldPosition, flame.simdWorldPosition)
-        let visiblePlaneCount: Int
-        if distance < 10.0 {
-            visiblePlaneCount = 1
-        } else if distance < 20.0 {
-            visiblePlaneCount = 2
-        } else {
-            visiblePlaneCount = 3
-        }
-        for (planeIndex, planeNode) in flame.childNodes.enumerated() {
-            planeNode.isHidden = planeIndex >= visiblePlaneCount
-        }
+    /// Scales the persistent foam-accumulation node to match suppression progress (0...1) — a
+    /// small but already-visible blob as soon as suppression starts, growing to a size that
+    /// visually starts to envelop the flame by the time a tree is fully suppressed. Reading
+    /// straight from the runtime's own per-tick progress value (which already decays on its own
+    /// when the trigger isn't held on this tree, see `FireResponseRuntime.applySuppression`) means
+    /// the foam visibly shrinks back down too if the operator gives up on a tree partway through —
+    /// the same single source of truth driving both the mechanic and what's on screen, not a
+    /// separate tracked state that could drift out of sync.
+    private func updateFoamAccumulation(_ node: SCNNode, fraction: Float) {
+        let clamped = max(0.0, min(1.0, fraction))
+        node.isHidden = clamped <= 0.001
+        let scale = CGFloat(0.2 + clamped * 1.6)
+        node.scale = SCNVector3(scale, scale, scale)
     }
 
-    /// Same overdraw-vs-distance tradeoff as the flame LOD above, applied to the smoke particle
-    /// system instead of discrete planes: up close, each particle's quad covers far more screen
-    /// area (and there are up to ~24 alive at once per tree at the base birth rate), so simply
-    /// emitting fewer of them is the equivalent lever — there's no separate "plane count" to trim
-    /// for a particle system, just how many particles exist to shade at once.
+    /// Cuts smoke's overdraw cost as the viewer closes in — up close, each particle's quad covers
+    /// far more screen area (and there are up to ~24 alive at once per tree at the base birth
+    /// rate), so emitting fewer of them is the lever. The equivalent trick for the flame
+    /// cross-billboard (hiding planes at close range) was tried and reverted: it made distance
+    /// crossings visibly pop planes in/out — reported as "мерцающими" (flickering) trees, and the
+    /// user wants a burning tree to always read as fully, continuously on fire. The ambient-forest
+    /// density/map-scale fixes (see project memory) turned out to be the dominant performance
+    /// lever anyway, so losing this specific LOD is an acceptable trade.
     private func applySmokeOverdrawLOD(_ smoke: SCNNode, viewerWorldPosition: SIMD3<Float>) {
         guard let particleSystem = smoke.particleSystems?.first else { return }
         let distance = simd_distance(viewerWorldPosition, smoke.simdWorldPosition)

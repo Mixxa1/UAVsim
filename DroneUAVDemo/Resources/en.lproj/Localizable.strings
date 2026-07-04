@@ -130,6 +130,20 @@
 "payload.hose.extinguishing" = "Extinguishing…";
 "payload.hose.throw_distance" = "THROW %.0f m";
 "payload.hose.spraying_status" = "SPRAYING";
+"payload.capsule.title" = "Fire Capsule Launcher";
+"payload.capsule.subtitle" = "Hover over the fire and drop a capsule to extinguish it";
+"payload.capsule.size_class" = "Capsule Size";
+"payload.capsule.size.small" = "Small";
+"payload.capsule.size.medium" = "Medium";
+"payload.capsule.size.large" = "Large";
+"payload.capsule.count" = "Capsule Count";
+"payload.capsule.rig_mass" = "Rig mass: %.1f kg";
+"payload.capsule.mass_follows_rig" = "Mass follows capsule size × count, not independently editable.";
+"payload.capsule.remaining" = "CAPSULES %d";
+"payload.capsule.empty" = "No capsules remaining";
+"payload.capsule.dropped_status" = "Capsule dropped";
+"payload.capsule.reloading" = "RELOADING…";
+"payload.capsule.recharge_progress" = "RELOAD %.0f%%";
 
 // Thermal camera
 "payload.camera.thermal.palette" = "Palette";
@@ -497,6 +511,7 @@
 "payload.type.lidar_module" = "LiDAR Module";
 "payload.type.laser_rangefinder" = "Laser Rangefinder";
 "payload.type.fire_hose" = "Fire Hose";
+"payload.type.fire_capsule_launcher" = "Fire Capsule Launcher";
 "payload.type.rescue_pack" = "Rescue Pack";
 "payload.type.sensor_module" = "Sensor Module";
 "payload.type.radio_relay" = "Radio Relay";

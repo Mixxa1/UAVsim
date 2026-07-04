@@ -56,6 +56,9 @@ enum PayloadMissionSignal: Equatable {
     case rangefinderPowered(Bool)
     case rangeMeasured(distanceMeters: Double)
     case hosePowered(Bool)
+    case capsuleLauncherPowered(Bool)
+    case capsuleDropped(remaining: Int)
+    case capsulesRecharged(remaining: Int)
 }
 
 struct PayloadCameraOpticsState: Codable, Equatable {

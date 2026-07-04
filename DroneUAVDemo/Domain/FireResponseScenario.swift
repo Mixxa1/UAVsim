@@ -149,8 +149,9 @@ enum FireResponseOutcome: Equatable {
 // MARK: - Hose tuning
 
 /// Fixed suppression tuning for the fire hose. Unlike `MissionDetectionTuning.make(for:)`, this
-/// isn't keyed per-payload — `.fireResponse` has exactly one compatible payload, so there's no
-/// varying input axis to switch on.
+/// isn't keyed per-payload — the hose is the only payload that suppresses via continuous aim/dwell
+/// (the fire-capsule launcher, `.fireResponse`'s other compatible payload, instead suppresses via
+/// an instant area-of-effect burst on impact — see `FireCapsuleSize`/`FireResponseRuntime.extinguishTreesInRadius`).
 ///
 /// `nozzleThrowMeters` is the nozzle's own spray-throw distance from the drone's current position
 /// under pump pressure — a short, fixed distance independent of hose length. It is NOT the same
@@ -223,4 +224,80 @@ enum FireHoseDiameterClass: String, CaseIterable, Codable, Hashable, Identifiabl
     func massForLength(_ meters: Float) -> Float {
         max(0.0, meters) * massPerMeterKg + hardwareOverheadKg
     }
+}
+
+// MARK: - Fire-extinguishing capsule launcher
+
+/// Real drone-droppable fire-extinguishing capsules/balls: 1.5-3kg each depending on size, burst
+/// on impact and disperse powder/gas in a fixed radius around the impact point, instantly clearing
+/// anything burning within it. Unlike the hose (continuous aim, dwell-based, effectively unlimited
+/// water from the truck), this is a lighter, ammo-limited, bursty mechanic for aircraft too light
+/// to carry a hose rig at all — the "size" axis trades more capsules (more attempts) against a
+/// bigger blast radius (each attempt covers more area) rather than length like the hose.
+enum FireCapsuleSize: String, CaseIterable, Codable, Hashable, Identifiable {
+    case small
+    case medium
+    case large
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .small: return "payload.capsule.size.small"
+        case .medium: return "payload.capsule.size.medium"
+        case .large: return "payload.capsule.size.large"
+        }
+    }
+
+    var massKg: Float {
+        switch self {
+        case .small: return 1.5
+        case .medium: return 2.25
+        case .large: return 3.0
+        }
+    }
+
+    var blastRadiusMeters: Float {
+        switch self {
+        case .small: return 3.0
+        case .medium: return 4.0
+        case .large: return 5.0
+        }
+    }
+}
+
+enum FireCapsuleTuning {
+    /// Fixed launcher-rack hardware mass, independent of how many capsules are loaded.
+    static let launcherHardwareOverheadKg: Float = 1.5
+    static let countRange: ClosedRange<Int> = 1...4
+
+    static func totalMass(size: FireCapsuleSize, count: Int) -> Float {
+        launcherHardwareOverheadKg + size.massKg * Float(max(0, count))
+    }
+
+    /// Truck placement reach for capsule missions — feeds `FireZonePlacement.generate`'s
+    /// `tetherLengthMeters` exactly like the hose's rigged length does, giving the capsule
+    /// launcher its own difficulty-scaled truck standoff instead of the hose's fallback. First-pass
+    /// numbers, expected to be tuned after in-game testing like every other constant in this
+    /// mission type.
+    static func truckOperationalReachMeters(for difficulty: MissionDifficulty) -> Float {
+        switch difficulty {
+        case .easy: return 100.0
+        case .medium: return 180.0
+        case .hard: return 280.0
+        }
+    }
+
+    /// Seconds to refill one capsule while landed in the truck's recharge zone.
+    static func rechargeSecondsPerCapsule(for difficulty: MissionDifficulty) -> Double {
+        switch difficulty {
+        case .easy: return 5.0
+        case .medium: return 6.5
+        case .hard: return 8.0
+        }
+    }
+
+    /// Fixed "close enough to the truck" tolerance — deliberately NOT difficulty-scaled; only
+    /// reload time and truck placement distance scale with difficulty.
+    static let rechargeZoneRadiusMeters: Float = 10.0
 }

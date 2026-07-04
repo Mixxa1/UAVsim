@@ -130,6 +130,20 @@
 "payload.hose.extinguishing" = "Тушение…";
 "payload.hose.throw_distance" = "ДАЛЬНОСТЬ %.0f м";
 "payload.hose.spraying_status" = "ПОДАЧА ПЕНЫ";
+"payload.capsule.title" = "Капсульный огнетушитель";
+"payload.capsule.subtitle" = "Зависните над очагом и сбросьте капсулу для тушения";
+"payload.capsule.size_class" = "Размер капсулы";
+"payload.capsule.size.small" = "Малая";
+"payload.capsule.size.medium" = "Средняя";
+"payload.capsule.size.large" = "Большая";
+"payload.capsule.count" = "Число капсул";
+"payload.capsule.rig_mass" = "Масса оснастки: %.1f кг";
+"payload.capsule.mass_follows_rig" = "Масса определяется размером × количеством капсул и не редактируется напрямую.";
+"payload.capsule.remaining" = "КАПСУЛЫ %d";
+"payload.capsule.empty" = "Капсулы закончились";
+"payload.capsule.dropped_status" = "Капсула сброшена";
+"payload.capsule.reloading" = "ПЕРЕЗАРЯДКА…";
+"payload.capsule.recharge_progress" = "ЗАРЯДКА %.0f%%";
 
 // Тепловизионная камера
 "payload.camera.thermal.palette" = "Палитра";
@@ -494,6 +508,7 @@
 "payload.type.lidar_module" = "Лидар";
 "payload.type.laser_rangefinder" = "Лазерный дальномер";
 "payload.type.fire_hose" = "Пожарный рукав";
+"payload.type.fire_capsule_launcher" = "Капсульный огнетушитель";
 "payload.type.rescue_pack" = "Комплект первой помощи";
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";

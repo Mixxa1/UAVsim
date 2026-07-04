@@ -110,6 +110,37 @@ enum PayloadVisualFactory {
             nozzle.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
             nozzle.position = SCNVector3(0.0, -0.036 * sizeScale, 0.038 * sizeScale)
             standardPresentation.addChildNode(nozzle)
+        case .fireCapsuleLauncher:
+            let capsuleAccentMaterial = material(
+                diffuse: NSColor(calibratedRed: 0.82, green: 0.14, blue: 0.10, alpha: 1.0),
+                roughness: 0.40,
+                metalness: 0.20
+            )
+            let capsuleMaterial = material(
+                diffuse: NSColor(calibratedWhite: 0.92, alpha: 1.0),
+                roughness: 0.30,
+                metalness: 0.10
+            )
+
+            let rack = boxNode(size: SIMD3<Float>(0.10, 0.028, 0.05) * sizeScale, chamfer: 0.008 * sizeScale, material: shellMaterial)
+            rack.position = SCNVector3(0.0, -0.024 * sizeScale, 0.0)
+            standardPresentation.addChildNode(rack)
+
+            let rackBand = boxNode(size: SIMD3<Float>(0.104, 0.008, 0.052) * sizeScale, chamfer: 0.004 * sizeScale, material: capsuleAccentMaterial)
+            rackBand.position = SCNVector3(0.0, -0.018 * sizeScale, 0.0)
+            standardPresentation.addChildNode(rackBand)
+
+            // Visible capsule count reflects the rigged count so the player can see remaining
+            // ammo at a glance without a HUD element — same "show, don't tell" idea as the fire
+            // hose's suppression foam.
+            let capsuleCount = max(1, min(4, configuration.fireCapsuleCount))
+            let spacing: Float = 0.026 * sizeScale
+            let startX = -spacing * Float(capsuleCount - 1) / 2.0
+            for index in 0..<capsuleCount {
+                let capsule = sphereNode(radius: 0.011 * sizeScale, material: capsuleMaterial)
+                capsule.position = SCNVector3(startX + spacing * Float(index), -0.040 * sizeScale, 0.0)
+                standardPresentation.addChildNode(capsule)
+            }
         case .rescuePack:
             let pack = boxNode(size: SIMD3<Float>(0.11, 0.07, 0.09) * sizeScale, chamfer: 0.010 * sizeScale, material: shellMaterial)
             pack.position = SCNVector3(0.0, -0.040 * sizeScale, 0.0)

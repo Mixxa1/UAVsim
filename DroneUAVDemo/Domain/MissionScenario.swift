@@ -43,7 +43,7 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
         case .searchAndRescue:
             return [.thermalCamera, .cameraGimbal]
         case .fireResponse:
-            return [.fireHose]
+            return [.fireHose, .fireCapsuleLauncher]
         }
     }
 }
@@ -339,6 +339,9 @@ struct MissionScenarioConfiguration: Equatable {
     /// Only meaningful when `payloadType == .fireHose` — the rigging chosen at Mission Setup.
     var fireHoseDiameterClass: FireHoseDiameterClass = .standard
     var fireHoseLengthMeters: Float = 30.0
+    /// Only meaningful when `payloadType == .fireCapsuleLauncher` — the rigging chosen at Mission Setup.
+    var fireCapsuleSize: FireCapsuleSize = .medium
+    var fireCapsuleCount: Int = 2
 }
 
 // MARK: - Derived placement (computed at launch from parameters + world)
