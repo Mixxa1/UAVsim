@@ -64,6 +64,8 @@
 		100000000000000000000234 /* UAVSelectionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000137 /* UAVSelectionState.swift */; };
 		100000000000000000000235 /* UAVFilterBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000138 /* UAVFilterBarView.swift */; };
 		100000000000000000000236 /* UAVProfileCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000139 /* UAVProfileCardView.swift */; };
+		100000000000000000000A2B /* UAVLivePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2C /* UAVLivePreviewView.swift */; };
+		100000000000000000000A2D /* UAVSelectionCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2E /* UAVSelectionCardView.swift */; };
 		100000000000000000000237 /* UAVCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013A /* UAVCatalogView.swift */; };
 		100000000000000000000238 /* PayloadVisualPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013B /* PayloadVisualPreset.swift */; };
 		100000000000000000000239 /* PayloadType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013C /* PayloadType.swift */; };
@@ -395,6 +397,8 @@
 		100000000000000000000137 /* UAVSelectionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVSelectionState.swift; sourceTree = "<group>"; };
 		100000000000000000000138 /* UAVFilterBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVFilterBarView.swift; sourceTree = "<group>"; };
 		100000000000000000000139 /* UAVProfileCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVProfileCardView.swift; sourceTree = "<group>"; };
+		100000000000000000000A2C /* UAVLivePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVLivePreviewView.swift; sourceTree = "<group>"; };
+		100000000000000000000A2E /* UAVSelectionCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVSelectionCardView.swift; sourceTree = "<group>"; };
 		10000000000000000000013A /* UAVCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVCatalogView.swift; sourceTree = "<group>"; };
 		10000000000000000000013B /* PayloadVisualPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadVisualPreset.swift; sourceTree = "<group>"; };
 		10000000000000000000013C /* PayloadType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadType.swift; sourceTree = "<group>"; };
@@ -965,6 +969,8 @@
 				10000000000000000000014D /* UAVCatalogModuleView.swift */,
 				100000000000000000000138 /* UAVFilterBarView.swift */,
 				100000000000000000000139 /* UAVProfileCardView.swift */,
+				100000000000000000000A2C /* UAVLivePreviewView.swift */,
+				100000000000000000000A2E /* UAVSelectionCardView.swift */,
 				1000000000000000000001AC /* UIScrollRouter.swift */,
 				1000000000000000000001AB /* VirtualKeyboardView.swift */,
 				1000000000000000000002D4 /* ReplayCenterView.swift */,
@@ -1392,6 +1398,8 @@
 				100000000000000000000234 /* UAVSelectionState.swift in Sources */,
 				100000000000000000000235 /* UAVFilterBarView.swift in Sources */,
 				100000000000000000000236 /* UAVProfileCardView.swift in Sources */,
+				100000000000000000000A2B /* UAVLivePreviewView.swift in Sources */,
+				100000000000000000000A2D /* UAVSelectionCardView.swift in Sources */,
 				100000000000000000000237 /* UAVCatalogView.swift in Sources */,
 				100000000000000000000238 /* PayloadVisualPreset.swift in Sources */,
 				100000000000000000000239 /* PayloadType.swift in Sources */,

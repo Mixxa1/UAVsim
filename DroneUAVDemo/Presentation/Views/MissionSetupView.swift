@@ -44,6 +44,37 @@ struct MissionSetupView: View {
         compatibleProfiles.first { $0.id == selectedProfileID } ?? compatibleProfiles.first
     }
 
+    /// Resolves a live-preview-ready `UAVProfile` for a card, including the one entry
+    /// (`DroneModelProfile.abstractProfile`) whose `resolvedUAVProfile` is nil because it never sets
+    /// `uavProfileID` — falls back to `UAVReferenceCatalog.abstractProfile(from:)`, a different
+    /// function that does build a real (if generic) `UAVProfile`, so that card still rotates a
+    /// placeholder airframe instead of showing a blank preview.
+    private func previewProfile(for profile: DroneModelProfile) -> UAVProfile? {
+        profile.resolvedUAVProfile
+            ?? (profile.isAbstract ? UAVReferenceCatalog.abstractProfile(from: .default) : nil)
+    }
+
+    private func profileBadgeText(for profile: DroneModelProfile) -> String {
+        if profile.isAbstract {
+            return NSLocalizedString("uav.badge.custom", comment: "")
+        }
+        return (profile.resolvedUAVProfile?.specConfidence ?? .partial).catalogTitle.uppercased()
+    }
+
+    private func profileBadgeTint(for profile: DroneModelProfile) -> Color {
+        if profile.isAbstract {
+            return .orange
+        }
+        switch profile.resolvedUAVProfile?.specConfidence ?? .partial {
+        case .verified:
+            return .green
+        case .partial:
+            return .yellow
+        case .custom:
+            return .orange
+        }
+    }
+
     private var compatiblePayloads: [PayloadType] {
         kind.compatiblePayloads
     }
@@ -274,21 +305,34 @@ struct MissionSetupView: View {
         sectionCard(titleKey: "mission.setup.section.platform") {
             VStack(alignment: .leading, spacing: 14) {
                 labeledRow("mission.setup.uav") {
-                    Picker("", selection: $selectedProfileID) {
-                        ForEach(compatibleProfiles) { profile in
-                            Text(profile.uiDisplayName).tag(profile.id)
+                    if compatibleProfiles.isEmpty {
+                        Text("mission.setup.uav.none_compatible")
+                            .font(.caption2)
+                            .foregroundStyle(GroundControlPalette.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 10)], spacing: 10) {
+                            ForEach(compatibleProfiles) { profile in
+                                Button {
+                                    selectedProfileID = profile.id
+                                } label: {
+                                    UAVSelectionCardView(
+                                        name: profile.uiDisplayName,
+                                        manufacturer: profile.manufacturer,
+                                        previewProfile: previewProfile(for: profile),
+                                        massKg: profile.takeoffMassKg,
+                                        speedMps: profile.resolvedUAVProfile?.nominalCruiseSpeedMps ?? profile.maxHorizontalSpeedMps,
+                                        flightTimeSec: profile.resolvedUAVProfile?.nominalFlightTimeSec ?? profile.maxFlightTimeMin * 60.0,
+                                        rangeMeters: profile.resolvedUAVProfile?.nominalMaxRangeM,
+                                        badgeText: profileBadgeText(for: profile),
+                                        badgeTint: profileBadgeTint(for: profile),
+                                        isSelected: profile.id == selectedProfileID
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .tint(.white)
-                }
-
-                if compatibleProfiles.isEmpty {
-                    Text("mission.setup.uav.none_compatible")
-                        .font(.caption2)
-                        .foregroundStyle(GroundControlPalette.danger)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 labeledRow("mission.setup.payload") {
