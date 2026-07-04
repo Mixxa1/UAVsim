@@ -50,13 +50,26 @@ final class FireVisualAssetLoader {
 
     private init() {}
 
-    /// Animated flame billboard for a burning tree — a plain `SCNPlane` (not the source USDZ's own
-    /// ground-facing quad) with an `SCNBillboardConstraint` so it always faces the camera. Falls
-    /// back to an empty node if the textures failed to load.
-    func makeFlameNode(heightMeters: Float) -> SCNNode {
+    /// Animated flame "cross-billboard" wrapped around a burning tree — 3 identical `SCNPlane`s
+    /// sharing one material, fixed at 60° apart around the trunk's vertical axis (0°/60°/120°,
+    /// each double-sided so that span covers the full 360° same as a full turn would). Deliberately
+    /// NOT a single `SCNBillboardConstraint`-driven plane (the previous approach): a billboard
+    /// always re-orients to face the camera, which cancels out any fixed angular offset between
+    /// multiple planes — they'd all converge to the same camera-facing orientation regardless of
+    /// how they were initially rotated, so a billboarded plane can never look "wrapped around" a
+    /// volume no matter how many copies you add. Fixed, unbillboarded angles are what actually
+    /// give the classic impostor-tree look of fire surrounding the trunk from any viewing angle,
+    /// same technique real-time engines use for cross-billboard foliage.
+    ///
+    /// `baseYawDegrees` MUST differ per tree (caller passes the tree's own random yaw) — a first
+    /// version hardcoded the same 3 world-space angles for every tree, so every burning tree's
+    /// planes lined up at the exact same 3 absolute directions; from any single camera angle, many
+    /// same-angle planes across many different trees projected into the same screen-space
+    /// orientation and merged into a few giant flat "walls" instead of 13 separate, localized fire
+    /// clumps. Falls back to an empty node if the textures failed to load.
+    func makeFlameNode(heightMeters: Float, baseYawDegrees: Float = 0.0) -> SCNNode {
         let wrapper = SCNNode()
         wrapper.name = "mission.fire_tree.flame"
-        wrapper.constraints = [SCNBillboardConstraint()]
 
         guard let baseColor = loadBaseColorImage(), let emissive = loadEmissiveImage() else {
             warnOnce()
@@ -72,17 +85,33 @@ final class FireVisualAssetLoader {
         material.readsFromDepthBuffer = true
         material.isDoubleSided = true
 
-        let width = CGFloat(heightMeters) * 0.85
-        let height = CGFloat(heightMeters)
+        // Matches the source sprite cell's own aspect ratio (~157.5:256 px ≈ 0.615:1, measured
+        // directly off the grid, not guessed) instead of the earlier 0.5:1, which over-stretched
+        // the flame image vertically into a tall, rigid-looking "pillar." Also shrunk overall
+        // (was spanning near-ground to well above the crown) so the flame reads as concentrated
+        // around the crown instead of a uniform column — narrower helps it stay hugging a single
+        // tree instead of visually bridging into neighbors in a dense cluster too.
+        let width = CGFloat(heightMeters) * 0.42
+        let height = CGFloat(heightMeters) * 0.68
         let plane = SCNPlane(width: width, height: height)
         plane.firstMaterial = material
 
-        let planeNode = SCNNode(geometry: plane)
-        planeNode.name = "mission.fire_tree.flame.plane"
-        planeNode.castsShadow = false
-        wrapper.addChildNode(planeNode)
+        let yawAnglesDegrees: [Float] = [0.0, 60.0, 120.0]
+        var firstPlaneNode: SCNNode?
+        for yawDegrees in yawAnglesDegrees {
+            let planeNode = SCNNode(geometry: plane)
+            planeNode.name = "mission.fire_tree.flame.plane"
+            planeNode.castsShadow = false
+            planeNode.eulerAngles.y = CGFloat((yawDegrees + baseYawDegrees) * .pi / 180.0)
+            wrapper.addChildNode(planeNode)
+            if firstPlaneNode == nil {
+                firstPlaneNode = planeNode
+            }
+        }
 
-        runFlipbookAnimation(on: planeNode, material: material)
+        if let firstPlaneNode {
+            runFlipbookAnimation(on: firstPlaneNode, material: material)
+        }
 
         return wrapper
     }

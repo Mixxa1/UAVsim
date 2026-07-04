@@ -3807,7 +3807,10 @@ final class DroneSceneController {
             // real bug: it put the flame near the trunk base, occluded, instead of at canopy
             // height — the smoke's own upward particle drift over its lifetime hid the same bug
             // from view since particles rise well past their scaled-down birth point regardless).
-            let flame = FireVisualAssetLoader.shared.makeFlameNode(heightMeters: heightMeters * 0.55)
+            let flame = FireVisualAssetLoader.shared.makeFlameNode(
+                heightMeters: heightMeters * 0.55,
+                baseYawDegrees: yaw * 180.0 / .pi
+            )
             flame.position = SCNVector3(tree.position.x, tree.position.y + CGFloat(heightMeters * 0.58), tree.position.z)
             flame.isHidden = true
             missionScenarioRootNode.addChildNode(flame)
