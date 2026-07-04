@@ -492,6 +492,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var diagSceneApplyCount: Int = 0
     private var diagRenderFrameCount: Int = 0
     private var lastThermalDiagnosticsUpdate: TimeInterval = 0.0
+    private var lastThermalRenderFrameHop: TimeInterval = 0.0
     private var diagLastResetTime: TimeInterval = 0
     private var diagLastComputedHz = (out: 0.0, rx: 0.0, sceneApply: 0.0, renderFPS: 0.0)
     // Throttle @Published onlineInterpolatedRemoteStates; interval driven by policy.overlayPublishInterval.
@@ -3631,6 +3632,20 @@ final class DroneSimulationViewModel: ObservableObject {
         // calling lockFocus() off-main is a known hang/deadlock hazard. Hop explicitly rather than
         // assume the caller's thread.
         guard cameraMode == .payloadOptics else { return }
+
+        // This callback fires at the display's actual render rate (up to 60-120/sec), not the
+        // simulation tick rate — a fresh `Task { @MainActor ... }` every single frame has real
+        // per-call scheduling/allocation overhead, paid continuously for the entire time ANY
+        // payload-optics view (camera/rangefinder/hose) is active, independent of whether thermal
+        // is even engaged (the check for that happens only after the hop, since it needs
+        // `self.payloadCameraOpticsState` which isn't safe to read off the main actor). Thermal
+        // has no real need for per-frame granularity here anyway — its own diagnostics refresh
+        // below is already throttled to ~8Hz — so the hop itself is throttled to roughly that same
+        // cadence instead of firing every frame. Found while investigating reported lag specific
+        // to payload-optics view (not the fire-response scene itself, already checked separately).
+        guard time - lastThermalRenderFrameHop >= 0.05 else { return }
+        lastThermalRenderFrameHop = time
+
         Task { @MainActor [weak self] in
             self?.updateThermalForRenderFrame(atTime: time, cameraMode: cameraMode)
         }
@@ -4079,7 +4094,17 @@ final class DroneSimulationViewModel: ObservableObject {
         // which makes the same tree count read as a real forest. Mutating mapScale directly
         // (rather than calling setTerrainMapScale) skips its resetAfter:true, which would wipe
         // the drone back to spawn mid-bootstrap.
-        let recommendedScale = params.difficulty.recommendedMapScale
+        //
+        // `MissionDifficulty.recommendedMapScale` shrinks easy/medium down to `.x8` — right for
+        // SAR (a smaller search sector should feel like a smaller, tighter search), but this same
+        // fixed-pool-cap-regardless-of-map-size mechanic backfires for Fire Response: confirmed via
+        // a user's Debug log + testing that easy/medium's `.x8` map crams roughly the same ambient
+        // tree count into 1/4 the area of hard's `.x16`, so easy/medium missions were the *more*
+        // GPU-taxed ones, backwards from what difficulty would suggest. Fire Response's own
+        // difficulty scaling already lives in fireZoneRadiusMeters/fireTreeCount/spread rate, not
+        // overall map size, so it always gets the larger `.x16` regardless of difficulty instead of
+        // inheriting SAR's shrink-for-easier-difficulty logic.
+        let recommendedScale = params.kind == .fireResponse ? MapScale.x16 : params.difficulty.recommendedMapScale
         if terrain.mapScale != recommendedScale {
             terrain.mapScale = recommendedScale
             terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: recommendedScale)

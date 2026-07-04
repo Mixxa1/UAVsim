@@ -83,9 +83,20 @@ struct MissionSetupView: View {
                 selectedProfileID = compatibleProfiles.first?.id ?? ""
             }
         }
-        .onChange(of: kind) { _, _ in
+        .onChange(of: kind) { _, newValue in
             if !compatiblePayloads.contains(payload) {
                 payload = compatiblePayloads.first ?? .thermalCamera
+            }
+            // `.dense` (the default above) is tuned for SAR — a genuinely hard-to-search forest is
+            // the point there (see ScenePopulationService/generateForest's own reasoning). Fire
+            // Response doesn't share that justification: its fire zone already gets its own
+            // dedicated, guaranteed tree population from spawnFireResponseScenario, so the ambient
+            // forest across the rest of the map is purely decorative here — maxing it out too adds
+            // real rendering/shadow cost (confirmed via a user's Debug log: `.dense` alone produced
+            // ~917 ambient trees map-wide) without a corresponding gameplay benefit. Default to
+            // `.medium` when switching into this scenario kind instead.
+            if newValue == .fireResponse {
+                terrainDensity = .medium
             }
         }
         .onChange(of: payload) { _, _ in

@@ -3980,6 +3980,9 @@ final class DroneSceneController {
                 if let flame {
                     applyFlameOverdrawLOD(flame, viewerWorldPosition: viewerWorldPosition)
                 }
+                if let smoke {
+                    applySmokeOverdrawLOD(smoke, viewerWorldPosition: viewerWorldPosition)
+                }
             case .charred:
                 flame?.isHidden = true
                 smoke?.isHidden = true
@@ -4030,6 +4033,23 @@ final class DroneSceneController {
         }
         for (planeIndex, planeNode) in flame.childNodes.enumerated() {
             planeNode.isHidden = planeIndex >= visiblePlaneCount
+        }
+    }
+
+    /// Same overdraw-vs-distance tradeoff as the flame LOD above, applied to the smoke particle
+    /// system instead of discrete planes: up close, each particle's quad covers far more screen
+    /// area (and there are up to ~24 alive at once per tree at the base birth rate), so simply
+    /// emitting fewer of them is the equivalent lever — there's no separate "plane count" to trim
+    /// for a particle system, just how many particles exist to shade at once.
+    private func applySmokeOverdrawLOD(_ smoke: SCNNode, viewerWorldPosition: SIMD3<Float>) {
+        guard let particleSystem = smoke.particleSystems?.first else { return }
+        let distance = simd_distance(viewerWorldPosition, smoke.simdWorldPosition)
+        if distance < 10.0 {
+            particleSystem.birthRate = 1
+        } else if distance < 20.0 {
+            particleSystem.birthRate = 2
+        } else {
+            particleSystem.birthRate = 4
         }
     }
 
@@ -5424,7 +5444,9 @@ final class DroneSceneController {
                 light.shadowCascadeSplittingFactor = 0.15
                 // Was 4096/32 — measured FPS drop in payload view at that resolution/sample count;
                 // 2048/16 keeps shadows visibly sharper than the non-payload default (1536/12)
-                // without the cost of the full 4096/32 pass.
+                // without the cost of the full 4096/32 pass. Confirmed NOT the cause of the
+                // fire-response payload-optics lag (user tested dropping to 1536/12, no change) —
+                // reverted back to this.
                 light.shadowMapSize = CGSize(width: 2048, height: 2048)
                 light.shadowSampleCount = 16
                 light.shadowBias = 0.62
