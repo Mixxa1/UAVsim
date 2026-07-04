@@ -4206,7 +4206,10 @@ final class DroneSimulationViewModel: ObservableObject {
             isSpraying: hoseOpticsState.isSpraying
         )
         fireResponseRuntime = runtime
-        sceneController.updateFireResponseVisuals(treeStatuses: runtime.treeStatuses)
+        sceneController.updateFireResponseVisuals(
+            treeStatuses: runtime.treeStatuses,
+            viewerWorldPosition: finiteVector(state.position, fallback: lastFiniteState.position)
+        )
         publishFireResponseState()
 
         if let outcome = runtime.outcome {
@@ -4243,7 +4246,10 @@ final class DroneSimulationViewModel: ObservableObject {
         guard var runtime = fireResponseRuntime, runtime.isActive else { return }
         runtime.debugExtinguishNearestFire(to: currentPlanarPosition())
         fireResponseRuntime = runtime
-        sceneController.updateFireResponseVisuals(treeStatuses: runtime.treeStatuses)
+        sceneController.updateFireResponseVisuals(
+            treeStatuses: runtime.treeStatuses,
+            viewerWorldPosition: finiteVector(state.position, fallback: lastFiniteState.position)
+        )
         publishFireResponseState()
         if let outcome = runtime.outcome {
             handleFireResponseOutcome(outcome)
@@ -7380,15 +7386,38 @@ final class DroneSimulationViewModel: ObservableObject {
             isPowered: isMountedHoseAvailable
         )
         sceneController.updateHoseGimbal(state: hoseController.opticsState)
-        let aimedIndex = hoseController.opticsState.isAvailable
-            ? sceneController.hoseFireSuppressionSample(fireTreeNodes: sceneController.fireTreeNodes)
-            : nil
+
+        // The nozzle raycast (`updateHoseAimAndSpray`) is a full-scene hit-test — by far the most
+        // expensive thing this function does, and it used to run unconditionally every tick
+        // whenever a hose was mounted, whether or not the operator was even looking at it. The
+        // suppression mechanic only reacts to the aimed tree while the trigger is held
+        // (`FireResponseRuntime.applySuppression` ignores `aimedFireIndex` whenever `isSpraying`
+        // is false), and the HUD's aim indicator is only ever visible while actually looking
+        // through the hose's own payload-optics view — so flying around normally with a hose
+        // mounted (most of a fire-response mission) can skip the raycast entirely.
+        let isSpraying = hoseController.opticsState.isSpraying
+        let isViewingHoseOptics = cameraConfiguration.mode == .payloadOptics
+            && !payloadCameraOpticsState.isAvailable
+            && !rangefinderOpticsState.isAvailable
+            && hoseController.opticsState.isAvailable
+        let shouldSampleAim = hoseController.opticsState.isAvailable && (isSpraying || isViewingHoseOptics)
+
+        let aimedIndex: Int?
+        if shouldSampleAim {
+            aimedIndex = sceneController.updateHoseAimAndSpray(
+                fireTreeNodes: sceneController.fireTreeNodes,
+                isSpraying: isSpraying
+            )
+        } else {
+            aimedIndex = nil
+            sceneController.hideHoseSprayVisual()
+        }
+
         hoseController.updateAimedFire(
             index: aimedIndex,
             progress: fireResponseRuntime?.suppressionProgress(for: aimedIndex) ?? 0.0
         )
         hoseOpticsState = hoseController.opticsState
-        sceneController.updateHoseSprayStreamVisual(isSpraying: hoseOpticsState.isSpraying)
 
         let hoseSignals = hoseController.consumeMissionSignals()
         if !hoseSignals.isEmpty {

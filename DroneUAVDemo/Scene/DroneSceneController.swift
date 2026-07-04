@@ -138,6 +138,12 @@ final class DroneSceneController {
     private(set) var fireTreeNodes: [SCNNode] = []
     private var fireTreeFlameNodes: [SCNNode] = []
     private var fireTreeSmokeNodes: [SCNNode] = []
+    // Real-world tree heights, parallel to `fireTreeNodes` — needed to place world-space VFX
+    // (like the charred-transition foam burst) without relying on `tree.boundingBox`, which is in
+    // the tree's native/unscaled local units and only converts to real meters when parented under
+    // that same scaled tree node (see the flame/smoke scale-parenting fix in
+    // `spawnFireResponseScenario` for the fuller explanation of why that parenting is wrong).
+    private var fireTreeHeightsMeters: [Float] = []
     private var lastFireTreeStatuses: [FireTreeStatus] = []
     private var fireTreeObstacleIDs: Set<UUID> = []
     private var fireTruckNode: SCNNode?
@@ -2684,10 +2690,10 @@ final class DroneSceneController {
         // Cosmetic only — the hose reads as a short nozzle stub mounted on the drone (like the
         // rangefinder's beam when idle), not a rigid boom stretched out to the full nozzle throw.
         // It extends a little further while actively spraying, to read as a hose stream rather
-        // than a fixed antenna; `hoseFireSuppressionSample`'s raycast (using the full
+        // than a fixed antenna; `updateHoseAimAndSpray`'s raycast (using the full
         // `nozzleThrowMeters`) is what actually governs suppression range, independent of this
         // visual length. The real visible foam stream is `hoseStreamNode`/`hoseImpactNode`,
-        // driven separately by `updateHoseSprayStreamVisual`.
+        // driven from the same call.
         let stubLength: Float = 0.35
         let sprayStreamLength: Float = 2.5
         let length = state.isSpraying ? sprayStreamLength : stubLength
@@ -2724,29 +2730,34 @@ final class DroneSceneController {
         return (origin, forward, results)
     }
 
-    /// Returns the index into `fireTreeNodes` of the first thing hit, if (and only if) that first
-    /// hit is one of the tracked fire trees — a tree partially screened by terrain/another tree in
-    /// front of it is correctly not aimable, same LOS spirit as the payload camera's mission
-    /// sample.
-    func hoseFireSuppressionSample(fireTreeNodes: [SCNNode]) -> Int? {
-        guard !fireTreeNodes.isEmpty, let hit = hoseAimRaycast(), let first = hit.results.first else {
+    /// Single per-tick nozzle raycast, shared by the suppression-target lookup and the visible
+    /// foam stream — previously each ran its own full-scene `hitTestWithSegment` independently, so
+    /// every tick spent spraying paid for this expensive query twice over. Returns the index into
+    /// `fireTreeNodes` of the first thing hit, if (and only if) that first hit is one of the
+    /// tracked fire trees — a tree partially screened by terrain/another tree in front of it is
+    /// correctly not aimable, same LOS spirit as the payload camera's mission sample. As a side
+    /// effect, positions and shows/hides the foam stream/impact visuals to match wherever the
+    /// nozzle points while `isSpraying`, independent of whether that hit counts as a suppression
+    /// target (a real hose sprays wherever it's pointed, on-target or not).
+    @discardableResult
+    func updateHoseAimAndSpray(fireTreeNodes: [SCNNode], isSpraying: Bool) -> Int? {
+        ensureHoseRig()
+        guard let hit = hoseAimRaycast() else {
+            hoseStreamNode?.isHidden = true
+            hoseImpactNode?.isHidden = true
             return nil
         }
-        return fireTreeNodes.firstIndex { isDescendant(first.node, of: $0) }
-    }
 
-    /// Shows/hides and repositions the visible foam stream + impact splash to match wherever the
-    /// nozzle currently points, while the trigger is physically held — the stream flies to
-    /// whatever the raycast actually hits (a fire, terrain, empty air at max throw), independent
-    /// of whether that hit counts as a suppression target.
-    func updateHoseSprayStreamVisual(isSpraying: Bool) {
-        ensureHoseRig()
-        guard let stream = hoseStreamNode, let impact = hoseImpactNode else { return }
+        let aimedIndex: Int? = fireTreeNodes.isEmpty
+            ? nil
+            : hit.results.first.flatMap { first in
+                fireTreeNodes.firstIndex { isDescendant(first.node, of: $0) }
+            }
 
-        guard isSpraying, let hit = hoseAimRaycast() else {
-            stream.isHidden = true
-            impact.isHidden = true
-            return
+        guard isSpraying, let stream = hoseStreamNode, let impact = hoseImpactNode else {
+            hoseStreamNode?.isHidden = true
+            hoseImpactNode?.isHidden = true
+            return aimedIndex
         }
 
         let endpoint: SIMD3<Float>
@@ -2774,6 +2785,17 @@ final class DroneSceneController {
             particleSystem.particleVelocity = travelDistance / travelTime
             particleSystem.particleVelocityVariation = particleSystem.particleVelocity * 0.08
         }
+
+        return aimedIndex
+    }
+
+    /// Cheap fallback for ticks that skip the raycast entirely (see
+    /// `DroneSimulationViewModel.refreshHoseAimStatus`) — just hides the spray visuals without
+    /// touching the scene graph otherwise, so a stream that was visible on a previous tick doesn't
+    /// stay stuck on-screen once spraying/viewing the hose optics stops.
+    func hideHoseSprayVisual() {
+        hoseStreamNode?.isHidden = true
+        hoseImpactNode?.isHidden = true
     }
 
     private func stabilizedPayloadCameraEuler(for droneState: DroneState) -> SIMD3<Float> {
@@ -3753,6 +3775,7 @@ final class DroneSceneController {
         fireTreeNodes.removeAll(keepingCapacity: false)
         fireTreeFlameNodes.removeAll(keepingCapacity: false)
         fireTreeSmokeNodes.removeAll(keepingCapacity: false)
+        fireTreeHeightsMeters.removeAll(keepingCapacity: false)
         lastFireTreeStatuses.removeAll(keepingCapacity: false)
         fireTruckNode = nil
         if !fireTreeObstacleIDs.isEmpty {
@@ -3787,6 +3810,7 @@ final class DroneSceneController {
         var treeNodes: [SCNNode] = []
         var flameNodes: [SCNNode] = []
         var smokeNodes: [SCNNode] = []
+        var heightsMeters: [Float] = []
         var anchorPositions: [SIMD3<Float>] = []
 
         for position in placement.treePositions {
@@ -3798,6 +3822,7 @@ final class DroneSceneController {
             makeMaterialsIndependent(tree)
             missionScenarioRootNode.addChildNode(tree)
             treeNodes.append(tree)
+            heightsMeters.append(heightMeters)
 
             // Parented to `missionScenarioRootNode`, NOT `tree` — `tree`'s own node carries
             // `PineTreeAssetLoader`'s model-to-world scale factor (the raw Pine_Tree.usdz is ~300
@@ -3848,6 +3873,7 @@ final class DroneSceneController {
         fireTreeNodes = treeNodes
         fireTreeFlameNodes = flameNodes
         fireTreeSmokeNodes = smokeNodes
+        fireTreeHeightsMeters = heightsMeters
         lastFireTreeStatuses = Array(repeating: .unburned, count: treeNodes.count)
 
         let truckObstacle = spawnFireTruckDecoration(placement: placement, groundY: groundY)
@@ -3936,8 +3962,9 @@ final class DroneSceneController {
     /// instant a tree is first suppressed (`.burning` → `.charred`) — permanently darkens its
     /// (already-independent, see `makeMaterialsIndependent`) materials and triggers a one-shot
     /// foam-impact burst. Called once per tick from the simulation view model alongside the
-    /// fire-response runtime tick.
-    func updateFireResponseVisuals(treeStatuses: [FireTreeStatus]) {
+    /// fire-response runtime tick. `viewerWorldPosition` (the drone's own position — a fine proxy
+    /// for the payload-optics camera mounted on it) drives the flame's overdraw LOD below.
+    func updateFireResponseVisuals(treeStatuses: [FireTreeStatus], viewerWorldPosition: SIMD3<Float>) {
         for (index, status) in treeStatuses.enumerated() where index < fireTreeNodes.count {
             let previousStatus = index < lastFireTreeStatuses.count ? lastFireTreeStatuses[index] : .unburned
             let flame = index < fireTreeFlameNodes.count ? fireTreeFlameNodes[index] : nil
@@ -3950,19 +3977,60 @@ final class DroneSceneController {
             case .burning:
                 flame?.isHidden = false
                 smoke?.isHidden = false
+                if let flame {
+                    applyFlameOverdrawLOD(flame, viewerWorldPosition: viewerWorldPosition)
+                }
             case .charred:
                 flame?.isHidden = true
                 smoke?.isHidden = true
                 if previousStatus != .charred {
                     let treeNode = fireTreeNodes[index]
                     darkenMaterialsRecursively(treeNode)
+                    // Parented to `missionScenarioRootNode`, NOT `treeNode` — same scale-parenting
+                    // pitfall as the flame/smoke fix above: `treeNode.boundingBox` is in the raw
+                    // Pine_Tree.usdz's native/unscaled local units (~300 tall), which only
+                    // converts to real meters when read INSIDE that same scaled node. A hardcoded
+                    // `SCNSphere(radius: 0.6)` burst parented there would render at ~0.6 * scale
+                    // (scale ≈ heightMeters/300, so ~3.6cm for an 18m tree) instead of the intended
+                    // 0.6m. `fireTreeHeightsMeters[index]` gives the real height directly, so the
+                    // burst's world position is computed the same way flame/smoke already are.
+                    let heightMeters = index < fireTreeHeightsMeters.count ? fireTreeHeightsMeters[index] : 18.0
                     let burst = FireVisualAssetLoader.shared.makeFoamBurstNode()
-                    burst.position = SCNVector3(0, treeNode.boundingBox.max.y * 0.5, 0)
-                    treeNode.addChildNode(burst)
+                    burst.position = SCNVector3(
+                        treeNode.position.x,
+                        treeNode.position.y + CGFloat(heightMeters * 0.5),
+                        treeNode.position.z
+                    )
+                    missionScenarioRootNode.addChildNode(burst)
                 }
             }
         }
         lastFireTreeStatuses = treeStatuses
+    }
+
+    /// Cuts the flame cross-billboard's overdraw cost as the viewer closes in. The 3 additively-
+    /// blended, depth-non-writing planes per tree are cheap from a distance (each covers only a
+    /// small share of screen pixels), but expensive up close — the hose payload-optics camera
+    /// flying right up to a burning tree is exactly the case a user reported as newly laggy after
+    /// the raycast-frequency fix above, and unlike that fix this cost scales with on-screen
+    /// footprint, not tick frequency, so gating by distance (not camera mode) is what actually
+    /// targets it. The full 3-plane wraparound read is mainly useful for a readable silhouette
+    /// from a distance anyway — at point-blank range a single plane already fills most of the
+    /// frame, so the extra 2 mostly just triple-shade the same overlapping pixels for little
+    /// additional visual benefit.
+    private func applyFlameOverdrawLOD(_ flame: SCNNode, viewerWorldPosition: SIMD3<Float>) {
+        let distance = simd_distance(viewerWorldPosition, flame.simdWorldPosition)
+        let visiblePlaneCount: Int
+        if distance < 10.0 {
+            visiblePlaneCount = 1
+        } else if distance < 20.0 {
+            visiblePlaneCount = 2
+        } else {
+            visiblePlaneCount = 3
+        }
+        for (planeIndex, planeNode) in flame.childNodes.enumerated() {
+            planeNode.isHidden = planeIndex >= visiblePlaneCount
+        }
     }
 
     /// Permanently darkens a suppressed tree's (already independent) materials toward soot-grey —
