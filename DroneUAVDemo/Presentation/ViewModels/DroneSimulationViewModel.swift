@@ -4183,7 +4183,26 @@ final class DroneSimulationViewModel: ObservableObject {
         // difficulty scaling already lives in fireZoneRadiusMeters/fireTreeCount/spread rate, not
         // overall map size, so it always gets the larger `.x16` regardless of difficulty instead of
         // inheriting SAR's shrink-for-easier-difficulty logic.
-        let recommendedScale = params.kind == .fireResponse ? MapScale.x16 : params.difficulty.recommendedMapScale
+        // A difficulty/mission-kind baseline is a floor, not a ceiling. Two separate reasons a
+        // fixed-wing aircraft needs more room than that baseline:
+        //  1. A large/long-range airframe (e.g. the MQ-9B SkyGuardian, 24 m wingspan) needs more
+        //     maneuvering room in general — `DroneModelProfile.preferredMapScaleMin` already
+        //     computes exactly this per aircraft (turn radius/maneuver comfort, used elsewhere for
+        //     free-flight map selection).
+        //  2. Confirmed via user testing: even a merely medium airframe (FT5 Łoś) that does NOT
+        //     trip `preferredMapScaleMin` still flew clean past the world boundary — signal-loss
+        //     locks flight controls entirely (see `signal_loss.lost_message`), and unlike a
+        //     multirotor a fixed-wing can't just stop and hover to avoid it. It can't loiter in
+        //     place while working a mission's target cluster; every attack pass needs a wide
+        //     banking turn to reposition, and that turn's radius alone can exceed a "just barely
+        //     big enough" map's margin even when nothing about the airframe looks oversized on
+        //     paper. So ANY fixed-wing gets a flat floor here, not just ones flagged by
+        //     `preferredMapScaleMin`.
+        let fixedWingFloor: MapScale = selectedDroneProfile.airframeClass == .fixedWing ? .x32 : .x4
+        let missionKindBaseline = params.kind == .fireResponse ? MapScale.x16 : params.difficulty.recommendedMapScale
+        let aircraftMinScale = selectedDroneProfile.operationalProfile.preferredMapScaleMin
+        let recommendedScale = [missionKindBaseline, aircraftMinScale, fixedWingFloor]
+            .max { $0.numericPreset < $1.numericPreset }!
         if terrain.mapScale != recommendedScale {
             terrain.mapScale = recommendedScale
             terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: recommendedScale)
