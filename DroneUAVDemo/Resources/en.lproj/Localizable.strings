@@ -142,8 +142,7 @@
 "payload.capsule.remaining" = "CAPSULES %d";
 "payload.capsule.empty" = "No capsules remaining";
 "payload.capsule.dropped_status" = "Capsule dropped";
-"payload.capsule.reloading" = "RELOADING…";
-"payload.capsule.recharge_progress" = "RELOAD %.0f%%";
+"payload.capsule.recharge_countdown" = "RELOAD %.1fs";
 
 // Thermal camera
 "payload.camera.thermal.palette" = "Palette";

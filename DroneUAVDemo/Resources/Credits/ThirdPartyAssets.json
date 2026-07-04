@@ -189,6 +189,24 @@
           "licenseName": "Creative Commons Attribution",
           "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
           "changes": "Imported as USDZ and used as the search-and-rescue target (the missing person) in the Flight Missions search scenario of DroneUAVDemo."
+      },
+      {
+          "id": "fire_truck_codexito",
+          "title": "Fire Truck",
+          "author": "codexito",
+          "sourceURL": "https://skfb.ly/KzqZ",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ and used as a static decorative fire-truck prop parked near the fire zone in the Fire Response mission of DroneUAVDemo."
+      },
+      {
+          "id": "flames_photon_that_one_larry",
+          "title": "flames",
+          "author": "photon (that one larry)",
+          "sourceURL": "https://skfb.ly/pAEAw",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ; a diffuse/emissive flame-sheet texture was extracted from it and used to drive the cross-billboard flame flipbook visual for burning trees in the Fire Response mission of DroneUAVDemo."
       }
   ]
 }

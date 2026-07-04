@@ -142,8 +142,7 @@
 "payload.capsule.remaining" = "КАПСУЛЫ %d";
 "payload.capsule.empty" = "Капсулы закончились";
 "payload.capsule.dropped_status" = "Капсула сброшена";
-"payload.capsule.reloading" = "ПЕРЕЗАРЯДКА…";
-"payload.capsule.recharge_progress" = "ЗАРЯДКА %.0f%%";
+"payload.capsule.recharge_countdown" = "ЗАРЯДКА %.1fс";
 
 // Тепловизионная камера
 "payload.camera.thermal.palette" = "Палитра";

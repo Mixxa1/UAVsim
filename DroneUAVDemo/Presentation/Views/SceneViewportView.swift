@@ -648,38 +648,40 @@ private struct HoseAimViewportOverlayView: View {
     }
 }
 
-/// Small always-visible ammo/rig status strip for the fire-capsule launcher, shown in every camera
-/// mode except the dedicated bombardier camera (which has its own, richer readout) — deliberately
-/// NOT a camera-viewfinder-style overlay (no corner frame, no crosshair) here, just a simple status
-/// readout, matching how a real ammo counter works.
+/// Small always-visible ammo/rig status panel for the fire-capsule launcher, shown in every camera
+/// mode except the dedicated bombardier camera (which has its own, richer readout). Styled to match
+/// the rest of the sim's instrument HUD (`CompactTelemetryHUDView`, `MissionScenarioHUDView`) —
+/// a plain dark panel with a thin border and small monospace text, not a bold colorful game-style
+/// ammo badge.
 private struct FireCapsuleStatusHUDView: View {
     let state: PayloadFireCapsuleState
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundStyle(state.remainingCapsules > 0 ? Color.white : Color.red.opacity(0.85))
+                .foregroundStyle(state.remainingCapsules > 0 ? GroundControlPalette.textPrimary : GroundControlPalette.danger)
 
             Text(LocalizedStringKey(state.capsuleSize.titleKey))
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.75))
+                .foregroundStyle(GroundControlPalette.textSecondary)
 
             Text(String(format: "%.0f m", state.capsuleSize.blastRadiusMeters))
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.orange.opacity(0.85))
+                .foregroundStyle(GroundControlPalette.textSecondary)
 
             if state.isRecharging {
-                Text(LocalizedStringKey("payload.capsule.reloading"))
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.yellow.opacity(0.9))
+                Text(String(
+                    format: NSLocalizedString("payload.capsule.recharge_countdown", comment: ""),
+                    state.rechargeSecondsRemaining
+                ))
+                .foregroundStyle(GroundControlPalette.warning)
             }
         }
-        .padding(.horizontal, 16)
+        .font(.caption.weight(.semibold).monospaced())
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.black.opacity(0.5), in: Capsule())
+        .background(Color.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
         )
     }
 }
@@ -690,7 +692,9 @@ private struct FireCapsuleStatusHUDView: View {
 /// overlays, there's no aim state to reflect (no yaw/pitch, no lock-on) — the crosshair is always
 /// exactly the true impact point, since the capsule's fall has zero forward-throw. This is the
 /// direct answer to "improve the capsule marker": a dedicated aiming view instead of only the
-/// ground-projected ring (which stays, visible from every other camera mode too).
+/// ground-projected ring (which stays, visible from every other camera mode too). The status
+/// readout at the bottom matches the sim's own instrument-panel look (see `FireCapsuleStatusHUDView`
+/// above), not a game-style HUD badge.
 private struct CapsuleBombardierOpticsOverlayView: View {
     let state: PayloadFireCapsuleState
 
@@ -702,14 +706,23 @@ private struct CapsuleBombardierOpticsOverlayView: View {
             let shortSide = min(geometry.size.width, geometry.size.height)
             let vignetteDiameter = shortSide * 0.92
             let rulerHalfWidth = shortSide * 0.32
+            let maxRadius = max(geometry.size.width, geometry.size.height) * 0.75
+            let edgeFraction = Double((vignetteDiameter / 2.0) / maxRadius)
 
             ZStack {
-                // Circular vignette: a stroked ring plus a radial darkening toward the frame edges.
+                // Circular vignette: fully clear inside the ring so the scene reads normally, then
+                // a quick ramp to near-opaque black right at the ring's edge and beyond — a real
+                // scope/binocular view, not just a soft darkening toward the corners.
                 RadialGradient(
-                    colors: [Color.clear, Color.black.opacity(0.55)],
+                    gradient: Gradient(stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: .clear, location: min(0.97, edgeFraction * 0.94)),
+                        .init(color: Color.black.opacity(0.97), location: min(0.985, edgeFraction * 1.06)),
+                        .init(color: Color.black.opacity(0.97), location: 1.0)
+                    ]),
                     center: .center,
-                    startRadius: vignetteDiameter * 0.32,
-                    endRadius: max(geometry.size.width, geometry.size.height) * 0.72
+                    startRadius: 0,
+                    endRadius: maxRadius
                 )
                 .allowsHitTesting(false)
 
@@ -744,32 +757,34 @@ private struct CapsuleBombardierOpticsOverlayView: View {
 
                 VStack {
                     Spacer()
-                    VStack(spacing: 6) {
-                        HStack(spacing: 14) {
-                            Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
-                                .foregroundStyle(state.remainingCapsules > 0 ? Color.white : Color.red.opacity(0.9))
-                            Text(LocalizedStringKey(state.capsuleSize.titleKey))
-                                .foregroundStyle(Color.white.opacity(0.75))
-                            Text(String(format: "%.0f m", state.capsuleSize.blastRadiusMeters))
-                                .foregroundStyle(Color.orange.opacity(0.85))
-                        }
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
+                            .foregroundStyle(state.remainingCapsules > 0 ? GroundControlPalette.textPrimary : GroundControlPalette.danger)
+                        Text(LocalizedStringKey(state.capsuleSize.titleKey))
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                        Text(String(format: "%.0f m", state.capsuleSize.blastRadiusMeters))
+                            .foregroundStyle(GroundControlPalette.textSecondary)
 
                         if state.isRecharging {
-                            VStack(spacing: 4) {
-                                Text(String(
-                                    format: NSLocalizedString("payload.capsule.recharge_progress", comment: ""),
-                                    state.rechargeProgress01 * 100.0
-                                ))
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.yellow.opacity(0.9))
+                            Text(String(
+                                format: NSLocalizedString("payload.capsule.recharge_countdown", comment: ""),
+                                state.rechargeSecondsRemaining
+                            ))
+                            .foregroundStyle(GroundControlPalette.warning)
 
-                                ProgressView(value: state.rechargeProgress01)
-                                    .frame(width: 160)
-                                    .tint(Color.yellow.opacity(0.85))
-                            }
+                            ProgressView(value: state.rechargeProgress01)
+                                .frame(width: 140)
+                                .tint(GroundControlPalette.warning)
                         }
                     }
+                    .font(.caption.weight(.semibold).monospaced())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+                    )
                     .padding(.bottom, 40)
                 }
             }

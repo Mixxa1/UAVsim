@@ -76,6 +76,7 @@ final class PayloadFireCapsuleController {
             rechargeAccumulatedSeconds = 0.0
             state.isRecharging = false
             state.rechargeProgress01 = 0.0
+            state.rechargeSecondsRemaining = 0.0
             return
         }
 
@@ -87,5 +88,6 @@ final class PayloadFireCapsuleController {
             pendingMissionSignals.append(.capsulesRecharged(remaining: state.remainingCapsules))
         }
         state.rechargeProgress01 = min(1.0, rechargeAccumulatedSeconds / secondsPerCapsule)
+        state.rechargeSecondsRemaining = max(0.0, secondsPerCapsule - rechargeAccumulatedSeconds)
     }
 }

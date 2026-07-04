@@ -13,6 +13,8 @@ struct PayloadFireCapsuleState: Codable, Equatable {
     var isRecharging: Bool
     /// 0...1 progress toward the next capsule while `isRecharging`.
     var rechargeProgress01: Double
+    /// Seconds remaining until the next capsule finishes loading, while `isRecharging`.
+    var rechargeSecondsRemaining: Double
 
     init(
         isAvailable: Bool = true,
@@ -21,7 +23,8 @@ struct PayloadFireCapsuleState: Codable, Equatable {
         remainingCapsules: Int = 2,
         feedLabel: String = "CAPSULES",
         isRecharging: Bool = false,
-        rechargeProgress01: Double = 0.0
+        rechargeProgress01: Double = 0.0,
+        rechargeSecondsRemaining: Double = 0.0
     ) {
         self.isAvailable = isAvailable
         self.isPowered = isPowered
@@ -30,5 +33,6 @@ struct PayloadFireCapsuleState: Codable, Equatable {
         self.feedLabel = feedLabel
         self.isRecharging = isRecharging
         self.rechargeProgress01 = rechargeProgress01
+        self.rechargeSecondsRemaining = rechargeSecondsRemaining
     }
 }
