@@ -761,7 +761,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 cameraLayoutKey: "drone.camera.fixed_front",
                 visualClass: .wingtraClass,
                 operationalCategory: .fixedWingVTOL,
-                airframeClass: .fixedWing,
+                airframeClass: .hybridVTOL,
                 airframeStyle: .tailsitterVTOL,
                 fixedWingParameters: FixedWingParameters(
                     family: .tailsitterVTOL,
@@ -787,7 +787,15 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.62,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 72.0, followDistance: 8.2, followHeight: 2.6),
-                collisionRadiusMeters: 0.34
+                collisionRadiusMeters: 0.34,
+                // Real tailsitter: props never tilt relative to the airframe
+                // (buildWingtraOneGenII's leftMotor/rightMotor, both fixed
+                // forward-facing) — the whole body pitches instead. Fixed
+                // .cruiseProp units, mount offsets match the visual rig.
+                propulsionUnitTemplate: [
+                    .cruiseProp(id: "wingtra_prop_left", mountOffset: SIMD3<Float>(-0.29, 0.060, 0.14)),
+                    .cruiseProp(id: "wingtra_prop_right", mountOffset: SIMD3<Float>(0.29, 0.060, 0.14))
+                ]
             )
         case .quantumSystemsTrinityPro:
             return RuntimeTuning(
@@ -803,7 +811,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 cameraLayoutKey: "drone.camera.fixed_front",
                 visualClass: .trinityClass,
                 operationalCategory: .fixedWingVTOL,
-                airframeClass: .fixedWing,
+                airframeClass: .hybridVTOL,
                 airframeStyle: .surveyEVTOL,
                 fixedWingParameters: FixedWingParameters(
                     family: .surveyEVTOL,
@@ -829,7 +837,20 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.58,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 9.4, followHeight: 3.0),
-                collisionRadiusMeters: 0.44
+                collisionRadiusMeters: 0.44,
+                // Trinity Pro renders through the same UAVVisualFactory rig as
+                // Wingcopter 198 (buildQuantumSystemsTrinityPro, shared 4-pod
+                // tiltPivot layout) — mirror its mount offsets exactly.
+                propulsionUnitTemplate: [
+                    .tiltRotor(id: "trinitypro_tilt_fl_upper", mountOffset: SIMD3<Float>(-0.52, 0.11, 0.12)),
+                    .tiltRotor(id: "trinitypro_tilt_fl_lower", mountOffset: SIMD3<Float>(-0.52, 0.08, 0.12)),
+                    .tiltRotor(id: "trinitypro_tilt_fr_upper", mountOffset: SIMD3<Float>(0.52, 0.11, 0.12)),
+                    .tiltRotor(id: "trinitypro_tilt_fr_lower", mountOffset: SIMD3<Float>(0.52, 0.08, 0.12)),
+                    .tiltRotor(id: "trinitypro_tilt_rl_upper", mountOffset: SIMD3<Float>(-0.52, 0.11, -0.14)),
+                    .tiltRotor(id: "trinitypro_tilt_rl_lower", mountOffset: SIMD3<Float>(-0.52, 0.08, -0.14)),
+                    .tiltRotor(id: "trinitypro_tilt_rr_upper", mountOffset: SIMD3<Float>(0.52, 0.11, -0.14)),
+                    .tiltRotor(id: "trinitypro_tilt_rr_lower", mountOffset: SIMD3<Float>(0.52, 0.08, -0.14))
+                ]
             )
         case .djiFlyCart30:
             return RuntimeTuning(
