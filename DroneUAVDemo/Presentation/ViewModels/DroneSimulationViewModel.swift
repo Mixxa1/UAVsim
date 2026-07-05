@@ -735,12 +735,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshActivityPolicy(now: TimeInterval) {
-        // TEMPORARY DEBUG OVERRIDE: force full-speed regardless of window focus/visibility, so
-        // switching to Xcode to inspect a frame-time regression doesn't ALSO throttle the sim via
-        // this exact mechanism — confounds the "did switching windows actually help" diagnostic.
-        // Revert to the real switch below once the render-time investigation is done.
-        let activity: RuntimeActivityState = .interacting
-        /*
+        let activity: RuntimeActivityState
         switch currentVisibilityState {
         case .minimized:       activity = .minimized
         case .hidden:          activity = .hidden
@@ -748,7 +743,6 @@ final class DroneSimulationViewModel: ObservableObject {
         case .activeVisible:
             activity = (now - lastUserInteractionAt < 1.0) ? .interacting : .activeIdle
         }
-        */
         let policy = RuntimePerformancePolicy(activity)
         guard policy != performancePolicy else { return }
         performancePolicy = policy
@@ -998,12 +992,6 @@ final class DroneSimulationViewModel: ObservableObject {
     private var collisionDebugAccumulator: Float = 0.0
     private var lastCollisionDebugEnabled: Bool = false
     private var autosaveAccumulator: Float = 0.0
-    // TEMPORARY DEBUG: throttles the unconditional [RenderBreakdown]/[TickAlive] prints to ~once a
-    // second instead of every tick, so the console stays readable while tracing a reported
-    // frame-time regression. Remove once root-caused.
-    private var renderBreakdownLogAccumulator: Float = 0.0
-    // TEMPORARY DEBUG: same throttle for the [PayloadCamBreakdown] sub-step print.
-    private var payloadCamBreakdownLogAccumulator: Float = 0.0
     private var onlineSnapshotSequenceNumber: UInt64 = 0
     private var lastOnlineSnapshotSentAt: TimeInterval = 0
     private var lastOnlineSnapshotCleanupAt: TimeInterval = 0
@@ -4412,18 +4400,6 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func tick() {
         let frameStart = CACurrentMediaTime()
-        // TEMPORARY DEBUG: coarse whole-tick lap buckets (pairs with the render-bracket
-        // [TickAlive] print at the end of this function) — the render bracket alone proved
-        // insufficient to localize a low-altitude/grounded frame-time regression. Remove together
-        // with that print once root-caused.
-        var tickLapT0 = frameStart
-        var msTickControl = 0.0, msTickPreCollision = 0.0, msTickPhysics = 0.0
-        var msTickPostCollision = 0.0, msTickGrounded = 0.0, msTickModes = 0.0
-        func tickLap(_ bucket: inout Double) {
-            let now = CACurrentMediaTime()
-            bucket = (now - tickLapT0) * 1000.0
-            tickLapT0 = now
-        }
         let now = CACurrentMediaTime()
 
         // v1.4.6: drive interacting → activeIdle transition (key window, no input for 1 s).
@@ -4564,7 +4540,6 @@ final class DroneSimulationViewModel: ObservableObject {
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
 
         _ = updateFleetStatus(deltaTime: dt)
-        tickLap(&msTickControl)
 
         let collisionCandidateRadius = collisionService.spatialQueryRadius
         let prePhysicsCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
@@ -4585,7 +4560,6 @@ final class DroneSimulationViewModel: ObservableObject {
         collisionAnalysis = prePhysicsCollisionAnalysis
 
         handleAutoCollisionInterventions()
-        tickLap(&msTickPreCollision)
 
         let control = buildControlInput(from: controlValues)
         let context = DroneSimulationContext(
@@ -4611,7 +4585,6 @@ final class DroneSimulationViewModel: ObservableObject {
         applySupportSurfaceConstraint(previousState: previousState)
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
-        tickLap(&msTickPhysics)
 
         let postPhysicsCollisionAnalysis: CollisionAnalysisSnapshot
         let sweptCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
@@ -4695,10 +4668,8 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
-        tickLap(&msTickPostCollision)
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         applyGroundedSafetyIfNeeded(deltaTime: dt)
-        tickLap(&msTickGrounded)
 
         #if DEBUG
         // Launch detector: a sudden upward position jump with low vertical velocity is a teleport
@@ -4768,21 +4739,10 @@ final class DroneSimulationViewModel: ObservableObject {
         applyMissionSafetyRuntimeIfNeeded()
         sampleMissionObservationIfNeeded()
         updateThunderstormLightning(deltaTime: dt)
-        tickLap(&msTickModes)
 
         let renderStart = CACurrentMediaTime()
-        var t0 = renderStart
-        var msApplyWeather = 0.0, msSceneUpdate = 0.0, msFleetWingmen = 0.0, msCompass = 0.0
-        var msPayloadCameraStatus = 0.0, msPayloadLifecycle = 0.0, msMissionScenario = 0.0
-        var msFireResponse = 0.0, msOnlineSnapshot = 0.0
-        func lap(_ bucket: inout Double) {
-            let now = CACurrentMediaTime()
-            bucket = (now - t0) * 1000.0
-            t0 = now
-        }
         if !performancePolicy.stopRendering {
             sceneController.applyWeatherVisual(weather)
-            lap(&msApplyWeather)
             sceneController.update(
                 with: state,
                 camera: cameraConfiguration,
@@ -4791,37 +4751,20 @@ final class DroneSimulationViewModel: ObservableObject {
                 diagnosticMode: diagnosticMode,
                 deltaTime: dt
             )
-            lap(&msSceneUpdate)
             sceneController.updateFleetWingmen(
                 wingmen,
                 profile: selectedDroneProfile,
                 throttle: state.throttle,
                 deltaTime: dt
             )
-            lap(&msFleetWingmen)
         }
         refreshCompassOverlay()
-        lap(&msCompass)
         refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
-        lap(&msPayloadCameraStatus)
         syncPayloadLifecycleEvents()
-        lap(&msPayloadLifecycle)
         updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
-        lap(&msMissionScenario)
         updateFireResponseRuntime(deltaTime: TimeInterval(dt))
-        lap(&msFireResponse)
         publishOnlineVehicleSnapshotIfNeeded(now: now)
-        lap(&msOnlineSnapshot)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
-        // TEMPORARY DEBUG: unconditional (no #if DEBUG, no threshold) whole-tick breakdown,
-        // throttled to ~once/sec via renderBreakdownLogAccumulator; the actual print sits at the
-        // very end of tick() so it also covers the diagnostics/telemetry tail. Remove once
-        // root-caused.
-        renderBreakdownLogAccumulator += dt
-        let shouldPrintTickAlive = renderBreakdownLogAccumulator >= 1.0
-        if shouldPrintTickAlive {
-            renderBreakdownLogAccumulator = 0.0
-        }
 
         collisionDebugAccumulator += dt
         let collisionDebugStateChanged = (lastCollisionDebugEnabled != collisionDebugEnabled)
@@ -4897,22 +4840,6 @@ final class DroneSimulationViewModel: ObservableObject {
         if autosaveAccumulator >= 6.0 {
             performAutosaveIfNeeded()
             autosaveAccumulator = 0.0
-        }
-
-        if shouldPrintTickAlive {
-            let frameMs = (CACurrentMediaTime() - frameStart) * 1000.0
-            let tailMs = (CACurrentMediaTime() - renderStart) * 1000.0 - renderTimeMs
-            print(String(
-                format: "[TickAlive] tick=%d frame=%.2fms ctl=%.2f preCol=%.2f phys=%.2f " +
-                    "postCol=%.2f grounded=%.2f modes=%.2f render=%.2f tail=%.2f | " +
-                    "weather=%.2f sceneUpdate=%.2f fleet=%.2f compass=%.2f payloadCam=%.2f " +
-                    "payloadLifecycle=%.2f missionScenario=%.2f fireResponse=%.2f onlineSnapshot=%.2f",
-                simulationTickCounter, frameMs,
-                msTickControl, msTickPreCollision, msTickPhysics,
-                msTickPostCollision, msTickGrounded, msTickModes, renderTimeMs, tailMs,
-                msApplyWeather, msSceneUpdate, msFleetWingmen, msCompass, msPayloadCameraStatus,
-                msPayloadLifecycle, msMissionScenario, msFireResponse, msOnlineSnapshot
-            ))
         }
     }
 
@@ -7496,20 +7423,6 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshPayloadCameraStatus(deltaTime: TimeInterval = 0.0) {
-        // TEMPORARY DEBUG: sub-step laps — the whole-tick [TickAlive] print pinned a constant
-        // ~33ms on this function even AFTER its raycast was replaced with pure analytic math,
-        // which smells like a lock wait (e.g. first `.presentation` read of the tick syncing
-        // against SceneKit's render thread), not computation. Remove with the other temp prints.
-        let dbgStart = CACurrentMediaTime()
-        var dbgT0 = dbgStart
-        var dbgAvail = 0.0, dbgTargetDist = 0.0, dbgOptics = 0.0, dbgPublish = 0.0
-        var dbgSceneSync = 0.0, dbgRangefinder = 0.0, dbgHose = 0.0, dbgCapsule = 0.0
-        var dbgFlightDiag = 0.0
-        func dbgLap(_ bucket: inout Double) {
-            let now = CACurrentMediaTime()
-            bucket = (now - dbgT0) * 1000.0
-            dbgT0 = now
-        }
         if !isMountedPayloadCameraAvailable {
             previousPayloadCameraVelocity = nil
             previousPayloadCameraAngularVelocity = nil
@@ -7519,9 +7432,7 @@ final class DroneSimulationViewModel: ObservableObject {
             isPowered: isMountedPayloadCameraAvailable,
             feedLabel: payloadCameraFeedLabel
         )
-        dbgLap(&dbgAvail)
         let targetDistance = sceneController.payloadCameraTargetDistance(maxDistance: 500.0)
-        dbgLap(&dbgTargetDist)
         let linearSpeed = Double(simd_length(state.velocity))
         let angularSpeed = Double(simd_length(state.angularVelocity))
         let linearAcceleration: Double
@@ -7574,9 +7485,7 @@ final class DroneSimulationViewModel: ObservableObject {
             platformStability: platformStability,
             motionDisturbance: motionDisturbance
         )
-        dbgLap(&dbgOptics)
         publishPayloadCameraOpticsState()
-        dbgLap(&dbgPublish)
         previousPayloadCameraVelocity = state.velocity
         previousPayloadCameraAngularVelocity = state.angularVelocity
 
@@ -7598,27 +7507,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
             }
         }
-        dbgLap(&dbgSceneSync)
         refreshRangefinderStatus()
-        dbgLap(&dbgRangefinder)
         refreshHoseAimStatus()
-        dbgLap(&dbgHose)
         refreshCapsuleLauncherStatus(deltaTime: deltaTime)
-        dbgLap(&dbgCapsule)
         refreshFlightControlDiagnostics()
-        dbgLap(&dbgFlightDiag)
-
-        let dbgTotalMs = (CACurrentMediaTime() - dbgStart) * 1000.0
-        payloadCamBreakdownLogAccumulator += Float(deltaTime)
-        if dbgTotalMs > 8.0, payloadCamBreakdownLogAccumulator >= 1.0 {
-            payloadCamBreakdownLogAccumulator = 0.0
-            print(String(
-                format: "[PayloadCamBreakdown] total=%.2fms avail=%.2f targetDist=%.2f optics=%.2f " +
-                    "publish=%.2f sceneSync=%.2f rangefinder=%.2f hose=%.2f capsule=%.2f flightDiag=%.2f",
-                dbgTotalMs, dbgAvail, dbgTargetDist, dbgOptics,
-                dbgPublish, dbgSceneSync, dbgRangefinder, dbgHose, dbgCapsule, dbgFlightDiag
-            ))
-        }
     }
 
     /// No aim/raycast needed at all (unlike the hose) — the launcher just needs to know it's
