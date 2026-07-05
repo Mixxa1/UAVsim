@@ -764,9 +764,11 @@ final class DroneSceneController {
 
     private func thermalCenterProbe() -> (cls: ThermalMaterialClass, temp: Double, name: String?)? {
         guard let renderer = thermalRenderer, let payloadCameraNode else { return nil }
-        let origin = payloadCameraNode.presentation.simdWorldPosition
+        // Model transform, not `.presentation` — see `payloadCameraTargetDistance` (render-thread
+        // scene-lock stall avoidance).
+        let origin = payloadCameraNode.simdWorldPosition
         let forward = simd_normalize(simd_act(
-            simd_quatf(payloadCameraNode.presentation.simdWorldTransform),
+            simd_quatf(payloadCameraNode.simdWorldTransform),
             SIMD3<Float>(0.0, 0.0, -1.0)
         ))
         guard simd_length_squared(forward) > 0.000001 else { return nil }
@@ -1294,6 +1296,213 @@ final class DroneSceneController {
         )
     }
 
+    // MARK: - Analytic environment raycast
+
+    /// First hit along a ray against the environment's analytic collision catalog
+    /// (`environmentObstacles`: tree trunk/canopy boxes, building boxes/meshes, fire-truck box…)
+    /// plus the flat ground plane.
+    ///
+    /// This deliberately replaces SceneKit's `hitTestWithSegment` for the per-tick payload-camera/
+    /// rangefinder/hose-nozzle distance queries: the render-scene hit test has to triangle-test
+    /// every high-poly USDZ pine whose bounds the segment touches, measured at ~33ms per call
+    /// through dense forest (the direct cause of the reported sim-wide FPS degradation — and
+    /// `.closest` instead of `.all` did NOT fix it, SceneKit still visits every candidate).
+    /// An analytic pass over the same proxies the flight model collides with costs microseconds.
+    ///
+    /// Trade-off: the ray sees collision proxies, not render meshes — non-collidable decorations
+    /// (e.g. the SAR mannequin) are invisible to it, and a tree reads as its trunk/canopy boxes.
+    /// That's the same world the drone physically flies against, so HUD distance readouts stay
+    /// consistent with collision behavior.
+    private func analyticEnvironmentRayHit(
+        origin: SIMD3<Float>,
+        direction: SIMD3<Float>,
+        maxDistance: Float
+    ) -> (distance: Float, obstacleID: UUID?)? {
+        guard maxDistance > 0.0, simd_length_squared(direction) > 0.000001 else { return nil }
+        let dir = simd_normalize(direction)
+        var bestDistance = maxDistance
+        var bestObstacleID: UUID?
+        var hasHit = false
+
+        // Flat ground plane — same reference height the payload drop camera uses. Model position
+        // (not `.presentation`): the ground never animates, so they're equal, but the model read
+        // avoids the render-thread scene-lock sync `.presentation` forces.
+        let groundY = max(Float(groundNode.position.y), 0.0)
+        if dir.y < -0.0001 {
+            let t = (groundY - origin.y) / dir.y
+            if t > 0.0001, t < bestDistance {
+                bestDistance = t
+                bestObstacleID = nil
+                hasHit = true
+            }
+        }
+
+        for obstacle in environmentObstacles {
+            // Bounding-sphere reject before any narrow-phase math.
+            let halfHeight = (obstacle.topY - obstacle.baseY) * 0.5
+            let boundsCenter = SIMD3<Float>(
+                obstacle.center.x,
+                (obstacle.baseY + obstacle.topY) * 0.5,
+                obstacle.center.z
+            )
+            let boundsRadius = sqrt(obstacle.radius * obstacle.radius + halfHeight * halfHeight)
+            let toCenter = boundsCenter - origin
+            let projection = simd_dot(toCenter, dir)
+            if projection < -boundsRadius || projection - boundsRadius > bestDistance { continue }
+            if simd_length_squared(toCenter) - projection * projection > boundsRadius * boundsRadius {
+                continue
+            }
+
+            let hit: Float?
+            if let triangles = obstacle.meshTriangles, !triangles.isEmpty {
+                hit = rayMeshDistance(
+                    origin: origin,
+                    direction: dir,
+                    maxDistance: bestDistance,
+                    triangles: triangles
+                )
+            } else if let halfExtents = obstacle.planarHalfExtents {
+                hit = rayBoxDistance(
+                    origin: origin,
+                    direction: dir,
+                    obstacle: obstacle,
+                    halfExtents: halfExtents
+                )
+            } else {
+                hit = rayCylinderDistance(origin: origin, direction: dir, obstacle: obstacle)
+            }
+            if let hit, hit < bestDistance {
+                bestDistance = hit
+                bestObstacleID = obstacle.id
+                hasHit = true
+            }
+        }
+
+        return hasHit ? (bestDistance, bestObstacleID) : nil
+    }
+
+    /// Slab test against an upright yaw-rotated box (rotation convention matches
+    /// `CollisionObstacle.rotate`/`rotatePlanar`). Returns entry distance, or nil when the ray
+    /// misses or starts inside (no meaningful "distance to" reading from inside a proxy).
+    private func rayBoxDistance(
+        origin: SIMD3<Float>,
+        direction dir: SIMD3<Float>,
+        obstacle: CollisionObstacle,
+        halfExtents: SIMD2<Float>
+    ) -> Float? {
+        let localOrigin = rotatePlanar(
+            SIMD2<Float>(origin.x - obstacle.center.x, origin.z - obstacle.center.z),
+            radians: -obstacle.yawRadians
+        )
+        let localDir = rotatePlanar(SIMD2<Float>(dir.x, dir.z), radians: -obstacle.yawRadians)
+
+        var tMin: Float = 0.0
+        var tMax = Float.greatestFiniteMagnitude
+
+        func clipSlab(originC: Float, dirC: Float, minC: Float, maxC: Float) -> Bool {
+            if abs(dirC) < 0.000001 {
+                return originC >= minC && originC <= maxC
+            }
+            let inverse = 1.0 / dirC
+            var t1 = (minC - originC) * inverse
+            var t2 = (maxC - originC) * inverse
+            if t1 > t2 { swap(&t1, &t2) }
+            tMin = max(tMin, t1)
+            tMax = min(tMax, t2)
+            return tMin <= tMax
+        }
+
+        guard clipSlab(originC: localOrigin.x, dirC: localDir.x, minC: -halfExtents.x, maxC: halfExtents.x),
+              clipSlab(originC: localOrigin.y, dirC: localDir.y, minC: -halfExtents.y, maxC: halfExtents.y),
+              clipSlab(originC: origin.y, dirC: dir.y, minC: obstacle.baseY, maxC: obstacle.topY) else {
+            return nil
+        }
+        return tMin > 0.0001 ? tMin : nil
+    }
+
+    /// Capped-vertical-cylinder intersection (the default proxy shape for obstacles without
+    /// explicit box extents or mesh triangles). Same inside-start semantics as `rayBoxDistance`.
+    private func rayCylinderDistance(
+        origin: SIMD3<Float>,
+        direction dir: SIMD3<Float>,
+        obstacle: CollisionObstacle
+    ) -> Float? {
+        var tMin: Float = 0.0
+        var tMax = Float.greatestFiniteMagnitude
+
+        if abs(dir.y) < 0.000001 {
+            if origin.y < obstacle.baseY || origin.y > obstacle.topY { return nil }
+        } else {
+            let inverse = 1.0 / dir.y
+            var t1 = (obstacle.baseY - origin.y) * inverse
+            var t2 = (obstacle.topY - origin.y) * inverse
+            if t1 > t2 { swap(&t1, &t2) }
+            tMin = max(tMin, t1)
+            tMax = min(tMax, t2)
+            if tMin > tMax { return nil }
+        }
+
+        let offsetX = origin.x - obstacle.center.x
+        let offsetZ = origin.z - obstacle.center.z
+        let planarA = dir.x * dir.x + dir.z * dir.z
+        if planarA < 0.00000001 {
+            if offsetX * offsetX + offsetZ * offsetZ > obstacle.radius * obstacle.radius {
+                return nil
+            }
+        } else {
+            let planarB = 2.0 * (offsetX * dir.x + offsetZ * dir.z)
+            let planarC = offsetX * offsetX + offsetZ * offsetZ - obstacle.radius * obstacle.radius
+            let discriminant = planarB * planarB - 4.0 * planarA * planarC
+            if discriminant < 0.0 { return nil }
+            let sqrtDiscriminant = sqrt(discriminant)
+            var t1 = (-planarB - sqrtDiscriminant) / (2.0 * planarA)
+            var t2 = (-planarB + sqrtDiscriminant) / (2.0 * planarA)
+            if t1 > t2 { swap(&t1, &t2) }
+            tMin = max(tMin, t1)
+            tMax = min(tMax, t2)
+            if tMin > tMax { return nil }
+        }
+
+        return tMin > 0.0001 ? tMin : nil
+    }
+
+    /// Möller–Trumbore over an obstacle's mesh triangles (no backface culling — matches the old
+    /// hit test's `backFaceCulling: false`), with each triangle's stored AABB as a prefilter.
+    private func rayMeshDistance(
+        origin: SIMD3<Float>,
+        direction dir: SIMD3<Float>,
+        maxDistance: Float,
+        triangles: [CollisionMeshTriangle]
+    ) -> Float? {
+        var best: Float?
+        let end = origin + dir * maxDistance
+        let segmentMin = simd_min(origin, end)
+        let segmentMax = simd_max(origin, end)
+
+        for triangle in triangles {
+            if triangle.maximum.x < segmentMin.x || triangle.minimum.x > segmentMax.x ||
+                triangle.maximum.y < segmentMin.y || triangle.minimum.y > segmentMax.y ||
+                triangle.maximum.z < segmentMin.z || triangle.minimum.z > segmentMax.z {
+                continue
+            }
+            let edge1 = triangle.point1 - triangle.point0
+            let edge2 = triangle.point2 - triangle.point0
+            let pVector = simd_cross(dir, edge2)
+            let determinant = simd_dot(edge1, pVector)
+            if abs(determinant) < 0.0000001 { continue }
+            let inverseDeterminant = 1.0 / determinant
+            let tVector = origin - triangle.point0
+            let u = simd_dot(tVector, pVector) * inverseDeterminant
+            if u < 0.0 || u > 1.0 { continue }
+            let qVector = simd_cross(tVector, edge1)
+            let v = simd_dot(dir, qVector) * inverseDeterminant
+            if v < 0.0 || u + v > 1.0 { continue }
+            let t = simd_dot(edge2, qVector) * inverseDeterminant
+            if t > 0.0001, t < (best ?? maxDistance) { best = t }
+        }
+        return best
+    }
+
     func payloadCameraTargetDistance(maxDistance: Double) -> Double? {
         guard payloadCameraOpticsState.isAvailable,
               payloadCameraOpticsState.isPowered,
@@ -1301,9 +1510,15 @@ final class DroneSceneController {
             return nil
         }
 
-        let origin = payloadCameraNode.presentation.simdWorldPosition
+        // Model transform, NOT `.presentation`: reading `.presentation` from the main thread
+        // blocks on SceneKit's scene lock, which the render thread holds for most of each frame
+        // while drawing the dense forest — measured at ~16ms (one full frame) per call. The rig
+        // is kinematic and we set the drone/rig transform ourselves earlier in this same tick
+        // (`update(with:...)`), so the model transform here is both stall-free AND more current
+        // than the render thread's last-presented copy.
+        let origin = payloadCameraNode.simdWorldPosition
         let forward = simd_normalize(simd_act(
-            simd_quatf(payloadCameraNode.presentation.simdWorldTransform),
+            simd_quatf(payloadCameraNode.simdWorldTransform),
             SIMD3<Float>(0.0, 0.0, -1.0)
         ))
         guard simd_length_squared(forward) > 0.000001 else {
@@ -1311,30 +1526,14 @@ final class DroneSceneController {
         }
 
         let distanceLimit = max(1.0, Float(maxDistance))
-        let end = origin + forward * distanceLimit
-        let results = scene.rootNode.hitTestWithSegment(
-            from: SCNVector3(origin.x, origin.y, origin.z),
-            to: SCNVector3(end.x, end.y, end.z),
-            options: [
-                SCNHitTestOption.backFaceCulling.rawValue: false,
-                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue
-            ]
-        )
-
-        for result in results {
-            if isDescendant(result.node, of: droneNode) || isDescendant(result.node, of: payloadCameraRigNode) {
-                continue
-            }
-
-            let hit = SIMD3<Float>(
-                Float(result.worldCoordinates.x),
-                Float(result.worldCoordinates.y),
-                Float(result.worldCoordinates.z)
-            )
-            return Double(simd_distance(origin, hit))
+        guard let hit = analyticEnvironmentRayHit(
+            origin: origin,
+            direction: forward,
+            maxDistance: distanceLimit
+        ) else {
+            return nil
         }
-
-        return nil
+        return Double(hit.distance)
     }
 
     func attachPayloadVisual(_ configuration: PayloadConfiguration) {
@@ -2760,9 +2959,12 @@ final class DroneSceneController {
         }
         ensureRangefinderRig()
 
-        let origin = rangefinderPitchNode.presentation.simdWorldPosition
+        // Model transform, not `.presentation` — see `payloadCameraTargetDistance` for why
+        // (avoids a ~16ms render-thread scene-lock stall; gimbal euler angles were just set above
+        // this same tick, so model is the current pose).
+        let origin = rangefinderPitchNode.simdWorldPosition
         let forward = simd_normalize(simd_act(
-            simd_quatf(rangefinderPitchNode.presentation.simdWorldTransform),
+            simd_quatf(rangefinderPitchNode.simdWorldTransform),
             SIMD3<Float>(0.0, 0.0, -1.0)
         ))
         guard simd_length_squared(forward) > 0.000001 else {
@@ -2770,30 +2972,14 @@ final class DroneSceneController {
         }
 
         let distanceLimit = max(1.0, Float(maxDistance))
-        let end = origin + forward * distanceLimit
-        let results = scene.rootNode.hitTestWithSegment(
-            from: SCNVector3(origin.x, origin.y, origin.z),
-            to: SCNVector3(end.x, end.y, end.z),
-            options: [
-                SCNHitTestOption.backFaceCulling.rawValue: false,
-                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue
-            ]
-        )
-
-        for result in results {
-            if isDescendant(result.node, of: droneNode) || isDescendant(result.node, of: rangefinderRigNode) {
-                continue
-            }
-
-            let hit = SIMD3<Float>(
-                Float(result.worldCoordinates.x),
-                Float(result.worldCoordinates.y),
-                Float(result.worldCoordinates.z)
-            )
-            return Double(simd_distance(origin, hit))
+        guard let hit = analyticEnvironmentRayHit(
+            origin: origin,
+            direction: forward,
+            maxDistance: distanceLimit
+        ) else {
+            return nil
         }
-
-        return nil
+        return Double(hit.distance)
     }
 
     func updateRangefinderBeam(state: PayloadRangefinderOpticsState) {
@@ -2864,11 +3050,15 @@ final class DroneSceneController {
             hoseCamera = camera
         }
 
+        // Deliberately created WITHOUT particle systems attached — same "hidden but still
+        // simulating" cost as the fire flipbook/smoke fix above applies here too: these ran at
+        // birthRate 300/70 continuously in the background for the entire mission whenever a hose
+        // is mounted, even while not spraying (the vast majority of the time). Attached/removed
+        // on the actual spray-state transition instead, see `updateHoseAimAndSpray`/`hideHoseSprayVisual`.
         if hoseStreamNode == nil {
             let node = SCNNode()
             node.name = "hoseStreamNode"
             node.simdPosition = SIMD3<Float>(0.0, 0.0, -0.4)
-            node.addParticleSystem(FireVisualAssetLoader.shared.makeFoamStreamParticleSystem())
             node.isHidden = true
             hosePitchNode.addChildNode(node)
             hoseStreamNode = node
@@ -2877,7 +3067,6 @@ final class DroneSceneController {
         if hoseImpactNode == nil {
             let node = SCNNode()
             node.name = "hoseImpactNode"
-            node.addParticleSystem(FireVisualAssetLoader.shared.makeFoamImpactParticleSystem())
             node.isHidden = true
             hosePitchNode.addChildNode(node)
             hoseImpactNode = node
@@ -2920,29 +3109,30 @@ final class DroneSceneController {
     /// Common raycast along the hose nozzle's current aim direction, out to its fixed spray-throw
     /// distance (nozzle pump pressure, not hose length). Shared by the suppression-target lookup
     /// and the visible foam stream, so both always agree on where the nozzle is actually pointing.
-    private func hoseAimRaycast() -> (origin: SIMD3<Float>, forward: SIMD3<Float>, results: [SCNHitTestResult])? {
+    /// Analytic (`analyticEnvironmentRayHit`), not a SceneKit hit test — see that function's note.
+    private func hoseAimRaycast() -> (
+        origin: SIMD3<Float>,
+        forward: SIMD3<Float>,
+        hitDistance: Float?,
+        hitObstacleID: UUID?
+    )? {
         guard hoseOpticsState.isAvailable, hoseOpticsState.isPowered else { return nil }
         ensureHoseRig()
 
-        let origin = hosePitchNode.presentation.simdWorldPosition
+        // Model transform, not `.presentation` — see `payloadCameraTargetDistance` for why
+        // (avoids a ~16ms render-thread scene-lock stall).
+        let origin = hosePitchNode.simdWorldPosition
         let forward = simd_normalize(simd_act(
-            simd_quatf(hosePitchNode.presentation.simdWorldTransform),
+            simd_quatf(hosePitchNode.simdWorldTransform),
             SIMD3<Float>(0.0, 0.0, -1.0)
         ))
         guard simd_length_squared(forward) > 0.000001 else { return nil }
 
         let reach = max(1.0, Float(hoseOpticsState.nozzleThrowMeters))
-        let end = origin + forward * reach
-        let results = scene.rootNode.hitTestWithSegment(
-            from: SCNVector3(origin.x, origin.y, origin.z),
-            to: SCNVector3(end.x, end.y, end.z),
-            options: [
-                SCNHitTestOption.backFaceCulling.rawValue: false,
-                SCNHitTestOption.searchMode.rawValue: SCNHitTestSearchMode.all.rawValue
-            ]
-        ).filter { !isDescendant($0.node, of: droneNode) && !isDescendant($0.node, of: hoseRigNode) }
-
-        return (origin, forward, results)
+        if let hit = analyticEnvironmentRayHit(origin: origin, direction: forward, maxDistance: reach) {
+            return (origin, forward, hit.distance, hit.obstacleID)
+        }
+        return (origin, forward, nil, nil)
     }
 
     /// Single per-tick nozzle raycast, shared by the suppression-target lookup and the visible
@@ -2958,36 +3148,40 @@ final class DroneSceneController {
     func updateHoseAimAndSpray(fireTreeNodes: [SCNNode], isSpraying: Bool) -> Int? {
         ensureHoseRig()
         guard let hit = hoseAimRaycast() else {
-            hoseStreamNode?.isHidden = true
-            hoseImpactNode?.isHidden = true
+            hideHoseSprayVisual()
             return nil
         }
 
-        let aimedIndex: Int? = fireTreeNodes.isEmpty
-            ? nil
-            : hit.results.first.flatMap { first in
-                fireTreeNodes.firstIndex { isDescendant(first.node, of: $0) }
-            }
+        // The analytic hit reports the obstacle it struck; fire trees registered their collision
+        // proxies with `obstacleMap[id] = tree` in `spawnFireResponseScenario`, where `tree` is
+        // the exact node stored in `fireTreeNodes` — so owner-identity lookup replaces the old
+        // hit-node-descendant walk.
+        let aimedIndex: Int? = hit.hitObstacleID.flatMap { obstacleID in
+            guard let ownerNode = obstacleMap[obstacleID] else { return nil }
+            return fireTreeNodes.firstIndex { $0 === ownerNode }
+        }
 
         guard isSpraying, let stream = hoseStreamNode, let impact = hoseImpactNode else {
-            hoseStreamNode?.isHidden = true
-            hoseImpactNode?.isHidden = true
+            hideHoseSprayVisual()
             return aimedIndex
         }
 
         let endpoint: SIMD3<Float>
-        if let first = hit.results.first {
-            endpoint = SIMD3<Float>(
-                Float(first.worldCoordinates.x),
-                Float(first.worldCoordinates.y),
-                Float(first.worldCoordinates.z)
-            )
+        if let hitDistance = hit.hitDistance {
+            endpoint = hit.origin + hit.forward * hitDistance
         } else {
             let reach = max(1.0, Float(hoseOpticsState.nozzleThrowMeters))
             endpoint = hit.origin + hit.forward * reach
         }
 
         let distance = max(0.3, simd_distance(hit.origin, endpoint))
+
+        if stream.particleSystems?.isEmpty ?? true {
+            stream.addParticleSystem(FireVisualAssetLoader.shared.makeFoamStreamParticleSystem())
+        }
+        if impact.particleSystems?.isEmpty ?? true {
+            impact.addParticleSystem(FireVisualAssetLoader.shared.makeFoamImpactParticleSystem())
+        }
 
         stream.isHidden = false
         impact.isHidden = false
@@ -3005,12 +3199,29 @@ final class DroneSceneController {
     }
 
     /// Cheap fallback for ticks that skip the raycast entirely (see
-    /// `DroneSimulationViewModel.refreshHoseAimStatus`) — just hides the spray visuals without
-    /// touching the scene graph otherwise, so a stream that was visible on a previous tick doesn't
-    /// stay stuck on-screen once spraying/viewing the hose optics stops.
+    /// `DroneSimulationViewModel.refreshHoseAimStatus`) — hides the spray visuals AND detaches
+    /// their particle systems (not just `isHidden`, which only skips drawing — a `loops = true`
+    /// particle system keeps emitting/simulating in the background otherwise, a constant tax for
+    /// the whole mission whenever a hose is mounted, not just while actively spraying) so a stream
+    /// that was visible on a previous tick doesn't stay stuck on-screen, and doesn't keep costing
+    /// anything, once spraying/viewing the hose optics stops.
+    ///
+    /// Called every non-spraying/non-viewing tick (i.e. nearly always, for the whole mission,
+    /// whenever a hose is mounted) — so `removeAllParticleSystems()` must be skipped once already
+    /// empty. That call mutates the render scene graph, which (measured directly: a constant
+    /// ~16ms/tick, exactly one frame at 60Hz) blocks the main thread on the render thread's scene
+    /// lock while it's busy drawing dense forest, same class of stall as reading `.presentation`
+    /// from the main thread. Guarding it turns a per-tick cost into a one-time cost at the actual
+    /// stop-spraying transition.
     func hideHoseSprayVisual() {
         hoseStreamNode?.isHidden = true
         hoseImpactNode?.isHidden = true
+        if hoseStreamNode?.particleSystems?.isEmpty == false {
+            hoseStreamNode?.removeAllParticleSystems()
+        }
+        if hoseImpactNode?.particleSystems?.isEmpty == false {
+            hoseImpactNode?.removeAllParticleSystems()
+        }
     }
 
     private func stabilizedPayloadCameraEuler(for droneState: DroneState) -> SIMD3<Float> {
@@ -4197,6 +4408,25 @@ final class DroneSceneController {
             let flame = index < fireTreeFlameNodes.count ? fireTreeFlameNodes[index] : nil
             let smoke = index < fireTreeSmokeNodes.count ? fireTreeSmokeNodes[index] : nil
 
+            // The flame's flipbook `SCNAction` and the smoke's particle system both keep costing a
+            // constant per-frame tax across the WHOLE tree pool (up to 13 trees at hard difficulty)
+            // for the entire mission if simply left running/attached behind `isHidden` — hidden only
+            // skips drawing, not action evaluation or particle simulation. Start/stop them only on
+            // the actual burning-state transition (not every tick) so the cost only exists for trees
+            // that are actually alight right now.
+            let isBurningNow: Bool
+            if case .burning = status { isBurningNow = true } else { isBurningNow = false }
+            let wasBurningBefore: Bool
+            if case .burning = previousStatus { wasBurningBefore = true } else { wasBurningBefore = false }
+            if isBurningNow != wasBurningBefore {
+                if let flame {
+                    FireVisualAssetLoader.shared.setFlameAnimating(flame, isAnimating: isBurningNow)
+                }
+                if let smoke {
+                    FireVisualAssetLoader.shared.setSmokeActive(smoke, isActive: isBurningNow)
+                }
+            }
+
             switch status {
             case .unburned:
                 flame?.isHidden = true
@@ -4331,9 +4561,11 @@ final class DroneSceneController {
         guard let cameraNode = payloadCameraNode, missionTargetNode != nil else {
             return nil
         }
-        let presentation = cameraNode.presentation
-        let camPos = presentation.simdWorldPosition
-        let worldTransform = presentation.simdWorldTransform
+        // Model transform, not `.presentation` — see `payloadCameraTargetDistance` for why
+        // (avoids a ~16ms render-thread scene-lock stall; this runs every tick a SAR target is in
+        // the camera's range/cone gate).
+        let camPos = cameraNode.simdWorldPosition
+        let worldTransform = cameraNode.simdWorldTransform
         // SceneKit cameras look down their local -Z axis.
         let forwardColumn = SIMD3<Float>(
             worldTransform.columns.2.x,
@@ -4371,29 +4603,23 @@ final class DroneSceneController {
         )
     }
 
+    /// Analytic occlusion check against the collision catalog (see `analyticEnvironmentRayHit`).
+    /// This fires every tick while the target sits inside the camera's range/cone gate — exactly
+    /// the "climbed high enough to see the search sector" moment — so the SceneKit hit test it
+    /// replaces (which had no searchMode option at all, i.e. the exhaustive default) was itself a
+    /// 30ms-class per-tick cost the instant detection became possible. The mannequin and the
+    /// drone aren't in the obstacle catalog, so the old self-hit filtering is unnecessary.
     private func isLineOfSightClearToMissionTarget(from: SIMD3<Float>, to: SIMD3<Float>) -> Bool {
-        let results = scene.rootNode.hitTestWithSegment(
-            from: SCNVector3(from.x, from.y, from.z),
-            to: SCNVector3(to.x, to.y, to.z),
-            options: [
-                SCNHitTestOption.backFaceCulling.rawValue: false,
-                SCNHitTestOption.ignoreHiddenNodes.rawValue: true
-            ]
-        )
         let targetDistance = simd_distance(from, to)
-        for result in results {
-            if nodeIsDescendant(result.node, of: missionTargetNode) { continue }
-            if nodeIsDescendant(result.node, of: droneNode) { continue }
-            let hit = SIMD3<Float>(
-                Float(result.worldCoordinates.x),
-                Float(result.worldCoordinates.y),
-                Float(result.worldCoordinates.z)
-            )
-            if simd_distance(from, hit) < targetDistance - 0.5 {
-                return false
-            }
-        }
-        return true
+        guard targetDistance > 0.6 else { return true }
+        // Same 0.5m tolerance as before: anything the ray strikes meaningfully closer than the
+        // target counts as an occluder; capping maxDistance at that tolerance means any hit at
+        // all answers the question.
+        return analyticEnvironmentRayHit(
+            origin: from,
+            direction: (to - from) / targetDistance,
+            maxDistance: targetDistance - 0.5
+        ) == nil
     }
 
     private func nodeIsDescendant(_ node: SCNNode, of ancestor: SCNNode?) -> Bool {

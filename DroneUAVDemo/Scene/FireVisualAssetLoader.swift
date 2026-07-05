@@ -97,32 +97,61 @@ final class FireVisualAssetLoader {
         plane.firstMaterial = material
 
         let yawAnglesDegrees: [Float] = [0.0, 60.0, 120.0]
-        var firstPlaneNode: SCNNode?
         for yawDegrees in yawAnglesDegrees {
             let planeNode = SCNNode(geometry: plane)
             planeNode.name = "mission.fire_tree.flame.plane"
             planeNode.castsShadow = false
             planeNode.eulerAngles.y = CGFloat((yawDegrees + baseYawDegrees) * .pi / 180.0)
             wrapper.addChildNode(planeNode)
-            if firstPlaneNode == nil {
-                firstPlaneNode = planeNode
-            }
         }
 
-        if let firstPlaneNode {
-            runFlipbookAnimation(on: firstPlaneNode, material: material)
-        }
+        configureFlipbookSampler(material: material)
 
         return wrapper
     }
 
+    /// Starts/stops the flame's flipbook animation on an already-built flame node (from
+    /// `makeFlameNode`) — deliberately NOT auto-started at creation time. Every tree in the fire
+    /// zone's full pool (up to 13 at hard difficulty, most of them unburned/hidden at any moment)
+    /// gets its own flame node up front; a `SCNAction.repeatForever` keeps evaluating every
+    /// rendered frame and re-writing the material's `contentsTransform` even while the node is
+    /// `.isHidden` (hidden only skips drawing, not action evaluation) — a constant, mission-long
+    /// tax across the whole tree pool regardless of how many are actually burning. Caller (see
+    /// `DroneSceneController.updateFireResponseVisuals`) starts this only on the burning-state
+    /// transition, not every tick — `runAction`/`removeAction(forKey:)` are idempotent no-ops if
+    /// already in the requested state, so redundant calls are harmless but unnecessary.
+    func setFlameAnimating(_ flameNode: SCNNode, isAnimating: Bool) {
+        guard let planeNode = flameNode.childNodes.first,
+              let material = planeNode.geometry?.firstMaterial else {
+            return
+        }
+        if isAnimating {
+            guard planeNode.action(forKey: "fireFlipbook") == nil else { return }
+            runFlipbookAnimation(on: planeNode, material: material)
+        } else {
+            planeNode.removeAction(forKey: "fireFlipbook")
+        }
+    }
+
     /// Soft rising smoke above a burning tree — a procedural particle system (no image), mirroring
     /// the rain/snow convention already proven in `DroneSceneController.makeRainSystem`/`makeSnowSystem`.
+    /// Deliberately created WITHOUT a particle system attached (see `setSmokeActive`) — same
+    /// hidden-but-still-simulating cost as the flame flipbook above applies to particle systems too.
     func makeSmokeNode() -> SCNNode {
         let node = SCNNode()
         node.name = "mission.fire_tree.smoke"
-        node.addParticleSystem(makeSmokeParticleSystem())
         return node
+    }
+
+    /// Attaches/removes the smoke particle system based on burning state — called on the
+    /// burning-state transition, not every tick (see `setFlameAnimating`'s doc comment for why).
+    func setSmokeActive(_ smokeNode: SCNNode, isActive: Bool) {
+        if isActive {
+            guard smokeNode.particleSystems?.isEmpty ?? true else { return }
+            smokeNode.addParticleSystem(makeSmokeParticleSystem())
+        } else {
+            smokeNode.removeAllParticleSystems()
+        }
     }
 
     /// One-shot suppression burst — a white/foam-colored sphere that scales up and fades out,
@@ -205,14 +234,18 @@ final class FireVisualAssetLoader {
 
     // MARK: - Flame flipbook
 
-    private func runFlipbookAnimation(on node: SCNNode, material: SCNMaterial) {
+    /// One-time sampler setup, safe to do at creation regardless of burn state (unlike actually
+    /// running the animation — see `setFlameAnimating`).
+    private func configureFlipbookSampler(material: SCNMaterial) {
         // Prevent the sampler from bleeding neighboring frames at tile edges once
         // `contentsTransform` scales the UV rect down to a single grid cell.
         material.diffuse.wrapS = .clamp
         material.diffuse.wrapT = .clamp
         material.emission.wrapS = .clamp
         material.emission.wrapT = .clamp
+    }
 
+    private func runFlipbookAnimation(on node: SCNNode, material: SCNMaterial) {
         let totalFrames = FireFlipbookLayout.totalFrames
         let cycleDuration = Double(totalFrames) / FireFlipbookLayout.frameRate
         let animate = SCNAction.customAction(duration: cycleDuration) { _, elapsedTime in
@@ -231,7 +264,7 @@ final class FireVisualAssetLoader {
             material.diffuse.contentsTransform = transform
             material.emission.contentsTransform = transform
         }
-        node.runAction(.repeatForever(animate))
+        node.runAction(.repeatForever(animate), forKey: "fireFlipbook")
     }
 
     private func loadBaseColorImage() -> CGImage? {
