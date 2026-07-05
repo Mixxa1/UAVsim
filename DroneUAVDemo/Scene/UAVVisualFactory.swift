@@ -916,6 +916,7 @@ enum UAVVisualFactory {
         ]
 
         var props: [SCNNode] = []
+        var tiltPivots: [SCNNode] = []
         let spinDirections: [Float] = [1.0, -1.0, -1.0, 1.0]
 
         for (index, pod) in podPositions.enumerated() {
@@ -923,15 +924,31 @@ enum UAVVisualFactory {
             mast.position = SCNVector3(pod.0.x, 0.054, pod.0.z)
             root.addChildNode(mast)
 
+            // The nacelle (motor + propeller) tilts as a unit around this
+            // pivot; the mast (mount stalk) stays fixed, matching a real
+            // tilt-rotor where the arm attaches to the wing but the nacelle
+            // itself rotates. Rotating +eulerAngles.x by the propulsion
+            // unit's tiltAngleRad sweeps local +Y ("up", hover) toward local
+            // +Z ("nose" in this file's own pre-flip convention) — verified
+            // against the existing noseCone rotation elsewhere in this file.
+            // DroneModelBuilder.build(profile:) applies the whole-model 180°
+            // yaw flip for .fixedWing/.hybridVTOL that reconciles this
+            // local +Z-nose convention with the physics engine's body-frame
+            // forward=-Z, so no extra sign flip is needed here.
+            let tiltPivot = SCNNode()
+            tiltPivot.name = "tiltPivot.trinity.\(index)"
+            tiltPivot.position = SCNVector3(pod.0.x, pod.0.y, pod.0.z)
+            root.addChildNode(tiltPivot)
+            tiltPivots.append(tiltPivot)
+
             let motor = cylinderNode(radius: 0.022, height: 0.026, material: accentMaterial)
-            motor.position = SCNVector3(pod.0.x, pod.0.y, pod.0.z)
-            root.addChildNode(motor)
+            tiltPivot.addChildNode(motor)
             append(motor, to: pod.1, componentNodes: &componentNodes)
 
             let propeller = topPropellerNode(material: rotorMaterial, radius: 0.13)
-            propeller.position = SCNVector3(pod.0.x, pod.0.y + 0.020, pod.0.z)
+            propeller.position = SCNVector3(0.0, 0.020, 0.0)
             propeller.name = "propeller.trinity.\(index)"
-            root.addChildNode(propeller)
+            tiltPivot.addChildNode(propeller)
             props.append(propeller)
             append(propeller, to: pod.2, componentNodes: &componentNodes)
         }
@@ -951,7 +968,8 @@ enum UAVVisualFactory {
             propellerSpinDirections: spinDirections,
             componentNodes: componentNodes,
             fpvAnchorNode: fpvAnchor,
-            payloadMountNode: payloadMountNode
+            payloadMountNode: payloadMountNode,
+            tiltPivotNodes: tiltPivots
         )
     }
 

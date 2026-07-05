@@ -30,6 +30,7 @@ struct KeyboardInputSnapshot {
     let axisInput: KeyboardAxisInput
     let yawInput: KeyboardYawInput
     let lookInput: KeyboardLookInput
+    let vtolTransitionLever: Float
     let activeContinuousCommands: Set<KeyboardCommand>
     let processingMode: InputProcessingMode
 
@@ -84,6 +85,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case yawLeft
     case yawRight
     case accelerate
+    case vtolTransitionForward
+    case vtolTransitionBack
 
     case hover
     case resetDrone
@@ -123,7 +126,8 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
 
     var category: KeyBindingCategory {
         switch self {
-        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate, .hover, .resetDrone, .releasePayload:
+        case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
+             .vtolTransitionForward, .vtolTransitionBack, .hover, .resetDrone, .releasePayload:
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .resetCameraOrientation,
@@ -139,6 +143,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     var isContinuous: Bool {
         switch self {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
+             .vtolTransitionForward, .vtolTransitionBack,
              .zoomIn, .zoomOut,
              .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .sprayHoseTrigger:
             return true
@@ -170,6 +175,10 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.flight.yaw_right"
         case .accelerate:
             return "keybind.flight.accelerate"
+        case .vtolTransitionForward:
+            return "keybind.flight.vtol_transition_forward"
+        case .vtolTransitionBack:
+            return "keybind.flight.vtol_transition_back"
         case .hover:
             return "keybind.flight.hover"
         case .resetDrone:
@@ -263,6 +272,8 @@ struct KeyBindingProfile {
             .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
             .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
             .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
+            .vtolTransitionForward: KeyBindingDescriptor(command: .vtolTransitionForward, keyCode: 7, keyLabel: "X"),
+            .vtolTransitionBack: KeyBindingDescriptor(command: .vtolTransitionBack, keyCode: 45, keyLabel: "N"),
             .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
             .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
@@ -399,6 +410,7 @@ protocol KeyboardInputProviding {
     func currentAxisInput() -> KeyboardAxisInput
     func currentYawInput() -> KeyboardYawInput
     func currentLookInput() -> KeyboardLookInput
+    func currentVTOLTransitionLever() -> Float
     func currentInputSnapshot() -> KeyboardInputSnapshot
     func consumeActions() -> [InputAction]
     func setInputProcessingMode(_ mode: InputProcessingMode)
@@ -443,6 +455,8 @@ final class KeyboardInputService: KeyboardInputProviding {
         .yawLeft: KeyBindingDescriptor(command: .yawLeft, keyCode: 38, keyLabel: "J"),
         .yawRight: KeyBindingDescriptor(command: .yawRight, keyCode: 37, keyLabel: "L"),
         .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
+        .vtolTransitionForward: KeyBindingDescriptor(command: .vtolTransitionForward, keyCode: 7, keyLabel: "X"),
+        .vtolTransitionBack: KeyBindingDescriptor(command: .vtolTransitionBack, keyCode: 45, keyLabel: "N"),
         .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
         .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
         .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
@@ -556,11 +570,16 @@ final class KeyboardInputService: KeyboardInputProviding {
         return KeyboardLookInput(yaw: yaw, pitch: pitch, speedBoost: speedBoost, precisionMode: precisionMode)
     }
 
+    func currentVTOLTransitionLever() -> Float {
+        (activeContinuousCommands.contains(.vtolTransitionForward) ? 1.0 : 0.0) - (activeContinuousCommands.contains(.vtolTransitionBack) ? 1.0 : 0.0)
+    }
+
     func currentInputSnapshot() -> KeyboardInputSnapshot {
         KeyboardInputSnapshot(
             axisInput: currentAxisInput(),
             yawInput: currentYawInput(),
             lookInput: currentLookInput(),
+            vtolTransitionLever: currentVTOLTransitionLever(),
             activeContinuousCommands: activeContinuousCommands,
             processingMode: processingMode
         )
@@ -793,6 +812,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             enqueueAction(.toggleRangefinderArmed)
         case .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision,
              .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
+             .vtolTransitionForward, .vtolTransitionBack,
              .sprayHoseTrigger:
             break
         }

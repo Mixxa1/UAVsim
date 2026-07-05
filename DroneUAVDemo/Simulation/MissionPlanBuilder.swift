@@ -78,7 +78,7 @@ final class MissionPlanBuilder {
         switch airframeClass {
         case .multirotor:
             return multicopterRouteBuilder.build(from: previewRoute)
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             return fixedWingRouteBuilder.build(from: previewRoute)
         }
     }
@@ -88,7 +88,7 @@ final class MissionPlanBuilder {
         previewRoute: MissionPreviewRoute?,
         airframeClass: AirframeClass
     ) -> [MissionTarget] {
-        if airframeClass == .fixedWing {
+        if airframeClass == .fixedWing || airframeClass == .hybridVTOL {
             return waypoints.map(MissionTarget.init)
         }
 

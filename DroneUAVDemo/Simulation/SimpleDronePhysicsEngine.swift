@@ -38,6 +38,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 next = stepMultirotorBaseline(state: next, control: control, context: context, dt: dt)
             case .fixedWing:
                 next = stepFixedWingAerodynamic(state: next, control: control, context: context, dt: dt)
+            case .hybridVTOL:
+                next = stepHybridVTOLTransitional(state: next, control: control, context: context, dt: dt)
             }
             remaining -= dt
         }
@@ -130,8 +132,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         let q = orientationQuaternion(from: next.orientation)
         let liftPenalty = baseline.liftPenaltyMultiplier.clamped(to: 0.78...1.02)
-        let maxThrust = mass * Tuning.gravity * (baseline.effectiveStabilizationThrust + authority * 0.35) * batteryFactor * liftPenalty
-        let thrustMagnitude = motorThrottle * maxThrust
+        let thrustMagnitude = rotorBorneThrustMagnitude(
+            motorThrottle: motorThrottle,
+            baseline: baseline,
+            authority: authority,
+            mass: mass,
+            batteryFactor: batteryFactor,
+            liftPenalty: liftPenalty
+        )
         let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
 
         let gravityForce = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
@@ -234,6 +242,23 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.forwardAirspeed = simd_length(SIMD2<Float>(next.velocity.x, next.velocity.z))
 
         return next
+    }
+
+    /// Total rotor-borne vertical thrust magnitude, sized so 100% throttle
+    /// supports (`effectiveStabilizationThrust` + maneuver margin) times the
+    /// aircraft's own weight. Shared by `stepMultirotorBaseline` (a single
+    /// virtual rotor) and `stepHybridVTOLTransitional` (split across however
+    /// many lift-capable propulsion units the airframe has).
+    private func rotorBorneThrustMagnitude(
+        motorThrottle: Float,
+        baseline: ResolvedFlightBaseline,
+        authority: Float,
+        mass: Float,
+        batteryFactor: Float,
+        liftPenalty: Float
+    ) -> Float {
+        let maxThrust = mass * Tuning.gravity * (baseline.effectiveStabilizationThrust + authority * 0.35) * batteryFactor * liftPenalty
+        return motorThrottle * maxThrust
     }
 
     private func multirotorHorizontalDragDamping(
@@ -639,6 +664,500 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.motorThrottle = next.throttle
         next.rotorAngularSpeed = SIMD4<Float>(crashOrDisarmed ? 0.0 : (60.0 + motorThrottle * 540.0), 0.0, 0.0, 0.0)
         next.forwardAirspeed = airspeed
+
+        return next
+    }
+
+    /// hybridVTOL: a genuine transition-capable integrator, not a throttle-
+    /// floor tweak bolted onto the fixed-wing model. Each `PropulsionUnit`'s
+    /// own `thrustDirectionBody` sweeps from vertical (hover) to forward
+    /// (cruise) as its tilt servo moves, so propulsive force is one unified
+    /// per-unit sum rather than separate hover/cruise force terms.
+    ///
+    /// The hover<->cruise handover is governed by `vtolWingborneBlend` — the
+    /// physically computed fraction of the weight the wing actually carries
+    /// (wingLift/weight, smoothed) — NOT by tilt geometry or a timer. Tilt
+    /// angle only steers the thrust vector; whether the rotors may shed load
+    /// (thrust budget, attitude authority, throttle floor, vertical caps)
+    /// follows real lift. A safety controller additionally gates the tilt
+    /// servo: it may only advance toward cruise while wing lift plus the
+    /// rotors' remaining vertical capacity cover the weight with margin, and
+    /// it rolls back toward hover on stall or excessive sink regardless of
+    /// the pilot's lever.
+    private func stepHybridVTOLTransitional(
+        state: DroneState,
+        control: DroneControlInput,
+        context: DroneSimulationContext,
+        dt: Float
+    ) -> DroneState {
+        var next = state
+
+        let profile = context.profile
+        let wing = profile.fixedWingParameters ?? FixedWingParameters(
+            family: .surveyEVTOL,
+            minSustainableSpeedMps: 10.0,
+            cruiseSpeedMps: 17.0,
+            climbSpeedMps: 13.0,
+            stallWarningSpeedMps: 9.0,
+            waypointAcceptanceRadiusMeters: 9.0,
+            nominalTurnRateDegPerSec: 9.0,
+            bankResponseGain: 0.72,
+            climbResponseGain: 0.64,
+            descentResponseGain: 0.54,
+            dragFactor: 1.0,
+            throttleResponseGain: 0.64,
+            turnAuthority: 0.7,
+            maxBankAngleDeg: 36.0
+        )
+        let payloadMassModel = context.vehicleMassModel
+        let baseline = FlightBaselineResolver.resolve(
+            runtimeProfile: profile,
+            activeUAVProfile: context.activeUAVProfile,
+            vehicleMassModel: payloadMassModel,
+            flightMode: control.mode
+        )
+        let authorityPenalty = baseline.maneuverAuthorityMultiplier
+        let authority = (context.damageState.controlAuthorityMultiplier * authorityPenalty).clamped(to: 0.18...1.00)
+        let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
+        let mass = max(0.20, payloadMassModel.resolvedCurrentTotalMass)
+        let liftPenalty = baseline.liftPenaltyMultiplier.clamped(to: 0.78...1.02)
+        let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
+
+        // --- 1. Aerodynamic model: real airframe size from the catalog first
+        // (see the identical note in stepFixedWingAerodynamic — getting this
+        // wrong silently undersizes wing area/thrust by an order of magnitude).
+        let catalogDimensions = context.activeUAVProfile?.dimensions
+        let realWingSpanMm = catalogDimensions?.wingspanMillimeters ?? profile.dimensionsUnfoldedMm.x
+        let realFuselageLengthMm = catalogDimensions?.fuselageLengthMillimeters ?? (realWingSpanMm * 0.55)
+        let realHeightMm = catalogDimensions?.heightMillimeters ?? (realWingSpanMm * 0.12)
+
+        let aero = FixedWingAerodynamics.build(
+            family: wing.family,
+            massKg: payloadMassModel.resolvedCurrentTotalMass,
+            wingSpanM: realWingSpanMm / 1000.0,
+            fuselageLengthM: realFuselageLengthMm / 1000.0,
+            heightM: realHeightMm / 1000.0,
+            turnAuthority: wing.turnAuthority,
+            minSustainableSpeedMps: wing.minSustainableSpeedMps
+        )
+
+        // --- 2. Control surfaces: identical stick/angle -> elevator/aileron/
+        // rudder mapping as stepFixedWingAerodynamic (reused verbatim so the
+        // pilot's roll/pitch commands mean the same thing in both phases).
+        var elevatorFraction: Float = 0.0
+        var aileronFraction: Float = 0.0
+        var rudderFraction: Float = 0.0
+
+        if !crashOrDisarmed {
+            let currentEuler = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat)
+            if control.controlMode.isRateMode {
+                elevatorFraction = control.targetOrientation.y.clamped(to: -1.0...1.0)
+                aileronFraction = control.targetOrientation.x.clamped(to: -1.0...1.0)
+                rudderFraction = desiredFixedWingRudderFraction(
+                    control: control,
+                    currentYaw: currentEuler.z,
+                    yawRate: state.bodyAngularVelocity.z,
+                    authority: authority,
+                    wing: wing,
+                    fallbackHeading: wrap(control.targetOrientation.z)
+                )
+            } else {
+                let maxBank = Float(wing.maxBankAngleDeg).degreesToRadians
+                let maxPitchAngle = (control.controlMode == .hoverAssist ? Float(16.0) : Float(26.0)).degreesToRadians
+                let targetRoll = control.targetOrientation.x.clamped(to: -maxBank...maxBank)
+                let targetPitch = control.targetOrientation.y.clamped(to: -maxPitchAngle...maxPitchAngle)
+                let rollError = wrap(targetRoll - currentEuler.x)
+                let pitchError = wrap(targetPitch - currentEuler.y)
+                let rollErrorNorm = (rollError / maxBank).clamped(to: -1.0...1.0)
+                let rollRateNorm = (state.bodyAngularVelocity.x / 1.8).clamped(to: -1.0...1.0)
+                let pitchErrorNorm = (pitchError / maxPitchAngle).clamped(to: -1.0...1.0)
+                let pitchRateNorm = (state.bodyAngularVelocity.y / 1.2).clamped(to: -1.0...1.0)
+                aileronFraction = ((rollErrorNorm * 3.5 - rollRateNorm * 0.4) * authority * max(0.75, wing.bankResponseGain)).clamped(to: -1.0...1.0)
+                elevatorFraction = ((pitchErrorNorm * 3.5 - pitchRateNorm * 0.4) * authority * max(0.75, wing.climbResponseGain)).clamped(to: -1.0...1.0)
+                rudderFraction = desiredFixedWingRudderFraction(
+                    control: control,
+                    currentYaw: currentEuler.z,
+                    yawRate: state.bodyAngularVelocity.z,
+                    authority: authority,
+                    wing: wing,
+                    fallbackHeading: wrap(control.targetOrientation.z),
+                    coordinationBankRad: currentEuler.x
+                )
+            }
+        }
+
+        let surfaceSlewRate: Float = 4.0
+        elevatorFraction = approach(current: state.elevatorDeflection, target: elevatorFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        aileronFraction = approach(current: state.aileronDeflection, target: aileronFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        rudderFraction = approach(current: state.rudderDeflection, target: rudderFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        next.elevatorDeflection = elevatorFraction
+        next.aileronDeflection = aileronFraction
+        next.rudderDeflection = rudderFraction
+
+        // --- 3. Aerodynamics: identical angle-of-attack model as
+        // stepFixedWingAerodynamic. No hover-gating needed — `airspeed` is
+        // floored at 0.5 m/s, so dynamic pressure (and therefore lift/drag/
+        // moment) is naturally ~900x smaller at hover than at cruise.
+        let effectiveWind = effectiveWindWithGusts(
+            baseWind: context.windVector,
+            altitudeM: state.position.y,
+            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
+            dt: dt,
+            referenceAirspeed: max(simd_length(state.velocity), 1.0)
+        )
+        let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity - effectiveWind)
+        let airspeed = max(simd_length(bodyAirflow), 0.5)
+        let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
+        let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
+
+        let airDensity: Float = 1.225
+        let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
+
+        let (cl, cd) = aero.liftDrag(alphaRad: alpha)
+        let cy = aero.cyBeta * beta
+
+        let normalizedWindDir = simd_length(bodyAirflow) > 0.0001 ? simd_normalize(bodyAirflow) : SIMD3<Float>(0, 0, -1)
+        let bodyUp = SIMD3<Float>(0, 1, 0)
+        let bodyRight = SIMD3<Float>(1, 0, 0)
+        let liftDirRaw = bodyUp - normalizedWindDir * simd_dot(bodyUp, normalizedWindDir)
+        let liftDir = simd_length(liftDirRaw) > 0.0001 ? simd_normalize(liftDirRaw) : SIMD3<Float>(0, 1, 0)
+        let sideDirRaw = bodyRight - normalizedWindDir * simd_dot(bodyRight, normalizedWindDir)
+        let sideDir = simd_length(sideDirRaw) > 0.0001 ? simd_normalize(sideDirRaw) : SIMD3<Float>(1, 0, 0)
+
+        let liftForce = liftDir * (cl * dynamicPressure * aero.wingArea)
+        let dragForce = -normalizedWindDir * (cd * dynamicPressure * aero.wingArea)
+        let sideForce = sideDir * (cy * dynamicPressure * aero.wingArea)
+        let aeroForceBody = liftForce + dragForce + sideForce
+
+        let rollRate = state.bodyAngularVelocity.x
+        let pitchRate = state.bodyAngularVelocity.y
+        let yawRate = state.bodyAngularVelocity.z
+        let pHat = rollRate * aero.wingSpan / (2.0 * airspeed)
+        let qHat = pitchRate * aero.meanChord / (2.0 * airspeed)
+        let rHat = yawRate * aero.wingSpan / (2.0 * airspeed)
+
+        let cmPitch = aero.pitchMoment(alphaRad: alpha, elevatorFraction: elevatorFraction, qHat: qHat)
+        let clRoll = aero.rollMoment(alphaRad: alpha, betaRad: beta, aileronFraction: aileronFraction, pHat: pHat)
+        let cnYaw = aero.yawMoment(alphaRad: alpha, betaRad: beta, rudderFraction: rudderFraction, rHat: rHat)
+
+        let aeroMomentBody = SIMD3<Float>(
+            clRoll * dynamicPressure * aero.wingArea * aero.wingSpan,
+            cmPitch * dynamicPressure * aero.wingArea * aero.meanChord,
+            cnYaw * dynamicPressure * aero.wingArea * aero.wingSpan
+        )
+        // Propulsion-airframe coupling (torque reaction/P-factor/gyroscopic
+        // precession) is intentionally omitted here — those formulas assume
+        // one prop disk, not an arbitrary array of independently-tilting
+        // units, and are a secondary realism layer rather than a
+        // flyability requirement for this pass.
+
+        // --- 4. Wing-borne blend: THE transition variable. Not tilt geometry
+        // (which only says where the servos point) but the physically
+        // computed fraction of the aircraft's weight the wing is carrying
+        // right now — so airspeed, wind, mass, air density and stall all
+        // directly govern the hover<->cruise handover, and a headwind
+        // genuinely makes the transition complete earlier.
+        let aeroForceWorld = simd_act(state.fixedWingOrientationQuat, aeroForceBody)
+        let weight = mass * Tuning.gravity
+        let wingLiftRatio = max(0.0, aeroForceWorld.y) / weight
+        next.vtolWingLiftRatio = wingLiftRatio
+        // Asymmetric smoothing: hand weight to the wing slowly (gust-proof),
+        // re-engage the rotors fast when lift collapses (stall recovery).
+        next.vtolWingborneBlend = approach(
+            current: state.vtolWingborneBlend,
+            target: wingLiftRatio.clamped(to: 0.0...1.0),
+            increaseRate: 0.8,
+            decreaseRate: 2.5,
+            dt: dt
+        )
+        let wingborneBlend = next.vtolWingborneBlend
+
+        // --- 5. Tilt servos + transition safety controller. The lever is
+        // pilot *intent*; the controller only lets tilt advance toward cruise
+        // while wing lift plus the rotors' remaining vertical capacity still
+        // cover the weight with margin — and rolls the tilt back toward
+        // hover on stall or excessive sink, regardless of the lever
+        // (safety wins over the command, same precedent as mission
+        // constraint enforcement).
+        var units = state.propulsionUnits
+        let leverForward = control.vtolTransitionLever > 0.05
+        let leverBack = control.vtolTransitionLever < -0.05
+        next.vtolTransitionBlocked = false
+
+        // alpha is only meaningful against *forward* airflow — a pure
+        // vertical hover climb reads as alpha ~ ±90° (the relative wind comes
+        // from below, not from ahead) regardless of how fast it's climbing,
+        // and that is not a stall, it's just a helicopter-mode climb with no
+        // forward speed yet. Gating on total airspeed (as an earlier version
+        // of this check did) made isStalled true throughout any ordinary
+        // climb, permanently blocking the tilt gate below — the exact "X
+        // does nothing" bug this fixes. Gate on the body-forward airflow
+        // component specifically, since that's what a wing stall is about.
+        let forwardAirspeedForStallCheck = max(0.0, -bodyAirflow.z)
+        let stallRelevant = forwardAirspeedForStallCheck > max(4.0, wing.stallWarningSpeedMps * 0.5)
+        let isStalled = stallRelevant && abs(alpha) > aero.stallAlphaRad
+        let ratedDescent = profile.maxDescentSpeedMps.clamped(to: 1.0...20.0)
+        let sinkingTooFast = state.velocity.y < -ratedDescent * 1.15
+        let airborne = !state.physicalState.isGroundRestState && state.position.y > 0.5
+        let emergencyRollback = airborne && state.vtolTransitionProgress > 0.05 && (isStalled || sinkingTooFast)
+
+        // Advancing to tilt angle θ is safe while the wing's current lift
+        // plus the rotors' maximum vertical capacity at θ still cover the
+        // weight with a 5% reserve. Capped at 0.9 so the final degrees to
+        // 90° can complete once the wing carries ~90% (cos 90° = 0 would
+        // otherwise demand wingLiftRatio >= 1.05 — unreachable in level
+        // flight).
+        func tiltAdvanceIsSafe(toTiltRad nextTilt: Float) -> Bool {
+            let requiredLiftRatio = min(0.9, 1.05 - baseline.effectiveStabilizationThrust * cos(nextTilt))
+            // Below ~13.5°, thrust is still almost entirely vertical and
+            // requiredLiftRatio is already deeply negative (always
+            // satisfied) — the wing isn't expected to be carrying any
+            // weight yet. Alpha reads large here on any climb with modest
+            // forward speed (steep flight-path angle, not flow separation),
+            // so gate the stall check off until the tilt has actually
+            // reached an angle where the wing is meant to start
+            // contributing. This avoids blocking the first few degrees of
+            // every climbing transition attempt while still catching a
+            // genuine stall once it matters.
+            let stallGateArmed = nextTilt > (Float.pi / 2) * 0.15
+            return wingLiftRatio >= requiredLiftRatio && !(stallGateArmed && isStalled) && !sinkingTooFast
+        }
+
+        let tiltRotorIndices = units.indices.filter { units[$0].role == .tiltRotor }
+        for index in tiltRotorIndices {
+            let unit = units[index]
+            let commandedTarget: Float
+            if emergencyRollback {
+                commandedTarget = 0.0
+            } else if leverForward {
+                commandedTarget = .pi / 2
+            } else if leverBack {
+                commandedTarget = 0.0
+            } else {
+                commandedTarget = unit.targetTiltAngleRad
+            }
+            units[index].targetTiltAngleRad = commandedTarget
+
+            guard !crashOrDisarmed else { continue }
+            let candidate = approach(
+                current: unit.tiltAngleRad,
+                target: commandedTarget,
+                increaseRate: unit.tiltRateLimitRadPerSec,
+                decreaseRate: unit.tiltRateLimitRadPerSec,
+                dt: dt
+            )
+            if candidate > unit.tiltAngleRad {
+                if tiltAdvanceIsSafe(toTiltRad: candidate) {
+                    units[index].tiltAngleRad = candidate
+                } else {
+                    next.vtolTransitionBlocked = true // hold at current tilt
+                }
+            } else {
+                units[index].tiltAngleRad = candidate // toward hover: always allowed
+            }
+        }
+        if emergencyRollback {
+            next.vtolTransitionBlocked = true
+        }
+
+        let meanTiltAngleRad: Float
+        if tiltRotorIndices.isEmpty {
+            // No tilting hardware — synthetic lever-driven progress, gated
+            // by the same safety condition.
+            let target: Float = emergencyRollback ? 0.0 : (leverForward ? 1.0 : (leverBack ? 0.0 : state.vtolTransitionProgress))
+            var candidate = crashOrDisarmed ? state.vtolTransitionProgress : approach(current: state.vtolTransitionProgress, target: target, increaseRate: 0.5, decreaseRate: 0.5, dt: dt)
+            if candidate > state.vtolTransitionProgress, !tiltAdvanceIsSafe(toTiltRad: candidate * .pi / 2) {
+                candidate = state.vtolTransitionProgress
+                next.vtolTransitionBlocked = true
+            }
+            next.vtolTransitionProgress = candidate
+            meanTiltAngleRad = next.vtolTransitionProgress * .pi / 2
+        } else {
+            let sum = tiltRotorIndices.reduce(Float(0)) { $0 + units[$1].tiltAngleRad }
+            meanTiltAngleRad = sum / Float(tiltRotorIndices.count)
+            next.vtolTransitionProgress = (meanTiltAngleRad / (Float.pi / 2)).clamped(to: 0.0...1.0)
+        }
+
+        // --- 6. Throttle: continuous hover<->cruise floor blend, driven by
+        // how much of the weight the wing actually carries.
+        var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
+        if crashOrDisarmed || context.batteryState.isDepleted || control.mode == .emergencyStop {
+            throttleCommand = 0.0
+        } else {
+            let hoverPhaseFloor: Float
+            switch control.mode {
+            case .takeoff, .hover:
+                hoverPhaseFloor = baseline.takeoffThrottleReference
+            case .landing:
+                hoverPhaseFloor = baseline.landingThrottleReference
+            case .manual, .autoPath, .returnHome, .emergencyStop:
+                hoverPhaseFloor = baseline.hoverLockThrottle
+            }
+            let cruiseFloor = max(baseline.cruiseReferenceThrottle, baseline.effectiveMinimumSafeFlightThrottle)
+            let throttleFloor = state.position.y > 0.15
+                ? hoverPhaseFloor * (1.0 - wingborneBlend) + cruiseFloor * wingborneBlend
+                : 0.0
+            throttleCommand = max(throttleCommand, throttleFloor)
+        }
+
+        let motorThrottle = approach(
+            current: state.motorThrottle,
+            target: throttleCommand,
+            increaseRate: (1.6 + baseline.effectiveThrottleAuthority * 0.7 * wing.throttleResponseGain).clamped(to: 1.4...2.8),
+            decreaseRate: (2.0 + baseline.effectiveThrottleAuthority * 0.6 * wing.throttleResponseGain).clamped(to: 1.8...3.0),
+            dt: dt
+        )
+
+        // --- 7. Propulsive thrust: one unified per-unit sum. Each unit's own
+        // thrustDirectionBody encodes the direction sweep via its tilt angle;
+        // the *magnitude* budget blends by wingborneBlend — the rotors carry
+        // exactly the share of weight the wing does not yet carry, and decay
+        // to drag-canceling cruise thrust as the wing takes over (a rotor
+        // does not shut down on a schedule, it sheds load as lift builds).
+        let liftCapableUnits = units.filter { $0.role == .liftRotor || $0.role == .tiltRotor }
+        let cruiseUnits = units.filter { $0.role == .cruiseProp }
+
+        let (_, cdTrim) = aero.liftDrag(alphaRad: 0.0)
+        let cruiseSpeed = max(wing.cruiseSpeedMps, wing.minSustainableSpeedMps, 1.0)
+        let dragAtCruise = 0.5 * airDensity * cruiseSpeed * cruiseSpeed * aero.wingArea * cdTrim
+        let referenceThrottle = max(0.2, baseline.cruiseReferenceThrottle)
+        let cruiseSizedThrustMagnitude = crashOrDisarmed ? 0.0 : motorThrottle * max(0.5, dragAtCruise / referenceThrottle) * batteryFactor
+
+        let hoverSizedThrustMagnitude = liftCapableUnits.isEmpty ? 0.0 : rotorBorneThrustMagnitude(
+            motorThrottle: crashOrDisarmed ? 0.0 : motorThrottle,
+            baseline: baseline,
+            authority: authority,
+            mass: mass,
+            batteryFactor: batteryFactor,
+            liftPenalty: liftPenalty
+        )
+        let totalLiftCapableThrustMagnitude = hoverSizedThrustMagnitude * (1.0 - wingborneBlend) + cruiseSizedThrustMagnitude * wingborneBlend
+        let perLiftUnitThrustMagnitude = liftCapableUnits.isEmpty ? 0.0 : totalLiftCapableThrustMagnitude / Float(liftCapableUnits.count)
+
+        let perCruiseUnitThrustMagnitude = cruiseUnits.isEmpty ? 0.0 : cruiseSizedThrustMagnitude / Float(cruiseUnits.count)
+
+        var thrustForceBody = SIMD3<Float>(repeating: 0.0)
+        for index in units.indices {
+            let magnitude: Float
+            switch units[index].role {
+            case .liftRotor, .tiltRotor:
+                magnitude = perLiftUnitThrustMagnitude
+            case .cruiseProp:
+                magnitude = perCruiseUnitThrustMagnitude
+            }
+            thrustForceBody += units[index].thrustDirectionBody * magnitude
+            units[index].rotationalSpeedRadPerSec = crashOrDisarmed ? 0.0 : (120.0 + motorThrottle * 640.0)
+        }
+
+        // --- 8. Attitude authority blend: aero moments alone (~zero at
+        // hover, since dynamicPressure floors near zero there) would leave
+        // the aircraft with no control in hover — layer in multirotor-style
+        // differential-thrust rate tracking, weighted by how much of the
+        // weight the rotors still carry, so it fades out exactly as real
+        // aero authority (dynamic pressure) fades in. On stall the blend
+        // collapses fast and rotor-style control returns automatically.
+        let desiredRates = crashOrDisarmed ? SIMD3<Float>(repeating: 0.0) : desiredMultirotorRates(control: control, state: state, authority: authority)
+        let hoverRateGain = SIMD3<Float>(7.2 * authority, 7.2 * authority, 4.8 * authority)
+        let hoverAngularDamping = SIMD3<Float>(2.8, 2.8, 2.2)
+        let hoverAngularAccel = (desiredRates - state.bodyAngularVelocity) * hoverRateGain - state.bodyAngularVelocity * hoverAngularDamping
+        let aeroAngularAccel = aeroMomentBody / aero.inertiaTensor
+        let angularAccel = hoverAngularAccel * (1.0 - wingborneBlend) + aeroAngularAccel * wingborneBlend
+
+        // --- 9. Integration: always the fixed-wing quaternion path — a real
+        // tilt-rotor's fuselage attitude representation doesn't change with
+        // nacelle angle, so there is exactly one rotational integrator here.
+        let totalForceWorld = simd_act(state.fixedWingOrientationQuat, aeroForceBody + thrustForceBody)
+            + SIMD3<Float>(0, -mass * Tuning.gravity, 0)
+        let acceleration = totalForceWorld / mass
+
+        next.velocity = state.velocity + acceleration * dt
+
+        // Vertical-speed governor: blends from the multirotor-style hard
+        // ascent/descent cap (hover) to the wing's own climb capability
+        // (cruise) as the wing takes the weight — without this a
+        // near-vertical hover climb has nothing bounding it (unlike
+        // stepMultirotorBaseline, which always clamps `velocity.y`) and
+        // keeps accelerating until drag alone catches up, far past the
+        // airframe's rated ascent rate.
+        let hoverVerticalUpMax = profile.maxAscentSpeedMps.clamped(to: 1.0...20.0)
+        let hoverVerticalDownMax = ratedDescent
+        let cruiseVerticalMax = max(wing.climbSpeedMps, hoverVerticalUpMax)
+        let verticalUpMax = hoverVerticalUpMax * (1.0 - wingborneBlend) + cruiseVerticalMax * wingborneBlend
+        let verticalDownMax = hoverVerticalDownMax * (1.0 - wingborneBlend) + cruiseVerticalMax * wingborneBlend
+        next.velocity.y = next.velocity.y.clamped(to: -verticalDownMax...verticalUpMax)
+
+        // Absolute total-speed safety net: a defensive ceiling well above the
+        // airframe's own cruise envelope, independent of the vertical cap
+        // above — guards against any other runaway (e.g. an aero force
+        // computed at an extreme, physically-invalid angle of attack during
+        // a mismatched transition) compounding into an unbounded climb in
+        // total kinetic energy rather than just leaving the vertical axis.
+        let absoluteSpeedCeiling = max(profile.maxHorizontalSpeedMps, wing.cruiseSpeedMps) * 1.6
+        let currentSpeed = simd_length(next.velocity)
+        if currentSpeed > absoluteSpeedCeiling {
+            next.velocity *= absoluteSpeedCeiling / currentSpeed
+        }
+
+        next.position = state.position + next.velocity * dt
+
+        next.bodyAngularVelocity = clampMagnitude(state.bodyAngularVelocity + angularAccel * dt, limit: 10.0)
+        next.fixedWingOrientationQuat = integrateFixedWingOrientation(
+            state.fixedWingOrientationQuat,
+            rollRate: next.bodyAngularVelocity.x,
+            pitchRate: next.bodyAngularVelocity.y,
+            yawRate: next.bodyAngularVelocity.z,
+            dt: dt
+        )
+        next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+        next.angularVelocity = next.bodyAngularVelocity
+        next.angleOfAttack = alpha
+        next.sideslipAngle = beta
+
+        // --- 10. Ground handling: reused verbatim from stepFixedWingAerodynamic
+        // — a hybridVTOL rests on gear like a fixed-wing, not by cutting
+        // thrust flush to the ground like a multirotor.
+        if next.position.y < 0.0 {
+            next.position.y = 0.0
+            if next.velocity.y < 0.0 {
+                next.velocity.y = 0.0
+            }
+        }
+
+        let groundRestState = next.position.y <= 0.03 && state.physicalState.isGroundRestState && motorThrottle < 0.18
+        if groundRestState {
+            next.velocity.x *= max(0.0, 1.0 - dt * 10.0)
+            next.velocity.z *= max(0.0, 1.0 - dt * 10.0)
+            next.bodyAngularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - dt * 12.0))
+            if state.physicalState != .crashed {
+                let headingOnlyQuat = simd_quatf(angle: next.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+                let levelBlend = min(1.0, dt * 4.0)
+                let blendedVector = next.fixedWingOrientationQuat.vector * (1.0 - levelBlend) + headingOnlyQuat.vector * levelBlend
+                next.fixedWingOrientationQuat = simd_quatf(vector: simd_normalize(blendedVector))
+                next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+            }
+            next.angularVelocity = next.bodyAngularVelocity
+        }
+
+        next.throttle = crashOrDisarmed ? 0.0 : motorThrottle
+        next.motorThrottle = next.throttle
+        next.forwardAirspeed = airspeed
+
+        // --- 11. VTOL phase telemetry label (display-only, see VTOLFlightPhase).
+        if next.vtolTransitionProgress <= 0.02 {
+            switch control.mode {
+            case .takeoff:
+                next.vtolPhase = .verticalTakeoff
+            case .landing:
+                next.vtolPhase = .verticalLanding
+            default:
+                next.vtolPhase = .hover
+            }
+        } else if next.vtolTransitionProgress >= 0.98 {
+            next.vtolPhase = .cruise
+        } else {
+            next.vtolPhase = leverForward ? .transitionToForward : .transitionToHover
+        }
+        next.propulsionUnits = units
 
         return next
     }

@@ -4,6 +4,7 @@ import simd
 enum AirframeClass: String, CaseIterable {
     case multirotor
     case fixedWing
+    case hybridVTOL
 }
 
 enum DroneOperationalCategory: String, CaseIterable {
@@ -384,6 +385,10 @@ struct DroneModelProfile: Identifiable, Hashable {
     let cameraPreset: DroneCameraPreset
     let collisionRadiusMeters: Float
 
+    /// Static template of propulsion units seeded into `DroneState.propulsionUnits`
+    /// on arm/spawn/reset. Empty for airframes that aren't hybridVTOL.
+    let propulsionUnitTemplate: [PropulsionUnit]
+
     let notes: String
     let sourceURL: URL?
     let uavProfileID: String?
@@ -416,6 +421,7 @@ struct DroneModelProfile: Identifiable, Hashable {
         hoverThrottle: Float,
         cameraPreset: DroneCameraPreset,
         collisionRadiusMeters: Float,
+        propulsionUnitTemplate: [PropulsionUnit] = [],
         notes: String,
         sourceURL: URL?,
         uavProfileID: String? = nil
@@ -447,6 +453,7 @@ struct DroneModelProfile: Identifiable, Hashable {
         self.hoverThrottle = hoverThrottle
         self.cameraPreset = cameraPreset
         self.collisionRadiusMeters = collisionRadiusMeters
+        self.propulsionUnitTemplate = propulsionUnitTemplate
         self.notes = notes
         self.sourceURL = sourceURL
         self.uavProfileID = uavProfileID
@@ -583,6 +590,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
             hoverThrottle: tuning.hoverThrottle,
             cameraPreset: tuning.cameraPreset,
             collisionRadiusMeters: tuning.collisionRadiusMeters,
+            propulsionUnitTemplate: tuning.propulsionUnitTemplate,
             notes: uavProfile.notes,
             sourceURL: UAVReferenceCatalog.sourceURL(for: uavProfile.id),
             uavProfileID: uavProfile.id
@@ -1352,7 +1360,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 )
             )
         case "wingcopter-198":
-            return fixedWingRuntimeTuning(
+            return hybridVTOLRuntimeTuning(
                 fallbackTakeoffMass: 25.0,
                 fallbackDimensions: DroneDimensionsMM(x: 1980.0, y: 1520.0, z: 650.0),
                 maxHorizontalSpeedMps: 25.0,
@@ -1362,10 +1370,6 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 maxWindResistanceMps: 14.0,
                 batteryEnergyWh: 1000.0,
                 visualClass: .trinityClass,
-                operationalCategory: .fixedWingVTOL,
-                airframeStyle: .surveyEVTOL,
-                launchMethod: .vertical,
-                landingMethod: .vertical,
                 controlResponsiveness: 0.56,
                 cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 9.4, followHeight: 3.0),
                 collisionRadiusMeters: 0.38,
@@ -1387,7 +1391,22 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     preferredLaunchMode: .vtol,
                     initialClimbPitchDeg: 10.5,
                     initialClimbTargetAltitude: 18.0
-                )
+                ),
+                // Real Wingcopter 198: 8 motors on 4 tilting rotor arms (2
+                // coaxial per arm), sweeping 0 (vertical/hover) -> pi/2
+                // (forward/cruise). Mount offsets mirror Trinity's 4-pod
+                // layout (DroneModelBuilder.buildTrinityClass) since the
+                // visual rig doesn't yet model a tilting nacelle (Phase C).
+                propulsionUnitTemplate: [
+                    .tiltRotor(id: "wingcopter198_tilt_fl_upper", mountOffset: SIMD3<Float>(-0.52, 0.11, 0.12)),
+                    .tiltRotor(id: "wingcopter198_tilt_fl_lower", mountOffset: SIMD3<Float>(-0.52, 0.08, 0.12)),
+                    .tiltRotor(id: "wingcopter198_tilt_fr_upper", mountOffset: SIMD3<Float>(0.52, 0.11, 0.12)),
+                    .tiltRotor(id: "wingcopter198_tilt_fr_lower", mountOffset: SIMD3<Float>(0.52, 0.08, 0.12)),
+                    .tiltRotor(id: "wingcopter198_tilt_rl_upper", mountOffset: SIMD3<Float>(-0.52, 0.11, -0.14)),
+                    .tiltRotor(id: "wingcopter198_tilt_rl_lower", mountOffset: SIMD3<Float>(-0.52, 0.08, -0.14)),
+                    .tiltRotor(id: "wingcopter198_tilt_rr_upper", mountOffset: SIMD3<Float>(0.52, 0.11, -0.14)),
+                    .tiltRotor(id: "wingcopter198_tilt_rr_lower", mountOffset: SIMD3<Float>(0.52, 0.08, -0.14))
+                ]
             )
         case "matternet-m2":
             return multirotorRuntimeTuning(
@@ -1649,6 +1668,54 @@ struct LIPODroneModelRepository: DroneModelRepository {
         )
     }
 
+    private static func hybridVTOLRuntimeTuning(
+        fallbackTakeoffMass: Float,
+        fallbackDimensions: DroneDimensionsMM,
+        runtimeSceneDimensionsOverride: DroneDimensionsMM? = nil,
+        maxHorizontalSpeedMps: Float,
+        maxAscentSpeedMps: Float,
+        maxDescentSpeedMps: Float,
+        maxFlightTimeMin: Float,
+        maxWindResistanceMps: Float,
+        batteryEnergyWh: Float,
+        visualClass: DroneVisualClass,
+        operationalCategory: DroneOperationalCategory = .fixedWingVTOL,
+        airframeStyle: AirframeStyle = .surveyEVTOL,
+        launchMethod: LaunchMethod = .vertical,
+        landingMethod: LandingMethod = .vertical,
+        controlResponsiveness: Float,
+        cameraPreset: DroneCameraPreset,
+        collisionRadiusMeters: Float,
+        fixedWingParameters: FixedWingParameters,
+        propulsionUnitTemplate: [PropulsionUnit]
+    ) -> RuntimeTuning {
+        RuntimeTuning(
+            fallbackTakeoffMass: fallbackTakeoffMass,
+            fallbackDimensions: fallbackDimensions,
+            runtimeSceneDimensionsOverride: runtimeSceneDimensionsOverride,
+            maxHorizontalSpeedMps: maxHorizontalSpeedMps,
+            maxAscentSpeedMps: maxAscentSpeedMps,
+            maxDescentSpeedMps: maxDescentSpeedMps,
+            maxFlightTimeMin: maxFlightTimeMin,
+            maxHoverTimeMin: 0.0,
+            maxWindResistanceMps: maxWindResistanceMps,
+            batteryEnergyWh: batteryEnergyWh,
+            cameraLayoutKey: "drone.camera.fixed_front",
+            visualClass: visualClass,
+            operationalCategory: operationalCategory,
+            airframeClass: .hybridVTOL,
+            airframeStyle: airframeStyle,
+            fixedWingParameters: fixedWingParameters,
+            launchMethod: launchMethod,
+            landingMethod: landingMethod,
+            controlResponsiveness: controlResponsiveness,
+            hoverThrottle: 0.0,
+            cameraPreset: cameraPreset,
+            collisionRadiusMeters: collisionRadiusMeters,
+            propulsionUnitTemplate: propulsionUnitTemplate
+        )
+    }
+
     static func abstractProfile(from parameters: AbstractDroneParameters) -> DroneModelProfile {
         DroneModelProfile(
             id: "abstract-uav",
@@ -1707,6 +1774,7 @@ private struct RuntimeTuning {
     let hoverThrottle: Float
     let cameraPreset: DroneCameraPreset
     let collisionRadiusMeters: Float
+    let propulsionUnitTemplate: [PropulsionUnit]
 
     init(
         fallbackTakeoffMass: Float,
@@ -1730,7 +1798,8 @@ private struct RuntimeTuning {
         controlResponsiveness: Float,
         hoverThrottle: Float,
         cameraPreset: DroneCameraPreset,
-        collisionRadiusMeters: Float
+        collisionRadiusMeters: Float,
+        propulsionUnitTemplate: [PropulsionUnit] = []
     ) {
         self.fallbackTakeoffMass = fallbackTakeoffMass
         self.fallbackDimensions = fallbackDimensions
@@ -1754,6 +1823,7 @@ private struct RuntimeTuning {
         self.hoverThrottle = hoverThrottle
         self.cameraPreset = cameraPreset
         self.collisionRadiusMeters = collisionRadiusMeters
+        self.propulsionUnitTemplate = propulsionUnitTemplate
     }
 }
 
@@ -1972,7 +2042,7 @@ private enum UAVOperationalProfileResolver {
         runtimeProfile: DroneModelProfile
     ) -> Float {
         switch runtimeProfile.airframeClass {
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             return runtimeProfile.fixedWingParameters?.cruiseSpeedMps ??
                 max(8.0, runtimeProfile.maxHorizontalSpeedMps * 0.55)
         case .multirotor:

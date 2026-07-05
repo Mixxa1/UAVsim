@@ -32,7 +32,7 @@ final class MissionProgressTracker {
             switch airframeClass {
             case .multirotor:
                 return 0.95
-            case .fixedWing:
+            case .fixedWing, .hybridVTOL:
                 let wing = fixedWingParameters ?? FixedWingParameters(
                     family: .conventionalSurvey,
                     minSustainableSpeedMps: 10.0,

@@ -219,7 +219,7 @@ final class AutoNavigationController {
                 targetAltitude = effectiveTargetAltitude
             }
 
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             let wing = resolvedFixedWingParameters(input.fixedWingParameters)
             let currentAirspeed = max(planarSpeed, input.physicalState.isGroundRestState ? 0.0 : wing.minSafeAirspeed * 0.62)
             let minimumTurnRadius = wing.minimumTurnRadius(

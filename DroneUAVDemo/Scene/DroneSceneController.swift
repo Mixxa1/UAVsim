@@ -195,6 +195,7 @@ final class DroneSceneController {
     private var propellerNodes: [SCNNode]
     private var spinDirections: [Float]
     private var spinAngles: [Float]
+    private var tiltPivotNodes: [SCNNode]
     private var componentNodes: [DamageComponent: [SCNNode]]
     private var visualBoundsCenter = SIMD3<Float>(repeating: 0.0)
     private var visualBoundsSize = SIMD3<Float>(repeating: 0.36)
@@ -335,6 +336,7 @@ final class DroneSceneController {
         self.propellerNodes = droneVisual.propellerNodes
         self.spinDirections = droneVisual.propellerSpinDirections
         self.spinAngles = Array(repeating: 0.0, count: droneVisual.propellerNodes.count)
+        self.tiltPivotNodes = droneVisual.tiltPivotNodes
         self.componentNodes = droneVisual.componentNodes
         self.visualBoundsCenter = droneVisual.visualBoundsCenter
         self.visualBoundsSize = droneVisual.visualBoundsSize
@@ -2036,6 +2038,7 @@ final class DroneSceneController {
         spinDirections = droneVisual.propellerSpinDirections
         componentNodes = droneVisual.componentNodes
         spinAngles = Array(repeating: 0.0, count: propellerNodes.count)
+        tiltPivotNodes = droneVisual.tiltPivotNodes
         visualBoundsCenter = droneVisual.visualBoundsCenter
         visualBoundsSize = droneVisual.visualBoundsSize
         cachedSubjectScale = droneVisual.subjectScale
@@ -2538,6 +2541,7 @@ final class DroneSceneController {
         applyPayloadFPVPresentation()
         updatePayloadCamera(state: payloadCameraOpticsState, droneState: state, deltaTime: deltaTime)
 
+        updatePropulsionUnitVisuals(state: state)
         rotatePropellers(state: state, deltaTime: deltaTime)
         updateDroppedPayloadRuntime(deltaTime: deltaTime)
         applyComponentOverlays(damage: damage, thermal: thermal, mode: diagnosticMode)
@@ -3659,9 +3663,7 @@ final class DroneSceneController {
 
     private func modelForwardLocal() -> SIMD3<Float> {
         switch activeProfile.airframeClass {
-        case .multirotor:
-            return SIMD3<Float>(0.0, 0.0, -1.0)
-        case .fixedWing:
+        case .multirotor, .fixedWing, .hybridVTOL:
             return SIMD3<Float>(0.0, 0.0, -1.0)
         }
     }
@@ -3700,13 +3702,36 @@ final class DroneSceneController {
         let profileFactor = (activeProfile.maxHorizontalSpeedMps / 20.0).clamped(to: 0.55...1.2)
         let rotorOmega = state.rotorAngularSpeed
         let base = [rotorOmega.x, rotorOmega.y, rotorOmega.z, rotorOmega.w]
+        // Real per-unit RPM when the airframe actually models propulsion
+        // units (hybridVTOL with a populated template) — all units share one
+        // rate in this simplified model, so a single representative value
+        // drives every visual prop. Falls back to the legacy decorative
+        // formula otherwise (unchanged behavior for multirotor/fixedWing and
+        // any hybridVTOL airframe that doesn't seed propulsionUnits yet).
+        let propulsionUnitOmega = state.propulsionUnits.first(where: { $0.role == .tiltRotor })?.rotationalSpeedRadPerSec
 
         for index in propellerNodes.indices {
-            let omega = index < base.count ? base[index] : rotorOmega.x
+            let omega = propulsionUnitOmega ?? (index < base.count ? base[index] : rotorOmega.x)
             let fallback = 18.0 + 160.0 * state.throttle * profileFactor
             let spinSpeed = max(0.0, omega) > 0.1 ? omega : fallback
             spinAngles[index] += spinDirections[index] * spinSpeed * deltaTime
             propellerNodes[index].eulerAngles.y = CGFloat(spinAngles[index])
+        }
+    }
+
+    /// Tilts each nacelle pivot to match the propulsion units' real servo
+    /// angle — the visual consumer of `PropulsionUnit.tiltAngleRad` that
+    /// makes the transition physically visible, not just a number in the
+    /// telemetry panel. All tiltRotor units share one target/rate in this
+    /// simplified model, so one representative angle drives every pivot,
+    /// even where the physics template has more units (Wingcopter: 8) than
+    /// the visual rig has pods (4).
+    private func updatePropulsionUnitVisuals(state: DroneState) {
+        guard !tiltPivotNodes.isEmpty else { return }
+        guard let representative = state.propulsionUnits.first(where: { $0.role == .tiltRotor }) else { return }
+        let angle = CGFloat(representative.tiltAngleRad)
+        for pivot in tiltPivotNodes {
+            pivot.eulerAngles.x = angle
         }
     }
 

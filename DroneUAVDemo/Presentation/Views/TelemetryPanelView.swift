@@ -44,6 +44,21 @@ struct TelemetryPanelView: View {
                 row(titleKey: "telemetry.fixed_wing_battery", value: telemetry.fixedWingBatteryWarningLevel)
                 row(titleKey: "telemetry.fixed_wing_transition", value: telemetry.fixedWingTransitionReason)
             }
+            if telemetry.vtolDiagnosticsVisible {
+                // NOTE: vtolDiagnosticsVisible is a plain field on
+                // TelemetrySnapshot (set from selectedDroneProfile.airframeClass
+                // == .hybridVTOL), not derived from other fields — the
+                // "at rest" defaults (phase=hover, tilt=0°, progress=0%) are
+                // indistinguishable from a real hovering hybridVTOL, unlike
+                // fixedWingDiagnosticsVisible which can key off NaN sentinels.
+                row(titleKey: "telemetry.vtol_phase", valueKey: telemetry.vtolPhaseKey)
+                row(titleKey: "telemetry.vtol_tilt_angle", value: String(format: "%.0f°", telemetry.vtolTiltAngleDeg))
+                row(titleKey: "telemetry.vtol_transition", value: String(format: "%.0f %%", telemetry.vtolTransitionProgressPercent))
+                row(titleKey: "telemetry.vtol_wing_lift", value: String(format: "%.0f %%", telemetry.vtolWingLiftRatioPercent))
+                if telemetry.vtolTransitionBlocked {
+                    row(titleKey: "telemetry.vtol_transition_blocked", value: toggleLabel(true))
+                }
+            }
             row(titleKey: "telemetry.mode_transition_reason", value: telemetry.modeTransitionReason)
             row(titleKey: "telemetry.mission_abort_reason", value: telemetry.missionAbortReason)
             row(titleKey: "telemetry.control_authority", value: telemetry.controlAuthority)

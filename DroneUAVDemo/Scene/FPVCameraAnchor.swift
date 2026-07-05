@@ -15,7 +15,7 @@ struct FPVCameraAnchor {
         case .multirotor:
             baseOffset = SIMD3<Float>(0.0, 0.006, 0.0)
             forwardClearance = max(0.024, min(0.070, scale * 0.11))
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             baseOffset = SIMD3<Float>(0.0, 0.010, 0.0)
             forwardClearance = max(0.038, min(0.120, scale * 0.14))
         }

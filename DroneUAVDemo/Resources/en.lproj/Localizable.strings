@@ -908,6 +908,17 @@
 "telemetry.fixed_wing_progress.format" = "along-track %.2f";
 "telemetry.fixed_wing_battery" = "FW battery tier";
 "telemetry.fixed_wing_transition" = "FW transition";
+"telemetry.vtol_phase" = "VTOL phase";
+"telemetry.vtol_tilt_angle" = "Rotor tilt";
+"telemetry.vtol_transition" = "Transition";
+"telemetry.vtol_wing_lift" = "Wing lift";
+"telemetry.vtol_transition_blocked" = "Transition gated";
+"vtol.phase.vertical_takeoff" = "Vertical takeoff";
+"vtol.phase.hover" = "Hover";
+"vtol.phase.transition_to_forward" = "Transitioning to cruise";
+"vtol.phase.cruise" = "Cruise";
+"vtol.phase.transition_to_hover" = "Transitioning to hover";
+"vtol.phase.vertical_landing" = "Vertical landing";
 "telemetry.mode_transition_reason" = "Mode reason";
 "telemetry.mission_abort_reason" = "Mission abort";
 

@@ -66,6 +66,8 @@
 		100000000000000000000236 /* UAVProfileCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000139 /* UAVProfileCardView.swift */; };
 		100000000000000000000A2B /* UAVLivePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2C /* UAVLivePreviewView.swift */; };
 		100000000000000000000A2D /* UAVSelectionCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2E /* UAVSelectionCardView.swift */; };
+		100000000000000000000A30 /* PropulsionUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2F /* PropulsionUnit.swift */; };
+		100000000000000000000A32 /* VTOLFlightPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A31 /* VTOLFlightPhase.swift */; };
 		100000000000000000000237 /* UAVCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013A /* UAVCatalogView.swift */; };
 		100000000000000000000238 /* PayloadVisualPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013B /* PayloadVisualPreset.swift */; };
 		100000000000000000000239 /* PayloadType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013C /* PayloadType.swift */; };
@@ -355,6 +357,8 @@
 		10000000000000000000010E /* DroneModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelBuilder.swift; sourceTree = "<group>"; };
 		10000000000000000000010F /* DroneSceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneSceneController.swift; sourceTree = "<group>"; };
 		100000000000000000000110 /* DroneModelProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelProfile.swift; sourceTree = "<group>"; };
+		100000000000000000000A2F /* PropulsionUnit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropulsionUnit.swift; sourceTree = "<group>"; };
+		100000000000000000000A31 /* VTOLFlightPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VTOLFlightPhase.swift; sourceTree = "<group>"; };
 		10000000000000000000041E /* FixedWingAerodynamics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAerodynamics.swift; sourceTree = "<group>"; };
 		100000000000000000000111 /* WeatherModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherModel.swift; sourceTree = "<group>"; };
 		100000000000000000000112 /* TerrainModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainModel.swift; sourceTree = "<group>"; };
@@ -735,6 +739,8 @@
 				100000000000000000000106 /* DroneFlightMode.swift */,
 				1000000000000000000002B8 /* FixedWingAssistMode.swift */,
 				100000000000000000000110 /* DroneModelProfile.swift */,
+				100000000000000000000A2F /* PropulsionUnit.swift */,
+				100000000000000000000A31 /* VTOLFlightPhase.swift */,
 				100000000000000000000367 /* MountedCADPayload.swift */,
 				10000000000000000000013D /* PayloadConfiguration.swift */,
 				10000000000000000000013F /* PayloadCapabilityCheck.swift */,
@@ -1400,6 +1406,8 @@
 				100000000000000000000236 /* UAVProfileCardView.swift in Sources */,
 				100000000000000000000A2B /* UAVLivePreviewView.swift in Sources */,
 				100000000000000000000A2D /* UAVSelectionCardView.swift in Sources */,
+				100000000000000000000A30 /* PropulsionUnit.swift in Sources */,
+				100000000000000000000A32 /* VTOLFlightPhase.swift in Sources */,
 				100000000000000000000237 /* UAVCatalogView.swift in Sources */,
 				100000000000000000000238 /* PayloadVisualPreset.swift in Sources */,
 				100000000000000000000239 /* PayloadType.swift in Sources */,

@@ -215,7 +215,7 @@ final class MissionRuntimeMonitor {
         switch airframeClass {
         case .multirotor:
             return distanceProgressEpsilon
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             return max(0.14, distanceProgressEpsilon * 0.55)
         }
     }
@@ -227,7 +227,7 @@ final class MissionRuntimeMonitor {
         switch airframeClass {
         case .multirotor:
             return stallTimeout
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             let wing = resolvedFixedWingParameters(fixedWingParameters)
             let baseTurnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
             let turnTime = Double((baseTurnRadius * .pi) / max(wing.cruiseSpeedMps, 1.0))

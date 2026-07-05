@@ -77,6 +77,12 @@ struct TelemetrySnapshot {
     var fixedWingBatteryWarningLevel: String
     var fixedWingProfileLimitsActive: Bool
     var fixedWingTransitionReason: String
+    var vtolDiagnosticsVisible: Bool
+    var vtolPhaseKey: String
+    var vtolTiltAngleDeg: Double
+    var vtolTransitionProgressPercent: Double
+    var vtolWingLiftRatioPercent: Double
+    var vtolTransitionBlocked: Bool
     var missionAbortReason: String
     var modeTransitionReason: String
     var controlAuthority: String
@@ -179,6 +185,12 @@ struct TelemetrySnapshot {
         fixedWingBatteryWarningLevel: "nominal",
         fixedWingProfileLimitsActive: false,
         fixedWingTransitionReason: "n/a",
+        vtolDiagnosticsVisible: false,
+        vtolPhaseKey: "vtol.phase.hover",
+        vtolTiltAngleDeg: 0.0,
+        vtolTransitionProgressPercent: 0.0,
+        vtolWingLiftRatioPercent: 0.0,
+        vtolTransitionBlocked: false,
         missionAbortReason: "n/a",
         modeTransitionReason: "initialization",
         controlAuthority: FlightControlAuthority.none.title,

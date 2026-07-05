@@ -74,6 +74,27 @@ struct DroneState {
     var aileronDeflection: Float = 0.0
     var rudderDeflection: Float = 0.0
 
+    // MARK: - hybridVTOL propulsion units
+    //
+    // Mutable per-unit simulation state (tilt angle, spin rate) seeded from
+    // the profile's static `propulsionUnitTemplate` on arm/spawn/reset. Empty
+    // for airframes that aren't hybridVTOL.
+    var propulsionUnits: [PropulsionUnit] = []
+    /// 0 = hover, 1 = cruise. Mean tilt of `tiltRotor` units / (pi/2) —
+    /// indicates servo *position*, not force balance (see vtolWingborneBlend).
+    var vtolTransitionProgress: Float = 0.0
+    var vtolPhase: VTOLFlightPhase = .hover
+    /// 0...1: what fraction of the aircraft's weight the wing is *actually*
+    /// carrying right now (smoothed, asymmetric: hands over to the wing
+    /// slowly, re-engages rotors fast on lift loss). This — not tilt
+    /// geometry — is the master hover<->cruise blend for hybridVTOL physics.
+    var vtolWingborneBlend: Float = 0.0
+    /// Raw wingLift/weight from the last tick. Telemetry for the future HUD.
+    var vtolWingLiftRatio: Float = 0.0
+    /// true when the pilot's lever demanded forward tilt this tick but the
+    /// transition safety gate held or rolled the servo back.
+    var vtolTransitionBlocked: Bool = false
+
     static let initial = DroneState(
         position: SIMD3<Float>(0.0, 0.0, 0.0),
         velocity: SIMD3<Float>(repeating: 0.0),

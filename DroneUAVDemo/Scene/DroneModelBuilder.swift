@@ -14,6 +14,9 @@ struct DroneVisualModel {
     let visualBoundsCenter: SIMD3<Float>
     let visualBoundsSize: SIMD3<Float>
     let subjectScale: Float
+    /// Per-propulsion-unit tilt pivots (nacelle = motor+propeller), one per
+    /// visual rotor pod. Empty for rigs without a tilt-rotor mechanism.
+    let tiltPivotNodes: [SCNNode]
 
     init(
         rootNode: SCNNode,
@@ -27,7 +30,8 @@ struct DroneVisualModel {
         payloadMountNode: SCNNode,
         visualBoundsCenter: SIMD3<Float> = .zero,
         visualBoundsSize: SIMD3<Float> = SIMD3<Float>(repeating: 0.36),
-        subjectScale: Float = 0.36
+        subjectScale: Float = 0.36,
+        tiltPivotNodes: [SCNNode] = []
     ) {
         self.rootNode = rootNode
         self.visualRootNode = visualRootNode
@@ -41,6 +45,7 @@ struct DroneVisualModel {
         self.visualBoundsCenter = visualBoundsCenter
         self.visualBoundsSize = visualBoundsSize
         self.subjectScale = subjectScale
+        self.tiltPivotNodes = tiltPivotNodes
     }
 }
 
@@ -79,7 +84,15 @@ enum DroneModelBuilder {
                 rawModel = buildTrinityClass(profile: profile)
             }
         }
-        if profile.airframeClass == .fixedWing {
+        if profile.airframeClass == .fixedWing || profile.airframeClass == .hybridVTOL {
+            // Same legacy-chase-camera compensating flip as .fixedWing (see
+            // the .multirotor case above) — every asset in this file/
+            // UAVVisualFactory is authored nose-toward-+Z expecting this
+            // rotation. hybridVTOL didn't exist as an AirframeClass until
+            // this pass; Wingcopter 198's rig (shared with Quantum Trinity
+            // Pro, which stays .fixedWing and already got this flip) needs
+            // it too, or its nose renders backwards relative to the physics
+            // engine's forward=-Z convention.
             rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
         }
         return wrapVisualModel(rawModel, for: profile)
@@ -1190,7 +1203,8 @@ enum DroneModelBuilder {
             payloadMountNode: rawModel.payloadMountNode,
             visualBoundsCenter: adjustedCenter,
             visualBoundsSize: adjustedSize,
-            subjectScale: subjectScale
+            subjectScale: subjectScale,
+            tiltPivotNodes: rawModel.tiltPivotNodes
         )
     }
 

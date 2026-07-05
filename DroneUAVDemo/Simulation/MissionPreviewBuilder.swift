@@ -30,7 +30,7 @@ final class MissionPreviewBuilder {
         var isFlyablePreview = false
         var previewStatusKey: String?
 
-        if airframeClass == .fixedWing {
+        if airframeClass == .fixedWing || airframeClass == .hybridVTOL {
             if let flyablePreview = buildFixedWingPreview(
                 draft: draft,
                 viewport: viewport,

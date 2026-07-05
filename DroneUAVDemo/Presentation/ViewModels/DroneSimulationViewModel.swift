@@ -68,7 +68,8 @@ private struct DroneControlInputBuilder {
             throttle: Float(controls.throttle),
             isArmed: isArmed,
             mode: mode,
-            controlMode: controlMode
+            controlMode: controlMode,
+            vtolTransitionLever: Float(controls.vtolTransitionLever)
         )
     }
 
@@ -1402,7 +1403,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         self.sceneController = DroneSceneController(initialProfile: selectedProfile)
 
-        let initialState = DroneState.initial
+        var initialState = DroneState.initial
+        initialState.propulsionUnits = selectedProfile.propulsionUnitTemplate
         self.state = initialState
         self.lastFiniteState = initialState
         self.controlValues = DroneControlValues(
@@ -2239,6 +2241,7 @@ final class DroneSimulationViewModel: ObservableObject {
         flightControlMode = .stabilized
         clearSignalLossState(restoringInputMode: false)
         state = DroneState.initial
+        state.propulsionUnits = selectedDroneProfile.propulsionUnitTemplate
         lastFiniteState = state
         controlValues = DroneControlValues()
         batteryState = .full
@@ -2405,7 +2408,8 @@ final class DroneSimulationViewModel: ObservableObject {
         if state.position.y <= 0.10 {
             transitionPhysicalState(.takeoffTransition)
         }
-        if selectedDroneProfile.airframeClass == .fixedWing {
+        switch selectedDroneProfile.airframeClass {
+        case .fixedWing:
             if activeLaunchMode() != .standard {
                 beginFixedWingLaunchSequence()
             } else {
@@ -2419,7 +2423,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
                 values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
             }, markManual: false)
-        } else {
+        case .multirotor, .hybridVTOL:
             updateControlValues({ values in
                 values.y = max(values.y, 3.0)
                 values.roll = 0.0
@@ -2439,13 +2443,14 @@ final class DroneSimulationViewModel: ObservableObject {
         if state.position.y > 0.05 {
             transitionPhysicalState(.landing)
         }
-        if selectedDroneProfile.airframeClass == .fixedWing {
+        switch selectedDroneProfile.airframeClass {
+        case .fixedWing:
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = min(max(values.pitch, 6.0), 14.0)
                 values.throttle = min(values.throttle, Double(baseline.landingThrottleReference))
             }, markManual: false)
-        } else {
+        case .multirotor, .hybridVTOL:
             updateControlValues({ values in
                 values.y = 0.0
                 values.roll = 0.0
@@ -4900,7 +4905,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let airframeScale: Float
 
         switch selectedDroneProfile.airframeClass {
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             airframeScale = 1.18
         case .multirotor:
             airframeScale = 0.96
@@ -5283,6 +5288,12 @@ final class DroneSimulationViewModel: ObservableObject {
         controlState: ResolvedControlState
     ) {
         guard canControlLocalVehicle else { return }
+
+        // hybridVTOL transition lever: a raw held-key input, not routed through
+        // the assist/marker-guidance pipeline below (keyboard-only this pass;
+        // ignored entirely by non-hybridVTOL physics).
+        controlValues.vtolTransitionLever = Double(keyboardInputService.currentVTOLTransitionLever())
+
         // P2P 0.7: existing DroneState represents the local pilot vehicle only
         // until multi-state network physics is introduced.
         let inputState = buildFlightInputState(from: controlState)
@@ -5327,7 +5338,7 @@ final class DroneSimulationViewModel: ObservableObject {
             abs(effectiveAxis.vertical) > 0.001 ||
             hasEffectiveYawInput
 
-        if selectedDroneProfile.airframeClass == .fixedWing {
+        if selectedDroneProfile.airframeClass == .fixedWing || selectedDroneProfile.airframeClass == .hybridVTOL {
             fixedWingAssistUsesTargetYawWhileManual = false
 
             if route.authority == .markerGuidance,
@@ -6643,7 +6654,7 @@ final class DroneSimulationViewModel: ObservableObject {
             setFixedWingGuidanceSource(.none, reason: "multicopter_autopilot_active")
             command = multicopterAutopilotController.command(for: context)
             fixedWingAutopilotDebugState = .idle
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             let fixedWingGuidanceSource: FixedWingGuidanceSource
             if mode == .returnHome {
                 fixedWingGuidanceSource = .returnHome
@@ -6973,7 +6984,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 executionCeiling,
                 max(3.4, homePosition.y + 4.0, state.position.y + (physicalState.isGroundRestState ? 3.0 : 0.8))
             )
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             baselineAltitude = min(
                 executionCeiling,
                 max(10.0, homePosition.y + 8.0, state.position.y + 3.4)
@@ -7036,7 +7047,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func resolvedFlightControlMode(for authority: FlightControlAuthority) -> FlightControlMode {
-        if selectedDroneProfile.airframeClass == .fixedWing {
+        if selectedDroneProfile.airframeClass == .fixedWing || selectedDroneProfile.airframeClass == .hybridVTOL {
             switch mode {
             case .autoPath, .returnHome, .takeoff, .landing:
                 return .stabilized
@@ -7960,6 +7971,7 @@ final class DroneSimulationViewModel: ObservableObject {
             physicalState: .disarmed,
             mode: mode
         )
+        state.propulsionUnits = selectedDroneProfile.propulsionUnitTemplate
         sanitizeDynamicStateForSpawn(context: "load_project")
         controlValues = neutralControls(from: state)
 
@@ -8323,6 +8335,40 @@ final class DroneSimulationViewModel: ObservableObject {
             ? fleetSnapshot.nearestInterDroneDistance
             : Float(terrain.worldHalfExtent * 2.0)
 
+        let vtolPhaseKey: String
+        let vtolTiltAngleDeg: Double
+        let vtolTransitionProgressPercent: Double
+        let vtolWingLiftRatioPercent: Double
+        let vtolTransitionBlockedFlag: Bool
+        if selectedDroneProfile.airframeClass == .hybridVTOL {
+            switch state.vtolPhase {
+            case .verticalTakeoff:
+                vtolPhaseKey = "vtol.phase.vertical_takeoff"
+            case .hover:
+                vtolPhaseKey = "vtol.phase.hover"
+            case .transitionToForward:
+                vtolPhaseKey = "vtol.phase.transition_to_forward"
+            case .cruise:
+                vtolPhaseKey = "vtol.phase.cruise"
+            case .transitionToHover:
+                vtolPhaseKey = "vtol.phase.transition_to_hover"
+            case .verticalLanding:
+                vtolPhaseKey = "vtol.phase.vertical_landing"
+            }
+            let tiltRad = state.propulsionUnits.first(where: { $0.role == .tiltRotor })?.tiltAngleRad
+                ?? (state.vtolTransitionProgress * .pi / 2)
+            vtolTiltAngleDeg = Double(tiltRad.radiansToDegrees)
+            vtolTransitionProgressPercent = Double(state.vtolTransitionProgress) * 100.0
+            vtolWingLiftRatioPercent = Double(state.vtolWingLiftRatio) * 100.0
+            vtolTransitionBlockedFlag = state.vtolTransitionBlocked
+        } else {
+            vtolPhaseKey = "vtol.phase.hover"
+            vtolTiltAngleDeg = 0.0
+            vtolTransitionProgressPercent = 0.0
+            vtolWingLiftRatioPercent = 0.0
+            vtolTransitionBlockedFlag = false
+        }
+
         return TelemetrySnapshot(
             timestampISO8601: iso,
             droneModelID: selectedDroneProfile.id,
@@ -8391,6 +8437,12 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingProfileLimitsActive: selectedDroneProfile.airframeClass == .fixedWing &&
                 selectedDroneProfile.fixedWingParameters != nil,
             fixedWingTransitionReason: fixedWingLastTransitionReason ?? "n/a",
+            vtolDiagnosticsVisible: selectedDroneProfile.airframeClass == .hybridVTOL,
+            vtolPhaseKey: vtolPhaseKey,
+            vtolTiltAngleDeg: vtolTiltAngleDeg,
+            vtolTransitionProgressPercent: vtolTransitionProgressPercent,
+            vtolWingLiftRatioPercent: vtolWingLiftRatioPercent,
+            vtolTransitionBlocked: vtolTransitionBlockedFlag,
             missionAbortReason: missionExecutionState.abortReason?.rawValue ??
                 missionSafetyState.abortReason?.rawValue ??
                 "n/a",
@@ -12390,7 +12442,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func missionWaypointAcceptanceRadiusMeters() -> Float {
         switch selectedDroneProfile.airframeClass {
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             let wing = activeFixedWingParameters()
             return wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
         case .multirotor:

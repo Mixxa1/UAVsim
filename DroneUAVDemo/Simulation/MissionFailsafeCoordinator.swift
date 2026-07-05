@@ -26,7 +26,7 @@ final class MissionFailsafeCoordinator {
             return canReturnSafely ? .returnHome : .abortMission
         }
 
-        if airframeClass == .fixedWing {
+        if airframeClass == .fixedWing || airframeClass == .hybridVTOL {
             switch safetyState.blockReason {
             case .routeInvalid:
                 return .abortMission
@@ -67,7 +67,7 @@ final class MissionFailsafeCoordinator {
             if !safetyState.runtimeConstraints.collisionSafe && airframeClass == .multirotor {
                 return .hold
             }
-            if airframeClass == .fixedWing {
+            if airframeClass == .fixedWing || airframeClass == .hybridVTOL {
                 return .pauseMission
             }
             return canReturnSafely ? .returnHome : .pauseMission

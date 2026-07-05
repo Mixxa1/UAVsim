@@ -9,7 +9,7 @@ enum UAVAirframeKind: String, CaseIterable, Equatable, Hashable {
         switch airframeClass {
         case .multirotor:
             self = .multicopter
-        case .fixedWing:
+        case .fixedWing, .hybridVTOL:
             self = .fixedWing
         }
     }

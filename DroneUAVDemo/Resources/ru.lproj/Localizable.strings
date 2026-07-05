@@ -903,6 +903,17 @@
 "telemetry.fixed_wing_progress.format" = "продвижение %.2f";
 "telemetry.fixed_wing_battery" = "FW батарея";
 "telemetry.fixed_wing_transition" = "FW переход";
+"telemetry.vtol_phase" = "Фаза VTOL";
+"telemetry.vtol_tilt_angle" = "Наклон роторов";
+"telemetry.vtol_transition" = "Переход";
+"telemetry.vtol_wing_lift" = "Подъёмная сила крыла";
+"telemetry.vtol_transition_blocked" = "Переход заблокирован";
+"vtol.phase.vertical_takeoff" = "Вертикальный взлёт";
+"vtol.phase.hover" = "Зависание";
+"vtol.phase.transition_to_forward" = "Переход в крейсер";
+"vtol.phase.cruise" = "Крейсер";
+"vtol.phase.transition_to_hover" = "Переход в зависание";
+"vtol.phase.vertical_landing" = "Вертикальная посадка";
 "telemetry.mode_transition_reason" = "Причина режима";
 "telemetry.mission_abort_reason" = "Причина прерывания";
 

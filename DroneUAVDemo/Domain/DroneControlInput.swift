@@ -8,4 +8,9 @@ struct DroneControlInput {
     var isArmed: Bool
     var mode: DroneFlightMode
     var controlMode: FlightControlMode
+
+    /// -1...1. hybridVTOL transition lever: +1 drives tiltRotor units'
+    /// targetTiltAngleRad toward cruise (pi/2), -1 toward hover (0), 0 holds
+    /// the current target. Ignored by non-hybridVTOL airframes.
+    var vtolTransitionLever: Float = 0.0
 }

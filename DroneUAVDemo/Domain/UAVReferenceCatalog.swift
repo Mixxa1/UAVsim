@@ -263,6 +263,20 @@ enum UAVReferenceCatalog {
             shortDescription: "Tilt-rotor eVTOL delivery drone with fixed-wing cruise and multi-drop medical logistics capability.",
             notes: "Wingcopter publishes the Wingcopter 198 with a 198×152×65 cm aircraft envelope, 25 kg maximum takeoff weight, 94 km maximum range, 90 km/h speed, 4.7 kg payload, eight motors, and two batteries. Battery-separated mass is still estimated until OEM mass breakdown is available.",
             missionRole: "Blood, laboratory sample, vaccine, and medicine delivery between hospitals, labs, and remote points",
+            // Explicit tuning, decoupled from Quantum Trinity Pro's shared
+            // catalogDefault(visualPreset:) numbers now that this airframe is
+            // a mechanically-simulated true tilt-rotor (AirframeClass.hybridVTOL
+            // in DroneModelProfile), not a lift+cruise hybrid like Trinity.
+            flightTuningProfile: UAVFlightTuningProfile.hybridVTOL(
+                referenceMass: 20.3,
+                hoverThrottleBaseline: 0.62,
+                transitionThrottleBaseline: 0.57,
+                cruiseThrottleBaseline: 0.44,
+                verticalResponseFactor: 0.85,
+                transitionResponseFactor: 0.78,
+                payloadThrustCompensationFactor: 0.36,
+                source: .estimated
+            ),
             nominalFlightTimeSec: 3760,
             nominalCruiseSpeedMps: 25.0,
             nominalMaxRangeM: 94000,

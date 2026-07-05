@@ -20,7 +20,7 @@ final class MissionAuthorityGuard {
     ) -> MissionControlAuthorityState {
         let now = Date()
         let requiresMissionAuthority = executionState.status == .running
-        let fixedWingRouteActive = airframeClass == .fixedWing &&
+        let fixedWingRouteActive = (airframeClass == .fixedWing || airframeClass == .hybridVTOL) &&
             isFixedWingMissionRouteActive(debugState: fixedWingDebugState)
         let hasBoundMissionTarget = fixedWingRouteActive || adapter.isBound(
             activeTarget: executionState.activeTarget,
