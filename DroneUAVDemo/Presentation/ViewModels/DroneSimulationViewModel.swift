@@ -2190,15 +2190,43 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
         isArmed = true
-        if heightAboveSupportSurface(for: state.position) <= 0.08 {
+        let heightAboveSupport = heightAboveSupportSurface(for: state.position)
+        if heightAboveSupport <= 0.08 {
             transitionPhysicalState(.armedOnGround)
         }
-        if heightAboveSupportSurface(for: state.position) <= 0.05,
-           selectedDroneProfile.airframeClass == .multirotor {
+        if heightAboveSupport <= 0.05,
+           selectedDroneProfile.airframeStyle == .tailsitterVTOL {
+            beginTailsitterVerticalTakeoffOnArm()
+        } else if heightAboveSupport <= 0.05,
+                  selectedDroneProfile.airframeClass == .multirotor {
             updateControlValues({ values in
                 values.throttle = max(values.throttle, 0.06)
             }, markManual: false)
         }
+    }
+
+    private func beginTailsitterVerticalTakeoffOnArm() {
+        let baseline = resolvedFlightBaseline(for: .takeoff)
+        state.propulsionUnits = selectedDroneProfile.propulsionUnitTemplate
+        state.vtolTransitionProgress = 0.0
+        state.vtolWingborneBlend = 0.0
+        state.vtolWingLiftRatio = 0.0
+        state.vtolTransitionBlocked = false
+        state.vtolPhase = .verticalTakeoff
+        let restOrientation = spawnOrientation(for: selectedDroneProfile)
+        state.orientation.x = restOrientation.x
+        state.orientation.y = restOrientation.y
+        resyncFixedWingAttitudeFromEuler()
+        setFlightMode(.takeoff, reason: "tailsitter_arm_vertical_takeoff")
+        transitionPhysicalState(.takeoffTransition)
+        updateControlValues({ values in
+            values.y = max(values.y, Double(max(3.0, state.position.y + 3.0)))
+            values.roll = 0.0
+            values.pitch = 0.0
+            values.yaw = Double(state.orientation.z.radiansToDegrees)
+            values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
+            values.vtolTransitionLever = 0.0
+        }, markManual: false)
     }
 
     func disarm(forceEmergency: Bool = false, preserveCrashDynamics: Bool = false) {
@@ -5310,11 +5338,26 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         let effectiveControlMode = resolvedFlightControlMode(for: route.authority)
 
-        manualYawIntent = route.yawInput.intent * (route.yawInput.speedBoost ? 1.35 : 1.0)
         let maxAltitude = Double(terrain.maxFlightAltitude)
         let effectiveAxis = route.axisInput
+        let tailsitterHoverControlsActive = selectedDroneProfile.airframeStyle == .tailsitterVTOL &&
+            state.vtolTransitionProgress < 0.25
+        let tailsitterHoverTurnIntent = tailsitterHoverControlsActive ? -effectiveAxis.strafe : 0.0
+        manualYawIntent = (route.yawInput.intent + tailsitterHoverTurnIntent).clamped(to: -1.0...1.0) *
+            (route.yawInput.speedBoost ? 1.35 : 1.0)
 
-        if route.authority == .manual, mode == .hover {
+        let hasEffectiveYawInput = abs(manualYawIntent) > 0.001
+        let hasEffectiveInput =
+            abs(effectiveAxis.forward) > 0.001 ||
+            abs(effectiveAxis.strafe) > 0.001 ||
+            abs(effectiveAxis.vertical) > 0.001 ||
+            hasEffectiveYawInput
+        let hasVTOLTransitionInput = abs(controlValues.vtolTransitionLever) > 0.05
+        let shouldExitHoverForManualAuthority = selectedDroneProfile.airframeStyle == .tailsitterVTOL
+            ? (hasEffectiveInput || hasVTOLTransitionInput)
+            : true
+
+        if route.authority == .manual, mode == .hover, shouldExitHoverForManualAuthority {
             setFlightMode(.manual, reason: "manual_input_exit_hover")
         }
 
@@ -5330,13 +5373,6 @@ final class DroneSimulationViewModel: ObservableObject {
             _ = applyMultirotorTargetMarkerGuidance(deltaTime: deltaTime)
             return
         }
-
-        let hasEffectiveYawInput = abs(route.yawInput.intent) > 0.001
-        let hasEffectiveInput =
-            abs(effectiveAxis.forward) > 0.001 ||
-            abs(effectiveAxis.strafe) > 0.001 ||
-            abs(effectiveAxis.vertical) > 0.001 ||
-            hasEffectiveYawInput
 
         if selectedDroneProfile.airframeClass == .fixedWing || selectedDroneProfile.airframeClass == .hybridVTOL {
             fixedWingAssistUsesTargetYawWhileManual = false
@@ -5368,9 +5404,25 @@ final class DroneSimulationViewModel: ObservableObject {
                 maxBankAngleDeg: 38.0
             )
             let currentHorizontalSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
-            let speedRatio = (currentHorizontalSpeed / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...1.35)
+            let speedRatioUpperBound: Float = selectedDroneProfile.airframeStyle == .tailsitterVTOL ? 1.0 : 1.35
+            let speedRatio = (currentHorizontalSpeed / max(wing.cruiseSpeedMps, 0.1)).clamped(to: 0.55...speedRatioUpperBound)
             let speedRatioDouble = Double(speedRatio)
-            let stallBias = Double(max(0.0, wing.stallWarningSpeedMps - currentHorizontalSpeed)) * 0.018
+            // Stall-recovery throttle bias assumes low horizontal speed means
+            // "about to stall, add power" — true for a conventional fixed-wing
+            // aircraft, but a hybridVTOL hovering (or a tailsitter sitting
+            // nose-up) is *supposed* to read near-zero horizontal speed while
+            // perfectly safe, rotor/hover-borne. Without gating, this fought
+            // the pilot's own throttle-down input every tick (Q barely moved
+            // the number, any other key let it climb back) and the resulting
+            // thrust fighting its own correction is what read as continuous
+            // shake. Scale by how much of the weight the wing is actually
+            // carrying (0 in hover, 1 once genuinely wing-borne) — unchanged
+            // for conventional fixedWing, which doesn't populate this field
+            // and always reads 1.0 here.
+            let wingBorneFraction: Double = selectedDroneProfile.airframeClass == .hybridVTOL
+                ? Double(state.vtolWingborneBlend)
+                : 1.0
+            let stallBias = Double(max(0.0, wing.stallWarningSpeedMps - currentHorizontalSpeed)) * 0.018 * Double(deltaTime) * wingBorneFraction
             let rollGain = Double((effectiveControlMode == .acro ? 58.0 : 30.0) * wing.bankResponseGain) * speedRatioDouble
             let pitchAuthority = Double(effectiveControlMode == .acro ? 50.0 : 24.0)
             let pitchResponseGain = Double(effectiveAxis.forward < 0.0 ? wing.climbResponseGain : wing.descentResponseGain)
@@ -5378,10 +5430,12 @@ final class DroneSimulationViewModel: ObservableObject {
             let rollLimit = Double(wing.maxBankAngleDeg)
             let pitchLimit = 28.0
             let throttleDelta = Double(effectiveAxis.vertical) * Double((effectiveAxis.speedBoost ? 0.54 : 0.30) * wing.throttleResponseGain) * Double(deltaTime)
-            let rollCommand = (-Double(effectiveAxis.strafe) * rollGain).clamped(to: -rollLimit...rollLimit)
+            let rollCommand = tailsitterHoverControlsActive
+                ? 0.0
+                : (-Double(effectiveAxis.strafe) * rollGain).clamped(to: -rollLimit...rollLimit)
             let pitchCommand = (-Double(effectiveAxis.forward) * pitchGain).clamped(to: -pitchLimit...pitchLimit)
             let manualThrottle = (controlValues.throttle + throttleDelta + stallBias).clamped(to: 0.0...1.0)
-            let liveTurnOverride = abs(effectiveAxis.strafe) > 0.001 || hasEffectiveYawInput
+            let liveTurnOverride = (!tailsitterHoverControlsActive && abs(effectiveAxis.strafe) > 0.001) || hasEffectiveYawInput
             let liveAltitudeOverride = abs(effectiveAxis.forward) > 0.001 || abs(effectiveAxis.vertical) > 0.001
 
             if liveTurnOverride {
@@ -6808,7 +6862,20 @@ final class DroneSimulationViewModel: ObservableObject {
                 }
             } else {
                 let targetAltitude = Float(controlValues.y)
-                if physicalState == .airborne && state.position.y >= targetAltitude - 0.08 && abs(state.velocity.y) < 0.45 {
+                if selectedDroneProfile.airframeStyle == .tailsitterVTOL,
+                   state.position.y >= targetAltitude - 0.08 {
+                    setFlightMode(.hover, reason: "takeoff_completed_tailsitter")
+                    updateControlValues({ values in
+                        values.x = Double(state.position.x)
+                        values.y = Double(state.position.y)
+                        values.z = Double(state.position.z)
+                        values.roll = 0.0
+                        values.pitch = 0.0
+                        values.yaw = Double(state.orientation.z.radiansToDegrees)
+                        values.throttle = Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle)
+                        values.vtolTransitionLever = 0.0
+                    }, markManual: false)
+                } else if physicalState == .airborne && state.position.y >= targetAltitude - 0.08 && abs(state.velocity.y) < 0.45 {
                     setFlightMode(.hover, reason: "takeoff_completed_multicopter")
                     lockControlsToCurrentState(overrideThrottle: Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle))
                 }
@@ -8355,8 +8422,14 @@ final class DroneSimulationViewModel: ObservableObject {
             case .verticalLanding:
                 vtolPhaseKey = "vtol.phase.vertical_landing"
             }
+            // Tailsitters have no tiltRotor unit (thrust direction is fixed
+            // relative to the body) — for them, "tilt" is the body's own
+            // pitch, which is the real diagnostic signal when the hover
+            // pitch-lock is suspected of not holding, so show the actual
+            // measured attitude rather than the lever-derived progress
+            // estimate.
             let tiltRad = state.propulsionUnits.first(where: { $0.role == .tiltRotor })?.tiltAngleRad
-                ?? (state.vtolTransitionProgress * .pi / 2)
+                ?? ((.pi / 2) - state.orientation.y)
             vtolTiltAngleDeg = Double(tiltRad.radiansToDegrees)
             vtolTransitionProgressPercent = Double(state.vtolTransitionProgress) * 100.0
             vtolWingLiftRatioPercent = Double(state.vtolWingLiftRatio) * 100.0
@@ -14221,8 +14294,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         if state.position.y <= 0.05 {
-            state.orientation.x = 0.0
-            state.orientation.y = 0.0
+            let restOrientation = spawnOrientation(for: selectedDroneProfile)
+            state.orientation.x = restOrientation.x
+            state.orientation.y = restOrientation.y
         }
 
         resyncFixedWingAttitudeFromEuler()
@@ -14230,6 +14304,12 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func spawnOrientation(for profile: DroneModelProfile) -> SIMD3<Float> {
+        // A tailsitter rests nose-up on its tail (pitch = +90°), not flat —
+        // matching the hover transition controller's rest target
+        // (vtolTransitionProgress = 0 always demands pitch -> 90°).
+        if profile.airframeStyle == .tailsitterVTOL {
+            return SIMD3<Float>(0, .pi / 2, 0)
+        }
         return .zero
     }
 
@@ -14247,7 +14327,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// instead of the visually-reset one — looks like the aircraft barely
     /// moves even at full throttle.
     private func resyncFixedWingAttitudeFromEuler() {
-        guard selectedDroneProfile.airframeClass == .fixedWing else { return }
+        guard selectedDroneProfile.airframeClass == .fixedWing || selectedDroneProfile.airframeClass == .hybridVTOL else { return }
         state.fixedWingOrientationQuat = simd_quatf(angle: state.orientation.z, axis: SIMD3<Float>(0, 1, 0))
             * simd_quatf(angle: state.orientation.y, axis: SIMD3<Float>(1, 0, 0))
             * simd_quatf(angle: state.orientation.x, axis: SIMD3<Float>(0, 0, 1))
@@ -14276,8 +14356,9 @@ final class DroneSimulationViewModel: ObservableObject {
         state.forwardAirspeed = 0.0
         state.throttle = 0.0
         state.motorThrottle = 0.0
-        state.orientation.x = 0.0
-        state.orientation.y = 0.0
+        let restOrientation = spawnOrientation(for: selectedDroneProfile)
+        state.orientation.x = restOrientation.x
+        state.orientation.y = restOrientation.y
         resyncFixedWingAttitudeFromEuler()
         setFlightMode(.manual, reason: "settle_disarmed_grounded")
         state.mode = mode
@@ -14331,15 +14412,36 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         if previousState.position.y > previousSupportY + 0.06 && state.position.y <= supportY + 0.02 {
+            // Same tailsitter carve-out as severeAttitudeOnGround below: a
+            // correct nose-up touchdown (pitch ~ +90°) shouldn't itself
+            // count as impact severity — measure deviation from the
+            // expected rest pitch instead of raw magnitude.
+            let pitchSeverityTerm: Float = selectedDroneProfile.airframeStyle == .tailsitterVTOL
+                ? abs(abs(previousState.orientation.y) - .pi / 2)
+                : abs(previousState.orientation.y)
             let touchdownSeverity =
                 abs(previousState.velocity.y) * 1.45 +
                 simd_length(SIMD2<Float>(previousState.velocity.x, previousState.velocity.z)) * 0.72 +
                 simd_length(previousState.angularVelocity) * 0.42 +
-                (abs(previousState.orientation.x) + abs(previousState.orientation.y)) * 0.45
+                (abs(previousState.orientation.x) + pitchSeverityTerm) * 0.45
             impactSeverityAccumulator = max(impactSeverityAccumulator, touchdownSeverity)
         }
 
-        let severeAttitudeOnGround = nearGround && (abs(state.orientation.x) > 1.22 || abs(state.orientation.y) > 1.22)
+        // A tailsitter's *correct* rest attitude is nose-up (pitch ~ +90°) —
+        // unlike every other airframe, where any such pitch on the ground
+        // can only mean it tipped over. Flagging raw pitch magnitude here
+        // treated a perfectly normal, correctly-resting Wingtra as crashed
+        // within ~0.12s of settling, forcing a repeated arm -> instantly
+        // "crashed" -> auto-disarm loop (the "can't even take off" / shaking
+        // the user reported — each arm attempt produced a thrust pulse
+        // before being killed). Roll is unambiguous either way — tipping
+        // onto a wingtip is never correct — so only that still counts.
+        let severeAttitudeOnGround: Bool
+        if selectedDroneProfile.airframeStyle == .tailsitterVTOL {
+            severeAttitudeOnGround = nearGround && abs(state.orientation.x) > 1.22
+        } else {
+            severeAttitudeOnGround = nearGround && (abs(state.orientation.x) > 1.22 || abs(state.orientation.y) > 1.22)
+        }
         let hasCrashCondition =
             physicalState == .crashed ||
             damageState.isFlightCritical ||

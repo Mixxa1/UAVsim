@@ -2506,7 +2506,20 @@ final class DroneSceneController {
         diagnosticMode: DiagnosticOverlayMode,
         deltaTime: Float
     ) {
-        droneNode.position = SCNVector3(state.position.x, state.position.y, state.position.z)
+        // Tailsitters rest nose-up on their tail, well below the airframe
+        // origin physics measures from — but position.y == 0 at rest is a
+        // load-bearing contract for arm/takeoff ground checks and throttle
+        // floors elsewhere (see the reverted physics-side attempt at this
+        // same offset: it silently made the aircraft read as already
+        // airborne at rest and self-throttle on arm). Applying the same
+        // half-fuselage-length lift purely to the *rendered* position avoids
+        // that: physics keeps its simple y=0 ground contract, only the
+        // visible mesh moves up so the tail doesn't clip into the terrain.
+        // Matches buildWingtraOneGenII's actual fuselage capsule length.
+        let tailsitterVisualLift: Float = activeProfile.airframeStyle == .tailsitterVTOL
+            ? 0.39 * abs(sin(state.orientation.y))
+            : 0.0
+        droneNode.position = SCNVector3(state.position.x, state.position.y + tailsitterVisualLift, state.position.z)
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
 

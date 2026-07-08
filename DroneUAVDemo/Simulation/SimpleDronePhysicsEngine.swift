@@ -456,7 +456,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         var rudderFraction: Float = 0.0
 
         if !crashOrDisarmed {
-            let currentEuler = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat)
+            let currentEuler = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat, fallback: state.orientation)
             if control.controlMode.isRateMode {
                 elevatorFraction = control.targetOrientation.y.clamped(to: -1.0...1.0)
                 aileronFraction = control.targetOrientation.x.clamped(to: -1.0...1.0)
@@ -635,7 +635,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             yawRate: next.bodyAngularVelocity.z,
             dt: dt
         )
-        next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+        next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat, fallback: state.orientation)
         next.angularVelocity = next.bodyAngularVelocity
         next.angleOfAttack = alpha
         next.sideslipAngle = beta
@@ -659,7 +659,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 let levelBlend = min(1.0, dt * 4.0)
                 let blendedVector = next.fixedWingOrientationQuat.vector * (1.0 - levelBlend) + headingOnlyQuat.vector * levelBlend
                 next.fixedWingOrientationQuat = simd_quatf(vector: simd_normalize(blendedVector))
-                next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+                next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat, fallback: next.orientation)
             }
             next.angularVelocity = next.bodyAngularVelocity
         }
@@ -796,7 +796,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         var rudderFraction: Float = 0.0
 
         if !crashOrDisarmed {
-            let currentEuler = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat)
+            let currentEuler = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat, fallback: state.orientation)
             if control.controlMode.isRateMode {
                 elevatorFraction = control.targetOrientation.y.clamped(to: -1.0...1.0)
                 aileronFraction = control.targetOrientation.x.clamped(to: -1.0...1.0)
@@ -1030,17 +1030,28 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         } else {
             let hoverPhaseFloor: Float
             switch control.mode {
-            case .takeoff, .hover:
+            case .takeoff:
                 hoverPhaseFloor = baseline.takeoffThrottleReference
+            case .hover:
+                hoverPhaseFloor = profile.airframeStyle == .tailsitterVTOL
+                    ? baseline.hoverLockThrottle
+                    : baseline.takeoffThrottleReference
             case .landing:
                 hoverPhaseFloor = baseline.landingThrottleReference
             case .manual, .autoPath, .returnHome, .emergencyStop:
                 hoverPhaseFloor = baseline.hoverLockThrottle
             }
             let cruiseFloor = max(baseline.cruiseReferenceThrottle, baseline.effectiveMinimumSafeFlightThrottle)
-            let throttleFloor = state.position.y > 0.15
-                ? hoverPhaseFloor * (1.0 - wingborneBlend) + cruiseFloor * wingborneBlend
-                : 0.0
+            let allowGroundTakeoffFloor = profile.airframeStyle == .tailsitterVTOL && control.mode == .takeoff
+            let manualTailsitterThrottle = profile.airframeStyle == .tailsitterVTOL && control.mode == .manual
+            let throttleFloor: Float
+            if manualTailsitterThrottle {
+                throttleFloor = 0.0
+            } else if state.position.y > 0.15 || allowGroundTakeoffFloor {
+                throttleFloor = hoverPhaseFloor * (1.0 - wingborneBlend) + cruiseFloor * wingborneBlend
+            } else {
+                throttleFloor = 0.0
+            }
             throttleCommand = max(throttleCommand, throttleFloor)
         }
 
@@ -1135,7 +1146,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // computed at an extreme, physically-invalid angle of attack during
         // a mismatched transition) compounding into an unbounded climb in
         // total kinetic energy rather than just leaving the vertical axis.
-        let absoluteSpeedCeiling = max(profile.maxHorizontalSpeedMps, wing.cruiseSpeedMps) * 1.6
+        // Tilt-rotors keep the old defensive headroom; tailsitters were
+        // visibly riding that headroom as a steady 40+ m/s "cruise", so keep
+        // them close to the catalog envelope instead.
+        let speedCeilingMultiplier: Float = profile.airframeStyle == .tailsitterVTOL ? 1.0 : 1.6
+        let absoluteSpeedCeiling = max(profile.maxHorizontalSpeedMps, wing.cruiseSpeedMps) * speedCeilingMultiplier
         let currentSpeed = simd_length(next.velocity)
         if currentSpeed > absoluteSpeedCeiling {
             next.velocity *= absoluteSpeedCeiling / currentSpeed
@@ -1151,7 +1166,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             yawRate: next.bodyAngularVelocity.z,
             dt: dt
         )
-        next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+        next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat, fallback: state.orientation)
         next.angularVelocity = next.bodyAngularVelocity
         next.angleOfAttack = alpha
         next.sideslipAngle = beta
@@ -1159,6 +1174,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // --- 10. Ground handling: reused verbatim from stepFixedWingAerodynamic
         // — a hybridVTOL rests on gear like a fixed-wing, not by cutting
         // thrust flush to the ground like a multirotor.
+        //
+        // A tailsitter's tail (its actual ground-contact point when nose-up)
+        // sits below the airframe origin used here — tempting to offset
+        // position.y itself, but `position.y == supportSurfaceY` is a
+        // load-bearing contract for *everything else* in the app (arm/
+        // takeoff ground checks, throttle floors, `heightAboveSupportSurface`
+        // callers) that treats any nonzero height as "already airborne".
+        // Tried exactly that offset once already: it silently broke arming
+        // (the aircraft read as already flying at rest and self-applied
+        // hover throttle). The tail/ground visual gap is handled purely as a
+        // rendering offset in DroneSceneController instead — physics keeps
+        // position.y == 0 at rest for every airframe, tailsitter included.
         if next.position.y < 0.0 {
             next.position.y = 0.0
             if next.velocity.y < 0.0 {
@@ -1172,11 +1199,25 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             next.velocity.z *= max(0.0, 1.0 - dt * 10.0)
             next.bodyAngularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - dt * 12.0))
             if state.physicalState != .crashed {
-                let headingOnlyQuat = simd_quatf(angle: next.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+                // Level roll/pitch toward the ground while preserving current
+                // heading — EXCEPT a tailsitter, which rests nose-up on its
+                // tail (pitch = +90°), not flat on its belly. Snapping it
+                // level here would fight the hover transition controller,
+                // which always demands pitch -> 90° at rest (progress = 0):
+                // the very first tick after arming would see thrust ~100%
+                // horizontal (nose level) while the controller yanks for a
+                // 90° attitude it doesn't have yet.
+                let restQuat: simd_quatf
+                if profile.airframeStyle == .tailsitterVTOL {
+                    restQuat = simd_quatf(angle: next.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+                        * simd_quatf(angle: Float.pi / 2, axis: SIMD3<Float>(1, 0, 0))
+                } else {
+                    restQuat = simd_quatf(angle: next.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+                }
                 let levelBlend = min(1.0, dt * 4.0)
-                let blendedVector = next.fixedWingOrientationQuat.vector * (1.0 - levelBlend) + headingOnlyQuat.vector * levelBlend
+                let blendedVector = next.fixedWingOrientationQuat.vector * (1.0 - levelBlend) + restQuat.vector * levelBlend
                 next.fixedWingOrientationQuat = simd_quatf(vector: simd_normalize(blendedVector))
-                next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat)
+                next.orientation = eulerFromFixedWingQuaternion(next.fixedWingOrientationQuat, fallback: next.orientation)
             }
             next.angularVelocity = next.bodyAngularVelocity
         }
@@ -1372,15 +1413,67 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // (from the elevator/pitch stick) takes back over via the same
         // hover<->aero blend used for roll/yaw.
         let desiredRates = s.crashOrDisarmed ? SIMD3<Float>(repeating: 0.0) : desiredMultirotorRates(control: control, state: state, authority: s.authority)
-        let currentPitch = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat).y
+        let currentPitch = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat, fallback: state.orientation).y
         let targetPitchRad = (1.0 - s.vtolTransitionProgress) * (Float.pi / 2)
         let pitchRateTarget = ((targetPitchRad - currentPitch) * 2.2).clamped(to: -1.6...1.6)
-        let hoverDesiredRates = SIMD3<Float>(desiredRates.x, pitchRateTarget, desiredRates.z)
-        let hoverRateGain = SIMD3<Float>(7.2 * s.authority, 7.2 * s.authority, 4.8 * s.authority)
-        let hoverAngularDamping = SIMD3<Float>(2.8, 2.8, 2.2)
+        // Roll/yaw's stick-tracking rate commands (desiredRates.x/z) come from
+        // angleTrackingRates, which diffs against state.orientation.x/z — the
+        // roll/yaw Euler angles extracted via atan2(-forward.x, -forward.z).
+        // That extraction is gimbal-locked exactly at pitch = +-90 deg
+        // (forward.x and forward.z both -> 0, so atan2 sees a near-(0,0)
+        // input and returns an arbitrarily noisy angle) — precisely the
+        // attitude a tailsitter sits at for all of hover. Feeding that noise
+        // into a full-authority rate controller is what reads as "jerks
+        // left-right" at spawn/hover. Fade roll/yaw command authority out as
+        // the nose approaches vertical (gimbalSafetyFactor -> 0); the
+        // damping term below (driven by bodyAngularVelocity, a real
+        // integrated quantity, not an Euler extraction) still actively
+        // resists any actual rotation, so the aircraft holds still rather
+        // than going slack. Full stick authority returns smoothly as the
+        // nose comes down toward level, exactly where the extraction becomes
+        // well-conditioned again.
+        let gimbalSafetyFactor = abs(cos(currentPitch))
+        let verticalness = abs(sin(currentPitch)).clamped(to: 0.0...1.0)
+        let hoverYawBlend = (verticalness * (1.0 - s.vtolTransitionProgress)).clamped(to: 0.0...1.0)
+        let rollCommandBlend = min(gimbalSafetyFactor, s.vtolTransitionProgress)
+        // Near vertical, the world-yaw axis is the airframe's thrust axis
+        // (body Z / this integrator's roll-rate channel), not body Y. Sending
+        // manual yaw into body Y at hover rocks the aircraft around a
+        // horizontal axis and creates the left-right resonance seen in flight.
+        // Blend that command back to the normal body-yaw channel as the
+        // tailsitter pitches toward cruise.
+        let yawRateCommand = desiredRates.z * 0.45
+        let hoverDesiredRates = SIMD3<Float>(
+            desiredRates.x * rollCommandBlend + yawRateCommand * hoverYawBlend,
+            pitchRateTarget,
+            yawRateCommand * (1.0 - hoverYawBlend)
+        )
+        let hoverRateGain = SIMD3<Float>(4.2 * s.authority, 6.4 * s.authority, 3.2 * s.authority)
+        let hoverAngularDamping = SIMD3<Float>(5.2, 3.2, 4.8)
         let hoverAngularAccel = (hoverDesiredRates - state.bodyAngularVelocity) * hoverRateGain - state.bodyAngularVelocity * hoverAngularDamping
         let aeroAngularAccel = s.aeroMomentBody / s.aero.inertiaTensor
-        let angularAccel = hoverAngularAccel * (1.0 - s.wingborneBlend) + aeroAngularAccel * s.wingborneBlend
+        // Attitude authority blends by *pilot-commanded* progress here, not
+        // by wingborneBlend (unlike Wingcopter, where thrust direction is
+        // already locked to the tilt angle regardless of aero authority).
+        // For a tailsitter, pitch itself is the contested axis: even at
+        // pitch near 0 deg (nose level, thrust ~horizontal), an ordinary wing
+        // moving forward generates real lift -- wingborneBlend rises from
+        // that alone, with no regard for whether the current pitch matches
+        // what the pilot actually asked for (progress). Blending aero
+        // authority in by wingborneBlend let that incidental lift hand
+        // control away from the hover-pitch-lock before it ever reached 90
+        // deg, which is exactly the self-reinforcing loop that kept the
+        // aircraft flying like a conventional low-pitch airplane instead of
+        // holding nose-up hover: low pitch -> real lift -> more aero
+        // authority -> pitch never corrects. Progress instead only grows
+        // when the pilot commands it (gated by the safety check in
+        // computeVTOLAeroTransitionStep), so at progress = 0 the hover
+        // controller keeps full, uncontested authority over pitch.
+        // Even at full cruise progress, keep a slice of body-rate SAS online:
+        // the simplified Wingtra aero model is not stable enough by itself to
+        // damp a manual roll/yaw disturbance without overshooting.
+        let attitudeAuthorityBlend = min(s.vtolTransitionProgress, 0.72)
+        let angularAccel = hoverAngularAccel * (1.0 - attitudeAuthorityBlend) + aeroAngularAccel * attitudeAuthorityBlend
 
         next = integrateVTOLBody(
             state: state,
@@ -1429,10 +1522,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// (`atan2(-dx, -dz)`, also used by `FixedWingAutopilotInput`). Gimbal-locks
     /// at pitch = ±90° like any Euler representation — display-only, never fed
     /// back into the physics integration.
-    private func eulerFromFixedWingQuaternion(_ q: simd_quatf) -> SIMD3<Float> {
+    private func eulerFromFixedWingQuaternion(_ q: simd_quatf, fallback: SIMD3<Float>? = nil) -> SIMD3<Float> {
         let forward = simd_act(q, SIMD3<Float>(0, 0, -1))
         let pitch = asin(forward.y.clamped(to: -1.0...1.0))
-        let yaw = atan2(-forward.x, -forward.z)
+        let horizontalForward = simd_length(SIMD2<Float>(forward.x, forward.z))
+        let fallbackYaw = fallback?.z ?? 0.0
+        let yaw = horizontalForward < 0.08 && fallbackYaw.isFinite
+            ? fallbackYaw
+            : atan2(-forward.x, -forward.z)
 
         let upWorld = simd_act(q, SIMD3<Float>(0, 1, 0))
         let invYaw = simd_quatf(angle: -yaw, axis: SIMD3<Float>(0, 1, 0))
