@@ -26,6 +26,10 @@ final class MissionAuthorityGuard {
             activeTarget: executionState.activeTarget,
             currentMarker: currentMarker
         )
+        let hybridVTOLRouteManaged = airframeClass == .hybridVTOL &&
+            missionOwnsTargetSource &&
+            hasBoundMissionTarget
+        let routeManagedByAircraftAutopilot = fixedWingRouteActive || hybridVTOLRouteManaged
 
         guard requiresMissionAuthority else {
             resetPendingLoss()
@@ -47,7 +51,7 @@ final class MissionAuthorityGuard {
             if executionState.activeTarget == nil || !missionOwnsTargetSource || !hasBoundMissionTarget {
                 return .noMissionTarget
             }
-            if fixedWingRouteActive {
+            if routeManagedByAircraftAutopilot {
                 return nil
             }
             if controlAuthority != .markerGuidance {
@@ -68,7 +72,7 @@ final class MissionAuthorityGuard {
                 : .transientLost
 
             return MissionControlAuthorityState(
-                expectedAuthority: fixedWingRouteActive ? .none : .markerGuidance,
+                expectedAuthority: routeManagedByAircraftAutopilot ? .none : .markerGuidance,
                 actualAuthority: controlAuthority,
                 sourceOwnsTarget: missionOwnsTargetSource,
                 hasBoundMissionTarget: hasBoundMissionTarget,
@@ -92,7 +96,7 @@ final class MissionAuthorityGuard {
         resetPendingLoss()
 
         return MissionControlAuthorityState(
-            expectedAuthority: fixedWingRouteActive ? .none : .markerGuidance,
+            expectedAuthority: routeManagedByAircraftAutopilot ? .none : .markerGuidance,
             actualAuthority: controlAuthority,
             sourceOwnsTarget: missionOwnsTargetSource,
             hasBoundMissionTarget: hasBoundMissionTarget,

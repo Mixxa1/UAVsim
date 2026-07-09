@@ -405,16 +405,23 @@ final class FixedWingAutopilotController {
         defaultAltitude: Float,
         wing: FixedWingParameters
     ) -> FixedWingAutopilotPlan {
-        let waypointCaptureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
-        let waypoints: [FixedWingAutopilotWaypoint] = tracking.waypoints
+        let routeWaypoints = tracking.waypoints
             .filter { isFinite($0.position) }
-            .map { wp in
+        let baseCaptureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
+        let waypoints: [FixedWingAutopilotWaypoint] = routeWaypoints
+            .enumerated()
+            .map { index, wp in
                 FixedWingAutopilotWaypoint(
                     position: SIMD2<Float>(wp.position.x, wp.position.z),
                     altitude: wp.position.y.isFinite && wp.position.y > 0.05
                         ? wp.position.y
                         : max(defaultAltitude, 1.0),
-                    acceptanceRadius: waypointCaptureRadius
+                    acceptanceRadius: waypointAcceptanceRadius(
+                        for: index,
+                        routeWaypoints: routeWaypoints,
+                        baseRadius: baseCaptureRadius,
+                        wing: wing
+                    )
                 )
             }
         let minimumIndex = max(0, tracking.minimumWaypointIndex ?? 0)
@@ -424,6 +431,55 @@ final class FixedWingAutopilotController {
             minimumWaypointIndex: min(max(0, minimumIndex - 1), max(0, waypoints.count - 1)),
             loopAfterFinalWaypoint: false
         )
+    }
+
+    private func waypointAcceptanceRadius(
+        for index: Int,
+        routeWaypoints: [FixedWingRouteWaypoint],
+        baseRadius: Float,
+        wing: FixedWingParameters
+    ) -> Float {
+        switch wing.family {
+        case .surveyEVTOL:
+            break
+        case .tailsitterVTOL:
+            return baseRadius
+        default:
+            return baseRadius
+        }
+
+        guard routeWaypoints.indices.contains(index) else {
+            return baseRadius
+        }
+
+        let current = SIMD2<Float>(
+            routeWaypoints[index].position.x,
+            routeWaypoints[index].position.z
+        )
+        var nearestSpacing = Float.greatestFiniteMagnitude
+        if index > 0 {
+            let previous = SIMD2<Float>(
+                routeWaypoints[index - 1].position.x,
+                routeWaypoints[index - 1].position.z
+            )
+            nearestSpacing = min(nearestSpacing, simd_distance(current, previous))
+        }
+        if index + 1 < routeWaypoints.count {
+            let next = SIMD2<Float>(
+                routeWaypoints[index + 1].position.x,
+                routeWaypoints[index + 1].position.z
+            )
+            nearestSpacing = min(nearestSpacing, simd_distance(current, next))
+        }
+        guard nearestSpacing.isFinite else {
+            return baseRadius
+        }
+
+        let spacingCap = max(
+            wing.waypointAcceptanceRadiusMeters * 0.72,
+            nearestSpacing * 0.34
+        )
+        return min(baseRadius, max(5.0, spacingCap))
     }
 
     private func syntheticRouteTracking(
@@ -520,11 +576,11 @@ final class FixedWingAutopilotController {
         if let missionIndex = tracking.waypoints[autopilotIndex].missionWaypointIndex {
             return missionIndex
         }
-        if let nextMissionIndex = tracking.waypoints[autopilotIndex...].compactMap(\.missionWaypointIndex).first {
-            return nextMissionIndex
-        }
         if let previousMissionIndex = tracking.waypoints[...autopilotIndex].compactMap(\.missionWaypointIndex).last {
             return previousMissionIndex
+        }
+        if let nextMissionIndex = tracking.waypoints[autopilotIndex...].compactMap(\.missionWaypointIndex).first {
+            return nextMissionIndex
         }
         return autopilotIndex
     }

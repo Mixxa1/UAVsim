@@ -145,14 +145,15 @@ struct SceneViewportView: View {
                 .padding(.top, overlayInset)
             }
         }
-        .overlay(alignment: .top) {
-            if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive {
-                CompassOverlayView(viewModel: viewModel.compassViewModel)
-                    .padding(.top, 12)
-            }
-        }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
+                if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive {
+                    CompassOverlayView(
+                        viewModel: viewModel.compassViewModel,
+                        telemetry: viewModel.telemetry
+                    )
+                }
+
                 if viewModel.onlineTrialContext != nil {
                     OnlineTrialRuntimeOverlay(
                         context: viewModel.onlineTrialContext,

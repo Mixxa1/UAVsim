@@ -58,10 +58,16 @@ final class MissionRuntimeMonitor {
         }
 
         let now = Date()
-        let fixedWingRouteActive = airframeClass == .fixedWing &&
+        let fixedWingRouteCapable = airframeClass == .fixedWing || airframeClass == .hybridVTOL
+        let fixedWingRouteActive = fixedWingRouteCapable &&
             isFixedWingRouteActive(debugState: fixedWingDebugState)
+        let hybridVTOLPreCruiseActive = airframeClass == .hybridVTOL &&
+            missionOwnsTargetSource &&
+            flightMode == .autoPath &&
+            !fixedWingRouteActive &&
+            (currentMarker != nil || executionState.hasBoundAutopilotTarget)
         let observedDistance: Float? = {
-            guard airframeClass == .fixedWing,
+            guard fixedWingRouteCapable,
                   fixedWingRouteActive,
                   let fixedWingDebugState else {
                 return executionState.distanceToActiveTarget
@@ -87,14 +93,14 @@ final class MissionRuntimeMonitor {
             if distance < previousClosest {
                 closestObservedDistance = distance
             }
-            if airframeClass == .fixedWing,
+            if fixedWingRouteActive,
                autoNavigationStatus.phase == .approach,
                distance <= fixedWingFlyByDistanceWindow(fixedWingParameters: fixedWingParameters) {
                 lastProgressAt = now
             }
             lastObservedDistance = distance
         }
-        if airframeClass == .fixedWing,
+        if fixedWingRouteActive,
            let fixedWingDebugState,
            fixedWingDebugState.currentWaypointIndex > activeTarget.index {
             lastProgressAt = now
@@ -103,6 +109,9 @@ final class MissionRuntimeMonitor {
         let rawTargetMissing: Bool = {
             if airframeClass == .fixedWing {
                 return !missionOwnsTargetSource || !fixedWingRouteActive
+            }
+            if airframeClass == .hybridVTOL, fixedWingRouteActive {
+                return !missionOwnsTargetSource
             }
             return !missionOwnsTargetSource ||
                 currentMarker == nil ||
@@ -115,6 +124,14 @@ final class MissionRuntimeMonitor {
             }
             if airframeClass == .fixedWing {
                 return !fixedWingRouteActive || flightMode != .autoPath
+            }
+            if airframeClass == .hybridVTOL, fixedWingRouteActive {
+                return flightMode != .autoPath
+            }
+            if airframeClass == .hybridVTOL {
+                return currentMarker == nil ||
+                    !executionState.hasBoundAutopilotTarget ||
+                    flightMode != .autoPath
             }
             return currentMarker != nil &&
                 executionState.hasBoundAutopilotTarget &&
@@ -139,7 +156,7 @@ final class MissionRuntimeMonitor {
                   let lastProgressAt else {
                 return false
             }
-            if airframeClass == .fixedWing {
+            if fixedWingRouteActive {
                 let flyByDistanceWindow = fixedWingFlyByDistanceWindow(fixedWingParameters: fixedWingParameters)
                 let distanceSlack = fixedWingDistanceSlack(fixedWingParameters: fixedWingParameters)
                 if launchCorridorActive {
@@ -155,6 +172,13 @@ final class MissionRuntimeMonitor {
                 }
                 if let closestObservedDistance,
                    distance <= closestObservedDistance + distanceSlack {
+                    return false
+                }
+            } else if hybridVTOLPreCruiseActive {
+                let transitionGrace = hybridVTOLTransitionGraceTimeout(
+                    fixedWingParameters: fixedWingParameters
+                )
+                if now.timeIntervalSince(lastProgressAt) < transitionGrace {
                     return false
                 }
             }
@@ -249,6 +273,15 @@ final class MissionRuntimeMonitor {
         let wing = resolvedFixedWingParameters(fixedWingParameters)
         let turnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
         return max(turnRadius * 0.55, wing.waypointAcceptanceRadiusMeters * 0.75)
+    }
+
+    private func hybridVTOLTransitionGraceTimeout(
+        fixedWingParameters: FixedWingParameters?
+    ) -> TimeInterval {
+        let wing = resolvedFixedWingParameters(fixedWingParameters)
+        let baseTurnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseSpeedMps)
+        let turnTime = Double((baseTurnRadius * .pi) / max(wing.cruiseSpeedMps, 1.0))
+        return max(stallTimeout + 12.0, min(32.0, turnTime + 16.0))
     }
 
     private func resolvedFixedWingParameters(

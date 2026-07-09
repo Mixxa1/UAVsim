@@ -166,6 +166,7 @@ final class MissionSafetyEvaluator {
         runtimeMonitor: MissionRuntimeMonitorReport,
         canStartMissionAutopilot: Bool,
         batteryState: BatteryState,
+        airframeClass: AirframeClass,
         collisionAnalysis: CollisionAnalysisSnapshot,
         thermalState: ThermalState,
         signalState: UAVSignalState,
@@ -178,12 +179,19 @@ final class MissionSafetyEvaluator {
         let hasExecutionContour = executionState.hasExecutionContour
         let hasMissionTarget = executionState.activeTarget != nil
         let hasRuntimeDistance = executionState.hasRuntimeDistance
+        let usesCruiseRangeForBatteryTime = airframeClass == .hybridVTOL
+        let remainingTimeSafeToStart = usesCruiseRangeForBatteryTime ||
+            batteryState.remainingTimeSec <= 0.0 ||
+            batteryState.remainingTimeSec >= 90.0
+        let remainingTimeSafeToContinue = usesCruiseRangeForBatteryTime ||
+            batteryState.remainingTimeSec <= 0.0 ||
+            batteryState.remainingTimeSec >= 45.0
         let batterySafeToStart = !batteryState.isDepleted &&
             batteryState.chargePercent >= 18.0 &&
-            (batteryState.remainingTimeSec <= 0.0 || batteryState.remainingTimeSec >= 90.0)
+            remainingTimeSafeToStart
         let batterySafeToContinue = !batteryState.isDepleted &&
             batteryState.chargePercent >= 12.0 &&
-            (batteryState.remainingTimeSec <= 0.0 || batteryState.remainingTimeSec >= 45.0)
+            remainingTimeSafeToContinue
         let returnSafe = operationalStatus.canReachHomeSafely
         let missionSafe = operationalStatus.canCompleteMissionSafely
         let collisionSafe = collisionAnalysis.emergencyAction != .emergencyStop &&

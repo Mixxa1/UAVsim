@@ -103,6 +103,41 @@ private struct FixedWingAssistOverrideAxes: OptionSet {
     static let all: FixedWingAssistOverrideAxes = [.turn, .altitude]
 }
 
+private enum VTOLAutopilotPhase: String, Equatable {
+    case idleGrounded
+    case verticalTakeoff
+    case hoverHold
+    case transitionToCruise
+    case wingborneCruise
+    case transitionToHover
+    case precisionHover
+    case verticalLanding
+    case emergencyHover
+    case forcedLanding
+    case transitionAbort
+}
+
+private enum VTOLAutopilotSafetyState: Equatable {
+    case nominal
+    case transitionBlocked(String)
+    case transitionAborting(String)
+    case emergencyHover(String)
+    case forcedLanding(String)
+}
+
+private struct VTOLAutopilotDecision: Equatable {
+    var phase: VTOLAutopilotPhase
+    var target: SIMD3<Float>
+    var targetAltitude: Float
+    var targetAirspeed: Float?
+    var targetHeading: Float?
+    var maxSinkRate: Float
+    var transitionLever: Double
+    var speedScale: Float
+    var safetyState: VTOLAutopilotSafetyState
+    var reason: String
+}
+
 private struct DroneWarningBuilder {
     let isArmed: Bool
     let physicalState: DronePhysicalState
@@ -958,6 +993,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let missionReportBuilder = MissionReportBuilder()
     let replayLibraryViewModel = ReplayLibraryViewModel()
 
+    private var vtolAutopilotPhase: VTOLAutopilotPhase = .idleGrounded
     private var state: DroneState
     private var lastFiniteState: DroneState
     private var simulationTimer: Timer?
@@ -2451,12 +2487,20 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
                 values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
             }, markManual: false)
-        case .multirotor, .hybridVTOL:
+        case .multirotor:
             updateControlValues({ values in
                 values.y = max(values.y, 3.0)
                 values.roll = 0.0
                 values.pitch = 0.0
                 values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
+            }, markManual: false)
+        case .hybridVTOL:
+            updateControlValues({ values in
+                values.y = max(values.y, 3.0)
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
+                values.vtolTransitionLever = 0.0
             }, markManual: false)
         }
     }
@@ -2478,12 +2522,28 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.pitch = min(max(values.pitch, 6.0), 14.0)
                 values.throttle = min(values.throttle, Double(baseline.landingThrottleReference))
             }, markManual: false)
-        case .multirotor, .hybridVTOL:
+        case .multirotor:
             updateControlValues({ values in
                 values.y = 0.0
                 values.roll = 0.0
                 values.pitch = 0.0
                 values.throttle = min(values.throttle, Double(baseline.landingThrottleReference))
+            }, markManual: false)
+        case .hybridVTOL:
+            let hoverBaseline = resolvedFlightBaseline(for: .hover)
+            let needsHoverTransition = state.vtolTransitionProgress > 0.08
+            updateControlValues({ values in
+                values.x = Double(state.position.x)
+                values.z = Double(state.position.z)
+                values.y = needsHoverTransition
+                    ? Double(max(homePosition.y + 1.8, state.position.y))
+                    : 0.0
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.throttle = needsHoverTransition
+                    ? max(values.throttle, Double(hoverBaseline.hoverLockThrottle))
+                    : min(values.throttle, Double(baseline.landingThrottleReference))
+                values.vtolTransitionLever = -1.0
             }, markManual: false)
         }
     }
@@ -2505,6 +2565,14 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         setFlightMode(.hover, reason: "hover_requested")
         lockControlsToCurrentState(overrideThrottle: Double(baseline.hoverLockThrottle))
+        if selectedDroneProfile.airframeClass == .hybridVTOL {
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.throttle = max(values.throttle, Double(baseline.hoverLockThrottle))
+                values.vtolTransitionLever = -1.0
+            }, markManual: false)
+        }
     }
 
     func activateAutoPath() {
@@ -2524,11 +2592,13 @@ final class DroneSimulationViewModel: ObservableObject {
             autoFlightGoal = nil
             autoNavigationController.start(safeTravelAltitude: targetMarkerTravelAltitude())
             setFlightMode(.autoPath, reason: "user_requested_auto_path_marker")
+            prepareHybridVTOLAutopilotForForwardRoute()
             navigationSnapshot = .idle
             refreshTerrainMapSnapshot(recordTrail: false)
             return
         }
         setFlightMode(.autoPath, reason: "user_requested_auto_path_patrol")
+        prepareHybridVTOLAutopilotForForwardRoute()
         returnHomeStage = .idle
         autoPathPlanner.invalidate()
         autoFlightGoal = nextAutoPatrolGoal(resetCycle: true)
@@ -2546,6 +2616,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         cancelTargetMarkerAutoNavigation()
         setFlightMode(.returnHome, reason: reason)
+        prepareHybridVTOLAutopilotForForwardRoute()
         returnHomeStage = .ascend
         setFixedWingGuidanceSource(.returnHome, reason: "\(reason)_guidance_armed")
         autoFlightGoal = nil
@@ -4231,7 +4302,10 @@ final class DroneSimulationViewModel: ObservableObject {
         //     big enough" map's margin even when nothing about the airframe looks oversized on
         //     paper. So ANY fixed-wing gets a flat floor here, not just ones flagged by
         //     `preferredMapScaleMin`.
-        let fixedWingFloor: MapScale = selectedDroneProfile.airframeClass == .fixedWing ? .x32 : .x4
+        let fixedWingFloor: MapScale = (
+            selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL
+        ) ? .x32 : .x4
         let missionKindBaseline = params.kind == .fireResponse ? MapScale.x16 : params.difficulty.recommendedMapScale
         let aircraftMinScale = selectedDroneProfile.operationalProfile.preferredMapScaleMin
         let recommendedScale = [missionKindBaseline, aircraftMinScale, fixedWingFloor]
@@ -4592,7 +4666,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         collisionAnalysis = prePhysicsCollisionAnalysis
 
-        handleAutoCollisionInterventions()
+        handleAutoCollisionInterventions(deltaTime: dt)
 
         let control = buildControlInput(from: controlValues)
         let context = DroneSimulationContext(
@@ -5267,7 +5341,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func handleAutoCollisionInterventions() {
+    private func handleAutoCollisionInterventions(deltaTime: Float) {
         guard mode.isAutoControlled else {
             return
         }
@@ -5284,9 +5358,56 @@ final class DroneSimulationViewModel: ObservableObject {
             lockControlsToCurrentState(
                 overrideThrottle: Double(max(resolvedFlightBaseline(for: .hover).hoverLockThrottle, state.throttle))
             )
+            if selectedDroneProfile.airframeClass == .hybridVTOL {
+                updateControlValues({ values in
+                    values.roll = 0.0
+                    values.pitch = 0.0
+                    values.vtolTransitionLever = -1.0
+                }, markManual: false)
+            }
         case .avoid:
             guard let obstacleID = collisionAnalysis.nearestObstacleID,
                   let obstacle = sceneController.obstacleCenter(for: obstacleID) else {
+                return
+            }
+
+            if selectedDroneProfile.airframeClass == .hybridVTOL {
+                let planarOffset = SIMD2<Float>(
+                    state.position.x - obstacle.x,
+                    state.position.z - obstacle.z
+                )
+                let fallbackAway = SIMD2<Float>(-sin(state.orientation.z), -cos(state.orientation.z))
+                let awayPlanar = simd_length(planarOffset) > 0.01
+                    ? simd_normalize(planarOffset)
+                    : fallbackAway
+                let avoidAltitude = max(homePosition.y + 2.4, state.position.y)
+                let avoidTarget = clampToWorldBounds(SIMD3<Float>(
+                    state.position.x + awayPlanar.x * 4.0,
+                    avoidAltitude,
+                    state.position.z + awayPlanar.y * 4.0
+                ))
+                let avoidContext = AutopilotTrackingContext(
+                    state: state,
+                    physicalState: physicalState,
+                    target: avoidTarget,
+                    targetAltitude: avoidTarget.y,
+                    speedScale: 0.36,
+                    yawAlignToHome: false,
+                    yawOverrideRadians: state.orientation.z,
+                    deltaTime: deltaTime,
+                    flightBaseline: resolvedFlightBaseline(for: .hover)
+                )
+                applyHybridVTOLHoverAutopilotCommand(
+                    context: avoidContext,
+                    target: avoidTarget,
+                    targetAltitude: avoidTarget.y,
+                    speedScale: 0.36,
+                    yawOverrideRadians: state.orientation.z,
+                    vtolTransitionLever: state.vtolTransitionProgress > 0.08 ? -1.0 : 0.0,
+                    minimumThrottle: resolvedFlightBaseline(for: .hover).hoverLockThrottle,
+                    reason: "vtol_collision_avoidance_hover",
+                    deltaTime: deltaTime
+                )
                 return
             }
 
@@ -5379,9 +5500,20 @@ final class DroneSimulationViewModel: ObservableObject {
 
             if route.authority == .markerGuidance,
                targetMarkerState != nil {
+                if selectedDroneProfile.airframeClass == .hybridVTOL,
+                   activeRouteTargetSource != .mission,
+                   hybridVTOLMarkerGuidanceReachedTarget() {
+                    finishTargetMarkerAutoNavigation()
+                    return
+                }
                 if let output = applyFixedWingMarkerGuidance(deltaTime: deltaTime),
                    output.hasCompletedRoute,
                    activeRouteTargetSource != .mission {
+                    finishTargetMarkerAutoNavigation()
+                }
+                if selectedDroneProfile.airframeClass == .hybridVTOL,
+                   activeRouteTargetSource != .mission,
+                   hybridVTOLMarkerGuidanceReachedTarget() {
                     finishTargetMarkerAutoNavigation()
                 }
                 return
@@ -5909,6 +6041,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.yaw = Double(state.orientation.z.radiansToDegrees)
                 let throttleTarget = hoverBaseline.clamped(to: 0.0...1.0)
                 values.throttle = values.throttle + (throttleTarget - values.throttle) * 0.18
+                if selectedDroneProfile.airframeClass == .hybridVTOL {
+                    values.vtolTransitionLever = state.vtolTransitionProgress > 0.04 ? -1.0 : 0.0
+                }
             }, markManual: false)
 
         case .emergencyStop:
@@ -5926,6 +6061,8 @@ final class DroneSimulationViewModel: ObservableObject {
             navigationSnapshot = .idle
             if mode == .takeoff {
                 updateFixedWingLaunchSequence(deltaTime: deltaTime)
+            } else if mode == .landing {
+                updateHybridVTOLLandingCommand(deltaTime: deltaTime)
             }
         }
     }
@@ -6304,10 +6441,26 @@ final class DroneSimulationViewModel: ObservableObject {
             verticalSpeed <= 0.55
     }
 
+    private func hybridVTOLMarkerGuidanceReachedTarget() -> Bool {
+        guard let marker = targetMarkerState,
+              hybridVTOLReadyForPrecisionHover() else {
+            return false
+        }
+        let horizontalSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        let verticalSpeed = abs(state.velocity.y)
+        return marker.distance(from: currentPlanarPosition()) <= 1.10 &&
+            horizontalSpeed <= 1.40 &&
+            verticalSpeed <= 0.75
+    }
+
     private func finishTargetMarkerAutoNavigation() {
         navigationSnapshot = .idle
         resetFixedWingAutopilotCommands()
         if selectedDroneProfile.airframeClass == .multirotor {
+            hover()
+            return
+        }
+        if selectedDroneProfile.airframeClass == .hybridVTOL {
             hover()
             return
         }
@@ -6399,7 +6552,12 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let travelAltitude = max(3.2, homePosition.y + 4.0)
+        let travelAltitude: Float
+        if selectedDroneProfile.airframeClass == .hybridVTOL {
+            travelAltitude = hybridVTOLRouteAltitude(defaultAltitude: max(10.0, homePosition.y + 8.0))
+        } else {
+            travelAltitude = max(3.2, homePosition.y + 4.0)
+        }
         var plannedGoal = clampToWorldBounds(SIMD3<Float>(activeGoal.x, travelAltitude, activeGoal.z))
         plannedGoal.y = min(plannedGoal.y, terrain.maxFlightAltitude - 2.0)
 
@@ -6456,26 +6614,56 @@ final class DroneSimulationViewModel: ObservableObject {
         navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
 
         guard let target = autoPathPlanner.currentTarget() else {
+            if selectedDroneProfile.airframeClass == .hybridVTOL,
+               autoPathPlanner.hasReachedGoal(
+                   currentPosition: state.position,
+                   threshold: max(
+                       5.0,
+                       selectedDroneProfile.fixedWingParameters?.waypointAcceptanceRadiusMeters ?? 5.0
+                   )
+               ) {
+                autoFlightGoal = nextAutoPatrolGoal(resetCycle: false)
+                autoPathPlanner.invalidate()
+                return
+            }
             let holdThrottle = Double(resolvedFlightBaseline(for: .autoPath).cruiseReferenceThrottle)
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = 0.0
                 values.throttle = max(values.throttle, holdThrottle)
+                if selectedDroneProfile.airframeClass == .hybridVTOL {
+                    values.vtolTransitionLever = state.vtolTransitionProgress > 0.08 ? -1.0 : 0.0
+                }
             }, markManual: false)
             return
         }
 
-        applyAutopilotTrackingControl(
+        let output = applyAutopilotTrackingControl(
             target: target,
             targetAltitude: travelAltitude,
             speedScale: collisionAnalysis.riskScore >= 0.55 ? 0.45 : 1.0,
             yawAlignToHome: false,
             deltaTime: deltaTime
         )
+        if selectedDroneProfile.airframeClass == .hybridVTOL,
+           output?.hasCompletedRoute == true ||
+            autoPathPlanner.hasReachedGoal(
+                currentPosition: state.position,
+                threshold: max(
+                    5.0,
+                    selectedDroneProfile.fixedWingParameters?.waypointAcceptanceRadiusMeters ?? 5.0
+                )
+            ) {
+            autoFlightGoal = nextAutoPatrolGoal(resetCycle: false)
+            autoPathPlanner.invalidate()
+        }
     }
 
     private func updateReturnHomePath(deltaTime: Float) {
-        let safeTravelAltitude = min(terrain.maxFlightAltitude - 2.0, max(homePosition.y + 6.0, state.position.y + 2.5))
+        let defaultSafeTravelAltitude = min(terrain.maxFlightAltitude - 2.0, max(homePosition.y + 6.0, state.position.y + 2.5))
+        let safeTravelAltitude = selectedDroneProfile.airframeClass == .hybridVTOL
+            ? hybridVTOLRouteAltitude(defaultAltitude: max(10.0, homePosition.y + 8.0, state.position.y))
+            : defaultSafeTravelAltitude
 
         if selectedDroneProfile.airframeClass == .fixedWing, returnHomeStage == .ascend {
             returnHomeStage = .navigate
@@ -6496,6 +6684,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.roll = 0.0
                 values.pitch = 0.0
                 values.throttle = max(values.throttle, ascentThrottle)
+                if selectedDroneProfile.airframeClass == .hybridVTOL {
+                    values.vtolTransitionLever = 0.0
+                }
             }, markManual: false)
 
             if state.position.y >= safeTravelAltitude - 0.35 {
@@ -6590,6 +6781,16 @@ final class DroneSimulationViewModel: ObservableObject {
                     returnHomeStage = .align
                     autoPathPlanner.invalidate()
                 }
+            } else if selectedDroneProfile.airframeClass == .hybridVTOL {
+                let wing = selectedDroneProfile.fixedWingParameters
+                let vtolArrivalRadius = max(
+                    8.0,
+                    (wing?.waypointAcceptanceRadiusMeters ?? 5.0) * 1.45
+                )
+                if horizontalDistance < vtolArrivalRadius {
+                    returnHomeStage = .align
+                    autoPathPlanner.invalidate()
+                }
             } else if horizontalDistance < 1.5 {
                 returnHomeStage = .align
             }
@@ -6625,6 +6826,50 @@ final class DroneSimulationViewModel: ObservableObject {
                 return
             }
 
+            if selectedDroneProfile.airframeClass == .hybridVTOL {
+                let readyForPrecisionHover = hybridVTOLReadyForPrecisionHover()
+                let alignmentAltitude = readyForPrecisionHover
+                    ? max(homePosition.y + 1.8, state.position.y)
+                    : max(homePosition.y + 3.0, state.position.y)
+                let alignmentTarget = SIMD3<Float>(
+                    homePosition.x,
+                    alignmentAltitude,
+                    homePosition.z
+                )
+                let alignmentContext = AutopilotTrackingContext(
+                    state: state,
+                    physicalState: physicalState,
+                    target: alignmentTarget,
+                    targetAltitude: alignmentAltitude,
+                    speedScale: readyForPrecisionHover ? 0.42 : 0.32,
+                    yawAlignToHome: true,
+                    yawOverrideRadians: 0.0,
+                    deltaTime: deltaTime,
+                    flightBaseline: resolvedFlightBaseline(for: .hover)
+                )
+                applyHybridVTOLHoverAutopilotCommand(
+                    context: alignmentContext,
+                    target: alignmentTarget,
+                    targetAltitude: alignmentAltitude,
+                    speedScale: readyForPrecisionHover ? 0.42 : 0.32,
+                    yawOverrideRadians: 0.0,
+                    vtolTransitionLever: state.vtolTransitionProgress > 0.08 ? -1.0 : 0.0,
+                    minimumThrottle: resolvedFlightBaseline(for: .hover).hoverLockThrottle,
+                    reason: readyForPrecisionHover
+                        ? "vtol_return_home_precision_align"
+                        : "vtol_return_home_transition_to_hover",
+                    deltaTime: deltaTime
+                )
+                let horizontalDistance = simd_length(SIMD2<Float>(
+                    state.position.x - homePosition.x,
+                    state.position.z - homePosition.z
+                ))
+                if readyForPrecisionHover && horizontalDistance < 0.45 {
+                    returnHomeStage = .descend
+                }
+                return
+            }
+
             let alignmentBaseline = resolvedFlightBaseline(for: .returnHome)
             let alignmentThrottle = Double(
                 alignmentBaseline.hoverCapable
@@ -6639,6 +6884,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.pitch = 0.0
                 values.yaw = 0.0
                 values.throttle = max(alignmentThrottle, values.throttle * 0.96)
+                if selectedDroneProfile.airframeClass == .hybridVTOL {
+                    values.vtolTransitionLever = 0.0
+                }
             }, markManual: false)
 
             let horizontalDistance = simd_length(SIMD2<Float>(state.position.x - homePosition.x, state.position.z - homePosition.z))
@@ -6648,6 +6896,11 @@ final class DroneSimulationViewModel: ObservableObject {
 
         case .descend:
             navigationSnapshot = autoPathPlanner.snapshot(currentPosition: state.position)
+            if selectedDroneProfile.airframeClass == .hybridVTOL,
+               !hybridVTOLReadyForPrecisionHover() {
+                returnHomeStage = .align
+                return
+            }
             let landingThrottle = Double(resolvedFlightBaseline(for: .landing).landingThrottleReference)
             updateControlValues({ values in
                 values.x = Double(homePosition.x)
@@ -6657,6 +6910,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.pitch = 0.0
                 values.yaw = 0.0
                 values.throttle = max(0.22, min(values.throttle, landingThrottle))
+                if selectedDroneProfile.airframeClass == .hybridVTOL {
+                    values.vtolTransitionLever = -1.0
+                }
             }, markManual: false)
 
             let horizontalDistance = simd_length(SIMD2<Float>(state.position.x - homePosition.x, state.position.z - homePosition.z))
@@ -6675,6 +6931,45 @@ final class DroneSimulationViewModel: ObservableObject {
                 }, markManual: false)
             }
         }
+    }
+
+    private func updateHybridVTOLLandingCommand(deltaTime: Float) {
+        guard selectedDroneProfile.airframeClass == .hybridVTOL else {
+            return
+        }
+
+        let readyForDescent = hybridVTOLReadyForPrecisionHover()
+        let targetAltitude = readyForDescent
+            ? homePosition.y
+            : max(homePosition.y + 1.8, state.position.y)
+        let target = SIMD3<Float>(
+            state.position.x,
+            targetAltitude,
+            state.position.z
+        )
+        let baseline = resolvedFlightBaseline(for: readyForDescent ? .landing : .hover)
+        let context = AutopilotTrackingContext(
+            state: state,
+            physicalState: physicalState,
+            target: target,
+            targetAltitude: targetAltitude,
+            speedScale: readyForDescent ? 0.35 : 0.50,
+            yawAlignToHome: false,
+            yawOverrideRadians: state.orientation.z,
+            deltaTime: deltaTime,
+            flightBaseline: baseline
+        )
+        applyHybridVTOLHoverAutopilotCommand(
+            context: context,
+            target: target,
+            targetAltitude: targetAltitude,
+            speedScale: readyForDescent ? 0.35 : 0.50,
+            yawOverrideRadians: state.orientation.z,
+            vtolTransitionLever: -1.0,
+            minimumThrottle: readyForDescent ? nil : baseline.hoverLockThrottle,
+            reason: readyForDescent ? "vtol_vertical_landing" : "vtol_transition_to_hover_before_landing",
+            deltaTime: deltaTime
+        )
     }
 
     @discardableResult
@@ -6701,68 +6996,688 @@ final class DroneSimulationViewModel: ObservableObject {
             flightBaseline: flightBaseline
         )
 
-        let command: AutopilotControlCommand
-        var fixedWingOutput: FixedWingAutopilotOutput?
         switch selectedDroneProfile.airframeClass {
         case .multirotor:
             setFixedWingGuidanceSource(.none, reason: "multicopter_autopilot_active")
-            command = multicopterAutopilotController.command(for: context)
+            let command = multicopterAutopilotController.command(for: context)
             fixedWingAutopilotDebugState = .idle
-        case .fixedWing, .hybridVTOL:
-            let fixedWingGuidanceSource: FixedWingGuidanceSource
-            if mode == .returnHome {
-                fixedWingGuidanceSource = .returnHome
-            } else if activeRouteTargetSource == .mission {
-                fixedWingGuidanceSource = .mission
-            } else if targetMarkerState != nil {
-                fixedWingGuidanceSource = .marker
-            } else {
-                fixedWingGuidanceSource = activeFixedWingGuidanceSource == .none ? .mission : activeFixedWingGuidanceSource
-            }
-            setFixedWingGuidanceSource(fixedWingGuidanceSource, reason: "fixed_wing_autopilot_tracking")
-            let missionSpeedConstraints = fixedWingGuidanceSource == .mission ? currentMissionPlan?.constraints.speed : nil
-            let output = fixedWingAutopilotController.trackingCommand(
-                for: context,
-                parameters: activeFixedWingParameters(),
-                launchMode: activeLaunchMode(),
-                launchAsset: activeLaunchAsset(),
-                routeTracking: currentFixedWingRouteTrackingContext(fallbackTarget: target),
-                missionMinAirspeed: missionSpeedConstraints?.minimumMetersPerSecond,
-                missionMaxAirspeed: missionSpeedConstraints.map {
-                    $0.effectiveMaximum(profileMaxSpeed: activeFixedWingParameters().maxAirspeed)
-                }
+            applyAutopilotCommand(command, deltaTime: deltaTime)
+            return nil
+        case .fixedWing:
+            return applyFixedWingAutopilotTracking(
+                context: context,
+                target: target,
+                deltaTime: deltaTime
             )
-            fixedWingAutopilotAltitudeCommand = output.command.positionTarget.y
-            fixedWingAutopilotCourseCommand = output.command.yawDegrees.degreesToRadians
-            fixedWingLastTransitionReason = output.transitionReason
-            fixedWingAutopilotDebugState = output.debugState
-            fixedWingOutput = output
-            updateFixedWingNavigationSnapshot(
-                routeTracking: currentFixedWingRouteTrackingContext(fallbackTarget: target),
-                debugState: output.debugState
+        case .hybridVTOL:
+            return applyHybridVTOLAutopilotTracking(
+                context: context,
+                deltaTime: deltaTime
             )
+        }
+    }
 
-            if mode == .takeoff || output.launchPhase != nil {
-                updateLegacyLaunchState(
-                    legacyLaunchState(for: output, launchMode: activeLaunchMode()),
-                    deltaTime: deltaTime
-                )
-            } else if launchState != .idle {
-                updateLegacyLaunchState(.completed)
+    @discardableResult
+    private func applyFixedWingAutopilotTracking(
+        context: AutopilotTrackingContext,
+        target: SIMD3<Float>,
+        deltaTime: Float,
+        vtolTransitionLever: Double? = nil
+    ) -> FixedWingAutopilotOutput? {
+        let fixedWingGuidanceSource = fixedWingGuidanceSourceForCurrentRoute()
+        setFixedWingGuidanceSource(fixedWingGuidanceSource, reason: "fixed_wing_autopilot_tracking")
+
+        let routeTracking = currentFixedWingRouteTrackingContext(fallbackTarget: target)
+        let missionSpeedConstraints = fixedWingGuidanceSource == .mission ? currentMissionPlan?.constraints.speed : nil
+        let output = fixedWingAutopilotController.trackingCommand(
+            for: context,
+            parameters: activeFixedWingParameters(),
+            launchMode: activeLaunchMode(),
+            launchAsset: activeLaunchAsset(),
+            routeTracking: routeTracking,
+            missionMinAirspeed: missionSpeedConstraints?.minimumMetersPerSecond,
+            missionMaxAirspeed: missionSpeedConstraints.map {
+                $0.effectiveMaximum(profileMaxSpeed: activeFixedWingParameters().maxAirspeed)
             }
+        )
+        fixedWingAutopilotAltitudeCommand = output.command.positionTarget.y
+        fixedWingAutopilotCourseCommand = output.command.yawDegrees.degreesToRadians
+        fixedWingLastTransitionReason = output.transitionReason
+        fixedWingAutopilotDebugState = output.debugState
+        updateFixedWingNavigationSnapshot(
+            routeTracking: routeTracking,
+            debugState: output.debugState
+        )
 
-            if output.phase == .failed {
-                setFixedWingGuidanceSource(.none, reason: "fixed_wing_autopilot_failed")
-                if mode.isAutoControlled {
-                    setFlightMode(.manual, reason: "fixed_wing_autopilot_failed")
-                }
-            }
-
-            command = output.command
+        if mode == .takeoff || output.launchPhase != nil {
+            updateLegacyLaunchState(
+                legacyLaunchState(for: output, launchMode: activeLaunchMode()),
+                deltaTime: deltaTime
+            )
+        } else if launchState != .idle {
+            updateLegacyLaunchState(.completed)
         }
 
-        applyAutopilotCommand(command, deltaTime: deltaTime)
-        return fixedWingOutput
+        if output.phase == .failed {
+            setFixedWingGuidanceSource(.none, reason: "fixed_wing_autopilot_failed")
+            if mode.isAutoControlled {
+                setFlightMode(.manual, reason: "fixed_wing_autopilot_failed")
+            }
+        }
+
+        applyAutopilotCommand(
+            output.command,
+            deltaTime: deltaTime,
+            vtolTransitionLever: vtolTransitionLever
+        )
+        return output
+    }
+
+    private func fixedWingGuidanceSourceForCurrentRoute() -> FixedWingGuidanceSource {
+        if mode == .returnHome {
+            return .returnHome
+        }
+        if activeRouteTargetSource == .mission {
+            return .mission
+        }
+        if targetMarkerState != nil {
+            return .marker
+        }
+        return activeFixedWingGuidanceSource == .none ? .mission : activeFixedWingGuidanceSource
+    }
+
+    @discardableResult
+    private func applyHybridVTOLAutopilotTracking(
+        context: AutopilotTrackingContext,
+        deltaTime: Float
+    ) -> FixedWingAutopilotOutput? {
+        let wing = activeFixedWingParameters()
+        let routeAltitude = hybridVTOLRouteAltitude(defaultAltitude: context.targetAltitude)
+        let decision = hybridVTOLAutopilotDecision(
+            context: context,
+            wing: wing,
+            routeAltitude: routeAltitude
+        )
+        vtolAutopilotPhase = decision.phase
+
+        switch decision.phase {
+        case .idleGrounded, .hoverHold, .precisionHover:
+            applyHybridVTOLHoverAutopilotCommand(
+                context: context,
+                target: decision.target,
+                targetAltitude: decision.targetAltitude,
+                speedScale: decision.speedScale,
+                yawOverrideRadians: decision.targetHeading ?? context.yawOverrideRadians,
+                vtolTransitionLever: decision.transitionLever,
+                minimumThrottle: nil,
+                reason: decision.reason,
+                deltaTime: deltaTime
+            )
+            return nil
+        case .verticalTakeoff:
+            applyHybridVTOLHoverAutopilotCommand(
+                context: context,
+                target: decision.target,
+                targetAltitude: decision.targetAltitude,
+                speedScale: decision.speedScale,
+                yawOverrideRadians: decision.targetHeading ?? context.yawOverrideRadians,
+                vtolTransitionLever: decision.transitionLever,
+                minimumThrottle: resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference,
+                reason: decision.reason,
+                deltaTime: deltaTime
+            )
+            return nil
+        case .transitionToHover, .transitionAbort, .emergencyHover, .forcedLanding, .verticalLanding:
+            let throttleFloor: Float?
+            switch decision.phase {
+            case .emergencyHover:
+                throttleFloor = resolvedFlightBaseline(for: .hover).hoverLockThrottle
+            case .forcedLanding, .verticalLanding:
+                throttleFloor = resolvedFlightBaseline(for: .landing).landingThrottleReference
+            default:
+                throttleFloor = nil
+            }
+            applyHybridVTOLHoverAutopilotCommand(
+                context: context,
+                target: decision.target,
+                targetAltitude: decision.targetAltitude,
+                speedScale: decision.speedScale,
+                yawOverrideRadians: decision.targetHeading ?? context.yawOverrideRadians,
+                vtolTransitionLever: decision.transitionLever,
+                minimumThrottle: throttleFloor,
+                reason: decision.reason,
+                deltaTime: deltaTime
+            )
+            return nil
+        case .transitionToCruise:
+            applyHybridVTOLTransitionToCruiseCommand(
+                context: context,
+                decision: decision,
+                wing: wing,
+                routeAltitude: routeAltitude,
+                deltaTime: deltaTime
+            )
+            return nil
+        case .wingborneCruise:
+            let cruiseContext = AutopilotTrackingContext(
+                state: state,
+                physicalState: physicalState,
+                target: decision.target,
+                targetAltitude: routeAltitude,
+                speedScale: context.speedScale,
+                yawAlignToHome: context.yawAlignToHome,
+                yawOverrideRadians: decision.targetHeading ?? context.yawOverrideRadians,
+                deltaTime: context.deltaTime,
+                flightBaseline: context.flightBaseline
+            )
+            return applyFixedWingAutopilotTracking(
+                context: cruiseContext,
+                target: decision.target,
+                deltaTime: deltaTime,
+                vtolTransitionLever: 1.0
+            )
+        }
+    }
+
+    private func hybridVTOLAutopilotDecision(
+        context: AutopilotTrackingContext,
+        wing: FixedWingParameters,
+        routeAltitude: Float
+    ) -> VTOLAutopilotDecision {
+        let target = hybridVTOLActiveLegTarget(context: context, routeAltitude: routeAltitude)
+        let currentPlanar = SIMD2<Float>(state.position.x, state.position.z)
+        let targetPlanar = SIMD2<Float>(target.x, target.z)
+        let routeVector = targetPlanar - currentPlanar
+        let planarDistance = simd_length(routeVector)
+        let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        let airspeed = max(state.forwardAirspeed, planarSpeed)
+        let liftRatio = max(state.vtolWingLiftRatio, state.vtolWingborneBlend)
+        let routeYaw: Float? = planarDistance > 0.5
+            ? fixedWingCourseRadians(from: routeVector)
+            : context.yawOverrideRadians
+        let precisionRadius = hybridVTOLPrecisionEntryRadius(wing: wing)
+        let cruiseEntryDistance = hybridVTOLCruiseEntryDistance(wing: wing, precisionRadius: precisionRadius)
+        let cruiseExitDistance = hybridVTOLCruiseExitDistance(wing: wing, precisionRadius: precisionRadius)
+        let wasCruisePath = vtolAutopilotPhase == .transitionToCruise ||
+            vtolAutopilotPhase == .wingborneCruise
+        let wantsCruise = planarDistance > cruiseEntryDistance ||
+            (wasCruisePath && planarDistance > cruiseExitDistance)
+        let airborne = !physicalState.isGroundRestState && state.position.y > 0.45
+        let maxSinkRate = max(1.4, min(3.2, wing.nominalSinkRateMps * 1.35))
+
+        func decision(
+            _ phase: VTOLAutopilotPhase,
+            target: SIMD3<Float> = target,
+            altitude: Float = routeAltitude,
+            lever: Double,
+            speedScale: Float,
+            safety: VTOLAutopilotSafetyState = .nominal,
+            reason: String
+        ) -> VTOLAutopilotDecision {
+            VTOLAutopilotDecision(
+                phase: phase,
+                target: target,
+                targetAltitude: altitude,
+                targetAirspeed: phase == .wingborneCruise || phase == .transitionToCruise ? wing.cruiseAirspeed : nil,
+                targetHeading: routeYaw,
+                maxSinkRate: maxSinkRate,
+                transitionLever: lever,
+                speedScale: speedScale,
+                safetyState: safety,
+                reason: reason
+            )
+        }
+
+        if !isArmed && physicalState.isGroundRestState {
+            return decision(
+                .idleGrounded,
+                target: SIMD3<Float>(state.position.x, max(0.0, state.position.y), state.position.z),
+                altitude: max(0.0, state.position.y),
+                lever: 0.0,
+                speedScale: 0.0,
+                reason: "vtol_idle_grounded"
+            )
+        }
+
+        if mode == .landing {
+            return decision(
+                .verticalLanding,
+                target: SIMD3<Float>(state.position.x, 0.0, state.position.z),
+                altitude: 0.0,
+                lever: -1.0,
+                speedScale: 0.35,
+                reason: "vtol_vertical_landing"
+            )
+        }
+
+        if airborne && collisionAnalysis.riskScore >= 0.82 {
+            return decision(
+                .emergencyHover,
+                target: SIMD3<Float>(state.position.x, max(routeAltitude, state.position.y), state.position.z),
+                altitude: max(routeAltitude, state.position.y),
+                lever: -1.0,
+                speedScale: 0.25,
+                safety: .emergencyHover("corridorBlocked"),
+                reason: "vtol_emergency_hover_corridor_blocked"
+            )
+        }
+
+        if airborne && (batteryState.chargePercent <= 4.0 || damageState.isFlightCritical) {
+            return decision(
+                .forcedLanding,
+                target: SIMD3<Float>(state.position.x, 0.0, state.position.z),
+                altitude: 0.0,
+                lever: -1.0,
+                speedScale: 0.25,
+                safety: .forcedLanding(batteryState.chargePercent <= 4.0 ? "lowBattery" : "damageCritical"),
+                reason: "vtol_forced_landing"
+            )
+        }
+
+        if state.position.y < routeAltitude - 0.85 && state.vtolTransitionProgress < 0.20 {
+            return decision(
+                .verticalTakeoff,
+                target: SIMD3<Float>(state.position.x, routeAltitude, state.position.z),
+                altitude: routeAltitude,
+                lever: 0.0,
+                speedScale: min(context.speedScale, 0.55),
+                reason: "vtol_vertical_takeoff_to_route_altitude"
+            )
+        }
+
+        if planarDistance <= precisionRadius {
+            let needsHoverCapture = state.vtolTransitionProgress > 0.08 ||
+                planarSpeed > max(4.5, wing.minSafeAirspeed * 0.28)
+            if needsHoverCapture {
+                return decision(
+                    .transitionToHover,
+                    lever: -1.0,
+                    speedScale: min(context.speedScale, 0.42),
+                    reason: "vtol_transition_to_hover_for_waypoint"
+                )
+            }
+            return decision(
+                .precisionHover,
+                lever: 0.0,
+                speedScale: min(context.speedScale, 0.35),
+                reason: "vtol_precision_hover_waypoint"
+            )
+        }
+
+        if !wantsCruise {
+            let hoverLever = state.vtolTransitionProgress > 0.08 ? -1.0 : 0.0
+            return decision(
+                hoverLever < 0.0 ? .transitionToHover : .hoverHold,
+                lever: hoverLever,
+                speedScale: min(context.speedScale, 0.62),
+                reason: hoverLever < 0.0 ? "vtol_transition_to_hover_short_leg" : "vtol_hover_hold_short_leg"
+            )
+        }
+
+        let transitionSafety = hybridVTOLTransitionSafetyState(
+            airspeed: airspeed,
+            routeAltitude: routeAltitude,
+            wing: wing
+        )
+        switch transitionSafety {
+        case .nominal:
+            break
+        case .transitionBlocked(let reason):
+            if state.position.y < routeAltitude - 0.45 {
+                return decision(
+                    .verticalTakeoff,
+                    target: SIMD3<Float>(state.position.x, routeAltitude, state.position.z),
+                    altitude: routeAltitude,
+                    lever: 0.0,
+                    speedScale: min(context.speedScale, 0.50),
+                    safety: transitionSafety,
+                    reason: "vtol_transition_blocked_\(reason)"
+                )
+            }
+            return decision(
+                .hoverHold,
+                target: SIMD3<Float>(state.position.x, routeAltitude, state.position.z),
+                altitude: routeAltitude,
+                lever: state.vtolTransitionProgress > 0.08 ? -1.0 : 0.0,
+                speedScale: min(context.speedScale, 0.45),
+                safety: transitionSafety,
+                reason: "vtol_transition_blocked_\(reason)"
+            )
+        case .transitionAborting(let reason):
+            return decision(
+                .transitionAbort,
+                target: SIMD3<Float>(state.position.x, max(routeAltitude, state.position.y), state.position.z),
+                altitude: max(routeAltitude, state.position.y),
+                lever: -1.0,
+                speedScale: 0.32,
+                safety: transitionSafety,
+                reason: "vtol_transition_abort_\(reason)"
+            )
+        case .emergencyHover(let reason):
+            return decision(
+                .emergencyHover,
+                target: SIMD3<Float>(state.position.x, max(routeAltitude, state.position.y), state.position.z),
+                altitude: max(routeAltitude, state.position.y),
+                lever: -1.0,
+                speedScale: 0.25,
+                safety: transitionSafety,
+                reason: "vtol_emergency_hover_\(reason)"
+            )
+        case .forcedLanding(_):
+            return decision(
+                .forcedLanding,
+                target: SIMD3<Float>(state.position.x, 0.0, state.position.z),
+                altitude: 0.0,
+                lever: -1.0,
+                speedScale: 0.25,
+                safety: transitionSafety,
+                reason: "vtol_forced_landing"
+            )
+        }
+
+        if hybridVTOLCruiseReady(wing: wing) {
+            return decision(
+                .wingborneCruise,
+                lever: 1.0,
+                speedScale: context.speedScale,
+                reason: "vtol_cruise_accepted_lift_ready"
+            )
+        }
+
+        let transitionLever = hybridVTOLTransitionLever(
+            wing: wing,
+            airspeed: airspeed,
+            liftRatio: liftRatio,
+            transitionProgress: state.vtolTransitionProgress
+        )
+        let transitionReason = transitionLever > 0.05
+            ? "vtol_transition_to_cruise"
+            : "vtol_transition_delayed_lift_or_speed"
+        return decision(
+            .transitionToCruise,
+            lever: transitionLever,
+            speedScale: min(max(context.speedScale, 0.58), 0.84),
+            reason: transitionReason
+        )
+    }
+
+    private func applyHybridVTOLTransitionToCruiseCommand(
+        context: AutopilotTrackingContext,
+        decision: VTOLAutopilotDecision,
+        wing: FixedWingParameters,
+        routeAltitude: Float,
+        deltaTime: Float
+    ) {
+        let currentPlanar = SIMD2<Float>(state.position.x, state.position.z)
+        let targetPlanar = SIMD2<Float>(decision.target.x, decision.target.z)
+        let routeVector = targetPlanar - currentPlanar
+        let planarDistance = simd_length(routeVector)
+        let direction: SIMD2<Float>
+        if planarDistance > 0.01 {
+            direction = routeVector / planarDistance
+        } else {
+            let yaw = state.orientation.z
+            direction = SIMD2<Float>(-sin(yaw), -cos(yaw))
+        }
+        let lookaheadUpperBound = max(24.0, wing.cruiseAirspeed * 1.6)
+        let transitionLookahead = min(max(planarDistance * 0.45, 12.0), lookaheadUpperBound)
+        let transitionTarget = SIMD3<Float>(
+            state.position.x + direction.x * transitionLookahead,
+            routeAltitude,
+            state.position.z + direction.y * transitionLookahead
+        )
+        let transitionBaseline = resolvedFlightBaseline(for: mode)
+        let transitionContext = AutopilotTrackingContext(
+            state: state,
+            physicalState: physicalState,
+            target: transitionTarget,
+            targetAltitude: routeAltitude,
+            speedScale: decision.speedScale,
+            yawAlignToHome: context.yawAlignToHome,
+            yawOverrideRadians: decision.targetHeading ?? context.yawOverrideRadians,
+            deltaTime: context.deltaTime,
+            flightBaseline: transitionBaseline
+        )
+        var command = multicopterAutopilotController.command(for: transitionContext)
+        let attitudeScale = (1.0 - state.vtolTransitionProgress * 0.65).clamped(to: 0.25...1.0)
+        command.rollDegrees *= attitudeScale
+        command.pitchDegrees *= attitudeScale
+        command.throttle = max(
+            command.throttle,
+            transitionBaseline.hoverLockThrottle,
+            transitionBaseline.cruiseReferenceThrottle
+        )
+        if state.position.y < routeAltitude - 0.30 {
+            command.throttle = max(
+                command.throttle,
+                resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference
+            )
+        }
+        fixedWingAutopilotAltitudeCommand = routeAltitude
+        fixedWingAutopilotCourseCommand = decision.targetHeading
+        fixedWingAutopilotDebugState = .idle
+        fixedWingLastTransitionReason = decision.reason
+        applyAutopilotCommand(
+            command,
+            deltaTime: deltaTime,
+            vtolTransitionLever: decision.transitionLever
+        )
+    }
+
+    private func hybridVTOLActiveLegTarget(
+        context: AutopilotTrackingContext,
+        routeAltitude: Float
+    ) -> SIMD3<Float> {
+        if activeRouteTargetSource == .mission,
+           missionExecutionState.status == .running,
+           let activeTarget = missionExecutionState.activeTarget,
+           isFiniteVector2(activeTarget.position) {
+            return SIMD3<Float>(
+                activeTarget.position.x,
+                routeAltitude,
+                activeTarget.position.y
+            )
+        }
+        return SIMD3<Float>(context.target.x, routeAltitude, context.target.z)
+    }
+
+    private func hybridVTOLPrecisionEntryRadius(wing: FixedWingParameters) -> Float {
+        let captureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
+        let turnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
+        if wing.family == .surveyEVTOL {
+            return max(
+                12.0,
+                captureRadius * 0.95,
+                min(turnRadius * 0.55, captureRadius * 2.4)
+            )
+        }
+        return max(
+            16.0,
+            captureRadius * 1.10,
+            min(turnRadius * 0.65, captureRadius * 2.6)
+        )
+    }
+
+    private func hybridVTOLCruiseEntryDistance(
+        wing: FixedWingParameters,
+        precisionRadius: Float
+    ) -> Float {
+        let turnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
+        return max(
+            precisionRadius * 1.75,
+            min(turnRadius * 1.10, precisionRadius * 3.4),
+            wing.cruiseAirspeed * 3.5
+        )
+    }
+
+    private func hybridVTOLCruiseExitDistance(
+        wing: FixedWingParameters,
+        precisionRadius: Float
+    ) -> Float {
+        let turnRadius = wing.minimumTurnRadius(airspeed: wing.cruiseAirspeed)
+        return max(
+            precisionRadius * 1.15,
+            min(turnRadius * 0.72, precisionRadius * 2.2)
+        )
+    }
+
+    private func hybridVTOLTransitionSafetyState(
+        airspeed: Float,
+        routeAltitude: Float,
+        wing: FixedWingParameters
+    ) -> VTOLAutopilotSafetyState {
+        let minimumAltitude = max(8.0, homePosition.y + 6.0)
+        if state.position.y < minimumAltitude {
+            return .transitionBlocked("insufficientAltitude")
+        }
+        if batteryState.chargePercent < 12.0 {
+            return .transitionBlocked("lowBattery")
+        }
+        if damageState.isFlightCritical || damageState.averageHealth < 0.35 {
+            return .transitionBlocked("damageCritical")
+        }
+        if collisionAnalysis.riskScore >= 0.70 {
+            return .emergencyHover("corridorBlocked")
+        }
+        let sinkLimit = max(1.2, wing.nominalSinkRateMps * 1.15)
+        if state.vtolTransitionProgress > 0.10,
+           state.velocity.y < -sinkLimit {
+            return .transitionAborting("sinkRateExceeded")
+        }
+        let tooSlowForLateTilt = state.vtolTransitionProgress > 0.62 &&
+            airspeed < wing.minSustainableSpeedMps * 0.72
+        if tooSlowForLateTilt {
+            return .transitionAborting("insufficientAirspeed")
+        }
+        if state.vtolTransitionBlocked,
+           state.vtolTransitionProgress > 0.20,
+           state.velocity.y < -0.6 {
+            return .transitionAborting("liftReserveLost")
+        }
+        if state.position.y < routeAltitude - 1.6,
+           state.vtolTransitionProgress > 0.35 {
+            return .transitionAborting("altitudeNotHeld")
+        }
+        return .nominal
+    }
+
+    private func hybridVTOLTransitionLever(
+        wing: FixedWingParameters,
+        airspeed: Float,
+        liftRatio: Float,
+        transitionProgress: Float
+    ) -> Double {
+        guard collisionAnalysis.riskScore < 0.70 else {
+            return 0.0
+        }
+        let sinkLimit = max(1.2, wing.nominalSinkRateMps * 1.15)
+        guard state.velocity.y >= -sinkLimit else {
+            return 0.0
+        }
+        guard !state.vtolTransitionBlocked else {
+            return 0.0
+        }
+        if transitionProgress < 0.18 {
+            return 1.0
+        }
+        let progress = transitionProgress.clamped(to: 0.0...1.0)
+        let requiredLiftRatio = min(0.86, 0.10 + progress * 0.74)
+        let requiredAirspeed = max(
+            wing.minSafeAirspeed * (0.42 + progress * 0.38),
+            wing.minSustainableSpeedMps * (0.38 + progress * 0.42)
+        )
+        if liftRatio >= requiredLiftRatio && airspeed >= requiredAirspeed {
+            return 1.0
+        }
+        let degradedLiftOK = liftRatio >= requiredLiftRatio * 0.78
+        let degradedSpeedOK = airspeed >= requiredAirspeed * 0.92
+        return degradedLiftOK && degradedSpeedOK ? 0.45 : 0.0
+    }
+
+    private func applyHybridVTOLHoverAutopilotCommand(
+        context: AutopilotTrackingContext,
+        target: SIMD3<Float>,
+        targetAltitude: Float,
+        speedScale: Float,
+        yawOverrideRadians: Float?,
+        vtolTransitionLever: Double,
+        minimumThrottle: Float?,
+        reason: String,
+        deltaTime: Float
+    ) {
+        let hoverBaseline = resolvedFlightBaseline(for: .hover)
+        let hoverContext = AutopilotTrackingContext(
+            state: state,
+            physicalState: physicalState,
+            target: target,
+            targetAltitude: targetAltitude,
+            speedScale: speedScale,
+            yawAlignToHome: context.yawAlignToHome,
+            yawOverrideRadians: yawOverrideRadians,
+            deltaTime: context.deltaTime,
+            flightBaseline: hoverBaseline
+        )
+        var command = multicopterAutopilotController.command(for: hoverContext)
+        if state.vtolTransitionProgress > 0.12 {
+            let attitudeScale = (1.0 - state.vtolTransitionProgress * 0.55).clamped(to: 0.35...1.0)
+            command.rollDegrees *= attitudeScale
+            command.pitchDegrees *= attitudeScale
+        }
+        if let minimumThrottle {
+            command.throttle = max(command.throttle, minimumThrottle)
+        }
+
+        fixedWingAutopilotAltitudeCommand = targetAltitude
+        fixedWingAutopilotCourseCommand = command.yawDegrees.degreesToRadians
+        fixedWingAutopilotDebugState = .idle
+        fixedWingLastTransitionReason = reason
+        applyAutopilotCommand(
+            command,
+            deltaTime: deltaTime,
+            vtolTransitionLever: vtolTransitionLever
+        )
+    }
+
+    private func hybridVTOLCruiseReady(wing: FixedWingParameters) -> Bool {
+        let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        let airspeed = max(state.forwardAirspeed, planarSpeed)
+        let liftRatio = max(state.vtolWingLiftRatio, state.vtolWingborneBlend)
+        let altitudeStable = state.velocity.y > -max(1.1, wing.nominalSinkRateMps * 0.65)
+        guard altitudeStable else {
+            return false
+        }
+        if selectedDroneProfile.airframeStyle == .surveyEVTOL {
+            return state.vtolTransitionProgress >= 0.72 &&
+                liftRatio >= 0.62 &&
+                airspeed >= wing.minSustainableSpeedMps * 0.78
+        }
+
+        return state.vtolTransitionProgress >= 0.86 &&
+            liftRatio >= 0.74 &&
+            airspeed >= wing.minSustainableSpeedMps * 0.82
+    }
+
+    private func hybridVTOLReadyForPrecisionHover() -> Bool {
+        guard selectedDroneProfile.airframeClass == .hybridVTOL else {
+            return true
+        }
+        let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        return state.vtolTransitionProgress <= 0.10 && planarSpeed <= 5.5
+    }
+
+    private func hybridVTOLRouteAltitude(defaultAltitude: Float) -> Float {
+        let ceiling = max(6.0, terrain.maxFlightAltitude - 2.0)
+        let cruiseFloor = max(10.0, homePosition.y + 8.0)
+        return min(ceiling, max(defaultAltitude, cruiseFloor))
+    }
+
+    private func prepareHybridVTOLAutopilotForForwardRoute() {
+        guard selectedDroneProfile.airframeClass == .hybridVTOL else {
+            return
+        }
+        updateControlValues({ values in
+            values.vtolTransitionLever = 0.0
+        }, markManual: false)
     }
 
     private func updateFixedWingNavigationSnapshot(
@@ -6791,7 +7706,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func applyAutopilotCommand(
         _ command: AutopilotControlCommand,
-        deltaTime: Float
+        deltaTime: Float,
+        vtolTransitionLever: Double? = nil
     ) {
         updateControlValues({ values in
             values.x = Double(command.positionTarget.x)
@@ -6804,6 +7720,9 @@ final class DroneSimulationViewModel: ObservableObject {
             let followBlend = (deltaTime * 3.4).clamped(to: 0.06...0.30)
             let blendedThrottle = Float(values.throttle) + (command.throttle - Float(values.throttle)) * followBlend
             values.throttle = Double(blendedThrottle.clamped(to: 0.0...1.0))
+            if let vtolTransitionLever {
+                values.vtolTransitionLever = vtolTransitionLever
+            }
         }, markManual: false)
     }
 
@@ -7036,7 +7955,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func targetMarkerTravelAltitude() -> Float {
         let executionCeiling = max(6.0, terrain.maxFlightAltitude - 2.0)
-        if selectedDroneProfile.airframeClass == .multirotor,
+        if selectedDroneProfile.airframeClass != .fixedWing,
            let marker = targetMarkerState,
            activeRouteTargetSource != .none,
            activeRouteTargetAltitudeMarkerID == marker.id,
@@ -7062,7 +7981,7 @@ final class DroneSimulationViewModel: ObservableObject {
             baselineAltitude: baselineAltitude,
             terrainMaxAltitude: executionCeiling
         )
-        if selectedDroneProfile.airframeClass == .multirotor,
+        if selectedDroneProfile.airframeClass != .fixedWing,
            let marker = targetMarkerState,
            activeRouteTargetSource != .none {
             let clampedAltitude = resolvedAltitude.clamped(to: 0.0...executionCeiling)
@@ -7338,7 +8257,8 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func currentFixedWingAutoNavigationStatus() -> AutoNavigationStatus? {
-        guard selectedDroneProfile.airframeClass == .fixedWing,
+        guard selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL,
               let routePhase = fixedWingAutoNavigationPhase(
                 for: fixedWingAutopilotDebugState,
                 guidanceSource: activeFixedWingGuidanceSource
@@ -8366,7 +9286,9 @@ final class DroneSimulationViewModel: ObservableObject {
         let flight = flightState(speed: speed)
         let autoNavigationStatus = currentAutoNavigationStatus()
         let fixedWingDebug = fixedWingAutopilotDebugState
-        let fixedWingRouteActive = selectedDroneProfile.airframeClass == .fixedWing
+        let fixedWingRouteCapable = selectedDroneProfile.airframeClass == .fixedWing ||
+            selectedDroneProfile.airframeClass == .hybridVTOL
+        let fixedWingRouteActive = fixedWingRouteCapable
             && activeFixedWingGuidanceSource != .none
             && fixedWingDebug.missionState != .idle
             && fixedWingDebug.missionState != .failed
@@ -8507,7 +9429,7 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingSpeedRecoveryActive: fixedWingDebug.speedRecoveryActive,
             fixedWingAlongTrackProgress: Double(fixedWingDebug.alongTrackProgress),
             fixedWingBatteryWarningLevel: fixedWingBatteryWarningLevel.rawValue,
-            fixedWingProfileLimitsActive: selectedDroneProfile.airframeClass == .fixedWing &&
+            fixedWingProfileLimitsActive: fixedWingRouteCapable &&
                 selectedDroneProfile.fixedWingParameters != nil,
             fixedWingTransitionReason: fixedWingLastTransitionReason ?? "n/a",
             vtolDiagnosticsVisible: selectedDroneProfile.airframeClass == .hybridVTOL,
@@ -8590,25 +9512,48 @@ final class DroneSimulationViewModel: ObservableObject {
         let healthPenalty = max(0.58, damageState.averageHealth.clamped(to: 0.0...1.0)) * batteryHealthFactor
         let consumptionMultiplier = currentConsumptionMultiplier(operationalProfile: operationalProfile)
 
+        let nominalRemainingTimeSec = operationalProfile.nominalFlightTimeSec *
+            effectiveBatteryFraction *
+            healthPenalty
+        let liveRemainingTimeSec: Float? = (!groundedStaticState && batteryState.remainingTimeSec > 1.0)
+            ? batteryState.remainingTimeSec
+            : nil
         let estimatedRemainingTimeSec = max(
             0.0,
-            (!groundedStaticState && batteryState.remainingTimeSec > 1.0)
-                ? batteryState.remainingTimeSec
-                : operationalProfile.nominalFlightTimeSec * effectiveBatteryFraction * healthPenalty
+            selectedDroneProfile.airframeClass == .hybridVTOL
+                ? max(liveRemainingTimeSec ?? 0.0, nominalRemainingTimeSec)
+                : (liveRemainingTimeSec ?? nominalRemainingTimeSec)
         )
-        let estimatedRemainingRangeM = max(
+        let nominalRangeWeatherDivisor = selectedDroneProfile.airframeClass == .hybridVTOL
+            ? max(1.0, weatherPenalty)
+            : 1.0
+        let nominalRangeEstimate = max(
             0.0,
-            groundedStaticState
-                ? operationalProfile.nominalMaxRangeM *
-                    effectiveBatteryFraction *
-                    payloadRangeFactor *
-                    max(0.76, healthPenalty)
-                : estimatedRemainingTimeSec *
-                    operationalProfile.nominalCruiseSpeedMps *
-                    payloadRangeFactor *
-                    healthPenalty /
-                    max(1.0, weatherPenalty * consumptionMultiplier)
+            operationalProfile.nominalMaxRangeM *
+                effectiveBatteryFraction *
+                payloadRangeFactor *
+                max(0.76, healthPenalty) /
+                nominalRangeWeatherDivisor
         )
+        let liveRangeTimeSec = liveRemainingTimeSec ?? nominalRemainingTimeSec
+        let liveRangeEstimate = max(
+            0.0,
+            liveRangeTimeSec *
+                operationalProfile.nominalCruiseSpeedMps *
+                payloadRangeFactor *
+                healthPenalty /
+                max(1.0, weatherPenalty * consumptionMultiplier)
+        )
+        let estimatedRemainingRangeM: Float = {
+            if groundedStaticState {
+                return nominalRangeEstimate
+            }
+            if selectedDroneProfile.airframeClass == .hybridVTOL {
+                let liveRange = liveRemainingTimeSec == nil ? 0.0 : liveRangeEstimate
+                return max(nominalRangeEstimate, liveRange)
+            }
+            return liveRangeEstimate
+        }()
         let reserveDistance = max(
             operationalProfile.nominalCruiseSpeedMps * 30.0,
             operationalProfile.nominalMaxRangeM * operationalProfile.batteryReserveFraction
@@ -9183,7 +10128,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private func fixedWingFlyByRoutePlan(
         targetAltitude: Float
     ) -> FixedWingFlyByRoutePlan? {
-        guard selectedDroneProfile.airframeClass == .fixedWing else {
+        guard selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL else {
             return nil
         }
 
@@ -11363,6 +12309,10 @@ final class DroneSimulationViewModel: ObservableObject {
             }) {
                 return min(previousMissionRouteIndex + 1, routeWaypoints.count - 1)
             }
+            if selectedDroneProfile.airframeClass == .hybridVTOL,
+               routeWaypoints[0].missionWaypointIndex != nil {
+                return 0
+            }
             return min(1, routeWaypoints.count - 1)
         }()
 
@@ -11393,7 +12343,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private func currentFixedWingRouteTrackingContext(
         fallbackTarget: SIMD3<Float>? = nil
     ) -> FixedWingRouteTrackingContext? {
-        guard selectedDroneProfile.airframeClass == .fixedWing else {
+        guard selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL else {
             return nil
         }
 
@@ -11458,7 +12409,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return FixedWingRouteTrackingContext(
                 routeIdentifier: "\(routeSeed):blocked",
                 waypoints: [],
-                minimumWaypointIndex: targetMissionWaypointIndex,
+                minimumWaypointIndex: nil,
                 preferredLoiterCenter: nil,
                 preferredLoiterRadius: nil,
                 flyableRoute: nil
@@ -11472,7 +12423,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return FixedWingRouteTrackingContext(
                 routeIdentifier: "\(routeSeed):empty",
                 waypoints: [],
-                minimumWaypointIndex: targetMissionWaypointIndex,
+                minimumWaypointIndex: nil,
                 preferredLoiterCenter: nil,
                 preferredLoiterRadius: nil,
                 flyableRoute: nil
@@ -11500,7 +12451,7 @@ final class DroneSimulationViewModel: ObservableObject {
         return FixedWingRouteTrackingContext(
             routeIdentifier: routeIdentifier,
             waypoints: routeWaypoints,
-            minimumWaypointIndex: targetMissionWaypointIndex,
+            minimumWaypointIndex: 1,
             preferredLoiterCenter: target,
             preferredLoiterRadius: wing.loiterRadiusMeters,
             flyableRoute: flyableRoute
@@ -11515,6 +12466,24 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if activeRouteTargetSource == .mission,
            let currentMissionPlan {
+            if selectedDroneProfile.airframeClass == .hybridVTOL,
+               let activeTarget = missionExecutionState.activeTarget,
+               isFiniteVector2(activeTarget.position) {
+                let activeWaypointIndex = missionExecutionState.activeWaypointIndex ?? activeTarget.index
+                let activeTargetWorld = SIMD3<Float>(
+                    activeTarget.position.x,
+                    targetAltitude,
+                    activeTarget.position.y
+                )
+                return fixedWingDirectRouteTrackingContext(
+                    prefix: "vtol-mission:\(currentMissionPlan.id.uuidString):active:\(activeWaypointIndex):target:\(activeTarget.id.uuidString)",
+                    target: activeTargetWorld,
+                    targetAltitude: targetAltitude,
+                    wing: wing,
+                    targetWaypointIdentifier: activeTarget.waypointID.uuidString,
+                    targetMissionWaypointIndex: activeTarget.index
+                )
+            }
             let missionWaypoints = fixedWingMissionRouteWaypoints(
                 from: currentMissionPlan,
                 targetAltitude: targetAltitude
@@ -11537,7 +12506,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 return FixedWingRouteTrackingContext(
                     routeIdentifier: missionRouteKey,
                     waypoints: runtimeWaypoints,
-                    minimumWaypointIndex: minimumWaypointIndex,
+                    minimumWaypointIndex: 1,
                     preferredLoiterCenter: runtimeWaypoints.last?.position,
                     preferredLoiterRadius: wing.loiterRadiusMeters,
                     flyableRoute: flyableRoute
@@ -11547,7 +12516,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 return FixedWingRouteTrackingContext(
                     routeIdentifier: missionRouteKey,
                     waypoints: [],
-                    minimumWaypointIndex: minimumWaypointIndex,
+                    minimumWaypointIndex: nil,
                     preferredLoiterCenter: nil,
                     preferredLoiterRadius: nil,
                     flyableRoute: nil
@@ -11566,7 +12535,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 return FixedWingRouteTrackingContext(
                     routeIdentifier: missionRouteKey,
                     waypoints: [],
-                    minimumWaypointIndex: minimumWaypointIndex,
+                    minimumWaypointIndex: nil,
                     preferredLoiterCenter: nil,
                     preferredLoiterRadius: nil,
                     flyableRoute: nil
@@ -12895,6 +13864,7 @@ final class DroneSimulationViewModel: ObservableObject {
         next.roll = next.roll.clamped(to: -70.0...70.0)
         next.pitch = next.pitch.clamped(to: -70.0...70.0)
         next.yaw = next.yaw.clamped(to: -180.0...180.0)
+        next.vtolTransitionLever = next.vtolTransitionLever.clamped(to: -1.0...1.0)
 
         if next == controlValues {
             return
@@ -12970,6 +13940,7 @@ final class DroneSimulationViewModel: ObservableObject {
                     autoNavigationController.cancel()
                 }
                 setFlightMode(.autoPath, reason: source == .mission ? "mission_target_bound_auto_path" : "manual_marker_auto_path")
+                prepareHybridVTOLAutopilotForForwardRoute()
             }
         } else {
             autoNavigationController.clearTarget()
@@ -13299,6 +14270,13 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        if selectedDroneProfile.airframeClass == .hybridVTOL,
+           isArmed,
+           state.position.y > 0.05 {
+            hover()
+            return
+        }
+
         if selectedDroneProfile.airframeClass == .multirotor,
            isArmed,
            state.position.y > 0.05 {
@@ -13460,7 +14438,10 @@ final class DroneSimulationViewModel: ObservableObject {
             flightMode: mode,
             airframeClass: selectedDroneProfile.airframeClass,
             fixedWingParameters: selectedDroneProfile.fixedWingParameters,
-            fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ? fixedWingAutopilotDebugState : nil,
+            fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL
+                ? fixedWingAutopilotDebugState
+                : nil,
             adapter: missionAutopilotAdapter
         )
         let previousState = missionExecutionState
@@ -13516,7 +14497,10 @@ final class DroneSimulationViewModel: ObservableObject {
             controlAuthority: flightControlDiagnostics.authority,
             missionOwnsTargetSource: activeRouteTargetSource == .mission,
             airframeClass: selectedDroneProfile.airframeClass,
-            fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ? fixedWingAutopilotDebugState : nil,
+            fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL
+                ? fixedWingAutopilotDebugState
+                : nil,
             currentMarker: targetMarkerState,
             adapter: missionAutopilotAdapter
         )
@@ -13529,7 +14513,10 @@ final class DroneSimulationViewModel: ObservableObject {
             launchState: launchState,
             airframeClass: selectedDroneProfile.airframeClass,
             fixedWingParameters: selectedDroneProfile.fixedWingParameters,
-            fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ? fixedWingAutopilotDebugState : nil
+            fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ||
+                selectedDroneProfile.airframeClass == .hybridVTOL
+                ? fixedWingAutopilotDebugState
+                : nil
         )
         let operationalStatus = currentMissionOperationalStatus(
             missionDistanceEstimate: currentMissionDistanceEstimate()
@@ -13543,6 +14530,7 @@ final class DroneSimulationViewModel: ObservableObject {
             runtimeMonitor: runtimeMonitor,
             canStartMissionAutopilot: canBindMissionTargetToAutopilot,
             batteryState: batteryState,
+            airframeClass: selectedDroneProfile.airframeClass,
             collisionAnalysis: collisionAnalysis,
             thermalState: thermalState,
             signalState: signalState,

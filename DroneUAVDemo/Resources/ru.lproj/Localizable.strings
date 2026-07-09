@@ -1074,6 +1074,15 @@
 "overlay.compass.metric.bearing" = "ПЕЛ";
 "overlay.compass.marker.current" = "КУР";
 "overlay.compass.marker.target" = "ЦЕЛ";
+"overlay.pfd.title" = "ОСНОВНОЙ ПОЛЕТНЫЙ ДИСПЛЕЙ";
+"overlay.pfd.subtitle" = "Авиагоризонт / скорость / высота";
+"overlay.pfd.metric.speed" = "СКР";
+"overlay.pfd.metric.altitude" = "ВЫС";
+"overlay.pfd.metric.vertical_speed" = "V/S";
+"overlay.pfd.metric.roll" = "КРЕН";
+"overlay.pfd.metric.pitch" = "ТАНГ";
+"overlay.pfd.metric.bearing" = "ПЕЛ";
+"overlay.pfd.metric.battery" = "АКБ";
 
 "hud.compact.position" = "ПОЗ  x %.1f  y %.1f  z %.1f";
 "hud.compact.speed_battery" = "СКР  %.1f м/с   АКБ %.0f%%";

@@ -79,12 +79,17 @@ struct MissionConstraints: Equatable {
                 dockAltitude + 4.0,
                 currentAltitude + (currentAltitude <= 0.05 ? 3.0 : 0.8)
             )
-        case .fixedWing, .hybridVTOL:
+        case .fixedWing:
             baseline = max(
                 10.0,
                 dockAltitude + 8.0,
                 currentAltitude + 3.4
             )
+        case .hybridVTOL:
+            let cruiseFloor = max(10.0, dockAltitude + 8.0)
+            baseline = currentAltitude <= cruiseFloor
+                ? max(cruiseFloor, currentAltitude + 3.4)
+                : cruiseFloor
         }
         return min(terrainCeiling, max(0.0, baseline))
     }

@@ -1079,6 +1079,15 @@
 "overlay.compass.metric.bearing" = "BRG";
 "overlay.compass.marker.current" = "HDG";
 "overlay.compass.marker.target" = "TGT";
+"overlay.pfd.title" = "PRIMARY FLIGHT DISPLAY";
+"overlay.pfd.subtitle" = "Attitude / speed / altitude";
+"overlay.pfd.metric.speed" = "SPD";
+"overlay.pfd.metric.altitude" = "ALT";
+"overlay.pfd.metric.vertical_speed" = "V/S";
+"overlay.pfd.metric.roll" = "ROLL";
+"overlay.pfd.metric.pitch" = "PITCH";
+"overlay.pfd.metric.bearing" = "BRG";
+"overlay.pfd.metric.battery" = "BAT";
 
 "hud.compact.position" = "POS  x %.1f  y %.1f  z %.1f";
 "hud.compact.speed_battery" = "SPD  %.1f m/s   BAT %.0f%%";
