@@ -71,13 +71,25 @@ final class MissionProgressTracker {
             currentPosition: planarPosition
         )
         let hasBoundTarget: Bool = {
-            if isFixedWingRouteActive || isHybridVTOLRouteGuidanceActive {
+            if isFixedWingRouteActive {
                 return true
             }
-            return adapter.isBound(
+            let adapterHasBoundTarget = adapter.isBound(
                 activeTarget: activeTarget,
                 currentMarker: currentMarker
             )
+            guard airframeClass == .hybridVTOL else {
+                return adapterHasBoundTarget
+            }
+
+            // A running mission alone is not proof that hybrid guidance is
+            // engaged. If the inner fixed-wing controller drops to manual or
+            // hover between waypoints, reporting the target as bound prevents
+            // DroneSimulationViewModel from rebinding it. Pause/resume then
+            // appears to "fix" the route only because resume binds explicitly.
+            // Takeoff is allowed while the bound target waits for the launch
+            // handoff; normal route execution must actually be in autoPath.
+            return adapterHasBoundTarget && (flightMode == .autoPath || flightMode == .takeoff)
         }()
         let autopilotSettled = !autoNavigationStatus.isActive ||
             autoNavigationStatus.phase == .hold ||

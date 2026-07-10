@@ -1404,17 +1404,28 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // stick control the whole flight (no world-frame axis remap between
         // hover/cruise — real tailsitter autopilots also fly body rates, not
         // world Euler angles). Pitch is different: while transitioning, the
-        // pitch axis is *commanded by the sweep itself* (nose-up 90° at
-        // progress 0 -> level 0° at progress 1 — matches
-        // eulerFromFixedWingQuaternion's pitch = asin(forward.y) convention)
-        // rather than by the pilot's pitch stick, mirroring how Wingcopter's
-        // tilt lever — not the pitch stick — drives its rotor angle. As
-        // wingborneBlend rises toward cruise, normal aero pitch authority
-        // (from the elevator/pitch stick) takes back over via the same
-        // hover<->aero blend used for roll/yaw.
+        // pitch axis is initially commanded by the sweep itself (nose-up 90°
+        // at progress 0, matching eulerFromFixedWingQuaternion's
+        // pitch = asin(forward.y) convention). As the sweep reaches cruise,
+        // its endpoint blends into the requested fixed-wing pitch so the
+        // residual SAS and the aerodynamic elevator share one target. Normal
+        // aero pitch authority takes back over via the same hover<->aero blend
+        // used for roll/yaw.
         let desiredRates = s.crashOrDisarmed ? SIMD3<Float>(repeating: 0.0) : desiredMultirotorRates(control: control, state: state, authority: s.authority)
         let currentPitch = eulerFromFixedWingQuaternion(state.fixedWingOrientationQuat, fallback: state.orientation).y
-        let targetPitchRad = (1.0 - s.vtolTransitionProgress) * (Float.pi / 2)
+        // Once the tailsitter is in cruise, the residual body-rate SAS must
+        // follow the same pitch target as the aerodynamic elevator loop. The
+        // old target always ended at exactly 0 degrees, so the still-active
+        // SAS fought every altitude-hold pitch command and produced the
+        // Wingtra-only up/down oscillation. Keep the 90-degree hover target,
+        // but blend its cruise endpoint into the actual commanded attitude.
+        let maxCruisePitchUp = max(0.05, s.wing.maxPitchUpDeg.degreesToRadians)
+        let maxCruisePitchDown = max(0.05, s.wing.maxPitchDownDeg.degreesToRadians)
+        let cruisePitchTarget = control.targetOrientation.y.clamped(
+            to: -maxCruisePitchDown...maxCruisePitchUp
+        )
+        let targetPitchRad = (1.0 - s.vtolTransitionProgress) * (Float.pi / 2) +
+            s.vtolTransitionProgress * cruisePitchTarget
         let pitchRateTarget = ((targetPitchRad - currentPitch) * 2.2).clamped(to: -1.6...1.6)
         // Roll/yaw's stick-tracking rate commands (desiredRates.x/z) come from
         // angleTrackingRates, which diffs against state.orientation.x/z — the

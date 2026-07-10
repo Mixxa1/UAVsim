@@ -95,6 +95,15 @@ final class FixedWingAutopilot {
         static let turnLiftCompensationGain: Float = 0.6   // rad pitch per unit (1/cos(bank) - 1)
         static let pitchFilterTau: Float = 0.45
         static let maxAltitudeBleedRateMps: Float = 4.5
+        // The hybrid path enters this controller only after the VTOL has
+        // become wingborne. Its rotor/wing handoff has more vertical lag than
+        // a conventional airplane, so the conventional V/S gain repeatedly
+        // drives the pitch command from one limit to the other.
+        static let hybridVTOLAltitudePitchGain: Float = 0.026
+        static let hybridVTOLVerticalDampingGain: Float = 0.045
+        static let hybridVTOLPitchFilterTau: Float = 0.70
+        static let hybridVTOLMaxPitchUpDeg: Float = 8.0
+        static let hybridVTOLMaxPitchDownDeg: Float = 6.0
         // Throttle (speed)
         static let throttleSpeedGain: Float = 0.085        // throttle per (m/s) speed error
         static let throttleAltitudeAssistGain: Float = 0.018
@@ -146,6 +155,7 @@ final class FixedWingAutopilot {
         targetAltitudeOverride: Float?,
         missionMinAirspeed: Float? = nil,
         missionMaxAirspeed: Float? = nil,
+        useHybridVTOLCruiseStabilization: Bool = false,
         input: FixedWingAutopilotInput
     ) -> FixedWingAutopilotResult? {
         guard !plan.waypoints.isEmpty else {
@@ -394,10 +404,22 @@ final class FixedWingAutopilot {
         let altitudeError = targetAltitude - input.aircraftPosition.y
         let verticalVelocity = input.aircraftVelocity.y.isFinite ? input.aircraftVelocity.y : 0.0
         let bleed: Float = Tuning.maxAltitudeBleedRateMps
-        let altitudePitchRaw = (altitudeError * Tuning.altitudePitchGain
-            - verticalVelocity * Tuning.verticalDampingGain).clamped(to: -bleed...bleed)
-        let maxPitchUpRad = max(0.05, wing.maxPitchUpDeg.degreesToRadians)
-        let maxPitchDownRad = max(0.05, wing.maxPitchDownDeg.degreesToRadians)
+        let altitudePitchGain = useHybridVTOLCruiseStabilization
+            ? Tuning.hybridVTOLAltitudePitchGain
+            : Tuning.altitudePitchGain
+        let verticalDampingGain = useHybridVTOLCruiseStabilization
+            ? Tuning.hybridVTOLVerticalDampingGain
+            : Tuning.verticalDampingGain
+        let maxPitchUpDeg = useHybridVTOLCruiseStabilization
+            ? min(wing.maxPitchUpDeg, Tuning.hybridVTOLMaxPitchUpDeg)
+            : wing.maxPitchUpDeg
+        let maxPitchDownDeg = useHybridVTOLCruiseStabilization
+            ? min(wing.maxPitchDownDeg, Tuning.hybridVTOLMaxPitchDownDeg)
+            : wing.maxPitchDownDeg
+        let altitudePitchRaw = (altitudeError * altitudePitchGain
+            - verticalVelocity * verticalDampingGain).clamped(to: -bleed...bleed)
+        let maxPitchUpRad = max(0.05, maxPitchUpDeg.degreesToRadians)
+        let maxPitchDownRad = max(0.05, maxPitchDownDeg.degreesToRadians)
         var rawPitchRad = altitudePitchRaw.clamped(to: -maxPitchDownRad...maxPitchUpRad)
 
         // Stall protection — if we are dangerously slow, force nose down.
@@ -408,7 +430,10 @@ final class FixedWingAutopilot {
             stallProtectionActive = true
         }
 
-        let pitchAlpha = filterAlpha(tau: Tuning.pitchFilterTau, dt: input.deltaTime)
+        let pitchFilterTau = useHybridVTOLCruiseStabilization
+            ? Tuning.hybridVTOLPitchFilterTau
+            : Tuning.pitchFilterTau
+        let pitchAlpha = filterAlpha(tau: pitchFilterTau, dt: input.deltaTime)
         state.filteredPitchRad = state.filteredPitchRad + (rawPitchRad - state.filteredPitchRad) * pitchAlpha
         // Coordinated-turn lift compensation is applied *after* the pitch
         // filter, not blended into the filtered term — bank itself reaches
@@ -420,7 +445,19 @@ final class FixedWingAutopilot {
         // never charged for this, so without this term the aircraft sinks
         // every time it banks toward a waypoint.
         let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
-        state.filteredPitchRad = (state.filteredPitchRad + bankLiftLossRad).clamped(to: -maxPitchDownRad...maxPitchUpRad)
+        let commandedPitchRad: Float
+        if useHybridVTOLCruiseStabilization {
+            // This is a feed-forward correction, not an integral term. The
+            // legacy fixed-wing path stores it for compatibility; hybrid VTOL
+            // must keep it output-only or even a small sustained bank pumps
+            // the saved pitch command to its upper limit in a few frames.
+            commandedPitchRad = (state.filteredPitchRad + bankLiftLossRad)
+                .clamped(to: -maxPitchDownRad...maxPitchUpRad)
+        } else {
+            state.filteredPitchRad = (state.filteredPitchRad + bankLiftLossRad)
+                .clamped(to: -maxPitchDownRad...maxPitchUpRad)
+            commandedPitchRad = state.filteredPitchRad
+        }
 
         // Throttle: cruise + speed error + altitude assist when climbing.
         let approachScale: Float = {
@@ -460,10 +497,20 @@ final class FixedWingAutopilot {
         // square of that, so without extra throttle airspeed bleeds through
         // the turn, costing even more lift on top of the bank's cosine loss.
         let turnDragBoost = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnThrottleCompensationGain
-        state.filteredThrottle = (state.filteredThrottle + turnDragBoost).clamped(to: Tuning.throttleHoverSpan)
+        let commandedThrottle: Float
+        if useHybridVTOLCruiseStabilization {
+            // Same feed-forward rule as pitch: do not integrate the bank drag
+            // correction into persistent throttle state on every update.
+            commandedThrottle = (state.filteredThrottle + turnDragBoost)
+                .clamped(to: Tuning.throttleHoverSpan)
+        } else {
+            state.filteredThrottle = (state.filteredThrottle + turnDragBoost)
+                .clamped(to: Tuning.throttleHoverSpan)
+            commandedThrottle = state.filteredThrottle
+        }
 
         let bankDeg = state.filteredBankRad.radiansToDegrees
-        let pitchDeg = state.filteredPitchRad.radiansToDegrees
+        let pitchDeg = commandedPitchRad.radiansToDegrees
         let yawDeg = wrapAngle(desiredCourse).radiansToDegrees
         let aimWorld = SIMD3<Float>(aimPointPlanar.x, targetAltitude, aimPointPlanar.y)
         let positionTarget = holdsFinalCourse
@@ -491,7 +538,7 @@ final class FixedWingAutopilot {
             rollDegrees: bankDeg,
             pitchDegrees: pitchDeg,
             yawDegrees: yawDeg,
-            throttle: state.filteredThrottle,
+            throttle: commandedThrottle,
             positionTarget: positionTarget,
             activeWaypointIndex: activeIndex,
             distanceToActiveWaypointMeters: simd_length(activeWaypoint.position - aircraftPlanar),
@@ -501,7 +548,7 @@ final class FixedWingAutopilot {
             headingDegrees: input.aircraftYawRadians.radiansToDegrees,
             commandedBankDegrees: bankDeg,
             commandedPitchDegrees: pitchDeg,
-            commandedThrottle: state.filteredThrottle,
+            commandedThrottle: commandedThrottle,
             targetAltitudeMeters: targetAltitude,
             targetAirspeedMpsActive: targetSpeed,
             aimPointWorld: aimWorld,

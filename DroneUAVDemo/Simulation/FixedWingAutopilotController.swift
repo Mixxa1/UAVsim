@@ -179,7 +179,8 @@ final class FixedWingAutopilotController {
         launchAsset: LaunchAsset?,
         routeTracking: FixedWingRouteTrackingContext? = nil,
         missionMinAirspeed: Float? = nil,
-        missionMaxAirspeed: Float? = nil
+        missionMaxAirspeed: Float? = nil,
+        useHybridVTOLCruiseStabilization: Bool = false
     ) -> FixedWingAutopilotOutput {
         let airspeed = max(
             context.state.forwardAirspeed,
@@ -240,6 +241,7 @@ final class FixedWingAutopilotController {
             targetAltitudeOverride: altitudeFloor,
             missionMinAirspeed: missionMinAirspeedActive,
             missionMaxAirspeed: missionMaxAirspeedActive,
+            useHybridVTOLCruiseStabilization: useHybridVTOLCruiseStabilization,
             input: input
         ) else {
             setPhase(.failed, reason: "autopilot_returned_nil")

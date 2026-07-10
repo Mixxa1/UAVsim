@@ -7038,7 +7038,8 @@ final class DroneSimulationViewModel: ObservableObject {
             missionMinAirspeed: missionSpeedConstraints?.minimumMetersPerSecond,
             missionMaxAirspeed: missionSpeedConstraints.map {
                 $0.effectiveMaximum(profileMaxSpeed: activeFixedWingParameters().maxAirspeed)
-            }
+            },
+            useHybridVTOLCruiseStabilization: selectedDroneProfile.airframeClass == .hybridVTOL
         )
         fixedWingAutopilotAltitudeCommand = output.command.positionTarget.y
         fixedWingAutopilotCourseCommand = output.command.yawDegrees.degreesToRadians
@@ -7198,8 +7199,9 @@ final class DroneSimulationViewModel: ObservableObject {
         let precisionRadius = hybridVTOLPrecisionEntryRadius(wing: wing)
         let cruiseEntryDistance = hybridVTOLCruiseEntryDistance(wing: wing, precisionRadius: precisionRadius)
         let cruiseExitDistance = hybridVTOLCruiseExitDistance(wing: wing, precisionRadius: precisionRadius)
+        let cruiseWasEstablished = vtolAutopilotPhase == .wingborneCruise
         let wasCruisePath = vtolAutopilotPhase == .transitionToCruise ||
-            vtolAutopilotPhase == .wingborneCruise
+            cruiseWasEstablished
         let wantsCruise = planarDistance > cruiseEntryDistance ||
             (wasCruisePath && planarDistance > cruiseExitDistance)
         let airborne = !physicalState.isGroundRestState && state.position.y > 0.45
@@ -7317,7 +7319,8 @@ final class DroneSimulationViewModel: ObservableObject {
         let transitionSafety = hybridVTOLTransitionSafetyState(
             airspeed: airspeed,
             routeAltitude: routeAltitude,
-            wing: wing
+            wing: wing,
+            cruiseWasEstablished: cruiseWasEstablished
         )
         switch transitionSafety {
         case .nominal:
@@ -7372,6 +7375,23 @@ final class DroneSimulationViewModel: ObservableObject {
                 speedScale: 0.25,
                 safety: transitionSafety,
                 reason: "vtol_forced_landing"
+            )
+        }
+
+        // A tailsitter must not bounce back to the transition controller every
+        // time lift ratio or vertical speed crosses a cruise-entry threshold by
+        // a small amount. That controller handoff replaces the fixed-wing pitch
+        // command with a multicopter command, producing the visible Wingtra
+        // pitch "saw" and making the AUTO telemetry alternate ON/OFF. Once
+        // cruise has been established, retain it until the safety evaluator
+        // above reports a genuine loss of speed, sink-rate margin, or corridor.
+        if cruiseWasEstablished,
+           selectedDroneProfile.airframeStyle == .tailsitterVTOL {
+            return decision(
+                .wingborneCruise,
+                lever: 1.0,
+                speedScale: context.speedScale,
+                reason: "vtol_cruise_retained_hysteresis"
             )
         }
 
@@ -7524,8 +7544,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private func hybridVTOLTransitionSafetyState(
         airspeed: Float,
         routeAltitude: Float,
-        wing: FixedWingParameters
+        wing: FixedWingParameters,
+        cruiseWasEstablished: Bool
     ) -> VTOLAutopilotSafetyState {
+        let latchedTailsitterCruise = cruiseWasEstablished &&
+            selectedDroneProfile.airframeStyle == .tailsitterVTOL
         let minimumAltitude = max(8.0, homePosition.y + 6.0)
         if state.position.y < minimumAltitude {
             return .transitionBlocked("insufficientAltitude")
@@ -7539,22 +7562,27 @@ final class DroneSimulationViewModel: ObservableObject {
         if collisionAnalysis.riskScore >= 0.70 {
             return .emergencyHover("corridorBlocked")
         }
-        let sinkLimit = max(1.2, wing.nominalSinkRateMps * 1.15)
+        let sinkLimit = latchedTailsitterCruise
+            ? max(2.4, wing.nominalSinkRateMps * 1.75)
+            : max(1.2, wing.nominalSinkRateMps * 1.15)
         if state.vtolTransitionProgress > 0.10,
            state.velocity.y < -sinkLimit {
             return .transitionAborting("sinkRateExceeded")
         }
+        let lateTiltSpeedScale: Float = latchedTailsitterCruise ? 0.62 : 0.72
         let tooSlowForLateTilt = state.vtolTransitionProgress > 0.62 &&
-            airspeed < wing.minSustainableSpeedMps * 0.72
+            airspeed < wing.minSustainableSpeedMps * lateTiltSpeedScale
         if tooSlowForLateTilt {
             return .transitionAborting("insufficientAirspeed")
         }
-        if state.vtolTransitionBlocked,
+        if !latchedTailsitterCruise,
+           state.vtolTransitionBlocked,
            state.vtolTransitionProgress > 0.20,
            state.velocity.y < -0.6 {
             return .transitionAborting("liftReserveLost")
         }
-        if state.position.y < routeAltitude - 1.6,
+        if !latchedTailsitterCruise,
+           state.position.y < routeAltitude - 1.6,
            state.vtolTransitionProgress > 0.35 {
             return .transitionAborting("altitudeNotHeld")
         }
@@ -9292,6 +9320,14 @@ final class DroneSimulationViewModel: ObservableObject {
             && activeFixedWingGuidanceSource != .none
             && fixedWingDebug.missionState != .idle
             && fixedWingDebug.missionState != .failed
+        // During a hybrid transition the multicopter/transition controller is
+        // still following the bound route, while fixed-wing debug is
+        // intentionally `.idle`. Treat that as active auto-navigation instead
+        // of flashing AUTO OFF at every legitimate controller handoff.
+        let hybridRouteGuidanceActive = selectedDroneProfile.airframeClass == .hybridVTOL &&
+            mode == .autoPath &&
+            activeRouteTargetSource != .none &&
+            targetMarkerState != nil
         let targetDistanceMeters: Double = {
             if autoNavigationStatus.distanceToTarget.isFinite {
                 return Double(autoNavigationStatus.distanceToTarget)
@@ -9401,7 +9437,9 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionRisk: Double(collisionRisk),
             nearestObstacleDistance: Double(nearestObstacleDistance),
             nearestObstacleSource: collisionAnalysis.nearestObstacleSource ?? "n/a",
-            autoNavigationActive: autoNavigationStatus.isActive || fixedWingRouteActive,
+            autoNavigationActive: autoNavigationStatus.isActive ||
+                fixedWingRouteActive ||
+                hybridRouteGuidanceActive,
             targetDistanceMeters: targetDistanceMeters,
             targetBearingDegrees: targetBearingDegrees,
             pathStatus: navigationSnapshot.status.rawValue,
