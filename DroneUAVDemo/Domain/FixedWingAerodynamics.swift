@@ -212,6 +212,22 @@ struct FixedWingAerodynamics {
         let dampingScale = sqrt(mass / 20.0).clamped(to: 0.5...3.0)
         let turnGain = turnAuthority.clamped(to: 0.4...1.4)
 
+        // Roll-damping floor. The mass-based dampingScale collapses for
+        // ultralight airframes (floors at 0.5) while the damping moment's
+        // pHat = p*b/2V lever also shrinks with the small span — combined,
+        // a ~1.7 kg hand-launch wing ends up with a full-aileron steady
+        // roll rate of tens of rad/s. In flight that showed up as the wing
+        // blowing through its commanded 36° bank to a knife edge on the
+        // second turn input and falling out of the sky. Floor clp so the
+        // implied steady full-aileron roll rate stays believable for the
+        // airframe's size; for the existing heavy fleet this floor computes
+        // to at or below their current clp (FT5's within a few percent), so
+        // their tuned behaviour is unchanged.
+        let referenceSpeed = stallSpeed * 1.55
+        let targetMaxRollRateRadPerSec = (4.8 / span).clamped(to: 0.7...3.0)
+        let clpFloorMagnitude = (preset.clDeltaA * turnGain) *
+            (2.0 * referenceSpeed / span) / targetMaxRollRateRadPerSec
+
         let inertia = boxInertiaTensor(
             massKg: mass,
             wingSpanM: span,
@@ -234,7 +250,7 @@ struct FixedWingAerodynamics {
             cmq: preset.cmqBase * dampingScale,
             clBeta: preset.clBetaSlope,
             clDeltaA: preset.clDeltaA * turnGain,
-            clp: preset.clpBase * dampingScale,
+            clp: -max(abs(preset.clpBase * dampingScale), clpFloorMagnitude),
             cnBeta: preset.cnBetaSlope,
             cnDeltaR: preset.cnDeltaR * turnGain,
             cnr: preset.cnrBase * dampingScale,

@@ -339,11 +339,13 @@ struct FixedWingParameters: Hashable {
         // Release speeds must clear the stall regime with margin: the aero
         // model's lift scales with v², so a throw at ~0.6x of minSafeAirspeed
         // produces barely a third of the required lift and the airframe drops
-        // out of the operator's hand. Assisted launches therefore always
-        // release at (or comfortably above) minSafeAirspeed.
+        // out of the operator's hand. 1.22x (not 1.12x): at 1.12x the level-
+        // flight angle of attack still exceeds the 6° nose-up the thrower
+        // imparts, and flight tests showed the airframe settling into a
+        // ground skim off the hand instead of climbing.
         self.handThrowSpeed = max(
             handThrowSpeed ?? 0.0,
-            max(7.0, self.minSafeAirspeed * 1.12)
+            max(7.0, self.minSafeAirspeed * 1.22)
         )
         self.catapultExitSpeed = max(
             catapultExitSpeed ?? 0.0,
@@ -1319,7 +1321,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     preferredLaunchMode: .handLaunch,
                     initialClimbPitchDeg: 11.0,
                     maxInitialBankDeg: 15.0,
-                    handThrowSpeed: 20.2,
+                    handThrowSpeed: 22.0,
                     initialClimbTargetAltitude: 18.0
                 ),
                 launchMethod: .handLaunch,
@@ -1655,7 +1657,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     preferredLaunchMode: .handLaunch,
                     initialClimbPitchDeg: 11.0,
                     maxInitialBankDeg: 15.0,
-                    handThrowSpeed: 15.0,
+                    handThrowSpeed: 16.4,
                     initialClimbTargetAltitude: 16.0
                 )
             )
