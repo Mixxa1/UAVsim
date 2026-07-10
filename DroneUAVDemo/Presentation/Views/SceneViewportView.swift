@@ -30,6 +30,7 @@ struct SceneViewportView: View {
                 freeMoveSpeed: viewModel.cameraConfiguration.free.moveSpeed,
                 activityState: viewModel.performancePolicy.activityState,
                 wantsWeatherDepthOfField: viewModel.wantsWeatherDepthOfField,
+                isHandLaunchPOV: viewModel.isHandLaunchPOVActive,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },

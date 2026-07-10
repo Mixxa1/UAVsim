@@ -2,6 +2,7 @@ import Foundation
 
 enum TacticalMapMode: String, CaseIterable, Identifiable {
     case waypoint
+    case launchObject
     case dropZone
 
     var id: String { rawValue }
@@ -14,6 +15,8 @@ enum TacticalMapMode: String, CaseIterable, Identifiable {
         switch self {
         case .waypoint:
             return "tactical.map.mode.waypoint"
+        case .launchObject:
+            return "tactical.map.mode.launch_object"
         case .dropZone:
             return "tactical.map.mode.drop_zone"
         }
@@ -23,6 +26,8 @@ enum TacticalMapMode: String, CaseIterable, Identifiable {
         switch self {
         case .waypoint:
             return "tactical.map.instruction.waypoint"
+        case .launchObject:
+            return "tactical.map.instruction.launch_object"
         case .dropZone:
             return "tactical.map.instruction.drop_zone"
         }
@@ -30,7 +35,7 @@ enum TacticalMapMode: String, CaseIterable, Identifiable {
 
     var zoneType: MissionZoneType? {
         switch self {
-        case .waypoint:
+        case .waypoint, .launchObject:
             return nil
         case .dropZone:
             return .dropZone

@@ -362,6 +362,7 @@ enum InputAction: Equatable, Hashable {
     case dropPayload
     case armAircraft
     case disarmAircraft
+    case launchAircraft
     case selectFreeCamera
     case selectChaseCamera
     case selectOrbitCamera
@@ -632,6 +633,17 @@ final class KeyboardInputService: KeyboardInputProviding {
         if isTextInputActive(for: event) {
             clearInputState(keepPendingActions: true)
             return event
+        }
+
+        // ⌘E fires the assisted launch (hand throw / catapult release) — the
+        // one Command shortcut the flight layer owns; every other
+        // Command-modified key stays with the system and app menus.
+        if !event.isARepeat,
+           event.keyCode == 14, // E
+           event.modifierFlags.intersection([.command, .control, .option]) == [.command],
+           processingMode == .flight {
+            enqueueAction(.launchAircraft)
+            return nil
         }
 
         let blockingModifiers = event.modifierFlags.intersection([.command, .control, .option])

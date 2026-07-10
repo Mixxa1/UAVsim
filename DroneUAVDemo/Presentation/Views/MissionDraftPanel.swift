@@ -91,6 +91,7 @@ struct MissionDraftPanel: View {
     let state: TacticalMapState
     let missionPlan: MissionPlan?
     let supportedLaunchModes: [LaunchMode]
+    let fixedWingParameters: FixedWingParameters?
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
     let fixedWingAssistState: FixedWingAssistState
@@ -105,6 +106,7 @@ struct MissionDraftPanel: View {
     let onSetMaximumSpeed: (Float) -> Void
     let onSetLaunchMode: (LaunchMode) -> Void
     let onSetLaunchHeading: (Float) -> Void
+    let onSetLaunchAngle: (Float) -> Void
     let onClearLaunchObject: () -> Void
     let onPrepareMission: () -> Void
     let onStartMission: () -> Void
@@ -122,6 +124,10 @@ struct MissionDraftPanel: View {
             zoneSection
             sectionDivider
             constraintsSection
+            if hasAssistedLaunchModes {
+                sectionDivider
+                launchSection
+            }
             sectionDivider
             missionSection
             sectionDivider
@@ -132,6 +138,12 @@ struct MissionDraftPanel: View {
 
     private var draftEditingLocked: Bool {
         executionState.status == .running || executionState.status == .paused
+    }
+
+    private var hasAssistedLaunchModes: Bool {
+        supportedLaunchModes.contains {
+            $0.requiresLaunchObject && $0.isRuntimeImplemented
+        }
     }
 
     private var routeSection: some View {
@@ -203,16 +215,53 @@ struct MissionDraftPanel: View {
                     "tactical.map.launch.heading",
                     value: "\(Int(launchObject.headingDegrees.rounded()))°"
                 )
+                summaryRow(
+                    "tactical.map.launch.angle",
+                    value: "\(Int(launchObject.railAngleDegrees.rounded()))°"
+                )
+                if let launchPreview = state.launchPreview {
+                    summaryRow(
+                        "tactical.map.launch.corridor_length",
+                        value: String(format: "%.0f m", launchPreview.corridorLengthMeters)
+                    )
+                }
+                if let fixedWingParameters {
+                    if launchMode == .handLaunch {
+                        summaryRow(
+                            "tactical.map.launch.throw_speed",
+                            value: String(format: "%.1f m/s", fixedWingParameters.handThrowSpeed)
+                        )
+                    } else if launchMode == .catapult {
+                        summaryRow(
+                            "tactical.map.launch.exit_speed",
+                            value: String(format: "%.1f m/s", fixedWingParameters.catapultExitSpeed)
+                        )
+                        summaryRow(
+                            "tactical.map.launch.rail_length",
+                            value: String(format: "%.1f m", fixedWingParameters.catapultRailLengthMeters)
+                        )
+                    }
+                }
 
-                Slider(
+                launchSlider(
+                    titleKey: "tactical.map.launch.heading_control",
+                    valueText: "\(Int(launchObject.headingDegrees.rounded()))°",
                     value: Binding(
                         get: { Double(launchObject.headingDegrees) },
                         set: { onSetLaunchHeading(Float($0)) }
                     ),
-                    in: 0.0...359.0,
-                    step: 1.0
+                    range: 0.0...359.0
                 )
-                .disabled(draftEditingLocked)
+
+                launchSlider(
+                    titleKey: "tactical.map.launch.angle_control",
+                    valueText: "\(Int(launchObject.railAngleDegrees.rounded()))°",
+                    value: Binding(
+                        get: { Double(launchObject.railAngleDegrees) },
+                        set: { onSetLaunchAngle(Float($0)) }
+                    ),
+                    range: launchAngleRange(for: launchObject.type)
+                )
 
                 actionButton("tactical.map.action.clear_launch_object", tint: GroundControlPalette.borderStrong, action: onClearLaunchObject)
                     .disabled(draftEditingLocked || state.workingDraft.launchObject == nil)
@@ -789,8 +838,36 @@ struct MissionDraftPanel: View {
                 )
         }
         .buttonStyle(.plain)
+        .disabled(draftEditingLocked)
         .controllerButtonTarget(id: "tactical.launch.mode.\(mode.rawValue)") {
             onSetLaunchMode(mode)
+        }
+    }
+
+    private func launchAngleRange(
+        for type: MissionLaunchObjectType
+    ) -> ClosedRange<Double> {
+        Double(type.launchAngleRange.lowerBound)...Double(type.launchAngleRange.upperBound)
+    }
+
+    private func launchSlider(
+        titleKey: String,
+        valueText: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(LocalizedStringKey(titleKey))
+                Spacer()
+                Text(valueText)
+                    .foregroundStyle(GroundControlPalette.textPrimary)
+            }
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(GroundControlPalette.textSecondary)
+
+            Slider(value: value, in: range, step: 1.0)
+                .disabled(draftEditingLocked)
         }
     }
 }

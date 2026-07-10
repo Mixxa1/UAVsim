@@ -288,6 +288,7 @@
 		100000000000000000000A1F /* flames.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A20 /* flames.usdz */; };
 		100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A24 /* Fire_sheet_baseColor.png */; };
 		100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A26 /* Fire_sheet_emissive.jpg */; };
+		100000000000000000000A40 /* HandLaunchArm.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A41 /* HandLaunchArm.usdz */; };
 		100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1E /* FireTruckAssetLoader.swift */; };
 		100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A22 /* FireVisualAssetLoader.swift */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
@@ -625,6 +626,7 @@
 		100000000000000000000A20 /* flames.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/flames.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A24 /* Fire_sheet_baseColor.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Models/Scenario/Fire_sheet_baseColor.png"; sourceTree = "<group>"; };
 		100000000000000000000A26 /* Fire_sheet_emissive.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "Models/Scenario/Fire_sheet_emissive.jpg"; sourceTree = "<group>"; };
+		100000000000000000000A41 /* HandLaunchArm.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/HandLaunchArm.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
 		10000000000000000000040E /* SnowTerrainMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowTerrainMaterialLoader.swift; sourceTree = "<group>"; };
@@ -1068,6 +1070,7 @@
 				100000000000000000000A20 /* flames.usdz */,
 				100000000000000000000A24 /* Fire_sheet_baseColor.png */,
 				100000000000000000000A26 /* Fire_sheet_emissive.jpg */,
+				100000000000000000000A41 /* HandLaunchArm.usdz */,
 				10000000000000000000040B /* Generic_grass.usdz */,
 				100000000000000000000416 /* Snow04.usdz */,
 				B20400000000000000000003 /* Asphalt13.usdz */,
@@ -1228,6 +1231,7 @@
 				100000000000000000000A1F /* flames.usdz in Resources */,
 				100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */,
 				100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */,
+				100000000000000000000A40 /* HandLaunchArm.usdz in Resources */,
 				10000000000000000000040A /* Generic_grass.usdz in Resources */,
 				100000000000000000000417 /* Snow04.usdz in Resources */,
 				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,

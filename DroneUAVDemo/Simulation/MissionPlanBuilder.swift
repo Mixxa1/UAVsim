@@ -22,7 +22,8 @@ final class MissionPlanBuilder {
         from draft: MissionDraft,
         viewport: MapViewportState,
         airframeClass: AirframeClass = .multirotor,
-        fixedWingParameters: FixedWingParameters? = nil
+        fixedWingParameters: FixedWingParameters? = nil,
+        supportedLaunchModes: [LaunchMode] = LaunchMode.allCases
     ) -> MissionPlan {
         let previewRoute = previewBuilder.buildPreview(
             draft: draft,
@@ -30,10 +31,19 @@ final class MissionPlanBuilder {
             airframeClass: airframeClass,
             fixedWingParameters: fixedWingParameters
         )
+        let launchPreview = previewBuilder.buildLaunchPreview(
+            draft: draft,
+            viewport: viewport,
+            fixedWingParameters: fixedWingParameters,
+            supportedLaunchModes: supportedLaunchModes
+        )
         let validation = validator.validate(
             draft: draft,
             previewRoute: previewRoute,
-            viewport: viewport
+            launchPreview: launchPreview,
+            viewport: viewport,
+            fixedWingParameters: fixedWingParameters,
+            supportedLaunchModes: supportedLaunchModes
         )
         let routeBuild = buildRoute(
             from: previewRoute,
@@ -57,7 +67,10 @@ final class MissionPlanBuilder {
             legs: routeBuild?.legs ?? [],
             launchMode: draft.selectedLaunchMode,
             launchObject: draft.launchObject,
-            launchAsset: draft.launchObject?.launchAsset,
+            launchAsset: resolvedLaunchAsset(
+                from: draft.launchObject,
+                fixedWingParameters: fixedWingParameters
+            ),
             waypoints: planWaypoints,
             executionTargets: executionTargets,
             zones: draft.zones,
@@ -65,6 +78,27 @@ final class MissionPlanBuilder {
             status: validation.status,
             explanations: validation.explanations
         )
+    }
+
+    private func resolvedLaunchAsset(
+        from launchObject: MissionLaunchObject?,
+        fixedWingParameters: FixedWingParameters?
+    ) -> LaunchAsset? {
+        guard var asset = launchObject?.launchAsset else {
+            return nil
+        }
+        guard let fixedWingParameters else {
+            return asset
+        }
+        switch asset {
+        case .handLaunch(var hand):
+            hand.releaseHeightMeters = fixedWingParameters.handReleaseHeightMeters
+            asset = .handLaunch(hand)
+        case .catapult(var catapult):
+            catapult.rail.railLengthMeters = fixedWingParameters.catapultRailLengthMeters
+            asset = .catapult(catapult)
+        }
+        return asset
     }
 
     private func buildRoute(

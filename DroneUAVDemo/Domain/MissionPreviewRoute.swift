@@ -1,6 +1,33 @@
 import Foundation
 import simd
 
+struct MissionLaunchPreview: Equatable {
+    let mode: LaunchMode
+    let launchObjectID: UUID
+    let objectType: MissionLaunchObjectType
+    let origin: SIMD2<Float>
+    let railEnd: SIMD2<Float>?
+    let corridorEnd: SIMD2<Float>
+    let headingDegrees: Float
+    let launchAngleDegrees: Float
+    let corridorLengthMeters: Float
+    let isWithinWorldBounds: Bool
+    let hasSafeEdgeMargin: Bool
+    let avoidsNoFlyZones: Bool
+    let hasValidLaunchAngle: Bool
+
+    var isValid: Bool {
+        isWithinWorldBounds && hasSafeEdgeMargin && avoidsNoFlyZones && hasValidLaunchAngle
+    }
+
+    var points: [SIMD2<Float>] {
+        if let railEnd, simd_distance(origin, railEnd) > 0.05 {
+            return [origin, railEnd, corridorEnd]
+        }
+        return [origin, corridorEnd]
+    }
+}
+
 struct MissionPreviewRoute: Equatable {
     let id: UUID
     let missionPlanPoints: [SIMD2<Float>]

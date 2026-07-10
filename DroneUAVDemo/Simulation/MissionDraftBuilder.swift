@@ -4,11 +4,34 @@ import simd
 final class MissionDraftBuilder {
     func setLaunchMode(
         _ launchMode: LaunchMode,
-        in draft: MissionDraft
+        in draft: MissionDraft,
+        defaultLaunchAngleDegrees: Float? = nil
     ) -> MissionDraft {
         var nextDraft = draft
-        nextDraft.selectedLaunchMode = .standard
-        nextDraft.launchObject = nil
+        guard launchMode.isRuntimeImplemented else {
+            return nextDraft
+        }
+
+        nextDraft.selectedLaunchMode = launchMode
+        guard let requiredType = launchMode.defaultLaunchObjectType else {
+            nextDraft.launchObject = nil
+            return nextDraft
+        }
+
+        if let launchObject = nextDraft.launchObject,
+           launchObject.type != requiredType {
+            nextDraft.launchObject = MissionLaunchObject(
+                id: launchObject.id,
+                type: requiredType,
+                position: launchObject.position,
+                headingDegrees: launchObject.headingDegrees,
+                railAngleDegrees: resolvedDefaultLaunchAngle(
+                    defaultLaunchAngleDegrees,
+                    for: requiredType
+                ),
+                transitionHeadingDegrees: launchObject.headingDegrees
+            )
+        }
         return nextDraft
     }
 
@@ -52,11 +75,26 @@ final class MissionDraftBuilder {
         headingDegrees: Float,
         type: MissionLaunchObjectType,
         in draft: MissionDraft,
-        viewport: MapViewportState
+        viewport: MapViewportState,
+        defaultLaunchAngleDegrees: Float? = nil
     ) -> MissionDraft {
         var nextDraft = draft
-        nextDraft.selectedLaunchMode = .standard
-        nextDraft.launchObject = nil
+        let clampedPosition = viewport.clampedToWorld(position)
+        let normalizedHeading = normalizedHeadingDegrees(headingDegrees)
+        let existing = nextDraft.launchObject
+        let angle = existing?.type == type
+            ? existing?.railAngleDegrees ?? defaultRailAngleDegrees(for: type)
+            : resolvedDefaultLaunchAngle(defaultLaunchAngleDegrees, for: type)
+
+        nextDraft.selectedLaunchMode = type.launchMode
+        nextDraft.launchObject = MissionLaunchObject(
+            id: existing?.id ?? UUID(),
+            type: type,
+            position: clampedPosition,
+            headingDegrees: normalizedHeading,
+            railAngleDegrees: angle,
+            transitionHeadingDegrees: normalizedHeading
+        )
         return nextDraft
     }
 
@@ -69,9 +107,23 @@ final class MissionDraftBuilder {
             return nextDraft
         }
         launchObject.headingDegrees = normalizedHeadingDegrees(headingDegrees)
-        if launchObject.transitionHeadingDegrees == nil || launchObject.type == .catapultLine {
-            launchObject.transitionHeadingDegrees = launchObject.headingDegrees
+        launchObject.transitionHeadingDegrees = launchObject.headingDegrees
+        nextDraft.launchObject = launchObject
+        return nextDraft
+    }
+
+    func setLaunchAngle(
+        _ angleDegrees: Float,
+        in draft: MissionDraft
+    ) -> MissionDraft {
+        var nextDraft = draft
+        guard var launchObject = nextDraft.launchObject else {
+            return nextDraft
         }
+        launchObject.railAngleDegrees = clampedLaunchAngle(
+            angleDegrees,
+            for: launchObject.type
+        )
         nextDraft.launchObject = launchObject
         return nextDraft
     }
@@ -152,11 +204,7 @@ final class MissionDraftBuilder {
     }
 
     private func normalizedHeadingDegrees(_ headingDegrees: Float) -> Float {
-        var normalized = headingDegrees.truncatingRemainder(dividingBy: 360.0)
-        if normalized < 0.0 {
-            normalized += 360.0
-        }
-        return normalized
+        MissionLaunchGeometry.normalizedHeadingDegrees(headingDegrees)
     }
 
     private func defaultRailAngleDegrees(for type: MissionLaunchObjectType) -> Float {
@@ -165,8 +213,30 @@ final class MissionDraftBuilder {
             return 12.0
         case .runwayStrip:
             return 3.0
-        case .handLaunchPoint, .vtolStartPoint:
+        case .handLaunchPoint:
+            return 8.0
+        case .vtolStartPoint:
             return 0.0
         }
+    }
+
+    private func clampedLaunchAngle(
+        _ angleDegrees: Float,
+        for type: MissionLaunchObjectType
+    ) -> Float {
+        min(
+            type.launchAngleRange.upperBound,
+            max(type.launchAngleRange.lowerBound, angleDegrees)
+        )
+    }
+
+    private func resolvedDefaultLaunchAngle(
+        _ requestedAngle: Float?,
+        for type: MissionLaunchObjectType
+    ) -> Float {
+        clampedLaunchAngle(
+            requestedAngle ?? defaultRailAngleDegrees(for: type),
+            for: type
+        )
     }
 }

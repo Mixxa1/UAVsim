@@ -11,18 +11,18 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
 
     var requiresHeading: Bool {
         switch self {
-        case .catapultLine, .runwayStrip:
+        case .handLaunchPoint, .catapultLine, .runwayStrip:
             return true
-        case .handLaunchPoint, .vtolStartPoint:
+        case .vtolStartPoint:
             return false
         }
     }
 
     var requiresCorridor: Bool {
         switch self {
-        case .catapultLine, .runwayStrip:
+        case .handLaunchPoint, .catapultLine, .runwayStrip:
             return true
-        case .handLaunchPoint, .vtolStartPoint:
+        case .vtolStartPoint:
             return false
         }
     }
@@ -40,8 +40,58 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
         }
     }
 
+    var launchAngleRange: ClosedRange<Float> {
+        switch self {
+        case .handLaunchPoint:
+            return 2.0...20.0
+        case .catapultLine:
+            return 4.0...22.0
+        case .runwayStrip:
+            return 0.0...12.0
+        case .vtolStartPoint:
+            return 0.0...0.0
+        }
+    }
+
     var titleKey: String {
         "tactical.map.launch.object.\(rawValue)"
+    }
+}
+
+/// Canonical conversion between the tactical map's compass bearing and the
+/// fixed-wing/SceneKit attitude convention. Tactical bearings use 0° = +Z
+/// (north) and 90° = +X (east), while aircraft point along their local -Z
+/// axis. Keeping the conversion here prevents map, preview, physics and scene
+/// rendering from silently disagreeing about the sign of a launch heading.
+enum MissionLaunchGeometry {
+    static func normalizedHeadingDegrees(_ headingDegrees: Float) -> Float {
+        var normalized = headingDegrees.truncatingRemainder(dividingBy: 360.0)
+        if normalized < 0.0 {
+            normalized += 360.0
+        }
+        return normalized
+    }
+
+    static func horizontalDirection(headingDegrees: Float) -> SIMD2<Float> {
+        let radians = normalizedHeadingDegrees(headingDegrees) * .pi / 180.0
+        return SIMD2<Float>(sin(radians), cos(radians))
+    }
+
+    static func worldYawRadians(headingDegrees: Float) -> Float {
+        let direction = horizontalDirection(headingDegrees: headingDegrees)
+        return atan2(-direction.x, -direction.y)
+    }
+
+    static func direction3D(headingDegrees: Float, pitchDegrees: Float) -> SIMD3<Float> {
+        let horizontal = horizontalDirection(headingDegrees: headingDegrees)
+        let pitch = pitchDegrees * .pi / 180.0
+        return simd_normalize(
+            SIMD3<Float>(
+                horizontal.x * cos(pitch),
+                sin(pitch),
+                horizontal.y * cos(pitch)
+            )
+        )
     }
 }
 
@@ -73,6 +123,14 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
         headingDegrees * .pi / 180.0
     }
 
+    var horizontalLaunchDirection: SIMD2<Float> {
+        MissionLaunchGeometry.horizontalDirection(headingDegrees: launchDirectionDegrees)
+    }
+
+    var worldYawRadians: Float {
+        MissionLaunchGeometry.worldYawRadians(headingDegrees: launchDirectionDegrees)
+    }
+
     var transitionHeadingRadians: Float? {
         transitionHeadingDegrees.map { $0 * .pi / 180.0 }
     }
@@ -87,6 +145,15 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
 
     var launchAsset: LaunchAsset? {
         switch type {
+        case .handLaunchPoint:
+            return .handLaunch(
+                HandLaunchAsset(
+                    id: id,
+                    position: position,
+                    headingDegrees: launchDirectionDegrees,
+                    launchAngleDegrees: railAngleDegrees
+                )
+            )
         case .catapultLine:
             return .catapult(
                 CatapultLaunchAsset(
@@ -95,11 +162,12 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
                     rail: LaunchRailConfiguration(
                         headingDegrees: headingDegrees,
                         railAngleDegrees: railAngleDegrees,
-                        launchDirectionDegrees: launchDirectionDegrees
+                        launchDirectionDegrees: launchDirectionDegrees,
+                        railLengthMeters: 4.2
                     )
                 )
             )
-        case .handLaunchPoint, .runwayStrip, .vtolStartPoint:
+        case .runwayStrip, .vtolStartPoint:
             return nil
         }
     }
@@ -129,7 +197,7 @@ struct MissionDraft: Equatable {
     }
 
     var hasContent: Bool {
-        hasWaypoints || hasZones || launchObject != nil
+        hasWaypoints || hasZones || launchObject != nil || selectedLaunchMode != .standard
     }
 
     var dropZone: MissionZone? {

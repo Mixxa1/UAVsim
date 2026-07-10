@@ -24,6 +24,23 @@ enum AirframeStyle: String, CaseIterable {
 enum LaunchMethod: String, CaseIterable {
     case vertical
     case handLaunch
+    case catapult
+    case runway
+
+    static func resolved(from mode: LaunchMode, fallback: LaunchMethod) -> LaunchMethod {
+        switch mode {
+        case .handLaunch:
+            return .handLaunch
+        case .catapult:
+            return .catapult
+        case .runway:
+            return .runway
+        case .vtol:
+            return .vertical
+        case .standard:
+            return fallback
+        }
+    }
 }
 
 enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
@@ -36,15 +53,38 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 
     var requiresLaunchObject: Bool {
-        false
+        self != .standard
     }
 
     var defaultLaunchObjectType: MissionLaunchObjectType? {
-        nil
+        switch self {
+        case .standard:
+            return nil
+        case .handLaunch:
+            return .handLaunchPoint
+        case .catapult:
+            return .catapultLine
+        case .runway:
+            return .runwayStrip
+        case .vtol:
+            return .vtolStartPoint
+        }
     }
 
     var titleKey: String {
         "tactical.map.launch.mode.\(rawValue)"
+    }
+
+    /// Runway and mission-placed VTOL starts remain separate future features.
+    /// Do not expose them through the assisted fixed-wing launch workflow until
+    /// they have their own ground-roll/transition dynamics.
+    var isRuntimeImplemented: Bool {
+        switch self {
+        case .standard, .handLaunch, .catapult:
+            return true
+        case .runway, .vtol:
+            return false
+        }
     }
 }
 
@@ -59,6 +99,10 @@ enum LaunchState: String, CaseIterable, Equatable {
     case transitionToFlight
     case completed
     case aborted
+
+    var titleKey: String {
+        "launch.state.\(rawValue)"
+    }
 
     var blocksRouteCapture: Bool {
         switch self {
@@ -178,6 +222,12 @@ struct FixedWingParameters: Hashable {
     let maxInitialBankDeg: Float
     let handThrowSpeed: Float
     let catapultExitSpeed: Float
+    let handLaunchAngleDegrees: Float
+    let handReleaseHeightMeters: Float
+    let catapultRailAngleDegrees: Float
+    let catapultRailLengthMeters: Float
+    let maxCatapultAccelerationG: Float
+    let launchPreSpoolSeconds: Float
     let runwayTakeoffDistance: Float
     let initialClimbTargetAltitude: Float
 
@@ -215,6 +265,12 @@ struct FixedWingParameters: Hashable {
         maxInitialBankDeg: Float? = nil,
         handThrowSpeed: Float? = nil,
         catapultExitSpeed: Float? = nil,
+        handLaunchAngleDegrees: Float = 8.0,
+        handReleaseHeightMeters: Float = 1.45,
+        catapultRailAngleDegrees: Float = 12.0,
+        catapultRailLengthMeters: Float? = nil,
+        maxCatapultAccelerationG: Float = 8.0,
+        launchPreSpoolSeconds: Float = 0.45,
         runwayTakeoffDistance: Float = 45.0,
         initialClimbTargetAltitude: Float = 18.0
     ) {
@@ -247,8 +303,24 @@ struct FixedWingParameters: Hashable {
         )
         let resolvedMaxPitchUpDeg = maxPitchUpDeg ?? max(10.0, min(18.0, initialClimbPitchDeg + 4.0))
 
-        self.supportedLaunchModes = [.standard]
-        self.preferredLaunchMode = .standard
+        let resolvedSupportedModes: [LaunchMode]
+        if let supportedLaunchModes, !supportedLaunchModes.isEmpty {
+            resolvedSupportedModes = supportedLaunchModes.reduce(into: []) { modes, mode in
+                if !modes.contains(mode) {
+                    modes.append(mode)
+                }
+            }
+        } else if let preferredLaunchMode, preferredLaunchMode != .standard {
+            resolvedSupportedModes = [.standard, preferredLaunchMode]
+        } else {
+            resolvedSupportedModes = [.standard]
+        }
+        self.supportedLaunchModes = resolvedSupportedModes
+        if let preferredLaunchMode, resolvedSupportedModes.contains(preferredLaunchMode) {
+            self.preferredLaunchMode = preferredLaunchMode
+        } else {
+            self.preferredLaunchMode = resolvedSupportedModes.first ?? .standard
+        }
         self.minSafeAirspeed = resolvedMinSafeAirspeed
         self.climbAirspeed = resolvedClimbAirspeed
         self.cruiseAirspeed = resolvedCruiseAirspeed
@@ -264,8 +336,30 @@ struct FixedWingParameters: Hashable {
         self.takeoffRotationSpeed = takeoffRotationSpeed ?? max(resolvedMinSafeAirspeed * 0.94, minSustainableSpeedMps)
         self.initialClimbPitchDeg = initialClimbPitchDeg
         self.maxInitialBankDeg = min(maxBankAngleDeg, maxInitialBankDeg ?? max(10.0, maxBankAngleDeg * 0.55))
-        self.handThrowSpeed = handThrowSpeed ?? max(6.0, self.minSafeAirspeed * 0.58)
-        self.catapultExitSpeed = catapultExitSpeed ?? max(self.minSafeAirspeed * 1.08, self.climbAirspeed)
+        // Release speeds must clear the stall regime with margin: the aero
+        // model's lift scales with v², so a throw at ~0.6x of minSafeAirspeed
+        // produces barely a third of the required lift and the airframe drops
+        // out of the operator's hand. Assisted launches therefore always
+        // release at (or comfortably above) minSafeAirspeed.
+        self.handThrowSpeed = max(
+            handThrowSpeed ?? 0.0,
+            max(7.0, self.minSafeAirspeed * 1.12)
+        )
+        self.catapultExitSpeed = max(
+            catapultExitSpeed ?? 0.0,
+            max(self.minSafeAirspeed * 1.28, self.climbAirspeed)
+        )
+        self.handLaunchAngleDegrees = handLaunchAngleDegrees.clamped(to: 2.0...20.0)
+        self.handReleaseHeightMeters = handReleaseHeightMeters.clamped(to: 0.8...2.2)
+        self.catapultRailAngleDegrees = catapultRailAngleDegrees.clamped(to: 4.0...22.0)
+        self.maxCatapultAccelerationG = maxCatapultAccelerationG.clamped(to: 2.0...12.0)
+        let minimumRailLength = (self.catapultExitSpeed * self.catapultExitSpeed) /
+            (2.0 * self.maxCatapultAccelerationG * 9.81)
+        self.catapultRailLengthMeters = max(
+            minimumRailLength,
+            catapultRailLengthMeters ?? max(4.2, minimumRailLength)
+        )
+        self.launchPreSpoolSeconds = launchPreSpoolSeconds.clamped(to: 0.15...2.0)
         self.runwayTakeoffDistance = runwayTakeoffDistance
         self.initialClimbTargetAltitude = initialClimbTargetAltitude
     }
@@ -447,7 +541,9 @@ struct DroneModelProfile: Identifiable, Hashable {
         self.airframeClass = airframeClass
         self.airframeStyle = airframeStyle
         self.fixedWingParameters = fixedWingParameters
-        self.launchMethod = launchMethod
+        self.launchMethod = fixedWingParameters.map {
+            LaunchMethod.resolved(from: $0.preferredLaunchMode, fallback: launchMethod)
+        } ?? launchMethod
         self.landingMethod = landingMethod
         self.controlResponsiveness = controlResponsiveness
         self.hoverThrottle = hoverThrottle
@@ -493,11 +589,16 @@ struct DroneModelProfile: Identifiable, Hashable {
     }
 
     var supportedLaunchModes: [LaunchMode] {
-        [.standard]
+        let implemented = (fixedWingParameters?.supportedLaunchModes ?? [.standard])
+            .filter(\.isRuntimeImplemented)
+        return implemented.isEmpty ? [.standard] : implemented
     }
 
     var preferredLaunchMode: LaunchMode {
-        .standard
+        let preferred = fixedWingParameters?.preferredLaunchMode ?? .standard
+        return supportedLaunchModes.contains(preferred)
+            ? preferred
+            : supportedLaunchModes.first ?? .standard
     }
 }
 
@@ -1169,11 +1270,11 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.62,
                     turnAuthority: 0.48,
                     maxBankAngleDeg: 34.0,
-                    supportedLaunchModes: [.standard, .catapult],
+                    supportedLaunchModes: [.catapult],
                     preferredLaunchMode: .catapult,
                     initialClimbPitchDeg: 10.0,
                     maxInitialBankDeg: 13.0,
-                    catapultExitSpeed: 24.0,
+                    catapultExitSpeed: 29.0,
                     initialClimbTargetAltitude: 24.0
                 ),
                 launchMethod: .handLaunch,
@@ -1214,11 +1315,11 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.64,
                     turnAuthority: 0.56,
                     maxBankAngleDeg: 36.0,
-                    supportedLaunchModes: [.standard, .handLaunch],
+                    supportedLaunchModes: [.handLaunch],
                     preferredLaunchMode: .handLaunch,
                     initialClimbPitchDeg: 11.0,
                     maxInitialBankDeg: 15.0,
-                    handThrowSpeed: 9.0,
+                    handThrowSpeed: 20.2,
                     initialClimbTargetAltitude: 18.0
                 ),
                 launchMethod: .handLaunch,
@@ -1372,11 +1473,11 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.62,
                     turnAuthority: 0.50,
                     maxBankAngleDeg: 34.0,
-                    supportedLaunchModes: [.standard, .catapult],
+                    supportedLaunchModes: [.catapult],
                     preferredLaunchMode: .catapult,
                     initialClimbPitchDeg: 10.0,
                     maxInitialBankDeg: 13.0,
-                    catapultExitSpeed: 22.0,
+                    catapultExitSpeed: 23.0,
                     initialClimbTargetAltitude: 24.0
                 )
             )
@@ -1550,11 +1651,11 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.66,
                     turnAuthority: 0.64,
                     maxBankAngleDeg: 40.0,
-                    supportedLaunchModes: [.standard, .handLaunch],
+                    supportedLaunchModes: [.handLaunch],
                     preferredLaunchMode: .handLaunch,
                     initialClimbPitchDeg: 11.0,
                     maxInitialBankDeg: 15.0,
-                    handThrowSpeed: 8.4,
+                    handThrowSpeed: 15.0,
                     initialClimbTargetAltitude: 16.0
                 )
             )
@@ -1587,11 +1688,11 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.60,
                     turnAuthority: 0.52,
                     maxBankAngleDeg: 34.0,
-                    supportedLaunchModes: [.standard, .catapult],
+                    supportedLaunchModes: [.catapult],
                     preferredLaunchMode: .catapult,
                     initialClimbPitchDeg: 9.5,
                     maxInitialBankDeg: 12.0,
-                    catapultExitSpeed: 22.0,
+                    catapultExitSpeed: 24.0,
                     initialClimbTargetAltitude: 24.0
                 )
             )

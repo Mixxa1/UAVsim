@@ -7,6 +7,7 @@ struct TacticalMapView: View {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
     let state: TacticalMapState
     let missionPlan: MissionPlan?
+    let supportedLaunchModes: [LaunchMode]
     let executionState: MissionExecutionState
     let onSetMode: (TacticalMapMode) -> Void
     let onMapTap: (SIMD2<Float>) -> Void
@@ -125,8 +126,16 @@ struct TacticalMapView: View {
 
     private var modeSelector: some View {
         HStack(spacing: 8) {
-            ForEach(TacticalMapMode.planningModes) { mode in
+            ForEach(availablePlanningModes) { mode in
                 modeButton(mode)
+            }
+        }
+    }
+
+    private var availablePlanningModes: [TacticalMapMode] {
+        TacticalMapMode.planningModes.filter { mode in
+            mode != .launchObject || supportedLaunchModes.contains {
+                $0.requiresLaunchObject && $0.isRuntimeImplemented
             }
         }
     }
@@ -156,6 +165,12 @@ struct TacticalMapView: View {
             HStack(spacing: 10) {
                 metricChip("tactical.map.metric.span", value: scaleDescriptor)
                 metricChip("tactical.map.metric.route_distance", value: routeDistanceText)
+                if let launchPreview = state.launchPreview {
+                    metricChip(
+                        "tactical.map.metric.launch",
+                        value: "\(Int(launchPreview.headingDegrees.rounded()))° • \(Int(launchPreview.corridorLengthMeters.rounded())) m"
+                    )
+                }
                 if let previewStatusText {
                     metricChip("tactical.map.metric.preview", value: previewStatusText)
                 }
@@ -390,6 +405,9 @@ private struct TacticalMapLegendView: View {
                     legendRow(color: GroundControlPalette.accent, key: "tactical.map.legend.route")
                 }
                 legendRow(color: GroundControlPalette.success, key: "tactical.map.legend.safe_return")
+            case .launchObject:
+                legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.launch_rail")
+                legendRow(color: GroundControlPalette.accent, key: "tactical.map.legend.launch_corridor")
             case .dropZone:
                 legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.drop_zone")
             }
@@ -628,6 +646,7 @@ private struct TacticalMapCanvas: View {
             drawServiceOverlays(in: &context, projection: projection)
             drawTrail(in: &context, projection: projection)
             drawZones(in: &context, projection: projection)
+            drawLaunchObject(in: &context, projection: projection)
             drawMissionGeometry(in: &context, projection: projection)
             drawPreviewRoute(in: &context, projection: projection)
             drawActiveLeg(in: &context, projection: projection)
@@ -1164,6 +1183,76 @@ private struct TacticalMapCanvas: View {
                 anchor: .center
             )
         }
+    }
+
+    private func drawLaunchObject(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard let preview = state.launchPreview else {
+            return
+        }
+
+        let isActive = state.mode == .launchObject
+        let tint: Color = preview.isValid
+            ? (preview.mode == .catapult ? GroundControlPalette.warning : GroundControlPalette.accent)
+            : GroundControlPalette.danger
+        let origin = projection.project(preview.origin)
+        let corridorEnd = projection.project(preview.corridorEnd)
+
+        var corridor = Path()
+        corridor.move(to: origin)
+        corridor.addLine(to: corridorEnd)
+        context.stroke(
+            corridor,
+            with: .color(Color.black.opacity(0.46)),
+            style: StrokeStyle(lineWidth: isActive ? 4.4 : 3.0, lineCap: .round, dash: [7.0, 5.0])
+        )
+        context.stroke(
+            corridor,
+            with: .color(tint.opacity(isActive ? 0.96 : 0.62)),
+            style: StrokeStyle(lineWidth: isActive ? 2.2 : 1.3, lineCap: .round, dash: [7.0, 5.0])
+        )
+
+        if let railEnd = preview.railEnd {
+            var rail = Path()
+            rail.move(to: origin)
+            rail.addLine(to: projection.project(railEnd))
+            context.stroke(rail, with: .color(Color.black.opacity(0.62)), lineWidth: isActive ? 7.0 : 5.0)
+            context.stroke(rail, with: .color(tint.opacity(0.96)), lineWidth: isActive ? 3.8 : 2.6)
+        }
+
+        let markerRect = CGRect(x: origin.x - 7.0, y: origin.y - 7.0, width: 14.0, height: 14.0)
+        context.fill(Path(ellipseIn: markerRect), with: .color(tint.opacity(0.96)))
+        context.stroke(Path(ellipseIn: markerRect), with: .color(Color.white.opacity(0.76)), lineWidth: 1.0)
+
+        let deltaX = corridorEnd.x - origin.x
+        let deltaY = corridorEnd.y - origin.y
+        let deltaLength = max(CGFloat(0.001), hypot(deltaX, deltaY))
+        let unitX = deltaX / deltaLength
+        let unitY = deltaY / deltaLength
+        let normalX = -unitY
+        let normalY = unitX
+        var arrow = Path()
+        arrow.move(to: corridorEnd)
+        arrow.addLine(to: CGPoint(
+            x: corridorEnd.x - unitX * 12.0 + normalX * 5.0,
+            y: corridorEnd.y - unitY * 12.0 + normalY * 5.0
+        ))
+        arrow.move(to: corridorEnd)
+        arrow.addLine(to: CGPoint(
+            x: corridorEnd.x - unitX * 12.0 - normalX * 5.0,
+            y: corridorEnd.y - unitY * 12.0 - normalY * 5.0
+        ))
+        context.stroke(arrow, with: .color(tint.opacity(0.96)), lineWidth: 2.0)
+
+        context.draw(
+            Text(LocalizedStringKey(preview.objectType.titleKey))
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .foregroundColor(tint),
+            at: CGPoint(x: origin.x, y: origin.y + 17.0),
+            anchor: .center
+        )
     }
 
     private func drawPreviewRoute(

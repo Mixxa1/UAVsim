@@ -595,4 +595,318 @@ final class FixedWingAutopilotController {
 private extension Float {
     var degreesToRadians: Float { self * .pi / 180.0 }
     var radiansToDegrees: Float { self * 180.0 / .pi }
+    func clamped(to range: ClosedRange<Float>) -> Float {
+        min(range.upperBound, max(range.lowerBound, self))
+    }
+}
+
+struct FixedWingLaunchRuntimeSnapshot: Equatable {
+    let mode: LaunchMode
+    let state: LaunchState
+    let railProgress: Float
+    let longitudinalAirspeedMps: Float
+    let altitudeAboveLaunchMeters: Float
+    let transitionReason: String?
+    let dynamics: FixedWingLaunchDynamics?
+
+    static let idle = FixedWingLaunchRuntimeSnapshot(
+        mode: .standard,
+        state: .idle,
+        railProgress: 0.0,
+        longitudinalAirspeedMps: 0.0,
+        altitudeAboveLaunchMeters: 0.0,
+        transitionReason: nil,
+        dynamics: nil
+    )
+
+    var isReleased: Bool {
+        switch state {
+        case .rotation, .initialClimb, .transitionToFlight, .completed, .aborted:
+            return true
+        case .idle, .prelaunchCheck, .aligning, .launchCommit, .assistedAcceleration:
+            return false
+        }
+    }
+}
+
+/// Authoritative launch state machine. It owns staging, rail/throw release,
+/// AGL-relative climb transitions and abort timing. The route autopilot is
+/// deliberately kept out of the held/rail phases and is only engaged after
+/// physical release.
+final class FixedWingLaunchController {
+    private struct Configuration {
+        let launchID: UUID
+        let mode: LaunchMode
+        let origin: SIMD3<Float>
+        let direction: SIMD3<Float>
+        let worldYawRadians: Float
+        let pitchRadians: Float
+        let travelLengthMeters: Float
+        let releaseSpeedMps: Float
+        let maximumAccelerationMps2: Float
+        let nominalLaunchMassKg: Float
+        let preSpoolSeconds: Float
+        let minSafeAirspeedMps: Float
+        let initialClimbAltitudeMeters: Float
+    }
+
+    private var configuration: Configuration?
+    private var state: LaunchState = .idle
+    private var phaseElapsed: Float = 0.0
+    private var totalElapsed: Float = 0.0
+    private var transitionReason: String?
+
+    var isActive: Bool {
+        configuration != nil && state != .idle && state != .completed && state != .aborted
+    }
+
+    func reset() {
+        configuration = nil
+        state = .idle
+        phaseElapsed = 0.0
+        totalElapsed = 0.0
+        transitionReason = nil
+    }
+
+    @discardableResult
+    func begin(
+        mode: LaunchMode,
+        asset: LaunchAsset,
+        origin: SIMD3<Float>,
+        wing: FixedWingParameters,
+        nominalLaunchMassKg: Float
+    ) -> Bool {
+        let direction: SIMD3<Float>
+        let yaw: Float
+        let pitch: Float
+        let travelLength: Float
+        let releaseSpeed: Float
+        let launchID: UUID
+
+        switch (mode, asset) {
+        case (.handLaunch, .handLaunch(let hand)):
+            direction = hand.direction3D
+            yaw = hand.worldYawRadians
+            pitch = hand.launchAngleDegrees.degreesToRadians
+            travelLength = 0.0
+            releaseSpeed = wing.handThrowSpeed
+            launchID = hand.id
+        case (.catapult, .catapult(let catapult)):
+            direction = catapult.rail.direction3D
+            yaw = catapult.rail.worldYawRadians
+            pitch = catapult.rail.railAngleDegrees.degreesToRadians
+            travelLength = max(0.5, catapult.rail.railLengthMeters)
+            releaseSpeed = wing.catapultExitSpeed
+            launchID = catapult.id
+        default:
+            reset()
+            state = .aborted
+            transitionReason = "launch_asset_mode_mismatch"
+            return false
+        }
+
+        guard origin.x.isFinite, origin.y.isFinite, origin.z.isFinite,
+              simd_length(direction).isFinite, simd_length(direction) > 0.5,
+              releaseSpeed.isFinite, releaseSpeed > 0.5 else {
+            reset()
+            state = .aborted
+            transitionReason = "launch_geometry_invalid"
+            return false
+        }
+
+        configuration = Configuration(
+            launchID: launchID,
+            mode: mode,
+            origin: origin,
+            direction: simd_normalize(direction),
+            worldYawRadians: yaw,
+            pitchRadians: pitch,
+            travelLengthMeters: travelLength,
+            releaseSpeedMps: releaseSpeed,
+            maximumAccelerationMps2: wing.maxCatapultAccelerationG * 9.81,
+            nominalLaunchMassKg: max(0.2, nominalLaunchMassKg),
+            preSpoolSeconds: wing.launchPreSpoolSeconds,
+            minSafeAirspeedMps: wing.minSafeAirspeed,
+            initialClimbAltitudeMeters: wing.initialClimbTargetAltitude
+        )
+        state = .prelaunchCheck
+        phaseElapsed = 0.0
+        totalElapsed = 0.0
+        transitionReason = "launch_preflight_started"
+        return true
+    }
+
+    func update(
+        aircraftState: DroneState,
+        windVector: SIMD3<Float>,
+        isArmed: Bool,
+        batteryAvailable: Bool,
+        deltaTime: Float
+    ) -> FixedWingLaunchRuntimeSnapshot {
+        guard let configuration else {
+            return state == .aborted
+                ? FixedWingLaunchRuntimeSnapshot(
+                    mode: .standard,
+                    state: .aborted,
+                    railProgress: 0.0,
+                    longitudinalAirspeedMps: 0.0,
+                    altitudeAboveLaunchMeters: 0.0,
+                    transitionReason: transitionReason,
+                    dynamics: nil
+                )
+                : .idle
+        }
+
+        let dt = max(0.0, min(deltaTime, 0.1))
+        if state != .completed && state != .aborted {
+            phaseElapsed += dt
+            totalElapsed += dt
+        }
+
+        let relativeAirVelocity = aircraftState.velocity - windVector
+        let longitudinalAirspeed = max(0.0, simd_dot(relativeAirVelocity, configuration.direction))
+        let altitudeAboveLaunch = max(0.0, aircraftState.position.y - configuration.origin.y)
+        let railProgress: Float = configuration.travelLengthMeters > 0.05
+            ? (simd_dot(aircraftState.position - configuration.origin, configuration.direction) /
+                configuration.travelLengthMeters).clamped(to: 0.0...1.0)
+            : (isReleasedState(state) ? 1.0 : 0.0)
+
+        if !isArmed || !batteryAvailable || aircraftState.physicalState == .crashed {
+            transition(to: .aborted, reason: "launch_preflight_runtime_failure")
+        } else {
+            advance(
+                railProgress: railProgress,
+                longitudinalAirspeed: longitudinalAirspeed,
+                altitudeAboveLaunch: altitudeAboveLaunch,
+                configuration: configuration
+            )
+        }
+
+        return FixedWingLaunchRuntimeSnapshot(
+            mode: configuration.mode,
+            state: state,
+            railProgress: state == .assistedAcceleration && configuration.mode == .handLaunch
+                ? min(1.0, phaseElapsed / 0.035)
+                : railProgress,
+            longitudinalAirspeedMps: longitudinalAirspeed,
+            altitudeAboveLaunchMeters: altitudeAboveLaunch,
+            transitionReason: transitionReason,
+            dynamics: dynamics(for: configuration)
+        )
+    }
+
+    private func advance(
+        railProgress: Float,
+        longitudinalAirspeed: Float,
+        altitudeAboveLaunch: Float,
+        configuration: Configuration
+    ) {
+        switch state {
+        case .idle, .completed, .aborted:
+            return
+        case .prelaunchCheck:
+            if phaseElapsed >= max(0.12, configuration.preSpoolSeconds * 0.45) {
+                transition(to: .aligning, reason: "launch_alignment_started")
+            }
+        case .aligning:
+            if phaseElapsed >= max(0.10, configuration.preSpoolSeconds * 0.55) {
+                transition(to: .launchCommit, reason: "launch_alignment_complete")
+            }
+        case .launchCommit:
+            if phaseElapsed >= 0.10 {
+                transition(to: .assistedAcceleration, reason: configuration.mode == .catapult
+                    ? "catapult_carriage_released"
+                    : "hand_throw_released")
+            }
+        case .assistedAcceleration:
+            if configuration.mode == .catapult {
+                if railProgress >= 0.995 {
+                    transition(to: .rotation, reason: "catapult_rail_end_reached")
+                } else if phaseElapsed > 3.5 {
+                    transition(to: .aborted, reason: "catapult_acceleration_timeout")
+                }
+            } else if phaseElapsed >= 0.035 {
+                transition(to: .rotation, reason: "hand_throw_impulse_complete")
+            }
+        case .rotation:
+            let energyReady = longitudinalAirspeed >= configuration.minSafeAirspeedMps * 0.82
+            if energyReady || altitudeAboveLaunch >= 0.65 || phaseElapsed > 2.0 {
+                transition(to: .initialClimb, reason: energyReady
+                    ? "launch_energy_recovered"
+                    : "launch_climb_control_engaged")
+            }
+        case .initialClimb:
+            let altitudeReady = altitudeAboveLaunch >= configuration.initialClimbAltitudeMeters * 0.60
+            let speedReady = longitudinalAirspeed >= configuration.minSafeAirspeedMps * 0.90
+            if altitudeReady && speedReady {
+                transition(to: .transitionToFlight, reason: "protected_climb_complete")
+            } else if phaseElapsed > 7.0 {
+                transition(to: .transitionToFlight, reason: "protected_climb_timeout_handoff")
+            }
+        case .transitionToFlight:
+            let altitudeReady = altitudeAboveLaunch >= configuration.initialClimbAltitudeMeters * 0.90
+            let speedReady = longitudinalAirspeed >= configuration.minSafeAirspeedMps * 0.92
+            if altitudeReady && speedReady {
+                transition(to: .completed, reason: "launch_sequence_completed")
+            } else if phaseElapsed > 4.0 {
+                transition(to: .completed, reason: "launch_sequence_handoff_timeout")
+            }
+        }
+
+        if totalElapsed > 16.0,
+           state != .completed,
+           state != .aborted {
+            if isReleasedState(state) {
+                transition(to: .completed, reason: "launch_global_handoff_timeout")
+            } else {
+                transition(to: .aborted, reason: "launch_global_timeout")
+            }
+        }
+    }
+
+    private func dynamics(
+        for configuration: Configuration
+    ) -> FixedWingLaunchDynamics? {
+        let phase: FixedWingLaunchDynamicsPhase
+        switch state {
+        case .prelaunchCheck, .aligning, .launchCommit:
+            phase = .held
+        case .assistedAcceleration:
+            phase = configuration.mode == .catapult ? .catapultRail : .handRelease
+        case .idle, .rotation, .initialClimb, .transitionToFlight, .completed, .aborted:
+            return nil
+        }
+
+        return FixedWingLaunchDynamics(
+            launchID: configuration.launchID,
+            mode: configuration.mode,
+            phase: phase,
+            origin: configuration.origin,
+            direction: configuration.direction,
+            worldYawRadians: configuration.worldYawRadians,
+            pitchRadians: configuration.pitchRadians,
+            travelLengthMeters: configuration.travelLengthMeters,
+            targetReleaseSpeedMps: configuration.releaseSpeedMps,
+            maximumAccelerationMps2: configuration.maximumAccelerationMps2,
+            nominalLaunchMassKg: configuration.nominalLaunchMassKg
+        )
+    }
+
+    private func transition(to next: LaunchState, reason: String) {
+        guard state != next else {
+            return
+        }
+        state = next
+        phaseElapsed = 0.0
+        transitionReason = reason
+    }
+
+    private func isReleasedState(_ state: LaunchState) -> Bool {
+        switch state {
+        case .rotation, .initialClimb, .transitionToFlight, .completed, .aborted:
+            return true
+        case .idle, .prelaunchCheck, .aligning, .launchCommit, .assistedAcceleration:
+            return false
+        }
+    }
 }

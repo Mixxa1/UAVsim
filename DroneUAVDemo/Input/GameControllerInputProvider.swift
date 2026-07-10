@@ -579,6 +579,8 @@ private extension InputAction {
             return 42
         case .toggleRangefinderArmed:
             return 43
+        case .launchAircraft:
+            return 44
         }
     }
 }

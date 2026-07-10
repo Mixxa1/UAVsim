@@ -297,6 +297,10 @@ final class DroneSceneController {
     }
 
     private var freeLookAngles = SIMD2<Float>(repeating: 0.0)   // yaw, pitch
+    private let handLaunchPOVCameraNode = SCNNode()
+    private var handLaunchPOVLookAngles = SIMD2<Float>(repeating: 0.0) // yaw, pitch
+    private var handLaunchPOVArmBuilt = false
+    private(set) var isHandLaunchPOVActive = false
     private var orbitLookAngles = SIMD2<Float>(repeating: 0.0)  // yaw, pitch
     private var fpvLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
     private var topLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
@@ -454,6 +458,11 @@ final class DroneSceneController {
     }
 
     func pointOfView(for mode: CameraMode) -> SCNNode {
+        // The pre-launch hand-hold is always experienced first-person,
+        // regardless of which regular camera mode is selected underneath.
+        if isHandLaunchPOVActive {
+            return handLaunchPOVCameraNode
+        }
         switch mode {
         case .free:
             return freeCameraNode
@@ -996,17 +1005,24 @@ final class DroneSceneController {
         ) ?? max(Float(groundNode.presentation.position.y), 0.0)
 
         switch asset {
-        case .catapult(let catapult):
-            let direction = SIMD3<Float>(
-                sin(catapult.rail.headingRadians),
-                0.0,
-                cos(catapult.rail.headingRadians)
-            )
-            let startOffset = direction * -0.72
+        case .handLaunch(let hand):
+            // With the first-person view up, the hold point rides the
+            // operator's gaze (and walks with him); otherwise it is the
+            // static drafted launch point.
+            if let povCradle = handLaunchPOVCradlePoint() {
+                return povCradle
+            }
+            let forward = hand.horizontalDirection * LaunchRigMetrics.handHoldForwardOffset
             return SIMD3<Float>(
-                catapult.position.x + startOffset.x,
-                supportY + 0.18,
-                catapult.position.y + startOffset.z
+                hand.position.x + forward.x,
+                supportY + hand.releaseHeightMeters,
+                hand.position.y + forward.y
+            )
+        case .catapult(let catapult):
+            return SIMD3<Float>(
+                catapult.position.x,
+                supportY + LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset,
+                catapult.position.y
             )
         }
     }
@@ -1030,13 +1046,264 @@ final class DroneSceneController {
         launchAssetNode.simdPosition = SIMD3<Float>(asset.position.x, supportY, asset.position.y)
         launchAssetNode.eulerAngles = SCNVector3(
             0.0,
-            SCNFloat(asset.headingRadians),
+            SCNFloat(asset.worldYawRadians),
             0.0
         )
 
         switch asset {
+        case .handLaunch(let hand):
+            launchAssetNode.addChildNode(makeHandLaunchNode(for: hand))
         case .catapult(let catapult):
             launchAssetNode.addChildNode(makeCatapultNode(for: catapult))
+        }
+    }
+
+    func updateLaunchAssetPresentation(
+        progress: Float,
+        state: LaunchState
+    ) {
+        let clampedProgress = progress.clamped(to: 0.0...1.0)
+        switch currentLaunchAsset {
+        case .catapult(let catapult):
+            if let carriage = launchAssetNode.childNode(
+                withName: "catapult_carriage",
+                recursively: true
+            ) {
+                carriage.simdPosition.z = -catapult.rail.railLengthMeters * clampedProgress
+                carriage.opacity = state == .aborted ? 0.45 : 1.0
+            }
+        case .handLaunch:
+            let throwing = state == .assistedAcceleration
+            let released = state == .rotation ||
+                state == .initialClimb ||
+                state == .transitionToFlight ||
+                state == .completed
+            let releaseBlend = throwing ? clampedProgress : (released ? 1.0 : 0.0)
+            // 0 = holding the airframe at the release point, 1 = full forward
+            // follow-through after the throw (arm sweeps down along -Z).
+            if let armPivot = handLaunchPOVCameraNode.childNode(
+                withName: "hand_launch_pov_arm_pivot",
+                recursively: true
+            ) {
+                armPivot.eulerAngles.x = SCNFloat(-releaseBlend * 1.05)
+            }
+        case .none:
+            break
+        }
+    }
+
+    // MARK: - Hand-launch first-person view
+
+    /// While the airframe sits in the operator's hand, the scene is viewed
+    /// through this camera — the eyes of an operator who is intentionally
+    /// not modelled in the world. A sculpted first-person arm hangs under
+    /// the camera and carries the aircraft; mouse look turns both the view
+    /// and, via the view model, the held airframe. WASD walks the operator.
+    func activateHandLaunchPOV(initialYawRadians: Float, initialPitchRadians: Float) {
+        guard case .handLaunch(let hand)? = currentLaunchAsset else {
+            return
+        }
+
+        if handLaunchPOVCameraNode.parent == nil {
+            let camera = SCNCamera()
+            camera.fieldOfView = 74.0
+            camera.zNear = 0.015
+            camera.zFar = Double(CameraClipping.standardFar)
+            handLaunchPOVCameraNode.camera = camera
+            handLaunchPOVCameraNode.name = "hand_launch_pov_camera"
+            scene.rootNode.addChildNode(handLaunchPOVCameraNode)
+        }
+        if !handLaunchPOVArmBuilt {
+            buildHandLaunchPOVArm()
+        }
+
+        guard !isHandLaunchPOVActive else {
+            return
+        }
+        isHandLaunchPOVActive = true
+        handLaunchPOVCameraNode.isHidden = false
+        handLaunchPOVLookAngles = SIMD2<Float>(
+            initialYawRadians,
+            initialPitchRadians.clamped(to: -0.55...0.45)
+        )
+
+        // Eyes start at the drafted launch point; afterwards the operator is
+        // free to walk (`moveHandLaunchPOVOperator`), so the position is only
+        // set here, on entry.
+        let supportY = supportSurfaceHeight(
+            at: hand.position,
+            clearanceRadius: 0.28,
+            maximumHeight: .greatestFiniteMagnitude
+        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+        handLaunchPOVCameraNode.simdPosition = SIMD3<Float>(
+            hand.position.x,
+            supportY + hand.releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease,
+            hand.position.y
+        )
+        applyHandLaunchPOVAngles()
+    }
+
+    /// Hold point of the airframe in the operator's hand, in world space —
+    /// rides the gaze ray so hand, aircraft and view stay glued together.
+    func handLaunchPOVCradlePoint() -> SIMD3<Float>? {
+        guard isHandLaunchPOVActive else {
+            return nil
+        }
+        return handLaunchPOVCameraNode.simdConvertPosition(
+            SIMD3<Float>(
+                LaunchRigMetrics.handHoldSideOffset,
+                -LaunchRigMetrics.handHoldDropBelowEyes,
+                -LaunchRigMetrics.handHoldForwardOffset
+            ),
+            to: nil
+        )
+    }
+
+    func handLaunchPOVLookPitchRadians() -> Float {
+        handLaunchPOVLookAngles.y
+    }
+
+    /// First-person walking (WASD): moves the operator across the terrain in
+    /// look-relative directions, keeping the eyes at standing height above
+    /// whatever surface he is on. The held airframe follows via the per-tick
+    /// cradle hold, which reads `handLaunchPOVCradlePoint()`.
+    func moveHandLaunchPOVOperator(
+        forward: Float,
+        strafe: Float,
+        deltaTime: Float,
+        speed: Float,
+        worldHalfExtent: Float
+    ) {
+        guard isHandLaunchPOVActive,
+              deltaTime > 0.0,
+              case .handLaunch(let hand)? = currentLaunchAsset else {
+            return
+        }
+        let input = SIMD2<Float>(strafe, forward)
+        let magnitude = simd_length(input)
+        guard magnitude > 0.02 else {
+            return
+        }
+        let clamped = magnitude > 1.0 ? input / magnitude : input
+
+        let yaw = handLaunchPOVLookAngles.x
+        let forwardDir = SIMD2<Float>(-sin(yaw), -cos(yaw))
+        let rightDir = SIMD2<Float>(cos(yaw), -sin(yaw))
+        var planar = SIMD2<Float>(
+            handLaunchPOVCameraNode.simdPosition.x,
+            handLaunchPOVCameraNode.simdPosition.z
+        )
+        planar += (forwardDir * clamped.y + rightDir * clamped.x) * speed * deltaTime
+        let bound = max(4.0, worldHalfExtent - 2.0)
+        planar.x = planar.x.clamped(to: -bound...bound)
+        planar.y = planar.y.clamped(to: -bound...bound)
+
+        let supportY = supportSurfaceHeight(
+            at: planar,
+            clearanceRadius: 0.28,
+            maximumHeight: .greatestFiniteMagnitude
+        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+        handLaunchPOVCameraNode.simdPosition = SIMD3<Float>(
+            planar.x,
+            supportY + hand.releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease,
+            planar.y
+        )
+    }
+
+    func deactivateHandLaunchPOV() {
+        guard isHandLaunchPOVActive else {
+            return
+        }
+        isHandLaunchPOVActive = false
+        handLaunchPOVCameraNode.isHidden = true
+    }
+
+    func applyHandLaunchPOVLook(
+        yawDeltaDeg: Float,
+        pitchDeltaDeg: Float,
+        invertX: Bool,
+        invertY: Bool
+    ) {
+        guard isHandLaunchPOVActive else {
+            return
+        }
+        let yawSign: Float = invertX ? -1.0 : 1.0
+        let pitchSign: Float = invertY ? -1.0 : 1.0
+        handLaunchPOVLookAngles.x += yawDeltaDeg.degreesToRadians * yawSign
+        handLaunchPOVLookAngles.y = (handLaunchPOVLookAngles.y + pitchDeltaDeg.degreesToRadians * pitchSign)
+            .clamped(to: -0.55...0.45)
+        applyHandLaunchPOVAngles()
+    }
+
+    func handLaunchPOVWorldYawRadians() -> Float {
+        handLaunchPOVLookAngles.x
+    }
+
+    private func applyHandLaunchPOVAngles() {
+        handLaunchPOVCameraNode.eulerAngles = SCNVector3(
+            CGFloat(handLaunchPOVLookAngles.y),
+            CGFloat(handLaunchPOVLookAngles.x),
+            0.0
+        )
+    }
+
+    /// First-person viewmodel arm: the left arm enters the frame from the
+    /// lower-left, its open palm cupping the airframe's belly at the hold
+    /// point. Camera-local, so it follows every look movement together with
+    /// the held aircraft (whose cradle point rides the same gaze ray).
+    private func buildHandLaunchPOVArm() {
+        handLaunchPOVArmBuilt = true
+
+        let shoulderLocal = SIMD3<Float>(-0.32, -0.48, 0.15)
+        let palmTargetLocal = SIMD3<Float>(
+            LaunchRigMetrics.handHoldSideOffset,
+            -LaunchRigMetrics.handHoldDropBelowEyes - 0.085,
+            -LaunchRigMetrics.handHoldForwardOffset
+        )
+        let reachVector = palmTargetLocal - shoulderLocal
+        let reach = simd_length(reachVector)
+
+        let aligner = SCNNode()
+        aligner.simdPosition = shoulderLocal
+        aligner.simdOrientation = simd_quatf(
+            from: SIMD3<Float>(0.0, 0.0, -1.0),
+            to: reachVector / reach
+        )
+        handLaunchPOVCameraNode.addChildNode(aligner)
+
+        let pivot = SCNNode()
+        pivot.name = "hand_launch_pov_arm_pivot"
+        aligner.addChildNode(pivot)
+
+        if let armModel = HandLaunchArmAssetLoader.shared.makeArmNode(reach: reach) {
+            pivot.addChildNode(armModel)
+        } else {
+            let skinMaterial = SCNMaterial()
+            skinMaterial.diffuse.contents = NSColor(calibratedRed: 0.72, green: 0.56, blue: 0.45, alpha: 1.0)
+            skinMaterial.roughness.contents = 0.85
+            let elbowLocal = SIMD3<Float>(0.02, -0.055, -reach * 0.52)
+            let handLocal = SIMD3<Float>(0.0, 0.0, -reach)
+            pivot.addChildNode(launchRigSegment(
+                from: .zero, to: elbowLocal, radius: 0.052, material: skinMaterial
+            ))
+            pivot.addChildNode(launchRigSegment(
+                from: elbowLocal, to: handLocal, radius: 0.044, material: skinMaterial
+            ))
+            let palm = SCNNode(geometry: SCNSphere(radius: 0.055))
+            palm.geometry?.materials = [skinMaterial]
+            palm.simdPosition = handLocal
+            pivot.addChildNode(palm)
+        }
+
+        // A first-person viewmodel casting a big detached shadow on the
+        // ground reads as a glitch, not realism.
+        disableShadowsRecursively(handLaunchPOVCameraNode)
+    }
+
+    private func disableShadowsRecursively(_ node: SCNNode) {
+        node.castsShadow = false
+        for child in node.childNodes {
+            disableShadowsRecursively(child)
         }
     }
 
@@ -1178,82 +1445,433 @@ final class DroneSceneController {
         }
     }
 
-    private func makeCatapultNode(for asset: CatapultLaunchAsset) -> SCNNode {
-        let root = SCNNode()
-        let railPitch = SCNFloat(asset.rail.railAngleDegrees.degreesToRadians)
+    /// Height of the catapult shuttle deck (rail start) above the ground and
+    /// the extra offset that puts the aircraft's fuselage centre into the
+    /// shuttle cradle. `currentLaunchSpawnPoint` and the launch physics origin
+    /// must stay in lockstep with the visual rig built by `makeCatapultNode`.
+    private enum LaunchRigMetrics {
+        static let catapultDeckHeight: Float = 0.62
+        static let catapultCradleOffset: Float = 0.17
+        /// Hand launch is presented first-person: the airframe rides the
+        /// operator's gaze ray, held in the left hand (the sculpted asset is
+        /// a left arm) — forward of, below and to the left of the eyes
+        /// (composition validated with offscreen renders: the screen centre
+        /// stays clear for aiming, the arm enters from the lower-left). The
+        /// physics release origin and the POV camera must agree on these
+        /// numbers.
+        static let handHoldForwardOffset: Float = 0.75
+        static let handHoldDropBelowEyes: Float = 0.22
+        static let handHoldSideOffset: Float = -0.18
+        static let handEyeAboveRelease: Float = 0.20
+    }
 
-        let frameMaterial = SCNMaterial()
-        frameMaterial.diffuse.contents = NSColor(calibratedRed: 0.58, green: 0.61, blue: 0.65, alpha: 1.0)
-        frameMaterial.roughness.contents = 0.34
-        frameMaterial.metalness.contents = 0.78
+    /// Loads `HandLaunchArm.usdz` (sculpted human arm, shoulder ball to open
+    /// hand) for the hand-launch rig. The anchor points below were measured
+    /// from the mesh vertices (model units): the returned node has the
+    /// shoulder ball at its origin and the palm centre at `(0, 0, -reach)`,
+    /// so a parent pivot can swing it like a shoulder joint.
+    final class HandLaunchArmAssetLoader {
+        static let shared = HandLaunchArmAssetLoader()
 
-        let railMaterial = SCNMaterial()
-        railMaterial.diffuse.contents = NSColor(calibratedRed: 0.24, green: 0.26, blue: 0.30, alpha: 1.0)
-        railMaterial.roughness.contents = 0.46
-        railMaterial.metalness.contents = 0.84
+        private static let shoulderAnchor = SIMD3<Float>(-29.24, 77.21, 3.64)
+        private static let palmAnchor = SIMD3<Float>(71.54, -136.39, 23.21)
+        /// Roll about the arm axis that turns the open palm upward so it
+        /// carries the fuselage from below (chosen from rendered variants).
+        private static let palmUpRollRadians: Float = .pi / 2.0
 
-        let carriageMaterial = SCNMaterial()
-        carriageMaterial.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.94)
-        carriageMaterial.emission.contents = NSColor.systemOrange.withAlphaComponent(0.12)
-        carriageMaterial.roughness.contents = 0.42
+        private var cachedTemplate: SCNNode?
+        private var didAttemptLoad = false
 
-        let base = SCNNode(
-            geometry: SCNBox(width: 1.55, height: 0.05, length: 0.42, chamferRadius: 0.02)
-        )
-        base.geometry?.materials = [frameMaterial]
-        base.simdPosition = SIMD3<Float>(0.0, 0.03, 0.0)
-        root.addChildNode(base)
+        private init() {}
 
-        let railLeft = SCNNode(
-            geometry: SCNBox(width: 1.92, height: 0.03, length: 0.05, chamferRadius: 0.01)
-        )
-        railLeft.geometry?.materials = [railMaterial]
-        railLeft.simdPosition = SIMD3<Float>(0.0, 0.24, -0.08)
-        railLeft.eulerAngles.x = railPitch
-        root.addChildNode(railLeft)
+        /// Arm with the shoulder at the node origin reaching to a palm at
+        /// `(0, 0, -reach)`. Returns nil when the USDZ asset is unavailable —
+        /// the caller supplies its own procedural fallback.
+        func makeArmNode(reach: Float) -> SCNNode? {
+            guard let template = loadTemplate() else {
+                return nil
+            }
+            let shoulder = Self.shoulderAnchor
+            let armAxis = simd_normalize(Self.palmAnchor - shoulder)
+            let armLength = simd_length(Self.palmAnchor - shoulder)
+            let scale = max(0.05, reach) / max(1.0, armLength)
 
-        let railRight = SCNNode(
-            geometry: SCNBox(width: 1.92, height: 0.03, length: 0.05, chamferRadius: 0.01)
-        )
-        railRight.geometry?.materials = [railMaterial]
-        railRight.simdPosition = SIMD3<Float>(0.0, 0.24, 0.08)
-        railRight.eulerAngles.x = railPitch
-        root.addChildNode(railRight)
-
-        let carriage = SCNNode(
-            geometry: SCNBox(width: 0.22, height: 0.04, length: 0.22, chamferRadius: 0.01)
-        )
-        carriage.geometry?.materials = [carriageMaterial]
-        carriage.simdPosition = SIMD3<Float>(-0.56, 0.14, 0.0)
-        carriage.eulerAngles.x = railPitch
-        root.addChildNode(carriage)
-
-        let strutOffsets: [SIMD3<Float>] = [
-            SIMD3<Float>(-0.62, 0.10, -0.12),
-            SIMD3<Float>(-0.20, 0.10, 0.12),
-            SIMD3<Float>(0.22, 0.10, -0.12),
-            SIMD3<Float>(0.64, 0.10, 0.12)
-        ]
-
-        for offset in strutOffsets {
-            let strut = SCNNode(
-                geometry: SCNCylinder(radius: 0.018, height: 0.30)
+            let alignRotation = simd_quatf(from: armAxis, to: SIMD3<Float>(0.0, 0.0, -1.0))
+            let rollRotation = simd_quatf(
+                angle: Self.palmUpRollRadians,
+                axis: SIMD3<Float>(0.0, 0.0, 1.0)
             )
-            strut.geometry?.materials = [frameMaterial]
-            strut.simdPosition = offset
-            strut.eulerAngles.z = 0.22
-            root.addChildNode(strut)
+            let rotation = rollRotation * alignRotation
+
+            let arm = template.clone()
+            arm.simdScale = SIMD3<Float>(repeating: scale)
+            arm.simdOrientation = rotation
+            arm.simdPosition = -rotation.act(shoulder * scale)
+
+            let wrapper = SCNNode()
+            wrapper.name = "hand_launch_arm_model"
+            wrapper.addChildNode(arm)
+            return wrapper
         }
 
-        let headingMarker = SCNNode(
-            geometry: SCNCone(topRadius: 0.0, bottomRadius: 0.05, height: 0.18)
+        private func loadTemplate() -> SCNNode? {
+            if didAttemptLoad {
+                return cachedTemplate
+            }
+            didAttemptLoad = true
+
+            guard let url = Bundle.main.url(
+                forResource: "HandLaunchArm",
+                withExtension: "usdz"
+            ), let scene = try? SCNScene(url: url, options: [
+                .checkConsistency: false
+            ]) else {
+                print("[LaunchRig] HandLaunchArm.usdz unavailable; using procedural arm fallback")
+                return nil
+            }
+
+            let root = SCNNode()
+            root.name = "hand_launch_arm_template"
+            for child in scene.rootNode.childNodes {
+                root.addChildNode(child.clone())
+            }
+            normalizeMaterials(root)
+            cachedTemplate = root
+            return root
+        }
+
+        /// The Sketchfab sculpt ships with a translucent-looking material that
+        /// lets the terrain bleed through; force an opaque matte skin tone.
+        private func normalizeMaterials(_ node: SCNNode) {
+            node.castsShadow = true
+            node.geometry?.materials.forEach { material in
+                material.transparency = 1.0
+                material.blendMode = .replace
+                material.transparent.contents = nil
+                material.diffuse.contents = NSColor(
+                    calibratedRed: 0.87, green: 0.70, blue: 0.58, alpha: 1.0
+                )
+                material.roughness.contents = 0.85
+                material.metalness.contents = 0.0
+                material.isDoubleSided = true
+            }
+            for child in node.childNodes {
+                normalizeMaterials(child)
+            }
+        }
+    }
+
+    /// Capsule strut between two points; the workhorse of the procedural
+    /// launch-rig builders. Guards the degenerate anti-parallel case of
+    /// `simd_quatf(from:to:)` (straight-down segments) explicitly.
+    private func launchRigSegment(
+        name: String? = nil,
+        from start: SIMD3<Float>,
+        to end: SIMD3<Float>,
+        radius: Float,
+        material: SCNMaterial
+    ) -> SCNNode {
+        let delta = end - start
+        let length = max(0.01, simd_length(delta))
+        let direction = delta / length
+        let node = SCNNode(
+            geometry: SCNCapsule(
+                capRadius: CGFloat(radius),
+                height: CGFloat(length)
+            )
         )
-        headingMarker.geometry?.materials = [carriageMaterial]
-        headingMarker.simdPosition = SIMD3<Float>(0.98, 0.26, 0.0)
-        headingMarker.eulerAngles.z = -SCNFloat.pi / 2.0
-        root.addChildNode(headingMarker)
+        node.name = name
+        node.geometry?.materials = [material]
+        node.simdPosition = (start + end) * 0.5
+        let up = SIMD3<Float>(0.0, 1.0, 0.0)
+        if simd_dot(up, direction) < -0.9995 {
+            node.simdOrientation = simd_quatf(angle: .pi, axis: SIMD3<Float>(1.0, 0.0, 0.0))
+        } else {
+            node.simdOrientation = simd_quatf(from: up, to: direction)
+        }
+        return node
+    }
+
+    private func makeCatapultNode(for asset: CatapultLaunchAsset) -> SCNNode {
+        let root = SCNNode()
+        let railPitch = asset.rail.railAngleDegrees.degreesToRadians
+        let railLength = max(2.0, asset.rail.railLengthMeters)
+        let deckHeight = LaunchRigMetrics.catapultDeckHeight
+
+        let steelMaterial = SCNMaterial()
+        steelMaterial.diffuse.contents = NSColor(calibratedRed: 0.52, green: 0.55, blue: 0.57, alpha: 1.0)
+        steelMaterial.roughness.contents = 0.38
+        steelMaterial.metalness.contents = 0.72
+
+        let frameMaterial = SCNMaterial()
+        frameMaterial.diffuse.contents = NSColor(calibratedRed: 0.33, green: 0.37, blue: 0.33, alpha: 1.0)
+        frameMaterial.roughness.contents = 0.58
+        frameMaterial.metalness.contents = 0.42
+
+        let railMaterial = SCNMaterial()
+        railMaterial.diffuse.contents = NSColor(calibratedRed: 0.22, green: 0.24, blue: 0.27, alpha: 1.0)
+        railMaterial.roughness.contents = 0.44
+        railMaterial.metalness.contents = 0.86
+
+        let shuttleMaterial = SCNMaterial()
+        shuttleMaterial.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.96)
+        shuttleMaterial.emission.contents = NSColor.systemOrange.withAlphaComponent(0.08)
+        shuttleMaterial.roughness.contents = 0.46
+
+        let rubberMaterial = SCNMaterial()
+        rubberMaterial.diffuse.contents = NSColor(calibratedRed: 0.09, green: 0.09, blue: 0.10, alpha: 1.0)
+        rubberMaterial.roughness.contents = 0.92
+
+        let tankMaterial = SCNMaterial()
+        tankMaterial.diffuse.contents = NSColor(calibratedRed: 0.62, green: 0.64, blue: 0.60, alpha: 1.0)
+        tankMaterial.roughness.contents = 0.32
+        tankMaterial.metalness.contents = 0.68
+
+        // Point at travel distance `d` along the rail centreline (optionally
+        // dropped vertically below it), expressed in root (ground) space.
+        func railPoint(_ d: Float, drop: Float = 0.0) -> SIMD3<Float> {
+            SIMD3<Float>(
+                0.0,
+                deckHeight + sin(railPitch) * d - drop,
+                -cos(railPitch) * d
+            )
+        }
+
+        // --- Trailer chassis under the low (start) end ---------------------
+        for x: Float in [-0.34, 0.34] {
+            let sideMember = SCNNode(geometry: SCNBox(
+                width: 0.09, height: 0.14, length: 2.7, chamferRadius: 0.02
+            ))
+            sideMember.geometry?.materials = [frameMaterial]
+            sideMember.simdPosition = SIMD3<Float>(x, 0.40, 0.15)
+            root.addChildNode(sideMember)
+        }
+        for z: Float in [-1.05, 0.15, 1.35] {
+            let crossMember = SCNNode(geometry: SCNBox(
+                width: 0.72, height: 0.09, length: 0.09, chamferRadius: 0.02
+            ))
+            crossMember.geometry?.materials = [frameMaterial]
+            crossMember.simdPosition = SIMD3<Float>(0.0, 0.40, z)
+            root.addChildNode(crossMember)
+        }
+
+        let axle = SCNNode(geometry: SCNCylinder(radius: 0.035, height: 1.34))
+        axle.geometry?.materials = [steelMaterial]
+        axle.simdPosition = SIMD3<Float>(0.0, 0.30, 0.35)
+        axle.eulerAngles.z = SCNFloat.pi / 2.0
+        root.addChildNode(axle)
+
+        for x: Float in [-0.62, 0.62] {
+            let tire = SCNNode(geometry: SCNCylinder(radius: 0.30, height: 0.17))
+            tire.geometry?.materials = [rubberMaterial]
+            tire.simdPosition = SIMD3<Float>(x, 0.30, 0.35)
+            tire.eulerAngles.z = SCNFloat.pi / 2.0
+            root.addChildNode(tire)
+
+            let hub = SCNNode(geometry: SCNCylinder(radius: 0.11, height: 0.19))
+            hub.geometry?.materials = [steelMaterial]
+            hub.simdPosition = SIMD3<Float>(x, 0.30, 0.35)
+            hub.eulerAngles.z = SCNFloat.pi / 2.0
+            root.addChildNode(hub)
+        }
+
+        // Tow drawbar with a hitch eye at the rear (+Z, away from launch).
+        let drawbar = launchRigSegment(
+            from: SIMD3<Float>(0.0, 0.40, 1.45),
+            to: SIMD3<Float>(0.0, 0.30, 2.10),
+            radius: 0.04,
+            material: frameMaterial
+        )
+        root.addChildNode(drawbar)
+        let hitchEye = SCNNode(geometry: SCNTorus(ringRadius: 0.07, pipeRadius: 0.022))
+        hitchEye.geometry?.materials = [steelMaterial]
+        hitchEye.simdPosition = SIMD3<Float>(0.0, 0.28, 2.18)
+        root.addChildNode(hitchEye)
+
+        // Rear stabiliser jacks so the trailer reads as deployed, not parked.
+        for x: Float in [-0.34, 0.34] {
+            let jack = SCNNode(geometry: SCNCylinder(radius: 0.028, height: 0.36))
+            jack.geometry?.materials = [steelMaterial]
+            jack.simdPosition = SIMD3<Float>(x, 0.18, -1.05)
+            root.addChildNode(jack)
+            let pad = SCNNode(geometry: SCNBox(
+                width: 0.16, height: 0.03, length: 0.16, chamferRadius: 0.01
+            ))
+            pad.geometry?.materials = [frameMaterial]
+            pad.simdPosition = SIMD3<Float>(x, 0.015, -1.05)
+            root.addChildNode(pad)
+        }
+
+        // --- Pneumatic charge system on the trailer bed --------------------
+        for x: Float in [-0.20, 0.20] {
+            let receiver = SCNNode(geometry: SCNCylinder(radius: 0.14, height: 1.05))
+            receiver.geometry?.materials = [tankMaterial]
+            receiver.simdPosition = SIMD3<Float>(x, 0.60, 0.72)
+            receiver.eulerAngles.x = SCNFloat.pi / 2.0
+            root.addChildNode(receiver)
+        }
+        let manifold = SCNNode(geometry: SCNBox(
+            width: 0.34, height: 0.20, length: 0.26, chamferRadius: 0.03
+        ))
+        manifold.geometry?.materials = [steelMaterial]
+        manifold.simdPosition = SIMD3<Float>(0.0, 0.58, 1.32)
+        root.addChildNode(manifold)
+
+        // --- Inclined launch rail ------------------------------------------
+        let railAssembly = SCNNode()
+        railAssembly.name = "catapult_rail_assembly"
+        railAssembly.simdPosition = SIMD3<Float>(0.0, deckHeight, 0.0)
+        railAssembly.eulerAngles.x = SCNFloat(railPitch)
+        root.addChildNode(railAssembly)
+
+        let railSpan = railLength + 0.55
+        let railCenterZ = -(railLength - 0.25) * 0.5 - 0.15
+        for x: Float in [-0.17, 0.17] {
+            let rail = SCNNode(geometry: SCNBox(
+                width: 0.07, height: 0.11, length: CGFloat(railSpan), chamferRadius: 0.012
+            ))
+            rail.geometry?.materials = [railMaterial]
+            rail.simdPosition = SIMD3<Float>(x, -0.02, railCenterZ)
+            railAssembly.addChildNode(rail)
+
+            let flange = SCNNode(geometry: SCNBox(
+                width: 0.10, height: 0.022, length: CGFloat(railSpan), chamferRadius: 0.008
+            ))
+            flange.geometry?.materials = [steelMaterial]
+            flange.simdPosition = SIMD3<Float>(x, 0.045, railCenterZ)
+            railAssembly.addChildNode(flange)
+        }
+
+        // Lower truss chord + verticals: box-truss silhouette under the rails.
+        let chord = SCNNode(geometry: SCNBox(
+            width: 0.06, height: 0.06, length: CGFloat(railSpan - 0.3), chamferRadius: 0.012
+        ))
+        chord.geometry?.materials = [railMaterial]
+        chord.simdPosition = SIMD3<Float>(0.0, -0.26, railCenterZ)
+        railAssembly.addChildNode(chord)
+
+        let ribCount = max(4, Int(ceil(railLength / 0.62)))
+        for index in 0...ribCount {
+            let z = -railLength * (Float(index) / Float(ribCount))
+            let rib = SCNNode(geometry: SCNBox(
+                width: 0.42, height: 0.035, length: 0.06, chamferRadius: 0.008
+            ))
+            rib.geometry?.materials = [steelMaterial]
+            rib.simdPosition = SIMD3<Float>(0.0, -0.085, z)
+            railAssembly.addChildNode(rib)
+
+            let post = SCNNode(geometry: SCNCylinder(radius: 0.016, height: 0.15))
+            post.geometry?.materials = [steelMaterial]
+            post.simdPosition = SIMD3<Float>(0.0, -0.18, z)
+            railAssembly.addChildNode(post)
+        }
+
+        // Acceleration tube (pneumatic piston) slung between the chords.
+        let tube = SCNNode(geometry: SCNCylinder(
+            radius: 0.075, height: CGFloat(railLength * 0.92)
+        ))
+        tube.geometry?.materials = [tankMaterial]
+        tube.simdPosition = SIMD3<Float>(0.0, -0.16, -railLength * 0.46)
+        tube.eulerAngles.x = SCNFloat.pi / 2.0
+        railAssembly.addChildNode(tube)
+
+        // End bumper / shuttle arrestor at the tip.
+        let bumper = SCNNode(geometry: SCNBox(
+            width: 0.46, height: 0.17, length: 0.11, chamferRadius: 0.02
+        ))
+        bumper.geometry?.materials = [shuttleMaterial]
+        bumper.simdPosition = SIMD3<Float>(0.0, 0.06, -railLength - 0.24)
+        railAssembly.addChildNode(bumper)
+        for x: Float in [-0.12, 0.12] {
+            let absorber = SCNNode(geometry: SCNCylinder(radius: 0.025, height: 0.16))
+            absorber.geometry?.materials = [steelMaterial]
+            absorber.simdPosition = SIMD3<Float>(x, 0.06, -railLength - 0.14)
+            absorber.eulerAngles.x = SCNFloat.pi / 2.0
+            railAssembly.addChildNode(absorber)
+        }
+
+        // --- Launch shuttle (moved along -Z by rail progress) ---------------
+        let shuttle = SCNNode()
+        shuttle.name = "catapult_carriage"
+        railAssembly.addChildNode(shuttle)
+
+        let shuttlePlate = SCNNode(geometry: SCNBox(
+            width: 0.46, height: 0.05, length: 0.46, chamferRadius: 0.015
+        ))
+        shuttlePlate.geometry?.materials = [shuttleMaterial]
+        shuttlePlate.simdPosition = SIMD3<Float>(0.0, 0.075, 0.0)
+        shuttle.addChildNode(shuttlePlate)
+
+        for z: Float in [-0.14, 0.14] {
+            for side: Float in [-1.0, 1.0] {
+                let cradleArm = SCNNode(geometry: SCNBox(
+                    width: 0.035, height: 0.17, length: 0.05, chamferRadius: 0.008
+                ))
+                cradleArm.geometry?.materials = [steelMaterial]
+                cradleArm.simdPosition = SIMD3<Float>(side * 0.115, 0.16, z)
+                cradleArm.eulerAngles.z = SCNFloat(side * 0.5)
+                shuttle.addChildNode(cradleArm)
+            }
+        }
+
+        let pusherPlate = SCNNode(geometry: SCNBox(
+            width: 0.30, height: 0.17, length: 0.03, chamferRadius: 0.01
+        ))
+        pusherPlate.geometry?.materials = [shuttleMaterial]
+        pusherPlate.simdPosition = SIMD3<Float>(0.0, 0.16, 0.235)
+        shuttle.addChildNode(pusherPlate)
+
+        // --- Forward support legs under the high end ------------------------
+        let legFraction: Float = 0.86
+        let legAttach = railPoint(railLength * legFraction, drop: 0.10)
+        for side: Float in [-1.0, 1.0] {
+            let footPoint = SIMD3<Float>(
+                side * 0.58,
+                0.0,
+                legAttach.z + 0.22
+            )
+            let leg = launchRigSegment(
+                from: SIMD3<Float>(side * 0.13, legAttach.y - 0.06, legAttach.z),
+                to: footPoint,
+                radius: 0.032,
+                material: steelMaterial
+            )
+            root.addChildNode(leg)
+
+            let foot = SCNNode(geometry: SCNBox(
+                width: 0.20, height: 0.035, length: 0.20, chamferRadius: 0.012
+            ))
+            foot.geometry?.materials = [frameMaterial]
+            foot.simdPosition = SIMD3<Float>(footPoint.x, 0.018, footPoint.z)
+            root.addChildNode(foot)
+        }
+        let legBrace = launchRigSegment(
+            from: SIMD3<Float>(-0.42, 0.34, legAttach.z + 0.16),
+            to: SIMD3<Float>(0.42, 0.34, legAttach.z + 0.16),
+            radius: 0.022,
+            material: steelMaterial
+        )
+        root.addChildNode(legBrace)
+
+        // Diagonal brace from the chassis front to the rail mid-span.
+        let midAttach = railPoint(railLength * 0.42, drop: 0.14)
+        let diagonal = launchRigSegment(
+            from: SIMD3<Float>(0.0, 0.42, -1.0),
+            to: SIMD3<Float>(0.0, midAttach.y, midAttach.z),
+            radius: 0.030,
+            material: steelMaterial
+        )
+        root.addChildNode(diagonal)
 
         return root
+    }
+
+    /// The hand launch is presented purely first-person (see
+    /// `activateHandLaunchPOV`): the operator is not modelled in the world
+    /// and, per design, the launch spot carries no ground furniture either —
+    /// the tactical map is the only place the drafted point is visualised.
+    private func makeHandLaunchNode(for asset: HandLaunchAsset) -> SCNNode {
+        SCNNode()
     }
 
     func currentPayloadMountNode() -> SCNNode {

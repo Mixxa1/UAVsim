@@ -10,7 +10,10 @@ final class MissionPlanValidator {
     func validate(
         draft: MissionDraft,
         previewRoute: MissionPreviewRoute?,
-        viewport: MapViewportState
+        launchPreview: MissionLaunchPreview? = nil,
+        viewport: MapViewportState,
+        fixedWingParameters: FixedWingParameters? = nil,
+        supportedLaunchModes: [LaunchMode] = LaunchMode.allCases
     ) -> MissionPlanValidation {
         guard draft.hasContent else {
             return MissionPlanValidation(
@@ -38,10 +41,21 @@ final class MissionPlanValidator {
             )
         }
 
-        if draft.selectedLaunchMode.requiresLaunchObject,
+        if !draft.selectedLaunchMode.isRuntimeImplemented ||
+            !supportedLaunchModes.contains(draft.selectedLaunchMode) {
+            explanations.append(
+                MissionStatusExplanation(
+                    reason: .routeInvalid,
+                    severity: .critical,
+                    detailKey: "tactical.map.issue.launch_mode_unsupported"
+                )
+            )
+        } else if draft.selectedLaunchMode.requiresLaunchObject,
            let launchExplanation = validateLaunchObject(
                 draft: draft,
-                viewport: viewport
+                launchPreview: launchPreview,
+                viewport: viewport,
+                fixedWingParameters: fixedWingParameters
            ) {
             explanations.append(launchExplanation)
         }
@@ -253,7 +267,9 @@ final class MissionPlanValidator {
 
     private func validateLaunchObject(
         draft: MissionDraft,
-        viewport: MapViewportState
+        launchPreview: MissionLaunchPreview?,
+        viewport: MapViewportState,
+        fixedWingParameters: FixedWingParameters?
     ) -> MissionStatusExplanation? {
         guard let launchObject = draft.launchObject else {
             return MissionStatusExplanation(
@@ -261,6 +277,43 @@ final class MissionPlanValidator {
                 severity: .critical,
                 detailKey: "tactical.map.issue.launch_object_required"
             )
+        }
+
+        guard launchObject.type.launchMode == draft.selectedLaunchMode else {
+            return MissionStatusExplanation(
+                reason: .routeInvalid,
+                severity: .critical,
+                detailKey: "tactical.map.issue.launch_object_type_mismatch"
+            )
+        }
+
+        guard launchObject.headingDegrees.isFinite,
+              launchObject.railAngleDegrees.isFinite else {
+            return MissionStatusExplanation(
+                reason: .routeInvalid,
+                severity: .critical,
+                detailKey: "tactical.map.issue.launch_geometry_invalid"
+            )
+        }
+
+        guard launchObject.type.launchAngleRange.contains(launchObject.railAngleDegrees) else {
+            return MissionStatusExplanation(
+                reason: .routeInvalid,
+                severity: .critical,
+                detailKey: "tactical.map.issue.launch_angle_invalid"
+            )
+        }
+        if let fixedWingParameters {
+            let profileAngle = draft.selectedLaunchMode == .handLaunch
+                ? fixedWingParameters.handLaunchAngleDegrees
+                : fixedWingParameters.catapultRailAngleDegrees
+            guard profileAngle.isFinite else {
+                return MissionStatusExplanation(
+                    reason: .routeInvalid,
+                    severity: .critical,
+                    detailKey: "tactical.map.issue.launch_angle_invalid"
+                )
+            }
         }
 
         if !viewport.isWithinWorldBounds(launchObject.position, tolerance: 0.05) {
@@ -271,57 +324,36 @@ final class MissionPlanValidator {
             )
         }
 
-        let corridorLength = launchCorridorLength(
-            for: draft.selectedLaunchMode,
-            viewport: viewport
-        )
-        guard corridorLength > 0.05 else {
-            return nil
+        guard let launchPreview else {
+            return MissionStatusExplanation(
+                reason: .routeInvalid,
+                severity: .critical,
+                detailKey: "tactical.map.issue.launch_geometry_invalid"
+            )
         }
-
-        let headingRadians = (launchObject.transitionHeadingDegrees ?? launchObject.headingDegrees) * .pi / 180.0
-        let corridorEnd = launchObject.position + SIMD2<Float>(sin(headingRadians), cos(headingRadians)) * corridorLength
-        guard viewport.isWithinWorldBounds(corridorEnd, tolerance: 0.05) else {
+        guard launchPreview.isWithinWorldBounds else {
             return MissionStatusExplanation(
                 reason: .routeInvalid,
                 severity: .critical,
                 detailKey: "tactical.map.issue.launch_corridor_invalid"
             )
         }
-
-        if draft.selectedLaunchMode == .runway || draft.selectedLaunchMode == .catapult {
-            let edgeMargin = min(
-                viewport.distanceToNearestMapEdge(for: launchObject.position),
-                viewport.distanceToNearestMapEdge(for: corridorEnd)
+        guard launchPreview.hasSafeEdgeMargin else {
+            return MissionStatusExplanation(
+                reason: .routeInvalid,
+                severity: .critical,
+                detailKey: "tactical.map.issue.launch_space_insufficient"
             )
-            if edgeMargin < max(4.0, corridorLength * 0.12) {
-                return MissionStatusExplanation(
-                    reason: .routeInvalid,
-                    severity: .critical,
-                    detailKey: "tactical.map.issue.launch_space_insufficient"
-                )
-            }
+        }
+        guard launchPreview.avoidsNoFlyZones else {
+            return MissionStatusExplanation(
+                reason: .routeInvalid,
+                severity: .critical,
+                detailKey: "tactical.map.issue.launch_corridor_no_fly"
+            )
         }
 
         return nil
-    }
-
-    private func launchCorridorLength(
-        for launchMode: LaunchMode,
-        viewport: MapViewportState
-    ) -> Float {
-        switch launchMode {
-        case .standard:
-            return 0.0
-        case .handLaunch:
-            return max(12.0, viewport.minimumTurnRadiusM * 0.42)
-        case .catapult:
-            return max(18.0, viewport.minimumTurnRadiusM * 0.72)
-        case .runway:
-            return max(24.0, viewport.minimumTurnRadiusM * 1.15)
-        case .vtol:
-            return max(8.0, viewport.minimumTurnRadiusM * 0.32)
-        }
     }
 
     private func unique(_ explanations: [MissionStatusExplanation]) -> [MissionStatusExplanation] {

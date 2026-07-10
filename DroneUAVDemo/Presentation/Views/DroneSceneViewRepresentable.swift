@@ -26,12 +26,18 @@ private final class FocusableSCNView: SCNView {
         didSet {
             if usesUnboundedMouseLook {
                 window?.acceptsMouseMovedEvents = true
-                captureMouseLookIfPossible()
+                if capturesMouseOnEntry {
+                    captureMouseLookIfPossible()
+                }
             } else {
                 releaseMouseLook()
             }
         }
     }
+    /// Spectator hijacks the cursor the moment it enters the viewport; the
+    /// hand-launch POV instead waits for a click (UI panels stay usable) and
+    /// releases on Esc, like a regular FPS capture.
+    var capturesMouseOnEntry: Bool = true
     var renderPolicy: SceneRenderPolicy = .policy(for: .interacting) {
         didSet {
             applyRenderPolicy()
@@ -59,7 +65,7 @@ private final class FocusableSCNView: SCNView {
         window?.acceptsMouseMovedEvents = true
         if window == nil {
             releaseMouseLook()
-        } else if usesUnboundedMouseLook {
+        } else if usesUnboundedMouseLook, capturesMouseOnEntry {
             captureMouseLookIfPossible()
         }
         subscribeToWindowRenderPause()
@@ -117,7 +123,7 @@ private final class FocusableSCNView: SCNView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if usesUnboundedMouseLook {
+        if usesUnboundedMouseLook, capturesMouseOnEntry {
             captureMouseLookIfPossible()
         }
         super.mouseEntered(with: event)
@@ -289,6 +295,10 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     var wantsWeatherDepthOfField: Bool = false
     var renderPolicyOverride: SceneRenderPolicy? = nil
     var isInteractive: Bool = true
+    /// First-person hand-launch hold: mouse-drag look must reach the view
+    /// model even though the underlying camera mode stays e.g. `.follow`
+    /// while the POV camera temporarily overrides the viewpoint.
+    var isHandLaunchPOV: Bool = false
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -305,8 +315,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.renderPolicy = policy
         view.backgroundColor = .black
         view.delegate = context.coordinator
-        view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
-        view.usesUnboundedMouseLook = isInteractive && cameraMode == .spectator
+        view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV) ? onLookDelta : nil
+        view.capturesMouseOnEntry = cameraMode == .spectator
+        view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV)
         // DOF post-process honors both the weather request and the graphics tier (low disables it).
         view.technique = (wantsWeatherDepthOfField && quality.weatherDepthOfFieldEnabled)
             ? WeatherDepthOfFieldTechnique.shared : nil
@@ -345,8 +356,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         let policy = renderPolicyOverride ?? SceneRenderPolicy.policy(for: activityState)
         if let view = view as? FocusableSCNView {
             view.renderPolicy = policy
-            view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator) ? onLookDelta : nil
-            view.usesUnboundedMouseLook = isInteractive && cameraMode == .spectator
+            view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV) ? onLookDelta : nil
+            view.capturesMouseOnEntry = cameraMode == .spectator
+            view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV)
         } else {
             if view.preferredFramesPerSecond != policy.preferredFPS {
                 view.preferredFramesPerSecond = policy.preferredFPS

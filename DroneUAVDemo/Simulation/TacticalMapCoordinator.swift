@@ -10,6 +10,7 @@ final class TacticalMapCoordinator {
         let workingDraft: MissionDraft
         let airframeClass: AirframeClass
         let fixedWingParameters: FixedWingParameters?
+        let supportedLaunchModes: [LaunchMode]
     }
 
     private let previewBuilder: MissionPreviewBuilder
@@ -32,7 +33,8 @@ final class TacticalMapCoordinator {
         committedDraft: MissionDraft,
         workingDraft: MissionDraft,
         airframeClass: AirframeClass,
-        fixedWingParameters: FixedWingParameters?
+        fixedWingParameters: FixedWingParameters?,
+        supportedLaunchModes: [LaunchMode]
     ) -> TacticalMapState {
         let key = BuildKey(
             isVisible: isVisible,
@@ -41,7 +43,8 @@ final class TacticalMapCoordinator {
             committedDraft: committedDraft,
             workingDraft: workingDraft,
             airframeClass: airframeClass,
-            fixedWingParameters: fixedWingParameters
+            fixedWingParameters: fixedWingParameters,
+            supportedLaunchModes: supportedLaunchModes
         )
         if cachedBuildKey == key,
            let cachedBuildState {
@@ -54,10 +57,19 @@ final class TacticalMapCoordinator {
             airframeClass: airframeClass,
             fixedWingParameters: fixedWingParameters
         )
+        let launchPreview = previewBuilder.buildLaunchPreview(
+            draft: workingDraft,
+            viewport: viewport,
+            fixedWingParameters: fixedWingParameters,
+            supportedLaunchModes: supportedLaunchModes
+        )
         let draftStatus = validator.validate(
             draft: workingDraft,
             previewRoute: previewRoute,
-            viewport: viewport
+            launchPreview: launchPreview,
+            viewport: viewport,
+            fixedWingParameters: fixedWingParameters,
+            supportedLaunchModes: supportedLaunchModes
         )
         let isDraftDirty = committedDraft != workingDraft
 
@@ -67,6 +79,7 @@ final class TacticalMapCoordinator {
             viewport: viewport,
             committedDraft: committedDraft,
             workingDraft: workingDraft,
+            launchPreview: launchPreview,
             previewRoute: previewRoute,
             draftStatus: draftStatus,
             isDraftDirty: isDraftDirty

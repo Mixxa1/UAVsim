@@ -7,6 +7,7 @@ struct TacticalMapState: Equatable {
     var viewport: MapViewportState
     var committedDraft: MissionDraft
     var workingDraft: MissionDraft
+    var launchPreview: MissionLaunchPreview?
     var previewRoute: MissionPreviewRoute?
     var draftStatus: MissionDraftStatus
     var isDraftDirty: Bool
@@ -17,6 +18,7 @@ struct TacticalMapState: Equatable {
         viewport: .empty,
         committedDraft: .empty,
         workingDraft: .empty,
+        launchPreview: nil,
         previewRoute: nil,
         draftStatus: .empty,
         isDraftDirty: false

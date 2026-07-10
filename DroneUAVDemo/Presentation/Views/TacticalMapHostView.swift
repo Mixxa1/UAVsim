@@ -7,6 +7,7 @@ struct TacticalMapHostView: View {
     let missionPlan: MissionPlan?
     let profileName: String
     let supportedLaunchModes: [LaunchMode]
+    let fixedWingParameters: FixedWingParameters?
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
     let fixedWingAssistState: FixedWingAssistState
@@ -25,6 +26,7 @@ struct TacticalMapHostView: View {
     let onSetMaximumSpeed: (Float) -> Void
     let onSetLaunchMode: (LaunchMode) -> Void
     let onSetLaunchHeading: (Float) -> Void
+    let onSetLaunchAngle: (Float) -> Void
     let onClearLaunchObject: () -> Void
     let onSaveDraft: () -> Void
     let onPrepareMission: () -> Void
@@ -62,6 +64,7 @@ struct TacticalMapHostView: View {
                             snapshot: snapshot,
                             state: state,
                             missionPlan: missionPlan,
+                            supportedLaunchModes: supportedLaunchModes,
                             executionState: executionState,
                             onSetMode: onSetMode,
                             onMapTap: onMapTap
@@ -76,6 +79,7 @@ struct TacticalMapHostView: View {
                             missionPlan: missionPlan,
                             profileName: profileName,
                             supportedLaunchModes: supportedLaunchModes,
+                            fixedWingParameters: fixedWingParameters,
                             executionState: executionState,
                             missionStatus: missionStatus,
                             fixedWingAssistState: fixedWingAssistState,
@@ -93,6 +97,7 @@ struct TacticalMapHostView: View {
                             onSetMaximumSpeed: onSetMaximumSpeed,
                             onSetLaunchMode: onSetLaunchMode,
                             onSetLaunchHeading: onSetLaunchHeading,
+                            onSetLaunchAngle: onSetLaunchAngle,
                             onClearLaunchObject: onClearLaunchObject,
                             onPrepareMission: onPrepareMission,
                             onStartMission: onStartMission,
@@ -127,6 +132,7 @@ private struct MissionSidebar: View {
     let missionPlan: MissionPlan?
     let profileName: String
     let supportedLaunchModes: [LaunchMode]
+    let fixedWingParameters: FixedWingParameters?
     let executionState: MissionExecutionState
     let missionStatus: MissionStatusSnapshot
     let fixedWingAssistState: FixedWingAssistState
@@ -144,6 +150,7 @@ private struct MissionSidebar: View {
     let onSetMaximumSpeed: (Float) -> Void
     let onSetLaunchMode: (LaunchMode) -> Void
     let onSetLaunchHeading: (Float) -> Void
+    let onSetLaunchAngle: (Float) -> Void
     let onClearLaunchObject: () -> Void
     let onPrepareMission: () -> Void
     let onStartMission: () -> Void
@@ -179,6 +186,7 @@ private struct MissionSidebar: View {
                     state: state,
                     missionPlan: missionPlan,
                     supportedLaunchModes: supportedLaunchModes,
+                    fixedWingParameters: fixedWingParameters,
                     executionState: executionState,
                     missionStatus: missionStatus,
                     fixedWingAssistState: fixedWingAssistState,
@@ -193,6 +201,7 @@ private struct MissionSidebar: View {
                     onSetMaximumSpeed: onSetMaximumSpeed,
                     onSetLaunchMode: onSetLaunchMode,
                     onSetLaunchHeading: onSetLaunchHeading,
+                    onSetLaunchAngle: onSetLaunchAngle,
                     onClearLaunchObject: onClearLaunchObject,
                     onPrepareMission: onPrepareMission,
                     onStartMission: onStartMission,

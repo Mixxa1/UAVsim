@@ -43,6 +43,7 @@ struct FlightOpsModuleView: View {
                     ) {
                         viewModel.takeoff()
                     }
+                    .disabled(!viewModel.canInitiateTakeoffCommand)
 
                     OperationalActionButton(
                         titleKey: "command.land",
@@ -71,6 +72,54 @@ struct FlightOpsModuleView: View {
                             systemImage: "house.fill"
                         ) {
                             viewModel.activateReturnHome()
+                        }
+                    }
+                }
+            }
+
+            if viewModel.showsFixedWingLaunchStatus {
+                ModuleSection(
+                    titleKey: "module.flight_ops.launch_status",
+                    subtitleKey: "module.flight_ops.launch_status.subtitle"
+                ) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(spacing: 8) {
+                            StatusBadge(
+                                titleKey: viewModel.fixedWingLaunchState.titleKey,
+                                tint: launchStatusTint
+                            )
+                            Spacer(minLength: 8)
+                            Text(LocalizedStringKey(viewModel.fixedWingLaunchMode.titleKey))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(GroundControlPalette.textSecondary)
+                        }
+
+                        ProgressView(value: viewModel.fixedWingLaunchProgress)
+                            .tint(launchStatusTint)
+
+                        HStack {
+                            Text("module.flight_ops.launch_progress")
+                            Spacer()
+                            Text("\(Int((viewModel.fixedWingLaunchProgress * 100.0).rounded()))%")
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+
+                        if viewModel.fixedWingLaunchState != .idle {
+                            HStack {
+                                Text("module.flight_ops.launch_airspeed")
+                                Spacer()
+                                Text(String(format: "%.1f m/s", viewModel.fixedWingLaunchAirspeedMps))
+                            }
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                        }
+
+                        if let failureKey = viewModel.fixedWingLaunchFailureDetailKey {
+                            Text(LocalizedStringKey(failureKey))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(GroundControlPalette.danger)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -174,6 +223,21 @@ struct FlightOpsModuleView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var launchStatusTint: Color {
+        switch viewModel.fixedWingLaunchState {
+        case .idle:
+            return GroundControlPalette.textSecondary
+        case .prelaunchCheck, .aligning, .launchCommit:
+            return GroundControlPalette.warning
+        case .assistedAcceleration, .rotation, .initialClimb, .transitionToFlight:
+            return GroundControlPalette.accent
+        case .completed:
+            return GroundControlPalette.success
+        case .aborted:
+            return GroundControlPalette.danger
         }
     }
 

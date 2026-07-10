@@ -7,6 +7,87 @@ final class MissionPreviewBuilder {
         case counterClockwise
     }
 
+    func buildLaunchPreview(
+        draft: MissionDraft,
+        viewport: MapViewportState,
+        fixedWingParameters: FixedWingParameters? = nil,
+        supportedLaunchModes: [LaunchMode] = LaunchMode.allCases
+    ) -> MissionLaunchPreview? {
+        guard draft.selectedLaunchMode.requiresLaunchObject,
+              draft.selectedLaunchMode.isRuntimeImplemented,
+              supportedLaunchModes.contains(draft.selectedLaunchMode),
+              let launchObject = draft.launchObject,
+              launchObject.type.launchMode == draft.selectedLaunchMode else {
+            return nil
+        }
+
+        let wing = resolvedFixedWingParameters(fixedWingParameters)
+        let origin = launchObject.position
+        let direction = launchObject.horizontalLaunchDirection
+        let corridorLength = wing.corridorLength(for: draft.selectedLaunchMode)
+        let corridorEnd = origin + direction * corridorLength
+        let railEnd: SIMD2<Float>?
+        if draft.selectedLaunchMode == .catapult {
+            railEnd = origin + direction * min(wing.catapultRailLengthMeters, corridorLength)
+        } else {
+            railEnd = nil
+        }
+
+        let pointsToValidate = [origin, corridorEnd] + (railEnd.map { [$0] } ?? [])
+        let isWithinWorldBounds = pointsToValidate.allSatisfy {
+            viewport.isWithinWorldBounds($0, tolerance: 0.05)
+        }
+        let edgeMargin = pointsToValidate
+            .map { viewport.distanceToNearestMapEdge(for: $0) }
+            .min() ?? 0.0
+        let requiredEdgeMargin: Float = draft.selectedLaunchMode == .catapult
+            ? max(4.0, corridorLength * 0.12)
+            : max(2.0, corridorLength * 0.06)
+        let avoidsNoFlyZones = !draft.zones.contains { zone in
+            zone.type == .noFlyZone && segment(
+                from: origin,
+                to: corridorEnd,
+                intersectsCircleAt: zone.center,
+                radius: zone.radius + 1.0
+            )
+        }
+
+        return MissionLaunchPreview(
+            mode: draft.selectedLaunchMode,
+            launchObjectID: launchObject.id,
+            objectType: launchObject.type,
+            origin: origin,
+            railEnd: railEnd,
+            corridorEnd: corridorEnd,
+            headingDegrees: launchObject.launchDirectionDegrees,
+            launchAngleDegrees: launchObject.railAngleDegrees,
+            corridorLengthMeters: corridorLength,
+            isWithinWorldBounds: isWithinWorldBounds,
+            hasSafeEdgeMargin: edgeMargin >= requiredEdgeMargin,
+            avoidsNoFlyZones: avoidsNoFlyZones,
+            hasValidLaunchAngle: launchObject.type.launchAngleRange.contains(
+                launchObject.railAngleDegrees
+            )
+        )
+    }
+
+    private func segment(
+        from start: SIMD2<Float>,
+        to end: SIMD2<Float>,
+        intersectsCircleAt center: SIMD2<Float>,
+        radius: Float
+    ) -> Bool {
+        let delta = end - start
+        let lengthSquared = simd_length_squared(delta)
+        guard lengthSquared > 0.0001 else {
+            return simd_distance(start, center) <= radius
+        }
+        let rawT = simd_dot(center - start, delta) / lengthSquared
+        let t = min(1.0, max(0.0, rawT))
+        let closest = start + delta * t
+        return simd_distance(closest, center) <= max(0.0, radius)
+    }
+
     func buildPreview(
         draft: MissionDraft,
         viewport: MapViewportState,
@@ -303,33 +384,14 @@ final class MissionPreviewBuilder {
         guard draft.selectedLaunchMode.requiresLaunchObject else {
             return [resolvedRouteStartPoint(draft: draft, viewport: viewport)]
         }
-        guard let launchObject = draft.launchObject else {
+        guard let preview = buildLaunchPreview(
+            draft: draft,
+            viewport: viewport,
+            fixedWingParameters: fixedWingParameters
+        ), preview.isValid else {
             return nil
         }
-
-        let start = viewport.clampedToWorld(launchObject.position)
-        let corridorLength = fixedWingParameters.corridorLength(for: draft.selectedLaunchMode)
-        guard corridorLength > 0.05 else {
-            return [start]
-        }
-
-        let headingRadians = launchHeadingRadians(for: launchObject)
-        let forward = SIMD2<Float>(sin(headingRadians), cos(headingRadians))
-        let end = start + forward * corridorLength
-        guard viewport.isWithinWorldBounds(end, tolerance: 0.05) else {
-            return nil
-        }
-
-        return [start, end]
-    }
-
-    private func launchHeadingRadians(for launchObject: MissionLaunchObject) -> Float {
-        switch launchObject.type {
-        case .vtolStartPoint:
-            return launchObject.transitionHeadingRadians ?? launchObject.headingRadians
-        case .handLaunchPoint, .catapultLine, .runwayStrip:
-            return launchObject.headingRadians
-        }
+        return [preview.origin, preview.corridorEnd]
     }
 
     private func remapWaypointIndices(

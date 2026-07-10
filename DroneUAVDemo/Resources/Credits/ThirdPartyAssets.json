@@ -207,6 +207,15 @@
           "licenseName": "Creative Commons Attribution",
           "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
           "changes": "Imported as USDZ; a diffuse/emissive flame-sheet texture was extracted from it and used to drive the cross-billboard flame flipbook visual for burning trees in the Fire Response mission of DroneUAVDemo."
+      },
+      {
+          "id": "arm_hand_sculpting_alfance",
+          "title": "Arm & Hand sculpting",
+          "author": "alfance",
+          "sourceURL": "0",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ (HandLaunchArm.usdz), rescaled, recolored to an opaque matte skin tone and mounted on the articulated hand-launch arm rig in DroneUAVDemo."
       }
   ]
 }

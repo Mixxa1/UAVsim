@@ -35,6 +35,7 @@ struct LaunchRailConfiguration: Equatable, Hashable {
     var headingDegrees: Float
     var railAngleDegrees: Float
     var launchDirectionDegrees: Float
+    var railLengthMeters: Float = 4.2
 
     var headingRadians: Float {
         headingDegrees * .pi / 180.0
@@ -42,6 +43,21 @@ struct LaunchRailConfiguration: Equatable, Hashable {
 
     var launchDirectionRadians: Float {
         launchDirectionDegrees * .pi / 180.0
+    }
+
+    var horizontalDirection: SIMD2<Float> {
+        MissionLaunchGeometry.horizontalDirection(headingDegrees: headingDegrees)
+    }
+
+    var direction3D: SIMD3<Float> {
+        MissionLaunchGeometry.direction3D(
+            headingDegrees: headingDegrees,
+            pitchDegrees: railAngleDegrees
+        )
+    }
+
+    var worldYawRadians: Float {
+        MissionLaunchGeometry.worldYawRadians(headingDegrees: headingDegrees)
     }
 }
 
@@ -61,11 +77,51 @@ struct CatapultLaunchAsset: Identifiable, Equatable, Hashable {
     }
 }
 
+struct HandLaunchAsset: Identifiable, Equatable, Hashable {
+    let id: UUID
+    var position: SIMD2<Float>
+    var headingDegrees: Float
+    var launchAngleDegrees: Float
+    var releaseHeightMeters: Float
+
+    init(
+        id: UUID = UUID(),
+        position: SIMD2<Float>,
+        headingDegrees: Float,
+        launchAngleDegrees: Float = 8.0,
+        releaseHeightMeters: Float = 1.45
+    ) {
+        self.id = id
+        self.position = position
+        self.headingDegrees = headingDegrees
+        self.launchAngleDegrees = launchAngleDegrees
+        self.releaseHeightMeters = releaseHeightMeters
+    }
+
+    var horizontalDirection: SIMD2<Float> {
+        MissionLaunchGeometry.horizontalDirection(headingDegrees: headingDegrees)
+    }
+
+    var direction3D: SIMD3<Float> {
+        MissionLaunchGeometry.direction3D(
+            headingDegrees: headingDegrees,
+            pitchDegrees: launchAngleDegrees
+        )
+    }
+
+    var worldYawRadians: Float {
+        MissionLaunchGeometry.worldYawRadians(headingDegrees: headingDegrees)
+    }
+}
+
 enum LaunchAsset: Identifiable, Equatable, Hashable {
+    case handLaunch(HandLaunchAsset)
     case catapult(CatapultLaunchAsset)
 
     var id: UUID {
         switch self {
+        case .handLaunch(let asset):
+            return asset.id
         case .catapult(let asset):
             return asset.id
         }
@@ -73,6 +129,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
 
     var position: SIMD2<Float> {
         switch self {
+        case .handLaunch(let asset):
+            return asset.position
         case .catapult(let asset):
             return asset.position
         }
@@ -80,6 +138,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
 
     var railAngleDegrees: Float {
         switch self {
+        case .handLaunch(let asset):
+            return asset.launchAngleDegrees
         case .catapult(let asset):
             return asset.rail.railAngleDegrees
         }
@@ -87,6 +147,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
 
     var headingDegrees: Float {
         switch self {
+        case .handLaunch(let asset):
+            return asset.headingDegrees
         case .catapult(let asset):
             return asset.rail.headingDegrees
         }
@@ -94,6 +156,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
 
     var launchDirectionDegrees: Float {
         switch self {
+        case .handLaunch(let asset):
+            return asset.headingDegrees
         case .catapult(let asset):
             return asset.rail.launchDirectionDegrees
         }
@@ -105,5 +169,20 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
 
     var launchDirectionRadians: Float {
         launchDirectionDegrees * .pi / 180.0
+    }
+
+    var horizontalDirection: SIMD2<Float> {
+        MissionLaunchGeometry.horizontalDirection(headingDegrees: launchDirectionDegrees)
+    }
+
+    var direction3D: SIMD3<Float> {
+        MissionLaunchGeometry.direction3D(
+            headingDegrees: launchDirectionDegrees,
+            pitchDegrees: railAngleDegrees
+        )
+    }
+
+    var worldYawRadians: Float {
+        MissionLaunchGeometry.worldYawRadians(headingDegrees: launchDirectionDegrees)
     }
 }

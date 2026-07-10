@@ -666,6 +666,10 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isMissionReplayRecording: Bool = false
     @Published private(set) var lastMissionReplaySession: MissionReplaySession?
     @Published private(set) var lastMissionReport: MissionReport?
+    /// First-person hand-launch hold: the scene is viewed through the eyes of
+    /// the (unmodelled) operator whose arm carries the airframe. Published so
+    /// the viewport re-resolves its point of view and mouse-look routing.
+    @Published private(set) var isHandLaunchPOVActive: Bool = false
 
     let bindingsViewModel: BindingsViewModel
     let compassViewModel: CompassViewModel
@@ -708,6 +712,76 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
         return true
+    }
+
+    var showsFixedWingLaunchStatus: Bool {
+        selectedDroneProfile.airframeClass == .fixedWing &&
+            selectedDroneProfile.supportedLaunchModes.contains {
+                $0 == .handLaunch || $0 == .catapult
+            }
+    }
+
+    var canInitiateTakeoffCommand: Bool {
+        guard isArmed,
+              !batteryState.isDepleted,
+              physicalState != .crashed else {
+            return false
+        }
+        guard selectedDroneProfile.airframeClass == .fixedWing else {
+            return true
+        }
+        let launchMode = activeLaunchMode()
+        guard launchMode == .handLaunch || launchMode == .catapult else {
+            return true
+        }
+        return selectedDroneProfile.supportedLaunchModes.contains(launchMode) &&
+            activeLaunchAsset() != nil
+    }
+
+    var fixedWingLaunchMode: LaunchMode {
+        activeLaunchMode()
+    }
+
+    var fixedWingLaunchState: LaunchState {
+        launchState
+    }
+
+    var fixedWingLaunchProgress: Double {
+        Double(launchRuntimeSnapshot.railProgress.clamped(to: 0.0...1.0))
+    }
+
+    var fixedWingLaunchAirspeedMps: Float {
+        launchRuntimeSnapshot.longitudinalAirspeedMps
+    }
+
+    var fixedWingLaunchFailureDetailKey: String? {
+        guard launchState == .aborted else {
+            return nil
+        }
+        switch fixedWingLastTransitionReason {
+        case "launch_preflight_configuration_failed":
+            return "launch.reason.configuration_failed"
+        case "launch_preflight_corridor_invalid":
+            return "launch.reason.corridor_invalid"
+        case "launch_preflight_mass_exceeded":
+            return "launch.reason.mass_exceeded"
+        case "launch_preflight_tailwind_unsafe":
+            return "launch.reason.tailwind_unsafe"
+        case "launch_preflight_crosswind_unsafe":
+            return "launch.reason.crosswind_unsafe"
+        case "launch_preflight_vertical_clearance_invalid":
+            return "launch.reason.vertical_clearance_invalid"
+        case "launch_preflight_corridor_obstructed":
+            return "launch.reason.corridor_obstructed"
+        case "launch_preflight_runtime_failure":
+            return "launch.reason.runtime_failure"
+        case "catapult_acceleration_timeout", "launch_global_timeout":
+            return "launch.reason.acceleration_timeout"
+        case .some(_):
+            return "launch.reason.generic"
+        case .none:
+            return nil
+        }
     }
 
     func applyOnlineDamageState(_ damageState: OnlineVehicleDamageState) {
@@ -955,6 +1029,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let autoNavigationController: AutoNavigationController
     private let multicopterAutopilotController = MulticopterAutopilotController()
     private let fixedWingAutopilotController = FixedWingAutopilotController()
+    private let fixedWingLaunchController = FixedWingLaunchController()
     private let fixedWingAssistController = FixedWingAssistController()
     private let payloadCameraController: PayloadCameraController
     private let rangefinderController: PayloadRangefinderController
@@ -1014,6 +1089,23 @@ final class DroneSimulationViewModel: ObservableObject {
     private var collisionCooldown: Float = 0.0
     private var launchState: LaunchState = .idle
     private var launchStateElapsed: Float = 0.0
+    private var launchRuntimeSnapshot: FixedWingLaunchRuntimeSnapshot = .idle
+    private var activeFixedWingLaunchDynamics: FixedWingLaunchDynamics?
+    /// While true the idle aircraft is physically seated in its launch cradle
+    /// (catapult shuttle / operator's hand) instead of resting on the ground.
+    /// Engaged at spawn/reset and after a pre-release abort; released the
+    /// moment the launch state machine takes ownership of the airframe.
+    private var launchCradleHoldActive = false
+    /// Seconds since the hand-launch release: the first-person view lingers
+    /// briefly so the operator watches the airframe leave his hand before the
+    /// camera returns to the regular UAV view.
+    private var fixedWingLaunchReleaseElapsed: Float = 0.0
+    /// Launch corridor frozen at the moment the launch began. The live asset
+    /// heading keeps following the operator's aim (and reverts to the drafted
+    /// heading once the POV closes), so the climb-out guidance must NOT
+    /// re-read it mid-launch — that made the aircraft turn back toward the
+    /// drafted corridor right after release.
+    private var activeLaunchCorridor: (origin: SIMD3<Float>, horizontal: SIMD2<Float>)?
     private var homePosition = SIMD3<Float>(0.0, 0.0, 0.0)
     private var releasedPayloadConfiguration: PayloadConfiguration?
     private var payloadSelfInteractionTimer: Float = 0.0
@@ -1609,6 +1701,10 @@ final class DroneSimulationViewModel: ObservableObject {
         self.sceneController.setPayloadCameraOpticsState(self.payloadCameraOpticsState)
         sceneController.regenerateEnvironment(terrain)
         sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
+        let initialLaunchDraft = defaultLaunchConfiguredDraft()
+        committedTacticalMissionDraft = initialLaunchDraft
+        workingTacticalMissionDraft = initialLaunchDraft
+        refreshSceneLaunchAsset()
         sanitizeDynamicStateForSpawn(context: "init")
         sceneController.applyWeatherVisual(weather)
         sceneController.update(
@@ -2226,6 +2322,18 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
         isArmed = true
+        // Assisted-launch fixed wings have no ground takeoff: arming while
+        // grounded returns the airframe to its launcher (the operator picks
+        // it up / the shuttle receives it), ready for the next launch.
+        if selectedDroneProfile.airframeClass == .fixedWing,
+           activeLaunchMode().requiresLaunchObject,
+           missionExecutionState.status != .running,
+           missionExecutionState.status != .paused,
+           launchCradleHoldActive ||
+               physicalState.isGroundRestState ||
+               heightAboveSupportSurface(for: state.position) <= 0.08 {
+            seatAircraftInLaunchCradleIfAvailable()
+        }
         let heightAboveSupport = heightAboveSupportSurface(for: state.position)
         if heightAboveSupport <= 0.08 {
             transitionPhysicalState(.armedOnGround)
@@ -2291,6 +2399,7 @@ final class DroneSimulationViewModel: ObservableObject {
         resetFlightControlRouting()
 
         if !preserveCrashDynamics,
+           !launchCradleHoldActive,
            (heightAboveSupportSurface(for: state.position) <= 0.08 || physicalState.isGroundRestState) {
             settleDisarmedGroundedState()
         }
@@ -2706,7 +2815,9 @@ final class DroneSimulationViewModel: ObservableObject {
     func openMissionMap() {
         refreshTerrainMapSnapshot(recordTrail: false)
         workingTacticalMissionDraft = committedTacticalMissionDraft
-        tacticalMapMode = .waypoint
+        tacticalMapMode = workingTacticalMissionDraft.selectedLaunchMode.requiresLaunchObject
+            ? .launchObject
+            : .waypoint
         if bindingsViewModel.isPresented {
             setBindingsPanelVisible(false)
         }
@@ -2731,10 +2842,22 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func setTacticalMapMode(_ mode: TacticalMapMode) {
-        guard tacticalMapMode != mode else {
-            return
+        if mode == .launchObject,
+           !workingTacticalMissionDraft.selectedLaunchMode.requiresLaunchObject,
+           let assistedMode = selectedDroneProfile.supportedLaunchModes.first(where: {
+               ($0 == .handLaunch || $0 == .catapult) && $0.isRuntimeImplemented
+           }) {
+            workingTacticalMissionDraft = missionDraftBuilder.setLaunchMode(
+                assistedMode,
+                in: workingTacticalMissionDraft,
+                defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(for: assistedMode)
+            )
         }
 
+        guard tacticalMapMode != mode else {
+            refreshTacticalMapState()
+            return
+        }
         tacticalMapMode = mode
         refreshTacticalMapState()
     }
@@ -2753,7 +2876,36 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        if let zoneType = tacticalMapMode.zoneType {
+        if tacticalMapMode == .launchObject {
+            var launchMode = workingTacticalMissionDraft.selectedLaunchMode
+            if !launchMode.requiresLaunchObject,
+               let assistedMode = selectedDroneProfile.supportedLaunchModes.first(where: {
+                   ($0 == .handLaunch || $0 == .catapult) && $0.isRuntimeImplemented
+               }) {
+                launchMode = assistedMode
+                workingTacticalMissionDraft = missionDraftBuilder.setLaunchMode(
+                    assistedMode,
+                    in: workingTacticalMissionDraft,
+                    defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(for: assistedMode)
+                )
+            }
+            guard let launchObjectType = launchMode.defaultLaunchObjectType else {
+                refreshTacticalMapState()
+                return
+            }
+            let heading = workingTacticalMissionDraft.launchObject?.headingDegrees ??
+                initialLaunchHeadingDegrees(from: planarPosition)
+            workingTacticalMissionDraft = missionDraftBuilder.upsertLaunchObject(
+                at: planarPosition,
+                headingDegrees: heading,
+                type: launchObjectType,
+                in: workingTacticalMissionDraft,
+                viewport: viewport,
+                defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(
+                    for: launchObjectType.launchMode
+                )
+            )
+        } else if let zoneType = tacticalMapMode.zoneType {
             workingTacticalMissionDraft = missionDraftBuilder.upsertZone(
                 type: zoneType,
                 center: planarPosition,
@@ -2774,15 +2926,19 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func setTacticalLaunchMode(_ launchMode: LaunchMode) {
         guard missionExecutionState.status != .running,
-              missionExecutionState.status != .paused else {
+              missionExecutionState.status != .paused,
+              selectedDroneProfile.supportedLaunchModes.contains(launchMode),
+              launchMode.isRuntimeImplemented else {
             refreshMissionStatus()
             return
         }
 
         workingTacticalMissionDraft = missionDraftBuilder.setLaunchMode(
-            .standard,
-            in: workingTacticalMissionDraft
+            launchMode,
+            in: workingTacticalMissionDraft,
+            defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(for: launchMode)
         )
+        tacticalMapMode = launchMode.requiresLaunchObject ? .launchObject : .waypoint
         invalidatePreparedMissionIfNeeded()
         refreshTacticalMapState()
     }
@@ -2800,6 +2956,53 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         invalidatePreparedMissionIfNeeded()
         refreshTacticalMapState()
+    }
+
+    func setTacticalLaunchAngle(_ angleDegrees: Float) {
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused else {
+            refreshMissionStatus()
+            return
+        }
+
+        workingTacticalMissionDraft = missionDraftBuilder.setLaunchAngle(
+            angleDegrees,
+            in: workingTacticalMissionDraft
+        )
+        invalidatePreparedMissionIfNeeded()
+        refreshTacticalMapState()
+    }
+
+    private func initialLaunchHeadingDegrees(
+        from launchPosition: SIMD2<Float>
+    ) -> Float {
+        if let firstWaypoint = workingTacticalMissionDraft.waypoints.first {
+            let delta = firstWaypoint.position - launchPosition
+            if simd_length(delta) > 0.05 {
+                return MissionLaunchGeometry.normalizedHeadingDegrees(
+                    atan2(delta.x, delta.y) * 180.0 / .pi
+                )
+            }
+        }
+
+        let forward = SIMD2<Float>(-sin(state.orientation.z), -cos(state.orientation.z))
+        return MissionLaunchGeometry.normalizedHeadingDegrees(
+            atan2(forward.x, forward.y) * 180.0 / .pi
+        )
+    }
+
+    private func preferredLaunchAngleDegrees(for mode: LaunchMode) -> Float? {
+        guard let wing = selectedDroneProfile.fixedWingParameters else {
+            return nil
+        }
+        switch mode {
+        case .handLaunch:
+            return wing.handLaunchAngleDegrees
+        case .catapult:
+            return wing.catapultRailAngleDegrees
+        case .standard, .runway, .vtol:
+            return nil
+        }
     }
 
     func clearTacticalLaunchObject() {
@@ -2960,7 +3163,8 @@ final class DroneSimulationViewModel: ObservableObject {
             from: draft,
             viewport: currentTacticalMapViewport(),
             airframeClass: selectedDroneProfile.airframeClass,
-            fixedWingParameters: selectedDroneProfile.fixedWingParameters
+            fixedWingParameters: selectedDroneProfile.fixedWingParameters,
+            supportedLaunchModes: selectedDroneProfile.supportedLaunchModes
         )
         currentMissionPlan = plan
         invalidateFixedWingRouteCaches()
@@ -3789,6 +3993,16 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        if isHandLaunchPOVActive, !signalState.isInteractionBlocking {
+            sceneController.applyHandLaunchPOVLook(
+                yawDeltaDeg: deltaX * 0.08 * cameraConfiguration.effectiveLookSensitivity,
+                pitchDeltaDeg: deltaY * 0.08 * cameraConfiguration.effectiveLookSensitivity,
+                invertX: cameraConfiguration.invertLookX,
+                invertY: cameraConfiguration.invertLookY
+            )
+            return
+        }
+
         guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             return
         }
@@ -4180,6 +4394,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         sceneController.regenerateEnvironment(terrain)
         sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
+        refreshSceneLaunchAsset()
         homePosition = currentSpawnPoint()
         enforceRuntimeSafetyAndBounds(context: "regenerate_environment")
         sceneController.update(
@@ -4642,7 +4857,9 @@ final class DroneSimulationViewModel: ObservableObject {
         decayFixedWingAssistOverrideTimers(deltaTime: dt)
 
         applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
+        updateHandLaunchPOVWalk(deltaTime: dt)
         updateMissionReplayLifecycle()
+        activeFixedWingLaunchDynamics = nil
         updateAutopilotTargets(deltaTime: dt)
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
 
@@ -4677,7 +4894,8 @@ final class DroneSimulationViewModel: ObservableObject {
             batteryState: batteryState,
             collisionRisk: collisionAnalysis.riskScore,
             windVector: weather.windVector,
-            vehicleMassModel: vehicleMassModel
+            vehicleMassModel: vehicleMassModel,
+            fixedWingLaunchDynamics: activeFixedWingLaunchDynamics
         )
 
         let previousState = state
@@ -4776,7 +4994,12 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         updatePhysicalState(previousState: previousState, deltaTime: dt)
+        if let launchDynamics = activeFixedWingLaunchDynamics,
+           launchDynamics.phase == .held || launchDynamics.phase == .catapultRail {
+            transitionPhysicalState(.takeoffTransition)
+        }
         applyGroundedSafetyIfNeeded(deltaTime: dt)
+        refreshFixedWingLaunchPresentation()
 
         #if DEBUG
         // Launch detector: a sudden upward position jump with low vertical velocity is a teleport
@@ -5747,6 +5970,19 @@ final class DroneSimulationViewModel: ObservableObject {
                 arm()
             case .disarmAircraft:
                 disarm()
+            case .launchAircraft:
+                // ⌘E: hand-throw / catapult release for assisted-launch
+                // fixed wings. Arms the airframe first if needed, so the
+                // whole launch is a single keystroke from the operator view.
+                if selectedDroneProfile.airframeClass == .fixedWing,
+                   activeLaunchMode().requiresLaunchObject {
+                    if !isArmed {
+                        arm()
+                    }
+                    if canInitiateTakeoffCommand {
+                        takeoff()
+                    }
+                }
             case .selectFreeCamera:
                 setCameraMode(.free)
             case .selectChaseCamera:
@@ -5830,6 +6066,34 @@ final class DroneSimulationViewModel: ObservableObject {
             Float(controlState.cameraTilt)
         )
         let hasLookInput = abs(controlState.cameraPan) >= 0.001 || abs(controlState.cameraTilt) >= 0.001
+
+        if isHandLaunchPOVActive {
+            let targetVelocity = inputVelocity * (92.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
+            let accelerationBlend = (deltaTime * 12.0).clamped(to: 0.0...1.0)
+            cameraLookVelocity = simd_mix(
+                cameraLookVelocity,
+                targetVelocity,
+                SIMD2<Float>(repeating: accelerationBlend)
+            )
+            if !hasLookInput {
+                let damping = max(0.0, 1.0 - deltaTime * 9.0)
+                cameraLookVelocity *= damping
+                if simd_length_squared(cameraLookVelocity) < 0.0001 {
+                    cameraLookVelocity = .zero
+                }
+            }
+            payloadGimbalLookVelocity = .zero
+            guard simd_length_squared(cameraLookVelocity) > 0.0 else {
+                return
+            }
+            sceneController.applyHandLaunchPOVLook(
+                yawDeltaDeg: cameraLookVelocity.x * deltaTime,
+                pitchDeltaDeg: cameraLookVelocity.y * deltaTime,
+                invertX: cameraConfiguration.invertLookX,
+                invertY: cameraConfiguration.invertLookY
+            )
+            return
+        }
 
         switch cameraConfiguration.mode {
         case .fpv:
@@ -7050,13 +7314,20 @@ final class DroneSimulationViewModel: ObservableObject {
             debugState: output.debugState
         )
 
-        if mode == .takeoff || output.launchPhase != nil {
-            updateLegacyLaunchState(
-                legacyLaunchState(for: output, launchMode: activeLaunchMode()),
-                deltaTime: deltaTime
-            )
-        } else if launchState != .idle {
-            updateLegacyLaunchState(.completed)
+        // Hand/catapult launch is owned exclusively by
+        // `fixedWingLaunchController`. The legacy route-autopilot launch phase
+        // must never overwrite its release/climb state while the new sequence
+        // is active (or after it has produced a terminal snapshot).
+        if launchRuntimeSnapshot.state == .idle {
+            if output.launchPhase != nil {
+                updateLegacyLaunchState(
+                    legacyLaunchState(for: output, launchMode: activeLaunchMode()),
+                    deltaTime: deltaTime
+                )
+            } else if launchState != .idle,
+                      activeLaunchMode() == .standard {
+                updateLegacyLaunchState(.completed)
+            }
         }
 
         if output.phase == .failed {
@@ -12245,11 +12516,21 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func resetFixedWingAutopilotCommands() {
         fixedWingAutopilotController.reset()
+        fixedWingLaunchController.reset()
         fixedWingMissionStateArbiter.reset()
         fixedWingAutopilotAltitudeCommand = nil
         fixedWingAutopilotCourseCommand = nil
         launchState = .idle
         launchStateElapsed = 0.0
+        launchRuntimeSnapshot = .idle
+        activeFixedWingLaunchDynamics = nil
+        fixedWingLaunchReleaseElapsed = 0.0
+        activeLaunchCorridor = nil
+        // Deliberately NOT deactivating the hand-launch POV here: this reset
+        // runs at the start of every takeoff (via target-marker cancellation)
+        // and the first-person aim must survive into the launch sequence.
+        // The POV is owned by the cradle-hold/launch-release transitions.
+        sceneController.updateLaunchAssetPresentation(progress: 0.0, state: .idle)
         fixedWingLastTransitionReason = nil
         fixedWingAutopilotDebugState = .idle
         fixedWingMissionArbiterDecision = .nominal
@@ -12774,15 +13055,57 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func activeLaunchMode() -> LaunchMode {
-        .standard
+        let mode = currentMissionPlan?.launchMode ?? activeLaunchDraft().selectedLaunchMode
+        let supportedModes = selectedDroneProfile.supportedLaunchModes
+        if mode.isRuntimeImplemented, supportedModes.contains(mode) {
+            return mode
+        }
+        return supportedModes.first(where: { $0.isRuntimeImplemented }) ?? .standard
     }
 
     private func activeLaunchObject() -> MissionLaunchObject? {
-        nil
+        currentMissionPlan?.launchObject ?? activeLaunchDraft().launchObject
     }
 
     private func activeLaunchAsset() -> LaunchAsset? {
-        nil
+        guard activeLaunchMode().requiresLaunchObject,
+              let launchObject = activeLaunchObject(),
+              launchObject.type.launchMode == activeLaunchMode(),
+              var asset = launchObject.launchAsset else {
+            return nil
+        }
+
+        let wing = selectedDroneProfile.fixedWingParameters
+        switch asset {
+        case .handLaunch(var hand):
+            if let wing {
+                hand.releaseHeightMeters = wing.handReleaseHeightMeters
+            }
+            // In the first-person hold the operator aims with the mouse: the
+            // effective launch heading (and, within the physical throw range,
+            // the launch elevation) is wherever he is currently looking, not
+            // what was drafted on the tactical map.
+            if isHandLaunchPOVActive {
+                hand.headingDegrees = handLaunchPOVHeadingDegrees()
+                let lookPitchDegrees = sceneController.handLaunchPOVLookPitchRadians() * 180.0 / .pi
+                hand.launchAngleDegrees = lookPitchDegrees.clamped(
+                    to: MissionLaunchObjectType.handLaunchPoint.launchAngleRange
+                )
+            }
+            asset = .handLaunch(hand)
+        case .catapult(var catapult):
+            if let wing {
+                catapult.rail.railLengthMeters = wing.catapultRailLengthMeters
+            }
+            asset = .catapult(catapult)
+        }
+        return asset
+    }
+
+    private func activeLaunchDraft() -> MissionDraft {
+        isMissionMapVisible
+            ? workingTacticalMissionDraft
+            : committedTacticalMissionDraft
     }
 
     private func activeFixedWingParameters() -> FixedWingParameters {
@@ -12844,6 +13167,12 @@ final class DroneSimulationViewModel: ObservableObject {
             maxInitialBankDeg: base.maxInitialBankDeg,
             handThrowSpeed: base.handThrowSpeed,
             catapultExitSpeed: base.catapultExitSpeed,
+            handLaunchAngleDegrees: base.handLaunchAngleDegrees,
+            handReleaseHeightMeters: base.handReleaseHeightMeters,
+            catapultRailAngleDegrees: base.catapultRailAngleDegrees,
+            catapultRailLengthMeters: base.catapultRailLengthMeters,
+            maxCatapultAccelerationG: base.maxCatapultAccelerationG,
+            launchPreSpoolSeconds: base.launchPreSpoolSeconds,
             runwayTakeoffDistance: base.runwayTakeoffDistance,
             initialClimbTargetAltitude: base.initialClimbTargetAltitude
         )
@@ -13045,6 +13374,39 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    /// Launch equipment is part of the selected airframe configuration, even
+    /// when no waypoint mission exists yet. Keeping a default object at the
+    /// dock prevents reset/profile selection from silently reverting an
+    /// assisted-launch aircraft to an unusable standard draft.
+    private func defaultLaunchConfiguredDraft() -> MissionDraft {
+        let launchMode = selectedDroneProfile.preferredLaunchMode
+        var draft = missionDraftBuilder.setLaunchMode(
+            launchMode,
+            in: .empty,
+            defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(for: launchMode)
+        )
+        guard launchMode == .handLaunch || launchMode == .catapult,
+              selectedDroneProfile.supportedLaunchModes.contains(launchMode),
+              let objectType = launchMode.defaultLaunchObjectType else {
+            return draft
+        }
+
+        let dock = sceneController.currentDockSpawnPoint()
+        let forward = SIMD2<Float>(-sin(state.orientation.z), -cos(state.orientation.z))
+        let heading = MissionLaunchGeometry.normalizedHeadingDegrees(
+            atan2(forward.x, forward.y) * 180.0 / .pi
+        )
+        let angle = preferredLaunchAngleDegrees(for: launchMode) ?? 0.0
+        draft.launchObject = MissionLaunchObject(
+            type: objectType,
+            position: SIMD2<Float>(dock.x, dock.z),
+            headingDegrees: heading,
+            railAngleDegrees: angle,
+            transitionHeadingDegrees: heading
+        )
+        return draft
+    }
+
     private func normalizedLaunchConfiguration(
         for draft: MissionDraft
     ) -> MissionDraft {
@@ -13056,7 +13418,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
         var nextDraft = missionDraftBuilder.setLaunchMode(
             resolvedMode,
-            in: draft
+            in: draft,
+            defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(for: resolvedMode)
         )
 
         if resolvedMode == .standard {
@@ -13096,40 +13459,356 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func beginFixedWingLaunchSequence() {
         guard selectedDroneProfile.airframeClass == .fixedWing,
-              activeLaunchMode() != .standard else {
+              activeLaunchMode() == .handLaunch || activeLaunchMode() == .catapult else {
             resetFixedWingAutopilotCommands()
             return
         }
 
-        let spawnPoint = currentSpawnPoint()
-        let spawnYaw = spawnOrientation(for: selectedDroneProfile).z
-        let launchHeading = activeLaunchObject().map(launchHeadingRadians(for:)) ?? state.orientation.z
+        let launchMode = activeLaunchMode()
+        guard selectedDroneProfile.supportedLaunchModes.contains(launchMode),
+              launchMode.isRuntimeImplemented,
+              isArmed,
+              !batteryState.isDepleted,
+              physicalState != .crashed,
+              let launchAsset = activeLaunchAsset(),
+              let launchObject = activeLaunchObject(),
+              launchObject.type.launchMode == launchMode else {
+            abortFixedWingLaunch(reason: "launch_preflight_configuration_failed")
+            return
+        }
 
-        fixedWingAutopilotController.beginLaunch()
+        let launchPreview = missionPreviewBuilder.buildLaunchPreview(
+            draft: currentMissionPlan.map { plan in
+                MissionDraft(
+                    waypoints: activeLaunchDraft().waypoints,
+                    zones: activeLaunchDraft().zones,
+                    constraints: activeLaunchDraft().constraints,
+                    selectedLaunchMode: plan.launchMode,
+                    launchObject: plan.launchObject
+                )
+            } ?? activeLaunchDraft(),
+            viewport: currentTacticalMapViewport(),
+            fixedWingParameters: selectedDroneProfile.fixedWingParameters,
+            supportedLaunchModes: selectedDroneProfile.supportedLaunchModes
+        )
+        guard launchPreview?.isValid == true else {
+            abortFixedWingLaunch(reason: "launch_preflight_corridor_invalid")
+            return
+        }
+
+        let spawnPoint = currentSpawnPoint()
+        let wing = activeFixedWingParameters()
+        if let failureReason = fixedWingLaunchPreflightFailure(
+            mode: launchMode,
+            asset: launchAsset,
+            spawnPoint: spawnPoint,
+            parameters: wing
+        ) {
+            abortFixedWingLaunch(reason: failureReason)
+            return
+        }
+        let spawnYaw = launchAsset.worldYawRadians
+        let spawnPitch = launchAsset.railAngleDegrees.degreesToRadians
+
+        fixedWingAutopilotController.reset()
+        fixedWingLaunchController.reset()
+        guard fixedWingLaunchController.begin(
+            mode: activeLaunchMode(),
+            asset: launchAsset,
+            origin: spawnPoint,
+            wing: wing,
+            nominalLaunchMassKg: selectedDroneProfile.takeoffMassKg
+        ) else {
+            abortFixedWingLaunch(reason: "launch_controller_rejected_configuration")
+            return
+        }
+        // The launch state machine now owns the airframe: its `.held` dynamics
+        // phase pins the aircraft, so the idle cradle hold must let go.
+        launchCradleHoldActive = false
+        fixedWingLaunchReleaseElapsed = 0.0
+        activeLaunchCorridor = (
+            origin: spawnPoint,
+            horizontal: launchAsset.horizontalDirection
+        )
+        launchRuntimeSnapshot = FixedWingLaunchRuntimeSnapshot(
+            mode: launchMode,
+            state: .prelaunchCheck,
+            railProgress: 0.0,
+            longitudinalAirspeedMps: 0.0,
+            altitudeAboveLaunchMeters: 0.0,
+            transitionReason: "launch_preflight_started",
+            dynamics: nil
+        )
         fixedWingAutopilotAltitudeCommand = spawnPoint.y
-        fixedWingAutopilotCourseCommand = launchHeading
+        fixedWingAutopilotCourseCommand = spawnYaw
         homePosition = spawnPoint
         state.position = spawnPoint
         state.velocity = .zero
         state.orientation.x = 0.0
-        state.orientation.y = 0.0
+        state.orientation.y = spawnPitch
         state.orientation.z = spawnYaw
         resyncFixedWingAttitudeFromEuler()
+        transitionPhysicalState(.takeoffTransition)
         lastFiniteState = state
         updateLegacyLaunchState(.prelaunchCheck)
+        refreshSceneLaunchAsset()
+        sceneController.updateLaunchAssetPresentation(progress: 0.0, state: .prelaunchCheck)
         updateControlValues({ values in
             values.x = Double(spawnPoint.x)
             values.y = Double(spawnPoint.y)
             values.z = Double(spawnPoint.z)
             values.roll = 0.0
-            values.pitch = 0.0
+            values.pitch = Double(spawnPitch.radiansToDegrees)
             values.yaw = Double(spawnYaw.radiansToDegrees)
+            values.throttle = max(
+                values.throttle,
+                Double(resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference)
+            )
         }, markManual: false)
     }
 
+    private func abortFixedWingLaunch(reason: String) {
+        fixedWingLaunchController.reset()
+        activeFixedWingLaunchDynamics = nil
+        launchRuntimeSnapshot = FixedWingLaunchRuntimeSnapshot(
+            mode: activeLaunchMode(),
+            state: .aborted,
+            railProgress: 0.0,
+            longitudinalAirspeedMps: 0.0,
+            altitudeAboveLaunchMeters: 0.0,
+            transitionReason: reason,
+            dynamics: nil
+        )
+        updateLegacyLaunchState(.aborted)
+        fixedWingLastTransitionReason = reason
+        sceneController.updateLaunchAssetPresentation(progress: 0.0, state: .aborted)
+        // A pre-release abort leaves the airframe physically on the launcher —
+        // keep it seated there instead of letting it drop through the model.
+        if let cradlePoint = launchCradlePoint(),
+           simd_distance(state.position, cradlePoint) < 2.0 {
+            launchCradleHoldActive = true
+        }
+    }
+
+    private func launchCradlePoint() -> SIMD3<Float>? {
+        guard selectedDroneProfile.airframeClass == .fixedWing,
+              activeLaunchMode().requiresLaunchObject,
+              let asset = activeLaunchAsset() else {
+            return nil
+        }
+        return sceneController.currentLaunchSpawnPoint(for: asset)
+    }
+
+    /// Enters/leaves the first-person hand-launch view. Activation is
+    /// idempotent and re-called every held tick so the eye position tracks
+    /// the launch point; the scene keeps its look angles across calls.
+    private func setHandLaunchPOVActive(_ active: Bool) {
+        if active {
+            guard canControlLocalVehicle, !isSpectatorMode else {
+                return
+            }
+            let initialYaw = activeLaunchAsset()?.worldYawRadians ?? state.orientation.z
+            let initialPitch = (activeLaunchAsset()?.railAngleDegrees ?? 8.0).degreesToRadians
+            sceneController.activateHandLaunchPOV(
+                initialYawRadians: initialYaw,
+                initialPitchRadians: initialPitch
+            )
+            if !isHandLaunchPOVActive, sceneController.isHandLaunchPOVActive {
+                isHandLaunchPOVActive = true
+            }
+        } else {
+            sceneController.deactivateHandLaunchPOV()
+            if isHandLaunchPOVActive {
+                isHandLaunchPOVActive = false
+            }
+        }
+    }
+
+    /// First-person walking while holding the airframe: WASD moves the
+    /// operator (look-relative), Shift jogs. Only while the launch sequence
+    /// has not taken over the airframe.
+    private func updateHandLaunchPOVWalk(deltaTime: Float) {
+        guard isHandLaunchPOVActive,
+              launchRuntimeSnapshot.state == .idle ||
+                launchRuntimeSnapshot.state == .aborted,
+              !signalState.isInteractionBlocking else {
+            return
+        }
+        let axis = keyboardInputService.currentInputSnapshot().axisInput
+        guard abs(axis.forward) > 0.02 || abs(axis.strafe) > 0.02 else {
+            return
+        }
+        sceneController.moveHandLaunchPOVOperator(
+            forward: axis.forward,
+            strafe: axis.strafe,
+            deltaTime: deltaTime,
+            speed: axis.speedBoost ? 3.4 : 1.7,
+            worldHalfExtent: terrain.worldHalfExtent
+        )
+    }
+
+    /// Compass heading (map convention: 0° = +Z, 90° = +X) of the operator's
+    /// current first-person look direction.
+    private func handLaunchPOVHeadingDegrees() -> Float {
+        let yaw = sceneController.handLaunchPOVWorldYawRadians()
+        return MissionLaunchGeometry.normalizedHeadingDegrees(
+            atan2(-sin(yaw), -cos(yaw)) * 180.0 / .pi
+        )
+    }
+
+    /// Places the idle airframe into its launch cradle (catapult shuttle or
+    /// operator's hand) with the launcher's own heading and pitch. Returns
+    /// false when the selected aircraft has no assisted-launch equipment.
+    @discardableResult
+    private func seatAircraftInLaunchCradleIfAvailable() -> Bool {
+        guard let asset = activeLaunchAsset(),
+              let cradlePoint = launchCradlePoint() else {
+            launchCradleHoldActive = false
+            setHandLaunchPOVActive(false)
+            return false
+        }
+        state.position = cradlePoint
+        state.velocity = .zero
+        state.angularVelocity = .zero
+        state.orientation = SIMD3<Float>(
+            0.0,
+            asset.railAngleDegrees.degreesToRadians,
+            asset.worldYawRadians
+        )
+        resyncFixedWingAttitudeFromEuler()
+        homePosition = cradlePoint
+        lastFiniteState = state
+        launchCradleHoldActive = true
+        return true
+    }
+
+    /// Per-tick enforcement of the pre-launch cradle hold. The physics step
+    /// has already integrated gravity for this tick, so the hold re-pins the
+    /// airframe every frame until the launch state machine (or a cleared
+    /// launch configuration) releases it.
+    private func maintainLaunchCradleHoldIfNeeded() -> Bool {
+        guard launchCradleHoldActive else {
+            return false
+        }
+        guard physicalState != .crashed,
+              launchRuntimeSnapshot.state == .idle ||
+                launchRuntimeSnapshot.state == .aborted,
+              activeLaunchAsset() != nil else {
+            launchCradleHoldActive = false
+            setHandLaunchPOVActive(false)
+            return false
+        }
+
+        // While the hand-launch airframe is in its pre-launch hold, the whole
+        // experience is first-person — armed or not, the operator stands with
+        // the aircraft in hand from the moment the platform is selected. The
+        // catapult keeps its external view.
+        if activeLaunchMode() == .handLaunch {
+            setHandLaunchPOVActive(true)
+        } else {
+            setHandLaunchPOVActive(false)
+        }
+
+        // Re-resolve after the POV update: with the first-person view active
+        // the asset heading (and therefore the hold point) follows the
+        // operator's look direction.
+        guard let asset = activeLaunchAsset(),
+              let cradlePoint = launchCradlePoint() else {
+            launchCradleHoldActive = false
+            setHandLaunchPOVActive(false)
+            return false
+        }
+
+        state.position = cradlePoint
+        state.velocity = .zero
+        state.angularVelocity = .zero
+        state.bodyAngularVelocity = .zero
+        state.forwardAirspeed = simd_length(weather.windVector)
+        state.orientation = SIMD3<Float>(
+            0.0,
+            asset.railAngleDegrees.degreesToRadians,
+            asset.worldYawRadians
+        )
+        resyncFixedWingAttitudeFromEuler()
+        transitionPhysicalState(isArmed ? .armedOnGround : .disarmed)
+        if !isArmed {
+            state.throttle = 0.0
+            state.motorThrottle = 0.0
+            state.rotorAngularSpeed = .zero
+        }
+        return true
+    }
+
+    private func fixedWingLaunchPreflightFailure(
+        mode: LaunchMode,
+        asset: LaunchAsset,
+        spawnPoint: SIMD3<Float>,
+        parameters wing: FixedWingParameters
+    ) -> String? {
+        let currentMass = max(0.2, vehicleMassModel.resolvedCurrentTotalMass)
+        let nominalMass = max(0.2, selectedDroneProfile.takeoffMassKg)
+        guard currentMass <= nominalMass * 1.12 else {
+            return "launch_preflight_mass_exceeded"
+        }
+
+        let direction = simd_normalize(asset.direction3D)
+        let nominalReleaseSpeed: Float
+        if mode == .handLaunch {
+            nominalReleaseSpeed = wing.handThrowSpeed *
+                sqrt(nominalMass / currentMass).clamped(to: 0.65...1.15)
+        } else {
+            let availableAcceleration = wing.maxCatapultAccelerationG * 9.81 *
+                nominalMass / currentMass
+            let forceLimitedExitSpeed = sqrt(
+                max(0.0, 2.0 * availableAcceleration * wing.catapultRailLengthMeters)
+            )
+            nominalReleaseSpeed = min(wing.catapultExitSpeed, forceLimitedExitSpeed)
+        }
+        let longitudinalWind = simd_dot(weather.windVector, direction)
+        let predictedLongitudinalAirspeed = nominalReleaseSpeed - longitudinalWind
+        let crosswind = simd_length(weather.windVector - direction * longitudinalWind)
+        // The airframe must leave the launcher flying, not stalling: predicted
+        // airspeed at release (throw/exit speed corrected for the along-track
+        // wind) has to clear minSafeAirspeed, or the launch is refused as a
+        // tailwind/overweight configuration instead of being allowed to mush
+        // into the ground right after release.
+        let minimumReleaseEnergy = wing.minSafeAirspeed * (mode == .handLaunch ? 0.95 : 1.02)
+        guard predictedLongitudinalAirspeed >= minimumReleaseEnergy else {
+            return "launch_preflight_tailwind_unsafe"
+        }
+        let crosswindLimit = min(
+            selectedDroneProfile.maxWindResistanceMps,
+            max(3.0, nominalReleaseSpeed * 0.45)
+        )
+        guard crosswind <= crosswindLimit else {
+            return "launch_preflight_crosswind_unsafe"
+        }
+
+        let corridorLength = wing.corridorLength(for: mode)
+        let railSkip = mode == .catapult ? wing.catapultRailLengthMeters : 0.4
+        let clearanceStart = spawnPoint + direction * min(railSkip, corridorLength * 0.45)
+        let clearanceEnd = spawnPoint + direction * corridorLength
+        guard clearanceEnd.y <= terrain.maxFlightAltitude - selectedDroneProfile.collisionRadius else {
+            return "launch_preflight_vertical_clearance_invalid"
+        }
+        let obstacles = sceneController.nearbyEnvironmentObstacles(
+            from: clearanceStart,
+            to: clearanceEnd,
+            margin: selectedDroneProfile.collisionRadius + 0.8
+        )
+        if let collision = collisionService.firstSweptCollision(
+            from: clearanceStart,
+            to: clearanceEnd,
+            droneRadius: selectedDroneProfile.collisionRadius,
+            obstacles: obstacles
+        ), !collision.isSupportSurfaceContact {
+            return "launch_preflight_corridor_obstructed"
+        }
+        return nil
+    }
+
     private func launchHeadingRadians(for launchObject: MissionLaunchObject) -> Float {
-        let degrees = launchObject.transitionHeadingDegrees ?? launchObject.headingDegrees
-        return degrees * .pi / 180.0
+        launchObject.worldYawRadians
     }
 
     private func updateLegacyLaunchState(_ nextState: LaunchState, deltaTime: Float = 0.0) {
@@ -13166,21 +13845,16 @@ final class DroneSimulationViewModel: ObservableObject {
         launchMode: LaunchMode,
         parameters wing: FixedWingParameters
     ) -> SIMD3<Float> {
-        let origin = currentSpawnPoint()
-        let headingRadians: Float
-        switch asset {
-        case .catapult(let catapult):
-            switch fixedWingAutopilotController.launchPhase {
-            case .onRail, .launchImpulse, .railRelease:
-                headingRadians = catapult.rail.headingRadians
-            case .initialClimb, .missionJoin, .none:
-                headingRadians = catapult.rail.launchDirectionRadians
-            }
-        case .none:
-            headingRadians = activeLaunchObject().map(launchHeadingRadians(for:)) ?? state.orientation.z
-        }
+        // The corridor frozen at launch begin is authoritative: the live
+        // asset heading follows the (possibly re-aimed / reverted-to-draft)
+        // launch object and must not steer the climb-out after release.
+        let origin = activeLaunchCorridor?.origin ?? currentSpawnPoint()
+        let horizontalDirection: SIMD2<Float> = activeLaunchCorridor?.horizontal ??
+            asset?.horizontalDirection ??
+            activeLaunchObject()?.horizontalLaunchDirection ??
+            SIMD2<Float>(-sin(state.orientation.z), -cos(state.orientation.z))
 
-        let distance: Float = {
+        let baseDistance: Float = {
             switch launchMode {
             case .catapult:
                 return max(wing.catapultExitSpeed * 1.6, 16.0)
@@ -13195,10 +13869,23 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }()
 
+        // The climb-out point must recede ahead of the aircraft: a fixed
+        // corridor end (~25-30 m) is overflown within seconds, and chasing a
+        // waypoint behind the aircraft bends the whole launch into a circle.
+        let alongTrack = simd_dot(
+            SIMD2<Float>(state.position.x - origin.x, state.position.z - origin.z),
+            horizontalDirection
+        )
+        let lookahead = max(
+            45.0,
+            wing.guidanceLookaheadDistance(airspeed: state.forwardAirspeed)
+        )
+        let distance = max(baseDistance, alongTrack + lookahead)
+
         return SIMD3<Float>(
-            origin.x - sin(headingRadians) * distance,
+            origin.x + horizontalDirection.x * distance,
             max(origin.y + wing.initialClimbTargetAltitude, wing.initialClimbTargetAltitude),
-            origin.z + cos(headingRadians) * distance
+            origin.z + horizontalDirection.y * distance
         )
     }
 
@@ -13208,19 +13895,100 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let launchMode = activeLaunchMode()
-        guard launchMode != .standard else {
+        guard launchMode == .handLaunch || launchMode == .catapult else {
             return
         }
 
         let wing = activeFixedWingParameters()
-        if launchState == .idle || launchState == .completed || launchState == .aborted {
+        if launchState == .aborted || launchRuntimeSnapshot.state == .aborted {
+            activeFixedWingLaunchDynamics = nil
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.throttle = 0.0
+            }, markManual: false)
+            setFlightMode(.manual, reason: "fixed_wing_launch_aborted")
+            return
+        }
+        if launchState == .idle {
             beginFixedWingLaunchSequence()
+            if launchState == .aborted {
+                activeFixedWingLaunchDynamics = nil
+                updateControlValues({ values in
+                    values.roll = 0.0
+                    values.pitch = 0.0
+                    values.throttle = 0.0
+                }, markManual: false)
+                setFlightMode(.manual, reason: "fixed_wing_launch_aborted")
+                return
+            }
         }
 
-        guard launchState != .idle,
-              launchState != .completed,
-              launchState != .aborted else {
+        launchRuntimeSnapshot = fixedWingLaunchController.update(
+            aircraftState: state,
+            windVector: weather.windVector,
+            isArmed: isArmed,
+            batteryAvailable: !batteryState.isDepleted,
+            deltaTime: deltaTime
+        )
+        updateLegacyLaunchState(launchRuntimeSnapshot.state, deltaTime: deltaTime)
+        activeFixedWingLaunchDynamics = launchRuntimeSnapshot.dynamics
+        fixedWingLastTransitionReason = launchRuntimeSnapshot.transitionReason
+        sceneController.updateLaunchAssetPresentation(
+            progress: launchRuntimeSnapshot.railProgress,
+            state: launchRuntimeSnapshot.state
+        )
+
+        switch launchRuntimeSnapshot.state {
+        case .idle:
             return
+        case .prelaunchCheck, .aligning, .launchCommit, .assistedAcceleration:
+            fixedWingLaunchReleaseElapsed = 0.0
+            let yaw = activeLaunchAsset()?.worldYawRadians ?? state.orientation.z
+            let pitch = activeLaunchAsset()?.railAngleDegrees ?? 0.0
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = Double(pitch)
+                values.yaw = Double(yaw.radiansToDegrees)
+                values.throttle = max(
+                    values.throttle,
+                    Double(resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference)
+                )
+            }, markManual: false)
+            return
+        case .aborted:
+            activeFixedWingLaunchDynamics = nil
+            // A released-then-failed launch leaves the airframe away from the
+            // cradle; the first-person view must not stay latched to it.
+            if !launchCradleHoldActive {
+                setHandLaunchPOVActive(false)
+            }
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.throttle = 0.0
+            }, markManual: false)
+            setFlightMode(.manual, reason: "fixed_wing_launch_aborted")
+            return
+        case .completed:
+            activeFixedWingLaunchDynamics = nil
+            setHandLaunchPOVActive(false)
+            if missionExecutionState.status == .running,
+               let activeTarget = missionExecutionState.activeTarget,
+               activeRouteTargetSource == .mission {
+                bindMissionExecutionTarget(activeTarget, startNavigation: true)
+                setFlightMode(.autoPath, reason: "fixed_wing_launch_joined_mission")
+            } else {
+                setFlightMode(.manual, reason: "fixed_wing_launch_completed")
+            }
+            return
+        case .rotation, .initialClimb, .transitionToFlight:
+            // Let the operator watch the airframe leave his hand for a
+            // moment, then hand the screen back to the regular UAV cameras.
+            fixedWingLaunchReleaseElapsed += deltaTime
+            if fixedWingLaunchReleaseElapsed >= 0.7 {
+                setHandLaunchPOVActive(false)
+            }
         }
 
         let target = launchSequenceTarget(
@@ -13242,30 +14010,61 @@ final class DroneSimulationViewModel: ObservableObject {
         let output = fixedWingAutopilotController.trackingCommand(
             for: context,
             parameters: wing,
-            launchMode: launchMode,
-            launchAsset: activeLaunchAsset(),
-            routeTracking: currentFixedWingRouteTrackingContext(fallbackTarget: target)
+            launchMode: .standard,
+            launchAsset: nil,
+            routeTracking: FixedWingRouteTrackingContext(
+                routeIdentifier: "launch:\(activeLaunchObject()?.id.uuidString ?? selectedDroneProfile.id)",
+                waypoints: [
+                    FixedWingRouteWaypoint(
+                        position: target,
+                        missionWaypointIndex: nil,
+                        waypointIdentifier: "fixed-wing-launch-corridor"
+                    )
+                ]
+            )
         )
+
+        var protectedCommand = output.command
+        let maxBank = launchRuntimeSnapshot.state == .transitionToFlight
+            ? wing.maxInitialBankDeg
+            : max(2.0, wing.maxInitialBankDeg * 0.45)
+        protectedCommand.rollDegrees = protectedCommand.rollDegrees.clamped(to: -maxBank...maxBank)
+        if launchRuntimeSnapshot.state == .rotation,
+           launchRuntimeSnapshot.longitudinalAirspeedMps < wing.minSafeAirspeed * 0.86 {
+            protectedCommand.pitchDegrees = protectedCommand.pitchDegrees.clamped(to: -1.0...3.0)
+        } else {
+            // Ceiling at maxPitchUpDeg, not initialClimbPitchDeg: right after
+            // a hand throw the airframe flies barely above minSafeAirspeed,
+            // where holding altitude alone already needs most of the
+            // initial-climb pitch as angle of attack — clamping to it left
+            // no margin to actually climb (observed as a ground-skimming
+            // launch that only rose after the manual handoff).
+            protectedCommand.pitchDegrees = protectedCommand.pitchDegrees.clamped(
+                to: 1.0...max(wing.initialClimbPitchDeg, wing.maxPitchUpDeg)
+            )
+        }
+        protectedCommand.throttle = max(protectedCommand.throttle, wing.maxThrottle * 0.92)
 
         fixedWingAutopilotAltitudeCommand = output.command.positionTarget.y
-        fixedWingAutopilotCourseCommand = output.command.yawDegrees.degreesToRadians
-        fixedWingLastTransitionReason = output.transitionReason
-        updateLegacyLaunchState(
-            legacyLaunchState(for: output, launchMode: launchMode),
-            deltaTime: deltaTime
-        )
-        applyAutopilotCommand(output.command, deltaTime: deltaTime)
+        fixedWingAutopilotCourseCommand = protectedCommand.yawDegrees.degreesToRadians
+        fixedWingAutopilotDebugState = output.debugState
+        applyAutopilotCommand(protectedCommand, deltaTime: deltaTime)
+    }
 
-        if output.launchPhase == nil {
-            if missionExecutionState.status == .running,
-               let activeTarget = missionExecutionState.activeTarget,
-               activeRouteTargetSource == .mission {
-                bindMissionExecutionTarget(activeTarget, startNavigation: true)
-                setFlightMode(.autoPath, reason: "fixed_wing_launch_joined_mission")
-            } else {
-                setFlightMode(.manual, reason: "fixed_wing_launch_completed")
-            }
+    private func refreshFixedWingLaunchPresentation() {
+        guard activeLaunchMode() == .handLaunch || activeLaunchMode() == .catapult else {
+            return
         }
+
+        let progress: Float
+        if let dynamics = activeFixedWingLaunchDynamics,
+           dynamics.phase == .catapultRail {
+            progress = (simd_dot(state.position - dynamics.origin, dynamics.direction) /
+                max(0.1, dynamics.travelLengthMeters)).clamped(to: 0.0...1.0)
+        } else {
+            progress = launchRuntimeSnapshot.railProgress
+        }
+        sceneController.updateLaunchAssetPresentation(progress: progress, state: launchState)
     }
 
     private func polylineLength(_ points: [SIMD2<Float>]) -> Float {
@@ -13775,11 +14574,15 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func currentSpawnPoint() -> SIMD3<Float> {
+        if activeLaunchMode().requiresLaunchObject,
+           let launchPoint = sceneController.currentLaunchSpawnPoint(for: activeLaunchAsset()) {
+            return launchPoint
+        }
         return sceneController.currentDockSpawnPoint()
     }
 
     private func refreshSceneLaunchAsset() {
-        sceneController.setLaunchAsset(nil)
+        sceneController.setLaunchAsset(activeLaunchAsset())
     }
 
     private func resetTerrainMapTrail() {
@@ -14134,8 +14937,9 @@ final class DroneSimulationViewModel: ObservableObject {
         isMissionMapVisible = false
         isInMissionDropZone = false
         sceneController.setMissionDropZone(nil)
-        committedTacticalMissionDraft = .empty
-        workingTacticalMissionDraft = .empty
+        let launchDraft = defaultLaunchConfiguredDraft()
+        committedTacticalMissionDraft = launchDraft
+        workingTacticalMissionDraft = launchDraft
         tacticalMapMode = .waypoint
         currentMissionPlan = nil
         missionExecutionState = .idle
@@ -14207,7 +15011,8 @@ final class DroneSimulationViewModel: ObservableObject {
             committedDraft: committedTacticalMissionDraft,
             workingDraft: workingTacticalMissionDraft,
             airframeClass: selectedDroneProfile.airframeClass,
-            fixedWingParameters: selectedDroneProfile.fixedWingParameters
+            fixedWingParameters: selectedDroneProfile.fixedWingParameters,
+            supportedLaunchModes: selectedDroneProfile.supportedLaunchModes
         )
 
         if nextState != tacticalMapState {
@@ -15279,6 +16084,7 @@ final class DroneSimulationViewModel: ObservableObject {
             state.position = spawn
             state.orientation = spawnOrientation(for: selectedDroneProfile)
             homePosition = spawn
+            seatAircraftInLaunchCradleIfAvailable()
         }
 
         if hardReset {
@@ -15515,6 +16321,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func applyGroundedSafetyIfNeeded(deltaTime: Float) {
+        if maintainLaunchCradleHoldIfNeeded() {
+            return
+        }
         let contact = supportSurfaceContact(for: state.position)
         let supportY = contact?.height ?? 0.0
         guard state.position.y <= supportY + 0.08 else {

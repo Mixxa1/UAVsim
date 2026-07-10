@@ -37,7 +37,17 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             case .multirotor:
                 next = stepMultirotorBaseline(state: next, control: control, context: context, dt: dt)
             case .fixedWing:
+                let previousSubstep = next
                 next = stepFixedWingAerodynamic(state: next, control: control, context: context, dt: dt)
+                if let launchDynamics = context.fixedWingLaunchDynamics {
+                    next = applyFixedWingLaunchDynamics(
+                        previousState: previousSubstep,
+                        integratedState: next,
+                        dynamics: launchDynamics,
+                        context: context,
+                        dt: dt
+                    )
+                }
             case .hybridVTOL:
                 if context.profile.airframeStyle == .tailsitterVTOL {
                     next = stepTailsitterVTOLTransitional(state: next, control: control, context: context, dt: dt)
@@ -486,9 +496,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 // inside its own commandable range, regardless of whether
                 // that range is 16° or 40°.
                 let rollErrorNorm = (rollError / maxBank).clamped(to: -1.0...1.0)
-                let rollRateNorm = (state.bodyAngularVelocity.x / 1.8).clamped(to: -1.0...1.0)
+                // Rate (damping) terms clamp at ±3, not ±1: an ultralight
+                // airframe (1-2 kg hand-launch wing) reaches several rad/s of
+                // roll with full aileron, and with a ±1 clamp the damping
+                // term saturated at 0.4 against a P term of up to 3.5 — the
+                // aircraft blew straight through its commanded bank into a
+                // near-knife-edge overshoot. Heavier airframes never exceed
+                // the old clamp, so their behaviour is unchanged.
+                let rollRateNorm = (state.bodyAngularVelocity.x / 1.8).clamped(to: -3.0...3.0)
                 let pitchErrorNorm = (pitchError / maxPitchAngle).clamped(to: -1.0...1.0)
-                let pitchRateNorm = (state.bodyAngularVelocity.y / 1.2).clamped(to: -1.0...1.0)
+                let pitchRateNorm = (state.bodyAngularVelocity.y / 1.2).clamped(to: -3.0...3.0)
                 // kP=3.5 (not 2.0): a pure P term always has some steady-state
                 // droop against the airframe's own natural restoring
                 // stiffness (cmAlpha) — e.g. Hermes 900 commanded to 8.5°
@@ -672,6 +689,94 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         return next
     }
 
+    private func applyFixedWingLaunchDynamics(
+        previousState: DroneState,
+        integratedState: DroneState,
+        dynamics: FixedWingLaunchDynamics,
+        context: DroneSimulationContext,
+        dt: Float
+    ) -> DroneState {
+        var next = integratedState
+        let directionLength = simd_length(dynamics.direction)
+        guard directionLength.isFinite, directionLength > 0.5 else {
+            return next
+        }
+        let direction = dynamics.direction / directionLength
+
+        func constrainAttitudeAndRates(_ state: inout DroneState, pitchBias: Float = 0.0) {
+            let launchEuler = SIMD3<Float>(
+                0.0,
+                dynamics.pitchRadians + pitchBias,
+                dynamics.worldYawRadians
+            )
+            state.orientation = launchEuler
+            state.fixedWingOrientationQuat = orientationQuaternion(from: launchEuler)
+            state.angularVelocity = .zero
+            state.bodyAngularVelocity = .zero
+            state.angleOfAttack = pitchBias
+            state.sideslipAngle = 0.0
+        }
+
+        switch dynamics.phase {
+        case .held:
+            next.position = dynamics.origin
+            next.velocity = .zero
+            next.forwardAirspeed = simd_length(context.windVector)
+            constrainAttitudeAndRates(&next)
+
+        case .catapultRail:
+            let travelLength = max(0.5, dynamics.travelLengthMeters)
+            let priorOffset = previousState.position - dynamics.origin
+            let priorDistance = simd_dot(priorOffset, direction).clamped(to: 0.0...travelLength)
+            let priorSpeed = max(0.0, simd_dot(previousState.velocity, direction))
+            let targetSpeed = max(0.1, dynamics.targetReleaseSpeedMps)
+            let requiredAcceleration = (targetSpeed * targetSpeed) / (2.0 * travelLength)
+            let actualMass = max(0.2, context.vehicleMassModel.resolvedCurrentTotalMass)
+            let forceLimitedAcceleration = dynamics.maximumAccelerationMps2 *
+                max(0.2, dynamics.nominalLaunchMassKg) / actualMass
+            let acceleration = min(
+                max(0.1, forceLimitedAcceleration),
+                max(0.1, requiredAcceleration)
+            )
+            let nextSpeed = min(targetSpeed, priorSpeed + acceleration * dt)
+            let averageSpeed = (priorSpeed + nextSpeed) * 0.5
+            let nextDistance = min(travelLength, priorDistance + averageSpeed * dt)
+
+            next.position = dynamics.origin + direction * nextDistance
+            // Never manufacture the configured exit speed at the rail end.
+            // If installed mass makes the launcher force insufficient, the
+            // aircraft leaves with the speed it actually accumulated.
+            next.velocity = direction * nextSpeed
+            next.forwardAirspeed = simd_length(next.velocity - context.windVector)
+            constrainAttitudeAndRates(&next)
+
+        case .handRelease:
+            let actualMass = max(0.2, context.vehicleMassModel.resolvedCurrentTotalMass)
+            let throwMassScale = sqrt(max(0.2, dynamics.nominalLaunchMassKg) / actualMass)
+                .clamped(to: 0.65...1.15)
+            let massAdjustedThrowSpeed = dynamics.targetReleaseSpeedMps * throwMassScale
+            let relativeVelocity = previousState.velocity - context.windVector
+            let longitudinalAirspeed = simd_dot(relativeVelocity, direction)
+            let distanceFromRelease = simd_distance(previousState.position, dynamics.origin)
+            if longitudinalAirspeed < massAdjustedThrowSpeed * 0.55,
+               distanceFromRelease < 0.12 {
+                next.position = dynamics.origin + direction * 0.015
+                // The throw is a ground-relative impulse. Wind remains in the
+                // normal airflow calculation and can help or hurt the launch.
+                next.velocity = direction * massAdjustedThrowSpeed
+                next.forwardAirspeed = simd_length(next.velocity - context.windVector)
+                // A thrower releases nose-high: the wing leaves the hand at a
+                // working angle of attack. Releasing with the nose exactly on
+                // the velocity vector (AoA 0) produced near-zero lift for the
+                // first second and the airframe sank from hand height to the
+                // ground before alpha could build.
+                constrainAttitudeAndRates(&next, pitchBias: 6.0 * .pi / 180.0)
+            }
+        }
+
+        return next
+    }
+
     /// hybridVTOL: a genuine transition-capable integrator, not a throttle-
     /// floor tweak bolted onto the fixed-wing model. Each `PropulsionUnit`'s
     /// own `thrustDirectionBody` sweeps from vertical (hover) to forward
@@ -816,9 +921,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 let rollError = wrap(targetRoll - currentEuler.x)
                 let pitchError = wrap(targetPitch - currentEuler.y)
                 let rollErrorNorm = (rollError / maxBank).clamped(to: -1.0...1.0)
-                let rollRateNorm = (state.bodyAngularVelocity.x / 1.8).clamped(to: -1.0...1.0)
+                // Rate (damping) terms clamp at ±3, not ±1: an ultralight
+                // airframe (1-2 kg hand-launch wing) reaches several rad/s of
+                // roll with full aileron, and with a ±1 clamp the damping
+                // term saturated at 0.4 against a P term of up to 3.5 — the
+                // aircraft blew straight through its commanded bank into a
+                // near-knife-edge overshoot. Heavier airframes never exceed
+                // the old clamp, so their behaviour is unchanged.
+                let rollRateNorm = (state.bodyAngularVelocity.x / 1.8).clamped(to: -3.0...3.0)
                 let pitchErrorNorm = (pitchError / maxPitchAngle).clamped(to: -1.0...1.0)
-                let pitchRateNorm = (state.bodyAngularVelocity.y / 1.2).clamped(to: -1.0...1.0)
+                let pitchRateNorm = (state.bodyAngularVelocity.y / 1.2).clamped(to: -3.0...3.0)
                 aileronFraction = ((rollErrorNorm * 3.5 - rollRateNorm * 0.4) * authority * max(0.75, wing.bankResponseGain)).clamped(to: -1.0...1.0)
                 elevatorFraction = ((pitchErrorNorm * 3.5 - pitchRateNorm * 0.4) * authority * max(0.75, wing.climbResponseGain)).clamped(to: -1.0...1.0)
                 rudderFraction = desiredFixedWingRudderFraction(
