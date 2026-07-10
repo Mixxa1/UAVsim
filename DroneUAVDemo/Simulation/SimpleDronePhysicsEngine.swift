@@ -770,7 +770,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 // the velocity vector (AoA 0) produced near-zero lift for the
                 // first second and the airframe sank from hand height to the
                 // ground before alpha could build.
-                constrainAttitudeAndRates(&next, pitchBias: 6.0 * .pi / 180.0)
+                constrainAttitudeAndRates(
+                    &next,
+                    pitchBias: FixedWingHandLaunchTuning.releaseAngleOfAttackDegrees * .pi / 180.0
+                )
             }
         }
 

@@ -1105,7 +1105,11 @@ final class DroneSimulationViewModel: ObservableObject {
     /// heading once the POV closes), so the climb-out guidance must NOT
     /// re-read it mid-launch — that made the aircraft turn back toward the
     /// drafted corridor right after release.
-    private var activeLaunchCorridor: (origin: SIMD3<Float>, horizontal: SIMD2<Float>)?
+    private var activeLaunchCorridor: (
+        origin: SIMD3<Float>,
+        horizontal: SIMD2<Float>,
+        releaseAttitudeDegrees: Float
+    )?
     private var homePosition = SIMD3<Float>(0.0, 0.0, 0.0)
     private var releasedPayloadConfiguration: PayloadConfiguration?
     private var payloadSelfInteractionTimer: Float = 0.0
@@ -13528,7 +13532,11 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingLaunchReleaseElapsed = 0.0
         activeLaunchCorridor = (
             origin: spawnPoint,
-            horizontal: launchAsset.horizontalDirection
+            horizontal: launchAsset.horizontalDirection,
+            releaseAttitudeDegrees: launchAsset.railAngleDegrees +
+                (launchMode == .handLaunch
+                    ? FixedWingHandLaunchTuning.releaseAngleOfAttackDegrees
+                    : 0.0)
         )
         launchRuntimeSnapshot = FixedWingLaunchRuntimeSnapshot(
             mode: launchMode,
@@ -13769,10 +13777,12 @@ final class DroneSimulationViewModel: ObservableObject {
         let crosswind = simd_length(weather.windVector - direction * longitudinalWind)
         // The airframe must leave the launcher flying, not stalling: predicted
         // airspeed at release (throw/exit speed corrected for the along-track
-        // wind) has to clear minSafeAirspeed, or the launch is refused as a
-        // tailwind/overweight configuration instead of being allowed to mush
-        // into the ground right after release.
-        let minimumReleaseEnergy = wing.minSafeAirspeed * (mode == .handLaunch ? 0.95 : 1.02)
+        // wind) has to retain the mode-specific margin above minSafeAirspeed,
+        // or the launch is refused as a tailwind/overweight configuration
+        // instead of being allowed to mush into the ground after release.
+        let minimumReleaseEnergy = wing.minSafeAirspeed * (mode == .handLaunch
+            ? FixedWingHandLaunchTuning.minimumReleaseAirspeedFactor
+            : 1.02)
         guard predictedLongitudinalAirspeed >= minimumReleaseEnergy else {
             return "launch_preflight_tailwind_unsafe"
         }
@@ -14029,7 +14039,18 @@ final class DroneSimulationViewModel: ObservableObject {
             ? wing.maxInitialBankDeg
             : max(2.0, wing.maxInitialBankDeg * 0.45)
         protectedCommand.rollDegrees = protectedCommand.rollDegrees.clamped(to: -maxBank...maxBank)
-        if launchRuntimeSnapshot.state == .rotation,
+        if launchMode == .handLaunch,
+           fixedWingLaunchReleaseElapsed < FixedWingHandLaunchTuning.releaseAttitudeHoldSeconds,
+           let releaseAttitudeDegrees = activeLaunchCorridor?.releaseAttitudeDegrees {
+            // The throw leaves the hand with a working angle of attack. The
+            // route controller's first transient command can be near-level;
+            // applying it immediately unloads the wing before its pitch loop
+            // has settled. Preserve the actual release attitude briefly, then
+            // hand over continuously to the normal aerodynamic controller.
+            protectedCommand.pitchDegrees = releaseAttitudeDegrees.clamped(
+                to: 1.0...max(wing.initialClimbPitchDeg, wing.maxPitchUpDeg)
+            )
+        } else if launchRuntimeSnapshot.state == .rotation,
            launchRuntimeSnapshot.longitudinalAirspeedMps < wing.minSafeAirspeed * 0.86 {
             protectedCommand.pitchDegrees = protectedCommand.pitchDegrees.clamped(to: -1.0...3.0)
         } else {

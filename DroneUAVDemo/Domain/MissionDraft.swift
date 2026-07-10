@@ -43,7 +43,7 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
     var launchAngleRange: ClosedRange<Float> {
         switch self {
         case .handLaunchPoint:
-            return 2.0...20.0
+            return FixedWingHandLaunchTuning.minimumLaunchAngleDegrees...20.0
         case .catapultLine:
             return 4.0...22.0
         case .runwayStrip:

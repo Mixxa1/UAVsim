@@ -43,6 +43,17 @@ enum LaunchMethod: String, CaseIterable {
     }
 }
 
+/// Shared physical assumptions for a hand throw. Keeping these values in one
+/// place makes the release impulse, preflight validation and initial attitude
+/// controller agree instead of handing the aircraft three different launch
+/// envelopes.
+enum FixedWingHandLaunchTuning {
+    static let minimumLaunchAngleDegrees: Float = 6.0
+    static let releaseAngleOfAttackDegrees: Float = 6.0
+    static let releaseAttitudeHoldSeconds: Float = 1.2
+    static let minimumReleaseAirspeedFactor: Float = 1.12
+}
+
 enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     case standard
     case handLaunch
@@ -351,7 +362,9 @@ struct FixedWingParameters: Hashable {
             catapultExitSpeed ?? 0.0,
             max(self.minSafeAirspeed * 1.28, self.climbAirspeed)
         )
-        self.handLaunchAngleDegrees = handLaunchAngleDegrees.clamped(to: 2.0...20.0)
+        self.handLaunchAngleDegrees = handLaunchAngleDegrees.clamped(
+            to: FixedWingHandLaunchTuning.minimumLaunchAngleDegrees...20.0
+        )
         self.handReleaseHeightMeters = handReleaseHeightMeters.clamped(to: 0.8...2.2)
         self.catapultRailAngleDegrees = catapultRailAngleDegrees.clamped(to: 4.0...22.0)
         self.maxCatapultAccelerationG = maxCatapultAccelerationG.clamped(to: 2.0...12.0)
