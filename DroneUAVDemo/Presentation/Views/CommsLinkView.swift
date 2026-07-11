@@ -14,6 +14,7 @@ struct CommsLinkView: View {
     let onRiggingChange: (FiberOpticReelClass, Double) -> Void
     let onAttach: () -> Void
     let onDetach: () -> Void
+    let onClose: (() -> Void)?
 
     /// Physical fiber remaining on the spool (not the margin-adjusted usable budget) — what
     /// actually determines the reel's live mass, mirrored from `updateFiberOpticTether`.
@@ -28,10 +29,30 @@ struct CommsLinkView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("comms_link.title")
-                    .font(.caption.weight(.bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(GroundControlPalette.textSecondary)
+                HStack(alignment: .top) {
+                    Text("comms_link.title")
+                        .font(.caption.weight(.bold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+
+                    Spacer()
+
+                    if let onClose {
+                        Button(action: onClose) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(GroundControlPalette.textPrimary.opacity(0.8))
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(GroundControlPalette.inset)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help(String(localized: "comms_link.toolbar.close"))
+                        .controllerButtonTarget(id: "comms_link.close", action: onClose)
+                    }
+                }
 
                 Text("comms_link.subtitle")
                     .font(.caption2)

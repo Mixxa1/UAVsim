@@ -1957,7 +1957,10 @@ struct ContentView: View {
                             linkState: viewModel.fiberLinkState,
                             onRiggingChange: viewModel.setFiberSpoolRigging,
                             onAttach: viewModel.attachFiberSpoolModule,
-                            onDetach: viewModel.detachFiberSpoolModule
+                            onDetach: viewModel.detachFiberSpoolModule,
+                            onClose: {
+                                viewModel.setCommsLinkPanelVisible(false)
+                            }
                         )
                         .disabled(viewModel.hasMissionScenario)
                     }

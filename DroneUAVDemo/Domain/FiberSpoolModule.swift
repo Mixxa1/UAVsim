@@ -6,7 +6,15 @@ import Foundation
 /// carried alongside a camera/sprayer/etc. rather than competing with them for the one payload bay.
 struct FiberSpoolModule: Hashable {
     var reelClass: FiberOpticReelClass
+    /// The reel's *rigged* capacity — immutable at runtime. Payout is tracked separately in
+    /// `deployedLengthMeters`: an earlier version drained mass by overwriting this field with the
+    /// remaining length every tick, which silently compounded the consumption math (each tick's
+    /// cumulative payout was re-subtracted from an already-reduced total), burning a 0.5 km reel
+    /// in seconds of flight.
     var totalLengthMeters: Float
+    /// Fiber already paid out this sortie — drives the live mass drain below without ever
+    /// touching the rigged capacity.
+    var deployedLengthMeters: Float = 0.0
 
     init(
         reelClass: FiberOpticReelClass = .medium,
@@ -19,9 +27,9 @@ struct FiberSpoolModule: Hashable {
         )
     }
 
-    /// Full-reel mass (hardware + un-payed-out fiber) — drains toward `reelClass.hardwareOverheadKg`
-    /// at runtime as fiber pays out (see `FiberLinkState`).
+    /// Live mass (hardware + fiber still wound on the drum) — drains toward
+    /// `reelClass.hardwareOverheadKg` as fiber pays out.
     var spoolMassKg: Float {
-        reelClass.massForLength(totalLengthMeters)
+        reelClass.massForLength(max(0.0, totalLengthMeters - deployedLengthMeters))
     }
 }

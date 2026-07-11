@@ -1198,7 +1198,18 @@ final class DroneSimulationViewModel: ObservableObject {
     /// reel this flight — reset whenever the tether goes from inactive to active (fresh reel).
     private var fiberOpticPathLengthUsedMeters: Float = 0.0
     private var fiberOpticSnagRisk: Float = 0.0
-    private var fiberOpticLastTrackedPosition: SIMD3<Float>?
+    /// Laid-line geometry for the current sortie: anchor at the launch point, then turn/contact
+    /// checkpoints (see `FiberPolylineCheckpoint`) — appended only, never removed mid-sortie,
+    /// because deployed fiber stays where it fell. Consumption and snag risk both derive from
+    /// this, and it's what the scene renders as the visible fiber.
+    private var fiberPolylineCheckpoints: [FiberPolylineCheckpoint] = []
+    /// Sum of the fixed (checkpoint-to-checkpoint) segment lengths — the live leg from the last
+    /// checkpoint to the aircraft is measured fresh each tick on top of this.
+    private var fiberPolylineFixedLengthMeters: Float = 0.0
+    /// Farthest point (and its distance) the aircraft has reached on the current live leg —
+    /// where a turn checkpoint gets fixed if the aircraft then backtracks or deviates laterally.
+    private var fiberLegFarthestPoint: SIMD3<Float>?
+    private var fiberLegFarthestDistance: Float = 0.0
     private var controlLinkFailsafeStageElapsed: Float = 0.0
     /// How long the radio link has been continuously back in the nominal zone while
     /// `controlLinkFailsafeLatched` is set — only used to confirm a *stable* reconnection before
@@ -2284,7 +2295,8 @@ final class DroneSimulationViewModel: ObservableObject {
         fiberLinkState = FiberLinkState()
         fiberOpticPathLengthUsedMeters = 0.0
         fiberOpticSnagRisk = 0.0
-        fiberOpticLastTrackedPosition = nil
+        clearFiberPolyline()
+        sceneController.clearFiberTetherVisual()
         // A previous reel's failsafe sequence may have ended in a terminal stage (landed/crashed/
         // etc.) — `beginControlLinkFailsafeSequence` only fires from `.none`, so this must be
         // cleared for a fresh reel's eventual severance to trigger the sequence again. Mounting a
@@ -2306,7 +2318,8 @@ final class DroneSimulationViewModel: ObservableObject {
         fiberLinkState = FiberLinkState()
         fiberOpticPathLengthUsedMeters = 0.0
         fiberOpticSnagRisk = 0.0
-        fiberOpticLastTrackedPosition = nil
+        clearFiberPolyline()
+        sceneController.clearFiberTetherVisual()
         controlLinkFailsafeStage = .none
         controlLinkFailsafeStageElapsed = 0.0
         controlLinkFailsafeLatched = false
@@ -2631,7 +2644,9 @@ final class DroneSimulationViewModel: ObservableObject {
         fiberLinkState = FiberLinkState()
         fiberOpticPathLengthUsedMeters = 0.0
         fiberOpticSnagRisk = 0.0
-        fiberOpticLastTrackedPosition = nil
+        clearFiberPolyline()
+        sceneController.clearFiberTetherVisual()
+        installedFiberSpoolModule?.deployedLengthMeters = 0.0
         controlLinkFailsafeStage = .none
         controlLinkFailsafeStageElapsed = 0.0
         controlLinkFailsafeLatched = false
@@ -16292,11 +16307,14 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    /// Unlike the hose's straight-line radial tether, the fiber-optic reel is consumed by actual
-    /// flight-path distance (this tick's position delta, accumulated), not distance from a fixed
-    /// point — a bent route uses up fiber faster than the straight-line distance it covers. Called
-    /// once per simulation tick (not from `enforceRuntimeSafetyAndBounds`, which can run several
-    /// times per tick for other safety passes and would double-count path length).
+    /// Laid-line fiber model: an anchor at the launch point plus turn/contact checkpoints form
+    /// the polyline of deployed fiber (`fiberPolylineCheckpoints`); the live leg runs from the
+    /// last checkpoint to the aircraft. Consumption is the polyline's total length, monotonic via
+    /// `max` — a reel pays out, it never rewinds — so hover/wind micro-jitter costs nothing
+    /// (the old per-tick `simd_distance` integration charged every centimeter of oscillation).
+    /// Snag risk comes only from the *line* actually bending around obstacles (contact
+    /// checkpoints, found by raycasting the live leg), never from the aircraft merely flying
+    /// near one. Called once per simulation tick.
     ///
     /// The fiber spool is a control-link module (`installedFiberSpoolModule`), not mission
     /// payload — this only ever reads/writes that slot, never `installedPayloadConfiguration`.
@@ -16306,64 +16324,130 @@ final class DroneSimulationViewModel: ObservableObject {
             // nor being broken should (see the two guards below): a real reel doesn't un-sever
             // just because the aircraft happens to touch the ground, and the failsafe's own
             // final landing necessarily drops through this same altitude check.
-            if fiberLinkState.status != .connected || fiberOpticLastTrackedPosition != nil {
+            if fiberLinkState.status != .connected || !fiberPolylineCheckpoints.isEmpty {
                 fiberLinkState = FiberLinkState()
+                clearFiberPolyline()
+                sceneController.clearFiberTetherVisual()
             }
-            fiberOpticLastTrackedPosition = nil
             return
         }
 
         guard fiberLinkState.status != .broken else {
             // Terminal — never reconnects, regardless of ground/armed state. `ControlLinkFailsafeStage`
             // owns recovery from here, including the landing this same reel is still mounted for.
+            // The rendered line deliberately stays frozen where it lay at the moment of the break.
             return
         }
 
         guard let installed = installedFiberSpoolModule, isArmed, state.position.y > 0.05 else {
             // Grounded/disarmed but the reel is still mounted and hasn't broken (e.g. sitting on
-            // the pad before launch) — pause tracking without resetting path-length/snag-risk
-            // progress; a real reel doesn't refill because the aircraft landed for a moment.
-            fiberOpticLastTrackedPosition = nil
+            // the pad before launch) — pause tracking without resetting the laid line or risk;
+            // a real reel doesn't refill because the aircraft landed for a moment.
             return
         }
 
-        if let lastPosition = fiberOpticLastTrackedPosition {
-            fiberOpticPathLengthUsedMeters += simd_distance(state.position, lastPosition)
+        // Seed the anchor on the sortie's first airborne tick — the line starts where the
+        // aircraft actually lifted off.
+        if fiberPolylineCheckpoints.isEmpty {
+            fiberPolylineCheckpoints = [FiberPolylineCheckpoint(position: state.position, kind: .anchor)]
+            fiberPolylineFixedLengthMeters = 0.0
+            fiberLegFarthestPoint = nil
+            fiberLegFarthestDistance = 0.0
         }
-        fiberOpticLastTrackedPosition = state.position
 
-        let reelClass = installed.reelClass
+        // 1) Line contact: does the live leg (last checkpoint → aircraft) pass through an
+        // obstacle? One pivot per tick at most — the wrap geometry refines over subsequent ticks
+        // as the aircraft keeps moving, without pivot-spamming a single trunk.
+        var newContactCreated = false
+        if let lastCP = fiberPolylineCheckpoints.last?.position {
+            let toDrone = state.position - lastCP
+            let legLength = simd_length(toDrone)
+            if legLength > FiberOpticTetherTuning.minCheckpointSpacingMeters + 0.5 {
+                let direction = toDrone / legLength
+                if let hitDistance = sceneController.fiberSegmentObstacleHitDistance(
+                    origin: lastCP,
+                    direction: direction,
+                    // Stop short of the aircraft itself — the leg endpoint is the airframe, and
+                    // its immediate vicinity is the reel outlet, not a snag.
+                    maxDistance: legLength - 0.4
+                ), hitDistance > FiberOpticTetherTuning.minCheckpointSpacingMeters {
+                    let pivot = lastCP
+                        + direction * max(0.3, hitDistance - FiberOpticTetherTuning.contactPivotClearanceMeters)
+                        + SIMD3<Float>(0.0, 0.2, 0.0)
+                    newContactCreated = appendFiberCheckpoint(
+                        FiberPolylineCheckpoint(position: pivot, kind: .contact)
+                    )
+                }
+            }
+        }
+
+        // 2) Turn points: capture the macroscopic flown path (out-and-back legs and real course
+        // changes) without charging for micro-jitter. A leg's farthest point becomes a fixed
+        // checkpoint once the aircraft backtracks or deviates sideways past the thresholds.
+        if let lastCP = fiberPolylineCheckpoints.last?.position {
+            let liveDistance = simd_distance(lastCP, state.position)
+            if let farthest = fiberLegFarthestPoint {
+                if liveDistance > fiberLegFarthestDistance {
+                    fiberLegFarthestPoint = state.position
+                    fiberLegFarthestDistance = liveDistance
+                } else if fiberLegFarthestDistance > FiberOpticTetherTuning.turnMinLegLengthMeters {
+                    let backtracked = fiberLegFarthestDistance - liveDistance > FiberOpticTetherTuning.turnBacktrackThresholdMeters
+                    var deviatedLaterally = false
+                    let axisVector = farthest - lastCP
+                    let axisLength = simd_length(axisVector)
+                    if axisLength > 0.001 {
+                        let axis = axisVector / axisLength
+                        let relative = state.position - lastCP
+                        let along = simd_dot(relative, axis)
+                        deviatedLaterally = simd_length(relative - axis * along) > FiberOpticTetherTuning.turnLateralDeviationMeters
+                    }
+                    if backtracked || deviatedLaterally {
+                        _ = appendFiberCheckpoint(FiberPolylineCheckpoint(position: farthest, kind: .turn))
+                    }
+                }
+            } else {
+                fiberLegFarthestPoint = state.position
+                fiberLegFarthestDistance = liveDistance
+            }
+        }
+
+        // 3) Consumption: fixed polyline length + live leg, monotonic (payout only).
+        let lastCPPosition = fiberPolylineCheckpoints.last?.position ?? state.position
+        let requiredLength = fiberPolylineFixedLengthMeters + simd_distance(lastCPPosition, state.position)
+        let previousDeployed = fiberOpticPathLengthUsedMeters
+        fiberOpticPathLengthUsedMeters = max(fiberOpticPathLengthUsedMeters, requiredLength)
+        let payoutDelta = fiberOpticPathLengthUsedMeters - previousDeployed
+
+        // The rigged capacity is immutable — payout is tracked on its own field. (An earlier
+        // version overwrote `totalLengthMeters` with the remaining length every tick to drain
+        // mass, which compounded the consumption math and burned a 0.5 km reel in seconds.)
         let configuredLength = installed.totalLengthMeters
         let usableBudget = configuredLength * FiberOpticTetherTuning.usableLengthFraction
         let remainingUsable = max(0.0, usableBudget - fiberOpticPathLengthUsedMeters)
 
-        // Physical fiber remaining on the spool (not the margin-adjusted usable budget above)
-        // determines the reel's actual mass — it gets lighter as fiber pays out, same idea as
-        // the agricultural sprayer's draining tank.
-        let remainingPhysicalLength = max(0.0, configuredLength - fiberOpticPathLengthUsedMeters)
-        let newMass = reelClass.massForLength(remainingPhysicalLength)
-        if abs(newMass - installed.spoolMassKg) > 0.0001 {
-            installedFiberSpoolModule?.totalLengthMeters = remainingPhysicalLength
+        // Mass drain: coarse 0.5 m granularity — no point re-running the whole mass model for
+        // sub-centimeter payout every tick.
+        if abs(installed.deployedLengthMeters - fiberOpticPathLengthUsedMeters) > 0.5 {
+            installedFiberSpoolModule?.deployedLengthMeters = min(fiberOpticPathLengthUsedMeters, configuredLength)
             refreshPayloadRuntimeState()
         }
 
-        // Snag/entanglement risk: proximity to obstacles weighted by turn rate. Deliberately
-        // simplified — no real cable-drag simulation, same spirit as the hose's straight-line
-        // tether standing in for a flexible rope.
-        let obstacleDistance = collisionAnalysis.nearestObstacleDistance
-        let proximityFactor: Float = obstacleDistance.isFinite && obstacleDistance < FiberOpticTetherTuning.snagRiskProximityMeters
-            ? max(0.0, 1.0 - obstacleDistance / FiberOpticTetherTuning.snagRiskProximityMeters)
-            : 0.0
-        if proximityFactor > 0.0 {
-            let turnRate = abs(state.angularVelocity.z)
-            let riskRate = (FiberOpticTetherTuning.snagRiskBaseRatePerSecond +
-                turnRate * FiberOpticTetherTuning.snagRiskTurnRateMultiplier) * proximityFactor
-            fiberOpticSnagRisk = min(1.0, fiberOpticSnagRisk + riskRate * deltaTime)
-        } else {
-            // Clear of every obstacle — let an isolated close pass/turn fade rather than
-            // permanently ratcheting toward a snag for the rest of the flight.
-            fiberOpticSnagRisk = max(0.0, fiberOpticSnagRisk - FiberOpticTetherTuning.snagRiskDecayPerSecondWhenClear * deltaTime)
+        // 4) Snag risk: a fresh wrap bumps it once; paying line out *over* existing contacts
+        // grinds it up (abrasion, scaled by contact count); a fully free line lets it decay.
+        let contactCount = fiberPolylineCheckpoints.reduce(into: 0) { count, checkpoint in
+            if checkpoint.kind == .contact { count += 1 }
         }
+        if newContactCreated {
+            fiberOpticSnagRisk += FiberOpticTetherTuning.contactRiskPerNewContact
+        }
+        if contactCount > 0 {
+            fiberOpticSnagRisk += payoutDelta
+                * FiberOpticTetherTuning.contactAbrasionRiskPerMeter
+                * min(Float(contactCount), FiberOpticTetherTuning.contactCountRiskCap)
+        } else {
+            fiberOpticSnagRisk -= FiberOpticTetherTuning.snagRiskDecayPerSecondWhenFree * deltaTime
+        }
+        fiberOpticSnagRisk = fiberOpticSnagRisk.clamped(to: 0.0...1.0)
 
         let remainingLengthFraction = usableBudget > 0.0001 ? remainingUsable / usableBudget : 0.0
         let isSnagged = fiberOpticSnagRisk >= 1.0
@@ -16387,9 +16471,40 @@ final class DroneSimulationViewModel: ObservableObject {
             snagRiskLevel: fiberOpticSnagRisk
         )
 
+        // 5) The visible line: fixed checkpoints plus the live leg to the aircraft.
+        var visualPoints = fiberPolylineCheckpoints.map(\.position)
+        visualPoints.append(state.position)
+        sceneController.updateFiberTetherVisual(points: visualPoints)
+
         if status == .broken {
             beginControlLinkFailsafeSequence(trigger: .fiberBroken)
         }
+    }
+
+    /// Appends a checkpoint if it clears the spacing/cap guards; returns whether it was added.
+    /// Fixing a checkpoint folds its segment into `fiberPolylineFixedLengthMeters` and starts a
+    /// fresh live leg.
+    private func appendFiberCheckpoint(_ checkpoint: FiberPolylineCheckpoint) -> Bool {
+        guard fiberPolylineCheckpoints.count < FiberOpticTetherTuning.maxCheckpoints,
+              let last = fiberPolylineCheckpoints.last else {
+            return false
+        }
+        let segmentLength = simd_distance(last.position, checkpoint.position)
+        guard segmentLength >= FiberOpticTetherTuning.minCheckpointSpacingMeters else {
+            return false
+        }
+        fiberPolylineFixedLengthMeters += segmentLength
+        fiberPolylineCheckpoints.append(checkpoint)
+        fiberLegFarthestPoint = nil
+        fiberLegFarthestDistance = 0.0
+        return true
+    }
+
+    private func clearFiberPolyline() {
+        fiberPolylineCheckpoints = []
+        fiberPolylineFixedLengthMeters = 0.0
+        fiberLegFarthestPoint = nil
+        fiberLegFarthestDistance = 0.0
     }
 
     /// Entry point into the control-link-loss failsafe — shared by a severed fiber and a lost
@@ -16554,11 +16669,15 @@ final class DroneSimulationViewModel: ObservableObject {
         case .emergencyLanding:
             // Same bounded orbit as `.loiterGlide` (not a dead-straight glide) plus a gentle
             // nose-up bias and decaying throttle — a slow, controlled spiral toward the ground
-            // near the loiter center, rather than potentially gliding for a long, unbounded
-            // straight-line distance before finally touching down.
+            // near the loiter center. Close to the ground the nose-up bias strengthens into a
+            // flare and the bank levels out: a real belly landing bleeds vertical speed right
+            // before touchdown instead of flying into the ground at descent attitude (which the
+            // collision system rightly classified as a crash, not a landing).
+            let heightAboveGround = heightAboveSupportSurface(for: state.position)
+            let flareBlend = Double((1.0 - heightAboveGround / 14.0).clamped(to: 0.0...1.0))
             updateControlValues({ values in
-                values.roll = controlLinkFailsafeOrbitBankDegrees()
-                values.pitch = 3.0
+                values.roll = controlLinkFailsafeOrbitBankDegrees() * (1.0 - flareBlend)
+                values.pitch = 3.0 + flareBlend * 5.0
                 values.throttle = max(0.0, values.throttle - 0.01)
             }, markManual: false)
             if physicalState.isGroundRestState {

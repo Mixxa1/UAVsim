@@ -117,6 +117,7 @@ final class DroneSceneController {
     // reach and darken the ground on their own. Decals are dropped along the flight path instead
     // of relying on the particles landing.
     private let agriculturalWetGroundNode = SCNNode()
+    private let fiberTetherPathNode = SCNNode()
     private var agriculturalWetGroundDecals: [SCNNode] = []
     private var lastAgriculturalWetDecalPlanarPosition: SIMD2<Float>?
     // Capsule bombardier camera — deliberately no yaw/pitch rig unlike the hose/rangefinder above:
@@ -431,6 +432,9 @@ final class DroneSceneController {
 
         agriculturalWetGroundNode.name = "agriculturalWetGroundNode"
         scene.rootNode.addChildNode(agriculturalWetGroundNode)
+
+        fiberTetherPathNode.name = "fiberTetherPathNode"
+        scene.rootNode.addChildNode(fiberTetherPathNode)
 
         missionDropZoneNode.name = "missionDropZoneNode"
         missionDropZoneNode.isHidden = true
@@ -2258,6 +2262,77 @@ final class DroneSceneController {
     func removeFiberSpoolVisual() {
         fiberSpoolVisualNode?.removeFromParentNode()
         fiberSpoolVisualNode = nil
+    }
+
+    /// First obstacle hit along the fiber's live leg — for the laid-line polyline's contact
+    /// detection. Ground-plane hits are deliberately excluded (`obstacleID == nil`): fiber lying
+    /// on the ground is its normal state, not a snag.
+    func fiberSegmentObstacleHitDistance(
+        origin: SIMD3<Float>,
+        direction: SIMD3<Float>,
+        maxDistance: Float
+    ) -> Float? {
+        guard let hit = analyticEnvironmentRayHit(
+            origin: origin,
+            direction: direction,
+            maxDistance: maxDistance
+        ), hit.obstacleID != nil else {
+            return nil
+        }
+        return hit.distance
+    }
+
+    /// Renders the deployed fiber as a hairline line-strip through the polyline's checkpoints,
+    /// with a subtle sag on the live leg (last segment) only — the fixed segments were laid under
+    /// payout tension and read fine as straight runs. Rebuilt per call; at the checkpoint cap
+    /// (~100 vertices) that's negligible against the frame budget.
+    func updateFiberTetherVisual(points: [SIMD3<Float>]) {
+        guard points.count >= 2 else {
+            clearFiberTetherVisual()
+            return
+        }
+
+        var vertices: [SCNVector3] = []
+        vertices.reserveCapacity(points.count + 6)
+        for index in 0..<(points.count - 1) {
+            vertices.append(SCNVector3(points[index]))
+        }
+
+        let legStart = points[points.count - 2]
+        let legEnd = points[points.count - 1]
+        let legLength = simd_distance(legStart, legEnd)
+        let sagDepth = min(2.2, legLength * 0.05)
+        let sagSamples = 6
+        for step in 1...sagSamples {
+            let t = Float(step) / Float(sagSamples)
+            var point = legStart + (legEnd - legStart) * t
+            point.y = max(0.04, point.y - sagDepth * sinf(.pi * t))
+            vertices.append(SCNVector3(point))
+        }
+
+        var indices: [Int32] = []
+        indices.reserveCapacity((vertices.count - 1) * 2)
+        for index in 0..<(vertices.count - 1) {
+            indices.append(Int32(index))
+            indices.append(Int32(index + 1))
+        }
+
+        let geometry = SCNGeometry(
+            sources: [SCNGeometrySource(vertices: vertices)],
+            elements: [SCNGeometryElement(indices: indices, primitiveType: .line)]
+        )
+        // A pale hairline, not literal 0.28mm black — a real fiber would be invisible at any
+        // camera distance, and the player needs to see where their line lies.
+        let material = SCNMaterial()
+        material.diffuse.contents = NSColor(calibratedWhite: 0.8, alpha: 0.55)
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        geometry.materials = [material]
+        fiberTetherPathNode.geometry = geometry
+    }
+
+    func clearFiberTetherVisual() {
+        fiberTetherPathNode.geometry = nil
     }
 
     @discardableResult
