@@ -514,6 +514,39 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var mode: DroneFlightMode
     @Published private(set) var flightControlMode: FlightControlMode
     @Published private(set) var isSimulationRunning: Bool
+
+    // MARK: - FPV OSD overlay inputs
+    // Feed the aircraft-camera "digital viewfinder" HUD (`FPVViewportOverlayView`). All computed
+    // from already-published state (read at the overlay's redraw cadence), so there is no extra
+    // per-frame @Published churn.
+
+    /// Left transmitter stick (Mode 2 layout): `x` = yaw stick, `y` = throttle position, each in
+    /// −1...1 with `y = +1` at full throttle. Yaw comes from the live resolved pilot input and
+    /// throttle from the commanded motor value, so the OSD stick reads neutral under autopilot —
+    /// which is correct, the pilot isn't touching it.
+    var fpvLeftStick: CGPoint {
+        CGPoint(
+            x: clampedUnitAxis(resolvedInputState.yaw),
+            y: clampedUnitAxis(controlValues.throttle * 2.0 - 1.0)
+        )
+    }
+
+    /// Right transmitter stick (Mode 2 layout): `x` = roll stick, `y` = pitch stick, each in −1...1.
+    var fpvRightStick: CGPoint {
+        CGPoint(
+            x: clampedUnitAxis(resolvedInputState.roll),
+            y: clampedUnitAxis(resolvedInputState.pitch)
+        )
+    }
+
+    /// Whether the onboard DVR (mission replay recorder) is actively capturing — drives the FPV
+    /// OSD's blinking "Rec." tag.
+    var isOnboardRecording: Bool { missionReplayRecorder.isRecording }
+
+    private func clampedUnitAxis(_ value: Double) -> Double {
+        guard value.isFinite else { return 0.0 }
+        return min(max(value, -1.0), 1.0)
+    }
     @Published private(set) var currentProjectID: String
     @Published private(set) var currentProjectName: String
     @Published private(set) var hasUnsavedChanges: Bool

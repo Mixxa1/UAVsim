@@ -1173,6 +1173,9 @@
 "overlay.compass.subtitle" = "Heading / north / target bearing";
 "overlay.compass.metric.heading" = "HDG";
 "overlay.compass.metric.north" = "N";
+"overlay.compass.metric.east" = "E";
+"overlay.compass.metric.south" = "S";
+"overlay.compass.metric.west" = "W";
 "overlay.compass.metric.bearing" = "BRG";
 "overlay.compass.marker.current" = "HDG";
 "overlay.compass.marker.target" = "TGT";
@@ -1189,6 +1192,16 @@
 "hud.compact.position" = "POS  x %.1f  y %.1f  z %.1f";
 "hud.compact.speed_battery" = "SPD  %.1f m/s   BAT %.0f%%";
 "hud.compact.auto_nav" = "AUTO %@  DST %@  BRG %@";
+
+"hud.fpv.mode.acro" = "Acro";
+"hud.fpv.mode.angle" = "Angle";
+"hud.fpv.mode.hover_assist" = "Hover";
+"hud.fpv.metric.altitude" = "Alt";
+"hud.fpv.metric.speed" = "Spd";
+"hud.fpv.unit.altitude" = "m";
+"hud.fpv.unit.speed" = "m/s";
+"hud.fpv.recording" = "Rec.";
+"hud.fpv.standby" = "Stby";
 
 "telemetry.flags.input.format" = "MAN %@ | MRK %@ | PV %@ | MAP %@";
 "telemetry.flags.state.format" = "DIS %@ | BLK %@ | SIG %@";

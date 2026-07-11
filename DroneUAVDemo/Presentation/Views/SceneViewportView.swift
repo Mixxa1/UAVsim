@@ -18,6 +18,9 @@ struct SceneViewportView: View {
         let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && rangefinderOpticsState.isAvailable
         let hoseOpticsState = viewModel.hoseOpticsState
         let hoseOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && hoseOpticsState.isAvailable
+        // Aircraft-camera "digital viewfinder" OSD replaces the default instrument HUD + PFD compass
+        // while the pilot is looking through the FPV camera, so the feed reads like a camera feed.
+        let fpvHUDActive = viewModel.cameraConfiguration.mode == .fpv && !viewModel.isSpectatorMode && !payloadOpticsActive
         let capsuleState = viewModel.capsuleState
         let capsuleOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && !hoseOpticsState.isAvailable && capsuleState.isAvailable
         // Visual counterpart to the radio link-quality HUD — fiber isn't a radio concern at all
@@ -157,6 +160,17 @@ struct SceneViewportView: View {
 
             if viewModel.isSpectatorMode || payloadOpticsActive {
                 EmptyView()
+            } else if fpvHUDActive {
+                FPVViewportOverlayView(
+                    telemetry: viewModel.telemetry,
+                    flightControlMode: viewModel.flightControlMode,
+                    compass: viewModel.compassViewModel,
+                    leftStick: viewModel.fpvLeftStick,
+                    rightStick: viewModel.fpvRightStick,
+                    isRecording: viewModel.isOnboardRecording
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
             } else if !viewModel.isParametersPanelVisible || viewModel.isCompactTelemetryHUDEnabled {
                 CompactTelemetryHUDView(
                     telemetry: viewModel.telemetry,
@@ -202,7 +216,7 @@ struct SceneViewportView: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
-                if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive {
+                if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive, !fpvHUDActive {
                     CompassOverlayView(
                         viewModel: viewModel.compassViewModel,
                         telemetry: viewModel.telemetry
@@ -2219,4 +2233,375 @@ private struct TerrainMapTransform {
 
 private func localized(_ key: String) -> String {
     NSLocalizedString(key, comment: "")
+}
+
+// MARK: – FPV camera "digital viewfinder" OSD
+
+/// On-screen display for the aircraft-mounted camera view (`CameraMode.fpv`), styled after a real
+/// drone/goggle DVR overlay — thin monochrome glyphs painted straight onto the live feed — rather
+/// than the sim's dark-panel instrument HUD (`CompactTelemetryHUDView`/`CompassOverlayView`), which
+/// `SceneViewportView.body` suppresses while this is up so the feed reads like a camera feed. The
+/// only non-white accents are functional and standard for real OSDs: a low-battery tint and the red
+/// record dot. Purely presentational; hit-testing is disabled by the caller.
+struct FPVViewportOverlayView: View {
+    let telemetry: TelemetrySnapshot
+    let flightControlMode: FlightControlMode
+    @ObservedObject var compass: CompassViewModel
+    let leftStick: CGPoint
+    let rightStick: CGPoint
+    let isRecording: Bool
+
+    private var altitudeText: String { String(format: "%.0f", max(0.0, telemetry.y)) }
+    private var speedText: String { String(format: "%.1f", max(0.0, telemetry.speed)) }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                FPVReticleView()
+                FPVHorizonLine(rollDegrees: telemetry.roll, pitchDegrees: telemetry.pitch)
+
+                // Top-left — flight mode + battery.
+                VStack(alignment: .leading, spacing: 9) {
+                    FPVModeBadge(mode: flightControlMode)
+                    FPVBatteryGauge(percent: telemetry.batteryPercent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.leading, 22)
+                .padding(.top, 18)
+
+                // Top-right — altitude + ground speed.
+                VStack(alignment: .trailing, spacing: 10) {
+                    FPVReadout(label: localized("hud.fpv.metric.altitude"), unit: localized("hud.fpv.unit.altitude"), value: altitudeText)
+                    FPVReadout(label: localized("hud.fpv.metric.speed"), unit: localized("hud.fpv.unit.speed"), value: speedText)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.trailing, 22)
+                .padding(.top, 18)
+
+                // Top-center — heading tape.
+                FPVCompassStrip(headingDegrees: compass.headingDegrees)
+                    .frame(width: min(max(geo.size.width * 0.42, 240.0), 380.0), height: 28)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 16)
+
+                // Bottom-center — transmitter sticks.
+                HStack(spacing: 10) {
+                    FPVStickIndicator(position: leftStick)
+                    FPVStickIndicator(position: rightStick)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 18)
+
+                // Bottom-left — DVR record tag.
+                FPVRecordingTag(isRecording: isRecording)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, 20)
+                    .padding(.bottom, 20)
+            }
+            .shadow(color: Color.black.opacity(0.5), radius: 1.5, x: 0, y: 1)
+        }
+    }
+}
+
+private struct FPVModeBadge: View {
+    let mode: FlightControlMode
+
+    private var codeKey: String {
+        switch mode {
+        case .acro: return "hud.fpv.mode.acro"
+        case .stabilized: return "hud.fpv.mode.angle"
+        case .hoverAssist: return "hud.fpv.mode.hover_assist"
+        }
+    }
+
+    var body: some View {
+        Text(LocalizedStringKey(codeKey))
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .tracking(1.5)
+            .textCase(.uppercase)
+            .foregroundStyle(.white.opacity(0.95))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(.white.opacity(0.85), lineWidth: 1.4)
+            )
+    }
+}
+
+private struct FPVBatteryGauge: View {
+    let percent: Double
+
+    private var fraction: CGFloat { CGFloat(min(max(percent / 100.0, 0.0), 1.0)) }
+
+    private var tint: Color {
+        switch percent {
+        case ..<15.0: return Color(red: 0.95, green: 0.30, blue: 0.24)
+        case ..<35.0: return Color(red: 0.95, green: 0.70, blue: 0.26)
+        default: return .white.opacity(0.95)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            HStack(spacing: 2) {
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .stroke(.white.opacity(0.85), lineWidth: 1.3)
+                        .frame(width: 34, height: 16)
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(tint)
+                        .frame(width: max(2.0, 28.0 * fraction), height: 10)
+                        .padding(.leading, 3)
+                }
+                Capsule()
+                    .fill(.white.opacity(0.85))
+                    .frame(width: 3, height: 7)
+            }
+            Text(String(format: "%.0f%%", max(0.0, percent)))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+        }
+    }
+}
+
+private struct FPVReadout: View {
+    let label: String
+    let unit: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: -1) {
+                Text(label)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .tracking(1)
+                    .textCase(.uppercase)
+                Text(unit)
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            Text(value)
+                .font(.system(size: 26, weight: .semibold, design: .monospaced))
+                .frame(minWidth: 46, alignment: .trailing)
+        }
+        .foregroundStyle(.white.opacity(0.95))
+    }
+}
+
+private struct FPVCompassStrip: View {
+    let headingDegrees: Double
+
+    /// Scrolling ticker matching the reference OSD: a wide (~240°) window so 3–4 cardinal letters
+    /// are in view at once and visibly slide as `headingDegrees` changes, with dot ticks marking
+    /// the 30°/60° steps in between — cardinal-only labels (no intercardinals), like the reference.
+    private static let visibleSpanDegrees = 240.0
+    private static let tickStepDegrees = 30.0
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            let centerX = rect.midX
+            let baselineY = rect.maxY - 7.0
+            let pixelsPerDegree = rect.width / Self.visibleSpanDegrees
+
+            let halfSpan = Self.visibleSpanDegrees / 2.0
+            let start = (headingDegrees / Self.tickStepDegrees).rounded(.down) * Self.tickStepDegrees - halfSpan
+            stride(from: start, through: start + Self.visibleSpanDegrees, by: Self.tickStepDegrees).forEach { absolute in
+                let value = fpvNormalizedHeading(absolute)
+                let delta = fpvShortestHeadingDelta(from: headingDegrees, to: value)
+                let x = centerX + delta * pixelsPerDegree
+                guard x >= rect.minX - 10, x <= rect.maxX + 10 else { return }
+
+                if let label = fpvCardinalLabel(value) {
+                    context.draw(
+                        Text(label)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(value == 0.0 ? 1.0 : 0.82)),
+                        at: CGPoint(x: x, y: baselineY - 6),
+                        anchor: .center
+                    )
+                } else {
+                    let dot = Path(ellipseIn: CGRect(x: x - 1.0, y: baselineY - 8.0, width: 2.0, height: 2.0))
+                    context.fill(dot, with: .color(.white.opacity(0.55)))
+                }
+            }
+
+            var caret = Path()
+            caret.move(to: CGPoint(x: centerX, y: baselineY + 2))
+            caret.addLine(to: CGPoint(x: centerX - 4, y: baselineY + 9))
+            caret.addLine(to: CGPoint(x: centerX + 4, y: baselineY + 9))
+            caret.closeSubpath()
+            context.fill(caret, with: .color(.white.opacity(0.95)))
+        }
+    }
+}
+
+/// Center gunsight reticle plus the dotted viewfinder rails (two static vertical dashes framing
+/// the shot), echoing the reference OSD's bracket look. Purely decorative/fixed — the reference's
+/// actual *dynamic* center element is the roll/pitch tick-line drawn separately by
+/// `FPVHorizonLine`, not these rails.
+private struct FPVReticleView: View {
+    var body: some View {
+        Canvas { context, size in
+            let cx = size.width / 2.0
+            let cy = size.height / 2.0
+            let shading = GraphicsContext.Shading.color(.white.opacity(0.85))
+            let dashed = StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [1.6, 5.0])
+
+            let railHalf = min(size.height * 0.26, 260.0)
+            let railX = min(size.width * 0.20, 340.0)
+            let railTop = cy - railHalf
+            let railBot = cy + railHalf
+
+            for x in [cx - railX, cx + railX] {
+                var rail = Path()
+                rail.move(to: CGPoint(x: x, y: railTop))
+                rail.addLine(to: CGPoint(x: x, y: railBot))
+                context.stroke(rail, with: shading, style: dashed)
+            }
+
+            // Center gunsight: ring + four short radial ticks + a center dot.
+            let ring = 9.0
+            context.stroke(
+                Path(ellipseIn: CGRect(x: cx - ring, y: cy - ring, width: ring * 2, height: ring * 2)),
+                with: shading,
+                lineWidth: 1.4
+            )
+            let tickInner = ring + 2.0
+            let tickOuter = ring + 7.0
+            for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
+                var tick = Path()
+                tick.move(to: CGPoint(x: cx + dx * tickInner, y: cy + dy * tickInner))
+                tick.addLine(to: CGPoint(x: cx + dx * tickOuter, y: cy + dy * tickOuter))
+                context.stroke(tick, with: shading, lineWidth: 1.4)
+            }
+            context.fill(
+                Path(ellipseIn: CGRect(x: cx - 1.5, y: cy - 1.5, width: 3.0, height: 3.0)),
+                with: .color(.white.opacity(0.95))
+            )
+        }
+    }
+}
+
+/// The reference OSD's actual dynamic center element: a short dotted tick-line through the
+/// reticle that behaves like a minimal artificial horizon — it rotates with bank angle and
+/// shifts vertically with pitch, exactly like `AttitudeDirectorView`'s horizon in the PFD
+/// (`CompassOverlayView.swift`), just rendered as a plain tick-line instead of a filled sky/ground
+/// split. Unlike the static rails/gunsight in `FPVReticleView`, this one genuinely moves every
+/// frame as the aircraft maneuvers.
+private struct FPVHorizonLine: View {
+    let rollDegrees: Double
+    let pitchDegrees: Double
+
+    private var boundedRoll: Double {
+        let value = rollDegrees.isFinite ? rollDegrees : 0.0
+        return min(max(value, -60.0), 60.0)
+    }
+
+    private var boundedPitch: Double {
+        let value = pitchDegrees.isFinite ? pitchDegrees : 0.0
+        return min(max(value, -35.0), 35.0)
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let cx = size.width / 2.0
+            let cy = size.height / 2.0
+            let halfLength = min(size.width * 0.10, 150.0)
+            let pitchPixelsPerDegree = 2.4
+
+            var world = context
+            world.translateBy(x: cx, y: cy)
+            world.rotate(by: .degrees(-boundedRoll))
+            world.translateBy(x: -cx, y: -cy)
+
+            let lineY = cy + boundedPitch * pitchPixelsPerDegree
+            let dashed = StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [1.6, 5.0])
+            var line = Path()
+            line.move(to: CGPoint(x: cx - halfLength, y: lineY))
+            line.addLine(to: CGPoint(x: cx + halfLength, y: lineY))
+            world.stroke(line, with: .color(.white.opacity(0.85)), style: dashed)
+        }
+    }
+}
+
+private struct FPVStickIndicator: View {
+    let position: CGPoint   // −1...1 per axis, y = +1 at top
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 1.0, dy: 1.0)
+            let panel = Path(roundedRect: rect, cornerRadius: 3.0)
+            context.fill(panel, with: .color(.black.opacity(0.32)))
+            context.stroke(
+                panel,
+                with: .color(.white.opacity(0.7)),
+                lineWidth: 1.0
+            )
+
+            let dashed = StrokeStyle(lineWidth: 1.0, dash: [2.0, 3.0])
+            var horizontal = Path()
+            horizontal.move(to: CGPoint(x: rect.minX + 3, y: rect.midY))
+            horizontal.addLine(to: CGPoint(x: rect.maxX - 3, y: rect.midY))
+            context.stroke(horizontal, with: .color(.white.opacity(0.34)), style: dashed)
+            var vertical = Path()
+            vertical.move(to: CGPoint(x: rect.midX, y: rect.minY + 3))
+            vertical.addLine(to: CGPoint(x: rect.midX, y: rect.maxY - 3))
+            context.stroke(vertical, with: .color(.white.opacity(0.34)), style: dashed)
+
+            let clampedX = min(max(position.x, -1.0), 1.0)
+            let clampedY = min(max(position.y, -1.0), 1.0)
+            let px = rect.midX + CGFloat(clampedX) * (rect.width / 2.0 - 5.0)
+            let py = rect.midY - CGFloat(clampedY) * (rect.height / 2.0 - 5.0)
+            let dot = 5.0
+            context.stroke(
+                Path(ellipseIn: CGRect(x: px - dot, y: py - dot, width: dot * 2, height: dot * 2)),
+                with: .color(.white.opacity(0.95)),
+                lineWidth: 1.4
+            )
+        }
+        .frame(width: 58, height: 42)
+    }
+}
+
+private struct FPVRecordingTag: View {
+    let isRecording: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.6)) { timeline in
+            let blinkOn = Int(timeline.date.timeIntervalSinceReferenceDate / 0.6) % 2 == 0
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(isRecording ? Color(red: 0.95, green: 0.24, blue: 0.20) : .white.opacity(0.45))
+                    .frame(width: 9, height: 9)
+                    .opacity(isRecording ? (blinkOn ? 1.0 : 0.25) : 0.55)
+                Text(LocalizedStringKey(isRecording ? "hud.fpv.recording" : "hud.fpv.standby"))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+        }
+    }
+}
+
+private func fpvNormalizedHeading(_ value: Double) -> Double {
+    let wrapped = value.truncatingRemainder(dividingBy: 360.0)
+    return wrapped >= 0.0 ? wrapped : wrapped + 360.0
+}
+
+private func fpvShortestHeadingDelta(from source: Double, to target: Double) -> CGFloat {
+    let raw = (fpvNormalizedHeading(target) - fpvNormalizedHeading(source)).truncatingRemainder(dividingBy: 360.0)
+    if raw > 180.0 { return CGFloat(raw - 360.0) }
+    if raw < -180.0 { return CGFloat(raw + 360.0) }
+    return CGFloat(raw)
+}
+
+private func fpvCardinalLabel(_ heading: Double) -> String? {
+    switch Int(fpvNormalizedHeading(heading).rounded()) {
+    case 0, 360: return localized("overlay.compass.metric.north")
+    case 90: return localized("overlay.compass.metric.east")
+    case 180: return localized("overlay.compass.metric.south")
+    case 270: return localized("overlay.compass.metric.west")
+    default: return nil
+    }
 }

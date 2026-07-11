@@ -1168,6 +1168,9 @@
 "overlay.compass.subtitle" = "Курс / север / пеленг цели";
 "overlay.compass.metric.heading" = "КУР";
 "overlay.compass.metric.north" = "С";
+"overlay.compass.metric.east" = "В";
+"overlay.compass.metric.south" = "Ю";
+"overlay.compass.metric.west" = "З";
 "overlay.compass.metric.bearing" = "ПЕЛ";
 "overlay.compass.marker.current" = "КУР";
 "overlay.compass.marker.target" = "ЦЕЛ";
@@ -1184,6 +1187,16 @@
 "hud.compact.position" = "ПОЗ  x %.1f  y %.1f  z %.1f";
 "hud.compact.speed_battery" = "СКР  %.1f м/с   АКБ %.0f%%";
 "hud.compact.auto_nav" = "АВТО %@  ДИСТ %@  ПЕЛ %@";
+
+"hud.fpv.mode.acro" = "Акро";
+"hud.fpv.mode.angle" = "Угол";
+"hud.fpv.mode.hover_assist" = "Завис";
+"hud.fpv.metric.altitude" = "Выс";
+"hud.fpv.metric.speed" = "Скор";
+"hud.fpv.unit.altitude" = "м";
+"hud.fpv.unit.speed" = "м/с";
+"hud.fpv.recording" = "Зап.";
+"hud.fpv.standby" = "Ожид";
 
 "telemetry.flags.input.format" = "РУЧ %@ | МЕТ %@ | ПН %@ | КАРТ %@";
 "telemetry.flags.state.format" = "РАЗ %@ | БЛК %@ | СИГ %@";
