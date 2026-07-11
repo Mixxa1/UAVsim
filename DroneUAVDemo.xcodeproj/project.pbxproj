@@ -81,6 +81,10 @@
 		00000000000003D041931BF1 /* PayloadAgriculturalSprayerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000003D041A4B004 /* PayloadAgriculturalSprayerState.swift */; };
 		00000000000003D041B64417 /* PayloadAgriculturalSprayerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000003D041C7D82A /* PayloadAgriculturalSprayerController.swift */; };
 		000000000000016017ECA7ED /* FiberOpticReelClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000001602213E81A /* FiberOpticReelClass.swift */; };
+		0000000000000007DF764C07 /* FiberSpoolModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000007DF7EC54C /* FiberSpoolModule.swift */; };
+		0000000000000007DF873E91 /* FiberLinkState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000013693BF5817 /* FiberLinkState.swift */; };
+		000000000000013693CCC1B8 /* UAVControlLinkType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000013693DA2B59 /* UAVControlLinkType.swift */; };
+		0000000000000B1D26A5DCA0 /* FiberFailsafeStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000B1D26B770B3 /* FiberFailsafeStage.swift */; };
 		100000000000000000000A27 /* PayloadFireCapsuleState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A28 /* PayloadFireCapsuleState.swift */; };
 		100000000000000000000A29 /* PayloadFireCapsuleController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2A /* PayloadFireCapsuleController.swift */; };
 		10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013F /* PayloadCapabilityCheck.swift */; };
@@ -88,9 +92,12 @@
 		10000000000000000000023E /* PayloadController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000141 /* PayloadController.swift */; };
 		10000000000000000000023F /* FPVCameraAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000142 /* FPVCameraAnchor.swift */; };
 		100000000000000000000240 /* PayloadVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000143 /* PayloadVisualFactory.swift */; };
+		00000000000001266C166A59 /* FiberSpoolVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000001266C1676F0 /* FiberSpoolVisualFactory.swift */; };
 		100000000000000000000241 /* PayloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000144 /* PayloadView.swift */; };
+		0000000000000457E1277D5F /* CommsLinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000457E18C7DC4 /* CommsLinkView.swift */; };
 		100000000000000000000242 /* PayloadMountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000145 /* PayloadMountState.swift */; };
 		100000000000000000000243 /* PayloadToolbarEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000146 /* PayloadToolbarEntry.swift */; };
+		00000000000003AD9089DF4C /* CommsLinkToolbarEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000003AD90967EE7 /* CommsLinkToolbarEntry.swift */; };
 		100000000000000000000244 /* PayloadDataQualitySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000147 /* PayloadDataQualitySource.swift */; };
 		100000000000000000000245 /* UAVFlightTuningProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000148 /* UAVFlightTuningProfile.swift */; };
 		100000000000000000000246 /* FlightBaselineResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000149 /* FlightBaselineResolver.swift */; };
@@ -421,6 +428,10 @@
 		00000000000003D041A4B004 /* PayloadAgriculturalSprayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadAgriculturalSprayerState.swift; sourceTree = "<group>"; };
 		00000000000003D041C7D82A /* PayloadAgriculturalSprayerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadAgriculturalSprayerController.swift; sourceTree = "<group>"; };
 		00000000000001602213E81A /* FiberOpticReelClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberOpticReelClass.swift; sourceTree = "<group>"; };
+		0000000000000007DF7EC54C /* FiberSpoolModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberSpoolModule.swift; sourceTree = "<group>"; };
+		000000000000013693BF5817 /* FiberLinkState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberLinkState.swift; sourceTree = "<group>"; };
+		000000000000013693DA2B59 /* UAVControlLinkType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVControlLinkType.swift; sourceTree = "<group>"; };
+		0000000000000B1D26B770B3 /* FiberFailsafeStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberFailsafeStage.swift; sourceTree = "<group>"; };
 		100000000000000000000A28 /* PayloadFireCapsuleState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireCapsuleState.swift; sourceTree = "<group>"; };
 		100000000000000000000A2A /* PayloadFireCapsuleController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireCapsuleController.swift; sourceTree = "<group>"; };
 		10000000000000000000013F /* PayloadCapabilityCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadCapabilityCheck.swift; sourceTree = "<group>"; };
@@ -428,9 +439,12 @@
 		100000000000000000000141 /* PayloadController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadController.swift; sourceTree = "<group>"; };
 		100000000000000000000142 /* FPVCameraAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVCameraAnchor.swift; sourceTree = "<group>"; };
 		100000000000000000000143 /* PayloadVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadVisualFactory.swift; sourceTree = "<group>"; };
+		00000000000001266C1676F0 /* FiberSpoolVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberSpoolVisualFactory.swift; sourceTree = "<group>"; };
 		100000000000000000000144 /* PayloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadView.swift; sourceTree = "<group>"; };
+		0000000000000457E18C7DC4 /* CommsLinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsLinkView.swift; sourceTree = "<group>"; };
 		100000000000000000000145 /* PayloadMountState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadMountState.swift; sourceTree = "<group>"; };
 		100000000000000000000146 /* PayloadToolbarEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadToolbarEntry.swift; sourceTree = "<group>"; };
+		00000000000003AD90967EE7 /* CommsLinkToolbarEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsLinkToolbarEntry.swift; sourceTree = "<group>"; };
 		100000000000000000000147 /* PayloadDataQualitySource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadDataQualitySource.swift; sourceTree = "<group>"; };
 		100000000000000000000148 /* UAVFlightTuningProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVFlightTuningProfile.swift; sourceTree = "<group>"; };
 		100000000000000000000149 /* FlightBaselineResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightBaselineResolver.swift; sourceTree = "<group>"; };
@@ -765,6 +779,10 @@
 				00000000000003D041A4B004 /* PayloadAgriculturalSprayerState.swift */,
 				00000000000003D041C7D82A /* PayloadAgriculturalSprayerController.swift */,
 				00000000000001602213E81A /* FiberOpticReelClass.swift */,
+				0000000000000007DF7EC54C /* FiberSpoolModule.swift */,
+				000000000000013693BF5817 /* FiberLinkState.swift */,
+				000000000000013693DA2B59 /* UAVControlLinkType.swift */,
+				0000000000000B1D26B770B3 /* FiberFailsafeStage.swift */,
 				100000000000000000000145 /* PayloadMountState.swift */,
 				100000000000000000000147 /* PayloadDataQualitySource.swift */,
 				10000000000000000000013C /* PayloadType.swift */,
@@ -925,6 +943,7 @@
 				A1530000000000000000000B /* BuildingColliderDomain.swift */,
 				100000000000000000000142 /* FPVCameraAnchor.swift */,
 				100000000000000000000143 /* PayloadVisualFactory.swift */,
+				00000000000001266C1676F0 /* FiberSpoolVisualFactory.swift */,
 				100000000000000000000157 /* PayloadDropCameraController.swift */,
 				10000000000000000000010D /* SceneFactory.swift */,
 				10000000000000000000011D /* ScenePopulationService.swift */,
@@ -984,7 +1003,9 @@
 				100000000000000000000172 /* TacticalMapView.swift */,
 				100000000000000000000104 /* TelemetryPanelView.swift */,
 				100000000000000000000144 /* PayloadView.swift */,
+				0000000000000457E18C7DC4 /* CommsLinkView.swift */,
 				100000000000000000000146 /* PayloadToolbarEntry.swift */,
+				00000000000003AD90967EE7 /* CommsLinkToolbarEntry.swift */,
 				10000000000000000000013A /* UAVCatalogView.swift */,
 				10000000000000000000014D /* UAVCatalogModuleView.swift */,
 				100000000000000000000138 /* UAVFilterBarView.swift */,
@@ -1439,14 +1460,21 @@
 				00000000000003D041931BF1 /* PayloadAgriculturalSprayerState.swift in Sources */,
 				00000000000003D041B64417 /* PayloadAgriculturalSprayerController.swift in Sources */,
 				000000000000016017ECA7ED /* FiberOpticReelClass.swift in Sources */,
+				0000000000000007DF764C07 /* FiberSpoolModule.swift in Sources */,
+				0000000000000007DF873E91 /* FiberLinkState.swift in Sources */,
+				000000000000013693CCC1B8 /* UAVControlLinkType.swift in Sources */,
+				0000000000000B1D26A5DCA0 /* FiberFailsafeStage.swift in Sources */,
 				10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */,
 				10000000000000000000023D /* VehicleMassModel.swift in Sources */,
 				10000000000000000000023E /* PayloadController.swift in Sources */,
 				10000000000000000000023F /* FPVCameraAnchor.swift in Sources */,
 				100000000000000000000240 /* PayloadVisualFactory.swift in Sources */,
+				00000000000001266C166A59 /* FiberSpoolVisualFactory.swift in Sources */,
 				100000000000000000000241 /* PayloadView.swift in Sources */,
+				0000000000000457E1277D5F /* CommsLinkView.swift in Sources */,
 				100000000000000000000242 /* PayloadMountState.swift in Sources */,
 				100000000000000000000243 /* PayloadToolbarEntry.swift in Sources */,
+				00000000000003AD9089DF4C /* CommsLinkToolbarEntry.swift in Sources */,
 				100000000000000000000244 /* PayloadDataQualitySource.swift in Sources */,
 				100000000000000000000245 /* UAVFlightTuningProfile.swift in Sources */,
 				100000000000000000000246 /* FlightBaselineResolver.swift in Sources */,

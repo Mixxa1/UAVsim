@@ -9,7 +9,6 @@ enum PayloadVisualPreset: String, Hashable {
     case fireHose
     case fireCapsuleLauncher
     case agriculturalSprayer
-    case fiberOpticSpool
     case rescuePack
     case sensorModule
     case radioRelay

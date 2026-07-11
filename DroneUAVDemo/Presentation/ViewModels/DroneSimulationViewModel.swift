@@ -274,7 +274,6 @@ private enum CollisionAftermathState: String {
 private enum SignalLossCause: String {
     case linkRange
     case impactDamage
-    case fiberSevered
 }
 
 private struct PayloadProximityEffect {
@@ -595,6 +594,10 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published var isParametersPanelVisible: Bool
     @Published var activeControlModule: ControlModule?
     @Published private(set) var isPayloadPanelVisible: Bool
+    /// Separate top-level panel from `isPayloadPanelVisible` — the fiber-optic control link is
+    /// not mission payload (see `UAVControlLinkType`), so it gets its own toolbar entry/overlay
+    /// rather than living inside the payload editor.
+    @Published private(set) var isCommsLinkPanelVisible = false
     @Published var isBoundaryBarrierVisible: Bool
     @Published var isCompactTelemetryHUDEnabled: Bool
     @Published var telemetryExportAlert: TelemetryExportAlert?
@@ -604,6 +607,17 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isArmed: Bool
     @Published private(set) var physicalState: DronePhysicalState
     @Published private(set) var payloadDraftConfiguration: PayloadConfiguration
+    /// Independent comms/control-link equipment slot — separate from the mission payload bay
+    /// above (see `UAVControlLinkType`), so an aircraft can carry a fiber spool and a camera/
+    /// sprayer/etc. at the same time rather than competing for one slot.
+    @Published private(set) var fiberSpoolDraftConfiguration = FiberSpoolModule()
+    @Published private(set) var isFiberSpoolAttached = false
+    @Published private(set) var fiberLinkState = FiberLinkState()
+    @Published private(set) var fiberFailsafeStage: FiberFailsafeStage = .none
+    /// Explicit opt-in (default off) to let an autonomous mission keep flying unattended after a
+    /// fiber break instead of the default `.returnHome` — must be a deliberate setting, not
+    /// default behavior.
+    @Published var continueMissionOnFiberLoss = false
     @Published private(set) var payloadState: PayloadState
     @Published private(set) var payloadMountState: PayloadMountState
     @Published private(set) var payloadCapabilityCheck: PayloadCapabilityCheck
@@ -654,13 +668,6 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isHoseTetherTaut = false
     @Published private(set) var hoseTetherDistanceMeters: Float = 0.0
     @Published private(set) var hoseTetherLimitMeters: Float = 0.0
-    /// Whether the fiber-optic tether accounting is currently active (attached, armed, airborne).
-    @Published private(set) var isFiberOpticTetherActive = false
-    @Published private(set) var fiberOpticRemainingLengthMeters: Float = 0.0
-    @Published private(set) var fiberOpticUsableLengthMeters: Float = 0.0
-    /// 0...1 entanglement risk from flying near obstacles while turning — reaching 1.0 severs
-    /// the fiber (see `updateFiberOpticTether`).
-    @Published private(set) var fiberOpticSnagRiskLevel: Float = 0.0
     @Published private(set) var payloadThermalState: PayloadThermalState = .default
     @Published private(set) var payloadMissionSignals: [PayloadMissionSignal]
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
@@ -721,6 +728,26 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
         return true
+    }
+
+    /// True for the whole fiber-severance failsafe sequence (braking/hoverFailsafe/landing,
+    /// stabilize/loiterGlide/emergencyLanding) — blocks player input the same way
+    /// `signalState.isInteractionBlocking` does, so the autonomous recovery isn't fought by the
+    /// player's own stick.
+    var isFiberFailsafeActive: Bool {
+        fiberFailsafeStage.isActive
+    }
+
+    /// Gates whether the existing world-boundary/geofence signal-loss machinery applies at all
+    /// (see `UAVControlLinkType`) — `.fiberOptic` only while the reel is actually mounted and the
+    /// link hasn't already broken (once broken, `FiberFailsafeStage` owns recovery, not a control
+    /// "link type").
+    /// Deliberately stays `.fiberOptic` even after the link breaks — a severed fiber doesn't
+    /// fall back to radio, it's just gone, and the aircraft is on `FiberFailsafeStage`'s own
+    /// autonomous recovery until it lands. Handing control back to the geofence/radio signal-loss
+    /// machine mid-failsafe would let it fight (or freeze) the failsafe's own flight commands.
+    var activeControlLinkType: UAVControlLinkType {
+        isFiberSpoolAttached ? .fiberOptic : .radio
     }
 
     var showsFixedWingLaunchStatus: Bool {
@@ -998,9 +1025,6 @@ final class DroneSimulationViewModel: ObservableObject {
             case .impactDamage:
                 lostTitle = String(localized: "signal_loss.impact_title")
                 lostMessage = String(localized: "signal_loss.impact_message")
-            case .fiberSevered:
-                lostTitle = String(localized: "signal_loss.fiber_title")
-                lostMessage = String(localized: "signal_loss.fiber_message")
             case .linkRange, .none:
                 lostTitle = String(localized: "signal_loss.lost_title")
                 lostMessage = String(localized: "signal_loss.lost_message")
@@ -1136,11 +1160,15 @@ final class DroneSimulationViewModel: ObservableObject {
     private var payloadSelfInteractionTimer: Float = 0.0
     private var payloadSelfInteractionSeverity: Float = 0.0
     private var payloadControlPenalty: Float = 0.0
+    #if DEBUG
+    private var lastLoggedAgriSprayerDebugState: String?
+    #endif
     /// Cumulative flight-path distance (not straight-line range) consumed from the fiber-optic
     /// reel this flight — reset whenever the tether goes from inactive to active (fresh reel).
     private var fiberOpticPathLengthUsedMeters: Float = 0.0
     private var fiberOpticSnagRisk: Float = 0.0
     private var fiberOpticLastTrackedPosition: SIMD3<Float>?
+    private var fiberFailsafeStageElapsed: Float = 0.0
     private var fixedWingAutopilotAltitudeCommand: Float?
     private var fixedWingAutopilotCourseCommand: Float?
     private var fixedWingAssistTurnOverrideTimeRemaining: Float = 0.0
@@ -1191,6 +1219,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// backtrace landing in Foundation's string search machinery).
     private var fixedWingObstacleBaseRadiusCache: [String: Float] = [:]
     private var installedPayloadConfiguration: PayloadConfiguration?
+    private var installedFiberSpoolModule: FiberSpoolModule?
     private var activePayloadReleaseID: UUID?
     private var lastSidebarModule: ControlModule = .flightOps
     private var committedTacticalMissionDraft: MissionDraft = .empty
@@ -1846,6 +1875,7 @@ final class DroneSimulationViewModel: ObservableObject {
             isParametersPanelVisible = false
             activeControlModule = nil
             isPayloadPanelVisible = false
+            isCommsLinkPanelVisible = false
             cameraConfiguration.mode = .spectator
             sceneController.configureSpectatorRuntime(camera: cameraConfiguration)
             inputManager.reset()
@@ -2113,6 +2143,12 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadDraftConfiguration.fireHoseDiameterClass = .standard
             payloadDraftConfiguration.fireHoseLengthMeters = 30.0
             payloadDraftConfiguration.payloadMass = FireHoseDiameterClass.standard.massForLength(30.0)
+        } else if type == .agriculturalSprayer {
+            // Same idea as the hose: a real tank's mass follows how full it is, not a flat
+            // constant. Reseed to a full tank on every switch into this type so a previously
+            // drained tank (from an earlier attach/spray cycle) never silently carries over.
+            payloadDraftConfiguration.agriculturalSprayerTankLiters = AgriculturalSprayerTuning.tankCapacityLiters
+            payloadDraftConfiguration.payloadMass = AgriculturalSprayerTuning.massForFullTank()
         } else {
             payloadDraftConfiguration.payloadMass = type.defaultMass
         }
@@ -2178,19 +2214,57 @@ final class DroneSimulationViewModel: ObservableObject {
         hasUnsavedChanges = true
     }
 
-    func setFiberOpticRigging(reelClass: FiberOpticReelClass, lengthMeters: Double) {
+    // MARK: - Fiber-optic control link (comms equipment, not mission payload)
+
+    func setFiberSpoolRigging(reelClass: FiberOpticReelClass, lengthMeters: Double) {
         guard canControlLocalVehicle else { return }
         let clampedLength = Float(lengthMeters).clamped(to: reelClass.lengthRangeMeters)
-        guard payloadDraftConfiguration.fiberOpticReelClass != reelClass
-            || abs(payloadDraftConfiguration.fiberOpticReelLengthMeters - clampedLength) > 0.001 else {
+        guard fiberSpoolDraftConfiguration.reelClass != reelClass
+            || abs(fiberSpoolDraftConfiguration.totalLengthMeters - clampedLength) > 0.001 else {
             return
         }
 
-        payloadDraftConfiguration.fiberOpticReelClass = reelClass
-        payloadDraftConfiguration.fiberOpticReelLengthMeters = clampedLength
-        payloadDraftConfiguration.payloadMass = reelClass.massForLength(clampedLength)
-        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
-        payloadStatusMessageKey = nil
+        fiberSpoolDraftConfiguration = FiberSpoolModule(reelClass: reelClass, totalLengthMeters: clampedLength)
+        if isFiberSpoolAttached {
+            installedFiberSpoolModule = fiberSpoolDraftConfiguration
+            sceneController.attachFiberSpoolVisual(fiberSpoolDraftConfiguration)
+            refreshPayloadRuntimeState()
+        }
+        hasUnsavedChanges = true
+    }
+
+    func attachFiberSpoolModule() {
+        guard canControlLocalVehicle, !isFiberSpoolAttached else { return }
+        installedFiberSpoolModule = fiberSpoolDraftConfiguration
+        isFiberSpoolAttached = true
+        // A freshly mounted reel starts fully wound — reset path-length/snag-risk accounting
+        // rather than inheriting whatever a previously mounted (and possibly severed) reel left
+        // behind.
+        fiberLinkState = FiberLinkState()
+        fiberOpticPathLengthUsedMeters = 0.0
+        fiberOpticSnagRisk = 0.0
+        fiberOpticLastTrackedPosition = nil
+        // A previous reel's failsafe sequence may have ended in a terminal stage (landed/crashed/
+        // etc.) — `beginFiberFailsafeSequence` only fires from `.none`, so this must be cleared
+        // for a fresh reel's eventual severance to trigger the sequence again.
+        fiberFailsafeStage = .none
+        fiberFailsafeStageElapsed = 0.0
+        sceneController.attachFiberSpoolVisual(fiberSpoolDraftConfiguration)
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func detachFiberSpoolModule() {
+        guard canControlLocalVehicle, isFiberSpoolAttached else { return }
+        installedFiberSpoolModule = nil
+        isFiberSpoolAttached = false
+        fiberLinkState = FiberLinkState()
+        fiberOpticPathLengthUsedMeters = 0.0
+        fiberOpticSnagRisk = 0.0
+        fiberOpticLastTrackedPosition = nil
+        fiberFailsafeStage = .none
+        fiberFailsafeStageElapsed = 0.0
+        sceneController.removeFiberSpoolVisual()
         refreshPayloadRuntimeState()
         hasUnsavedChanges = true
     }
@@ -2823,6 +2897,7 @@ final class DroneSimulationViewModel: ObservableObject {
         activeControlModule = module
         isParametersPanelVisible = module != nil
         isPayloadPanelVisible = false
+        isCommsLinkPanelVisible = false
     }
 
     func toggleActiveControlModule(_ module: ControlModule) {
@@ -2832,6 +2907,22 @@ final class DroneSimulationViewModel: ObservableObject {
     func togglePayloadPanel() {
         guard canControlLocalVehicle else { return }
         isPayloadPanelVisible.toggle()
+        if isPayloadPanelVisible {
+            isCommsLinkPanelVisible = false
+        }
+    }
+
+    func toggleCommsLinkPanel() {
+        guard canControlLocalVehicle else { return }
+        isCommsLinkPanelVisible.toggle()
+        if isCommsLinkPanelVisible {
+            isPayloadPanelVisible = false
+        }
+    }
+
+    func setCommsLinkPanelVisible(_ visible: Bool) {
+        guard canControlLocalVehicle || !visible else { return }
+        isCommsLinkPanelVisible = visible
     }
 
     func setPayloadPanelVisible(_ visible: Bool) {
@@ -4029,6 +4120,11 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        if isCommsLinkPanelVisible {
+            setCommsLinkPanelVisible(false)
+            return
+        }
+
         if isParametersPanelVisible {
             setControlPanelVisible(false)
         }
@@ -4900,7 +4996,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let blocksSimulationForSignalLoss = signalState.isInteractionBlocking &&
-            signalLossCause != .impactDamage && signalLossCause != .fiberSevered
+            signalLossCause != .impactDamage
         if blocksSimulationForSignalLoss {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
@@ -5078,6 +5174,7 @@ final class DroneSimulationViewModel: ObservableObject {
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
         updateSignalLossSequence(deltaTime: dt)
         updateFiberOpticTether(deltaTime: dt)
+        updateFiberFailsafeSequence(deltaTime: dt)
         syncMissionDeliveryState(triggerAutoRelease: false)
 
         if blocksSimulationForSignalLoss {
@@ -5719,7 +5816,7 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float,
         controlState: ResolvedControlState
     ) {
-        guard canControlLocalVehicle else { return }
+        guard canControlLocalVehicle, !isFiberFailsafeActive else { return }
 
         // hybridVTOL transition lever: a raw held-key input, not routed through
         // the assist/marker-guidance pipeline below (keyboard-only this pass;
@@ -6016,7 +6113,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func processInputActions(using controlState: ResolvedControlState) {
-        guard !signalState.isInteractionBlocking else {
+        guard !signalState.isInteractionBlocking, !isFiberFailsafeActive else {
             return
         }
 
@@ -8435,6 +8532,7 @@ final class DroneSimulationViewModel: ObservableObject {
             externalControllerOverlayActive ||
             isMissionMapVisible ||
             isPayloadPanelVisible ||
+            isCommsLinkPanelVisible ||
             (isParametersPanelVisible && activeControlModule != nil) ||
             isControllerCursorEnabled {
             return .uiNavigation
@@ -8708,7 +8806,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .agriculturalSprayer, .fiberOpticSpool, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .agriculturalSprayer, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -8728,7 +8826,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .agriculturalSprayer, .fiberOpticSpool, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .agriculturalSprayer, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -8953,7 +9051,21 @@ final class DroneSimulationViewModel: ObservableObject {
             refreshPayloadRuntimeState()
         }
         agriculturalSprayerState = agriculturalSprayerController.state
-        sceneController.setAgriculturalSprayerSpraying(agriculturalSprayerState.isSpraying)
+        sceneController.setAgriculturalSprayerSpraying(
+            agriculturalSprayerState.isSpraying,
+            dronePlanarPosition: currentPlanarPosition()
+        )
+
+        #if DEBUG
+        let debugSummary = "mounted=\(isMountedAgriculturalSprayerAvailable) " +
+            "type=\(payloadDraftConfiguration.payloadType.rawValue) " +
+            "available=\(agriculturalSprayerState.isAvailable) powered=\(agriculturalSprayerState.isPowered) " +
+            "spraying=\(agriculturalSprayerState.isSpraying) tank=\(agriculturalSprayerState.tankRemainingLiters)"
+        if debugSummary != lastLoggedAgriSprayerDebugState {
+            print("[AgriSprayer] \(debugSummary)")
+            lastLoggedAgriSprayerDebugState = debugSummary
+        }
+        #endif
     }
 
     /// The drone must actually LAND (not just hover) within a small radius of the fire truck to
@@ -9428,7 +9540,8 @@ final class DroneSimulationViewModel: ObservableObject {
             for: selectedDroneProfile,
             uavProfile: activeUAVProfile,
             installedPayload: installedPayloadConfiguration,
-            payloadState: payloadState
+            payloadState: payloadState,
+            installedFiberSpool: installedFiberSpoolModule
         )
     }
 
@@ -9636,9 +9749,7 @@ final class DroneSimulationViewModel: ObservableObject {
             abs(installedPayloadConfiguration.fireHoseLengthMeters - payloadDraftConfiguration.fireHoseLengthMeters) <= 0.001 &&
             installedPayloadConfiguration.fireCapsuleSize == payloadDraftConfiguration.fireCapsuleSize &&
             installedPayloadConfiguration.fireCapsuleCount == payloadDraftConfiguration.fireCapsuleCount &&
-            abs(installedPayloadConfiguration.agriculturalSprayerTankLiters - payloadDraftConfiguration.agriculturalSprayerTankLiters) <= 0.001 &&
-            installedPayloadConfiguration.fiberOpticReelClass == payloadDraftConfiguration.fiberOpticReelClass &&
-            abs(installedPayloadConfiguration.fiberOpticReelLengthMeters - payloadDraftConfiguration.fiberOpticReelLengthMeters) <= 0.001
+            abs(installedPayloadConfiguration.agriculturalSprayerTankLiters - payloadDraftConfiguration.agriculturalSprayerTankLiters) <= 0.001
     }
 
     private func resolvePayloadMountState() -> PayloadMountState {
@@ -15752,7 +15863,14 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func updateSignalLossSequence(deltaTime: Float) {
-        guard signalLossCause != .impactDamage, signalLossCause != .fiberSevered else {
+        // The world-boundary/geofence signal-loss machine is a radio-link concern (RSSI-style
+        // fade with distance) — a physical fiber isn't affected by distance from the map center,
+        // so it's bypassed entirely under `.fiberOptic` in favor of `FiberLinkState`/
+        // `FiberFailsafeStage` above.
+        guard activeControlLinkType == .radio else {
+            return
+        }
+        guard signalLossCause != .impactDamage else {
             return
         }
 
@@ -15963,50 +16081,53 @@ final class DroneSimulationViewModel: ObservableObject {
     /// point — a bent route uses up fiber faster than the straight-line distance it covers. Called
     /// once per simulation tick (not from `enforceRuntimeSafetyAndBounds`, which can run several
     /// times per tick for other safety passes and would double-count path length).
+    ///
+    /// The fiber spool is a control-link module (`installedFiberSpoolModule`), not mission
+    /// payload — this only ever reads/writes that slot, never `installedPayloadConfiguration`.
     private func updateFiberOpticTether(deltaTime: Float) {
-        guard let installed = installedPayloadConfiguration,
-              installed.payloadType == .fiberOpticSpool,
-              payloadState == .attached,
-              payloadMountState == .occupied,
-              isArmed,
-              state.position.y > 0.05 else {
-            if isFiberOpticTetherActive {
-                isFiberOpticTetherActive = false
-                fiberOpticRemainingLengthMeters = 0.0
-                fiberOpticUsableLengthMeters = 0.0
-                fiberOpticSnagRiskLevel = 0.0
+        guard installedFiberSpoolModule != nil, isFiberSpoolAttached else {
+            // Genuinely detached — only this resets link state to fresh. Neither being grounded
+            // nor being broken should (see the two guards below): a real reel doesn't un-sever
+            // just because the aircraft happens to touch the ground, and the failsafe's own
+            // final landing necessarily drops through this same altitude check.
+            if fiberLinkState.status != .connected || fiberOpticLastTrackedPosition != nil {
+                fiberLinkState = FiberLinkState()
             }
             fiberOpticLastTrackedPosition = nil
             return
         }
 
-        if !isFiberOpticTetherActive {
-            // Freshly armed/airborne with the reel mounted — start path-length and snag-risk
-            // accounting from zero rather than wherever a previous flight left off.
-            fiberOpticPathLengthUsedMeters = 0.0
-            fiberOpticSnagRisk = 0.0
+        guard fiberLinkState.status != .broken else {
+            // Terminal — never reconnects, regardless of ground/armed state. `FiberFailsafeStage`
+            // owns recovery from here, including the landing this same reel is still mounted for.
+            return
         }
-        isFiberOpticTetherActive = true
+
+        guard let installed = installedFiberSpoolModule, isArmed, state.position.y > 0.05 else {
+            // Grounded/disarmed but the reel is still mounted and hasn't broken (e.g. sitting on
+            // the pad before launch) — pause tracking without resetting path-length/snag-risk
+            // progress; a real reel doesn't refill because the aircraft landed for a moment.
+            fiberOpticLastTrackedPosition = nil
+            return
+        }
 
         if let lastPosition = fiberOpticLastTrackedPosition {
             fiberOpticPathLengthUsedMeters += simd_distance(state.position, lastPosition)
         }
         fiberOpticLastTrackedPosition = state.position
 
-        let reelClass = installed.fiberOpticReelClass
-        let configuredLength = installed.fiberOpticReelLengthMeters
+        let reelClass = installed.reelClass
+        let configuredLength = installed.totalLengthMeters
         let usableBudget = configuredLength * FiberOpticTetherTuning.usableLengthFraction
-        fiberOpticUsableLengthMeters = usableBudget
         let remainingUsable = max(0.0, usableBudget - fiberOpticPathLengthUsedMeters)
-        fiberOpticRemainingLengthMeters = remainingUsable
 
         // Physical fiber remaining on the spool (not the margin-adjusted usable budget above)
         // determines the reel's actual mass — it gets lighter as fiber pays out, same idea as
         // the agricultural sprayer's draining tank.
         let remainingPhysicalLength = max(0.0, configuredLength - fiberOpticPathLengthUsedMeters)
         let newMass = reelClass.massForLength(remainingPhysicalLength)
-        if abs(newMass - installed.payloadMass) > 0.0001 {
-            installedPayloadConfiguration?.payloadMass = newMass
+        if abs(newMass - installed.spoolMassKg) > 0.0001 {
+            installedFiberSpoolModule?.totalLengthMeters = remainingPhysicalLength
             refreshPayloadRuntimeState()
         }
 
@@ -16022,12 +16143,172 @@ final class DroneSimulationViewModel: ObservableObject {
             let riskRate = (FiberOpticTetherTuning.snagRiskBaseRatePerSecond +
                 turnRate * FiberOpticTetherTuning.snagRiskTurnRateMultiplier) * proximityFactor
             fiberOpticSnagRisk = min(1.0, fiberOpticSnagRisk + riskRate * deltaTime)
+        } else {
+            // Clear of every obstacle — let an isolated close pass/turn fade rather than
+            // permanently ratcheting toward a snag for the rest of the flight.
+            fiberOpticSnagRisk = max(0.0, fiberOpticSnagRisk - FiberOpticTetherTuning.snagRiskDecayPerSecondWhenClear * deltaTime)
         }
-        fiberOpticSnagRiskLevel = fiberOpticSnagRisk
 
-        if remainingUsable <= 0.0001 || fiberOpticSnagRisk >= 1.0 {
-            enterSignalLostState(cause: .fiberSevered)
+        let remainingLengthFraction = usableBudget > 0.0001 ? remainingUsable / usableBudget : 0.0
+        let isSnagged = fiberOpticSnagRisk >= 1.0
+        let isExhausted = remainingUsable <= 0.0001
+        let status: FiberLinkStatus
+        if isSnagged || isExhausted {
+            status = .broken
+        } else if fiberOpticSnagRisk >= FiberOpticTetherTuning.degradedSnagRiskThreshold
+            || remainingLengthFraction <= FiberOpticTetherTuning.degradedRemainingLengthFraction {
+            status = .degraded
+        } else {
+            status = .connected
         }
+
+        fiberLinkState = FiberLinkState(
+            status: status,
+            deployedLengthMeters: fiberOpticPathLengthUsedMeters,
+            remainingLengthMeters: remainingUsable,
+            usableLengthMeters: usableBudget,
+            isSnagged: isSnagged,
+            snagRiskLevel: fiberOpticSnagRisk
+        )
+
+        if status == .broken {
+            beginFiberFailsafeSequence()
+        }
+    }
+
+    /// Entry point into the fiber-severance failsafe. A mission-bound autonomous aircraft reuses
+    /// the existing `.returnHome` state machine directly instead of the staged sequence below —
+    /// `continueMissionOnFiberLoss` (default off) is the explicit opt-in to skip even that, per
+    /// the requirement that continuing unattended must be a deliberate setting, not the default.
+    private func beginFiberFailsafeSequence() {
+        guard fiberFailsafeStage == .none else {
+            return
+        }
+
+        if activeRouteTargetSource == .mission, missionExecutionState.status == .running {
+            if continueMissionOnFiberLoss {
+                fiberFailsafeStage = .missionContinued
+            } else {
+                setFlightMode(.returnHome, reason: "fiber_link_broken")
+                fiberFailsafeStage = .returnedHome
+            }
+            return
+        }
+
+        fiberFailsafeStageElapsed = 0.0
+        switch selectedDroneProfile.airframeClass {
+        case .multirotor:
+            fiberFailsafeStage = .braking
+        case .fixedWing, .hybridVTOL:
+            fiberFailsafeStage = .stabilize
+        }
+    }
+
+    /// Drives the active failsafe stage every tick, once `fiberFailsafeStage.isActive`. Applies
+    /// commands the same way `.hover`/`.emergencyStop`/autopilot modes already do elsewhere
+    /// (`updateControlValues(markManual: false)`), which is why gating player input
+    /// (`isFiberFailsafeActive`) matters — otherwise the player's own stick would fight this
+    /// every other tick instead of being cleanly superseded.
+    private func updateFiberFailsafeSequence(deltaTime: Float) {
+        guard fiberFailsafeStage.isActive else {
+            return
+        }
+        fiberFailsafeStageElapsed += deltaTime
+
+        switch fiberFailsafeStage {
+        case .braking:
+            let horizontalSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.yaw = Double(state.orientation.z.radiansToDegrees)
+                values.x = Double(state.position.x)
+                values.z = Double(state.position.z)
+            }, markManual: false)
+            if fiberFailsafeStageElapsed >= 1.0 || horizontalSpeed < 0.3 {
+                fiberFailsafeStage = .hoverFailsafe
+                fiberFailsafeStageElapsed = 0.0
+            }
+
+        case .hoverFailsafe:
+            let hoverBaseline = Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle)
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.yaw = Double(state.orientation.z.radiansToDegrees)
+                let throttleTarget = hoverBaseline.clamped(to: 0.0...1.0)
+                values.throttle = values.throttle + (throttleTarget - values.throttle) * 0.18
+            }, markManual: false)
+            // Real fiber breaks never reconnect — a brief 1-3s stabilization is enough before
+            // landing, unlike radio range loss where waiting longer might recover the link.
+            if fiberFailsafeStageElapsed >= 2.0 {
+                fiberFailsafeStage = .landing
+                fiberFailsafeStageElapsed = 0.0
+            }
+
+        case .landing:
+            updateControlValues({ values in
+                values.x = Double(state.position.x)
+                values.y = max(0.0, Double(state.position.y - 0.02))
+                values.z = Double(state.position.z)
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.throttle = max(0.0, values.throttle - 0.02)
+            }, markManual: false)
+            if physicalState.isGroundRestState {
+                finalizeFiberFailsafeLanding()
+            }
+
+        case .stabilize:
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 0.0
+                values.yaw = Double(state.orientation.z.radiansToDegrees)
+                values.throttle = values.throttle + (0.5 - values.throttle) * 0.12
+            }, markManual: false)
+            if fiberFailsafeStageElapsed >= 2.0 {
+                fiberFailsafeStage = .loiterGlide
+                fiberFailsafeStageElapsed = 0.0
+            }
+
+        case .loiterGlide:
+            // A small constant bank with no active tracking is enough to hold a circling pattern
+            // — no bound route/mission target is required, unlike the autopilot's real loiter.
+            updateControlValues({ values in
+                values.roll = 15.0
+                values.pitch = 0.0
+                values.throttle = values.throttle + (0.5 - values.throttle) * 0.08
+            }, markManual: false)
+            if fiberFailsafeStageElapsed >= 8.0 {
+                fiberFailsafeStage = .emergencyLanding
+                fiberFailsafeStageElapsed = 0.0
+            }
+
+        case .emergencyLanding:
+            // Gentle nose-up bias (not a dive) plus decaying throttle — a slow, controlled glide
+            // toward the ground rather than precise runway/belly-landing guidance.
+            updateControlValues({ values in
+                values.roll = 0.0
+                values.pitch = 3.0
+                values.throttle = max(0.0, values.throttle - 0.01)
+            }, markManual: false)
+            if physicalState.isGroundRestState {
+                finalizeFiberFailsafeLanding()
+            }
+
+        case .none, .landed, .crashed, .returnedHome, .missionContinued:
+            break
+        }
+    }
+
+    /// A severed control link doesn't come back by wiggling the stick — landing/crashing under
+    /// the failsafe disarms the aircraft, same as any other post-crash/post-landing state, so
+    /// resuming flight needs an explicit re-arm rather than seamlessly handing control back the
+    /// instant the failsafe's own descent touches down.
+    private func finalizeFiberFailsafeLanding() {
+        let crashed = physicalState == .crashed
+        fiberFailsafeStage = crashed ? .crashed : .landed
+        disarm(preserveCrashDynamics: crashed)
     }
 
     private func isFinite(_ value: SIMD3<Float>) -> Bool {

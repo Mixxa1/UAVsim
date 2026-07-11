@@ -14,7 +14,6 @@ struct PayloadView: View {
     let onMassChange: (Double) -> Void
     let onHoseRiggingChange: (FireHoseDiameterClass, Double) -> Void
     let onCapsuleRiggingChange: (FireCapsuleSize, Int) -> Void
-    let onFiberRiggingChange: (FiberOpticReelClass, Double) -> Void
     let onCustomNameChange: (String) -> Void
     let onAttach: () -> Void
     let onRelease: () -> Void
@@ -129,10 +128,6 @@ struct PayloadView: View {
 
             if configuration.payloadType == .fireCapsuleLauncher {
                 capsuleRiggingConsole
-            }
-
-            if configuration.payloadType == .fiberOpticSpool {
-                fiberRiggingConsole
             }
 
             if configuration.payloadType == .custom {
@@ -413,11 +408,6 @@ struct PayloadView: View {
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
-            } else if configuration.payloadType == .fiberOpticSpool {
-                Text("payload.fiber.mass_follows_rig")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.5))
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(14)
@@ -496,43 +486,6 @@ struct PayloadView: View {
         }
         .padding(14)
         .background(chromePanel(accent: Color.orange.opacity(0.34)))
-    }
-
-    private var fiberRiggingConsole: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(titleKey: "payload.fiber.reel_class")
-
-            Picker("", selection: Binding(
-                get: { configuration.fiberOpticReelClass },
-                set: { onFiberRiggingChange($0, Double(configuration.fiberOpticReelLengthMeters)) }
-            )) {
-                ForEach(FiberOpticReelClass.allCases) { value in
-                    Text(LocalizedStringKey(value.titleKey)).tag(value)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("payload.fiber.reel_length")
-                        .font(.caption).foregroundStyle(.white.opacity(0.8))
-                    Spacer()
-                    Text(String(format: "%.1f km", configuration.fiberOpticReelLengthMeters / 1000.0))
-                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
-                }
-                Slider(
-                    value: Binding(
-                        get: { Double(configuration.fiberOpticReelLengthMeters) },
-                        set: { onFiberRiggingChange(configuration.fiberOpticReelClass, $0) }
-                    ),
-                    in: Double(configuration.fiberOpticReelClass.lengthRangeMeters.lowerBound)...Double(configuration.fiberOpticReelClass.lengthRangeMeters.upperBound),
-                    step: Double(configuration.fiberOpticReelClass.lengthStepMeters)
-                )
-            }
-        }
-        .padding(14)
-        .background(chromePanel(accent: Color(red: 0.86, green: 0.53, blue: 0.06).opacity(0.34)))
     }
 
     private var customNameConsole: some View {
@@ -921,8 +874,6 @@ struct PayloadView: View {
             return "circle.hexagongrid.fill"
         case .agriculturalSprayer:
             return "leaf.fill"
-        case .fiberOpticSpool:
-            return "circle.dashed"
         case .rescuePack:
             return "cross.case.fill"
         case .sensorModule:
@@ -952,8 +903,6 @@ struct PayloadView: View {
             return Color(red: 0.90, green: 0.42, blue: 0.16)
         case .agriculturalSprayer:
             return Color(red: 0.30, green: 0.62, blue: 0.28)
-        case .fiberOpticSpool:
-            return Color(red: 0.86, green: 0.53, blue: 0.06)
         case .custom:
             return Color(red: 0.30, green: 0.74, blue: 0.98)
         }

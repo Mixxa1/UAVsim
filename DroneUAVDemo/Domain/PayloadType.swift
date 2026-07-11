@@ -9,7 +9,6 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
     case fireHose
     case fireCapsuleLauncher
     case agriculturalSprayer
-    case fiberOpticSpool
     case rescuePack
     case sensorModule
     case radioRelay
@@ -35,8 +34,6 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return NSLocalizedString("payload.type.fire_capsule_launcher", comment: "")
         case .agriculturalSprayer:
             return NSLocalizedString("payload.type.agricultural_sprayer", comment: "")
-        case .fiberOpticSpool:
-            return NSLocalizedString("payload.type.fiber_optic_spool", comment: "")
         case .rescuePack:
             return NSLocalizedString("payload.type.rescue_pack", comment: "")
         case .sensorModule:
@@ -75,12 +72,6 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             // (AgriculturalSprayerTuning.massForFullTank()). Drains toward the empty hardware-only
             // mass at runtime as the tank sprays out.
             return 47.0
-        case .fiberOpticSpool:
-            // Reference/baseline mass — matches a full medium-tier reel
-            // (FiberOpticReelClass.medium.massForLength at its midpoint). The actual configured
-            // mass varies with the rigged reel class/length, and drains toward the empty
-            // hardware-only mass at runtime as the fiber pays out.
-            return 9.0
         case .rescuePack:
             return 2.20
         case .sensorModule:
@@ -110,8 +101,6 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
             return .fireCapsuleLauncher
         case .agriculturalSprayer:
             return .agriculturalSprayer
-        case .fiberOpticSpool:
-            return .fiberOpticSpool
         case .rescuePack:
             return .rescuePack
         case .sensorModule:

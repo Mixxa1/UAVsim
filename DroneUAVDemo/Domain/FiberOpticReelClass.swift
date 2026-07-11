@@ -70,9 +70,23 @@ enum FiberOpticTetherTuning {
     /// Distance to the nearest obstacle at which entanglement risk starts accumulating.
     static let snagRiskProximityMeters: Float = 6.0
     /// Baseline risk accumulation per second at maximum proximity, before the turn-rate term.
-    static let snagRiskBaseRatePerSecond: Float = 0.05
+    /// Tuned so sustained flying right next to an obstacle takes tens of seconds to snag, not a
+    /// single brief pass — a real trailing fiber can graze a branch without necessarily catching.
+    static let snagRiskBaseRatePerSecond: Float = 0.02
     /// Extra risk accumulation per second per radian/second of yaw rate at maximum proximity —
     /// sharp turns near obstacles (or backtracking a complex route) are what actually snags a
-    /// trailing fiber, not just flying near something in a straight line.
-    static let snagRiskTurnRateMultiplier: Float = 2.2
+    /// trailing fiber, not just flying near something in a straight line. A typical route-following
+    /// turn is ~1-1.5 rad/s, so this is deliberately small — one turn near a tree shouldn't sever
+    /// the fiber in under a second.
+    static let snagRiskTurnRateMultiplier: Float = 0.15
+    /// Risk decays at this rate per second whenever clear of the proximity radius — an isolated
+    /// close pass or turn shouldn't permanently doom the rest of the flight, only sustained
+    /// weaving through obstacles should actually accumulate toward a snag.
+    static let snagRiskDecayPerSecondWhenClear: Float = 0.05
+    /// Snag risk crossing this moves `FiberLinkState.status` to `.degraded` (HUD warning only)
+    /// before it reaches 1.0 and actually severs the fiber.
+    static let degradedSnagRiskThreshold: Float = 0.4
+    /// Remaining-usable-length fraction below which the link is also considered `.degraded`,
+    /// independent of snag risk — running low on reel is its own warning.
+    static let degradedRemainingLengthFraction: Float = 0.10
 }

@@ -90,15 +90,25 @@ struct SceneViewportView: View {
                     .allowsHitTesting(false)
             }
 
-            if viewModel.isFiberOpticTetherActive {
+            if viewModel.isFiberSpoolAttached, viewModel.fiberLinkState.status != .broken {
                 FiberOpticTetherStatusHUDView(
-                    remainingLengthMeters: viewModel.fiberOpticRemainingLengthMeters,
-                    usableLengthMeters: viewModel.fiberOpticUsableLengthMeters,
-                    snagRiskLevel: viewModel.fiberOpticSnagRiskLevel
+                    remainingLengthMeters: viewModel.fiberLinkState.remainingLengthMeters,
+                    usableLengthMeters: viewModel.fiberLinkState.usableLengthMeters,
+                    snagRiskLevel: viewModel.fiberLinkState.snagRiskLevel
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding(.bottom, overlayInset + 10)
                 .allowsHitTesting(false)
+            }
+
+            // Dedicated to the fiber-severance failsafe — deliberately not the generic
+            // signal-loss overlay (`UAVSignalState`), since the aircraft is actively flying
+            // itself through named stages here, not frozen.
+            if viewModel.fiberFailsafeStage.isActive {
+                FiberFailsafeStageHUDView(stage: viewModel.fiberFailsafeStage)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, overlayInset + 10)
+                    .allowsHitTesting(false)
             }
 
             if payloadOpticsActive, payloadOpticsState.isAvailable, payloadOpticsState.mode == .thermalStub {
@@ -769,6 +779,28 @@ private struct FiberOpticTetherStatusHUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
         )
+    }
+}
+
+/// Top-of-screen banner for the named fiber-severance failsafe stages — deliberately distinct
+/// from the bottom-aligned equipment HUDs above and from the generic signal-loss overlay, since
+/// this reflects the aircraft actively flying itself through a recovery sequence, not a frozen
+/// "signal lost" state.
+private struct FiberFailsafeStageHUDView: View {
+    let stage: FiberFailsafeStage
+
+    var body: some View {
+        Text(LocalizedStringKey(stage.titleKey))
+            .font(.caption.weight(.bold).monospaced())
+            .textCase(.uppercase)
+            .foregroundStyle(GroundControlPalette.danger)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(GroundControlPalette.danger.opacity(0.7), lineWidth: 1)
+            )
     }
 }
 

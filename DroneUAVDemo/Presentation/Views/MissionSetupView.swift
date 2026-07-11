@@ -496,7 +496,6 @@ struct MissionSetupView: View {
         case .fireHose: return "payload.type.fire_hose"
         case .fireCapsuleLauncher: return "payload.type.fire_capsule_launcher"
         case .agriculturalSprayer: return "payload.type.agricultural_sprayer"
-        case .fiberOpticSpool: return "payload.type.fiber_optic_spool"
         case .lidarModule: return "payload.type.lidar_module"
         case .cargoBox: return "payload.type.cargo_box"
         case .rescuePack: return "payload.type.rescue_pack"

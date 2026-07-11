@@ -112,6 +112,13 @@ final class DroneSceneController {
     // Particle system attached/detached on the spray-state transition only, same "don't keep
     // simulating while hidden" discipline as the hose stream/impact nodes above.
     private var agriculturalSprayerMistNode: SCNNode?
+    // Ground-truth "the field is getting wet" trail — the mist particles above fall from the
+    // payload mount and die within ~1s/~3m, so at any normal flight altitude they never actually
+    // reach and darken the ground on their own. Decals are dropped along the flight path instead
+    // of relying on the particles landing.
+    private let agriculturalWetGroundNode = SCNNode()
+    private var agriculturalWetGroundDecals: [SCNNode] = []
+    private var lastAgriculturalWetDecalPlanarPosition: SIMD2<Float>?
     // Capsule bombardier camera — deliberately no yaw/pitch rig unlike the hose/rangefinder above:
     // the launcher has no aim mechanic at all, it's a fixed nadir view (see `dropFireCapsule`'s
     // zero-forward-throw fall kinematics, which makes a straight-down view always show the true
@@ -210,6 +217,10 @@ final class DroneSceneController {
     private var fpvPresentationActive: Bool = false
     private var payloadVisualNode: SCNNode?
     private var activePayloadConfiguration: PayloadConfiguration?
+    /// Independent comms/control-link equipment slot — shares the airframe's one payload mount
+    /// point (no per-airframe second mount anchor exists in this codebase) but offset behind/
+    /// below it so it doesn't visually overlap a simultaneously-mounted payload.
+    private var fiberSpoolVisualNode: SCNNode?
     private var payloadCameraNode: SCNNode?
     private var payloadCamera: SCNCamera?
     private var payloadCameraOpticsState = PayloadCameraOpticsState()
@@ -417,6 +428,9 @@ final class DroneSceneController {
 
         dockStationNode.name = "dockStationNode"
         scene.rootNode.addChildNode(dockStationNode)
+
+        agriculturalWetGroundNode.name = "agriculturalWetGroundNode"
+        scene.rootNode.addChildNode(agriculturalWetGroundNode)
 
         missionDropZoneNode.name = "missionDropZoneNode"
         missionDropZoneNode.isHidden = true
@@ -2232,6 +2246,20 @@ final class DroneSceneController {
         resetFPVPayloadPresentation()
     }
 
+    func attachFiberSpoolVisual(_ module: FiberSpoolModule) {
+        removeFiberSpoolVisual()
+        let node = FiberSpoolVisualFactory.build(reelClass: module.reelClass)
+        node.simdPosition = SIMD3<Float>(0.0, -0.02, 0.09)
+        applyCategoryBitMask(RenderCategory.mountedPayload, to: node)
+        payloadMountNode.addChildNode(node)
+        fiberSpoolVisualNode = node
+    }
+
+    func removeFiberSpoolVisual() {
+        fiberSpoolVisualNode?.removeFromParentNode()
+        fiberSpoolVisualNode = nil
+    }
+
     @discardableResult
     func releasePayloadVisual() -> UUID? {
         guard let attachedPayloadNode = payloadVisualNode else {
@@ -2735,7 +2763,17 @@ final class DroneSceneController {
         payloadDropCameraController.reset()
     }
 
+    /// Decals are positioned against the terrain's ground height at the moment they're dropped —
+    /// a full regeneration (new map scale/preset/seed) invalidates that, so clear rather than
+    /// leave a trail floating above or buried under the new surface.
+    func clearAgriculturalWetGroundDecals() {
+        agriculturalWetGroundDecals.forEach { $0.removeFromParentNode() }
+        agriculturalWetGroundDecals.removeAll()
+        lastAgriculturalWetDecalPlanarPosition = nil
+    }
+
     func regenerateEnvironment(_ terrain: TerrainConfiguration) {
+        clearAgriculturalWetGroundDecals()
         lastTerrainConfig = terrain
         EnvironmentObjectFactory.resetDiagnostics()
         EnvironmentObjectFactory.snowWeatherActive = (currentWeather.preset == .snow)
@@ -3899,10 +3937,18 @@ final class DroneSceneController {
         }
     }
 
+    private enum AgriculturalSprayVFXTuning {
+        /// Minimum planar distance between two consecutive wet-ground decals — spraying every
+        /// tick would drop a decal 60x/sec at typical framerates, far denser than needed.
+        static let decalSpacingMeters: Float = 0.6
+        /// Bounds memory/node count for a long spraying pass — oldest decals are dropped first.
+        static let maxDecalCount = 260
+    }
+
     /// No aiming, no raycast — the sprayer always emits straight down from the payload mount
     /// while the trigger is held. Mirrors the hose stream's discipline of only attaching the
     /// particle system while actually visible, not for the whole mission a sprayer is mounted.
-    func setAgriculturalSprayerSpraying(_ isSpraying: Bool) {
+    func setAgriculturalSprayerSpraying(_ isSpraying: Bool, dronePlanarPosition: SIMD2<Float>) {
         if agriculturalSprayerMistNode == nil {
             let node = SCNNode()
             node.name = "agriculturalSprayerMistNode"
@@ -3920,6 +3966,7 @@ final class DroneSceneController {
             if mistNode.particleSystems?.isEmpty == false {
                 mistNode.removeAllParticleSystems()
             }
+            lastAgriculturalWetDecalPlanarPosition = nil
             return
         }
 
@@ -3944,6 +3991,52 @@ final class DroneSceneController {
             system.blendMode = .alpha
             system.loops = true
             mistNode.addParticleSystem(system)
+        }
+
+        dropAgriculturalWetGroundDecalIfNeeded(at: dronePlanarPosition)
+    }
+
+    /// The mist particles above fall from the payload mount and die out within ~1s/~3m — at any
+    /// normal flight altitude they never actually reach the ground, so "spraying" had no visible
+    /// effect on the field at all. Ground truth is tracked here instead: a trail of darkened,
+    /// slightly irregular patches dropped along the flight path at the analytic ground height
+    /// (`supportSurfaceHeight`, no SceneKit hit-testing) — the same "wet ground" read as the hose
+    /// truck's own foam/impact visuals, just left behind rather than momentary.
+    private func dropAgriculturalWetGroundDecalIfNeeded(at dronePlanarPosition: SIMD2<Float>) {
+        if let lastPosition = lastAgriculturalWetDecalPlanarPosition,
+           simd_distance(dronePlanarPosition, lastPosition) < AgriculturalSprayVFXTuning.decalSpacingMeters {
+            return
+        }
+        lastAgriculturalWetDecalPlanarPosition = dronePlanarPosition
+
+        let groundY = supportSurfaceHeight(
+            at: dronePlanarPosition,
+            clearanceRadius: 0.3,
+            maximumHeight: .greatestFiniteMagnitude
+        ) ?? Float(groundNode.presentation.position.y)
+
+        // Mirrors the drop-zone ring's working translucent-disc recipe (diffuse alpha + constant
+        // lighting, default `.alpha` blend) — `.multiply` blend on a near-black diffuse rendered
+        // fully opaque black instead of a subtle tint, reading as a spilled-oil puddle rather
+        // than wet ground.
+        let radius = Float.random(in: 0.32...0.5)
+        let material = SCNMaterial()
+        material.diffuse.contents = NSColor(calibratedRed: 0.20, green: 0.16, blue: 0.09, alpha: 0.22)
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+
+        let disc = SCNCylinder(radius: CGFloat(radius), height: 0.004)
+        disc.radialSegmentCount = 14
+        disc.materials = [material]
+
+        let decal = SCNNode(geometry: disc)
+        decal.simdPosition = SIMD3<Float>(dronePlanarPosition.x, groundY + 0.014, dronePlanarPosition.y)
+        decal.eulerAngles.y = CGFloat.random(in: 0...(2 * .pi))
+        agriculturalWetGroundNode.addChildNode(decal)
+
+        agriculturalWetGroundDecals.append(decal)
+        if agriculturalWetGroundDecals.count > AgriculturalSprayVFXTuning.maxDecalCount {
+            agriculturalWetGroundDecals.removeFirst().removeFromParentNode()
         }
     }
 

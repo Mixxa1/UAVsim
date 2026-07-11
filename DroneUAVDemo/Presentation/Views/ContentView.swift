@@ -956,6 +956,14 @@ private struct SimulationToolstripView: View {
                     ) {
                         viewModel.togglePayloadPanel()
                     }
+
+                    CommsLinkToolbarEntry(
+                        isPresented: viewModel.isCommsLinkPanelVisible,
+                        isAttached: viewModel.isFiberSpoolAttached,
+                        linkStatus: viewModel.fiberLinkState.status
+                    ) {
+                        viewModel.toggleCommsLinkPanel()
+                    }
                 }
             }
             .padding(.horizontal, 14)
@@ -1441,6 +1449,11 @@ struct ContentView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     }
 
+                    if viewModel.isCommsLinkPanelVisible {
+                        commsLinkOverlay(for: viewModel)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                    }
+
                     if viewModel.isMissionMapVisible {
                         missionMapOverlay(for: viewModel)
                             .transition(.opacity)
@@ -1463,6 +1476,7 @@ struct ContentView: View {
                 }
             }
             .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
+            .animation(.easeOut(duration: 0.18), value: viewModel.isCommsLinkPanelVisible)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(KeyBindingsSheetHost(simulationViewModel: viewModel))
             .alert("battery.depleted.title", isPresented: Binding(
@@ -1886,7 +1900,6 @@ struct ContentView: View {
                             onMassChange: viewModel.setPayloadMass,
                             onHoseRiggingChange: viewModel.setFireHoseRigging,
                             onCapsuleRiggingChange: viewModel.setFireCapsuleRigging,
-                            onFiberRiggingChange: viewModel.setFiberOpticRigging,
                             onCustomNameChange: viewModel.setPayloadCustomName,
                             onAttach: viewModel.attachPayload,
                             onRelease: viewModel.releasePayload,
@@ -1894,6 +1907,54 @@ struct ContentView: View {
                             onClose: {
                                 viewModel.setPayloadPanelVisible(false)
                             }
+                        )
+                        .disabled(viewModel.hasMissionScenario)
+                    }
+                    .frame(maxWidth: 1040)
+                    .padding(.horizontal, 28)
+                    .padding(.top, viewModel.isToolPanelVisible ? 132 : 88)
+                    .padding(.bottom, 40)
+                }
+            }
+            .zIndex(4)
+        }
+    }
+
+    /// Separate top-level overlay from `payloadOverlay` above — the fiber-optic control link is
+    /// not mission payload (see `UAVControlLinkType`), so it gets its own toolbar entry and panel
+    /// rather than living inside the payload editor.
+    private func commsLinkOverlay(for viewModel: DroneSimulationViewModel) -> some View {
+        ControllerInteractionSurface(
+            bridge: viewModel.controllerUIBridge,
+            surfaceID: "comms-link-overlay",
+            secondaryAction: {
+                viewModel.handleControllerUICancel()
+            }
+        ) {
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.34)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        viewModel.setCommsLinkPanelVisible(false)
+                    }
+
+                ControllerScrollableRegion(
+                    id: "comms-link.overlay.scroll",
+                    showsIndicators: false,
+                    isPrimary: true
+                ) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if viewModel.hasMissionScenario {
+                            MissionLockBanner(messageKey: "payload.locked_by_mission")
+                        }
+
+                        CommsLinkView(
+                            fiberModule: viewModel.fiberSpoolDraftConfiguration,
+                            isAttached: viewModel.isFiberSpoolAttached,
+                            linkState: viewModel.fiberLinkState,
+                            onRiggingChange: viewModel.setFiberSpoolRigging,
+                            onAttach: viewModel.attachFiberSpoolModule,
+                            onDetach: viewModel.detachFiberSpoolModule
                         )
                         .disabled(viewModel.hasMissionScenario)
                     }

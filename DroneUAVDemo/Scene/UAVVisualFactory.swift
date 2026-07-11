@@ -172,22 +172,7 @@ enum UAVVisualFactory {
         case .colossusCA12Atlas:
             return buildColossusCA12Atlas(payloadMountOffset: payloadMountOffset)
         case .agroWingTitanAT40:
-            // Reuses the Griff 60 heavy-lift octocopter frame (same size class as this
-            // flagship sprayer) with an agricultural safety-yellow top panel so it still
-            // reads as a distinct airframe — the tank/boom/nozzle rig itself is a payload
-            // visual (PayloadVisualFactory), not baked into the airframe body.
-            return visualVariant(
-                buildGriff60(payloadMountOffset: payloadMountOffset),
-                name: "uavRoot.agroWingTitanAT40",
-                scale: 1.15,
-                accents: [
-                    .topPanel(
-                        color: NSColor(calibratedRed: 0.86, green: 0.70, blue: 0.10, alpha: 1.0),
-                        size: SIMD3<Float>(0.30, 0.03, 0.30),
-                        position: SIMD3<Float>(0.0, 0.14, 0.0)
-                    )
-                ]
-            )
+            return buildAgroWingTitanAT40(payloadMountOffset: payloadMountOffset)
         }
     }
 
@@ -1298,6 +1283,132 @@ enum UAVVisualFactory {
         let fpvAnchor = SCNNode()
         fpvAnchor.name = "fpvCameraAnchor"
         fpvAnchor.position = SCNVector3(0.0, -0.04, 0.24)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: propellers,
+            propellerSpinDirections: spinDirections,
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// Styled after the real DJI Agras T40 — a low-slung wide tank body, 4 diagonal arms each
+    /// carrying a coaxial rotor pair (X8, 8 propellers total), tall thin legs raising the tank
+    /// clear of the ground, and a spray boom/nozzle bar beneath the tank. Deliberately distinct
+    /// from the boxy cargo-deck octocopter silhouette shared by Griff/Colossus/Wildfire/Pyrolift
+    /// above — this airframe's defining features (wide tank, boom, legs) are agricultural, not
+    /// cargo-lift.
+    private static func buildAgroWingTitanAT40(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.agroWingTitanAT40"
+
+        let shellMaterial = material(diffuse: NSColor(calibratedWhite: 0.92, alpha: 1.0), roughness: 0.36, metalness: 0.10)
+        let armMaterial = material(diffuse: NSColor(calibratedRed: 0.14, green: 0.15, blue: 0.16, alpha: 1.0), roughness: 0.42, metalness: 0.30)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.86, green: 0.42, blue: 0.10, alpha: 1.0), roughness: 0.32, metalness: 0.16)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.94, alpha: 0.84), roughness: 0.22, metalness: 0.08)
+        let boomMaterial = material(diffuse: NSColor(calibratedWhite: 0.80, alpha: 1.0), roughness: 0.40, metalness: 0.20)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let tank = boxNode(size: SIMD3<Float>(0.46, 0.16, 0.26), chamfer: 0.05, material: shellMaterial)
+        root.addChildNode(tank)
+        append(tank, to: .battery, componentNodes: &componentNodes)
+
+        let hub = cylinderNode(radius: 0.10, height: 0.06, material: armMaterial)
+        hub.position = SCNVector3(0.0, 0.11, 0.0)
+        root.addChildNode(hub)
+        append(hub, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Forward radar/vision sensor pod — the T40's distinctive nose module.
+        let sensorPod = sphereNode(radius: 0.045, material: armMaterial)
+        sensorPod.position = SCNVector3(0.0, 0.02, 0.16)
+        root.addChildNode(sensorPod)
+        append(sensorPod, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        // 4 diagonal arms, each a coaxial rotor pair (X8) — the real T40's layout, unlike
+        // Griff's true single-plane octocopter spread.
+        let armPoints: [(SIMD3<Float>, DamageComponent)] = [
+            (SIMD3<Float>(0.62, 0.10, 0.62), .armFR),
+            (SIMD3<Float>(0.62, 0.10, -0.62), .armRR),
+            (SIMD3<Float>(-0.62, 0.10, -0.62), .armRL),
+            (SIMD3<Float>(-0.62, 0.10, 0.62), .armFL)
+        ]
+        let motorBuckets: [DamageComponent] = [.motorFR, .motorRR, .motorRL, .motorFL]
+        let propBuckets: [DamageComponent] = [.propellerFR, .propellerRR, .propellerRL, .propellerFL]
+
+        var propellers: [SCNNode] = []
+        var spinDirections: [Float] = []
+
+        for (index, arm) in armPoints.enumerated() {
+            let armBeam = beamNode(start: SIMD3<Float>(0.0, 0.09, 0.0), end: arm.0, radius: 0.026, material: armMaterial)
+            root.addChildNode(armBeam)
+            append(armBeam, to: arm.1, componentNodes: &componentNodes)
+
+            let motorMount = cylinderNode(radius: 0.05, height: 0.10, material: armMaterial)
+            motorMount.position = SCNVector3(arm.0.x, arm.0.y + 0.05, arm.0.z)
+            root.addChildNode(motorMount)
+            append(motorMount, to: motorBuckets[index], componentNodes: &componentNodes)
+
+            let topProp = topPropellerNode(material: rotorMaterial, radius: 0.20)
+            topProp.position = SCNVector3(arm.0.x, arm.0.y + 0.11, arm.0.z)
+            topProp.name = "propeller.agroWingTitanAT40.\(index).top"
+            root.addChildNode(topProp)
+            propellers.append(topProp)
+            spinDirections.append(index % 2 == 0 ? 1.0 : -1.0)
+            append(topProp, to: propBuckets[index], componentNodes: &componentNodes)
+
+            // Bottom rotor of the coaxial pair, counter-rotating against its own top rotor.
+            let bottomProp = topPropellerNode(material: rotorMaterial, radius: 0.20)
+            bottomProp.position = SCNVector3(arm.0.x, arm.0.y - 0.01, arm.0.z)
+            bottomProp.name = "propeller.agroWingTitanAT40.\(index).bottom"
+            root.addChildNode(bottomProp)
+            propellers.append(bottomProp)
+            spinDirections.append(index % 2 == 0 ? -1.0 : 1.0)
+            append(bottomProp, to: propBuckets[index], componentNodes: &componentNodes)
+        }
+
+        // Tall thin legs — Agras-class drones sit noticeably high off the ground to clear the
+        // tank/boom, unlike the low skids on the cargo-lift airframes above.
+        let legCorners: [SIMD2<Float>] = [
+            SIMD2<Float>(1.0, 1.0), SIMD2<Float>(1.0, -1.0),
+            SIMD2<Float>(-1.0, -1.0), SIMD2<Float>(-1.0, 1.0)
+        ]
+        for corner in legCorners {
+            let leg = beamNode(
+                start: SIMD3<Float>(0.16 * corner.x, -0.06, 0.10 * corner.y),
+                end: SIMD3<Float>(0.20 * corner.x, -0.34, 0.12 * corner.y),
+                radius: 0.014,
+                material: armMaterial
+            )
+            root.addChildNode(leg)
+        }
+
+        // Spray boom bar with nozzles, slung beneath the tank — wider than the tank itself, the
+        // defining agricultural-sprayer detail absent from every other airframe in this file.
+        let boom = boxNode(size: SIMD3<Float>(0.62, 0.03, 0.05), chamfer: 0.01, material: boomMaterial)
+        boom.position = SCNVector3(0.0, -0.32, 0.0)
+        root.addChildNode(boom)
+        append(boom, to: .escPower, componentNodes: &componentNodes)
+
+        let nozzleCount = 6
+        let nozzleSpacing: Float = 0.62 / Float(nozzleCount - 1)
+        let nozzleStartX: Float = -0.31
+        for index in 0..<nozzleCount {
+            let nozzle = cylinderNode(radius: 0.014, height: 0.05, material: accentMaterial)
+            nozzle.position = SCNVector3(nozzleStartX + nozzleSpacing * Float(index), -0.36, 0.0)
+            root.addChildNode(nozzle)
+        }
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.02, 0.20)
         root.addChildNode(fpvAnchor)
         append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
 

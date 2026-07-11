@@ -169,27 +169,6 @@ enum PayloadVisualFactory {
                 nozzle.position = SCNVector3(startX + spacing * Float(index), -0.090 * sizeScale, 0.0)
                 standardPresentation.addChildNode(nozzle)
             }
-        case .fiberOpticSpool:
-            let reelMaterial = material(
-                diffuse: NSColor(calibratedRed: 0.86, green: 0.53, blue: 0.06, alpha: 1.0),
-                roughness: 0.44,
-                metalness: 0.22
-            )
-
-            let spool = cylinderNode(radius: 0.030 * sizeScale, height: 0.052 * sizeScale, material: shellMaterial)
-            spool.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
-            spool.position = SCNVector3(0.0, -0.032 * sizeScale, 0.0)
-            standardPresentation.addChildNode(spool)
-
-            let spoolBand = cylinderNode(radius: 0.032 * sizeScale, height: 0.010 * sizeScale, material: reelMaterial)
-            spoolBand.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
-            spoolBand.position = SCNVector3(0.0, -0.032 * sizeScale, 0.0)
-            standardPresentation.addChildNode(spoolBand)
-
-            let feedEyelet = cylinderNode(radius: 0.006 * sizeScale, height: 0.018 * sizeScale, material: darkMaterial)
-            feedEyelet.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
-            feedEyelet.position = SCNVector3(0.0, -0.046 * sizeScale, 0.030 * sizeScale)
-            standardPresentation.addChildNode(feedEyelet)
         case .rescuePack:
             let pack = boxNode(size: SIMD3<Float>(0.11, 0.07, 0.09) * sizeScale, chamfer: 0.010 * sizeScale, material: shellMaterial)
             pack.position = SCNVector3(0.0, -0.040 * sizeScale, 0.0)

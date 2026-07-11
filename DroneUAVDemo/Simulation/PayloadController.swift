@@ -62,7 +62,8 @@ enum PayloadController {
         for runtimeProfile: DroneModelProfile,
         uavProfile: UAVProfile?,
         installedPayload: PayloadConfiguration?,
-        payloadState: PayloadState
+        payloadState: PayloadState,
+        installedFiberSpool: FiberSpoolModule? = nil
     ) -> VehicleMassModel {
         let payloadMass: Float
         if payloadState == .attached, let installedPayload {
@@ -70,11 +71,16 @@ enum PayloadController {
         } else {
             payloadMass = 0.0
         }
+        // The fiber spool is a control-link module, not mission payload (see
+        // `UAVControlLinkType`) — folded into the same total mass for flight-physics purposes
+        // (weight/agility), since it occupies its own equipment slot independent of the payload
+        // bay above.
+        let combinedMass = payloadMass + max(0.0, installedFiberSpool?.spoolMassKg ?? 0.0)
 
         return VehicleMassModel.resolve(
             for: runtimeProfile,
             uavProfile: uavProfile,
-            payloadMass: payloadMass
+            payloadMass: combinedMass
         )
     }
 }

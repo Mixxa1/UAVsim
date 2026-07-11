@@ -134,11 +134,35 @@
 "payload.fiber.reel.medium" = "Medium (2–10 km)";
 "payload.fiber.reel.long" = "Long (10–20 km)";
 "payload.fiber.reel_length" = "Reel Length";
+"comms_link.title" = "Comms & Control Link";
+"comms_link.subtitle" = "Fiber-optic tether — a control-link module, not mission payload. Immune to radio range/jamming, but limited by physical reel length and entanglement risk.";
+"comms_link.attach" = "Attach Fiber Spool";
+"comms_link.detach" = "Detach Fiber Spool";
+"comms_link.degraded_warning" = "Link degraded — high snag risk or reel nearly exhausted";
+"comms_link.severed_exhausted" = "Fiber severed — reel fully paid out";
+"comms_link.severed_snagged" = "Fiber severed — snagged and broken";
+"comms_link.rigging_locked" = "Detach the spool to reconfigure — a mounted reel can't be resized in flight.";
+"comms_link.telemetry.remaining" = "Remaining (usable)";
+"comms_link.telemetry.deployed" = "Deployed";
+"comms_link.telemetry.mass" = "Current mass";
+"comms_link.telemetry.snag_risk" = "Snag risk";
 "payload.fiber.rig_mass" = "Rig mass: %.1f kg";
 "payload.fiber.mass_follows_rig" = "Mass follows reel length × class, not independently editable.";
 "payload.fiber.remaining" = "FIBER %.1f / %.1f km";
 "payload.fiber.snag_risk" = "SNAG RISK %.0f%%";
 "payload.fiber.severed" = "FIBER SEVERED";
+
+// Fiber-severance failsafe stages
+"fiber_failsafe.stage.braking" = "Fiber Severed — Braking";
+"fiber_failsafe.stage.hover_failsafe" = "Fiber Severed — Holding Position";
+"fiber_failsafe.stage.landing" = "Fiber Severed — Landing";
+"fiber_failsafe.stage.stabilize" = "Fiber Severed — Stabilizing";
+"fiber_failsafe.stage.loiter_glide" = "Fiber Severed — Loitering";
+"fiber_failsafe.stage.emergency_landing" = "Fiber Severed — Emergency Landing";
+"fiber_failsafe.stage.landed" = "Fiber Severed — Landed";
+"fiber_failsafe.stage.crashed" = "Fiber Severed — Crashed";
+"fiber_failsafe.stage.returned_home" = "Fiber Severed — Returning Home";
+"fiber_failsafe.stage.mission_continued" = "Fiber Severed — Mission Continuing Unattended";
 "payload.hose.extinguishing" = "Extinguishing…";
 "payload.hose.throw_distance" = "THROW %.0f m";
 "payload.hose.spraying_status" = "SPRAYING";
@@ -311,8 +335,6 @@
 "signal_loss.lost_message" = "The UAV has left the map bounds. Flight controls are locked until the signal is restored.";
 "signal_loss.impact_title" = "SIGNAL LOST: AIRFRAME FAILURE";
 "signal_loss.impact_message" = "Impact damage interrupted the control link and onboard systems.";
-"signal_loss.fiber_title" = "SIGNAL LOST: FIBER SEVERED";
-"signal_loss.fiber_message" = "The optical fiber tether has been cut or fully paid out — the control link is gone.";
 "signal_loss.recover" = "Restore signal";
 
 "telemetry.position" = "Position";
@@ -475,6 +497,8 @@
 "payload.configure" = "Payload Config";
 "payload.toolbar.open" = "Open payload console";
 "payload.toolbar.close" = "Close payload console";
+"comms_link.toolbar.open" = "Open comms & control link console";
+"comms_link.toolbar.close" = "Close comms & control link console";
 "payload.section" = "PAYLOAD CONFIG";
 "payload.console.subtitle" = "Mission payload console for the active UAV profile";
 "payload.type" = "Payload Type";
@@ -1027,6 +1051,7 @@
 
 "module.payload.title" = "PAYLOAD";
 "module.payload.toolbar_title" = "Payload";
+"module.comms_link.toolbar_title" = "Comms Link";
 
 "module.camera.title" = "CAMERA";
 "module.camera.toolbar_title" = "Camera";
