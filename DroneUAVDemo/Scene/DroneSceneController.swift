@@ -426,6 +426,11 @@ final class DroneSceneController {
         launchAssetNode.isHidden = true
         scene.rootNode.addChildNode(launchAssetNode)
 
+        // Warm the hand-launch arm rig off the main thread now, so the first
+        // time the operator actually enters hand-launch hold doesn't pay for
+        // the USDZ parse as a mid-session hitch.
+        HandLaunchArmAssetLoader.shared.preloadInBackground()
+
         onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
         scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
 
@@ -998,20 +1003,25 @@ final class DroneSceneController {
             return nil
         }
 
-        let supportY = supportSurfaceHeight(
-            at: asset.position,
-            clearanceRadius: 0.28,
-            maximumHeight: .greatestFiniteMagnitude
-        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
-
         switch asset {
         case .handLaunch(let hand):
             // With the first-person view up, the hold point rides the
             // operator's gaze (and walks with him); otherwise it is the
-            // static drafted launch point.
+            // static drafted launch point. This is called every simulation
+            // tick for as long as the operator stands in the pre-launch
+            // hold, so once the POV cradle is available, take it directly —
+            // scanning every support surface in the scene (trees,
+            // buildings, decorations) just to compute a `supportY` that the
+            // POV branch then throws away was a real per-tick cost while the
+            // operator was simply standing there aiming.
             if let povCradle = handLaunchPOVCradlePoint() {
                 return povCradle
             }
+            let supportY = supportSurfaceHeight(
+                at: asset.position,
+                clearanceRadius: 0.28,
+                maximumHeight: .greatestFiniteMagnitude
+            ) ?? max(Float(groundNode.presentation.position.y), 0.0)
             let forward = hand.horizontalDirection * LaunchRigMetrics.handHoldForwardOffset
             return SIMD3<Float>(
                 hand.position.x + forward.x,
@@ -1019,6 +1029,11 @@ final class DroneSceneController {
                 hand.position.y + forward.y
             )
         case .catapult(let catapult):
+            let supportY = supportSurfaceHeight(
+                at: asset.position,
+                clearanceRadius: 0.28,
+                maximumHeight: .greatestFiniteMagnitude
+            ) ?? max(Float(groundNode.presentation.position.y), 0.0)
             return SIMD3<Float>(
                 catapult.position.x,
                 supportY + LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset,
@@ -1479,10 +1494,23 @@ final class DroneSceneController {
         /// carries the fuselage from below (chosen from rendered variants).
         private static let palmUpRollRadians: Float = .pi / 2.0
 
+        private let loadLock = NSLock()
         private var cachedTemplate: SCNNode?
         private var didAttemptLoad = false
 
         private init() {}
+
+        /// Kicks off the USDZ parse on a background queue as early as the
+        /// scene exists, well before the operator ever reaches hand-launch
+        /// hold. Parsing `HandLaunchArm.usdz` synchronously on first use used
+        /// to show up as a sudden frame hitch right as the first-person rig
+        /// was built; warming the cache ahead of time makes that first
+        /// `makeArmNode` call a cheap clone instead.
+        func preloadInBackground() {
+            DispatchQueue.global(qos: .utility).async { [self] in
+                _ = loadTemplate()
+            }
+        }
 
         /// Arm with the shoulder at the node origin reaching to a palm at
         /// `(0, 0, -reach)`. Returns nil when the USDZ asset is unavailable —
@@ -1514,7 +1542,15 @@ final class DroneSceneController {
             return wrapper
         }
 
+        /// Locked across the whole load (not just the cache read) so a
+        /// background preload and a main-thread `makeArmNode` racing each
+        /// other never both parse the USDZ, and the main thread — if it
+        /// somehow gets there first — simply blocks until the one load
+        /// finishes rather than falling back to the procedural arm.
         private func loadTemplate() -> SCNNode? {
+            loadLock.lock()
+            defer { loadLock.unlock() }
+
             if didAttemptLoad {
                 return cachedTemplate
             }

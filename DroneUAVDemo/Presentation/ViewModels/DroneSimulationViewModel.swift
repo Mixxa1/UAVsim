@@ -1100,6 +1100,14 @@ final class DroneSimulationViewModel: ObservableObject {
     /// briefly so the operator watches the airframe leave his hand before the
     /// camera returns to the regular UAV view.
     private var fixedWingLaunchReleaseElapsed: Float = 0.0
+    /// Player's live roll-stick command for a fixed wing, refreshed every
+    /// tick in `applyResolvedFlightControls` regardless of flight mode. The
+    /// assisted hand-launch/catapult corridor (`updateFixedWingLaunchSequence`)
+    /// reads this so the operator can bank left/right immediately after
+    /// release instead of being locked out until the corridor hands off to
+    /// `.manual` several seconds later.
+    private var fixedWingManualRollCommandDegrees: Float = 0.0
+    private var fixedWingManualTurnInputActive = false
     /// Launch corridor frozen at the moment the launch began. The live asset
     /// heading keeps following the operator's aim (and reverts to the drafted
     /// heading once the POV closes), so the climb-out guidance must NOT
@@ -5796,6 +5804,12 @@ final class DroneSimulationViewModel: ObservableObject {
             let manualThrottle = (controlValues.throttle + throttleDelta + stallBias).clamped(to: 0.0...1.0)
             let liveTurnOverride = (!tailsitterHoverControlsActive && abs(effectiveAxis.strafe) > 0.001) || hasEffectiveYawInput
             let liveAltitudeOverride = abs(effectiveAxis.forward) > 0.001 || abs(effectiveAxis.vertical) > 0.001
+
+            // Captured unconditionally (not just in the manual/assist branches
+            // below) so the assisted launch corridor can read live stick
+            // input even while `mode == .takeoff` still owns `controlValues`.
+            fixedWingManualRollCommandDegrees = Float(rollCommand)
+            fixedWingManualTurnInputActive = liveTurnOverride
 
             if liveTurnOverride {
                 registerFixedWingAssistOverride(.turn)
@@ -14038,7 +14052,16 @@ final class DroneSimulationViewModel: ObservableObject {
         let maxBank = launchRuntimeSnapshot.state == .transitionToFlight
             ? wing.maxInitialBankDeg
             : max(2.0, wing.maxInitialBankDeg * 0.45)
-        protectedCommand.rollDegrees = protectedCommand.rollDegrees.clamped(to: -maxBank...maxBank)
+        // The corridor's own route-tracking roll only holds the airframe on
+        // the launch heading; it never reflects the stick, so any manual
+        // roll input was being silently discarded for the whole climb-out
+        // (several seconds on some airframes) — the aircraft simply could
+        // not be steered left/right after a hand throw or catapult shot.
+        // Let a live stick command through immediately, still bounded by the
+        // same reduced-bank safety envelope used for the corridor hold.
+        protectedCommand.rollDegrees = fixedWingManualTurnInputActive
+            ? fixedWingManualRollCommandDegrees.clamped(to: -maxBank...maxBank)
+            : protectedCommand.rollDegrees.clamped(to: -maxBank...maxBank)
         if launchMode == .handLaunch,
            fixedWingLaunchReleaseElapsed < FixedWingHandLaunchTuning.releaseAttitudeHoldSeconds,
            let releaseAttitudeDegrees = activeLaunchCorridor?.releaseAttitudeDegrees {
