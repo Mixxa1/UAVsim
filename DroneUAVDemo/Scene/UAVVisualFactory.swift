@@ -171,6 +171,23 @@ enum UAVVisualFactory {
             return buildColossusCA8Vulcan(payloadMountOffset: payloadMountOffset)
         case .colossusCA12Atlas:
             return buildColossusCA12Atlas(payloadMountOffset: payloadMountOffset)
+        case .agroWingTitanAT40:
+            // Reuses the Griff 60 heavy-lift octocopter frame (same size class as this
+            // flagship sprayer) with an agricultural safety-yellow top panel so it still
+            // reads as a distinct airframe — the tank/boom/nozzle rig itself is a payload
+            // visual (PayloadVisualFactory), not baked into the airframe body.
+            return visualVariant(
+                buildGriff60(payloadMountOffset: payloadMountOffset),
+                name: "uavRoot.agroWingTitanAT40",
+                scale: 1.15,
+                accents: [
+                    .topPanel(
+                        color: NSColor(calibratedRed: 0.86, green: 0.70, blue: 0.10, alpha: 1.0),
+                        size: SIMD3<Float>(0.30, 0.03, 0.30),
+                        position: SIMD3<Float>(0.0, 0.14, 0.0)
+                    )
+                ]
+            )
         }
     }
 

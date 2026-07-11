@@ -1136,6 +1136,30 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 cameraPreset: DroneCameraPreset(fpvFov: 72.0, followDistance: 28.0, followHeight: 9.4),
                 collisionRadiusMeters: 1.40
             )
+        case .agroWingTitanAT40:
+            return RuntimeTuning(
+                fallbackTakeoffMass: 150.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3400, y: 3400, z: 1150),
+                maxHorizontalSpeedMps: 14.0,
+                maxAscentSpeedMps: 3.2,
+                maxDescentSpeedMps: 2.6,
+                maxFlightTimeMin: 15.0,
+                maxHoverTimeMin: 12.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 15000.0,
+                cameraLayoutKey: "drone.camera.single_compact",
+                visualClass: .atlasProTriple,
+                operationalCategory: .multirotor,
+                airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
+                fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                controlResponsiveness: 0.44,
+                hoverThrottle: 0.68,
+                cameraPreset: DroneCameraPreset(fpvFov: 75.0, followDistance: 22.0, followHeight: 7.5),
+                collisionRadiusMeters: 1.05
+            )
         case .avidrone490TL:
             return RuntimeTuning(
                 fallbackTakeoffMass: 57.0,

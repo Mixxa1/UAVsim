@@ -108,6 +108,10 @@ final class DroneSceneController {
     private var hoseCamera: SCNCamera?
     private var hoseStreamNode: SCNNode?
     private var hoseImpactNode: SCNNode?
+    // No aim rig at all (unlike the hose) — a fixed nadir mist cone under the payload mount.
+    // Particle system attached/detached on the spray-state transition only, same "don't keep
+    // simulating while hidden" discipline as the hose stream/impact nodes above.
+    private var agriculturalSprayerMistNode: SCNNode?
     // Capsule bombardier camera — deliberately no yaw/pitch rig unlike the hose/rangefinder above:
     // the launcher has no aim mechanic at all, it's a fixed nadir view (see `dropFireCapsule`'s
     // zero-forward-throw fall kinematics, which makes a straight-down view always show the true
@@ -3892,6 +3896,54 @@ final class DroneSceneController {
         }
         if hoseImpactNode?.particleSystems?.isEmpty == false {
             hoseImpactNode?.removeAllParticleSystems()
+        }
+    }
+
+    /// No aiming, no raycast — the sprayer always emits straight down from the payload mount
+    /// while the trigger is held. Mirrors the hose stream's discipline of only attaching the
+    /// particle system while actually visible, not for the whole mission a sprayer is mounted.
+    func setAgriculturalSprayerSpraying(_ isSpraying: Bool) {
+        if agriculturalSprayerMistNode == nil {
+            let node = SCNNode()
+            node.name = "agriculturalSprayerMistNode"
+            node.simdPosition = SIMD3<Float>(0.0, -0.06, 0.0)
+            node.isHidden = true
+            payloadMountNode.addChildNode(node)
+            agriculturalSprayerMistNode = node
+        }
+        guard let mistNode = agriculturalSprayerMistNode else {
+            return
+        }
+
+        guard isSpraying else {
+            mistNode.isHidden = true
+            if mistNode.particleSystems?.isEmpty == false {
+                mistNode.removeAllParticleSystems()
+            }
+            return
+        }
+
+        mistNode.isHidden = false
+        if mistNode.particleSystems?.isEmpty ?? true {
+            let system = SCNParticleSystem()
+            system.particleColor = NSColor(calibratedRed: 0.86, green: 0.94, blue: 0.80, alpha: 0.55)
+            system.particleSize = 0.05
+            system.particleSizeVariation = 0.02
+            system.birthRate = 220
+            system.emitterShape = SCNCylinder(radius: 0.16, height: 0.02)
+            system.birthLocation = .volume
+            system.birthDirection = .constant
+            system.emittingDirection = SCNVector3(0, -1, 0)
+            system.spreadingAngle = 22
+            system.particleVelocity = 3.2
+            system.particleVelocityVariation = 0.8
+            system.particleLifeSpan = 0.9
+            system.particleLifeSpanVariation = 0.2
+            system.isAffectedByGravity = true
+            system.acceleration = SCNVector3(0, -1.4, 0)
+            system.blendMode = .alpha
+            system.loops = true
+            mistNode.addParticleSystem(system)
         }
     }
 

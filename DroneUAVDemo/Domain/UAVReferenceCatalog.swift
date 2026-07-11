@@ -613,6 +613,26 @@ enum UAVReferenceCatalog {
             missionRole: "Superheavy aerial firefighting hose lift"
         ),
         UAVProfile(
+            id: "agrowing-titan-at40",
+            displayName: "AgroWing Titan AT-40",
+            manufacturer: "AgroWing Systems",
+            countryOfOrigin: "Netherlands",
+            vehicleType: .multicopter,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .cargo,
+            baseMass: 65.0,
+            batteryMass: 20.0,
+            maxPayloadMass: 90.0,
+            maxTakeoffMass: 175.0,
+            dimensions: UAVDimensions(),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.42, 0.0),
+            visualPreset: .agroWingTitanAT40,
+            shortDescription: "Flagship agricultural spray octocopter with a large belly tank, boom arms, and a wide-swath nozzle bar — noticeably bigger and slower than the survey/inspection multirotors in this catalog.",
+            notes: "Composite/representative platform (not a real product), sized in the spirit of real DJI Agras-class spray drones but scaled up to a flagship-tier heavy-lift tank capacity.",
+            missionRole: "Agricultural spraying and crop treatment"
+        ),
+        UAVProfile(
             id: "avidrone-490tl",
             displayName: "Avidrone 490TL",
             manufacturer: "Avidrone Aerospace",

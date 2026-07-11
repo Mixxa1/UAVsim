@@ -214,6 +214,17 @@ struct UAVFlightTuningProfile: Hashable {
                 payloadThrustCompensationFactor: 0.72,
                 source: source
             )
+        case .agroWingTitanAT40:
+            return multicopter(
+                referenceMass: referenceMass,
+                hoverThrottleBaseline: 0.68,
+                stabilizationThrustBaseline: 1.58,
+                verticalResponseFactor: 0.60,
+                throttleAuthority: 0.58,
+                maneuverPenaltyFactor: 0.50,
+                payloadThrustCompensationFactor: 0.64,
+                source: source
+            )
         case .avidrone490TL:
             return helicopter(
                 referenceMass: referenceMass,

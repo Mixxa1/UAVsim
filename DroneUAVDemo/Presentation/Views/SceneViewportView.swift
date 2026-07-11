@@ -83,6 +83,24 @@ struct SceneViewportView: View {
                     .allowsHitTesting(false)
             }
 
+            if viewModel.agriculturalSprayerState.isAvailable {
+                AgriculturalSprayerStatusHUDView(state: viewModel.agriculturalSprayerState)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, overlayInset + 10)
+                    .allowsHitTesting(false)
+            }
+
+            if viewModel.isFiberOpticTetherActive {
+                FiberOpticTetherStatusHUDView(
+                    remainingLengthMeters: viewModel.fiberOpticRemainingLengthMeters,
+                    usableLengthMeters: viewModel.fiberOpticUsableLengthMeters,
+                    snagRiskLevel: viewModel.fiberOpticSnagRiskLevel
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, overlayInset + 10)
+                .allowsHitTesting(false)
+            }
+
             if payloadOpticsActive, payloadOpticsState.isAvailable, payloadOpticsState.mode == .thermalStub {
                 ThermalScaleBarView(thermalState: viewModel.payloadThermalState)
                     .padding(.trailing, overlayInset + 14)
@@ -675,6 +693,72 @@ private struct FireCapsuleStatusHUDView: View {
                     state.rechargeSecondsRemaining
                 ))
                 .foregroundStyle(GroundControlPalette.warning)
+            }
+        }
+        .font(.caption.weight(.semibold).monospaced())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+        )
+    }
+}
+
+/// Always-visible-when-mounted tank readout — no dedicated optics view for the sprayer (it has
+/// no aim/gimbal), so this is the only place the operator sees remaining liquid, matching
+/// `FireCapsuleStatusHUDView`'s instrument-panel look above.
+private struct AgriculturalSprayerStatusHUDView: View {
+    let state: PayloadAgriculturalSprayerState
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(String(
+                format: NSLocalizedString("payload.sprayer.tank_remaining", comment: ""),
+                state.tankRemainingLiters,
+                state.tankCapacityLiters
+            ))
+            .foregroundStyle(state.tankRemainingLiters > 0.5 ? GroundControlPalette.textPrimary : GroundControlPalette.danger)
+
+            if state.isSpraying {
+                Text(LocalizedStringKey("payload.sprayer.spraying"))
+                    .foregroundStyle(GroundControlPalette.warning)
+            }
+        }
+        .font(.caption.weight(.semibold).monospaced())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.56), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
+        )
+    }
+}
+
+/// No dedicated optics view (no aim/gimbal) — remaining fiber (in km, path-length budget not
+/// straight-line distance) and entanglement risk are only ever visible here.
+private struct FiberOpticTetherStatusHUDView: View {
+    let remainingLengthMeters: Float
+    let usableLengthMeters: Float
+    let snagRiskLevel: Float
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(String(
+                format: NSLocalizedString("payload.fiber.remaining", comment: ""),
+                remainingLengthMeters / 1000.0,
+                usableLengthMeters / 1000.0
+            ))
+            .foregroundStyle(remainingLengthMeters > 50.0 ? GroundControlPalette.textPrimary : GroundControlPalette.danger)
+
+            if snagRiskLevel > 0.05 {
+                Text(String(
+                    format: NSLocalizedString("payload.fiber.snag_risk", comment: ""),
+                    snagRiskLevel * 100.0
+                ))
+                .foregroundStyle(snagRiskLevel > 0.6 ? GroundControlPalette.danger : GroundControlPalette.warning)
             }
         }
         .font(.caption.weight(.semibold).monospaced())

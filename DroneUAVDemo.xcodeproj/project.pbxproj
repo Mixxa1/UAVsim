@@ -77,6 +77,10 @@
 		100000000000000000000425 /* PayloadRangefinderController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000424 /* PayloadRangefinderController.swift */; };
 		100000000000000000000A17 /* PayloadFireHoseState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A18 /* PayloadFireHoseState.swift */; };
 		100000000000000000000A19 /* PayloadFireHoseController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1A /* PayloadFireHoseController.swift */; };
+		00000000000000E84FC7BA17 /* AgriculturalSprayerTuning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000E84FC7D906 /* AgriculturalSprayerTuning.swift */; };
+		00000000000003D041931BF1 /* PayloadAgriculturalSprayerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000003D041A4B004 /* PayloadAgriculturalSprayerState.swift */; };
+		00000000000003D041B64417 /* PayloadAgriculturalSprayerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000003D041C7D82A /* PayloadAgriculturalSprayerController.swift */; };
+		000000000000016017ECA7ED /* FiberOpticReelClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000001602213E81A /* FiberOpticReelClass.swift */; };
 		100000000000000000000A27 /* PayloadFireCapsuleState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A28 /* PayloadFireCapsuleState.swift */; };
 		100000000000000000000A29 /* PayloadFireCapsuleController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2A /* PayloadFireCapsuleController.swift */; };
 		10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013F /* PayloadCapabilityCheck.swift */; };
@@ -413,6 +417,10 @@
 		100000000000000000000424 /* PayloadRangefinderController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadRangefinderController.swift; sourceTree = "<group>"; };
 		100000000000000000000A18 /* PayloadFireHoseState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireHoseState.swift; sourceTree = "<group>"; };
 		100000000000000000000A1A /* PayloadFireHoseController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireHoseController.swift; sourceTree = "<group>"; };
+		00000000000000E84FC7D906 /* AgriculturalSprayerTuning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgriculturalSprayerTuning.swift; sourceTree = "<group>"; };
+		00000000000003D041A4B004 /* PayloadAgriculturalSprayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadAgriculturalSprayerState.swift; sourceTree = "<group>"; };
+		00000000000003D041C7D82A /* PayloadAgriculturalSprayerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadAgriculturalSprayerController.swift; sourceTree = "<group>"; };
+		00000000000001602213E81A /* FiberOpticReelClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberOpticReelClass.swift; sourceTree = "<group>"; };
 		100000000000000000000A28 /* PayloadFireCapsuleState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireCapsuleState.swift; sourceTree = "<group>"; };
 		100000000000000000000A2A /* PayloadFireCapsuleController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireCapsuleController.swift; sourceTree = "<group>"; };
 		10000000000000000000013F /* PayloadCapabilityCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadCapabilityCheck.swift; sourceTree = "<group>"; };
@@ -753,6 +761,10 @@
 				100000000000000000000A1A /* PayloadFireHoseController.swift */,
 				100000000000000000000A28 /* PayloadFireCapsuleState.swift */,
 				100000000000000000000A2A /* PayloadFireCapsuleController.swift */,
+				00000000000000E84FC7D906 /* AgriculturalSprayerTuning.swift */,
+				00000000000003D041A4B004 /* PayloadAgriculturalSprayerState.swift */,
+				00000000000003D041C7D82A /* PayloadAgriculturalSprayerController.swift */,
+				00000000000001602213E81A /* FiberOpticReelClass.swift */,
 				100000000000000000000145 /* PayloadMountState.swift */,
 				100000000000000000000147 /* PayloadDataQualitySource.swift */,
 				10000000000000000000013C /* PayloadType.swift */,
@@ -1423,6 +1435,10 @@
 				100000000000000000000A19 /* PayloadFireHoseController.swift in Sources */,
 				100000000000000000000A27 /* PayloadFireCapsuleState.swift in Sources */,
 				100000000000000000000A29 /* PayloadFireCapsuleController.swift in Sources */,
+				00000000000000E84FC7BA17 /* AgriculturalSprayerTuning.swift in Sources */,
+				00000000000003D041931BF1 /* PayloadAgriculturalSprayerState.swift in Sources */,
+				00000000000003D041B64417 /* PayloadAgriculturalSprayerController.swift in Sources */,
+				000000000000016017ECA7ED /* FiberOpticReelClass.swift in Sources */,
 				10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */,
 				10000000000000000000023D /* VehicleMassModel.swift in Sources */,
 				10000000000000000000023E /* PayloadController.swift in Sources */,

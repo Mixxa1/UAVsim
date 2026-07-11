@@ -274,6 +274,7 @@ private enum CollisionAftermathState: String {
 private enum SignalLossCause: String {
     case linkRange
     case impactDamage
+    case fiberSevered
 }
 
 private struct PayloadProximityEffect {
@@ -644,6 +645,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
     @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
     @Published private(set) var capsuleState = PayloadFireCapsuleState()
+    @Published private(set) var agriculturalSprayerState = PayloadAgriculturalSprayerState()
     /// Whether the hose-tether constraint is currently in effect (a fire-response mission with an
     /// attached, available hose payload) — false in every other scenario/payload combination.
     @Published private(set) var isHoseTetherActive = false
@@ -652,6 +654,13 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var isHoseTetherTaut = false
     @Published private(set) var hoseTetherDistanceMeters: Float = 0.0
     @Published private(set) var hoseTetherLimitMeters: Float = 0.0
+    /// Whether the fiber-optic tether accounting is currently active (attached, armed, airborne).
+    @Published private(set) var isFiberOpticTetherActive = false
+    @Published private(set) var fiberOpticRemainingLengthMeters: Float = 0.0
+    @Published private(set) var fiberOpticUsableLengthMeters: Float = 0.0
+    /// 0...1 entanglement risk from flying near obstacles while turning — reaching 1.0 severs
+    /// the fiber (see `updateFiberOpticTether`).
+    @Published private(set) var fiberOpticSnagRiskLevel: Float = 0.0
     @Published private(set) var payloadThermalState: PayloadThermalState = .default
     @Published private(set) var payloadMissionSignals: [PayloadMissionSignal]
     @Published private(set) var isPayloadCameraAutoSwitchEnabled: Bool
@@ -989,6 +998,9 @@ final class DroneSimulationViewModel: ObservableObject {
             case .impactDamage:
                 lostTitle = String(localized: "signal_loss.impact_title")
                 lostMessage = String(localized: "signal_loss.impact_message")
+            case .fiberSevered:
+                lostTitle = String(localized: "signal_loss.fiber_title")
+                lostMessage = String(localized: "signal_loss.fiber_message")
             case .linkRange, .none:
                 lostTitle = String(localized: "signal_loss.lost_title")
                 lostMessage = String(localized: "signal_loss.lost_message")
@@ -1035,6 +1047,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let rangefinderController: PayloadRangefinderController
     private let hoseController: PayloadFireHoseController
     private let capsuleController: PayloadFireCapsuleController
+    private let agriculturalSprayerController: PayloadAgriculturalSprayerController
     private let tacticalMapCoordinator = TacticalMapCoordinator()
     private let missionDraftBuilder = MissionDraftBuilder()
     private let missionPreviewBuilder = MissionPreviewBuilder()
@@ -1123,6 +1136,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private var payloadSelfInteractionTimer: Float = 0.0
     private var payloadSelfInteractionSeverity: Float = 0.0
     private var payloadControlPenalty: Float = 0.0
+    /// Cumulative flight-path distance (not straight-line range) consumed from the fiber-optic
+    /// reel this flight — reset whenever the tether goes from inactive to active (fresh reel).
+    private var fiberOpticPathLengthUsedMeters: Float = 0.0
+    private var fiberOpticSnagRisk: Float = 0.0
+    private var fiberOpticLastTrackedPosition: SIMD3<Float>?
     private var fixedWingAutopilotAltitudeCommand: Float?
     private var fixedWingAutopilotCourseCommand: Float?
     private var fixedWingAssistTurnOverrideTimeRemaining: Float = 0.0
@@ -1462,6 +1480,7 @@ final class DroneSimulationViewModel: ObservableObject {
         rangefinderController: PayloadRangefinderController = PayloadRangefinderController(),
         hoseController: PayloadFireHoseController = PayloadFireHoseController(),
         capsuleController: PayloadFireCapsuleController = PayloadFireCapsuleController(),
+        agriculturalSprayerController: PayloadAgriculturalSprayerController = PayloadAgriculturalSprayerController(),
         remoteHostPort: UInt16 = 7777,
         initialProjectID: String? = nil,
         initialProjectName: String? = nil,
@@ -1522,6 +1541,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.rangefinderController = rangefinderController
         self.hoseController = hoseController
         self.capsuleController = capsuleController
+        self.agriculturalSprayerController = agriculturalSprayerController
         self.compassViewModel = CompassViewModel()
 
         let abstract = AbstractDroneParameters.default
@@ -2152,6 +2172,23 @@ final class DroneSimulationViewModel: ObservableObject {
         payloadDraftConfiguration.fireCapsuleSize = size
         payloadDraftConfiguration.fireCapsuleCount = clampedCount
         payloadDraftConfiguration.payloadMass = FireCapsuleTuning.totalMass(size: size, count: clampedCount)
+        payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
+        payloadStatusMessageKey = nil
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
+    func setFiberOpticRigging(reelClass: FiberOpticReelClass, lengthMeters: Double) {
+        guard canControlLocalVehicle else { return }
+        let clampedLength = Float(lengthMeters).clamped(to: reelClass.lengthRangeMeters)
+        guard payloadDraftConfiguration.fiberOpticReelClass != reelClass
+            || abs(payloadDraftConfiguration.fiberOpticReelLengthMeters - clampedLength) > 0.001 else {
+            return
+        }
+
+        payloadDraftConfiguration.fiberOpticReelClass = reelClass
+        payloadDraftConfiguration.fiberOpticReelLengthMeters = clampedLength
+        payloadDraftConfiguration.payloadMass = reelClass.massForLength(clampedLength)
         payloadDraftConfiguration.isAttached = payloadDraftMatchesInstalledPayload()
         payloadStatusMessageKey = nil
         refreshPayloadRuntimeState()
@@ -3766,6 +3803,15 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshHoseAimStatus()
     }
 
+    // MARK: - Agricultural sprayer
+
+    /// Same physical trigger as the fire hose (`controlState.isHoseSprayHeld`) — whichever
+    /// payload is actually mounted reacts, the other controller no-ops on its own availability
+    /// guard, so no extra dispatch logic is needed at the call site.
+    func setAgriculturalSprayerSpraying(_ enabled: Bool) {
+        agriculturalSprayerController.setSpraying(enabled)
+    }
+
     func adjustHoseGimbal(yawDeltaDegrees: Double, pitchDeltaDegrees: Double) {
         hoseController.adjustGimbal(
             yawDeltaDegrees: yawDeltaDegrees,
@@ -4853,7 +4899,8 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let blocksSimulationForSignalLoss = signalState.isInteractionBlocking && signalLossCause != .impactDamage
+        let blocksSimulationForSignalLoss = signalState.isInteractionBlocking &&
+            signalLossCause != .impactDamage && signalLossCause != .fiberSevered
         if blocksSimulationForSignalLoss {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
@@ -5030,6 +5077,7 @@ final class DroneSimulationViewModel: ObservableObject {
         handleModeTransitions()
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
         updateSignalLossSequence(deltaTime: dt)
+        updateFiberOpticTether(deltaTime: dt)
         syncMissionDeliveryState(triggerAutoRelease: false)
 
         if blocksSimulationForSignalLoss {
@@ -5974,7 +6022,10 @@ final class DroneSimulationViewModel: ObservableObject {
 
         // A real hose sprays only while the trigger is physically held, not "toggle it on and
         // walk away" — tracked every tick from the held-key state, not the one-shot action queue.
+        // The agricultural sprayer reuses the same physical trigger; whichever payload is
+        // actually mounted reacts, the other no-ops on its own availability guard.
         setHoseSpraying(controlState.isHoseSprayHeld)
+        setAgriculturalSprayerSpraying(controlState.isHoseSprayHeld)
 
         for action in controlState.actions {
             switch action {
@@ -8657,7 +8708,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .agriculturalSprayer, .fiberOpticSpool, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -8677,7 +8728,7 @@ final class DroneSimulationViewModel: ObservableObject {
         switch payloadDraftConfiguration.payloadType {
         case .cameraGimbal, .thermalCamera, .custom:
             return true
-        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .rescuePack, .sensorModule, .radioRelay:
+        case .cargoBox, .lidarModule, .laserRangefinder, .fireHose, .fireCapsuleLauncher, .agriculturalSprayer, .fiberOpticSpool, .rescuePack, .sensorModule, .radioRelay:
             return false
         }
     }
@@ -8716,6 +8767,20 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         return payloadDraftConfiguration.payloadType == .fireCapsuleLauncher
+    }
+
+    /// Unlike the fire hose/capsule launcher, not gated to a specific mission scenario kind —
+    /// the sprayer is a general-purpose payload usable in sandbox flight or any mission.
+    private var isMountedAgriculturalSprayerAvailable: Bool {
+        guard mountedCADPayload == nil else {
+            return false
+        }
+
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+
+        return payloadDraftConfiguration.payloadType == .agriculturalSprayer
     }
 
     private var payloadCameraFeedLabel: String {
@@ -8825,6 +8890,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshRangefinderStatus()
         refreshHoseAimStatus()
         refreshCapsuleLauncherStatus(deltaTime: deltaTime)
+        refreshAgriculturalSprayerStatus(deltaTime: deltaTime)
         refreshFlightControlDiagnostics()
     }
 
@@ -8865,6 +8931,29 @@ final class DroneSimulationViewModel: ObservableObject {
                 payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
             }
         }
+    }
+
+    /// No aim/gimbal, no mission-scenario gating (unlike the hose/capsule launcher) — the
+    /// sprayer just needs to know it's mounted and drain its tank while the trigger is held.
+    /// The tank's liquid mass is mutated live into `installedPayloadConfiguration.payloadMass`
+    /// so the airframe actually gets lighter (and more agile) as it empties, same idea as the
+    /// fiber-optic reel losing mass as it pays out.
+    private func refreshAgriculturalSprayerStatus(deltaTime: TimeInterval = 0.0) {
+        agriculturalSprayerController.setAvailability(
+            isAvailable: isMountedAgriculturalSprayerAvailable,
+            isPowered: isMountedAgriculturalSprayerAvailable,
+            configuredTankLiters: Double(payloadDraftConfiguration.agriculturalSprayerTankLiters)
+        )
+        let drainedLiters = agriculturalSprayerController.drain(deltaTime: Float(deltaTime))
+        if drainedLiters > 0.0, let currentMass = installedPayloadConfiguration?.payloadMass,
+           installedPayloadConfiguration?.payloadType == .agriculturalSprayer {
+            let drainedMassKg = Float(drainedLiters) * AgriculturalSprayerTuning.liquidDensityKgPerLiter
+            let newMass = max(AgriculturalSprayerTuning.hardwareOverheadKg, currentMass - drainedMassKg)
+            installedPayloadConfiguration?.payloadMass = newMass
+            refreshPayloadRuntimeState()
+        }
+        agriculturalSprayerState = agriculturalSprayerController.state
+        sceneController.setAgriculturalSprayerSpraying(agriculturalSprayerState.isSpraying)
     }
 
     /// The drone must actually LAND (not just hover) within a small radius of the fire truck to
@@ -9546,7 +9635,10 @@ final class DroneSimulationViewModel: ObservableObject {
             installedPayloadConfiguration.fireHoseDiameterClass == payloadDraftConfiguration.fireHoseDiameterClass &&
             abs(installedPayloadConfiguration.fireHoseLengthMeters - payloadDraftConfiguration.fireHoseLengthMeters) <= 0.001 &&
             installedPayloadConfiguration.fireCapsuleSize == payloadDraftConfiguration.fireCapsuleSize &&
-            installedPayloadConfiguration.fireCapsuleCount == payloadDraftConfiguration.fireCapsuleCount
+            installedPayloadConfiguration.fireCapsuleCount == payloadDraftConfiguration.fireCapsuleCount &&
+            abs(installedPayloadConfiguration.agriculturalSprayerTankLiters - payloadDraftConfiguration.agriculturalSprayerTankLiters) <= 0.001 &&
+            installedPayloadConfiguration.fiberOpticReelClass == payloadDraftConfiguration.fiberOpticReelClass &&
+            abs(installedPayloadConfiguration.fiberOpticReelLengthMeters - payloadDraftConfiguration.fiberOpticReelLengthMeters) <= 0.001
     }
 
     private func resolvePayloadMountState() -> PayloadMountState {
@@ -14000,6 +14092,17 @@ final class DroneSimulationViewModel: ObservableObject {
             if missionExecutionState.status == .running,
                let activeTarget = missionExecutionState.activeTarget,
                activeRouteTargetSource == .mission {
+                // The runtime monitor has been ticking (with no progress recorded)
+                // since the mission started, through the whole pre-launch hold and
+                // launch corridor — reset it here, same as every other mission
+                // (re)engagement call site (startMissionExecution, resumeMissionExecution,
+                // the auto-resume path). Without this, `lastProgressAt` is already
+                // stale the instant autoPath engages, so the very first runtime-monitor
+                // evaluation reads as an immediate stall and the failsafe drops the
+                // aircraft to a manual course-hold with no active altitude correction —
+                // the "autopilot only works after pause/resume, otherwise it slowly
+                // sinks" symptom.
+                missionRuntimeMonitor.reset()
                 bindMissionExecutionTarget(activeTarget, startNavigation: true)
                 setFlightMode(.autoPath, reason: "fixed_wing_launch_joined_mission")
             } else {
@@ -15649,7 +15752,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func updateSignalLossSequence(deltaTime: Float) {
-        guard signalLossCause != .impactDamage else {
+        guard signalLossCause != .impactDamage, signalLossCause != .fiberSevered else {
             return
         }
 
@@ -15852,6 +15955,78 @@ final class DroneSimulationViewModel: ObservableObject {
         let outwardSpeed = simd_dot(state.velocity, radial)
         if outwardSpeed > 0.0 {
             state.velocity -= radial * outwardSpeed
+        }
+    }
+
+    /// Unlike the hose's straight-line radial tether, the fiber-optic reel is consumed by actual
+    /// flight-path distance (this tick's position delta, accumulated), not distance from a fixed
+    /// point — a bent route uses up fiber faster than the straight-line distance it covers. Called
+    /// once per simulation tick (not from `enforceRuntimeSafetyAndBounds`, which can run several
+    /// times per tick for other safety passes and would double-count path length).
+    private func updateFiberOpticTether(deltaTime: Float) {
+        guard let installed = installedPayloadConfiguration,
+              installed.payloadType == .fiberOpticSpool,
+              payloadState == .attached,
+              payloadMountState == .occupied,
+              isArmed,
+              state.position.y > 0.05 else {
+            if isFiberOpticTetherActive {
+                isFiberOpticTetherActive = false
+                fiberOpticRemainingLengthMeters = 0.0
+                fiberOpticUsableLengthMeters = 0.0
+                fiberOpticSnagRiskLevel = 0.0
+            }
+            fiberOpticLastTrackedPosition = nil
+            return
+        }
+
+        if !isFiberOpticTetherActive {
+            // Freshly armed/airborne with the reel mounted — start path-length and snag-risk
+            // accounting from zero rather than wherever a previous flight left off.
+            fiberOpticPathLengthUsedMeters = 0.0
+            fiberOpticSnagRisk = 0.0
+        }
+        isFiberOpticTetherActive = true
+
+        if let lastPosition = fiberOpticLastTrackedPosition {
+            fiberOpticPathLengthUsedMeters += simd_distance(state.position, lastPosition)
+        }
+        fiberOpticLastTrackedPosition = state.position
+
+        let reelClass = installed.fiberOpticReelClass
+        let configuredLength = installed.fiberOpticReelLengthMeters
+        let usableBudget = configuredLength * FiberOpticTetherTuning.usableLengthFraction
+        fiberOpticUsableLengthMeters = usableBudget
+        let remainingUsable = max(0.0, usableBudget - fiberOpticPathLengthUsedMeters)
+        fiberOpticRemainingLengthMeters = remainingUsable
+
+        // Physical fiber remaining on the spool (not the margin-adjusted usable budget above)
+        // determines the reel's actual mass — it gets lighter as fiber pays out, same idea as
+        // the agricultural sprayer's draining tank.
+        let remainingPhysicalLength = max(0.0, configuredLength - fiberOpticPathLengthUsedMeters)
+        let newMass = reelClass.massForLength(remainingPhysicalLength)
+        if abs(newMass - installed.payloadMass) > 0.0001 {
+            installedPayloadConfiguration?.payloadMass = newMass
+            refreshPayloadRuntimeState()
+        }
+
+        // Snag/entanglement risk: proximity to obstacles weighted by turn rate. Deliberately
+        // simplified — no real cable-drag simulation, same spirit as the hose's straight-line
+        // tether standing in for a flexible rope.
+        let obstacleDistance = collisionAnalysis.nearestObstacleDistance
+        let proximityFactor: Float = obstacleDistance.isFinite && obstacleDistance < FiberOpticTetherTuning.snagRiskProximityMeters
+            ? max(0.0, 1.0 - obstacleDistance / FiberOpticTetherTuning.snagRiskProximityMeters)
+            : 0.0
+        if proximityFactor > 0.0 {
+            let turnRate = abs(state.angularVelocity.z)
+            let riskRate = (FiberOpticTetherTuning.snagRiskBaseRatePerSecond +
+                turnRate * FiberOpticTetherTuning.snagRiskTurnRateMultiplier) * proximityFactor
+            fiberOpticSnagRisk = min(1.0, fiberOpticSnagRisk + riskRate * deltaTime)
+        }
+        fiberOpticSnagRiskLevel = fiberOpticSnagRisk
+
+        if remainingUsable <= 0.0001 || fiberOpticSnagRisk >= 1.0 {
+            enterSignalLostState(cause: .fiberSevered)
         }
     }
 

@@ -8,6 +8,8 @@ enum PayloadVisualPreset: String, Hashable {
     case laserRangefinder
     case fireHose
     case fireCapsuleLauncher
+    case agriculturalSprayer
+    case fiberOpticSpool
     case rescuePack
     case sensorModule
     case radioRelay

@@ -127,6 +127,18 @@
 "payload.hose.mass_follows_rig" = "Mass follows hose length × diameter, not independently editable.";
 "payload.hose.tether_taut" = "TETHER TAUT";
 "payload.hose.tether_distance" = "TETHER %.0f / %.0f m";
+
+// Fiber-optic tether
+"payload.fiber.reel_class" = "Reel Class";
+"payload.fiber.reel.short" = "Short (0.5–2 km)";
+"payload.fiber.reel.medium" = "Medium (2–10 km)";
+"payload.fiber.reel.long" = "Long (10–20 km)";
+"payload.fiber.reel_length" = "Reel Length";
+"payload.fiber.rig_mass" = "Rig mass: %.1f kg";
+"payload.fiber.mass_follows_rig" = "Mass follows reel length × class, not independently editable.";
+"payload.fiber.remaining" = "FIBER %.1f / %.1f km";
+"payload.fiber.snag_risk" = "SNAG RISK %.0f%%";
+"payload.fiber.severed" = "FIBER SEVERED";
 "payload.hose.extinguishing" = "Extinguishing…";
 "payload.hose.throw_distance" = "THROW %.0f m";
 "payload.hose.spraying_status" = "SPRAYING";
@@ -143,6 +155,10 @@
 "payload.capsule.empty" = "No capsules remaining";
 "payload.capsule.dropped_status" = "Capsule dropped";
 "payload.capsule.recharge_countdown" = "RELOAD %.1fs";
+
+// Agricultural sprayer
+"payload.sprayer.tank_remaining" = "TANK %.0f / %.0f L";
+"payload.sprayer.spraying" = "SPRAYING";
 
 // Thermal camera
 "payload.camera.thermal.palette" = "Palette";
@@ -295,6 +311,8 @@
 "signal_loss.lost_message" = "The UAV has left the map bounds. Flight controls are locked until the signal is restored.";
 "signal_loss.impact_title" = "SIGNAL LOST: AIRFRAME FAILURE";
 "signal_loss.impact_message" = "Impact damage interrupted the control link and onboard systems.";
+"signal_loss.fiber_title" = "SIGNAL LOST: FIBER SEVERED";
+"signal_loss.fiber_message" = "The optical fiber tether has been cut or fully paid out — the control link is gone.";
 "signal_loss.recover" = "Restore signal";
 
 "telemetry.position" = "Position";
@@ -511,6 +529,8 @@
 "payload.type.laser_rangefinder" = "Laser Rangefinder";
 "payload.type.fire_hose" = "Fire Hose";
 "payload.type.fire_capsule_launcher" = "Fire Capsule Launcher";
+"payload.type.agricultural_sprayer" = "Agricultural Sprayer";
+"payload.type.fiber_optic_spool" = "Fiber-Optic Spool";
 "payload.type.rescue_pack" = "Rescue Pack";
 "payload.type.sensor_module" = "Sensor Module";
 "payload.type.radio_relay" = "Radio Relay";

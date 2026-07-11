@@ -16,6 +16,15 @@ struct PayloadConfiguration: Hashable {
     /// runtime, the launcher's starting ammo count and each capsule's blast radius.
     var fireCapsuleSize: FireCapsuleSize
     var fireCapsuleCount: Int
+    /// Only meaningful when `payloadType == .agriculturalSprayer` — the rigged tank's starting
+    /// liquid level, which determines `payloadMass` (see `AgriculturalSprayerTuning.massForTankLevel`).
+    /// There is only one flagship tank size, so this is a starting fill level, not a size tier.
+    var agriculturalSprayerTankLiters: Float
+    /// Only meaningful when `payloadType == .fiberOpticSpool` — the rigged reel's class and
+    /// length, which together determine `payloadMass` (see `FiberOpticReelClass.massForLength`)
+    /// and, at runtime, the usable path-length budget before the link is severed.
+    var fiberOpticReelClass: FiberOpticReelClass
+    var fiberOpticReelLengthMeters: Float
 
     init(
         payloadType: PayloadType = .cameraGimbal,
@@ -26,7 +35,10 @@ struct PayloadConfiguration: Hashable {
         fireHoseDiameterClass: FireHoseDiameterClass = .standard,
         fireHoseLengthMeters: Float = 30.0,
         fireCapsuleSize: FireCapsuleSize = .medium,
-        fireCapsuleCount: Int = 2
+        fireCapsuleCount: Int = 2,
+        agriculturalSprayerTankLiters: Float = AgriculturalSprayerTuning.tankCapacityLiters,
+        fiberOpticReelClass: FiberOpticReelClass = .medium,
+        fiberOpticReelLengthMeters: Float = 5000.0
     ) {
         self.payloadType = payloadType
         self.customName = customName
@@ -35,12 +47,24 @@ struct PayloadConfiguration: Hashable {
         self.fireCapsuleSize = fireCapsuleSize
         let clampedCapsuleCount = min(max(fireCapsuleCount, FireCapsuleTuning.countRange.lowerBound), FireCapsuleTuning.countRange.upperBound)
         self.fireCapsuleCount = clampedCapsuleCount
+        let clampedTankLiters = min(max(agriculturalSprayerTankLiters, 0.0), AgriculturalSprayerTuning.tankCapacityLiters)
+        self.agriculturalSprayerTankLiters = clampedTankLiters
+        self.fiberOpticReelClass = fiberOpticReelClass
+        let clampedReelLength = min(
+            max(fiberOpticReelLengthMeters, fiberOpticReelClass.lengthRangeMeters.lowerBound),
+            fiberOpticReelClass.lengthRangeMeters.upperBound
+        )
+        self.fiberOpticReelLengthMeters = clampedReelLength
         self.payloadMass = payloadMass ?? {
             switch payloadType {
             case .fireHose:
                 return fireHoseDiameterClass.massForLength(fireHoseLengthMeters)
             case .fireCapsuleLauncher:
                 return FireCapsuleTuning.totalMass(size: fireCapsuleSize, count: clampedCapsuleCount)
+            case .agriculturalSprayer:
+                return AgriculturalSprayerTuning.massForTankLevel(clampedTankLiters)
+            case .fiberOpticSpool:
+                return fiberOpticReelClass.massForLength(clampedReelLength)
             default:
                 return payloadType.defaultMass
             }

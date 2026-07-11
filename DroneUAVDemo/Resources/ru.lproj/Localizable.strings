@@ -127,6 +127,18 @@
 "payload.hose.mass_follows_rig" = "Масса определяется длиной × диаметром рукава и не редактируется напрямую.";
 "payload.hose.tether_taut" = "ТРОС НАТЯНУТ";
 "payload.hose.tether_distance" = "ТРОС %.0f / %.0f м";
+
+// Оптоволоконная привязь
+"payload.fiber.reel_class" = "Класс катушки";
+"payload.fiber.reel.short" = "Короткая (0.5–2 км)";
+"payload.fiber.reel.medium" = "Средняя (2–10 км)";
+"payload.fiber.reel.long" = "Длинная (10–20 км)";
+"payload.fiber.reel_length" = "Длина катушки";
+"payload.fiber.rig_mass" = "Масса оснастки: %.1f кг";
+"payload.fiber.mass_follows_rig" = "Масса определяется длиной × классом катушки и не редактируется напрямую.";
+"payload.fiber.remaining" = "ВОЛОКНО %.1f / %.1f км";
+"payload.fiber.snag_risk" = "РИСК ЗАЦЕПА %.0f%%";
+"payload.fiber.severed" = "ВОЛОКНО ОБОРВАНО";
 "payload.hose.extinguishing" = "Тушение…";
 "payload.hose.throw_distance" = "ДАЛЬНОСТЬ %.0f м";
 "payload.hose.spraying_status" = "ПОДАЧА ПЕНЫ";
@@ -143,6 +155,10 @@
 "payload.capsule.empty" = "Капсулы закончились";
 "payload.capsule.dropped_status" = "Капсула сброшена";
 "payload.capsule.recharge_countdown" = "ЗАРЯДКА %.1fс";
+
+// Аграрный опрыскиватель
+"payload.sprayer.tank_remaining" = "БАК %.0f / %.0f Л";
+"payload.sprayer.spraying" = "РАСПЫЛЕНИЕ";
 
 // Тепловизионная камера
 "payload.camera.thermal.palette" = "Палитра";
@@ -295,6 +311,8 @@
 "signal_loss.lost_message" = "Сигнал потерян.";
 "signal_loss.impact_title" = "СИГНАЛ ПОТЕРЯН: ОТКАЗ ПЛАНЕРА";
 "signal_loss.impact_message" = "Ударное повреждение нарушило канал управления и бортовые системы.";
+"signal_loss.fiber_title" = "СИГНАЛ ПОТЕРЯН: ВОЛОКНО ОБОРВАНО";
+"signal_loss.fiber_message" = "Оптоволоконная привязь оборвана или полностью размотана — канал управления потерян.";
 "signal_loss.recover" = "Восстановить";
 
 "telemetry.position" = "Координаты";
@@ -508,6 +526,8 @@
 "payload.type.laser_rangefinder" = "Лазерный дальномер";
 "payload.type.fire_hose" = "Пожарный рукав";
 "payload.type.fire_capsule_launcher" = "Капсульный огнетушитель";
+"payload.type.agricultural_sprayer" = "Аграрный опрыскиватель";
+"payload.type.fiber_optic_spool" = "Катушка оптоволокна";
 "payload.type.rescue_pack" = "Комплект первой помощи";
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";
