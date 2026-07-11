@@ -144,7 +144,7 @@ struct MissionStatusPanel: View {
 
     private var feasibilityText: String {
         if snapshot.operationalStatus.canCompleteMissionSafely &&
-            snapshot.operationalStatus.geofenceState != .outside &&
+            snapshot.operationalStatus.worldDetailBoundaryState != .outside &&
             tacticalState.draftStatus.issues.isEmpty {
             return localized("mission.status.value.feasible")
         }
@@ -155,11 +155,11 @@ struct MissionStatusPanel: View {
     }
 
     private var geofenceTitle: String {
-        snapshot.operationalStatus.geofenceState.title
+        snapshot.operationalStatus.worldDetailBoundaryState.title
     }
 
     private var geofenceTint: Color {
-        switch snapshot.operationalStatus.geofenceState {
+        switch snapshot.operationalStatus.worldDetailBoundaryState {
         case .nominal:
             return GroundControlPalette.success
         case .warning:

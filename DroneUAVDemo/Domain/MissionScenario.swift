@@ -430,6 +430,35 @@ enum MissionScenarioOutcome: Equatable {
     case aborted
 }
 
+// MARK: - Mission geofence
+
+/// A configurable operational-area rule for the *current mission* — independent of both the
+/// world-detail boundary (`WorldDetailBoundaryState`, a rendering/visual-detail concept) and the
+/// radio link-quality zones (a comms concept, see `MissionOperationalStatus`). Crossing it invokes
+/// whatever `configuredAction` the scenario has decided is appropriate, exactly like a real
+/// PX4/ArduPilot geofence — a scenario/autopilot rule, not a radio-channel effect.
+enum MissionGeofenceAction: String, Equatable {
+    case warningOnly
+    case hold
+    case returnHome
+    case land
+    case missionFail
+}
+
+struct MissionGeofenceConfiguration: Equatable {
+    var center: SIMD2<Float>
+    var radiusMeters: Float
+    var configuredAction: MissionGeofenceAction
+}
+
+enum MissionGeofenceState: String, Equatable {
+    /// No mission is running, or the running scenario doesn't define an operational area.
+    case inactive
+    case nominal
+    case warning
+    case breach
+}
+
 // MARK: - Deterministic RNG
 
 /// Small linear-congruential generator (matches the seeded-RNG style used elsewhere in the

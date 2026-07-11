@@ -1,8 +1,8 @@
 import Foundation
 
-/// Runtime status of the fiber-optic control link — separate from `UAVSignalState` (the
-/// radio/geofence signal-loss machine), since a physical fiber break behaves nothing like flying
-/// out of radio range: no gradual RSSI fade, no countdown, and once broken it never reconnects.
+/// Runtime status of the fiber-optic control link — separate from `UAVSignalState` (the radio
+/// signal-loss machine), since a physical fiber break behaves nothing like flying out of radio
+/// range: no gradual RSSI fade, no countdown, and once broken it never reconnects.
 enum FiberLinkStatus: Equatable {
     /// Normal operation.
     case connected
@@ -11,7 +11,7 @@ enum FiberLinkStatus: Equatable {
     /// isn't).
     case degraded
     /// Terminal — fiber physically severed or the reel fully paid out. Never recovers; the
-    /// aircraft's own failsafe sequence (`FiberFailsafeStage`) takes over from here.
+    /// aircraft's own failsafe sequence (`ControlLinkFailsafeStage`) takes over from here.
     case broken
 }
 

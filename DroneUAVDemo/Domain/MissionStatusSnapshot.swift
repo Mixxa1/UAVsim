@@ -8,7 +8,10 @@ struct MissionOperationalStatus: Equatable {
     var distanceToHomeM: Float
     var distanceToNearestEdgeM: Float
     var nearestBoundaryDirection: MapBoundaryDirection
-    var geofenceState: MapGeofenceState
+    /// Distance to the *authored/detailed map's* edge — purely a visual-detail concept (crossing
+    /// it is a benign notice, flight continues into the procedural outer belt). Not radio range,
+    /// not a mission geofence — see `MissionSafetyState`/`MissionGeofenceConfiguration` for those.
+    var worldDetailBoundaryState: WorldDetailBoundaryState
     var missionDistanceBudgetM: Float
     var canReachHomeSafely: Bool
     var canCompleteMissionSafely: Bool
@@ -33,7 +36,7 @@ struct MissionOperationalStatus: Equatable {
         distanceToHomeM: 0.0,
         distanceToNearestEdgeM: 0.0,
         nearestBoundaryDirection: .north,
-        geofenceState: .nominal,
+        worldDetailBoundaryState: .nominal,
         missionDistanceBudgetM: 0.0,
         canReachHomeSafely: false,
         canCompleteMissionSafely: false,

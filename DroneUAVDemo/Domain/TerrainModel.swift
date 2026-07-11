@@ -345,6 +345,16 @@ struct TerrainConfiguration {
         max(worldHalfExtent * preset.extentMultiplier + 110.0, hardWorldBoundsRadius + 130.0)
     }
 
+    /// How far the procedurally-continued, lower-density "outer belt" reaches beyond
+    /// `scenicHalfExtent` before the world becomes flat, undecorated ground — large but finite,
+    /// scaled with map size so a realistic flight runs out of battery/fuel/fiber before it runs
+    /// out of world, without attempting a genuinely unbounded/streamed terrain (that's separate,
+    /// deferred work). Ground geometry and the boundary-belt decoration both key off this same
+    /// radius so neither a bare patch of ground nor a decorated area without ground can occur.
+    var beltOuterRadius: Float {
+        scenicHalfExtent + max(400.0, worldHalfExtent * 0.75)
+    }
+
     var maxFlightAltitude: Float {
         max(240.0, min(720.0, worldHalfExtent * 1.6))
     }

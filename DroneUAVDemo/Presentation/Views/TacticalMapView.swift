@@ -143,8 +143,8 @@ struct TacticalMapView: View {
     private var instructionBadge: some View {
         HStack(spacing: 8) {
             statusBadge(
-                title: state.viewport.geofenceState.title,
-                tint: geofenceTint(state.viewport.geofenceState)
+                title: state.viewport.worldDetailBoundaryState.title,
+                tint: geofenceTint(state.viewport.worldDetailBoundaryState)
             )
             Text(LocalizedStringKey(state.mode.instructionKey))
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
@@ -229,7 +229,7 @@ struct TacticalMapView: View {
     }
 
     private var geofenceText: String {
-        "\(state.viewport.geofenceState.title) • \(Int(state.viewport.boundaryHalfExtent.rounded())) m"
+        "\(state.viewport.worldDetailBoundaryState.title) • \(Int(state.viewport.boundaryHalfExtent.rounded())) m"
     }
 
     private var modeTitle: String {
@@ -356,7 +356,7 @@ struct TacticalMapView: View {
             )
     }
 
-    private func geofenceTint(_ state: MapGeofenceState) -> Color {
+    private func geofenceTint(_ state: WorldDetailBoundaryState) -> Color {
         switch state {
         case .nominal:
             return GroundControlPalette.success
@@ -1061,7 +1061,7 @@ private struct TacticalMapCanvas: View {
     }
 
     private var geofenceMarkerColor: Color {
-        switch state.viewport.geofenceState {
+        switch state.viewport.worldDetailBoundaryState {
         case .nominal:
             return GroundControlPalette.success
         case .warning:

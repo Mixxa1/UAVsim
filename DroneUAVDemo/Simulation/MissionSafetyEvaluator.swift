@@ -170,7 +170,8 @@ final class MissionSafetyEvaluator {
         collisionAnalysis: CollisionAnalysisSnapshot,
         thermalState: ThermalState,
         signalState: UAVSignalState,
-        operationalStatus: MissionOperationalStatus
+        operationalStatus: MissionOperationalStatus,
+        missionGeofenceState: MissionGeofenceState = .inactive
     ) -> MissionSafetyState {
         let maxTemperature = DamageComponent.allCases
             .map { thermalState.temperature(for: $0) }
@@ -259,6 +260,17 @@ final class MissionSafetyEvaluator {
                     reason: .runtimeUnsafe,
                     severity: .warning,
                     detailKey: "mission.status.reason.link_degraded"
+                )
+            )
+        }
+        if missionGeofenceState == .warning || missionGeofenceState == .breach {
+            warnings.append(
+                MissionWarning(
+                    reason: .runtimeUnsafe,
+                    severity: missionGeofenceState == .breach ? .critical : .warning,
+                    detailKey: missionGeofenceState == .breach
+                        ? "mission.status.reason.geofence_breach"
+                        : "mission.status.reason.geofence_warning"
                 )
             )
         }

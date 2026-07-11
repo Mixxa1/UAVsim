@@ -1,7 +1,12 @@
 import Foundation
 import simd
 
-enum MapGeofenceState: String, Equatable {
+/// Distance to the edge of the *authored/detailed* map — a purely visual-detail concept. Crossing
+/// `.outside` is a benign notice (the procedural outer belt continues the world); it does not
+/// mean radio signal is lost and does not mean a mission geofence has been breached — those are
+/// separate, independent concepts (see the radio link-quality zones on `MissionOperationalStatus`
+/// and `MissionGeofenceConfiguration`).
+enum WorldDetailBoundaryState: String, Equatable {
     case nominal
     case warning
     case critical
@@ -130,8 +135,8 @@ struct MapViewportState: Equatable {
         nearestBoundaryDirection(for: dronePosition)
     }
 
-    var geofenceState: MapGeofenceState {
-        geofenceState(for: dronePosition)
+    var worldDetailBoundaryState: WorldDetailBoundaryState {
+        worldDetailBoundaryState(for: dronePosition)
     }
 
     func clampedToWorld(_ position: SIMD2<Float>) -> SIMD2<Float> {
@@ -161,7 +166,7 @@ struct MapViewportState: Equatable {
         return local.y >= 0.0 ? .north : .south
     }
 
-    func geofenceState(for position: SIMD2<Float>) -> MapGeofenceState {
+    func worldDetailBoundaryState(for position: SIMD2<Float>) -> WorldDetailBoundaryState {
         let edgeDistance = distanceToNearestMapEdge(for: position)
         if edgeDistance < 0.0 {
             return .outside

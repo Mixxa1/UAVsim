@@ -5,7 +5,9 @@ final class MissionFailsafeCoordinator {
         executionState: MissionExecutionState,
         safetyState: MissionSafetyState,
         airframeClass: AirframeClass,
-        flightMode: DroneFlightMode
+        flightMode: DroneFlightMode,
+        missionGeofenceState: MissionGeofenceState = .inactive,
+        missionGeofenceAction: MissionGeofenceAction = .warningOnly
     ) -> MissionFailsafeMode {
         if flightMode == .returnHome {
             return .returnHome
@@ -13,6 +15,22 @@ final class MissionFailsafeCoordinator {
 
         guard executionState.status == .running else {
             return .none
+        }
+
+        // The geofence is a scenario/autopilot rule, not a radio-channel effect (same principle
+        // as real PX4/ArduPilot geofences) — its configured action is resolved directly, ahead of
+        // the generic battery/collision/route checks below, since it's an independent trigger.
+        if missionGeofenceState == .breach {
+            switch missionGeofenceAction {
+            case .warningOnly:
+                break
+            case .hold:
+                return .hold
+            case .returnHome:
+                return .returnHome
+            case .land, .missionFail:
+                return .abortMission
+            }
         }
 
         let runtime = safetyState.runtimeConstraints

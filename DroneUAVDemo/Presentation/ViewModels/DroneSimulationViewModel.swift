@@ -346,6 +346,23 @@ private struct PayloadProximityEffectModel {
 
 private enum SignalLossConfiguration {
     static let countdownDuration = 8
+    /// How long the radio link must sit continuously in the nominal zone before
+    /// `controlLinkFailsafeLatched` clears — a momentary blip crossing back into range shouldn't
+    /// immediately re-authorize arming.
+    static let stableReconnectionRequiredSeconds: Float = 1.5
+}
+
+/// Fixed-wing/hybridVTOL control-link failsafe orbit tuning — a real loiter/glide (not the
+/// open-loop constant-15°-bank the sequence originally used, whose turn radius at cruise speed
+/// was wide enough that 8 seconds barely curved the flight path, letting the aircraft drift far
+/// enough to fly over unrendered terrain past the world's outer belt).
+private enum ControlLinkFailsafeOrbitTuning {
+    // Sized so a typical fixed-wing cruise speed can actually achieve this turn radius at
+    // `maxBankDegrees` (r = v²/(g·tanφ) — a tighter target than the achievable turn radius would
+    // just leave the aircraft perpetually overshooting the ring instead of settling into a circle).
+    static let radiusMeters: Float = 220.0
+    static let courseErrorToBankGain: Float = 1.8
+    static let maxBankDegrees: Double = 35.0
 }
 
 private extension Int {
@@ -613,7 +630,21 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var fiberSpoolDraftConfiguration = FiberSpoolModule()
     @Published private(set) var isFiberSpoolAttached = false
     @Published private(set) var fiberLinkState = FiberLinkState()
-    @Published private(set) var fiberFailsafeStage: FiberFailsafeStage = .none
+    @Published private(set) var controlLinkFailsafeStage: ControlLinkFailsafeStage = .none
+    /// Which event triggered the currently-running (or most recently completed) failsafe stage —
+    /// same state machine either way, only the HUD text differs.
+    @Published private(set) var controlLinkFailsafeTrigger: ControlLinkFailsafeTrigger = .fiberBroken
+    /// Persists independently of `controlLinkFailsafeStage` reaching a terminal value (landed/
+    /// crashed) — a landing ends the aircraft's *motion*, it does not repair whatever caused the
+    /// control link to be lost. Gates `resolveArmAuthorization()` until an explicit recovery event
+    /// clears it: for radio, a stable reconnection held for `stableReconnectionRequiredSeconds`
+    /// (`updateControlLinkFailsafeLatchRecovery`); for fiber, only detaching/reattaching a reel
+    /// (a real repair/replacement action), never automatically.
+    @Published private(set) var controlLinkFailsafeLatched = false
+    /// Live, continuously-recomputed reason `arm()` would currently be refused (`.none` when
+    /// arming is allowed) — surfaced to the HUD so the block is visible before the player even
+    /// tries, not just as a rejected-command flash.
+    @Published private(set) var armBlockReason: ArmBlockReason = .none
     /// Explicit opt-in (default off) to let an autonomous mission keep flying unattended after a
     /// fiber break instead of the default `.returnHome` — must be a deliberate setting, not
     /// default behavior.
@@ -734,16 +765,16 @@ final class DroneSimulationViewModel: ObservableObject {
     /// stabilize/loiterGlide/emergencyLanding) — blocks player input the same way
     /// `signalState.isInteractionBlocking` does, so the autonomous recovery isn't fought by the
     /// player's own stick.
-    var isFiberFailsafeActive: Bool {
-        fiberFailsafeStage.isActive
+    var isControlLinkFailsafeActive: Bool {
+        controlLinkFailsafeStage.isActive
     }
 
     /// Gates whether the existing world-boundary/geofence signal-loss machinery applies at all
     /// (see `UAVControlLinkType`) — `.fiberOptic` only while the reel is actually mounted and the
-    /// link hasn't already broken (once broken, `FiberFailsafeStage` owns recovery, not a control
+    /// link hasn't already broken (once broken, `ControlLinkFailsafeStage` owns recovery, not a control
     /// "link type").
     /// Deliberately stays `.fiberOptic` even after the link breaks — a severed fiber doesn't
-    /// fall back to radio, it's just gone, and the aircraft is on `FiberFailsafeStage`'s own
+    /// fall back to radio, it's just gone, and the aircraft is on `ControlLinkFailsafeStage`'s own
     /// autonomous recovery until it lands. Handing control back to the geofence/radio signal-loss
     /// machine mid-failsafe would let it fight (or freeze) the failsafe's own flight commands.
     var activeControlLinkType: UAVControlLinkType {
@@ -1168,7 +1199,17 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fiberOpticPathLengthUsedMeters: Float = 0.0
     private var fiberOpticSnagRisk: Float = 0.0
     private var fiberOpticLastTrackedPosition: SIMD3<Float>?
-    private var fiberFailsafeStageElapsed: Float = 0.0
+    private var controlLinkFailsafeStageElapsed: Float = 0.0
+    /// How long the radio link has been continuously back in the nominal zone while
+    /// `controlLinkFailsafeLatched` is set — only used to confirm a *stable* reconnection before
+    /// clearing the latch (see `updateControlLinkFailsafeLatchRecovery`); resets to 0 the instant
+    /// the link degrades again. Fiber never uses this — it has no automatic recovery path.
+    private var stableRadioReconnectionSeconds: Float = 0.0
+    /// Planar point the fixed-wing/hybridVTOL control-link failsafe orbits during
+    /// `.loiterGlide`/`.emergencyLanding` — captured once, right when the failsafe begins, so the
+    /// aircraft loiters near where the link was actually lost instead of drifting in whatever
+    /// direction it happened to be flying (which could easily carry it past the rendered world).
+    private var controlLinkFailsafeLoiterCenter: SIMD2<Float>?
     private var fixedWingAutopilotAltitudeCommand: Float?
     private var fixedWingAutopilotCourseCommand: Float?
     private var fixedWingAssistTurnOverrideTimeRemaining: Float = 0.0
@@ -2245,10 +2286,14 @@ final class DroneSimulationViewModel: ObservableObject {
         fiberOpticSnagRisk = 0.0
         fiberOpticLastTrackedPosition = nil
         // A previous reel's failsafe sequence may have ended in a terminal stage (landed/crashed/
-        // etc.) — `beginFiberFailsafeSequence` only fires from `.none`, so this must be cleared
-        // for a fresh reel's eventual severance to trigger the sequence again.
-        fiberFailsafeStage = .none
-        fiberFailsafeStageElapsed = 0.0
+        // etc.) — `beginControlLinkFailsafeSequence` only fires from `.none`, so this must be
+        // cleared for a fresh reel's eventual severance to trigger the sequence again. Mounting a
+        // fresh reel is exactly the "replace the reel" recovery action fiber requires — nothing
+        // else ever clears `controlLinkFailsafeLatched` for a fiber-triggered latch.
+        controlLinkFailsafeStage = .none
+        controlLinkFailsafeStageElapsed = 0.0
+        controlLinkFailsafeLatched = false
+        controlLinkFailsafeLoiterCenter = nil
         sceneController.attachFiberSpoolVisual(fiberSpoolDraftConfiguration)
         refreshPayloadRuntimeState()
         hasUnsavedChanges = true
@@ -2262,8 +2307,10 @@ final class DroneSimulationViewModel: ObservableObject {
         fiberOpticPathLengthUsedMeters = 0.0
         fiberOpticSnagRisk = 0.0
         fiberOpticLastTrackedPosition = nil
-        fiberFailsafeStage = .none
-        fiberFailsafeStageElapsed = 0.0
+        controlLinkFailsafeStage = .none
+        controlLinkFailsafeStageElapsed = 0.0
+        controlLinkFailsafeLatched = false
+        controlLinkFailsafeLoiterCenter = nil
         sceneController.removeFiberSpoolVisual()
         refreshPayloadRuntimeState()
         hasUnsavedChanges = true
@@ -2438,10 +2485,50 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// Single, central source of truth for whether `arm()` is allowed right now — checked inside
+    /// `arm()` itself (not just used to disable a SwiftUI button), so no input source (keyboard,
+    /// controller, remote) can bypass it. Landing ends the aircraft's *motion*; it does not by
+    /// itself repair whatever caused the control link to be lost, so this stays independent of
+    /// `physicalState` reaching a grounded/rest value.
+    func resolveArmAuthorization() -> ArmAuthorization {
+        guard physicalState.permitsRearm, !damageState.isFlightCritical else {
+            return ArmAuthorization(isAllowed: false, reason: .vehicleRequiresRecovery)
+        }
+        if fiberLinkState.status == .broken {
+            return ArmAuthorization(
+                isAllowed: false,
+                reason: fiberLinkState.isSnagged ? .fiberBroken : .fiberExhausted
+            )
+        }
+        if controlLinkFailsafeLatched {
+            return ArmAuthorization(
+                isAllowed: false,
+                reason: controlLinkFailsafeTrigger == .radioLinkLost
+                    ? .radioLinkUnavailable
+                    : .linkLossFailsafeLatched
+            )
+        }
+        if activeControlLinkType == .radio {
+            let operationalStatus = currentMissionOperationalStatus(
+                missionDistanceEstimate: currentMissionDistanceEstimate()
+            )
+            if operationalStatus.isInWarningLinkZone {
+                return ArmAuthorization(isAllowed: false, reason: .radioLinkUnavailable)
+            }
+        }
+        return .allowed
+    }
+
+    private func publishArmRejected(reason: ArmBlockReason) {
+        armBlockReason = reason
+    }
+
     func arm() {
         guard canControlLocalVehicle else { return }
         ensureSimulationRunning()
-        guard physicalState.permitsRearm, !damageState.isFlightCritical else {
+        let authorization = resolveArmAuthorization()
+        guard authorization.isAllowed else {
+            publishArmRejected(reason: authorization.reason)
             return
         }
         isArmed = true
@@ -2536,6 +2623,21 @@ final class DroneSimulationViewModel: ObservableObject {
         setFlightMode(.manual, reason: "reset")
         flightControlMode = .stabilized
         clearSignalLossState(restoringInputMode: false)
+        // A full reset is a clean slate for a new attempt with the same equipment loadout — any
+        // fiber break/radio-lost latch from the previous attempt must not carry over and leave
+        // `resolveArmAuthorization()` still refusing to arm the freshly-respawned aircraft. A
+        // mounted fiber spool stays mounted, just returned to a fresh, unbroken state (mirrors
+        // `attachFiberSpoolModule()`'s own "freshly wound reel" reset).
+        fiberLinkState = FiberLinkState()
+        fiberOpticPathLengthUsedMeters = 0.0
+        fiberOpticSnagRisk = 0.0
+        fiberOpticLastTrackedPosition = nil
+        controlLinkFailsafeStage = .none
+        controlLinkFailsafeStageElapsed = 0.0
+        controlLinkFailsafeLatched = false
+        controlLinkFailsafeLoiterCenter = nil
+        stableRadioReconnectionSeconds = 0.0
+        armBlockReason = .none
         state = DroneState.initial
         state.propulsionUnits = selectedDroneProfile.propulsionUnitTemplate
         lastFiniteState = state
@@ -5174,7 +5276,9 @@ final class DroneSimulationViewModel: ObservableObject {
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
         updateSignalLossSequence(deltaTime: dt)
         updateFiberOpticTether(deltaTime: dt)
-        updateFiberFailsafeSequence(deltaTime: dt)
+        updateControlLinkFailsafeSequence(deltaTime: dt)
+        updateControlLinkFailsafeLatchRecovery(deltaTime: dt)
+        armBlockReason = resolveArmAuthorization().reason
         syncMissionDeliveryState(triggerAutoRelease: false)
 
         if blocksSimulationForSignalLoss {
@@ -5816,7 +5920,7 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float,
         controlState: ResolvedControlState
     ) {
-        guard canControlLocalVehicle, !isFiberFailsafeActive else { return }
+        guard canControlLocalVehicle, !isControlLinkFailsafeActive else { return }
 
         // hybridVTOL transition lever: a raw held-key input, not routed through
         // the assist/marker-guidance pipeline below (keyboard-only this pass;
@@ -6113,7 +6217,16 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func processInputActions(using controlState: ResolvedControlState) {
-        guard !signalState.isInteractionBlocking, !isFiberFailsafeActive else {
+        // Reset is a meta/administrative command ("give up, start over"), not a flight-control
+        // input — it must never be swallowed by signal-loss/failsafe input blocking below, or the
+        // player has no way out of a stuck sequence (e.g. a fixed-wing failsafe that can't find
+        // ground to land on). Checked and handled unconditionally, before the interaction gate.
+        if controlState.actions.contains(.requestReset) {
+            reset()
+            return
+        }
+
+        guard !signalState.isInteractionBlocking, !isControlLinkFailsafeActive else {
             return
         }
 
@@ -10108,7 +10221,10 @@ final class DroneSimulationViewModel: ObservableObject {
             }
             return localToHome.y >= 0.0 ? .north : .south
         }()
-        let geofenceState: MapGeofenceState = {
+        // Purely a visual-detail concept (distance to the authored/detailed map's edge) — crossing
+        // `.outside` is a benign notice, not a comms or mission event. See `updateSignalLossSequence`
+        // below, which now drives off the radio link-quality zones instead of this.
+        let worldDetailBoundaryState: WorldDetailBoundaryState = {
             let criticalBand = boundaryHalfExtentM * 0.05
             let warningBand = boundaryHalfExtentM * 0.15
             if distanceToNearestEdgeM < 0.0 {
@@ -10173,7 +10289,7 @@ final class DroneSimulationViewModel: ObservableObject {
             distanceToHomeM: distanceToHomeM,
             distanceToNearestEdgeM: distanceToNearestEdgeM,
             nearestBoundaryDirection: nearestBoundaryDirection,
-            geofenceState: geofenceState,
+            worldDetailBoundaryState: worldDetailBoundaryState,
             missionDistanceBudgetM: missionBudget,
             canReachHomeSafely: distanceToHomeM <= estimatedSafeReturnRangeM + 0.05,
             canCompleteMissionSafely: missionBudget <= estimatedSafeReturnRangeM + 0.05,
@@ -10190,6 +10306,51 @@ final class DroneSimulationViewModel: ObservableObject {
             lostLinkRadiusM: lostLinkRadiusM,
             operationalRadiusM: operationalRadiusM
         )
+    }
+
+    /// Mission geofence area — derived from the active scenario's own operational area
+    /// (search sector for SAR, fire zone for fire response), not from the map's authored/detail
+    /// boundary or the radio link range. `nil` when no scenario is running or the running kind
+    /// doesn't define an operational area (matches Part E's "sensible default per mission type,
+    /// no new authoring UI yet" scope).
+    private func currentMissionGeofenceConfiguration() -> MissionGeofenceConfiguration? {
+        if let runtime = missionScenarioRuntime, runtime.isActive {
+            let placement = runtime.placement
+            return MissionGeofenceConfiguration(
+                center: placement.sectorCenter,
+                // Generous margin over the search sector itself — chasing a lead just outside the
+                // sector shouldn't immediately breach; only warningOnly is configured for SAR.
+                radiusMeters: placement.sectorRadius * 1.5 + 60.0,
+                configuredAction: .warningOnly
+            )
+        }
+        if let runtime = fireResponseRuntime, runtime.isActive {
+            let placement = runtime.placement
+            return MissionGeofenceConfiguration(
+                center: placement.zoneCenter,
+                radiusMeters: placement.zoneRadius * 1.6 + 80.0,
+                // A firefighting aircraft drifting away from the fire zone (most relevant for the
+                // capsule launcher, which has no physical truck tether unlike the hose) should be
+                // held rather than left to wander unattended.
+                configuredAction: .hold
+            )
+        }
+        return nil
+    }
+
+    private func currentMissionGeofenceState(configuration: MissionGeofenceConfiguration?) -> MissionGeofenceState {
+        guard let configuration else {
+            return .inactive
+        }
+        let distance = simd_distance(currentPlanarPosition(), configuration.center)
+        let warningBand = configuration.radiusMeters * 0.85
+        if distance > configuration.radiusMeters {
+            return .breach
+        }
+        if distance > warningBand {
+            return .warning
+        }
+        return .nominal
     }
 
     private func currentConsumptionMultiplier(
@@ -15622,6 +15783,8 @@ final class DroneSimulationViewModel: ObservableObject {
         let operationalStatus = currentMissionOperationalStatus(
             missionDistanceEstimate: currentMissionDistanceEstimate()
         )
+        let missionGeofenceConfiguration = currentMissionGeofenceConfiguration()
+        let missionGeofenceState = currentMissionGeofenceState(configuration: missionGeofenceConfiguration)
 
         var safetyState = missionSafetyEvaluator.evaluate(
             draftStatus: tacticalMapState.draftStatus,
@@ -15635,7 +15798,8 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionAnalysis: collisionAnalysis,
             thermalState: thermalState,
             signalState: signalState,
-            operationalStatus: operationalStatus
+            operationalStatus: operationalStatus,
+            missionGeofenceState: missionGeofenceState
         )
 
         if selectedDroneProfile.airframeClass == .fixedWing {
@@ -15660,7 +15824,9 @@ final class DroneSimulationViewModel: ObservableObject {
             executionState: missionExecutionState,
             safetyState: safetyState,
             airframeClass: selectedDroneProfile.airframeClass,
-            flightMode: mode
+            flightMode: mode,
+            missionGeofenceState: missionGeofenceState,
+            missionGeofenceAction: missionGeofenceConfiguration?.configuredAction ?? .warningOnly
         )
         safetyState.failsafeMode = failsafeMode
         safetyState.abortReason = abortReason(for: failsafeMode, safetyState: safetyState)
@@ -15862,30 +16028,80 @@ final class DroneSimulationViewModel: ObservableObject {
         releasePayload()
     }
 
+    /// Local, cascade-only mirror of the radio link-quality zones — kept separate from
+    /// `WorldDetailBoundaryState` (which is a map-edge/visual-detail concept) since this drives
+    /// signal behavior purely from distance-to-home vs. the aircraft's nominal radio range.
+    private enum RadioLinkZone {
+        case nominal
+        case warning
+        case critical
+        case lost
+    }
+
     private func updateSignalLossSequence(deltaTime: Float) {
-        // The world-boundary/geofence signal-loss machine is a radio-link concern (RSSI-style
-        // fade with distance) — a physical fiber isn't affected by distance from the map center,
-        // so it's bypassed entirely under `.fiberOptic` in favor of `FiberLinkState`/
-        // `FiberFailsafeStage` above.
+        // Fiber isn't affected by distance from the map center at all — it's bypassed entirely
+        // under `.fiberOptic` in favor of `FiberLinkState`/`ControlLinkFailsafeStage` above.
         guard activeControlLinkType == .radio else {
             return
         }
         guard signalLossCause != .impactDamage else {
             return
         }
+        // Once the control link is genuinely lost and latched, this whole warning/countdown
+        // cascade stops running entirely — recovery is owned by
+        // `updateControlLinkFailsafeLatchRecovery`'s stable-reconnection timer, not by re-running
+        // this cascade every tick. Without this guard, `signalState` kept re-entering
+        // `.boundaryCountdown` from `.normal` every ~8s forever (harmless re-triggers) and, before
+        // this fix, `signalCountdownSecondsRemaining` never stopped decrementing past zero.
+        guard !controlLinkFailsafeLatched else {
+            return
+        }
 
         let operationalStatus = currentMissionOperationalStatus(
             missionDistanceEstimate: currentMissionDistanceEstimate()
         )
+        let linkLossPolicy = selectedDroneProfile.operationalProfile.linkLossPolicy
+        let radioZone: RadioLinkZone = {
+            if operationalStatus.isLinkLost { return .lost }
+            if operationalStatus.isInCriticalLinkZone { return .critical }
+            if operationalStatus.isInWarningLinkZone { return .warning }
+            return .nominal
+        }()
+
+        // A genuine radio-range failsafe reaction is a function of equipment, not of the world's
+        // detail boundary — an aircraft with an autopilot doesn't need to freeze/go dark just
+        // because it drifted out of nominal link range, it hands off to the same equipment
+        // failsafe a severed fiber would (see `beginControlLinkFailsafeSequence`). Only a simple
+        // aircraft with no autopilot to fall back on (`.strandedWithoutInput`) still goes through
+        // the freeze/dark countdown below — losing the channel really is losing the ability to
+        // fly for that equipment class.
+        func handleLinkLost() {
+            signalCountdownSecondsRemaining = 0
+            signalLossSecondAccumulator = 0.0
+            if linkLossPolicy == .strandedWithoutInput {
+                enterSignalLostState(cause: .linkRange)
+            } else {
+                // Not `.signalLost` — that state (and the interaction-blocking machinery it
+                // drives: full-screen freeze, `blocksSimulationForSignalLoss`, etc.) is reserved
+                // for aircraft with no autopilot to fall back on. This aircraft keeps flying
+                // itself through the failsafe below (input blocked via
+                // `isControlLinkFailsafeActive` instead), so the stale top-right countdown card
+                // just needs to clear — `ControlLinkFailsafeStageHUDView` takes over as the
+                // relevant HUD element from here, and `controlLinkFailsafeLatched` (set inside
+                // `beginControlLinkFailsafeSequence`) stops this cascade from re-entering.
+                signalState = .normal
+                beginControlLinkFailsafeSequence(trigger: .radioLinkLost)
+            }
+        }
 
         switch signalState {
         case .normal:
-            switch operationalStatus.geofenceState {
+            switch radioZone {
             case .warning:
                 signalState = .outOfBoundsWarning
             case .critical:
                 signalState = .signalDegrading
-            case .outside:
+            case .lost:
                 signalState = .boundaryCountdown
                 signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
                 signalLossSecondAccumulator = 0.0
@@ -15894,7 +16110,7 @@ final class DroneSimulationViewModel: ObservableObject {
             }
 
         case .outOfBoundsWarning, .signalDegrading, .boundaryCountdown:
-            switch operationalStatus.geofenceState {
+            switch radioZone {
             case .nominal:
                 clearSignalLossState(restoringInputMode: false)
                 return
@@ -15908,18 +16124,18 @@ final class DroneSimulationViewModel: ObservableObject {
                 signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
                 signalLossSecondAccumulator = 0.0
                 return
-            case .outside:
+            case .lost:
                 signalState = .boundaryCountdown
             }
 
             signalLossSecondAccumulator += deltaTime
 
-            while signalLossSecondAccumulator >= 1.0 {
+            while signalLossSecondAccumulator >= 1.0, signalCountdownSecondsRemaining > 0 {
                 signalLossSecondAccumulator -= 1.0
-                signalCountdownSecondsRemaining -= 1
+                signalCountdownSecondsRemaining = max(0, signalCountdownSecondsRemaining - 1)
 
                 if signalCountdownSecondsRemaining <= 0 {
-                    enterSignalLostState(cause: .linkRange)
+                    handleLinkLost()
                     return
                 }
             }
@@ -16098,7 +16314,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         guard fiberLinkState.status != .broken else {
-            // Terminal — never reconnects, regardless of ground/armed state. `FiberFailsafeStage`
+            // Terminal — never reconnects, regardless of ground/armed state. `ControlLinkFailsafeStage`
             // owns recovery from here, including the landing this same reel is still mounted for.
             return
         }
@@ -16172,50 +16388,98 @@ final class DroneSimulationViewModel: ObservableObject {
         )
 
         if status == .broken {
-            beginFiberFailsafeSequence()
+            beginControlLinkFailsafeSequence(trigger: .fiberBroken)
         }
     }
 
-    /// Entry point into the fiber-severance failsafe. A mission-bound autonomous aircraft reuses
-    /// the existing `.returnHome` state machine directly instead of the staged sequence below —
-    /// `continueMissionOnFiberLoss` (default off) is the explicit opt-in to skip even that, per
-    /// the requirement that continuing unattended must be a deliberate setting, not the default.
-    private func beginFiberFailsafeSequence() {
-        guard fiberFailsafeStage == .none else {
+    /// Entry point into the control-link-loss failsafe — shared by a severed fiber and a lost
+    /// radio link on an aircraft whose `linkLossPolicy` calls for it (see
+    /// `updateSignalLossSequence`): the reaction depends on equipment/policy, not on which link
+    /// type failed. A mission-bound autonomous aircraft reuses the existing `.returnHome` state
+    /// machine directly instead of the staged sequence below — `continueMissionOnFiberLoss`
+    /// (default off) is the explicit opt-in to skip even that, per the requirement that continuing
+    /// unattended must be a deliberate setting, not the default (applies to both triggers).
+    private func beginControlLinkFailsafeSequence(trigger: ControlLinkFailsafeTrigger) {
+        guard controlLinkFailsafeStage == .none else {
             return
         }
+        controlLinkFailsafeTrigger = trigger
+        // Persists through the whole sequence and past landing — a landing ends the aircraft's
+        // motion, not the reason it lost control in the first place. Cleared only by
+        // `updateControlLinkFailsafeLatchRecovery` (radio, after a stable reconnection) or by
+        // detaching/reattaching the fiber spool (a real repair/replacement action).
+        controlLinkFailsafeLatched = true
 
         if activeRouteTargetSource == .mission, missionExecutionState.status == .running {
             if continueMissionOnFiberLoss {
-                fiberFailsafeStage = .missionContinued
+                controlLinkFailsafeStage = .missionContinued
             } else {
-                setFlightMode(.returnHome, reason: "fiber_link_broken")
-                fiberFailsafeStage = .returnedHome
+                setFlightMode(.returnHome, reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost")
+                controlLinkFailsafeStage = .returnedHome
             }
             return
         }
 
-        fiberFailsafeStageElapsed = 0.0
+        controlLinkFailsafeStageElapsed = 0.0
         switch selectedDroneProfile.airframeClass {
         case .multirotor:
-            fiberFailsafeStage = .braking
+            controlLinkFailsafeStage = .braking
         case .fixedWing, .hybridVTOL:
-            fiberFailsafeStage = .stabilize
+            // Captured right here (not later, when `.loiterGlide` begins) so the orbit centers on
+            // where the link was actually lost — minimizing how far the brief wings-level
+            // `.stabilize` hold can carry it before the loiter takes over.
+            controlLinkFailsafeLoiterCenter = SIMD2<Float>(state.position.x, state.position.z)
+            controlLinkFailsafeStage = .stabilize
         }
     }
 
-    /// Drives the active failsafe stage every tick, once `fiberFailsafeStage.isActive`. Applies
+    /// Course (radians, codebase convention `atan2(-dx, -dz)` — matches
+    /// `MulticopterAutopilotController`/`SimpleDronePhysicsEngine`/`FixedWingAutopilot`) toward a
+    /// planar direction vector, used only by the control-link failsafe's own simple loiter so it
+    /// doesn't need to reach into the full waypoint-tracking autopilot for one bearing calculation.
+    private func controlLinkFailsafeCourse(direction: SIMD2<Float>) -> Float {
+        let course = atan2f(-direction.x, -direction.y)
+        return course.isFinite ? course : 0.0
+    }
+
+    private func controlLinkFailsafeShortestAngle(_ angle: Float) -> Float {
+        var normalized = angle
+        while normalized > .pi { normalized -= 2.0 * .pi }
+        while normalized < -.pi { normalized += 2.0 * .pi }
+        return normalized
+    }
+
+    /// Bank command (degrees) that flies a bounded circle around `controlLinkFailsafeLoiterCenter`:
+    /// heads toward the center while outside `ControlLinkFailsafeOrbitTuning.radiusMeters`, then
+    /// switches to the tangential direction to hold the circle — a deliberately simple "ring
+    /// following" guidance, not the full L1 path-tracking `FixedWingAutopilotController` uses for
+    /// missions, since this only ever needs to bound one orbit, not track a route.
+    private func controlLinkFailsafeOrbitBankDegrees() -> Double {
+        let currentPlanar = SIMD2<Float>(state.position.x, state.position.z)
+        let center = controlLinkFailsafeLoiterCenter ?? currentPlanar
+        let toCenter = center - currentPlanar
+        let distance = simd_length(toCenter)
+        let direction: SIMD2<Float> = distance > ControlLinkFailsafeOrbitTuning.radiusMeters
+            ? toCenter
+            : SIMD2<Float>(-toCenter.y, toCenter.x)
+        let desiredCourse = controlLinkFailsafeCourse(direction: direction)
+        let courseError = controlLinkFailsafeShortestAngle(desiredCourse - state.orientation.z)
+        let bankDeg = Double(courseError.radiansToDegrees) * Double(ControlLinkFailsafeOrbitTuning.courseErrorToBankGain)
+        return min(max(bankDeg, -ControlLinkFailsafeOrbitTuning.maxBankDegrees), ControlLinkFailsafeOrbitTuning.maxBankDegrees)
+    }
+
+    /// Drives the active failsafe stage every tick, once `controlLinkFailsafeStage.isActive`. Applies
     /// commands the same way `.hover`/`.emergencyStop`/autopilot modes already do elsewhere
     /// (`updateControlValues(markManual: false)`), which is why gating player input
-    /// (`isFiberFailsafeActive`) matters — otherwise the player's own stick would fight this
+    /// (`isControlLinkFailsafeActive`) matters — otherwise the player's own stick would fight this
     /// every other tick instead of being cleanly superseded.
-    private func updateFiberFailsafeSequence(deltaTime: Float) {
-        guard fiberFailsafeStage.isActive else {
+    private func updateControlLinkFailsafeSequence(deltaTime: Float) {
+        guard controlLinkFailsafeStage.isActive else {
             return
         }
-        fiberFailsafeStageElapsed += deltaTime
+        controlLinkFailsafeStageElapsed += deltaTime
 
-        switch fiberFailsafeStage {
+        switch controlLinkFailsafeStage {
         case .braking:
             let horizontalSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
             updateControlValues({ values in
@@ -16225,9 +16489,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.x = Double(state.position.x)
                 values.z = Double(state.position.z)
             }, markManual: false)
-            if fiberFailsafeStageElapsed >= 1.0 || horizontalSpeed < 0.3 {
-                fiberFailsafeStage = .hoverFailsafe
-                fiberFailsafeStageElapsed = 0.0
+            if controlLinkFailsafeStageElapsed >= 1.0 || horizontalSpeed < 0.3 {
+                controlLinkFailsafeStage = .hoverFailsafe
+                controlLinkFailsafeStageElapsed = 0.0
             }
 
         case .hoverFailsafe:
@@ -16241,9 +16505,9 @@ final class DroneSimulationViewModel: ObservableObject {
             }, markManual: false)
             // Real fiber breaks never reconnect — a brief 1-3s stabilization is enough before
             // landing, unlike radio range loss where waiting longer might recover the link.
-            if fiberFailsafeStageElapsed >= 2.0 {
-                fiberFailsafeStage = .landing
-                fiberFailsafeStageElapsed = 0.0
+            if controlLinkFailsafeStageElapsed >= 2.0 {
+                controlLinkFailsafeStage = .landing
+                controlLinkFailsafeStageElapsed = 0.0
             }
 
         case .landing:
@@ -16256,7 +16520,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.throttle = max(0.0, values.throttle - 0.02)
             }, markManual: false)
             if physicalState.isGroundRestState {
-                finalizeFiberFailsafeLanding()
+                finalizeControlLinkFailsafeLanding()
             }
 
         case .stabilize:
@@ -16266,34 +16530,39 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.yaw = Double(state.orientation.z.radiansToDegrees)
                 values.throttle = values.throttle + (0.5 - values.throttle) * 0.12
             }, markManual: false)
-            if fiberFailsafeStageElapsed >= 2.0 {
-                fiberFailsafeStage = .loiterGlide
-                fiberFailsafeStageElapsed = 0.0
+            if controlLinkFailsafeStageElapsed >= 2.0 {
+                controlLinkFailsafeStage = .loiterGlide
+                controlLinkFailsafeStageElapsed = 0.0
             }
 
         case .loiterGlide:
-            // A small constant bank with no active tracking is enough to hold a circling pattern
-            // — no bound route/mission target is required, unlike the autopilot's real loiter.
+            // Banks toward `controlLinkFailsafeLoiterCenter` and circles it (`
+            // controlLinkFailsafeOrbitBankDegrees`) — a fixed 15° bank previously had a turn
+            // radius wide enough (~650m+ at cruise speed) that it barely curved the flight path in
+            // 8 seconds, letting the aircraft drift far outside the rendered world before ever
+            // starting to loop back.
             updateControlValues({ values in
-                values.roll = 15.0
+                values.roll = controlLinkFailsafeOrbitBankDegrees()
                 values.pitch = 0.0
                 values.throttle = values.throttle + (0.5 - values.throttle) * 0.08
             }, markManual: false)
-            if fiberFailsafeStageElapsed >= 8.0 {
-                fiberFailsafeStage = .emergencyLanding
-                fiberFailsafeStageElapsed = 0.0
+            if controlLinkFailsafeStageElapsed >= 8.0 {
+                controlLinkFailsafeStage = .emergencyLanding
+                controlLinkFailsafeStageElapsed = 0.0
             }
 
         case .emergencyLanding:
-            // Gentle nose-up bias (not a dive) plus decaying throttle — a slow, controlled glide
-            // toward the ground rather than precise runway/belly-landing guidance.
+            // Same bounded orbit as `.loiterGlide` (not a dead-straight glide) plus a gentle
+            // nose-up bias and decaying throttle — a slow, controlled spiral toward the ground
+            // near the loiter center, rather than potentially gliding for a long, unbounded
+            // straight-line distance before finally touching down.
             updateControlValues({ values in
-                values.roll = 0.0
+                values.roll = controlLinkFailsafeOrbitBankDegrees()
                 values.pitch = 3.0
                 values.throttle = max(0.0, values.throttle - 0.01)
             }, markManual: false)
             if physicalState.isGroundRestState {
-                finalizeFiberFailsafeLanding()
+                finalizeControlLinkFailsafeLanding()
             }
 
         case .none, .landed, .crashed, .returnedHome, .missionContinued:
@@ -16301,13 +16570,46 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// Clears `controlLinkFailsafeLatched` on genuine recovery — the *only* place it's cleared
+    /// outside of a fiber-spool attach/detach. Radio can recover (a real RSSI-style channel can
+    /// come back into range); fiber cannot (a severed line is a terminal condition for the
+    /// sortie), so this deliberately does nothing at all for `.fiberBroken`.
+    private func updateControlLinkFailsafeLatchRecovery(deltaTime: Float) {
+        guard controlLinkFailsafeLatched else {
+            stableRadioReconnectionSeconds = 0.0
+            return
+        }
+        guard controlLinkFailsafeTrigger == .radioLinkLost else {
+            return
+        }
+
+        let operationalStatus = currentMissionOperationalStatus(
+            missionDistanceEstimate: currentMissionDistanceEstimate()
+        )
+        guard !operationalStatus.isInWarningLinkZone else {
+            stableRadioReconnectionSeconds = 0.0
+            return
+        }
+
+        stableRadioReconnectionSeconds += deltaTime
+        guard stableRadioReconnectionSeconds >= SignalLossConfiguration.stableReconnectionRequiredSeconds else {
+            return
+        }
+
+        controlLinkFailsafeLatched = false
+        controlLinkFailsafeStage = .none
+        controlLinkFailsafeStageElapsed = 0.0
+        controlLinkFailsafeLoiterCenter = nil
+        stableRadioReconnectionSeconds = 0.0
+    }
+
     /// A severed control link doesn't come back by wiggling the stick — landing/crashing under
     /// the failsafe disarms the aircraft, same as any other post-crash/post-landing state, so
     /// resuming flight needs an explicit re-arm rather than seamlessly handing control back the
     /// instant the failsafe's own descent touches down.
-    private func finalizeFiberFailsafeLanding() {
+    private func finalizeControlLinkFailsafeLanding() {
         let crashed = physicalState == .crashed
-        fiberFailsafeStage = crashed ? .crashed : .landed
+        controlLinkFailsafeStage = crashed ? .crashed : .landed
         disarm(preserveCrashDynamics: crashed)
     }
 

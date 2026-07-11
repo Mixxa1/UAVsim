@@ -969,69 +969,83 @@ final class ScenePopulationService {
         generator: inout SeededRandomGenerator
     ) -> [EnvironmentObjectDescriptor] {
         var descriptors: [EnvironmentObjectDescriptor] = []
-        let innerRadius = terrain.worldHalfExtent + 24.0
-        let outerRadius = terrain.scenicHalfExtent
-        let ringCount: Int
 
-        switch terrain.preset {
-        case .forest:
-            ringCount = 4
-        case .field:
-            ringCount = 3
-        case .cargoYard:
-            ringCount = 0
-        case .city:
-            ringCount = 0
-        case .gridDemo:
+        guard terrain.preset != .gridDemo else {
             // Bare debug map by design (see populate()'s early return for .gridDemo) — no belt.
-            ringCount = 0
+            return descriptors
         }
 
-        for ringIndex in 0..<ringCount {
-            let ringProgress = Float(ringIndex + 1) / Float(ringCount)
-            let baseRadius = mix(innerRadius, outerRadius, ringProgress)
-            let segmentCount = Int(72.0 + ringProgress * 26.0)
+        // Every preset gets belt continuity now (the world must look and behave the same for
+        // every UAV, regardless of which map it took off from) — city/cargoYard fall back to the
+        // same sparse field-style tree fringe rather than trying to continue buildings/containers
+        // procedurally, which stays out of scope here.
+        let treeBiome: TerrainPreset = (terrain.preset == .field || terrain.preset == .forest)
+            ? terrain.preset
+            : .field
 
+        func sizeForBelt(sparse: Bool) -> SIMD3<Float> {
+            let heightRange: ClosedRange<Float> = treeBiome == .forest
+                ? (sparse ? 10.0...22.0 : 12.0...28.0)
+                : (sparse ? 7.0...15.0 : 8.0...18.0)
+            let widthRange: ClosedRange<Float> = treeBiome == .forest
+                ? (sparse ? 2.2...5.4 : 2.6...6.4)
+                : (sparse ? 1.6...3.8 : 1.8...4.6)
+            return SIMD3<Float>(
+                Float.random(in: widthRange, using: &generator),
+                Float.random(in: heightRange, using: &generator),
+                Float.random(in: widthRange, using: &generator)
+            )
+        }
+
+        func appendRing(baseRadius: Float, segmentCount: Int, jitterRange: ClosedRange<Float>, dropoutChance: Float, sparse: Bool) {
             for index in 0..<segmentCount {
-                let theta = (Float(index) / Float(segmentCount)) * (.pi * 2.0)
-                let radialJitter = Float.random(in: -12.0...16.0, using: &generator)
-                let radius = baseRadius + radialJitter
-                let x = cos(theta) * radius
-                let z = sin(theta) * radius
-
-                switch terrain.preset {
-                case .forest:
-                    let size = SIMD3<Float>(
-                        Float.random(in: 2.6...6.4, using: &generator),
-                        Float.random(in: 12.0...28.0, using: &generator),
-                        Float.random(in: 2.6...6.4, using: &generator)
-                    )
-                    descriptors.append(makeDescriptor(
-                        kind: .tree,
-                        biome: .forest,
-                        position: SIMD3<Float>(x, 0.0, z),
-                        size: size,
-                        collidable: false
-                    ))
-
-                case .city, .cargoYard, .gridDemo:
+                if dropoutChance > 0.0, Float.random(in: 0.0...1.0, using: &generator) < dropoutChance {
                     continue
-
-                case .field:
-                    let size = SIMD3<Float>(
-                        Float.random(in: 1.8...4.6, using: &generator),
-                        Float.random(in: 8.0...18.0, using: &generator),
-                        Float.random(in: 1.8...4.6, using: &generator)
-                    )
-                    descriptors.append(makeDescriptor(
-                        kind: .tree,
-                        biome: .field,
-                        position: SIMD3<Float>(x, 0.0, z),
-                        size: size,
-                        collidable: false
-                    ))
                 }
+                let theta = (Float(index) / Float(segmentCount)) * (.pi * 2.0)
+                let radialJitter = Float.random(in: jitterRange, using: &generator)
+                let radius = baseRadius + radialJitter
+                let position = SIMD3<Float>(cos(theta) * radius, 0.0, sin(theta) * radius)
+                descriptors.append(makeDescriptor(
+                    kind: .tree,
+                    biome: treeBiome,
+                    position: position,
+                    size: sizeForBelt(sparse: sparse),
+                    collidable: false
+                ))
             }
+        }
+
+        // Near belt: same dense continuity as before, immediately past the authored/mission area.
+        let innerRadius = terrain.worldHalfExtent + 24.0
+        let nearOuterRadius = terrain.scenicHalfExtent
+        let nearRingCount = 3
+        for ringIndex in 0..<nearRingCount {
+            let ringProgress = Float(ringIndex + 1) / Float(nearRingCount)
+            appendRing(
+                baseRadius: mix(innerRadius, nearOuterRadius, ringProgress),
+                segmentCount: Int(72.0 + ringProgress * 26.0),
+                jitterRange: -12.0...16.0,
+                dropoutChance: 0.0,
+                sparse: false
+            )
+        }
+
+        // Far belt: progressively thinner and gappier out to `beltOuterRadius` — the "can render
+        // worse" lever is density and gaps, never the asset itself (still the real tree model).
+        let farOuterRadius = terrain.beltOuterRadius
+        let farRingCount = 4
+        for ringIndex in 0..<farRingCount {
+            let ringProgress = Float(ringIndex + 1) / Float(farRingCount)
+            let baseRadius = mix(nearOuterRadius, farOuterRadius, ringProgress)
+            let segmentCount = max(10, Int(64.0 * (1.0 - ringProgress * 0.7)))
+            appendRing(
+                baseRadius: baseRadius,
+                segmentCount: segmentCount,
+                jitterRange: -(24.0 + ringProgress * 40.0)...(28.0 + ringProgress * 48.0),
+                dropoutChance: 0.15 + ringProgress * 0.45,
+                sparse: true
+            )
         }
 
         return descriptors

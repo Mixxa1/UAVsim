@@ -20,6 +20,14 @@ struct SceneViewportView: View {
         let hoseOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && hoseOpticsState.isAvailable
         let capsuleState = viewModel.capsuleState
         let capsuleOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && !hoseOpticsState.isAvailable && capsuleState.isAvailable
+        // Visual counterpart to the radio link-quality HUD — fiber isn't a radio concern at all
+        // (bypasses `updateSignalLossSequence` entirely), so this only ever applies to `.radio`.
+        let radioStaticIntensity: Double = {
+            guard viewModel.activeControlLinkType == .radio else { return 0.0 }
+            let status = viewModel.missionStatusSnapshot.operationalStatus
+            guard status.isInWarningLinkZone else { return 0.0 }
+            return Double(min(max(1.0 - status.currentLinkQuality, 0.0), 1.0))
+        }()
 
         ZStack(alignment: .topLeading) {
             DroneSceneViewRepresentable(
@@ -40,6 +48,10 @@ struct SceneViewportView: View {
             )
             .blur(radius: payloadOpticsActive ? min(max(payloadOpticsState.blurRadius, 0.0), 8.0) : 0.0)
             .ignoresSafeArea()
+
+            if radioStaticIntensity > 0.02 {
+                RadioLinkStaticOverlayView(intensity: radioStaticIntensity)
+            }
 
             if payloadOpticsActive, payloadOpticsState.isAvailable {
                 PayloadOpticsViewportOverlayView(
@@ -104,8 +116,22 @@ struct SceneViewportView: View {
             // Dedicated to the fiber-severance failsafe — deliberately not the generic
             // signal-loss overlay (`UAVSignalState`), since the aircraft is actively flying
             // itself through named stages here, not frozen.
-            if viewModel.fiberFailsafeStage.isActive {
-                FiberFailsafeStageHUDView(stage: viewModel.fiberFailsafeStage)
+            if viewModel.controlLinkFailsafeStage.isActive {
+                ControlLinkFailsafeStageHUDView(
+                    stage: viewModel.controlLinkFailsafeStage,
+                    trigger: viewModel.controlLinkFailsafeTrigger
+                )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, overlayInset + 10)
+                    .allowsHitTesting(false)
+            }
+
+            // Grounded + blocked is the only time this matters (arm only applies while
+            // disarmed/on the ground) — a landing ends the aircraft's motion, not the reason
+            // control was lost, so this can outlive the failsafe banner above by a long margin
+            // (e.g. a severed fiber blocks re-arm indefinitely, until the spool is replaced).
+            if viewModel.physicalState.isGroundRestState, viewModel.armBlockReason != .none {
+                ArmBlockedHUDView(reason: viewModel.armBlockReason)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .padding(.top, overlayInset + 10)
                     .allowsHitTesting(false)
@@ -782,15 +808,88 @@ private struct FiberOpticTetherStatusHUDView: View {
     }
 }
 
-/// Top-of-screen banner for the named fiber-severance failsafe stages — deliberately distinct
-/// from the bottom-aligned equipment HUDs above and from the generic signal-loss overlay, since
-/// this reflects the aircraft actively flying itself through a recovery sequence, not a frozen
-/// "signal lost" state.
-private struct FiberFailsafeStageHUDView: View {
-    let stage: FiberFailsafeStage
+/// Deterministic per-frame "tick" generator for the radio-static overlay below — reseeded from a
+/// coarse time bucket (not the shared gameplay RNG) so the noise reads as flickering static at a
+/// fixed rate rather than a smooth animation, without needing to store any state across frames.
+private struct StaticNoiseTickGenerator: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(tick: Int) {
+        let seeded = UInt64(bitPattern: Int64(tick)) &* 2862933555777941757 &+ 3037000493
+        state = seeded == 0 ? 0xDEAD_BEEF : seeded
+    }
+
+    mutating func next() -> UInt64 {
+        state = 2862933555777941757 &* state &+ 3037000493
+        return state
+    }
+}
+
+/// Visual counterpart to the radio link-quality HUD text — a lightweight, SwiftUI-only static/
+/// interference effect over the camera feed. Deliberately not a second `SCNTechnique`:
+/// `SCNView.technique` only holds one technique at a time and that slot is already claimed by
+/// `WeatherDepthOfFieldTechnique`, so layering a real shader-based effect on top would require
+/// merging passes into that technique rather than adding an independent one. `intensity` is
+/// `(1 - currentLinkQuality)`, already thresholded by the caller to only appear at/above the
+/// radio link's warning zone.
+private struct RadioLinkStaticOverlayView: View {
+    let intensity: Double
 
     var body: some View {
-        Text(LocalizedStringKey(stage.titleKey))
+        TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                guard intensity > 0.01 else { return }
+                let time = timeline.date.timeIntervalSinceReferenceDate
+
+                let flicker = 0.05 + 0.03 * sin(time * 37.0)
+                context.fill(
+                    Path(CGRect(origin: .zero, size: size)),
+                    with: .color(Color.white.opacity(intensity * flicker))
+                )
+
+                // Re-seeded ~12 times a second so the snow reads as flickering static, not a
+                // continuously-drifting pattern.
+                var rng = StaticNoiseTickGenerator(tick: Int(time * 12.0))
+                let lineCount = Int(6.0 + intensity * 26.0)
+                for _ in 0..<lineCount {
+                    let y = CGFloat(Double.random(in: 0...Double(size.height), using: &rng))
+                    let lineWidth = CGFloat(Double.random(in: Double(size.width) * 0.05...Double(size.width) * 0.4, using: &rng))
+                    let x = CGFloat(Double.random(in: 0...Double(size.width - lineWidth), using: &rng))
+                    let alpha = Double.random(in: 0.06...0.22, using: &rng) * intensity
+                    context.fill(
+                        Path(CGRect(x: x, y: y, width: lineWidth, height: 1.4)),
+                        with: .color(Color.white.opacity(alpha))
+                    )
+                }
+
+                // Occasional full-width dropout band, only once the link is genuinely bad — reads
+                // as a signal glitch rather than just grain.
+                if intensity > 0.55, Double.random(in: 0...1, using: &rng) < 0.12 {
+                    let bandHeight = CGFloat(Double.random(in: 6...22, using: &rng))
+                    let y = CGFloat(Double.random(in: 0...Double(size.height) - bandHeight, using: &rng))
+                    context.fill(
+                        Path(CGRect(x: 0, y: y, width: size.width, height: bandHeight)),
+                        with: .color(Color.black.opacity(0.35))
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+}
+
+/// Top-of-screen banner for the named control-link-loss failsafe stages (fiber severance or a
+/// radio link lost on an autopilot-equipped aircraft) — deliberately distinct from the
+/// bottom-aligned equipment HUDs above and from the generic signal-loss overlay, since this
+/// reflects the aircraft actively flying itself through a recovery sequence, not a frozen
+/// "signal lost" state.
+private struct ControlLinkFailsafeStageHUDView: View {
+    let stage: ControlLinkFailsafeStage
+    let trigger: ControlLinkFailsafeTrigger
+
+    var body: some View {
+        Text(LocalizedStringKey(stage.titleKey(trigger: trigger)))
             .font(.caption.weight(.bold).monospaced())
             .textCase(.uppercase)
             .foregroundStyle(GroundControlPalette.danger)
@@ -801,6 +900,34 @@ private struct FiberFailsafeStageHUDView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(GroundControlPalette.danger.opacity(0.7), lineWidth: 1)
             )
+    }
+}
+
+/// Shown whenever the aircraft is grounded and `resolveArmAuthorization()` currently refuses to
+/// arm — the runtime gate itself lives in `DroneSimulationViewModel.arm()`/
+/// `resolveArmAuthorization()`, this is purely the "why" surfaced to the player before they even
+/// try, so a severed fiber or an unrecovered radio link doesn't read as an unresponsive button.
+private struct ArmBlockedHUDView: View {
+    let reason: ArmBlockReason
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text("arm_block.title")
+                .font(.caption2.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.white.opacity(0.7))
+            Text(LocalizedStringKey(reason.titleKey))
+                .font(.caption.weight(.bold).monospaced())
+        }
+        .foregroundStyle(GroundControlPalette.danger)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(GroundControlPalette.danger.opacity(0.7), lineWidth: 1)
+        )
     }
 }
 

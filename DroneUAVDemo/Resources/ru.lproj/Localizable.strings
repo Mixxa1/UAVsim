@@ -146,6 +146,14 @@
 "comms_link.telemetry.deployed" = "Размотано";
 "comms_link.telemetry.mass" = "Текущая масса";
 "comms_link.telemetry.snag_risk" = "Риск зацепа";
+"comms_link.radio.quality" = "Качество радиосвязи";
+"comms_link.radio.zone" = "Состояние радиоканала";
+"comms_link.radio.zone.stable" = "Стабильно";
+"comms_link.radio.zone.degraded" = "Деградация";
+"comms_link.radio.zone.critical" = "Критично";
+"comms_link.radio.zone.lost" = "Потеряно";
+"comms_link.radio.lost_stranded" = "Радиосвязь потеряна — автопилота нет, управление заморожено до восстановления связи.";
+"comms_link.radio.lost_failsafe" = "Радиосвязь потеряна — аппарат перешёл на собственный аварийный протокол.";
 "payload.fiber.rig_mass" = "Масса оснастки: %.1f кг";
 "payload.fiber.mass_follows_rig" = "Масса определяется длиной × классом катушки и не редактируется напрямую.";
 "payload.fiber.remaining" = "ВОЛОКНО %.1f / %.1f км";
@@ -163,6 +171,19 @@
 "fiber_failsafe.stage.crashed" = "Волокно оборвано — авария";
 "fiber_failsafe.stage.returned_home" = "Волокно оборвано — возврат домой";
 "fiber_failsafe.stage.mission_continued" = "Волокно оборвано — миссия продолжается автономно";
+
+// Этапы аварийного протокола после потери радиосвязи (тот же автомат, что и у обрыва волокна —
+// реакция зависит от оснащения аппарата, а не от типа канала)
+"radio_link_failsafe.stage.braking" = "Радиосвязь потеряна — торможение";
+"radio_link_failsafe.stage.hover_failsafe" = "Радиосвязь потеряна — удержание позиции";
+"radio_link_failsafe.stage.landing" = "Радиосвязь потеряна — посадка";
+"radio_link_failsafe.stage.stabilize" = "Радиосвязь потеряна — стабилизация";
+"radio_link_failsafe.stage.loiter_glide" = "Радиосвязь потеряна — барражирование";
+"radio_link_failsafe.stage.emergency_landing" = "Радиосвязь потеряна — аварийная посадка";
+"radio_link_failsafe.stage.landed" = "Радиосвязь потеряна — посажен";
+"radio_link_failsafe.stage.crashed" = "Радиосвязь потеряна — авария";
+"radio_link_failsafe.stage.returned_home" = "Радиосвязь потеряна — возврат домой";
+"radio_link_failsafe.stage.mission_continued" = "Радиосвязь потеряна — миссия продолжается автономно";
 "payload.hose.extinguishing" = "Тушение…";
 "payload.hose.throw_distance" = "ДАЛЬНОСТЬ %.0f м";
 "payload.hose.spraying_status" = "ПОДАЧА ПЕНЫ";
@@ -336,6 +357,13 @@
 "signal_loss.impact_title" = "СИГНАЛ ПОТЕРЯН: ОТКАЗ ПЛАНЕРА";
 "signal_loss.impact_message" = "Ударное повреждение нарушило канал управления и бортовые системы.";
 "signal_loss.recover" = "Восстановить";
+
+"arm_block.title" = "Армирование заблокировано";
+"arm_block.reason.radio_link_unavailable" = "Радиоканал ещё не стабилен — армирование заблокировано";
+"arm_block.reason.fiber_broken" = "Волокно зацепилось и оборвано — замените катушку для армирования";
+"arm_block.reason.fiber_exhausted" = "Катушка полностью размотана — замените катушку для армирования";
+"arm_block.reason.link_loss_failsafe_latched" = "Защёлка аварийного протокола активна — армирование заблокировано";
+"arm_block.reason.vehicle_requires_recovery" = "Аппарат требует восстановления перед армированием";
 
 "telemetry.position" = "Координаты";
 "telemetry.velocity" = "Скорость (вектор)";
@@ -1370,6 +1398,8 @@
 "mission.status.reason.route_margin_tight" = "Маршрут миссии оставляет слишком маленький резерв на безопасный возврат.";
 "mission.status.reason.route_exceeds_operational_radius" = "Маршрут миссии выходит за рекомендуемый рабочий радиус.";
 "mission.status.reason.link_degraded" = "Маршрут миссии заходит в зону деградации связи.";
+"mission.status.reason.geofence_warning" = "Приближение к границе рабочей зоны миссии.";
+"mission.status.reason.geofence_breach" = "Нарушена геозона рабочей области миссии.";
 "mission.status.reason.map_tight" = "Текущий размер карты тесен для выбранного профиля БЛА.";
 "mission.status.reason.map_unsuitable" = "Текущий размер карты не подходит выбранному профилю БЛА.";
 "mission.status.reason.mission_start_blocked" = "Старт миссии заблокирован текущим уровнем безопасности или временем работы.";

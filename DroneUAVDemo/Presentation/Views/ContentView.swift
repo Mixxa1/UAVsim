@@ -1949,6 +1949,9 @@ struct ContentView: View {
                         }
 
                         CommsLinkView(
+                            controlLinkType: viewModel.activeControlLinkType,
+                            operationalStatus: viewModel.missionStatusSnapshot.operationalStatus,
+                            linkLossPolicy: viewModel.selectedDroneProfile.operationalProfile.linkLossPolicy,
                             fiberModule: viewModel.fiberSpoolDraftConfiguration,
                             isAttached: viewModel.isFiberSpoolAttached,
                             linkState: viewModel.fiberLinkState,

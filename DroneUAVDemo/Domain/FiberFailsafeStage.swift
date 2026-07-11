@@ -1,10 +1,21 @@
 import Foundation
 
-/// Named, HUD-visible stages of the fiber-severance failsafe — driven by
-/// `DroneSimulationViewModel.updateFiberFailsafeSequence`, entered once `FiberLinkState.status`
-/// reaches `.broken`. Unlike the generic `UAVSignalState` freeze used for radio range loss, the
-/// aircraft keeps flying itself through these stages with input locked out.
-enum FiberFailsafeStage: Equatable {
+/// What triggered the currently-running (or most recently completed) failsafe sequence — a
+/// severed fiber and a lost radio link drive the exact same `ControlLinkFailsafeStage` machine
+/// (the reaction depends on the aircraft's equipment/policy, not on which link type failed), but
+/// the HUD text still needs to say which one actually happened.
+enum ControlLinkFailsafeTrigger: Equatable {
+    case fiberBroken
+    case radioLinkLost
+}
+
+/// Named, HUD-visible stages of the control-link-loss failsafe — driven by
+/// `DroneSimulationViewModel.updateControlLinkFailsafeSequence`, entered once either
+/// `FiberLinkState.status` reaches `.broken`, or the radio link is lost on an aircraft whose
+/// `linkLossPolicy` isn't `.strandedWithoutInput`. Unlike the `UAVSignalState` freeze (reserved
+/// for aircraft with no autopilot to fall back on), the aircraft keeps flying itself through
+/// these stages with input locked out.
+enum ControlLinkFailsafeStage: Equatable {
     case none
 
     // Multirotor: brake to a stop, hold briefly, then land in place.
@@ -39,30 +50,69 @@ enum FiberFailsafeStage: Equatable {
         }
     }
 
-    var titleKey: String {
+    func titleKey(trigger: ControlLinkFailsafeTrigger) -> String {
+        let prefix = trigger == .fiberBroken ? "fiber_failsafe" : "radio_link_failsafe"
         switch self {
         case .none:
             return ""
         case .braking:
-            return "fiber_failsafe.stage.braking"
+            return "\(prefix).stage.braking"
         case .hoverFailsafe:
-            return "fiber_failsafe.stage.hover_failsafe"
+            return "\(prefix).stage.hover_failsafe"
         case .landing:
-            return "fiber_failsafe.stage.landing"
+            return "\(prefix).stage.landing"
         case .stabilize:
-            return "fiber_failsafe.stage.stabilize"
+            return "\(prefix).stage.stabilize"
         case .loiterGlide:
-            return "fiber_failsafe.stage.loiter_glide"
+            return "\(prefix).stage.loiter_glide"
         case .emergencyLanding:
-            return "fiber_failsafe.stage.emergency_landing"
+            return "\(prefix).stage.emergency_landing"
         case .landed:
-            return "fiber_failsafe.stage.landed"
+            return "\(prefix).stage.landed"
         case .crashed:
-            return "fiber_failsafe.stage.crashed"
+            return "\(prefix).stage.crashed"
         case .returnedHome:
-            return "fiber_failsafe.stage.returned_home"
+            return "\(prefix).stage.returned_home"
         case .missionContinued:
-            return "fiber_failsafe.stage.mission_continued"
+            return "\(prefix).stage.mission_continued"
         }
     }
+}
+
+/// Why `arm()` was refused — the central, runtime-level gate
+/// (`DroneSimulationViewModel.resolveArmAuthorization`), not a SwiftUI button `.disabled()`
+/// flag, so no input source (keyboard, controller, remote) can bypass it. A landing completes
+/// the aircraft's *motion*; it does not by itself repair whatever caused the control link to be
+/// lost in the first place — that's exactly what this gate exists to keep separate.
+enum ArmBlockReason: Equatable {
+    case none
+    case radioLinkUnavailable
+    case fiberBroken
+    case fiberExhausted
+    case linkLossFailsafeLatched
+    case vehicleRequiresRecovery
+
+    var titleKey: String {
+        switch self {
+        case .none:
+            return ""
+        case .radioLinkUnavailable:
+            return "arm_block.reason.radio_link_unavailable"
+        case .fiberBroken:
+            return "arm_block.reason.fiber_broken"
+        case .fiberExhausted:
+            return "arm_block.reason.fiber_exhausted"
+        case .linkLossFailsafeLatched:
+            return "arm_block.reason.link_loss_failsafe_latched"
+        case .vehicleRequiresRecovery:
+            return "arm_block.reason.vehicle_requires_recovery"
+        }
+    }
+}
+
+struct ArmAuthorization: Equatable {
+    var isAllowed: Bool
+    var reason: ArmBlockReason
+
+    static let allowed = ArmAuthorization(isAllowed: true, reason: .none)
 }

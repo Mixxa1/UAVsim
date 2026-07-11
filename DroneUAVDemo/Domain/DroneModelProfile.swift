@@ -1988,6 +1988,45 @@ private struct RuntimeTuning {
     }
 }
 
+// Equipment/autonomy properties of the airframe itself — orthogonal to `UAVControlLinkType`
+// (which is a *dynamic* runtime state: radio vs. fiberOptic, depending on whether a spool is
+// attached right now). These describe what the aircraft can *do* about losing whichever link is
+// currently active, independent of which link that is — "losing the comms channel" and "losing
+// the ability to fly" are different events, and the reaction should depend on equipment, not on
+// which link type failed.
+enum NavigationCapability: String, Hashable {
+    /// No GPS/IMU-based hold or navigation — the operator's own visual line-of-sight is the only
+    /// stabilization/positioning reference (a simple acro/FPV racer).
+    case visualLineOfSight
+    /// GPS position/altitude hold, no autonomous mission-following or return-to-home logic.
+    case gpsAssisted
+    /// Full GPS autopilot — waypoint/mission following, return-to-home, loiter.
+    case gpsAutopilot
+}
+
+enum AutonomyLevel: String, Hashable {
+    /// Flies only under direct operator input (manual/stabilized/GPS-hold).
+    case operatorControlled
+    /// Can fly a pre-planned mission/route unattended, but has no dedicated link-loss failsafe
+    /// behavior beyond what the mission logic already does.
+    case missionControlled
+    /// Can autonomously execute a dedicated failsafe sequence (hold/RTH/land) independent of the
+    /// operator link, on top of mission-following.
+    case failsafeCapable
+}
+
+enum LinkLossPolicy: String, Hashable {
+    /// No autopilot to fall back on — losing the link also means losing the ability to fly.
+    /// Matches reality for a simple visual-line-of-sight aircraft with no GPS.
+    case strandedWithoutInput
+    /// Multirotor-style reaction: brake, hold position, then land in place.
+    case holdAndLand
+    /// Fixed-wing-style reaction: wings-level stabilize, loiter/glide, then a controlled descent.
+    case stabilizeAndGlideDown
+    /// Autonomous/mission-bound reaction: fly itself home via the existing return-to-home logic.
+    case returnHome
+}
+
 struct UAVOperationalProfile: Hashable {
     let nominalFlightTimeSec: Float
     let nominalCruiseSpeedMps: Float
@@ -2003,6 +2042,9 @@ struct UAVOperationalProfile: Hashable {
     let preferredMapScaleMin: MapScale
     let preferredMapScaleMax: MapScale
     let estimatedDataQuality: UAVEstimatedDataQuality
+    let navigationCapability: NavigationCapability
+    let autonomyLevel: AutonomyLevel
+    let linkLossPolicy: LinkLossPolicy
 }
 
 enum MapScaleSuitability: String, CaseIterable, Hashable {
@@ -2121,6 +2163,12 @@ private enum UAVOperationalProfileResolver {
                 runtimeProfile.fixedWingParameters?.stallWarningSpeedMps ??
                 0.0
         )
+        let navigationCapability = uavProfile?.navigationCapability ??
+            analogNavigationCapability(runtimeProfile: runtimeProfile, analog: analog)
+        let autonomyLevel = uavProfile?.autonomyLevel ??
+            analogAutonomyLevel(runtimeProfile: runtimeProfile, analog: analog, navigationCapability: navigationCapability)
+        let linkLossPolicy = uavProfile?.linkLossPolicy ??
+            analogLinkLossPolicy(runtimeProfile: runtimeProfile, navigationCapability: navigationCapability)
 
         let baseProfile = UAVOperationalProfile(
             nominalFlightTimeSec: nominalFlightTimeSec,
@@ -2136,7 +2184,10 @@ private enum UAVOperationalProfileResolver {
             minSafeAirspeedMps: minSafeAirspeedMps,
             preferredMapScaleMin: .x16,
             preferredMapScaleMax: .x64,
-            estimatedDataQuality: quality
+            estimatedDataQuality: quality,
+            navigationCapability: navigationCapability,
+            autonomyLevel: autonomyLevel,
+            linkLossPolicy: linkLossPolicy
         )
 
         let recommendation = UAVMapScaleRecommendationResolver.resolve(
@@ -2162,8 +2213,63 @@ private enum UAVOperationalProfileResolver {
             minSafeAirspeedMps: minSafeAirspeedMps,
             preferredMapScaleMin: uavProfile?.preferredMapScaleMin ?? recommendation.recommendedMapScaleMin,
             preferredMapScaleMax: uavProfile?.preferredMapScaleMax ?? recommendation.recommendedMapScaleMax,
-            estimatedDataQuality: quality
+            estimatedDataQuality: quality,
+            navigationCapability: navigationCapability,
+            autonomyLevel: autonomyLevel,
+            linkLossPolicy: linkLossPolicy
         )
+    }
+
+    // Equipment fit is inferred the same way every other unspecified operational number already
+    // is in this resolver: from the airframe class, mass category, and mission role, falling back
+    // to the most common real-world fit for this catalog (which is entirely professional/
+    // commercial/military hardware — a bare visual-line-of-sight racer with no GPS at all isn't
+    // represented here yet, but the category exists for custom/user-added airframes).
+    private static func analogNavigationCapability(
+        runtimeProfile: DroneModelProfile,
+        analog: AnalogCluster
+    ) -> NavigationCapability {
+        if analog.massCategory == .nano {
+            // Toy/nano-class multirotors (e.g. DJI Neo) typically hold altitude/position via
+            // vision+IMU rather than a full GPS autopilot with mission/RTH logic.
+            return .gpsAssisted
+        }
+        return .gpsAutopilot
+    }
+
+    private static func analogAutonomyLevel(
+        runtimeProfile: DroneModelProfile,
+        analog: AnalogCluster,
+        navigationCapability: NavigationCapability
+    ) -> AutonomyLevel {
+        guard navigationCapability != .visualLineOfSight else {
+            return .operatorControlled
+        }
+        let tacticalRole = analog.missionRole.contains("istar") ||
+            analog.missionRole.contains("isr") ||
+            analog.missionRole.contains("reconnaissance") ||
+            analog.missionRole.contains("strike") ||
+            analog.missionRole.contains("surveillance") ||
+            analog.missionRole.contains("patrol")
+        if tacticalRole && (runtimeProfile.airframeClass == .fixedWing || runtimeProfile.airframeClass == .hybridVTOL) {
+            return .failsafeCapable
+        }
+        return .missionControlled
+    }
+
+    private static func analogLinkLossPolicy(
+        runtimeProfile: DroneModelProfile,
+        navigationCapability: NavigationCapability
+    ) -> LinkLossPolicy {
+        guard navigationCapability != .visualLineOfSight else {
+            return .strandedWithoutInput
+        }
+        switch runtimeProfile.airframeClass {
+        case .fixedWing, .hybridVTOL:
+            return .returnHome
+        case .multirotor:
+            return navigationCapability == .gpsAutopilot ? .returnHome : .holdAndLand
+        }
     }
 
     private static func resolvedQuality(for uavProfile: UAVProfile?) -> UAVEstimatedDataQuality {

@@ -4587,7 +4587,10 @@ final class DroneSceneController {
 
     private func refreshGroundMaterial(for terrain: TerrainConfiguration) {
         guard let geometry = groundNode.geometry, terrain.preset != .gridDemo else { return }
-        let mapSizeMeters = terrain.scenicHalfExtent * 2.0
+        // Matches the ground plane's own size (`configureWorldSurfaceGeometry`, keyed off
+        // `beltOuterRadius`) so the tiled texture keeps a consistent scale all the way to the
+        // belt's outer edge instead of stretching past the old, smaller scenic extent.
+        let mapSizeMeters = terrain.beltOuterRadius * 2.0
         let material: SCNMaterial
         if terrain.preset == .city {
             material = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
@@ -5470,10 +5473,14 @@ final class DroneSceneController {
     }
 
     private func configureWorldSurfaceGeometry(for terrain: TerrainConfiguration) {
-        let scenicHalfExtent = terrain.scenicHalfExtent + 24.0
+        // Sized to the belt's outermost ring (not just the scenic/authored extent) so the ground
+        // always reaches at least as far as the decorated outer belt — no bare ground under the
+        // trees, and no cliff/void beyond it either. Past this radius is flat, undecorated ground;
+        // true unbounded/streamed terrain stays separate, deferred work.
+        let groundHalfExtent = terrain.beltOuterRadius + 24.0
         if let plane = groundNode.geometry as? SCNPlane {
-            plane.width = CGFloat(scenicHalfExtent * 2.0)
-            plane.height = CGFloat(scenicHalfExtent * 2.0)
+            plane.width = CGFloat(groundHalfExtent * 2.0)
+            plane.height = CGFloat(groundHalfExtent * 2.0)
         }
 
         let gridHalfExtent = min(terrain.worldHalfExtent, max(108.0, terrain.signalBoundaryRadius + 18.0))

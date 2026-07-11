@@ -146,6 +146,14 @@
 "comms_link.telemetry.deployed" = "Deployed";
 "comms_link.telemetry.mass" = "Current mass";
 "comms_link.telemetry.snag_risk" = "Snag risk";
+"comms_link.radio.quality" = "Radio link quality";
+"comms_link.radio.zone" = "Radio link state";
+"comms_link.radio.zone.stable" = "Stable";
+"comms_link.radio.zone.degraded" = "Degraded";
+"comms_link.radio.zone.critical" = "Critical";
+"comms_link.radio.zone.lost" = "Lost";
+"comms_link.radio.lost_stranded" = "Radio link lost — no autopilot aboard, control is frozen until it recovers.";
+"comms_link.radio.lost_failsafe" = "Radio link lost — the aircraft's own failsafe has taken over.";
 "payload.fiber.rig_mass" = "Rig mass: %.1f kg";
 "payload.fiber.mass_follows_rig" = "Mass follows reel length × class, not independently editable.";
 "payload.fiber.remaining" = "FIBER %.1f / %.1f km";
@@ -163,6 +171,19 @@
 "fiber_failsafe.stage.crashed" = "Fiber Severed — Crashed";
 "fiber_failsafe.stage.returned_home" = "Fiber Severed — Returning Home";
 "fiber_failsafe.stage.mission_continued" = "Fiber Severed — Mission Continuing Unattended";
+
+// Radio-link-loss failsafe stages (same state machine as the fiber failsafe above, driven by
+// equipment/policy rather than by which link type failed)
+"radio_link_failsafe.stage.braking" = "Radio Link Lost — Braking";
+"radio_link_failsafe.stage.hover_failsafe" = "Radio Link Lost — Holding Position";
+"radio_link_failsafe.stage.landing" = "Radio Link Lost — Landing";
+"radio_link_failsafe.stage.stabilize" = "Radio Link Lost — Stabilizing";
+"radio_link_failsafe.stage.loiter_glide" = "Radio Link Lost — Loitering";
+"radio_link_failsafe.stage.emergency_landing" = "Radio Link Lost — Emergency Landing";
+"radio_link_failsafe.stage.landed" = "Radio Link Lost — Landed";
+"radio_link_failsafe.stage.crashed" = "Radio Link Lost — Crashed";
+"radio_link_failsafe.stage.returned_home" = "Radio Link Lost — Returning Home";
+"radio_link_failsafe.stage.mission_continued" = "Radio Link Lost — Mission Continuing Unattended";
 "payload.hose.extinguishing" = "Extinguishing…";
 "payload.hose.throw_distance" = "THROW %.0f m";
 "payload.hose.spraying_status" = "SPRAYING";
@@ -336,6 +357,13 @@
 "signal_loss.impact_title" = "SIGNAL LOST: AIRFRAME FAILURE";
 "signal_loss.impact_message" = "Impact damage interrupted the control link and onboard systems.";
 "signal_loss.recover" = "Restore signal";
+
+"arm_block.title" = "Arm blocked";
+"arm_block.reason.radio_link_unavailable" = "Radio link not yet stable — arming blocked";
+"arm_block.reason.fiber_broken" = "Fiber snagged and broken — replace the spool to arm";
+"arm_block.reason.fiber_exhausted" = "Fiber reel fully paid out — replace the spool to arm";
+"arm_block.reason.link_loss_failsafe_latched" = "Control-link failsafe latched — arming blocked";
+"arm_block.reason.vehicle_requires_recovery" = "Vehicle requires recovery before arming";
 
 "telemetry.position" = "Position";
 "telemetry.velocity" = "Velocity";
@@ -1375,6 +1403,8 @@
 "mission.status.reason.route_margin_tight" = "Mission route leaves only a narrow safe-return reserve.";
 "mission.status.reason.route_exceeds_operational_radius" = "Mission route extends beyond the recommended operational radius.";
 "mission.status.reason.link_degraded" = "Mission route extends into degraded link coverage.";
+"mission.status.reason.geofence_warning" = "Approaching the mission's operational-area boundary.";
+"mission.status.reason.geofence_breach" = "Mission operational-area geofence breached.";
 "mission.status.reason.map_tight" = "Current map size is tight for the selected UAV profile.";
 "mission.status.reason.map_unsuitable" = "Current map size is unsuitable for the selected UAV profile.";
 "mission.status.reason.mission_start_blocked" = "Mission start is blocked by the current safety/runtime state.";

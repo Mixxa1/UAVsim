@@ -45,6 +45,9 @@ struct UAVProfile: Identifiable, Hashable {
     let preferredMapScaleMin: MapScale?
     let preferredMapScaleMax: MapScale?
     let estimatedDataQuality: UAVEstimatedDataQuality
+    let navigationCapability: NavigationCapability?
+    let autonomyLevel: AutonomyLevel?
+    let linkLossPolicy: LinkLossPolicy?
 
     init(
         id: String,
@@ -83,7 +86,10 @@ struct UAVProfile: Identifiable, Hashable {
         minSafeAirspeedMps: Float? = nil,
         preferredMapScaleMin: MapScale? = nil,
         preferredMapScaleMax: MapScale? = nil,
-        estimatedDataQuality: UAVEstimatedDataQuality? = nil
+        estimatedDataQuality: UAVEstimatedDataQuality? = nil,
+        navigationCapability: NavigationCapability? = nil,
+        autonomyLevel: AutonomyLevel? = nil,
+        linkLossPolicy: LinkLossPolicy? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -120,6 +126,9 @@ struct UAVProfile: Identifiable, Hashable {
         self.minSafeAirspeedMps = minSafeAirspeedMps
         self.preferredMapScaleMin = preferredMapScaleMin
         self.preferredMapScaleMax = preferredMapScaleMax
+        self.navigationCapability = navigationCapability
+        self.autonomyLevel = autonomyLevel
+        self.linkLossPolicy = linkLossPolicy
         self.estimatedDataQuality = estimatedDataQuality ?? {
             switch specConfidence {
             case .verified:
