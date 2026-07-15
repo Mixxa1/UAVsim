@@ -43,6 +43,14 @@ struct FaceReference {
 
     double area = 0.0;
 
+    // Cylindrical faces only: the cylinder axis and radius (assembly
+    // concentric mates). axisOrigin is a point on the axis, axisDirection
+    // is unit length. Zero radius means "no axis data" (non-cylindrical
+    // faces and stub builds).
+    cadnext::Vector3 axisOrigin;
+    cadnext::Vector3 axisDirection;
+    double radius = 0.0;
+
     // Only planar faces can host sketches in CADNext 0.8.
     bool isSketchable = false;
 

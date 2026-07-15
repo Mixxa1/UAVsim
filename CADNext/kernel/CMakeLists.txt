@@ -6,6 +6,7 @@ add_library(cadnext_kernel
     src/GeometryEvaluator.cpp
     src/EdgeAnalyzer.cpp
     src/FaceAnalyzer.cpp
+    src/VertexAnalyzer.cpp
     src/ExtrudeMesh.cpp
     src/MeshExtractor.cpp
     src/BooleanOps.cpp

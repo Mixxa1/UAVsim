@@ -28,6 +28,7 @@ endif()
 
 add_subdirectory(core)
 add_subdirectory(kernel)
+add_subdirectory(assembly)
 add_subdirectory(bridge)
 
 if(CADNEXT_WITH_COIN3D)

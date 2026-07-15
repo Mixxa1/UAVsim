@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -20,6 +22,7 @@
 
 class SoBaseColor;
 class SoCoordinate3;
+class SoDragger;
 class SoDrawStyle;
 class SoIndexedFaceSet;
 class SoLineSet;
@@ -29,6 +32,7 @@ class SoPickedPoint;
 class SoSeparator;
 class SoSwitch;
 class SoTransform;
+class SoTransformerManip;
 class SoTranslation;
 
 namespace cadnext::viewer {
@@ -106,6 +110,25 @@ public:
 
     // Per-object updates: grid/axes and untouched objects are not rebuilt.
     void updateObjectTransform(const std::string& objectId, const Transform& transform);
+
+    // Quaternion-based transform update (Assembly workbench: placements
+    // are translation+quaternion, never Euler). Quaternion order x,y,z,w.
+    void updateObjectPlacement(const std::string& objectId, const Vector3& position,
+                               double qx, double qy, double qz, double qw);
+
+    // --- Transform manipulator (Assembly move/rotate tool) ----------------
+    // Swaps the object's SoTransform for an SoTransformerManip (scale
+    // knobs hidden — assemblies never scale parts). onFinish fires after
+    // every completed drag gesture. The viewer must be in scene
+    // interaction mode (CoinViewer::setSceneInteractionMode) for the
+    // manip to receive events.
+    using ManipFinishCallback = std::function<void(const std::string& objectId)>;
+    bool attachTransformManip(const std::string& objectId, ManipFinishCallback onFinish);
+    void detachTransformManip(const std::string& objectId);
+    bool hasTransformManip(const std::string& objectId) const;
+    // Current manip placement: position + quaternion (x,y,z,w).
+    bool manipPlacement(const std::string& objectId, Vector3& position,
+                        double quaternion[4]) const;
     // Rebuilds only the shape children of the object node; the transform
     // and material (and therefore the selection highlight) are preserved.
     void updateObjectPrimitive(const Object& object);
@@ -279,7 +302,18 @@ private:
     SoSeparator* sketchPreviewNode_ = nullptr;
     SoCoordinate3* sketchPreviewCoords_ = nullptr;
     SoLineSet* sketchPreviewLines_ = nullptr;
+    // Transform manip bookkeeping (one manip at a time is enough for the
+    // Assembly move tool, but the map keeps the API general).
+    struct ManipState {
+        SoTransformerManip* manip = nullptr;
+        ManipFinishCallback onFinish;
+        std::string objectId;
+        SceneGraph* owner = nullptr;
+    };
+    static void manipFinishCallback(void* userData, ::SoDragger* dragger);
+
     std::unordered_map<std::string, SoSeparator*> objectNodes_;
+    std::unordered_map<std::string, std::unique_ptr<ManipState>> manipStates_;
     std::unordered_map<std::string, SoTransform*> objectTransforms_;
     std::unordered_map<std::string, SoMaterial*> objectMaterials_;
     std::unordered_map<std::string, SbColor> objectBaseColors_;

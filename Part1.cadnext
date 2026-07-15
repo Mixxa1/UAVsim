@@ -1,0 +1,77 @@
+{
+  "format": "cadnext",
+  "version": 1,
+  "document": {
+    "id": "document",
+    "name": "CADNext Prototype Document",
+    "unitSystem": "Metric",
+    "objects": [
+      {
+        "id": "object-1",
+        "name": "Тело выдавливания 1",
+        "type": "Body",
+        "primitive": {
+          "kind": "None",
+          "width": 1,
+          "height": 1,
+          "depth": 1,
+          "radius": 0.5
+        },
+        "transform": {
+          "position": { "x": 0, "y": 0, "z": 0 },
+          "rotationEuler": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        }
+      }
+    ],
+    "sketches": [
+      {
+        "id": "sketch-1",
+        "name": "Эскиз XY 1",
+        "plane": "XY",
+        "reference": {
+          "type": "CanonicalPlane",
+          "sourceId": "workplane-xy",
+          "sourceBodyId": "",
+          "sourceFaceId": "",
+          "displayName": "",
+          "origin": { "x": 0, "y": 0, "z": 0 },
+          "uAxis": { "x": 1, "y": 0, "z": 0 },
+          "vAxis": { "x": 0, "y": 1, "z": 0 },
+          "normal": { "x": 0, "y": 0, "z": 1 }
+        },
+        "entities": [
+          {
+            "id": "entity-1",
+            "name": "Прямоугольник 1",
+            "type": "Rectangle",
+            "rectangle": {
+              "origin": { "u": -0.30000000000000004, "v": -0.30000000000000004 },
+              "width": 0.60000000000000009,
+              "height": 0.60000000000000009
+            }
+          }
+        ]
+      }
+    ],
+    "workPlanes": [],
+    "features": [
+      {
+        "id": "feature-1",
+        "name": "Выдавливание 1",
+        "type": "Extrude",
+        "targetObjectId": "object-1",
+        "createdBodyId": "object-1",
+        "extrude": {
+          "sketchId": "sketch-1",
+          "profileId": "profile-entity-1",
+          "operation": "NewBody",
+          "direction": "Positive",
+          "depthMode": "Distance",
+          "distance": 0.10000000000000001
+        },
+        "suppressed": false
+      }
+    ]
+  }
+}

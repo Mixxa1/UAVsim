@@ -27,6 +27,11 @@ struct EdgeReference {
     cadnext::Vector3 end;
     cadnext::Vector3 center;
 
+    // Circle edges only: the circle axis (unit) and radius (assembly
+    // concentric mates). Zero radius means "no axis data".
+    cadnext::Vector3 axisDirection;
+    double radius = 0.0;
+
     double length = 0.0;
     bool isChamferable = false;
     bool isFilletable = false;

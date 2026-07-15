@@ -1,3 +1,75 @@
+add_executable(cadnext_test_assembly_math
+    test_assembly_math.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_math
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_serialization
+    test_assembly_serialization.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_serialization
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_reference_resolver
+    test_assembly_reference_resolver.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_reference_resolver
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_direct_solver
+    test_assembly_direct_solver.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_direct_solver
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_recompute_direct
+    test_assembly_recompute_direct.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_recompute_direct
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_constraint_solver
+    test_assembly_constraint_solver.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_constraint_solver
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_revision_reresolve
+    test_assembly_revision_reresolve.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_revision_reresolve
+    PRIVATE
+        cadnext_assembly
+)
+
+add_executable(cadnext_test_assembly_subassembly
+    test_assembly_subassembly.cpp
+)
+
+target_link_libraries(cadnext_test_assembly_subassembly
+    PRIVATE
+        cadnext_assembly
+)
+
 add_executable(cadnext_test_document
     test_document.cpp
 )
@@ -385,6 +457,21 @@ target_link_libraries(cadnext_test_face_workplane_serialization
         cadnext_core
 )
 
+add_test(NAME cadnext_test_assembly_math COMMAND cadnext_test_assembly_math)
+add_test(NAME cadnext_test_assembly_direct_solver
+         COMMAND cadnext_test_assembly_direct_solver)
+add_test(NAME cadnext_test_assembly_recompute_direct
+         COMMAND cadnext_test_assembly_recompute_direct)
+add_test(NAME cadnext_test_assembly_constraint_solver
+         COMMAND cadnext_test_assembly_constraint_solver)
+add_test(NAME cadnext_test_assembly_revision_reresolve
+         COMMAND cadnext_test_assembly_revision_reresolve)
+add_test(NAME cadnext_test_assembly_subassembly
+         COMMAND cadnext_test_assembly_subassembly)
+add_test(NAME cadnext_test_assembly_serialization
+         COMMAND cadnext_test_assembly_serialization)
+add_test(NAME cadnext_test_assembly_reference_resolver
+         COMMAND cadnext_test_assembly_reference_resolver)
 add_test(NAME cadnext_test_sketch_model COMMAND cadnext_test_sketch_model)
 add_test(NAME cadnext_test_units_mm_format COMMAND cadnext_test_units_mm_format)
 add_test(NAME cadnext_test_sketch_dimension_measurements
@@ -594,6 +681,15 @@ if(CADNEXT_WITH_OCCT)
             cadnext_kernel
     )
 
+    add_executable(cadnext_test_occt_assembly_topology
+        test_occt_assembly_topology.cpp
+    )
+
+    target_link_libraries(cadnext_test_occt_assembly_topology
+        PRIVATE
+            cadnext_kernel
+    )
+
     add_test(NAME cadnext_test_occt_kernel_primitives
              COMMAND cadnext_test_occt_kernel_primitives)
     add_test(NAME cadnext_test_occt_mesh_extractor
@@ -626,4 +722,6 @@ if(CADNEXT_WITH_OCCT)
              COMMAND cadnext_test_occt_edge_reanalysis_after_topology_change)
     add_test(NAME cadnext_test_occt_mass_properties
              COMMAND cadnext_test_occt_mass_properties)
+    add_test(NAME cadnext_test_occt_assembly_topology
+             COMMAND cadnext_test_occt_assembly_topology)
 endif()

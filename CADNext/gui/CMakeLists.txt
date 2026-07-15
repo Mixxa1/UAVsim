@@ -7,6 +7,9 @@ set(CMAKE_AUTOMOC ON)
 # Headers are listed so AUTOMOC picks up Q_OBJECT classes living under
 # include/ (AUTOMOC only auto-discovers headers next to their sources).
 add_library(cadnext_gui
+    include/cadnext/gui/AssemblyJointDialog.hpp
+    include/cadnext/gui/AssemblyPartLoader.hpp
+    include/cadnext/gui/AssemblyWindow.hpp
     include/cadnext/gui/AttachmentPointDialog.hpp
     include/cadnext/gui/CADPartLibraryService.hpp
     include/cadnext/gui/FilePreviewAssets.hpp
@@ -26,6 +29,9 @@ add_library(cadnext_gui
     include/cadnext/gui/UAVPayloadCompatibilityChecker.hpp
     include/cadnext/gui/UAVPayloadMountFlow.hpp
     include/cadnext/gui/UAVSelectionDialog.hpp
+    src/AssemblyJointDialog.cpp
+    src/AssemblyPartLoader.cpp
+    src/AssemblyWindow.cpp
     src/AttachmentPointDialog.cpp
     src/CADPartLibraryService.cpp
     src/FilePreviewAssets.cpp
@@ -55,6 +61,7 @@ target_include_directories(cadnext_gui
 target_link_libraries(cadnext_gui
     PUBLIC
         cadnext_core
+        cadnext_assembly
         cadnext_bridge
         cadnext_viewer
         Qt6::Core

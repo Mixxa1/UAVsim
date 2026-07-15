@@ -30,6 +30,7 @@
 #include "cadnext/bridge/UAVPartFormat.hpp"
 #include "cadnext/bridge/UAVPartReader.hpp"
 #include "cadnext/bridge/UAVPartWriter.hpp"
+#include "cadnext/gui/AssemblyWindow.hpp"
 #include "cadnext/gui/AttachmentPointDialog.hpp"
 #include "cadnext/gui/UAVPartPreviewPanel.hpp"
 #include "cadnext/gui/CutExtrudeDialog.hpp"
@@ -4476,6 +4477,21 @@ void MainWindow::openDocument() {
     updateUndoRedoActions();
 }
 
+void MainWindow::openAssemblyWindow(bool openDialog) {
+    if (!assemblyWindow_) {
+        assemblyWindow_ = std::make_unique<AssemblyWindow>();
+        // SoQt::init() ran at application startup, so the viewport can be
+        // created right away.
+        assemblyWindow_->initializeViewport();
+    }
+    assemblyWindow_->show();
+    assemblyWindow_->raise();
+    assemblyWindow_->activateWindow();
+    if (openDialog) {
+        assemblyWindow_->openAssembly();
+    }
+}
+
 void MainWindow::openUAVPart() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Открыть деталь"), QString(),
@@ -4869,6 +4885,9 @@ void MainWindow::createMenus() {
     fileMenu->addAction(tr("Открыть CAD-документ…"), QKeySequence::Open, this,
                         [this]() { openDocument(); });
     fileMenu->addAction(tr("Открыть деталь…"), this, [this]() { openUAVPart(); });
+    fileMenu->addSeparator();
+    fileMenu->addAction(tr("Создать сборку"), this, [this]() { openAssemblyWindow(false); });
+    fileMenu->addAction(tr("Открыть сборку…"), this, [this]() { openAssemblyWindow(true); });
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Сохранить CAD-документ"), QKeySequence::Save, this,
                         [this]() { saveDocument(); });

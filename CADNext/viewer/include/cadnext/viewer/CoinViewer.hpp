@@ -90,6 +90,13 @@ public:
     // Frames the given canonical work plane without changing orientation.
     void fitWorkPlane(const std::string& planeId);
 
+    // Scene interaction mode (Assembly move tool): the viewer leaves
+    // camera-viewing mode so mouse events reach scene manipulators
+    // (SoTransformerManip). Pick/hover callbacks are suspended while
+    // active; camera navigation returns when the mode is switched off.
+    void setSceneInteractionMode(bool active);
+    bool sceneInteractionMode() const;
+
     void setCameraBoundsScene(const ViewBoundsScene& scene);
     void setOrbitPivot(const cadnext::Vector3& pivot);
     void focusSelection(const SelectionState& selection);

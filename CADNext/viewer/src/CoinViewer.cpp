@@ -102,6 +102,9 @@ public:
     bool sketchInputActive = false;
     bool freeOrbitEnabled = true;
     bool navigationEnabled = true;
+    // Assembly move tool: events go to the scene graph (manip dragging);
+    // custom click/hover picking is suspended.
+    bool sceneInteractionActive = false;
     CameraNavigationOptions navigationOptions;
     SbVec3f orbitPivot = kSceneCenter;
     double orbitRadius = kDefaultGridFitRadius;
@@ -200,6 +203,22 @@ protected:
     SbBool processSoEvent(const SoEvent* event) override {
         if (!navigationEnabled) {
             return TRUE;
+        }
+        if (sceneInteractionActive) {
+            // Scene interaction (manip dragging): skip the custom pick
+            // handling; the base viewer (viewing off) forwards events to
+            // the scene graph. ESC still cancels via the handler.
+            if (event->isOfType(SoKeyboardEvent::getClassTypeId())) {
+                const auto* keyEvent = static_cast<const SoKeyboardEvent*>(event);
+                if (keyEvent->getKey() == SoKeyboardEvent::ESCAPE &&
+                    keyEvent->getState() == SoButtonEvent::DOWN) {
+                    if (sketchCancelHandler) {
+                        sketchCancelHandler();
+                    }
+                    return TRUE;
+                }
+            }
+            return SoQtExaminerViewer::processSoEvent(event);
         }
         if (event->isOfType(SoKeyboardEvent::getClassTypeId())) {
             const auto* keyEvent = static_cast<const SoKeyboardEvent*>(event);
@@ -852,6 +871,23 @@ bool CoinViewer::isNavigationEnabled() const {
 void CoinViewer::setNavigationEnabled(bool enabled) {
     navigationState_.setNavigationEnabled(enabled);
     applyNavigationState(enabled ? "enableNavigation" : "disableNavigation");
+}
+
+void CoinViewer::setSceneInteractionMode(bool active) {
+    if (!viewer_) {
+        return;
+    }
+    if (viewer_->sceneInteractionActive == active) {
+        return;
+    }
+    viewer_->sceneInteractionActive = active;
+    viewer_->clearNavigationInputState();
+    // Viewing off = events dispatch to the scene graph (manips).
+    viewer_->setViewing(active ? FALSE : TRUE);
+}
+
+bool CoinViewer::sceneInteractionMode() const {
+    return viewer_ && viewer_->sceneInteractionActive;
 }
 
 void CoinViewer::applyNavigationState(const char* /*reason*/) {

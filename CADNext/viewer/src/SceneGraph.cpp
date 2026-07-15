@@ -37,6 +37,9 @@
 #include <Inventor/nodes/SoText2.h>
 #include <Inventor/nodes/SoTransform.h>
 #include <Inventor/nodes/SoTranslation.h>
+#include <Inventor/actions/SoSearchAction.h>
+#include <Inventor/draggers/SoDragger.h>
+#include <Inventor/manips/SoTransformerManip.h>
 
 namespace cadnext::viewer {
 
@@ -597,6 +600,122 @@ void SceneGraph::updateObjectTransform(const std::string& objectId, const Transf
         return;
     }
     applyTransform(it->second, transform);
+}
+
+void SceneGraph::updateObjectPlacement(const std::string& objectId, const Vector3& position,
+                                       double qx, double qy, double qz, double qw) {
+    auto it = objectTransforms_.find(objectId);
+    if (it == objectTransforms_.end()) {
+        return;
+    }
+    SoTransform* transform = it->second;
+    transform->translation.setValue(static_cast<float>(position.x),
+                                    static_cast<float>(position.y),
+                                    static_cast<float>(position.z));
+    transform->rotation.setValue(SbRotation(static_cast<float>(qx), static_cast<float>(qy),
+                                            static_cast<float>(qz), static_cast<float>(qw)));
+    transform->scaleFactor.setValue(1.0f, 1.0f, 1.0f);
+}
+
+void SceneGraph::manipFinishCallback(void* userData, SoDragger*) {
+    auto* state = static_cast<ManipState*>(userData);
+    if (state && state->onFinish) {
+        state->onFinish(state->objectId);
+    }
+}
+
+bool SceneGraph::attachTransformManip(const std::string& objectId,
+                                      ManipFinishCallback onFinish) {
+    if (manipStates_.count(objectId)) {
+        return true;
+    }
+    auto transformIt = objectTransforms_.find(objectId);
+    if (transformIt == objectTransforms_.end()) {
+        return false;
+    }
+
+    SoSearchAction search;
+    search.setNode(transformIt->second);
+    search.apply(root_);
+    SoPath* path = search.getPath();
+    if (!path) {
+        return false;
+    }
+
+    auto* manip = new SoTransformerManip;
+    manip->ref();
+    // Assemblies never scale parts: hide every scale knob of the dragger.
+    if (SoDragger* dragger = manip->getDragger()) {
+        static const char* kScaleParts[] = {"scale1", "scale2", "scale3", "scale4",
+                                            "scale5", "scale6", "scale7", "scale8"};
+        for (const char* part : kScaleParts) {
+            dragger->setPart(part, new SoSeparator);
+        }
+    }
+    if (!manip->replaceNode(path)) {
+        manip->unref();
+        return false;
+    }
+
+    auto state = std::make_unique<ManipState>();
+    state->manip = manip;
+    state->onFinish = std::move(onFinish);
+    state->objectId = objectId;
+    state->owner = this;
+    if (SoDragger* dragger = manip->getDragger()) {
+        dragger->addFinishCallback(&SceneGraph::manipFinishCallback, state.get());
+    }
+    objectTransforms_[objectId] = manip;
+    manipStates_[objectId] = std::move(state);
+    return true;
+}
+
+void SceneGraph::detachTransformManip(const std::string& objectId) {
+    auto stateIt = manipStates_.find(objectId);
+    if (stateIt == manipStates_.end()) {
+        return;
+    }
+    SoTransformerManip* manip = stateIt->second->manip;
+    if (SoDragger* dragger = manip->getDragger()) {
+        dragger->removeFinishCallback(&SceneGraph::manipFinishCallback,
+                                      stateIt->second.get());
+    }
+
+    SoSearchAction search;
+    search.setNode(manip);
+    search.apply(root_);
+    if (SoPath* path = search.getPath()) {
+        auto* transform = new SoTransform;
+        transform->translation = manip->translation.getValue();
+        transform->rotation = manip->rotation.getValue();
+        transform->scaleFactor.setValue(1.0f, 1.0f, 1.0f);
+        if (manip->replaceManip(path, transform)) {
+            objectTransforms_[objectId] = transform;
+        }
+    }
+    manip->unref();
+    manipStates_.erase(stateIt);
+}
+
+bool SceneGraph::hasTransformManip(const std::string& objectId) const {
+    return manipStates_.count(objectId) > 0;
+}
+
+bool SceneGraph::manipPlacement(const std::string& objectId, Vector3& position,
+                                double quaternion[4]) const {
+    auto stateIt = manipStates_.find(objectId);
+    if (stateIt == manipStates_.end()) {
+        return false;
+    }
+    const SoTransformerManip* manip = stateIt->second->manip;
+    const SbVec3f translation = manip->translation.getValue();
+    position = {translation[0], translation[1], translation[2]};
+    const float* q = manip->rotation.getValue().getValue();
+    quaternion[0] = q[0];
+    quaternion[1] = q[1];
+    quaternion[2] = q[2];
+    quaternion[3] = q[3];
+    return true;
 }
 
 void SceneGraph::updateObjectPrimitive(const Object& object) {

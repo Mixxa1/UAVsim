@@ -20,6 +20,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Dir.hxx>
 #include <gp_Elips.hxx>
 #include <gp_Pnt.hxx>
 
@@ -121,9 +122,14 @@ EdgeReference edgeReferenceFor(const std::string& bodyId, int index, const TopoD
     reference.kind = edgeKindFor(curve.GetType());
 
     switch (reference.kind) {
-    case EdgeKind::Circle:
-        reference.center = toVector(curve.Circle().Location());
+    case EdgeKind::Circle: {
+        const gp_Circ circle = curve.Circle();
+        reference.center = toVector(circle.Location());
+        const gp_Dir axis = circle.Axis().Direction();
+        reference.axisDirection = {axis.X(), axis.Y(), axis.Z()};
+        reference.radius = circle.Radius();
         break;
+    }
     case EdgeKind::Ellipse:
         reference.center = toVector(curve.Ellipse().Location());
         break;

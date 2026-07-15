@@ -26,6 +26,7 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
@@ -409,6 +410,12 @@ std::vector<FaceReference> FaceAnalyzer::planarFacesForBody(const std::string& b
                 reference.height = std::max(vMax - vMin, 1.0e-6);
                 reference.isSketchable = true;
             } else {
+                if (reference.kind == FaceKind::Cylindrical) {
+                    const gp_Cylinder cylinder = surface.Cylinder();
+                    reference.axisOrigin = toVector(cylinder.Axis().Location());
+                    reference.axisDirection = toVector(cylinder.Axis().Direction());
+                    reference.radius = cylinder.Radius();
+                }
                 // Curved face: report it with its bounds center so the
                 // property panel has something to show.
                 Bnd_Box faceBounds;

@@ -38,6 +38,7 @@ namespace cadnext::gui {
 class CutExtrudeDialog;
 class EdgeOperationDialog;
 class ExtrudeDialog;
+class AssemblyWindow;
 class ProjectTree;
 class PropertyPanel;
 class SketchToolBar;
@@ -278,6 +279,10 @@ private:
     void rebuildUiFromDocument();
     void deriveCountersFromDocument();
 
+    // Assembly workbench (CAD Assembly): a separate window; openDialog
+    // shows the .cadasm file dialog immediately.
+    void openAssemblyWindow(bool openDialog);
+
     // Dirty-state.
     void markDirty();
     void setClean();
@@ -293,6 +298,7 @@ private:
 
     Document document_;
     CommandStack commandStack_;
+    std::unique_ptr<AssemblyWindow> assemblyWindow_;
     std::unique_ptr<kernel::Kernel> kernel_;
     std::unique_ptr<kernel::GeometryEvaluator> evaluator_;
     std::unique_ptr<viewer::CoinViewer> viewer_;
