@@ -48,6 +48,18 @@
 				<string>com.cadnext.cadnext</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>CADNext Assembly</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>cadasm_icon</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.cadnext.cadasm</string>
+			</array>
+		</dict>
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
@@ -93,6 +105,28 @@
 			<key>UTTypeIconFiles</key>
 			<array>
 				<string>cadnext_icon</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.cadnext.cadasm</string>
+			<key>UTTypeDescription</key>
+			<string>CADNext Assembly</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.item</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cadasm</string>
+				</array>
+			</dict>
+			<key>UTTypeIconFiles</key>
+			<array>
+				<string>cadasm_icon</string>
 			</array>
 		</dict>
 	</array>

@@ -254,6 +254,7 @@
 		100000000000000000000360 /* CADNextLauncherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000361 /* CADNextLauncherService.swift */; };
 		100000000000000000000362 /* uavpart_icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000364 /* uavpart_icon.icns */; };
 		100000000000000000000363 /* cadnext_icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000365 /* cadnext_icon.icns */; };
+		100000000000000000000426 /* cadasm_icon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000427 /* cadasm_icon.icns */; };
 		100000000000000000000368 /* MountedCADPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000367 /* MountedCADPayload.swift */; };
 		10000000000000000000036A /* SimulationLaunchConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000369 /* SimulationLaunchConfiguration.swift */; };
 		10000000000000000000036C /* CADPayloadHandoffService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000036B /* CADPayloadHandoffService.swift */; };
@@ -601,6 +602,7 @@
 		100000000000000000000361 /* CADNextLauncherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CADNextLauncherService.swift; sourceTree = "<group>"; };
 		100000000000000000000364 /* uavpart_icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = uavpart_icon.icns; sourceTree = "<group>"; };
 		100000000000000000000365 /* cadnext_icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = cadnext_icon.icns; sourceTree = "<group>"; };
+		100000000000000000000427 /* cadasm_icon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = cadasm_icon.icns; sourceTree = "<group>"; };
 		100000000000000000000366 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		100000000000000000000367 /* MountedCADPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountedCADPayload.swift; sourceTree = "<group>"; };
 		100000000000000000000369 /* SimulationLaunchConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationLaunchConfiguration.swift; sourceTree = "<group>"; };
@@ -1126,6 +1128,7 @@
 				A1530000000000000000000A /* brittle_stone_albedo.png */,
 				100000000000000000000364 /* uavpart_icon.icns */,
 				100000000000000000000365 /* cadnext_icon.icns */,
+				100000000000000000000427 /* cadasm_icon.icns */,
 				100000000000000000000366 /* Info.plist */,
 			);
 			path = Resources;
@@ -1287,6 +1290,7 @@
 				B20410000000000000000008 /* Shipping_Containers.usdz in Resources */,
 				100000000000000000000362 /* uavpart_icon.icns in Resources */,
 				100000000000000000000363 /* cadnext_icon.icns in Resources */,
+				100000000000000000000426 /* cadasm_icon.icns in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
