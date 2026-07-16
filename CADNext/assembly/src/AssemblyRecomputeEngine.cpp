@@ -122,7 +122,10 @@ AssemblyRecomputeEngine::RecomputeResult AssemblyRecomputeEngine::recompute(
         std::set<std::string> fixedSet(group.groundedComponentIds.begin(),
                                        group.groundedComponentIds.end());
         std::string anchor;
-        if (!groundedGroup) {
+        if (!groundedGroup && !group.jointIds.empty()) {
+            // Only groups with mates need a temporary anchor; a lone
+            // unmated component stays genuinely free (6 DOF), not
+            // «полностью определена» by anchoring itself.
             size_t bestJointCount = 0;
             for (const std::string& componentId : group.componentIds) {
                 const size_t jointCount = graph.jointIdsForComponent(componentId).size();
@@ -306,8 +309,20 @@ AssemblyRecomputeEngine::RecomputeResult AssemblyRecomputeEngine::recompute(
         }
 
         // --- 5. DOF analysis over the group -------------------------------
-        const std::map<std::string, DOFAnalyzer::ComponentDof> dof =
-            DOFAnalyzer::analyze(states, equations);
+        const DOFAnalyzer::GroupAnalysis dof = DOFAnalyzer::analyze(states, equations);
+        if (dof.redundantConstraints > 0 && solveResult.converged &&
+            !group.jointIds.empty()) {
+            // Redundant-but-consistent mates (например плоскость + соосность
+            // с перпендикулярной осью) — информация, не ошибка: конфликтом
+            // управляет сходимость решателя.
+            AssemblyDiagnostic diagnostic;
+            diagnostic.severity = DiagnosticSeverity::Info;
+            diagnostic.message =
+                "Assembly group is over-determined: " +
+                std::to_string(dof.redundantConstraints) +
+                " redundant constraint(s), system consistent";
+            result.diagnostics.push_back(diagnostic);
+        }
         for (const std::string& componentId : group.componentIds) {
             ComponentDofInfo info;
             const auto component = document.componentById(componentId);
@@ -316,9 +331,9 @@ AssemblyRecomputeEngine::RecomputeResult AssemblyRecomputeEngine::recompute(
             if (info.isGrounded) {
                 info.remainingDof = 0;
             } else {
-                const auto it = dof.find(componentId);
-                info.remainingDof = it != dof.end() ? it->second.remainingDof : 6;
-                info.overconstrained = it != dof.end() && it->second.overconstrained;
+                const auto it = dof.dofByComponent.find(componentId);
+                info.remainingDof =
+                    it != dof.dofByComponent.end() ? it->second.remainingDof : 6;
                 info.conflict = !solveResult.converged;
             }
             result.dofByComponent[componentId] = info;

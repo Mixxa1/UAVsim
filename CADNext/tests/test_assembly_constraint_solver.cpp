@@ -3,6 +3,7 @@
 // concentric + lock → 0), a distance mate, a closed chain, and an
 // over-/conflicting-constraint case.
 #include "cadnext/assembly/AssemblyRecomputeEngine.hpp"
+#include "cadnext/assembly/ConstraintSolver.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -289,6 +290,83 @@ int main() {
         // Placement stayed finite (nothing flew away).
         const Placement placementB = document.componentById("b").value().placement;
         assert(std::isfinite(placementB.translation.z));
+    }
+
+    // --- Signed direction residual: recovers from a badly-oriented start ----
+    // The free part begins with its mated normal ~150° away from the
+    // opposed target; the solver must rotate onto the requested hemisphere
+    // (an unsigned formulation would settle on the wrong side).
+    {
+        ConstraintSolver::ComponentState fixed;
+        fixed.id = "a";
+        fixed.fixed = true;
+
+        ConstraintSolver::ComponentState free;
+        free.id = "b";
+        free.placement.translation = {0.3, -0.2, 2.0};
+        free.placement.rotation =
+            Quaternion::fromAxisAngle({1.0, 0.0, 0.0}, 150.0 * M_PI / 180.0);
+
+        ConstraintSolver::JointEquation equation;
+        equation.type = JointType::Coincident;
+        equation.alignment = JointAlignment::Opposed;
+        equation.firstKind = GeometryReferenceKind::PlanarFace;
+        equation.secondKind = GeometryReferenceKind::PlanarFace;
+        equation.firstComponentId = "a";
+        equation.secondComponentId = "b";
+        // A's top face frame; B's bottom face frame.
+        equation.firstLocalFrame =
+            Frame::fromOriginZX({0.0, 0.0, 0.5}, {0.0, 0.0, 1.0}, {1.0, 0.0, 0.0});
+        equation.secondLocalFrame =
+            Frame::fromOriginZX({0.0, 0.0, -0.5}, {0.0, 0.0, -1.0}, {1.0, 0.0, 0.0});
+
+        const ConstraintSolver::SolveResult solved =
+            ConstraintSolver::solve({fixed, free}, {equation});
+        assert(solved.converged);
+        const Placement placementB = solved.placements.at("b");
+        const Frame bottomWorld = equation.secondLocalFrame.transformedBy(placementB);
+        // Opposed: B's bottom normal must end up exactly −Z (not +Z).
+        assert(nearlyEqual(dot(bottomWorld.zAxis, {0.0, 0.0, 1.0}), -1.0, 1.0e-6));
+        assert(nearlyEqual(bottomWorld.origin.z, 0.5, 1.0e-5));
+    }
+
+    // --- Two fixed parts + contradictory mate: no variables, must conflict --
+    {
+        ConstraintSolver::ComponentState first;
+        first.id = "a";
+        first.fixed = true;
+        ConstraintSolver::ComponentState second;
+        second.id = "b";
+        second.fixed = true;
+        second.placement.translation = {0.0, 0.0, 5.0}; // far from the mate
+
+        ConstraintSolver::JointEquation equation;
+        equation.type = JointType::Coincident;
+        equation.alignment = JointAlignment::Opposed;
+        equation.firstKind = GeometryReferenceKind::PlanarFace;
+        equation.secondKind = GeometryReferenceKind::PlanarFace;
+        equation.firstComponentId = "a";
+        equation.secondComponentId = "b";
+        equation.firstLocalFrame =
+            Frame::fromOriginZX({0.0, 0.0, 0.5}, {0.0, 0.0, 1.0}, {1.0, 0.0, 0.0});
+        equation.secondLocalFrame =
+            Frame::fromOriginZX({0.0, 0.0, -0.5}, {0.0, 0.0, -1.0}, {1.0, 0.0, 0.0});
+
+        const ConstraintSolver::SolveResult solved =
+            ConstraintSolver::solve({first, second}, {equation});
+        assert(!solved.converged);
+    }
+
+    // --- A lone unmated component stays genuinely free (6 DOF, no anchor) ---
+    {
+        AssemblyDocument document;
+        document.addComponent(makeComponent("solo", false, {1.0, 2.0, 3.0}));
+        const auto result = engine.recompute(document, provider);
+        assert(result.dofByComponent.at("solo").remainingDof == 6);
+        assert(!result.dofByComponent.at("solo").conflict);
+        // Placement untouched.
+        const Placement placement = document.componentById("solo").value().placement;
+        assert(nearlyEqual(placement.translation, {1.0, 2.0, 3.0}, kTol));
     }
 
     return 0;

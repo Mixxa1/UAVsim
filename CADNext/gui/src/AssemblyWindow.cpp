@@ -39,45 +39,9 @@ constexpr int kKindRole = Qt::UserRole + 2;
 constexpr int kComponentKind = 1;
 constexpr int kJointKind = 2;
 
-constexpr double kRadiansToDegrees = 180.0 / M_PI;
-constexpr double kDegreesToRadians = M_PI / 180.0;
-
-// Euler display follows the core Transform convention: degrees, applied
-// about world X, then Y, then Z. The assembly core itself stays purely
-// quaternion-based — these exist only for the property panel fields.
-cadnext::Vector3 eulerDegreesFromQuaternion(const assembly::Quaternion& q) {
-    const double m00 = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
-    const double m10 = 2.0 * (q.x * q.y + q.w * q.z);
-    const double m20 = 2.0 * (q.x * q.z - q.w * q.y);
-    const double m21 = 2.0 * (q.y * q.z + q.w * q.x);
-    const double m22 = 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
-
-    const double sy = std::clamp(-m20, -1.0, 1.0);
-    const double y = std::asin(sy);
-    double x = 0.0;
-    double z = 0.0;
-    if (std::fabs(sy) < 1.0 - 1.0e-9) {
-        x = std::atan2(m21, m22);
-        z = std::atan2(m10, m00);
-    } else {
-        // Gimbal lock: fold everything into X.
-        const double m01 = 2.0 * (q.x * q.y - q.w * q.z);
-        const double m11 = 1.0 - 2.0 * (q.x * q.x + q.z * q.z);
-        x = std::atan2(-m01, m11);
-    }
-    return {x * kRadiansToDegrees, y * kRadiansToDegrees, z * kRadiansToDegrees};
-}
-
-assembly::Quaternion quaternionFromEulerDegrees(double xDeg, double yDeg, double zDeg) {
-    const assembly::Quaternion qx =
-        assembly::Quaternion::fromAxisAngle({1.0, 0.0, 0.0}, xDeg * kDegreesToRadians);
-    const assembly::Quaternion qy =
-        assembly::Quaternion::fromAxisAngle({0.0, 1.0, 0.0}, yDeg * kDegreesToRadians);
-    const assembly::Quaternion qz =
-        assembly::Quaternion::fromAxisAngle({0.0, 0.0, 1.0}, zDeg * kDegreesToRadians);
-    // multiply applies the right factor first → X, then Y, then Z.
-    return qz.multiply(qy.multiply(qx)).normalized();
-}
+// Euler display conversions live in the assembly core
+// (eulerXYZDegreesFromQuaternion / quaternionFromEulerXYZDegrees) so they
+// are unit-tested; the window only wires them to the spin boxes.
 
 QString jointStatusText(assembly::JointSolveStatus status) {
     switch (status) {
@@ -270,6 +234,13 @@ AssemblyWindow::AssemblyWindow(QWidget* parent)
     fileMenu->addAction(tr("Сохранить"), this, [this]() { saveAssembly(); });
     fileMenu->addAction(tr("Сохранить как…"), this, [this]() { saveAssemblyAs(); });
 
+    QMenu* editMenu = menuBar()->addMenu(tr("Правка"));
+    undoAction_ = editMenu->addAction(tr("Отменить"), QKeySequence::Undo, this,
+                                      [this]() { undo(); });
+    redoAction_ = editMenu->addAction(tr("Повторить"), QKeySequence::Redo, this,
+                                      [this]() { redo(); });
+    updateUndoRedoActions();
+
     statusBar()->showMessage(
         tr("Вставьте детали и закрепите базовую, чтобы начать сборку"), 8000);
 }
@@ -338,6 +309,7 @@ void AssemblyWindow::newAssembly() {
     nextComponentNumber_ = 1;
     nextJointNumber_ = 1;
     lastRecompute_ = {};
+    clearUndoHistory();
     clearSelection();
     rebuildSceneFromDocument();
     rebuildTree();
@@ -389,6 +361,7 @@ void AssemblyWindow::loadFromPath(const QString& path) {
     }
     nextJointNumber_ = maxJoint + 1;
 
+    clearUndoHistory();
     clearSelection();
     rebuildSceneFromDocument();
     rebuildTree();
@@ -431,6 +404,84 @@ bool AssemblyWindow::saveToPath(const QString& path) {
     setClean();
     statusBar()->showMessage(tr("Сборка сохранена: %1").arg(path), 5000);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Undo/Redo
+// ---------------------------------------------------------------------------
+
+std::string AssemblyWindow::documentSnapshot() const {
+    // Empty file path keeps absolute source paths in the snapshot (undo
+    // never rewrites them relative).
+    return assembly::AssemblySerializer::toJson(document_);
+}
+
+void AssemblyWindow::pushUndoSnapshot() {
+    pushUndoSnapshot(documentSnapshot());
+}
+
+void AssemblyWindow::pushUndoSnapshot(std::string snapshot) {
+    constexpr size_t kUndoDepthLimit = 50;
+    undoStack_.push_back(std::move(snapshot));
+    if (undoStack_.size() > kUndoDepthLimit) {
+        undoStack_.erase(undoStack_.begin());
+    }
+    redoStack_.clear();
+    updateUndoRedoActions();
+}
+
+void AssemblyWindow::restoreSnapshot(const std::string& snapshot) {
+    const Result<assembly::AssemblyDocument> restored =
+        assembly::AssemblySerializer::fromJson(snapshot);
+    if (!restored.isOk()) {
+        statusBar()->showMessage(tr("Не удалось восстановить состояние сборки"), 5000);
+        return;
+    }
+    cancelJointTool();
+    setMoveModeActive(false);
+    document_ = restored.value();
+    clearSelection();
+    rebuildSceneFromDocument();
+    rebuildTree();
+    runRecompute();
+    markDirty();
+}
+
+void AssemblyWindow::undo() {
+    if (undoStack_.empty()) {
+        return;
+    }
+    redoStack_.push_back(documentSnapshot());
+    const std::string snapshot = undoStack_.back();
+    undoStack_.pop_back();
+    restoreSnapshot(snapshot);
+    updateUndoRedoActions();
+}
+
+void AssemblyWindow::redo() {
+    if (redoStack_.empty()) {
+        return;
+    }
+    undoStack_.push_back(documentSnapshot());
+    const std::string snapshot = redoStack_.back();
+    redoStack_.pop_back();
+    restoreSnapshot(snapshot);
+    updateUndoRedoActions();
+}
+
+void AssemblyWindow::clearUndoHistory() {
+    undoStack_.clear();
+    redoStack_.clear();
+    updateUndoRedoActions();
+}
+
+void AssemblyWindow::updateUndoRedoActions() {
+    if (undoAction_) {
+        undoAction_->setEnabled(!undoStack_.empty());
+    }
+    if (redoAction_) {
+        redoAction_->setEnabled(!redoStack_.empty());
+    }
 }
 
 void AssemblyWindow::markDirty() {
@@ -495,6 +546,8 @@ void AssemblyWindow::insertPart() {
     }
     source.contentHash = geometry.contentHash;
 
+    pushUndoSnapshot();
+
     assembly::AssemblyComponent component;
     component.id = nextComponentId();
     ++nextComponentNumber_;
@@ -558,6 +611,7 @@ void AssemblyWindow::toggleGroundSelected() {
         statusBar()->showMessage(tr("Выберите компонент, чтобы закрепить его"), 4000);
         return;
     }
+    pushUndoSnapshot();
     component->isGrounded = !component->isGrounded;
     markDirty();
     rebuildTree();
@@ -568,6 +622,7 @@ void AssemblyWindow::toggleGroundSelected() {
 void AssemblyWindow::deleteSelected() {
     cancelJointTool();
     if (selectionKind_ == SelectionKind::Component && !selectedComponentId_.empty()) {
+        pushUndoSnapshot();
         if (manipComponentId_ == selectedComponentId_) {
             setMoveModeActive(false);
         }
@@ -582,6 +637,7 @@ void AssemblyWindow::deleteSelected() {
         return;
     }
     if (selectionKind_ == SelectionKind::Joint && !selectedJointId_.empty()) {
+        pushUndoSnapshot();
         document_.removeJoint(selectedJointId_);
         clearSelection();
         rebuildTree();
@@ -657,6 +713,7 @@ void AssemblyWindow::handleManipFinished(const std::string& componentId) {
     if (!component || component->isGrounded) {
         return;
     }
+    pushUndoSnapshot();
     component->placement.translation = position;
     component->placement.rotation =
         assembly::Quaternion{quaternion[0], quaternion[1], quaternion[2], quaternion[3]}
@@ -731,11 +788,17 @@ void AssemblyWindow::refreshComponentVisual(const assembly::AssemblyComponent& c
         return;
     }
     if (!component.isVisible || component.isSuppressed) {
+        if (manipComponentId_ == component.id) {
+            manipComponentId_.clear(); // the scene detaches the manip itself
+        }
         viewer_->scene().removeObjectNode(component.id);
         return;
     }
     const AssemblyPartGeometry& geometry = partLoader_->geometryForSource(component.source);
     if (!geometry.valid) {
+        if (manipComponentId_ == component.id) {
+            manipComponentId_.clear();
+        }
         viewer_->scene().removeObjectNode(component.id);
         return;
     }
@@ -825,10 +888,10 @@ void AssemblyWindow::refreshTreeStatuses() {
             const auto& info = dofIt->second;
             if (info.conflict) {
                 status = tr("Конфликт");
-            } else if (info.overconstrained) {
-                status = tr("Переопределена");
             } else if (info.remainingDof == 0) {
                 status = tr("Полностью определена");
+            } else if (info.remainingDof == 6) {
+                status = tr("Свободна (6 DOF)");
             } else if (info.remainingDof > 0) {
                 status = tr("Недоопределена: %1 DOF").arg(info.remainingDof);
             } else if (!info.inGroundedGroup) {
@@ -1081,7 +1144,7 @@ void AssemblyWindow::refreshPropertyPanel() {
         positionSpins_[2]->setValue(
             cadnext::toMillimeters(component->placement.translation.z));
         const cadnext::Vector3 euler =
-            eulerDegreesFromQuaternion(component->placement.rotation);
+            assembly::eulerXYZDegreesFromQuaternion(component->placement.rotation);
         rotationSpins_[0]->setValue(euler.x);
         rotationSpins_[1]->setValue(euler.y);
         rotationSpins_[2]->setValue(euler.z);
@@ -1099,10 +1162,10 @@ void AssemblyWindow::refreshPropertyPanel() {
             const auto& info = dofIt->second;
             if (info.conflict) {
                 status = tr("Конфликт ограничений");
-            } else if (info.overconstrained) {
-                status = tr("Переопределена");
             } else if (info.remainingDof == 0) {
                 status = tr("Полностью определена");
+            } else if (info.remainingDof == 6) {
+                status = tr("Свободна (6 DOF)");
             } else if (info.remainingDof > 0) {
                 status = tr("Недоопределена: %1 DOF").arg(info.remainingDof);
             } else if (!info.inGroundedGroup) {
@@ -1158,6 +1221,7 @@ void AssemblyWindow::applyPanelName() {
     if (newName.empty() || newName == component->name) {
         return;
     }
+    pushUndoSnapshot();
     component->name = newName;
     markDirty();
     rebuildTree();
@@ -1171,6 +1235,10 @@ void AssemblyWindow::applyPanelFlags() {
     assembly::AssemblyComponent* component = selectedComponent();
     if (!component) {
         return;
+    }
+    if (component->isGrounded != groundedCheck_->isChecked() ||
+        component->isVisible != visibleCheck_->isChecked()) {
+        pushUndoSnapshot();
     }
     bool changed = false;
     if (component->isGrounded != groundedCheck_->isChecked()) {
@@ -1202,20 +1270,21 @@ void AssemblyWindow::applyPanelPlacement() {
     placement.translation = {cadnext::fromMillimeters(positionSpins_[0]->value()),
                              cadnext::fromMillimeters(positionSpins_[1]->value()),
                              cadnext::fromMillimeters(positionSpins_[2]->value())};
-    placement.rotation = quaternionFromEulerDegrees(
+    placement.rotation = assembly::quaternionFromEulerXYZDegrees(
         rotationSpins_[0]->value(), rotationSpins_[1]->value(),
         rotationSpins_[2]->value());
 
     const bool samePosition = assembly::nearlyEqual(
         placement.translation, component->placement.translation, 1.0e-9);
     const cadnext::Vector3 currentEuler =
-        eulerDegreesFromQuaternion(component->placement.rotation);
-    const cadnext::Vector3 newEuler = eulerDegreesFromQuaternion(placement.rotation);
+        assembly::eulerXYZDegreesFromQuaternion(component->placement.rotation);
+    const cadnext::Vector3 newEuler = assembly::eulerXYZDegreesFromQuaternion(placement.rotation);
     const bool sameRotation = assembly::nearlyEqual(currentEuler, newEuler, 1.0e-6);
     if (samePosition && sameRotation) {
         return;
     }
 
+    pushUndoSnapshot();
     component->placement = placement;
     markDirty();
     runRecompute();
@@ -1358,16 +1427,30 @@ AssemblyWindow::JointPickSelection AssemblyWindow::resolveJointPick(
     }
 
     // Edge if the click landed near one (world-space proximity, same
-    // tolerance policy as the part editor).
+    // adaptive tolerance policy as the part editor: 2.5% of the edge
+    // cloud's extent, clamped to sane absolute bounds).
     if (target.hasWorldPoint) {
         const auto edgesIt = worldEdgesByComponent_.find(pick.componentId);
         if (edgesIt != worldEdgesByComponent_.end() && !edgesIt->second.empty()) {
+            cadnext::Vector3 boundsMin{1.0e30, 1.0e30, 1.0e30};
+            cadnext::Vector3 boundsMax{-1.0e30, -1.0e30, -1.0e30};
+            const auto includePoint = [&](const cadnext::Vector3& point) {
+                boundsMin.x = std::min(boundsMin.x, point.x);
+                boundsMin.y = std::min(boundsMin.y, point.y);
+                boundsMin.z = std::min(boundsMin.z, point.z);
+                boundsMax.x = std::max(boundsMax.x, point.x);
+                boundsMax.y = std::max(boundsMax.y, point.y);
+                boundsMax.z = std::max(boundsMax.z, point.z);
+            };
             const kernel::EdgeReference* best = nullptr;
             double bestDistance = std::numeric_limits<double>::infinity();
             for (const kernel::EdgeReference& edge : edgesIt->second) {
                 std::vector<cadnext::Vector3> points = edge.previewPolyline;
                 if (points.size() < 2) {
                     points = {edge.start, edge.end};
+                }
+                for (const cadnext::Vector3& point : points) {
+                    includePoint(point);
                 }
                 for (size_t i = 1; i < points.size(); ++i) {
                     const double distance = distancePointToSegment(
@@ -1378,7 +1461,10 @@ AssemblyWindow::JointPickSelection AssemblyWindow::resolveJointPick(
                     }
                 }
             }
-            if (best && bestDistance <= 0.02) {
+            const double diagonal =
+                assembly::length(assembly::subtract(boundsMax, boundsMin));
+            const double tolerance = std::clamp(diagonal * 0.025, 0.015, 0.25);
+            if (best && bestDistance <= tolerance) {
                 for (const kernel::EdgeReference& localEdge : geometry.topology.edges) {
                     if (localEdge.edgeId == best->edgeId) {
                         pick.reference =
@@ -1534,6 +1620,10 @@ void AssemblyWindow::applyJointPreview(assembly::JointAlignment alignment,
 }
 
 void AssemblyWindow::finishJointTool() {
+    // Undo state captured before the ghost preview moves the child; only
+    // pushed when the joint is actually confirmed.
+    std::string preJointSnapshot = documentSnapshot();
+
     // Preview the snap immediately with the dialog's initial parameters.
     AssemblyJointDialog dialog(jointToolType_, firstPick_.label, secondPick_.label,
                                this);
@@ -1548,6 +1638,8 @@ void AssemblyWindow::finishJointTool() {
         cancelJointTool();
         return;
     }
+
+    pushUndoSnapshot(std::move(preJointSnapshot));
 
     assembly::AssemblyJoint joint;
     joint.id = "joint-" + std::to_string(nextJointNumber_);

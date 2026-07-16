@@ -535,6 +535,9 @@ void SceneGraph::removeObjectNode(const std::string& objectId) {
     if (it == objectNodes_.end()) {
         return;
     }
+    // A transform manip must never outlive its object node (the Assembly
+    // move tool can be active while a component is hidden or deleted).
+    detachTransformManip(objectId);
     removeMeshPickInfoForObject(objectId);
     nodeToObjectId_.erase(it->second);
     nodeToWorkPlaneId_.erase(it->second);
@@ -569,6 +572,10 @@ void SceneGraph::removeObjectNode(const std::string& objectId) {
 }
 
 void SceneGraph::clearObjectNodes() {
+    // Manips must not outlive their nodes (see removeObjectNode).
+    while (!manipStates_.empty()) {
+        detachTransformManip(manipStates_.begin()->first);
+    }
     // Only the entries owned by object nodes are dropped: the canonical
     // and document work plane helpers keep their pick-map entries.
     for (const auto& entry : objectNodes_) {

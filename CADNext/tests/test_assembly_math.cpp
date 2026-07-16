@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <initializer_list>
 
 using namespace cadnext::assembly;
 
@@ -92,6 +93,41 @@ int main() {
     const Frame moved = frame.transformedBy(parent);
     checkVector(moved.origin, parent.apply(frame.origin).x, parent.apply(frame.origin).y,
                 parent.apply(frame.origin).z);
+
+    // --- Euler XYZ display conversions (R = Rz·Ry·Rx, degrees) --------------
+    // Round-trip over a grid of representative angles.
+    const double angles[] = {-170.0, -90.0, -45.0, 0.0, 30.0, 89.0, 120.0};
+    for (const double ex : angles) {
+        for (const double ey : {-60.0, 0.0, 45.0}) {
+            for (const double ez : {-135.0, 0.0, 90.0}) {
+                const Quaternion q = quaternionFromEulerXYZDegrees(ex, ey, ez);
+                const cadnext::Vector3 back = eulerXYZDegreesFromQuaternion(q);
+                const Quaternion q2 =
+                    quaternionFromEulerXYZDegrees(back.x, back.y, back.z);
+                // Compare rotations (not raw angles: representations may
+                // differ), via action on the basis vectors.
+                checkVector(q2.rotate({1.0, 0.0, 0.0}), q.rotate({1.0, 0.0, 0.0}).x,
+                            q.rotate({1.0, 0.0, 0.0}).y, q.rotate({1.0, 0.0, 0.0}).z,
+                            1.0e-9);
+                checkVector(q2.rotate({0.0, 0.0, 1.0}), q.rotate({0.0, 0.0, 1.0}).x,
+                            q.rotate({0.0, 0.0, 1.0}).y, q.rotate({0.0, 0.0, 1.0}).z,
+                            1.0e-9);
+            }
+        }
+    }
+    // Single-axis sanity: pure 90° Z reads back as (0,0,90).
+    const cadnext::Vector3 pureZ = eulerXYZDegreesFromQuaternion(
+        Quaternion::fromAxisAngle({0.0, 0.0, 1.0}, M_PI / 2.0));
+    assert(nearlyEqual(pureZ.x, 0.0, 1.0e-9));
+    assert(nearlyEqual(pureZ.y, 0.0, 1.0e-9));
+    assert(nearlyEqual(pureZ.z, 90.0, 1.0e-9));
+    // Gimbal lock (y = 90°) still round-trips as a rotation.
+    const Quaternion lock = quaternionFromEulerXYZDegrees(25.0, 90.0, -40.0);
+    const cadnext::Vector3 lockEuler = eulerXYZDegreesFromQuaternion(lock);
+    const Quaternion lockBack =
+        quaternionFromEulerXYZDegrees(lockEuler.x, lockEuler.y, lockEuler.z);
+    checkVector(lockBack.rotate({1.0, 0.0, 0.0}), lock.rotate({1.0, 0.0, 0.0}).x,
+                lock.rotate({1.0, 0.0, 0.0}).y, lock.rotate({1.0, 0.0, 0.0}).z, 1.0e-6);
 
     return 0;
 }

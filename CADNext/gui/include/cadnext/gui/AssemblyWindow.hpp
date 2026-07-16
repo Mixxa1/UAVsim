@@ -72,6 +72,22 @@ private:
     void setClean();
     void updateWindowTitle();
 
+    // --- Undo/Redo -------------------------------------------------------------
+    // Snapshot-based: the document serializes to a small JSON (components
+    // are links, never geometry), so whole-document snapshots are cheap
+    // and cover every mutation uniformly. Placements re-derive through
+    // recompute after restore.
+    std::string documentSnapshot() const;
+    void pushUndoSnapshot();
+    // For mutations whose "before" state was captured earlier (the joint
+    // tool snapshots before the ghost preview moves the child).
+    void pushUndoSnapshot(std::string snapshot);
+    void restoreSnapshot(const std::string& snapshot);
+    void undo();
+    void redo();
+    void clearUndoHistory();
+    void updateUndoRedoActions();
+
     // --- Components ----------------------------------------------------------
     void insertPart();
     void toggleGroundSelected();
@@ -159,6 +175,10 @@ private:
 
     QAction* moveModeAction_ = nullptr;
     QAction* groundAction_ = nullptr;
+    QAction* undoAction_ = nullptr;
+    QAction* redoAction_ = nullptr;
+    std::vector<std::string> undoStack_;
+    std::vector<std::string> redoStack_;
 
     SelectionKind selectionKind_ = SelectionKind::None;
     std::string selectedComponentId_;

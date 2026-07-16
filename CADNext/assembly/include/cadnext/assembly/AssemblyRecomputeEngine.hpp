@@ -38,7 +38,6 @@ public:
         int remainingDof = -1;
         bool isGrounded = false;
         bool inGroundedGroup = false;
-        bool overconstrained = false;
         bool conflict = false;
     };
 

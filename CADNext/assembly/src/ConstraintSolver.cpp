@@ -30,10 +30,12 @@ bool isDirectional(GeometryReferenceKind kind) {
 }
 
 // Appends the equation's residuals for the given component placements.
-// Direction constraints use projections onto two stable perpendiculars of
-// the parent direction; the correct hemisphere comes from the initial
-// guess (the direct pass / ghost preview place components near the
-// solution before this solver runs).
+// Signed direction constraints (planes) use the differentiable
+// three-component difference z2 − sign·z1 (rank 2 at the solution, the
+// sign built in). Axis constraints (concentric, line-line) are
+// direction-agnostic by design — a shaft in a bore is valid either way —
+// so they use projections onto two stable perpendiculars and the initial
+// guess (direct pass / ghost preview) picks the hemisphere.
 void appendResiduals(const ConstraintSolver::JointEquation& equation,
                      const Placement& first, const Placement& second,
                      std::vector<double>& out) {
@@ -43,6 +45,8 @@ void appendResiduals(const ConstraintSolver::JointEquation& equation,
     const Vector3 a = stablePerpendicular(world.z1);
     const Vector3 b = cross(world.z1, a);
     const Vector3 delta = subtract(world.o2, world.o1);
+    // Signed direction difference for plane-type mates.
+    const Vector3 directionError = subtract(world.z2, scale(world.z1, sign));
 
     switch (equation.type) {
     case JointType::Coincident: {
@@ -70,21 +74,20 @@ void appendResiduals(const ConstraintSolver::JointEquation& equation,
             out.push_back(dot(delta, b));
             break;
         }
-        // Plane-plane: normals (anti)parallel + point on plane. Остаётся
+        // Plane-plane: normals aligned/opposed + point on plane. Остаётся
         // 3 DOF: два перемещения в плоскости и вращение вокруг нормали.
-        // The two direction rows + point-on-plane row remove exactly 3
-        // DOF; the hemisphere penalty row is a one-sided guard that reads
-        // zero once the correct side is reached (so it adds no rank).
-        out.push_back(dot(world.z2, a));
-        out.push_back(dot(world.z2, b));
+        // Three direction rows have rank 2 at the solution and encode the
+        // requested sign; the point row removes the normal translation.
+        out.push_back(directionError.x);
+        out.push_back(directionError.y);
+        out.push_back(directionError.z);
         out.push_back(dot(delta, world.z1) - equation.offsetMeters);
-        out.push_back(std::max(0.0, -sign * dot(world.z2, world.z1)));
         break;
     }
     case JointType::Parallel:
-        out.push_back(dot(world.z2, a));
-        out.push_back(dot(world.z2, b));
-        out.push_back(std::max(0.0, -sign * dot(world.z2, world.z1)));
+        out.push_back(directionError.x);
+        out.push_back(directionError.y);
+        out.push_back(directionError.z);
         break;
     case JointType::Perpendicular:
         out.push_back(dot(world.z2, world.z1));
@@ -103,10 +106,10 @@ void appendResiduals(const ConstraintSolver::JointEquation& equation,
         break;
     }
     case JointType::Distance:
-        out.push_back(dot(world.z2, a));
-        out.push_back(dot(world.z2, b));
+        out.push_back(directionError.x);
+        out.push_back(directionError.y);
+        out.push_back(directionError.z);
         out.push_back(dot(delta, world.z1) - equation.offsetMeters);
-        out.push_back(std::max(0.0, -sign * dot(world.z2, world.z1)));
         break;
     case JointType::Angle:
         out.push_back(dot(world.z2, world.z1) - std::cos(equation.angleRadians));
@@ -290,8 +293,12 @@ ConstraintSolver::SolveResult ConstraintSolver::solve(
     }
     const size_t variableCount = freeIndices.size() * 6;
     if (variableCount == 0 || equations.empty()) {
-        result.converged = true;
-        result.residualNorm = std::sqrt(squaredNorm(residuals(state, equations)));
+        // Nothing to move: the system is satisfied only if the residuals
+        // already are (two grounded parts with a contradictory mate must
+        // report a conflict, not silently pass).
+        const std::vector<double> residual = residuals(state, equations);
+        result.residualNorm = std::sqrt(squaredNorm(residual));
+        result.converged = maxAbs(residual) < 1.0e-6;
         return result;
     }
 

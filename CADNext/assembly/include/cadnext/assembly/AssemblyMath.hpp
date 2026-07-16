@@ -76,6 +76,12 @@ struct Frame {
     Frame transformedBy(const Placement& placement) const;
 };
 
+// Euler display conversions following the core Transform convention:
+// degrees, applied about world X, then Y, then Z (R = Rz·Ry·Rx). The
+// assembly core itself is quaternion-only — these exist for UI fields.
+Vector3 eulerXYZDegreesFromQuaternion(const Quaternion& rotation);
+Quaternion quaternionFromEulerXYZDegrees(double xDeg, double yDeg, double zDeg);
+
 bool nearlyEqual(double a, double b, double tolerance);
 bool nearlyEqual(const Vector3& a, const Vector3& b, double tolerance);
 

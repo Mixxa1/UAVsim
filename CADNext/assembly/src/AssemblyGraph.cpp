@@ -48,7 +48,6 @@ AssemblyGraph AssemblyGraph::build(const AssemblyDocument& document,
     AssemblyGraph graph;
 
     DisjointSet sets;
-    std::set<std::string> cycleRoots;
     for (const AssemblyComponent& component : document.components()) {
         if (!component.isSuppressed) {
             sets.ensure(component.id);
@@ -74,9 +73,7 @@ AssemblyGraph AssemblyGraph::build(const AssemblyDocument& document,
         edge.firstComponentId = first;
         edge.secondComponentId = second;
         graph.edges_.push_back(edge);
-        if (!sets.unite(first, second)) {
-            cycleRoots.insert(sets.find(first));
-        }
+        sets.unite(first, second);
     }
 
     std::map<std::string, Group> groupsByRoot;
@@ -90,9 +87,6 @@ AssemblyGraph AssemblyGraph::build(const AssemblyDocument& document,
         if (component.isGrounded) {
             group.groundedComponentIds.push_back(component.id);
         }
-        if (cycleRoots.count(root)) {
-            group.hasCycle = true;
-        }
     }
     for (const Edge& edge : graph.edges_) {
         groupsByRoot[sets.find(edge.firstComponentId)].jointIds.push_back(edge.jointId);
@@ -100,6 +94,10 @@ AssemblyGraph AssemblyGraph::build(const AssemblyDocument& document,
 
     graph.groups_.reserve(groupsByRoot.size());
     for (auto& entry : groupsByRoot) {
+        // A connected component with |edges| >= |vertices| carries at
+        // least one closed chain (spanning tree has |V|-1 edges).
+        entry.second.hasCycle =
+            entry.second.jointIds.size() >= entry.second.componentIds.size();
         graph.groups_.push_back(std::move(entry.second));
     }
     return graph;

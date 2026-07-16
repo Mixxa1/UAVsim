@@ -1,5 +1,6 @@
 #include "cadnext/assembly/AssemblyMath.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace cadnext::assembly {
@@ -213,6 +214,43 @@ Frame Frame::transformedBy(const Placement& placement) const {
     frame.yAxis = placement.applyDirection(yAxis);
     frame.zAxis = placement.applyDirection(zAxis);
     return frame;
+}
+
+Vector3 eulerXYZDegreesFromQuaternion(const Quaternion& q) {
+    constexpr double kRadiansToDegrees = 180.0 / M_PI;
+    const double m00 = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+    const double m10 = 2.0 * (q.x * q.y + q.w * q.z);
+    const double m20 = 2.0 * (q.x * q.z - q.w * q.y);
+    const double m21 = 2.0 * (q.y * q.z + q.w * q.x);
+    const double m22 = 1.0 - 2.0 * (q.x * q.x + q.y * q.y);
+
+    // R = Rz·Ry·Rx → m20 = -sin(y); x from (m21,m22); z from (m10,m00).
+    const double sy = std::clamp(-m20, -1.0, 1.0);
+    const double y = std::asin(sy);
+    double x = 0.0;
+    double z = 0.0;
+    if (std::fabs(sy) < 1.0 - 1.0e-9) {
+        x = std::atan2(m21, m22);
+        z = std::atan2(m10, m00);
+    } else {
+        // Gimbal lock (y = ±90°): fold the remaining rotation into X.
+        const double m01 = 2.0 * (q.x * q.y - q.w * q.z);
+        const double m11 = 1.0 - 2.0 * (q.x * q.x + q.z * q.z);
+        x = std::atan2(-m01, m11);
+    }
+    return {x * kRadiansToDegrees, y * kRadiansToDegrees, z * kRadiansToDegrees};
+}
+
+Quaternion quaternionFromEulerXYZDegrees(double xDeg, double yDeg, double zDeg) {
+    constexpr double kDegreesToRadians = M_PI / 180.0;
+    const Quaternion qx =
+        Quaternion::fromAxisAngle({1.0, 0.0, 0.0}, xDeg * kDegreesToRadians);
+    const Quaternion qy =
+        Quaternion::fromAxisAngle({0.0, 1.0, 0.0}, yDeg * kDegreesToRadians);
+    const Quaternion qz =
+        Quaternion::fromAxisAngle({0.0, 0.0, 1.0}, zDeg * kDegreesToRadians);
+    // multiply applies the right factor first → X, then Y, then Z.
+    return qz.multiply(qy.multiply(qx)).normalized();
 }
 
 bool nearlyEqual(double a, double b, double tolerance) {
