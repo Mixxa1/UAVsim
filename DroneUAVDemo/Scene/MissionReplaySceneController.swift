@@ -1289,7 +1289,8 @@ final class MissionReplaySceneController {
         let bodyScale: Float
     }
 
-    /// Resolves against the full canonical catalog (`LIPODroneModelRepository`) rather than a
+    /// Rebuilds an embedded Workbench assembly first, then resolves against the full canonical
+    /// catalog (`LIPODroneModelRepository`) rather than a
     /// caller-supplied list — the previous version relied on whichever screen happened to open
     /// the replay viewer to thread a non-empty `availableDroneProfiles` array through, and the
     /// start-screen entry point (`ReplayCenterWindowHost.open` with no active simulation) and the
@@ -1304,6 +1305,20 @@ final class MissionReplaySceneController {
         replayDroneNode.childNodes
             .filter { $0.name != "replayGizmoRoot" }
             .forEach { $0.removeFromParentNode() }
+
+        // Workbench profiles are intentionally not required to exist in the canonical catalog.
+        // The portable build snapshot contains every selected component (including imported CAD
+        // meshes), so it is the authoritative replay visual when present.
+        if let workbenchBuild = context?.workbenchBuild {
+            let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: workbenchBuild)
+            let visual = DroneModelBuilder.build(profile: profile)
+            replayDroneNode.addChildNode(visual.rootNode)
+            return UAVBuildResult(
+                displayName: profile.displayName,
+                profileFound: true,
+                bodyScale: profile.collisionRadius
+            )
+        }
 
         let allProfiles = LIPODroneModelRepository().allProfiles
         var foundProfile: DroneModelProfile?

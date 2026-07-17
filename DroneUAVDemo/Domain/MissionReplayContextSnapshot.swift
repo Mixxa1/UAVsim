@@ -11,6 +11,11 @@ struct MissionReplayContextSnapshot: Codable, Equatable {
     let selectedUAVProfileID: String?
     let selectedUAVProfileName: String?
 
+    /// A self-contained Workbench assembly used to reconstruct custom UAVs even when they are
+    /// not registered in the canonical model catalog. Optional for backward-compatible decoding
+    /// of replay sessions recorded before Workbench snapshots were embedded.
+    let workbenchBuild: WorkbenchBuild?
+
     let terrainPresetRawValue: String?
     let mapScaleRawValue: String?
     let terrainSeed: UInt64?

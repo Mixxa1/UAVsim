@@ -17603,6 +17603,7 @@ private extension DroneSimulationViewModel {
             selectedDroneProfileName: selectedDroneProfile.displayName,
             selectedUAVProfileID: activeUAVProfile?.id,
             selectedUAVProfileName: activeUAVProfile?.displayName,
+            workbenchBuild: selectedDroneProfile.workbenchBuild,
             terrainPresetRawValue: terrain.preset.rawValue,
             mapScaleRawValue: terrain.mapScale.rawValue,
             terrainSeed: terrain.seed,
