@@ -96,7 +96,10 @@ enum WorkbenchLibraryPreviewSceneFactory {
         // SceneKit composited its texture alpha as a luminous white rectangle.
         scene.background.contents = NSColor.clear
         scene.lightingEnvironment.contents = studioEnvironment
-        scene.lightingEnvironment.intensity = 0.13
+        // Enough image-based light for black carbon, rubber and anodised metal
+        // to retain their shape, while staying well below the clipped workshop
+        // environment that originally washed out light-coloured components.
+        scene.lightingEnvironment.intensity = 0.55
 
         let key = cacheKey as NSString
         let model: SCNNode
@@ -129,7 +132,7 @@ enum WorkbenchLibraryPreviewSceneFactory {
         camera.zFar = Double(layout.distance * 4 + 2)
         camera.wantsHDR = false
         camera.wantsExposureAdaptation = false
-        camera.exposureOffset = -0.62
+        camera.exposureOffset = 0.20
         camera.bloomIntensity = 0
         camera.screenSpaceAmbientOcclusionIntensity = 0
 
@@ -143,22 +146,22 @@ enum WorkbenchLibraryPreviewSceneFactory {
         addLight(
             to: scene,
             name: "preview.key",
-            color: NSColor(deviceRed: 0.95, green: 0.91, blue: 0.84, alpha: 1),
-            intensity: 68,
+            color: NSColor(deviceRed: 0.98, green: 0.96, blue: 0.92, alpha: 1),
+            intensity: 340,
             position: center + SIMD3<Float>(-layout.distance, layout.distance, layout.distance * 0.72),
             target: center)
         addLight(
             to: scene,
             name: "preview.fill",
-            color: NSColor(deviceRed: 0.68, green: 0.77, blue: 0.88, alpha: 1),
-            intensity: 18,
+            color: NSColor(deviceRed: 0.80, green: 0.86, blue: 0.94, alpha: 1),
+            intensity: 150,
             position: center + SIMD3<Float>(layout.distance, layout.distance * 0.28, layout.distance * 0.45),
             target: center)
         addLight(
             to: scene,
             name: "preview.rim",
-            color: NSColor(deviceRed: 0.74, green: 0.80, blue: 0.88, alpha: 1),
-            intensity: 24,
+            color: NSColor(deviceRed: 0.88, green: 0.92, blue: 0.97, alpha: 1),
+            intensity: 110,
             position: center + SIMD3<Float>(layout.distance * 0.42, layout.distance * 0.72, -layout.distance),
             target: center)
 
@@ -166,8 +169,8 @@ enum WorkbenchLibraryPreviewSceneFactory {
         ambient.name = "preview.ambient"
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.color = NSColor(deviceRed: 0.59, green: 0.63, blue: 0.68, alpha: 1)
-        ambient.light?.intensity = 17
+        ambient.light?.color = NSColor(deviceRed: 0.76, green: 0.78, blue: 0.81, alpha: 1)
+        ambient.light?.intensity = 70
         scene.rootNode.addChildNode(ambient)
         return scene
     }
@@ -277,8 +280,8 @@ enum WorkbenchLibraryPreviewSceneFactory {
             // the editor or simulation assembly.
             geometry.materials = geometry.materials.map { original in
                 let material = (original.copy() as? SCNMaterial) ?? original
-                material.diffuse.intensity = min(material.diffuse.intensity, 0.86)
-                material.reflective.intensity = min(material.reflective.intensity, 0.24)
+                material.diffuse.intensity = min(material.diffuse.intensity, 0.96)
+                material.reflective.intensity = min(material.reflective.intensity, 0.48)
                 material.normal.intensity = min(material.normal.intensity, 0.78)
                 guard material.lightingModel != .constant else { return material }
 
@@ -314,9 +317,9 @@ enum WorkbenchLibraryPreviewSceneFactory {
         let image = NSImage(size: size)
         image.lockFocus()
         let gradient = NSGradient(colors: [
-            NSColor(deviceRed: 0.22, green: 0.24, blue: 0.27, alpha: 1),
-            NSColor(deviceRed: 0.46, green: 0.49, blue: 0.53, alpha: 1),
-            NSColor(deviceRed: 0.18, green: 0.20, blue: 0.23, alpha: 1),
+            NSColor(deviceRed: 0.28, green: 0.30, blue: 0.33, alpha: 1),
+            NSColor(deviceRed: 0.56, green: 0.58, blue: 0.61, alpha: 1),
+            NSColor(deviceRed: 0.24, green: 0.26, blue: 0.29, alpha: 1),
         ])
         gradient?.draw(in: NSRect(origin: .zero, size: size), angle: -18)
         image.unlockFocus()

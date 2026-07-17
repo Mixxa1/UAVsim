@@ -48,6 +48,14 @@ struct WorkbenchResolvedComponentPlacement: Hashable {
     var size: SIMD3<Float>
 }
 
+/// Upper hard-points authored by each landing-gear renderer. Placement and
+/// mounting hardware both consume this layout so the visible leg roots, rather
+/// than the catalog proxy box, are seated against the aircraft belly.
+struct WorkbenchLandingGearAttachmentLayout {
+    var upperLocalY: Float
+    var rootPoints: [SIMD3<Float>]
+}
+
 enum WorkbenchBuildAnalyzer {
     private static let gravity = 9.80665
 
@@ -251,14 +259,82 @@ enum WorkbenchBuildAnalyzer {
         let fuselageLength = length * 0.78
         let fuselageCenterZ = -length * 0.015
         let noseLength = max(length * 0.10, 0.055)
-        let noseCenterZ = fuselageLength * 0.5 + fuselageCenterZ + noseLength * 0.42
+        let legacyNoseFrontZ = fuselageLength * 0.5 + fuselageCenterZ
+            + noseLength * 0.92
+        let cruiseFirewallZ = frame.motorMounts.enumerated()
+            .filter { index, _ in
+                guard frame.propulsionAxes.indices.contains(index) else { return false }
+                let axis = frame.propulsionAxes[index]
+                return simd_length_squared(axis) > 1e-8
+                    && simd_normalize(axis).z > 0.65
+            }
+            .map { $0.element.z }
+            .max()
         return (
             width: bodyRadius * 2,
             length: fuselageLength,
             top: max(frame.fcBay.y + 0.006, fuselageTop),
             bottom: min(-0.004, fuselageBottom),
-            frontZ: noseCenterZ + noseLength * 0.5,
+            frontZ: cruiseFirewallZ ?? legacyNoseFrontZ,
             rearZ: fuselageCenterZ - fuselageLength * 0.5)
+    }
+
+    static func landingGearAttachmentLayout(
+        for spec: WorkbenchComponentSpec
+    ) -> WorkbenchLandingGearAttachmentLayout {
+        let size = spec.proxy.size.simdFloat
+
+        if spec.id.contains("micro-guards") {
+            let ringRadius = size.x * 0.42
+            let pipeRadius = max(size.y * 0.10, 0.0015)
+            return WorkbenchLandingGearAttachmentLayout(
+                upperLocalY: pipeRadius,
+                rootPoints: [
+                    SIMD3<Float>(-ringRadius, pipeRadius, 0),
+                    SIMD3<Float>(ringRadius, pipeRadius, 0),
+                    SIMD3<Float>(0, pipeRadius, -ringRadius),
+                    SIMD3<Float>(0, pipeRadius, ringRadius),
+                ])
+        }
+
+        if spec.id.contains("cine-bumpers") {
+            let bumperTop = -size.y * 0.18 + max(size.y * 0.82, 0.020) * 0.5
+            let rootX = size.x * 0.34
+            let rootZ = size.z * 0.34
+            return WorkbenchLandingGearAttachmentLayout(
+                upperLocalY: bumperTop,
+                rootPoints: [
+                    SIMD3<Float>(-rootX, bumperTop, -rootZ),
+                    SIMD3<Float>(-rootX, bumperTop, rootZ),
+                    SIMD3<Float>(rootX, bumperTop, -rootZ),
+                    SIMD3<Float>(rootX, bumperTop, rootZ),
+                ])
+        }
+
+        if spec.id.contains("retractable") {
+            let pivotTop = size.y * 0.27 + size.z * 0.16
+            let rootX = size.x * 0.31
+            return WorkbenchLandingGearAttachmentLayout(
+                upperLocalY: pivotTop,
+                rootPoints: [
+                    SIMD3<Float>(-rootX, pivotTop, 0),
+                    SIMD3<Float>(rootX, pivotTop, 0),
+                ])
+        }
+
+        // Both the conventional skid and Tall Carbon Gear share the rendered
+        // four-strut layout. These are the actual upper beam endpoints.
+        let rootX = size.x * 0.34
+        let rootY = size.y * 0.45
+        let rootZ = size.z * 0.13
+        return WorkbenchLandingGearAttachmentLayout(
+            upperLocalY: rootY,
+            rootPoints: [
+                SIMD3<Float>(-rootX, rootY, -rootZ),
+                SIMD3<Float>(-rootX, rootY, rootZ),
+                SIMD3<Float>(rootX, rootY, -rootZ),
+                SIMD3<Float>(rootX, rootY, rootZ),
+            ])
     }
 
     /// Seats repeated wing servos on the actual skin instead of trusting
@@ -678,13 +754,25 @@ enum WorkbenchBuildAnalyzer {
                 // Fixed-wing avionics and the movable CG battery belong under
                 // the service hatch, not on top of the aerodynamic surface.
                 surface = .internalBay
+            } else if kind == .landingGear {
+                // Landing gear has one meaningful mounting face. Normalizing
+                // legacy Blueprints prevents a valid gear assembly being
+                // attached to the roof or a side of the aircraft.
+                surface = .bottom
             } else if kind == .receiver || kind == .flightController || kind == .esc {
                 surface = .internalBay
             } else {
                 surface = requested.surface
             }
             let offset = requested.offset.simdFloat
-            let base = basePosition(for: kind, surface: surface, size: size) + offset
+            var base = basePosition(for: kind, surface: surface, size: size) + offset
+            if kind == .landingGear, surface == .bottom {
+                let attachments = landingGearAttachmentLayout(for: spec)
+                // Seat the visible upper hard-points just below the real belly.
+                // The small remaining service gap is bridged by explicit pads
+                // and braces in WorkbenchModelBuilder.
+                base.y = deckBottom - gap - attachments.upperLocalY + offset.y
+            }
             var chosen: SIMD3<Float>?
 
             // Landing gear is an enclosing structure with an intentionally
@@ -763,7 +851,10 @@ enum WorkbenchBuildAnalyzer {
         case .payload:
             position.y = min(position.y, -Float(spec.proxy.size.y) * 0.5 - 0.010)
         case .landingGear:
-            position.y = min(position.y, -Float(spec.proxy.size.y) * 0.5 - 0.004)
+            let support = mountingEnvelope(for: frame)
+            let gap: Float = frame.frameClass == .tinyWhoop ? 0.0018 : 0.0035
+            position.y = support.bottom - gap
+                - landingGearAttachmentLayout(for: spec).upperLocalY
         default:
             break
         }

@@ -33,10 +33,10 @@ enum WorkbenchModelBuilder {
         let componentLayout = WorkbenchBuildAnalyzer.resolvedComponentLayout(for: build)
 
         let armTopY: Float = frame.frameClass == .tinyWhoop ? 0.0014 : 0.0026
-        var installedMotorTopY = armTopY
+        var installedMotorHeight: Float = 0
         if let motor = build.spec(for: .motor) {
             let prototype = componentNode(motor)
-            installedMotorTopY = armTopY + Float(prototype.boundingBox.max.y)
+            installedMotorHeight = Float(prototype.boundingBox.max.y)
             for (index, mount) in frame.motorMounts.enumerated() {
                 let node = prototype.clone()
                 node.name = "\(slotNodePrefix)motor.\(index)"
@@ -47,10 +47,14 @@ enum WorkbenchModelBuilder {
                     node.simdPosition = mount + SIMD3<Float>(0, armTopY, 0)
                     root.addChildNode(node)
                 } else {
+                    let axis = propulsionAxis(for: frame, index: index)
                     let mountRoot = propulsionMountRoot(
                         at: mount,
-                        axis: propulsionAxis(for: frame, index: index))
-                    node.simdPosition.y = armTopY
+                        axis: axis)
+                    // Lift motors stand on the wing pad.  A cruise motor's
+                    // local +Y is longitudinal, so adding the vertical arm
+                    // clearance there created a visible gap at the firewall.
+                    node.simdPosition.y = abs(axis.y) > 0.65 ? armTopY : 0
                     mountRoot.addChildNode(node)
                     root.addChildNode(mountRoot)
                 }
@@ -64,16 +68,17 @@ enum WorkbenchModelBuilder {
                 node.eulerAngles.y = index.isMultiple(of: 2) ? 0.18 : -0.18
                 applySelection(selectedCategory == .slot(.propeller), to: node)
                 if frame.architecture == .multicopter {
-                    node.simdPosition = mount + SIMD3<Float>(0, installedMotorTopY - 0.0005, 0)
+                    node.simdPosition = mount + SIMD3<Float>(
+                        0, armTopY + installedMotorHeight - 0.0005, 0)
                     root.addChildNode(node)
                 } else {
                     // Keep the named propeller itself aligned to local +Y.
                     // SceneController spins that local axis; the unnamed
                     // parent carries the fixed lift/cruise orientation.
-                    let mountRoot = propulsionMountRoot(
-                        at: mount,
-                        axis: propulsionAxis(for: frame, index: index))
-                    node.simdPosition.y = installedMotorTopY - 0.0005
+                    let axis = propulsionAxis(for: frame, index: index)
+                    let mountRoot = propulsionMountRoot(at: mount, axis: axis)
+                    let mountOffset = abs(axis.y) > 0.65 ? armTopY : 0
+                    node.simdPosition.y = mountOffset + installedMotorHeight - 0.0005
                     mountRoot.addChildNode(node)
                     root.addChildNode(mountRoot)
                 }
@@ -554,37 +559,80 @@ enum WorkbenchModelBuilder {
             }
 
         case .landingGear:
-            // Landing gear surrounds a central payload bay, so a full solid
-            // plate would reintroduce the very overlap the layout resolver
-            // avoids. Two outboard rails attach the leg roots to the belly.
-            let attachmentLocalY = spec.id.contains("retractable")
-                ? size.y * 0.28
-                : size.y * 0.45
-            let railY = placement.position.y + attachmentLocalY + plateThickness * 0.5
-            let railLength = min(max(size.z * 0.42, 0.030), support.length * 0.72)
-            for x in [-size.x * 0.34, size.x * 0.34] {
-                let rail = SCNBox(
-                    width: 0.008,
-                    height: CGFloat(plateThickness),
-                    length: CGFloat(railLength),
-                    chamferRadius: 0.001)
-                rail.materials = [plateMaterial]
-                let railNode = SCNNode(geometry: rail)
-                railNode.simdPosition = SIMD3<Float>(
-                    placement.position.x + x, railY, placement.position.z)
-                root.addChildNode(railNode)
+            // The five gear renderers do not share a proxy-box top: guards
+            // meet the aircraft at the torus, bumpers at capsule caps, skids
+            // at four beam ends and retracts at two pivot housings. Attach to
+            // those authored hard-points and clamp the belly ends inside the
+            // real central support envelope. This leaves the payload bay open
+            // while making every visible leg trace back to structure.
+            let attachments = WorkbenchBuildAnalyzer.landingGearAttachmentLayout(for: spec)
+            let isMicro = frame.frameClass == .tinyWhoop
+            let padWidth: Float = isMicro
+                ? 0.0045
+                : min(max(size.x * 0.055, 0.007), 0.016)
+            let padLength: Float = isMicro
+                ? 0.0055
+                : min(max(size.z * 0.10, 0.009), 0.016)
+            let braceRadius: Float = isMicro ? 0.00065 : 0.00115
+            let supportHalfX = max(support.width * 0.5 - padWidth * 0.55, 0)
+            let supportHalfZ = max((support.frontZ - support.rearZ) * 0.5, 0)
+            let supportCenterZ = (support.frontZ + support.rearZ) * 0.5
+            let supportInsetZ = min(padLength * 0.55, supportHalfZ * 0.72)
+            let anchorMinZ = support.rearZ + supportInsetZ
+            let anchorMaxZ = support.frontZ - supportInsetZ
 
-                let railTop = railY + plateThickness * 0.5
-                let postHeight = max(abs(support.bottom - railTop), 0.0008)
-                let post = SCNCylinder(radius: 0.0014, height: CGFloat(postHeight))
-                post.radialSegmentCount = 16
-                post.materials = [hardware]
-                let postNode = SCNNode(geometry: post)
-                postNode.simdPosition = SIMD3<Float>(
-                    placement.position.x + x,
-                    (support.bottom + railTop) * 0.5,
-                    placement.position.z)
-                root.addChildNode(postNode)
+            func clamp(_ value: Float, lower: Float, upper: Float) -> Float {
+                guard lower <= upper else { return (lower + upper) * 0.5 }
+                return min(max(value, lower), upper)
+            }
+
+            for (index, localRoot) in attachments.rootPoints.enumerated() {
+                let gearRoot = placement.position + localRoot
+                let anchorX = clamp(
+                    gearRoot.x,
+                    lower: -supportHalfX,
+                    upper: supportHalfX)
+                let anchorZ = supportHalfZ > 0
+                    ? clamp(gearRoot.z, lower: anchorMinZ, upper: anchorMaxZ)
+                    : supportCenterZ
+                let bellyAnchor = SIMD3<Float>(
+                    anchorX,
+                    support.bottom - plateThickness * 0.5,
+                    anchorZ)
+                let rootAnchor = SIMD3<Float>(
+                    gearRoot.x,
+                    gearRoot.y + plateThickness * 0.5,
+                    gearRoot.z)
+
+                let bellyPad = SCNBox(
+                    width: CGFloat(padWidth),
+                    height: CGFloat(plateThickness),
+                    length: CGFloat(padLength),
+                    chamferRadius: CGFloat(min(plateThickness * 0.38, 0.0008)))
+                bellyPad.materials = [plateMaterial]
+                let bellyPadNode = SCNNode(geometry: bellyPad)
+                bellyPadNode.name = "workbench.gear.bellyPad.\(index)"
+                bellyPadNode.simdPosition = bellyAnchor
+                root.addChildNode(bellyPadNode)
+
+                let rootPad = SCNBox(
+                    width: CGFloat(padWidth * 0.82),
+                    height: CGFloat(plateThickness),
+                    length: CGFloat(padLength * 0.82),
+                    chamferRadius: CGFloat(min(plateThickness * 0.34, 0.0007)))
+                rootPad.materials = [hardware]
+                let rootPadNode = SCNNode(geometry: rootPad)
+                rootPadNode.name = "workbench.gear.rootPad.\(index)"
+                rootPadNode.simdPosition = rootAnchor
+                root.addChildNode(rootPadNode)
+
+                let brace = beamNode(
+                    from: bellyAnchor,
+                    to: rootAnchor,
+                    radius: braceRadius,
+                    material: hardware)
+                brace.name = "workbench.gear.brace.\(index)"
+                root.addChildNode(brace)
             }
 
         default:
@@ -1125,6 +1173,7 @@ enum WorkbenchModelBuilder {
         // wing root. A shallow belly fairing leaves room for bottom-mounted
         // cameras and payloads resolved by the common placement engine.
         let fuselageLength = length * 0.78
+        let fuselageCenterZ = -length * 0.015
         let fuselage = SCNCapsule(
             capRadius: CGFloat(bodyRadius),
             height: CGFloat(max(fuselageLength, bodyRadius * 2.15)))
@@ -1133,25 +1182,77 @@ enum WorkbenchModelBuilder {
         fuselage.materials = [underside]
         let fuselageNode = SCNNode(geometry: fuselage)
         fuselageNode.eulerAngles.x = .pi / 2
-        fuselageNode.simdPosition = SIMD3<Float>(0, bodyRadius * 0.12, -length * 0.015)
+        fuselageNode.simdPosition = SIMD3<Float>(0, bodyRadius * 0.12, fuselageCenterZ)
         fuselageNode.name = "workbench.airframe.fuselage"
         root.addChildNode(fuselageNode)
 
-        let noseLength = max(length * 0.10, 0.055)
+        // A tractor motor needs a flat firewall.  The former zero-radius cone
+        // stopped several centimetres before the authored motor mount, leaving
+        // the motor visibly balanced on an isolated point.  Extend a truncated
+        // fairing to the real cruise mount and close it with a rigid bulkhead;
+        // the motor's zero plane now lands directly on that front face.
+        let cruiseMount = frame.motorMounts.enumerated()
+            .filter { propulsionAxis(for: frame, index: $0.offset).z > 0.65 }
+            .max { $0.element.z < $1.element.z }?
+            .element
+        let legacyNoseLength = max(length * 0.10, 0.055)
+        let fallbackFirewallZ = fuselageCenterZ + fuselageLength * 0.5
+            + legacyNoseLength * 0.92
+        let firewallFrontZ = cruiseMount?.z ?? fallbackFirewallZ
+        let firewallCenterY = cruiseMount?.y ?? bodyRadius * 0.12
+        let firewallThickness = max(bodyRadius * 0.10, 0.0042)
+        let noseFrontZ = firewallFrontZ - firewallThickness
+        let fuselageFrontZ = fuselageCenterZ + fuselageLength * 0.5
+        let noseRearZ = fuselageFrontZ - bodyRadius * 0.20
+        let noseRearCenter = SIMD3<Float>(0, bodyRadius * 0.12, noseRearZ)
+        let noseFrontCenter = SIMD3<Float>(0, firewallCenterY, noseFrontZ)
+        let noseVector = noseFrontCenter - noseRearCenter
+        let noseLength = max(simd_length(noseVector), 0.010)
+        let firewallRadius = min(
+            max(Float(frame.motorStatorMaxMm) * 0.0005 + 0.003, bodyRadius * 0.42),
+            bodyRadius * 0.72)
         let nose = SCNCone(
-            topRadius: 0,
+            topRadius: CGFloat(firewallRadius * 0.94),
             bottomRadius: CGFloat(bodyRadius * 0.90),
             height: CGFloat(noseLength))
         nose.radialSegmentCount = 36
         nose.materials = [accent]
         let noseNode = SCNNode(geometry: nose)
-        noseNode.eulerAngles.x = .pi / 2
-        noseNode.simdPosition = SIMD3<Float>(
-            0,
-            bodyRadius * 0.12,
-            fuselageLength * 0.5 - length * 0.015 + noseLength * 0.42)
+        noseNode.simdOrientation = simd_quatf(
+            from: SIMD3<Float>(0, 1, 0),
+            to: simd_normalize(noseVector))
+        noseNode.simdPosition = (noseRearCenter + noseFrontCenter) * 0.5
         noseNode.name = "workbench.airframe.nose"
         root.addChildNode(noseNode)
+
+        let firewall = SCNCylinder(
+            radius: CGFloat(firewallRadius),
+            height: CGFloat(firewallThickness))
+        firewall.radialSegmentCount = 36
+        firewall.materials = [carbon]
+        let firewallNode = SCNNode(geometry: firewall)
+        firewallNode.eulerAngles.x = .pi / 2
+        firewallNode.simdPosition = SIMD3<Float>(
+            0,
+            firewallCenterY,
+            noseFrontZ + firewallThickness * 0.5)
+        firewallNode.name = "workbench.airframe.motorFirewall"
+        root.addChildNode(firewallNode)
+
+        for angle in stride(from: Float.pi * 0.25, to: Float.pi * 2, by: Float.pi * 0.5) {
+            let fastener = SCNCylinder(
+                radius: CGFloat(max(firewallRadius * 0.045, 0.0011)),
+                height: 0.0012)
+            fastener.radialSegmentCount = 16
+            fastener.materials = [hardware]
+            let fastenerNode = SCNNode(geometry: fastener)
+            fastenerNode.eulerAngles.x = .pi / 2
+            fastenerNode.simdPosition = SIMD3<Float>(
+                cos(angle) * firewallRadius * 0.72,
+                firewallCenterY + sin(angle) * firewallRadius * 0.72,
+                firewallFrontZ + 0.0006)
+            root.addChildNode(fastenerNode)
+        }
 
         let canopy = SCNSphere(radius: CGFloat(bodyRadius * 0.82))
         canopy.segmentCount = 32

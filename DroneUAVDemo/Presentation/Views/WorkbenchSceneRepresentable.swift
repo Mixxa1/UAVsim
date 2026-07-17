@@ -363,14 +363,17 @@ enum WorkbenchWorkshopSceneFactory {
         camera.fieldOfView = 34
         camera.wantsHDR = true
         camera.wantsExposureAdaptation = false
-        camera.exposureOffset = -1.65
+        // Keep enough headroom for the pale foam wings, but do not force the
+        // whole workshop into an under-exposed night scene.  Lighting below is
+        // deliberately broad and rough materials no longer create hard clips.
+        camera.exposureOffset = -0.24
         camera.minimumExposure = -3
         camera.maximumExposure = 0
         camera.averageGray = 0.18
         // Preserve headroom in white workshop materials. At 1.0 SceneKit clips
         // the pegboard and tape atlas to display white before their surface
         // texture and soft shadows can remain visible.
-        camera.whitePoint = 2.0
+        camera.whitePoint = 2.18
         camera.screenSpaceAmbientOcclusionIntensity = 0.75
         camera.screenSpaceAmbientOcclusionRadius = 0.035
         camera.screenSpaceAmbientOcclusionBias = 0.002
@@ -383,6 +386,13 @@ enum WorkbenchWorkshopSceneFactory {
         cameraNode.name = cameraName
         scene.rootNode.addChildNode(cameraNode)
 
+        // A neutral reflection environment gives PBR carbon and anodised
+        // parts a readable base response from every camera angle.  It does not
+        // render into the background and therefore cannot form a bright panel.
+        scene.lightingEnvironment.contents = NSColor(
+            deviceRed: 0.56, green: 0.58, blue: 0.61, alpha: 1)
+        scene.lightingEnvironment.intensity = 0.22
+
         scene.rootNode.addChildNode(workshopEnvironment())
         addLighting(to: scene)
         return scene
@@ -390,34 +400,55 @@ enum WorkbenchWorkshopSceneFactory {
 
     private static func addLighting(to scene: SCNScene) {
         let ambient = SCNNode()
+        ambient.name = "workbench.light.ambient"
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.color = NSColor(deviceRed: 0.76, green: 0.75, blue: 0.71, alpha: 1)
-        ambient.light?.intensity = 22
+        // Neutral workshop bounce keeps black carbon, wiring and the shaded
+        // fuselage readable without painting a directional hotspot onto white
+        // foam wings. It is intentionally the dominant *base* contribution.
+        ambient.light?.color = NSColor(
+            deviceRed: 0.91, green: 0.92, blue: 0.92, alpha: 1)
+        ambient.light?.intensity = 92
         scene.rootNode.addChildNode(ambient)
 
         let key = SCNNode()
+        key.name = "workbench.light.key"
         key.light = SCNLight()
         key.light?.type = .directional
-        key.light?.color = NSColor(deviceRed: 1.0, green: 0.94, blue: 0.84, alpha: 1)
-        key.light?.intensity = 72
+        key.light?.color = NSColor(
+            deviceRed: 1.0, green: 0.95, blue: 0.87, alpha: 1)
+        key.light?.intensity = 205
         key.light?.castsShadow = true
-        key.light?.shadowRadius = 9
-        key.light?.shadowColor = NSColor.black.withAlphaComponent(0.24)
+        key.light?.shadowRadius = 18
+        key.light?.shadowColor = NSColor.black.withAlphaComponent(0.13)
         key.light?.shadowMapSize = CGSize(width: 2048, height: 2048)
-        key.eulerAngles = SCNVector3(-0.82, 0.58, -0.34)
+        // Straight ceiling wash: uniform over both the compact and fixed-wing
+        // tables, so orbiting the camera cannot reveal a bright pool.
+        key.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
         scene.rootNode.addChildNode(key)
 
+        // Broad opposing directionals behave like reflected ceiling/wall light:
+        // their illumination is uniform over a long wing and does not produce
+        // the near/far falloff that an omni source creates on large aircraft.
         let fill = SCNNode()
+        fill.name = "workbench.light.fill"
         fill.light = SCNLight()
-        fill.light?.type = .omni
-        fill.light?.color = NSColor(deviceRed: 0.76, green: 0.84, blue: 0.94, alpha: 1)
-        fill.light?.intensity = 10
-        fill.position = SCNVector3(-0.42, 0.30, 0.36)
+        fill.light?.type = .directional
+        fill.light?.color = NSColor(
+            deviceRed: 0.91, green: 0.95, blue: 1.0, alpha: 1)
+        fill.light?.intensity = 85
+        fill.eulerAngles = SCNVector3(-0.48, -1.08, 0.18)
         scene.rootNode.addChildNode(fill)
 
-        // No local spotlight: the supplied workbench albedo already contains
-        // worn bright patches, and a spot source turned them into hard hotspots.
+        let rearFill = SCNNode()
+        rearFill.name = "workbench.light.rear-fill"
+        rearFill.light = SCNLight()
+        rearFill.light?.type = .directional
+        rearFill.light?.color = NSColor(
+            deviceRed: 0.98, green: 0.98, blue: 0.96, alpha: 1)
+        rearFill.light?.intensity = 48
+        rearFill.eulerAngles = SCNVector3(-1.02, 2.42, -0.10)
+        scene.rootNode.addChildNode(rearFill)
     }
 
     private static func workshopEnvironment() -> SCNNode {
