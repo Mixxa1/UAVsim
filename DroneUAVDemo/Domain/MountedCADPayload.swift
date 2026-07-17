@@ -114,10 +114,6 @@ struct MountedCADPayload: Codable, Hashable, Identifiable {
 }
 
 extension CodableVector3D {
-    var simdFloat: SIMD3<Float> {
-        SIMD3<Float>(Float(x), Float(y), Float(z))
-    }
-
     var isFinite: Bool {
         x.isFinite && y.isFinite && z.isFinite
     }

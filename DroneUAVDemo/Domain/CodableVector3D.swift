@@ -25,4 +25,5 @@ struct CodableVector3D: Codable, Equatable, Hashable {
     }
 
     var simd: SIMD3<Double> { SIMD3<Double>(x, y, z) }
+    var simdFloat: SIMD3<Float> { SIMD3<Float>(Float(x), Float(y), Float(z)) }
 }

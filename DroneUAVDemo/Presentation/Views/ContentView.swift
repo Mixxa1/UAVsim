@@ -283,6 +283,27 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         )
     }
 
+    func launchWorkbenchBuild(_ build: WorkbenchBuild) {
+        let stats = WorkbenchBuildAnalyzer.analyze(build)
+        guard stats.isFlightReady else {
+            globalAlert = TelemetryExportAlert(
+                titleKey: "Workbench",
+                message: stats.errors.first ?? "Сборка не готова к испытанию."
+            )
+            return
+        }
+        let parameters = UAVBuildProfileSynthesizer.abstractParameters(for: build)
+        let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: build)
+        activeSimulation?.stopRuntimeForExit()
+        activeSimulation = DroneSimulationViewModel(
+            projectStorage: projectStorage,
+            initialProjectID: projectStorage.createProjectID(),
+            initialProjectName: build.name,
+            initialDroneProfile: profile,
+            initialAbstractParameters: parameters
+        )
+    }
+
     func openProject(_ summary: ProjectRecordSummary) {
         let vm = DroneSimulationViewModel(
             projectStorage: projectStorage,
@@ -1060,6 +1081,8 @@ struct ContentView: View {
     @State private var isOnlineTrialsPresented: Bool = false
     @State private var isMissionSetupPresented: Bool = false
     @State private var isSettingsPresented: Bool = false
+    @State private var isWorkbenchPresented: Bool = false
+    @StateObject private var workbenchViewModel = WorkbenchViewModel()
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
     private let cadPayloadHandoffTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
@@ -1089,6 +1112,15 @@ struct ContentView: View {
                             observedViewModel.applyOnlineDiagnostics(diag)
                         }
                 }
+            } else if isWorkbenchPresented {
+                WorkbenchView(
+                    viewModel: workbenchViewModel,
+                    onBuildAndTest: { build in
+                        isWorkbenchPresented = false
+                        appShell.launchWorkbenchBuild(build)
+                    },
+                    onClose: { isWorkbenchPresented = false }
+                )
             } else {
                 startScreen
             }
@@ -1340,6 +1372,10 @@ struct ContentView: View {
                     ) {
                         isSettingsPresented = true
                     }
+                }
+
+                startMenuButton(title: "Workbench — сборка дрона", systemImage: "wrench.and.screwdriver.fill") {
+                    isWorkbenchPresented = true
                 }
             }
             .frame(width: 460)

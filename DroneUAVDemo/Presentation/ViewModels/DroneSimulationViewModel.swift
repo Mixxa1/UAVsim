@@ -1599,6 +1599,8 @@ final class DroneSimulationViewModel: ObservableObject {
         initialProjectID: String? = nil,
         initialProjectName: String? = nil,
         launchConfiguration: SimulationLaunchConfiguration? = nil,
+        initialDroneProfile: DroneModelProfile? = nil,
+        initialAbstractParameters: AbstractDroneParameters? = nil,
         simulationRunMode: SimulationRunMode = .singlePlayer,
         onlineSessionConfig: OnlineTrialSessionConfig? = nil,
         localOnlineParticipant: LocalOnlineParticipant? = nil,
@@ -1658,12 +1660,19 @@ final class DroneSimulationViewModel: ObservableObject {
         self.agriculturalSprayerController = agriculturalSprayerController
         self.compassViewModel = CompassViewModel()
 
-        let abstract = AbstractDroneParameters.default
+        let abstract = initialAbstractParameters ?? AbstractDroneParameters.default
         self.abstractParameters = abstract
         let repository = LIPODroneModelRepository(abstractParameters: abstract)
-        let models = repository.allProfiles
+        var models = repository.allProfiles
+        if let initialDroneProfile {
+            if let index = models.firstIndex(where: { $0.id == initialDroneProfile.id }) {
+                models[index] = initialDroneProfile
+            } else {
+                models.append(initialDroneProfile)
+            }
+        }
         let requestedProfileID = launchConfiguration?.selectedUAVProfile ?? missionScenarioContext?.selectedUAVProfileID
-        let selectedProfile = requestedProfileID.flatMap { requestedID in
+        let selectedProfile = initialDroneProfile ?? requestedProfileID.flatMap { requestedID in
             let canonicalID = LIPODroneModelRepository.canonicalModelID(requestedID)
             return models.first { $0.id == canonicalID }
         } ?? repository.defaultProfile
