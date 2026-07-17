@@ -305,6 +305,8 @@
 		100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A22 /* FireVisualAssetLoader.swift */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
+		C0DE10000000000000000001 /* Workbench.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C0DE10000000000000000002 /* Workbench.usdz */; };
+		C0DE10000000000000000003 /* Brick_Material.usdz in Resources */ = {isa = PBXBuildFile; fileRef = C0DE10000000000000000004 /* Brick_Material.usdz */; };
 		10000000000000000000040F /* SnowTerrainMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040E /* SnowTerrainMaterialLoader.swift */; };
 		100000000000000000000411 /* SeasonalTreeAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000410 /* SeasonalTreeAssetLoader.swift */; };
 		100000000000000000000413 /* SnowPatchAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000412 /* SnowPatchAssetLoader.swift */; };
@@ -665,6 +667,8 @@
 		100000000000000000000A41 /* HandLaunchArm.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/HandLaunchArm.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
+		C0DE10000000000000000002 /* Workbench.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Workshop/Workbench.usdz"; sourceTree = "<group>"; };
+		C0DE10000000000000000004 /* Brick_Material.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Workshop/Brick_Material.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040E /* SnowTerrainMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowTerrainMaterialLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000410 /* SeasonalTreeAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeasonalTreeAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000412 /* SnowPatchAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnowPatchAssetLoader.swift; sourceTree = "<group>"; };
@@ -1135,6 +1139,8 @@
 				100000000000000000000126 /* Localizable.strings */,
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
 				10000000000000000000040D /* ThirdPartyAssets.json */,
+				C0DE10000000000000000002 /* Workbench.usdz */,
+				C0DE10000000000000000004 /* Brick_Material.usdz */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
 				100000000000000000000A04 /* Man.usdz */,
 				100000000000000000000A1C /* Fire_Truck.usdz */,
@@ -1297,6 +1303,8 @@
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
+				C0DE10000000000000000001 /* Workbench.usdz in Resources */,
+				C0DE10000000000000000003 /* Brick_Material.usdz in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
 				100000000000000000000A03 /* Man.usdz in Resources */,
 				100000000000000000000A1B /* Fire_Truck.usdz in Resources */,

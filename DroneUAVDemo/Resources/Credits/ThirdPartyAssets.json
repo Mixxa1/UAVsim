@@ -216,7 +216,24 @@
           "licenseName": "Creative Commons Attribution",
           "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
           "changes": "Imported as USDZ (HandLaunchArm.usdz), rescaled, recolored to an opaque matte skin tone and mounted on the articulated hand-launch arm rig in DroneUAVDemo."
+      },
+      {
+          "id": "workbench_jj_chalupnik",
+          "title": "Workbench",
+          "author": "JJ Chalupnik",
+          "sourceURL": "https://skfb.ly/6pTRO",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ, uniformly rescaled and aligned beneath the UAV as the textured 3D workbench environment in the DroneUAVDemo assembly editor."
+      },
+      {
+          "id": "brick_material_batuhan13",
+          "title": "Brick Material",
+          "author": "Batuhan13",
+          "sourceURL": "https://skfb.ly/orRQq",
+          "licenseName": "Creative Commons Attribution",
+          "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+          "changes": "Imported as USDZ; its embedded base-colour, normal, roughness, metallic and ambient-occlusion maps are tiled across the rear wall of the DroneUAVDemo assembly workshop."
       }
   ]
 }
-
