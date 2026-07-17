@@ -99,7 +99,7 @@ enum WorkbenchLibraryPreviewSceneFactory {
         // Enough image-based light for black carbon, rubber and anodised metal
         // to retain their shape, while staying well below the clipped workshop
         // environment that originally washed out light-coloured components.
-        scene.lightingEnvironment.intensity = 0.55
+        scene.lightingEnvironment.intensity = 0.60
 
         let key = cacheKey as NSString
         let model: SCNNode
@@ -132,7 +132,7 @@ enum WorkbenchLibraryPreviewSceneFactory {
         camera.zFar = Double(layout.distance * 4 + 2)
         camera.wantsHDR = false
         camera.wantsExposureAdaptation = false
-        camera.exposureOffset = 0.20
+        camera.exposureOffset = 0.27
         camera.bloomIntensity = 0
         camera.screenSpaceAmbientOcclusionIntensity = 0
 
@@ -146,15 +146,15 @@ enum WorkbenchLibraryPreviewSceneFactory {
         addLight(
             to: scene,
             name: "preview.key",
-            color: NSColor(deviceRed: 0.98, green: 0.96, blue: 0.92, alpha: 1),
-            intensity: 340,
+            color: NSColor(deviceRed: 1.0, green: 0.93, blue: 0.82, alpha: 1),
+            intensity: 365,
             position: center + SIMD3<Float>(-layout.distance, layout.distance, layout.distance * 0.72),
             target: center)
         addLight(
             to: scene,
             name: "preview.fill",
-            color: NSColor(deviceRed: 0.80, green: 0.86, blue: 0.94, alpha: 1),
-            intensity: 150,
+            color: NSColor(deviceRed: 0.93, green: 0.91, blue: 0.86, alpha: 1),
+            intensity: 165,
             position: center + SIMD3<Float>(layout.distance, layout.distance * 0.28, layout.distance * 0.45),
             target: center)
         addLight(
@@ -170,7 +170,7 @@ enum WorkbenchLibraryPreviewSceneFactory {
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
         ambient.light?.color = NSColor(deviceRed: 0.76, green: 0.78, blue: 0.81, alpha: 1)
-        ambient.light?.intensity = 70
+        ambient.light?.intensity = 80
         scene.rootNode.addChildNode(ambient)
         return scene
     }

@@ -366,7 +366,7 @@ enum WorkbenchWorkshopSceneFactory {
         // Keep enough headroom for the pale foam wings, but do not force the
         // whole workshop into an under-exposed night scene.  Lighting below is
         // deliberately broad and rough materials no longer create hard clips.
-        camera.exposureOffset = -0.24
+        camera.exposureOffset = 0.39
         camera.minimumExposure = -3
         camera.maximumExposure = 0
         camera.averageGray = 0.18
@@ -390,8 +390,8 @@ enum WorkbenchWorkshopSceneFactory {
         // parts a readable base response from every camera angle.  It does not
         // render into the background and therefore cannot form a bright panel.
         scene.lightingEnvironment.contents = NSColor(
-            deviceRed: 0.56, green: 0.58, blue: 0.61, alpha: 1)
-        scene.lightingEnvironment.intensity = 0.22
+            deviceRed: 0.60, green: 0.56, blue: 0.49, alpha: 1)
+        scene.lightingEnvironment.intensity = 0.24
 
         scene.rootNode.addChildNode(workshopEnvironment())
         addLighting(to: scene)
@@ -407,8 +407,8 @@ enum WorkbenchWorkshopSceneFactory {
         // fuselage readable without painting a directional hotspot onto white
         // foam wings. It is intentionally the dominant *base* contribution.
         ambient.light?.color = NSColor(
-            deviceRed: 0.91, green: 0.92, blue: 0.92, alpha: 1)
-        ambient.light?.intensity = 92
+            deviceRed: 0.96, green: 0.91, blue: 0.83, alpha: 1)
+        ambient.light?.intensity = 180
         scene.rootNode.addChildNode(ambient)
 
         let key = SCNNode()
@@ -416,8 +416,8 @@ enum WorkbenchWorkshopSceneFactory {
         key.light = SCNLight()
         key.light?.type = .directional
         key.light?.color = NSColor(
-            deviceRed: 1.0, green: 0.95, blue: 0.87, alpha: 1)
-        key.light?.intensity = 205
+            deviceRed: 1.0, green: 0.92, blue: 0.80, alpha: 1)
+        key.light?.intensity = 300
         key.light?.castsShadow = true
         key.light?.shadowRadius = 18
         key.light?.shadowColor = NSColor.black.withAlphaComponent(0.13)
@@ -435,8 +435,8 @@ enum WorkbenchWorkshopSceneFactory {
         fill.light = SCNLight()
         fill.light?.type = .directional
         fill.light?.color = NSColor(
-            deviceRed: 0.91, green: 0.95, blue: 1.0, alpha: 1)
-        fill.light?.intensity = 85
+            deviceRed: 0.94, green: 0.91, blue: 0.85, alpha: 1)
+        fill.light?.intensity = 160
         fill.eulerAngles = SCNVector3(-0.48, -1.08, 0.18)
         scene.rootNode.addChildNode(fill)
 
@@ -445,8 +445,8 @@ enum WorkbenchWorkshopSceneFactory {
         rearFill.light = SCNLight()
         rearFill.light?.type = .directional
         rearFill.light?.color = NSColor(
-            deviceRed: 0.98, green: 0.98, blue: 0.96, alpha: 1)
-        rearFill.light?.intensity = 48
+            deviceRed: 0.96, green: 0.92, blue: 0.86, alpha: 1)
+        rearFill.light?.intensity = 52
         rearFill.eulerAngles = SCNVector3(-1.02, 2.42, -0.10)
         scene.rootNode.addChildNode(rearFill)
     }
