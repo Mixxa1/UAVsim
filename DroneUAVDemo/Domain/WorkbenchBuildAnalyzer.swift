@@ -220,10 +220,14 @@ enum WorkbenchBuildAnalyzer {
             let length = isMicro
                 ? max(arm * 0.92, 0.030)
                 : min(max(arm * 0.68, 0.076), 0.116)
-            let deckTop = max(
-                frame.fcBay.y + 0.006,
-                isMicro ? 0.004 : 0.010,
-                frameHeight * 0.12)
+            // The FC/ESC live *inside* a real stack.  `top` is the roof plate,
+            // not the FC PCB itself; a top battery therefore sits on the roof
+            // instead of being piled directly on the controller.
+            let deckTop = isMicro
+                ? max(frame.fcBay.y + 0.007, 0.009)
+                : max(
+                    frame.fcBay.y + 0.020,
+                    min(max(frameHeight * 0.28, 0.028), 0.050))
             return (
                 width: width,
                 length: length,
@@ -288,7 +292,9 @@ enum WorkbenchBuildAnalyzer {
             let skinTop = (isTailBay ? tailThickness : wingThickness) * 0.5
             var candidate = SIMD3<Float>(
                 anchor.x,
-                skinTop + flangeThickness + size.y * 0.5,
+                // Recess the case into the servo pocket. Only the flange,
+                // horn and pushrod remain above the aerodynamic skin.
+                skinTop - size.y * 0.5 + flangeThickness * 0.45,
                 anchor.z)
             var attempt = 0
             while result.contains(where: { overlaps(candidate, $0) }), attempt < 12 {
@@ -321,6 +327,16 @@ enum WorkbenchBuildAnalyzer {
         let deckTop = support.top
         let deckBottom = support.bottom
         let gap: Float = frame.frameClass == .tinyWhoop ? 0.0018 : 0.0035
+        let isLiftingAirframe = frame.architecture != .multicopter
+        let span = max(Float(frame.sizeMeters.x), 0.08)
+        let aircraftLength = max(Float(frame.sizeMeters.z), bodyLength)
+        let referenceArea = max(Float(frame.wingAreaM2), span * aircraftLength * 0.18)
+        let meanChord = isLiftingAirframe
+            ? min(max(referenceArea / max(span, 0.01), aircraftLength * 0.20), aircraftLength * 0.52)
+            : bodyLength
+        let wingThickness = isLiftingAirframe
+            ? min(max(meanChord * 0.055, 0.010), 0.024)
+            : 0
 
         struct Envelope {
             var min: SIMD3<Float>
@@ -339,8 +355,9 @@ enum WorkbenchBuildAnalyzer {
         }
 
         /// Recognizable renderers extend beyond their catalog body proxy.
-        /// Reserve battery leads, receiver antennas, camera barrel and servo
-        /// horn without inflating the mounting plate itself.
+        /// Reserve only geometry that is physically attached to that body;
+        /// routed battery/RX wiring has its own clipped path and must not push
+        /// an otherwise internal module outside the fuselage.
         func collisionEnvelope(
             for kind: WorkbenchComponentKind,
             at position: SIMD3<Float>,
@@ -349,12 +366,15 @@ enum WorkbenchBuildAnalyzer {
             var result = envelope(at: position, size: size)
             switch kind {
             case .battery:
-                result.min.z -= max(size.z * 0.64, 0.010)
+                // Two retention straps sit slightly above the pack. The former
+                // long-Z reservation represented loose leads, which no longer
+                // exist now that the assembly owns a routed power harness.
                 result.max.y += 0.002
             case .receiver:
-                result.min.z -= max(size.z * 1.55, 0.025)
-                result.min.x -= 0.006
-                result.max.x += 0.006
+                // Only the protected RX body occupies the bay. Antennas are
+                // routed independently through clips along the frame/wing.
+                result.min.x -= 0.002
+                result.max.x += 0.002
             case .camera:
                 result.max.z += max(size.z * 0.58, 0.006)
                 result.min.x -= 0.003
@@ -373,23 +393,57 @@ enum WorkbenchBuildAnalyzer {
 
         func automaticSurface(
             for kind: WorkbenchComponentKind,
-            spec: WorkbenchComponentSpec
+            spec: WorkbenchComponentSpec,
+            size: SIMD3<Float>
         ) -> WorkbenchMountSurface {
+            let identity = "\(spec.id) \(spec.displayName)".lowercased()
+            if isLiftingAirframe {
+                switch kind {
+                // Real fixed-wing and lift+cruise builds keep power and radio
+                // electronics inside the fuselage under an access hatch.
+                case .battery, .esc, .flightController, .receiver:
+                    return .internalBay
+                case .servo:
+                    return .internalBay
+                case .gps:
+                    // PX4/ArduPilot require an unobstructed upper GNSS zone;
+                    // it belongs on the wing/fuselage top, never underneath.
+                    return .top
+                case .camera:
+                    return identity.contains("mapping") ? .bottom : .front
+                case .payload, .landingGear:
+                    return .bottom
+                case .sensor:
+                    if identity.contains("obstacle-array") || identity.contains("360") {
+                        return .top
+                    }
+                    if identity.contains("radar") || identity.contains("flow")
+                        || identity.contains("range") || identity.contains("altimeter") {
+                        return .bottom
+                    }
+                    return size.x > bodyWidth * 0.72 ? .bottom : .internalBay
+                case .motor, .propeller:
+                    return .automatic
+                }
+            }
+
             switch kind {
-            case .battery, .esc, .flightController: return .top
-            case .servo: return .left
-            case .receiver: return .right
+            case .battery: return .top
+            case .esc, .flightController, .receiver: return .internalBay
+            case .servo: return .internalBay
             case .camera: return .front
-            case .gps: return .rear
+            case .gps: return .top
             case .payload, .landingGear: return .bottom
             case .sensor:
-                let identity = "\(spec.id) \(spec.displayName)".lowercased()
+                if identity.contains("obstacle-array") || identity.contains("360") {
+                    return .top
+                }
                 if identity.contains("radar") || identity.contains("flow")
                     || identity.contains("range") || identity.contains("altimeter") {
                     return .bottom
                 }
                 if identity.contains("obstacle") { return .front }
-                if identity.contains("air quality") { return .right }
+                if identity.contains("air quality") { return .top }
                 return .top
             case .motor, .propeller: return .automatic
             }
@@ -401,7 +455,90 @@ enum WorkbenchBuildAnalyzer {
             size: SIMD3<Float>
         ) -> SIMD3<Float> {
             let half = size * 0.5
+
+            if isLiftingAirframe {
+                switch surface {
+                case .internalBay:
+                    // Longitudinal functional bays: ESC near the motor, FC at
+                    // CoG, battery on the CoG adjustment rail, RX aft in an RF
+                    // quiet pocket.  Vertical offsets create two supported
+                    // shelves without placing anything on the fuselage skin.
+                    let bayCenterY = (deckTop + deckBottom) * 0.5
+                    let z: Float
+                    let y: Float
+                    switch kind {
+                    case .esc:
+                        z = bodyLength * 0.29
+                        y = bayCenterY - bodyWidth * 0.10
+                    case .flightController:
+                        z = bodyLength * 0.075
+                        y = bayCenterY + bodyWidth * 0.12
+                    case .battery:
+                        z = -bodyLength * 0.105
+                        y = deckBottom + half.y + gap * 1.3
+                    case .receiver:
+                        z = -bodyLength * 0.33
+                        y = bayCenterY + bodyWidth * 0.02
+                    case .sensor:
+                        z = -bodyLength * 0.22
+                        y = bayCenterY
+                    default:
+                        z = frame.fcBay.z
+                        y = bayCenterY
+                    }
+                    return SIMD3<Float>(0, y, z)
+
+                case .top, .automatic:
+                    if kind == .gps {
+                        // A single pad on the wing keeps GNSS clear of the
+                        // battery/current loop while preserving sky view.
+                        let side: Float = frame.architecture == .liftCruiseVTOL ? -1 : 1
+                        return SIMD3<Float>(
+                            side * min(span * 0.22, 0.34),
+                            wingThickness * 0.5 + half.y + gap,
+                            -aircraftLength * 0.015)
+                    }
+                    return SIMD3<Float>(0, deckTop + half.y + gap, frame.fcBay.z)
+
+                case .bottom:
+                    let z: Float
+                    switch kind {
+                    case .camera: z = aircraftLength * 0.18
+                    case .sensor: z = aircraftLength * 0.02
+                    case .payload: z = -aircraftLength * 0.06
+                    default: z = frame.fcBay.z
+                    }
+                    return SIMD3<Float>(0, deckBottom - half.y - gap, z)
+
+                case .front:
+                    return SIMD3<Float>(
+                        frame.cameraMount.x,
+                        frame.cameraMount.y,
+                        support.frontZ + half.z + gap)
+                case .rear:
+                    return SIMD3<Float>(0, 0, support.rearZ - half.z - gap)
+                case .left:
+                    return SIMD3<Float>(-bodyWidth * 0.5 - half.x - gap, 0, 0)
+                case .right:
+                    return SIMD3<Float>(bodyWidth * 0.5 + half.x + gap, 0, 0)
+                }
+            }
+
             switch surface {
+            case .internalBay:
+                // Open-frame central stack. ESC is the lower tier, FC is on
+                // four damped standoffs, RX occupies the protected rear tier.
+                let interiorBottom = deckBottom + gap
+                switch kind {
+                case .esc:
+                    return SIMD3<Float>(frame.fcBay.x, interiorBottom + half.y, frame.fcBay.z)
+                case .flightController:
+                    return SIMD3<Float>(frame.fcBay.x, interiorBottom + half.y + 0.010, frame.fcBay.z)
+                case .receiver:
+                    return SIMD3<Float>(0, interiorBottom + half.y + 0.002, -bodyLength * 0.34)
+                default:
+                    return SIMD3<Float>(frame.fcBay.x, interiorBottom + half.y, frame.fcBay.z)
+                }
             case .top, .automatic:
                 var x = frame.fcBay.x
                 var z = frame.fcBay.z
@@ -409,8 +546,11 @@ enum WorkbenchBuildAnalyzer {
                     x = frame.batteryTray.x
                     z = frame.batteryTray.z
                 }
-                if kind == .gps { z -= bodyLength * 0.42 }
-                return SIMD3<Float>(x, deckTop + half.y + gap, z)
+                if kind == .gps { z -= bodyLength * 0.38 }
+                let mastClearance = kind == .gps
+                    ? max(0.014, size.x * 0.18)
+                    : gap
+                return SIMD3<Float>(x, deckTop + half.y + mastClearance, z)
             case .bottom:
                 var x = frame.fcBay.x
                 if kind == .sensor { x = bodyWidth * 0.22 }
@@ -434,10 +574,26 @@ enum WorkbenchBuildAnalyzer {
             for surface: WorkbenchMountSurface,
             kind: WorkbenchComponentKind
         ) -> [SIMD3<Float>] {
+            // GNSS remains on one rigid upper mast. If the battery occupies
+            // the rear roof, the collision solver raises this same mast
+            // rather than inventing a second cantilevering frame.
+            if kind == .gps, surface == .top { return [.zero] }
             if kind == .flightController || kind == .esc {
-                return [.zero]
+                return surface == .internalBay
+                    ? [.zero, SIMD3<Float>(0, 0, bodyLength * 0.18)]
+                    : [.zero]
             }
             switch surface {
+            case .internalBay:
+                return [
+                    .zero,
+                    SIMD3<Float>(0, 0, -bodyLength * 0.18),
+                    SIMD3<Float>(0, 0, bodyLength * 0.18),
+                    SIMD3<Float>(0, 0, -bodyLength * 0.34),
+                    SIMD3<Float>(0, 0, bodyLength * 0.34),
+                    SIMD3<Float>(-bodyWidth * 0.18, 0, 0),
+                    SIMD3<Float>(bodyWidth * 0.18, 0, 0),
+                ]
             case .top, .bottom, .automatic:
                 return [
                     .zero,
@@ -492,9 +648,6 @@ enum WorkbenchBuildAnalyzer {
             // surface mounts; they are not a single avionics brick on deck.
             if kind == .servo, !frame.servoMounts.isEmpty { continue }
             let requested = build.placement(for: kind)
-            let surface = requested.surface == .automatic
-                ? automaticSurface(for: kind, spec: spec)
-                : requested.surface
             // Proxy dimensions describe catalog data, while a few recognizable
             // renderers intentionally change orientation.  The resolver must
             // use the rendered envelope or an apparently collision-free layout
@@ -512,6 +665,24 @@ enum WorkbenchBuildAnalyzer {
                 max(renderedSize.x, 0.004),
                 max(renderedSize.y, 0.003),
                 max(renderedSize.z, 0.004))
+            let automatic = automaticSurface(for: kind, spec: spec, size: size)
+            let surface: WorkbenchMountSurface
+            if requested.surface == .automatic {
+                surface = automatic
+            } else if kind == .gps {
+                // A legacy Blueprint may still request a bottom/side GNSS
+                // shelf. Never honour it: GNSS needs a clear upper sky view.
+                surface = .top
+            } else if isLiftingAirframe,
+                      [.battery, .esc, .flightController, .receiver, .servo].contains(kind) {
+                // Fixed-wing avionics and the movable CG battery belong under
+                // the service hatch, not on top of the aerodynamic surface.
+                surface = .internalBay
+            } else if kind == .receiver || kind == .flightController || kind == .esc {
+                surface = .internalBay
+            } else {
+                surface = requested.surface
+            }
             let offset = requested.offset.simdFloat
             let base = basePosition(for: kind, surface: surface, size: size) + offset
             var chosen: SIMD3<Float>?
@@ -544,6 +715,12 @@ enum WorkbenchBuildAnalyzer {
                         current.intersects($0.1, clearance: gap)
                     })?.1 else { break }
                     switch surface {
+                    case .internalBay:
+                        // Interior conflicts are resolved along the fuselage/
+                        // stack axis, never by pushing a module through skin.
+                        let direction: Float = position.z <= 0 ? -1 : 1
+                        position.z += direction * (
+                            max(current.max.z - current.min.z, 0.010) + gap)
                     case .bottom:
                         position.y += conflict.min.y - gap - current.max.y
                     case .front:

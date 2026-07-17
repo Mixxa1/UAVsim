@@ -363,6 +363,7 @@
 		F2000000000000000000000A /* WorkbenchSceneRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */; };
 		F2000000000000000000000B /* WorkbenchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000B /* WorkbenchView.swift */; };
 		F2000000000000000000000C /* WorkbenchModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000C /* WorkbenchModelBuilder.swift */; };
+		F2000000000000000000000D /* WorkbenchPartPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* WorkbenchPartPreview.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -726,6 +727,7 @@
 		F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchSceneRepresentable.swift; sourceTree = "<group>"; };
 		F1000000000000000000000B /* WorkbenchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchView.swift; sourceTree = "<group>"; };
 		F1000000000000000000000C /* WorkbenchModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchModelBuilder.swift; sourceTree = "<group>"; };
+		F1000000000000000000000D /* WorkbenchPartPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchPartPreview.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1007,6 +1009,7 @@
 			isa = PBXGroup;
 			children = (
 				F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */,
+				F1000000000000000000000D /* WorkbenchPartPreview.swift */,
 				F1000000000000000000000B /* WorkbenchView.swift */,
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
@@ -1357,6 +1360,7 @@
 				F2000000000000000000000A /* WorkbenchSceneRepresentable.swift in Sources */,
 				F2000000000000000000000B /* WorkbenchView.swift in Sources */,
 				F2000000000000000000000C /* WorkbenchModelBuilder.swift in Sources */,
+				F2000000000000000000000D /* WorkbenchPartPreview.swift in Sources */,
 				100000000000000000000200 /* DroneUAVDemoApp.swift in Sources */,
 				100000000000000000000201 /* ContentView.swift in Sources */,
 				100000000000000000000202 /* ControlPanelView.swift in Sources */,

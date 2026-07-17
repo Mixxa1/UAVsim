@@ -9,6 +9,10 @@ struct WorkbenchTuning: Codable, Hashable {
 
 enum WorkbenchMountSurface: String, Codable, CaseIterable, Hashable, Identifiable {
     case automatic
+    /// Protected avionics/battery compartment.  On an open multicopter this
+    /// means the volume between the lower and upper deck; on lifting
+    /// airframes it is the radio-transparent fuselage bay under the hatch.
+    case internalBay
     case top
     case bottom
     case front
@@ -21,6 +25,7 @@ enum WorkbenchMountSurface: String, Codable, CaseIterable, Hashable, Identifiabl
     var displayName: String {
         switch self {
         case .automatic: return "Автоматически"
+        case .internalBay: return "Внутри корпуса"
         case .top: return "Сверху"
         case .bottom: return "Снизу"
         case .front: return "Спереди"

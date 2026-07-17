@@ -68,6 +68,14 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
         private var minimumCameraDistance: Float = 0.34
         private var maximumCameraDistance: Float = 1.05
 
+        private struct VisualBounds {
+            var minimum: SIMD3<Float>
+            var maximum: SIMD3<Float>
+
+            var center: SIMD3<Float> { (minimum + maximum) * 0.5 }
+            var size: SIMD3<Float> { maximum - minimum }
+        }
+
         init(viewModel: WorkbenchViewModel) { self.viewModel = viewModel }
 
         func rebuild(in scene: SCNScene, fitsCamera: Bool) {
@@ -75,6 +83,19 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             let node = WorkbenchModelBuilder.aircraftNode(
                 for: viewModel.build,
                 selectedCategory: viewModel.selectedCategory)
+            let localBounds = visualBounds(of: node, relativeTo: node)
+            let workspace = WorkbenchWorkshopSceneFactory.configureWorkspace(
+                for: viewModel.build.vehicleArchitecture,
+                aircraftSize: localBounds.size,
+                in: scene)
+            // Scene components are authored around the frame origin, not around
+            // the lowest wheel, skid or underslung battery. Seat that real lower
+            // envelope on the mat so bottom-mounted equipment raises the whole
+            // aircraft instead of passing through the bench.
+            node.simdPosition = SIMD3<Float>(
+                workspace.center.x - localBounds.center.x,
+                workspace.surfaceY - localBounds.minimum.y + 0.0012,
+                workspace.center.z - localBounds.center.z)
             scene.rootNode.addChildNode(node)
             aircraft = node
             lastRevision = viewModel.build.revision
@@ -162,30 +183,87 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             guard let camera = scene.rootNode.childNode(
                 withName: WorkbenchWorkshopSceneFactory.cameraName,
                 recursively: false) else { return }
-            let bounds = node.boundingBox
-            let minimum = SIMD3<Float>(Float(bounds.min.x), Float(bounds.min.y), Float(bounds.min.z))
-            let maximum = SIMD3<Float>(Float(bounds.max.x), Float(bounds.max.y), Float(bounds.max.z))
-            let center = (minimum + maximum) * Float(0.5)
-            let size = maximum - minimum
+            let bounds = visualBounds(of: node, relativeTo: scene.rootNode)
+            let center = bounds.center
+            let size = bounds.size
             let extent = max(size.x, size.z, size.y * 2.8, Float(0.18))
-            let target = center + SIMD3<Float>(extent * 0.09, -extent * 0.045, 0)
             let isWinged = viewModel.build.vehicleArchitecture != .multicopter
+            // Looking slightly to the right/below the model moves it away from
+            // the inspector and the bottom carousel without translating the UAV
+            // off the physical centre of its table.
+            let target = center + SIMD3<Float>(
+                extent * (isWinged ? 0.12 : 0.09),
+                -extent * (isWinged ? 0.085 : 0.045),
+                0)
             cameraOrbitTarget = target
-            minimumCameraDistance = max(extent * (isWinged ? 0.68 : 1.0), 0.34)
-            maximumCameraDistance = max(
-                minimumCameraDistance + 0.16,
-                min(max(extent * (isWinged ? 1.42 : 2.25), 0.86), isWinged ? 1.65 : 1.02))
-            let initialDistance = min(
-                max(extent * (isWinged ? 1.24 : 1.9), 0.78),
-                maximumCameraDistance)
-            camera.camera?.fieldOfView = isWinged ? 42 : 34
-            let viewingDirection = simd_normalize(SIMD3<Float>(0.84, 0.62, 1.18))
+            if isWinged {
+                minimumCameraDistance = max(extent * 0.82, 0.62)
+                maximumCameraDistance = max(
+                    minimumCameraDistance + 0.40,
+                    min(max(extent * 2.05, 1.75), 3.05))
+            } else {
+                minimumCameraDistance = max(extent, 0.34)
+                maximumCameraDistance = max(
+                    minimumCameraDistance + 0.16,
+                    min(max(extent * 2.25, 0.86), 1.02))
+            }
+            let initialDistance = min(max(
+                extent * (isWinged ? 1.64 : 1.9),
+                isWinged ? 1.30 : 0.78), maximumCameraDistance)
+            camera.camera?.fieldOfView = isWinged ? 46 : 34
+            let viewingDirection = simd_normalize(isWinged
+                ? SIMD3<Float>(0.62, 0.53, 1.32)
+                : SIMD3<Float>(0.84, 0.62, 1.18))
             camera.simdPosition = target + viewingDirection * initialDistance
             camera.look(at: SCNVector3(target.x, target.y, target.z))
             scnView?.pointOfView = camera
             scnView?.defaultCameraController.pointOfView = camera
             scnView?.defaultCameraController.automaticTarget = false
             scnView?.defaultCameraController.target = SCNVector3(target.x, target.y, target.z)
+        }
+
+        /// Computes geometry-only bounds in a chosen coordinate space. Selection
+        /// rings deliberately do not participate: otherwise changing a category
+        /// can lift the aircraft or make the camera pulse even though no physical
+        /// part has moved.
+        private func visualBounds(of root: SCNNode, relativeTo target: SCNNode) -> VisualBounds {
+            var minimum = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+            var maximum = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+            var foundGeometry = false
+
+            func include(_ node: SCNNode) {
+                if node.name?.hasPrefix(WorkbenchModelBuilder.hotspotNodePrefix) == true {
+                    return
+                }
+                if let geometry = node.geometry {
+                    let bounds = geometry.boundingBox
+                    let xs = [Float(bounds.min.x), Float(bounds.max.x)]
+                    let ys = [Float(bounds.min.y), Float(bounds.max.y)]
+                    let zs = [Float(bounds.min.z), Float(bounds.max.z)]
+                    for x in xs {
+                        for y in ys {
+                            for z in zs {
+                                let point = node.simdConvertPosition(
+                                    SIMD3<Float>(x, y, z), to: target)
+                                minimum = simd_min(minimum, point)
+                                maximum = simd_max(maximum, point)
+                                foundGeometry = true
+                            }
+                        }
+                    }
+                }
+                node.childNodes.forEach(include)
+            }
+            root.childNodes.forEach(include)
+
+            if !foundGeometry {
+                let fallback = root.boundingBox
+                minimum = SIMD3<Float>(
+                    Float(fallback.min.x), Float(fallback.min.y), Float(fallback.min.z))
+                maximum = SIMD3<Float>(
+                    Float(fallback.max.x), Float(fallback.max.y), Float(fallback.max.z))
+            }
+            return VisualBounds(minimum: minimum, maximum: maximum)
         }
     }
 }
@@ -226,6 +304,54 @@ final class WorkbenchSCNView: SCNView {
 
 enum WorkbenchWorkshopSceneFactory {
     static let cameraName = "workbench.camera"
+    private static let environmentName = "workbench.environment"
+    private static let standardMatName = "workbench.cutting-mat"
+    private static let wingedStageName = "workbench.winged-stage"
+
+    struct WorkspacePlacement {
+        var center: SIMD3<Float>
+        var surfaceY: Float
+    }
+
+    /// A fixed-wing airframe needs depth for its fuselage and width for its wing;
+    /// scaling the aircraft down would make parts unreadable. Instead it receives
+    /// a clean second bench in front of the furnished workbench. The original set
+    /// remains as workshop context, while no tool chest can intersect the wing.
+    static func configureWorkspace(
+        for architecture: WorkbenchVehicleArchitecture,
+        aircraftSize: SIMD3<Float>,
+        in scene: SCNScene
+    ) -> WorkspacePlacement {
+        guard let environment = scene.rootNode.childNode(
+            withName: environmentName, recursively: false) else {
+            return WorkspacePlacement(center: .zero, surfaceY: -0.005)
+        }
+
+        environment.childNode(withName: wingedStageName, recursively: false)?
+            .removeFromParentNode()
+        let standardMat = environment.childNode(
+            withName: standardMatName, recursively: true)
+
+        guard architecture != .multicopter else {
+            standardMat?.isHidden = false
+            return WorkspacePlacement(
+                center: SIMD3<Float>(-0.06, 0, -0.02),
+                surfaceY: -0.006)
+        }
+
+        standardMat?.isHidden = true
+        let tableWidth = min(max(aircraftSize.x + 0.30, 1.85), 3.10)
+        let tableDepth = min(max(aircraftSize.z + 0.30, 0.95), 1.90)
+        // Keep the rear edge just in front of the furnished table. Growing the
+        // clean table therefore adds usable depth toward the camera, not through
+        // the wall, pegboard or tool cabinet.
+        let center = SIMD3<Float>(0, 0, max(0.58, tableDepth * 0.5 + 0.06))
+        environment.addChildNode(wingedStage(
+            width: tableWidth,
+            depth: tableDepth,
+            center: center))
+        return WorkspacePlacement(center: center, surfaceY: -0.006)
+    }
 
     static func makeScene() -> SCNScene {
         let scene = SCNScene()
@@ -296,7 +422,7 @@ enum WorkbenchWorkshopSceneFactory {
 
     private static func workshopEnvironment() -> SCNNode {
         let root = SCNNode()
-        root.name = "workbench.environment"
+        root.name = environmentName
 
         let assetWorkbench = makeWorkbenchAssetNode()
         if let assetWorkbench {
@@ -348,43 +474,135 @@ enum WorkbenchWorkshopSceneFactory {
         return root
     }
 
+    private static func wingedStage(
+        width: Float,
+        depth: Float,
+        center: SIMD3<Float>
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = wingedStageName
+
+        let top = SCNBox(
+            width: CGFloat(width),
+            height: 0.060,
+            length: CGFloat(depth),
+            chamferRadius: 0.012)
+        top.materials = [woodMaterial()]
+        let topNode = SCNNode(geometry: top)
+        topNode.simdPosition = SIMD3<Float>(center.x, -0.040, center.z)
+        root.addChildNode(topNode)
+
+        // The mat covers the working surface but stays visibly inset from every
+        // edge, so even a large wing reads as resting on a real table rather than
+        // floating on an infinite CAD plane.
+        let mat = SCNBox(
+            width: CGFloat(max(width - 0.08, 0.20)),
+            height: 0.004,
+            length: CGFloat(max(depth - 0.08, 0.20)),
+            chamferRadius: 0.006)
+        mat.materials = [cuttingMatMaterial()]
+        let matNode = SCNNode(geometry: mat)
+        matNode.name = "workbench.winged-stage.mat"
+        matNode.simdPosition = SIMD3<Float>(center.x, -0.008, center.z)
+        root.addChildNode(matNode)
+
+        let legMaterial = woodMaterial()
+        let legHeight: CGFloat = 0.525
+        let legInset: Float = 0.095
+        for x in [-width * 0.5 + legInset, width * 0.5 - legInset] {
+            for z in [-depth * 0.5 + legInset, depth * 0.5 - legInset] {
+                let leg = SCNBox(
+                    width: 0.070,
+                    height: legHeight,
+                    length: 0.070,
+                    chamferRadius: 0.005)
+                leg.materials = [legMaterial]
+                let legNode = SCNNode(geometry: leg)
+                legNode.simdPosition = SIMD3<Float>(
+                    center.x + x, -0.3375, center.z + z)
+                root.addChildNode(legNode)
+            }
+        }
+
+        let longApron = SCNBox(
+            width: CGFloat(max(width - 0.13, 0.20)),
+            height: 0.075,
+            length: 0.030,
+            chamferRadius: 0.004)
+        longApron.materials = [legMaterial]
+        for z in [-depth * 0.5 + 0.045, depth * 0.5 - 0.045] {
+            let apronNode = SCNNode(geometry: longApron)
+            apronNode.simdPosition = SIMD3<Float>(center.x, -0.092, center.z + z)
+            root.addChildNode(apronNode)
+        }
+
+        let shortApron = SCNBox(
+            width: 0.030,
+            height: 0.075,
+            length: CGFloat(max(depth - 0.13, 0.20)),
+            chamferRadius: 0.004)
+        shortApron.materials = [legMaterial]
+        for x in [-width * 0.5 + 0.045, width * 0.5 - 0.045] {
+            let apronNode = SCNNode(geometry: shortApron)
+            apronNode.simdPosition = SIMD3<Float>(center.x + x, -0.092, center.z)
+            root.addChildNode(apronNode)
+        }
+
+        root.enumerateChildNodes { node, _ in node.castsShadow = true }
+        return root
+    }
+
     /// Three-sided room shell plus a textured floor. It is deliberately larger
     /// than the visible camera frustum so constrained orbiting never reveals the
     /// empty SceneKit background around the workshop asset.
     private static func addRoomBackdrop(to root: SCNNode) {
-        let brick = brickWallMaterial()
+        func retile(_ material: SCNMaterial, x: CGFloat, y: CGFloat) {
+            let transform = SCNMatrix4MakeScale(x, y, 1)
+            for property in [material.diffuse, material.normal, material.roughness,
+                             material.metalness, material.ambientOcclusion] {
+                property.contentsTransform = transform
+            }
+        }
 
-        let backWall = SCNPlane(width: 3.4, height: 2.0)
-        backWall.materials = [brick]
+        let backBrick = brickWallMaterial()
+        retile(backBrick, x: 4.52, y: 2.16)
+        let sideBrick = brickWallMaterial()
+        retile(sideBrick, x: 7.38, y: 2.16)
+
+        let roomWidth: CGFloat = 4.8
+        let sideDepth: CGFloat = 4.2
+        let roomCenterZ: Float = 1.84
+
+        let backWall = SCNPlane(width: roomWidth, height: 2.4)
+        backWall.materials = [backBrick]
         let backNode = SCNNode(geometry: backWall)
         backNode.name = "workbench.brick-background"
-        backNode.position = SCNVector3(0, 0.05, -0.26)
+        backNode.position = SCNVector3(0, 0.25, -0.26)
         root.addChildNode(backNode)
 
-        let sideDepth: CGFloat = 1.82
-        let leftWall = SCNPlane(width: sideDepth, height: 2.0)
-        leftWall.materials = [brick]
+        let leftWall = SCNPlane(width: sideDepth, height: 2.4)
+        leftWall.materials = [sideBrick]
         let leftNode = SCNNode(geometry: leftWall)
         leftNode.name = "workbench.brick-wall.left"
-        leftNode.position = SCNVector3(-1.70, 0.05, 0.65)
+        leftNode.position = SCNVector3(-2.40, 0.25, roomCenterZ)
         leftNode.eulerAngles.y = .pi / 2
         root.addChildNode(leftNode)
 
-        let rightWall = SCNPlane(width: sideDepth, height: 2.0)
-        rightWall.materials = [brick]
+        let rightWall = SCNPlane(width: sideDepth, height: 2.4)
+        rightWall.materials = [sideBrick]
         let rightNode = SCNNode(geometry: rightWall)
         rightNode.name = "workbench.brick-wall.right"
-        rightNode.position = SCNVector3(1.70, 0.05, 0.65)
+        rightNode.position = SCNVector3(2.40, 0.25, roomCenterZ)
         rightNode.eulerAngles.y = -.pi / 2
         root.addChildNode(rightNode)
 
-        let floor = SCNPlane(width: 3.4, height: sideDepth)
+        let floor = SCNPlane(width: roomWidth, height: sideDepth)
         let floorMaterial = woodMaterial()
-        floorMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(6, 4, 1)
+        floorMaterial.diffuse.contentsTransform = SCNMatrix4MakeScale(8.5, 9.2, 1)
         floor.materials = [floorMaterial]
         let floorNode = SCNNode(geometry: floor)
         floorNode.name = "workbench.floor"
-        floorNode.position = SCNVector3(0, -0.60, 0.65)
+        floorNode.position = SCNVector3(0, -0.60, roomCenterZ)
         floorNode.eulerAngles.x = -.pi / 2
         root.addChildNode(floorNode)
     }
@@ -964,202 +1182,4 @@ enum WorkbenchWorkshopSceneFactory {
         image.unlockFocus()
         return image
     }
-}
-
-/// Live 3D thumbnails share the same component factory as the assembled UAV,
-/// but use deterministic neutral product lighting for readable silhouettes.
-struct WorkbenchPartPreview: NSViewRepresentable {
-    var frame: WorkbenchFrameSpec?
-    var component: WorkbenchComponentSpec?
-
-    final class Coordinator {
-        var representedKey: String?
-    }
-
-    init(frame: WorkbenchFrameSpec) {
-        self.frame = frame
-        component = nil
-    }
-
-    init(component: WorkbenchComponentSpec) {
-        frame = nil
-        self.component = component
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> SCNView {
-        let view = SCNView(frame: .zero)
-        view.backgroundColor = .clear
-        view.autoenablesDefaultLighting = false
-        view.antialiasingMode = .multisampling2X
-        view.rendersContinuously = false
-        view.scene = thumbnailScene()
-        view.pointOfView = view.scene?.rootNode.childNode(withName: "preview.camera", recursively: false)
-        context.coordinator.representedKey = identityKey
-        return view
-    }
-
-    func updateNSView(_ nsView: SCNView, context: Context) {
-        guard context.coordinator.representedKey != identityKey else { return }
-        nsView.scene = thumbnailScene()
-        nsView.pointOfView = nsView.scene?.rootNode.childNode(withName: "preview.camera", recursively: false)
-        context.coordinator.representedKey = identityKey
-    }
-
-    private var identityKey: String {
-        if let frame { return "frame.\(frame.id).\(frame.hashValue)" }
-        if let component { return "component.\(component.id).\(component.hashValue)" }
-        return "empty"
-    }
-
-    private func thumbnailScene() -> SCNScene {
-        let scene = SCNScene()
-        scene.lightingEnvironment.contents = NSColor(deviceWhite: 0.58, alpha: 1)
-        scene.lightingEnvironment.intensity = 0.42
-        let cacheKey = identityKey as NSString
-        let model: SCNNode
-        if let cached = Self.modelCache.object(forKey: cacheKey) {
-            model = cached.clone()
-        } else {
-            model = frame.map { WorkbenchModelBuilder.previewNode(for: $0) }
-                ?? component.map { WorkbenchModelBuilder.previewNode(for: $0) }
-                ?? SCNNode()
-            prepareMaterialsForPreview(in: model)
-            Self.modelCache.setObject(model.clone(), forKey: cacheKey, cost: model.childNodes.count + 1)
-        }
-        scene.rootNode.addChildNode(model)
-
-        let bounds = model.boundingBox
-        let lo = SIMD3<Float>(Float(bounds.min.x), Float(bounds.min.y), Float(bounds.min.z))
-        let hi = SIMD3<Float>(Float(bounds.max.x), Float(bounds.max.y), Float(bounds.max.z))
-        let center = (lo + hi) * Float(0.5)
-        let extent = max(simd_length(hi - lo), Float(0.025))
-
-        let camera = SCNCamera()
-        camera.usesOrthographicProjection = true
-        camera.orthographicScale = Double(extent * 0.86)
-        camera.zNear = 0.001
-        camera.zFar = 20
-        camera.wantsHDR = false
-        camera.wantsExposureAdaptation = false
-        camera.exposureOffset = -0.35
-        camera.screenSpaceAmbientOcclusionIntensity = 0
-        camera.bloomIntensity = 0
-        let cameraNode = SCNNode()
-        cameraNode.name = "preview.camera"
-        cameraNode.camera = camera
-        cameraNode.simdPosition = center + SIMD3<Float>(extent * 0.70, extent * 0.48, extent * 1.03)
-        cameraNode.look(at: SCNVector3(center.x, center.y, center.z))
-        scene.rootNode.addChildNode(cameraNode)
-
-        // A restrained radial surface grounds the product without turning the
-        // transparent card into a miniature boxed diorama.
-        let catcher = SCNPlane(
-            width: CGFloat(extent * 1.34),
-            height: CGFloat(extent * 1.34))
-        let catcherMaterial = SCNMaterial()
-        catcherMaterial.lightingModel = .physicallyBased
-        catcherMaterial.diffuse.contents = Self.previewShadowTexture
-        catcherMaterial.roughness.contents = NSNumber(value: 0.92)
-        catcherMaterial.metalness.contents = NSNumber(value: 0.0)
-        catcherMaterial.blendMode = .alpha
-        catcherMaterial.isDoubleSided = true
-        catcher.materials = [catcherMaterial]
-        let catcherNode = SCNNode(geometry: catcher)
-        catcherNode.eulerAngles.x = -.pi / 2
-        catcherNode.simdPosition = SIMD3<Float>(center.x, lo.y - extent * 0.018, center.z)
-        catcherNode.castsShadow = false
-        scene.rootNode.addChildNode(catcherNode)
-
-        let ambient = SCNNode()
-        ambient.light = SCNLight()
-        ambient.light?.type = .ambient
-        ambient.light?.color = NSColor(deviceRed: 0.78, green: 0.81, blue: 0.84, alpha: 1)
-        ambient.light?.intensity = 24
-        scene.rootNode.addChildNode(ambient)
-
-        let key = SCNNode()
-        key.light = SCNLight()
-        key.light?.type = .directional
-        key.light?.color = NSColor(deviceRed: 1.0, green: 0.95, blue: 0.88, alpha: 1)
-        key.light?.intensity = 112
-        // The radial catcher already supplies a readable contact shadow. A
-        // shadow map per card is disproportionately expensive in a large shelf.
-        key.light?.castsShadow = false
-        key.eulerAngles = SCNVector3(-0.72, 0.48, -0.30)
-        scene.rootNode.addChildNode(key)
-
-        let fill = SCNNode()
-        fill.light = SCNLight()
-        fill.light?.type = .omni
-        fill.light?.color = NSColor(deviceRed: 0.72, green: 0.82, blue: 0.94, alpha: 1)
-        fill.light?.intensity = 18
-        fill.simdPosition = center + SIMD3<Float>(-extent, extent * 0.4, extent * 0.7)
-        scene.rootNode.addChildNode(fill)
-
-        let rim = SCNNode()
-        rim.light = SCNLight()
-        rim.light?.type = .directional
-        rim.light?.color = NSColor(deviceRed: 0.78, green: 0.86, blue: 0.96, alpha: 1)
-        rim.light?.intensity = 28
-        rim.eulerAngles = SCNVector3(-0.38, -2.22, 0.12)
-        scene.rootNode.addChildNode(rim)
-        return scene
-    }
-
-    private func prepareMaterialsForPreview(in node: SCNNode) {
-        func prepare(_ geometry: SCNGeometry?) {
-            geometry?.materials.forEach { material in
-                // Preserve the same roughness, metalness and normal response as
-                // the assembled model. Flattening everything to Blinn made metal,
-                // carbon, heat-shrink and ceramic look like identical painted toys.
-                if material.lightingModel != .constant {
-                    material.lightingModel = .physicallyBased
-                }
-                material.emission.contents = NSColor.black
-                if material.multiply.contents == nil {
-                    material.multiply.contents = NSColor.white
-                }
-                if material.roughness.contents == nil {
-                    material.roughness.contents = NSNumber(value: 0.52)
-                }
-                if material.metalness.contents == nil {
-                    material.metalness.contents = NSNumber(value: 0.05)
-                }
-            }
-        }
-
-        prepare(node.geometry)
-        node.enumerateChildNodes { child, _ in
-            prepare(child.geometry)
-        }
-    }
-
-    private static let previewShadowTexture: NSImage = {
-        let size = NSSize(width: 256, height: 256)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor.clear.setFill()
-        NSRect(origin: .zero, size: size).fill()
-        let colors = [
-            NSColor(deviceWhite: 0.035, alpha: 0.33),
-            NSColor(deviceWhite: 0.035, alpha: 0.12),
-            NSColor(deviceWhite: 0.035, alpha: 0.0),
-        ]
-        let locations: [CGFloat] = [0.0, 0.52, 1.0]
-        let gradient = NSGradient(colors: colors, atLocations: locations, colorSpace: .deviceRGB)
-        gradient?.draw(in: NSRect(origin: .zero, size: size), relativeCenterPosition: .zero)
-        image.unlockFocus()
-        return image
-    }()
-
-    private static let modelCache: NSCache<NSString, SCNNode> = {
-        let cache = NSCache<NSString, SCNNode>()
-        cache.countLimit = 160
-        cache.totalCostLimit = 12_000
-        return cache
-    }()
 }

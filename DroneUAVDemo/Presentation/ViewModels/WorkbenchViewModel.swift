@@ -108,7 +108,11 @@ final class WorkbenchViewModel: ObservableObject {
     }
 
     func mountSurface(for kind: WorkbenchComponentKind) -> WorkbenchMountSurface {
-        build.placement(for: kind).surface
+        // Reflect the actually resolved physical zone. This keeps a legacy
+        // Blueprint that requested an unsafe GPS/RX/battery face from leaving
+        // a SwiftUI Picker with a value that is no longer offered by the UI.
+        WorkbenchBuildAnalyzer.resolvedComponentLayout(for: build)[kind]?.surface
+            ?? build.placement(for: kind).surface
     }
 
     // MARK: Mutations

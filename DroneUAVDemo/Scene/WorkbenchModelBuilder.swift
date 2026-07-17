@@ -89,6 +89,8 @@ enum WorkbenchModelBuilder {
             root.addChildNode(hardware)
             let node = componentNode(spec)
             node.simdPosition = placement.position
+            applyMountOrientation(
+                to: node, kind: kind, spec: spec, placement: placement)
             node.name = "\(slotNodePrefix)\(kind.rawValue)"
             applySelection(selectedCategory == .slot(kind), to: node)
             root.addChildNode(node)
@@ -100,7 +102,8 @@ enum WorkbenchModelBuilder {
             for (index, position) in positions.enumerated() {
                 let hardware = servoMountingHardwareNode(
                     at: position,
-                    size: servo.proxy.size.simdFloat)
+                    size: servo.proxy.size.simdFloat,
+                    frame: frame)
                 hardware.name = "workbench.mount.servo.\(index)"
                 root.addChildNode(hardware)
 
@@ -112,10 +115,54 @@ enum WorkbenchModelBuilder {
             }
         }
 
+        // Wiring is part of the assembly, not part of a catalog thumbnail.
+        // Route every visible lead to an actual endpoint and hold it against
+        // the frame with clips instead of leaving loose cylinders in space.
+        if let battery = componentLayout[.battery],
+           let esc = componentLayout[.esc] {
+            root.addChildNode(powerHarnessNode(
+                battery: battery, esc: esc, frame: frame))
+        }
+        if let receiver = componentLayout[.receiver] {
+            root.addChildNode(receiverAntennaHarnessNode(
+                receiver: receiver, frame: frame))
+        }
+        if let controller = componentLayout[.flightController] {
+            for kind in [WorkbenchComponentKind.gps, .sensor] {
+                guard let peripheral = componentLayout[kind] else { continue }
+                root.addChildNode(signalHarnessNode(
+                    from: peripheral, to: controller, frame: frame))
+            }
+        }
+
         if showsHotspots {
             addHotspots(to: root, build: build, selectedCategory: selectedCategory)
         }
         return root
+    }
+
+    private static func applyMountOrientation(
+        to node: SCNNode,
+        kind: WorkbenchComponentKind,
+        spec: WorkbenchComponentSpec,
+        placement: WorkbenchResolvedComponentPlacement
+    ) {
+        guard placement.surface == .bottom else { return }
+        switch kind {
+        case .camera:
+            // Mapping/landing cameras look through the belly aperture.
+            node.eulerAngles.x = .pi / 2
+        case .sensor:
+            let identity = "\(spec.id) \(spec.displayName)".lowercased()
+            // Optical-flow geometry is authored with its lens along -Y.
+            // Radar/rangefinder faces are authored forward and must be turned
+            // into a real downward-looking installation.
+            if !identity.contains("optical-flow") {
+                node.eulerAngles.x = .pi / 2
+            }
+        default:
+            break
+        }
     }
 
     private static func propulsionAxis(
@@ -145,7 +192,8 @@ enum WorkbenchModelBuilder {
 
     private static func servoMountingHardwareNode(
         at position: SIMD3<Float>,
-        size: SIMD3<Float>
+        size: SIMD3<Float>,
+        frame: WorkbenchResolvedFrame
     ) -> SCNNode {
         let root = SCNNode()
         let flange = SCNBox(
@@ -157,7 +205,7 @@ enum WorkbenchModelBuilder {
         let flangeNode = SCNNode(geometry: flange)
         flangeNode.simdPosition = SIMD3<Float>(
             position.x,
-            position.y - size.y * 0.5 - 0.00075,
+            position.y + size.y * 0.5 - 0.00075,
             position.z)
         root.addChildNode(flangeNode)
 
@@ -169,9 +217,39 @@ enum WorkbenchModelBuilder {
             let screwNode = SCNNode(geometry: screw)
             screwNode.simdPosition = SIMD3<Float>(
                 position.x + x,
-                position.y - size.y * 0.5 - 0.0002,
+                position.y + size.y * 0.5 + 0.0002,
                 position.z)
             root.addChildNode(screwNode)
+        }
+
+        // Short mechanical linkage to the matching trailing-edge surface.
+        // It makes the actuator read as an installed servo rather than an
+        // electronics brick left on top of the wing.
+        let aircraftLength = max(Float(frame.sizeMeters.z), 0.36)
+        let isTail = position.z < -aircraftLength * 0.22
+        let linkageLength = isTail
+            ? max(aircraftLength * 0.055, 0.028)
+            : max(aircraftLength * 0.075, 0.034)
+        let hornPoint = SIMD3<Float>(
+            position.x + size.x * 0.22,
+            position.y + size.y * 0.5 + 0.003,
+            position.z)
+        let controlPoint = SIMD3<Float>(
+            position.x + (isTail ? 0 : (position.x < 0 ? -0.006 : 0.006)),
+            hornPoint.y - 0.001,
+            position.z - linkageLength)
+        root.addChildNode(beamNode(
+            from: hornPoint,
+            to: controlPoint,
+            radius: 0.00055,
+            material: hardware))
+        for point in [hornPoint, controlPoint] {
+            let joint = SCNSphere(radius: 0.00125)
+            joint.segmentCount = 14
+            joint.materials = [hardware]
+            let jointNode = SCNNode(geometry: joint)
+            jointNode.simdPosition = point
+            root.addChildNode(jointNode)
         }
         return root
     }
@@ -220,6 +298,32 @@ enum WorkbenchModelBuilder {
             let connectorWidth: Float = frame.frameClass == .tinyWhoop ? 0.0018 : 0.0032
 
             switch placement.surface {
+            case .internalBay:
+                // Interior trays bolt to the belly/deck with real standoffs.
+                // Keeping these inside the fuselage/central cage avoids the
+                // former floating side shelves while preserving service gaps.
+                let plateFaceY = platePosition.y - plateThickness * 0.5
+                let frameFaceY = support.bottom
+                let supportHeight = max(abs(plateFaceY - frameFaceY), 0.0025)
+                let supportCenterY = min(plateFaceY, frameFaceY) + supportHeight * 0.5
+                let xInset = max(halfPlateX - 0.003, 0.0015)
+                let zInset = max(halfPlateZ - 0.003, 0.0015)
+                for x in [-xInset, xInset] {
+                    for z in [-zInset, zInset] {
+                        let post = SCNCylinder(
+                            radius: frame.frameClass == .tinyWhoop ? 0.0006 : 0.0010,
+                            height: CGFloat(supportHeight))
+                        post.radialSegmentCount = 14
+                        post.materials = [kind == .flightController ? rubber : hardware]
+                        let node = SCNNode(geometry: post)
+                        node.simdPosition = SIMD3<Float>(
+                            platePosition.x + x,
+                            supportCenterY,
+                            platePosition.z + z)
+                        root.addChildNode(node)
+                    }
+                }
+
             case .top, .automatic, .bottom:
                 let plateFaceY = platePosition.y
                     + (isBottom ? plateThickness * 0.5 : -plateThickness * 0.5)
@@ -347,6 +451,108 @@ enum WorkbenchModelBuilder {
                 root.addChildNode(railNode)
             }
 
+            if isBottom {
+                // A belly pack must never become the point on which the
+                // aircraft rests. Two protective skids extend below it and
+                // define the model's true table-contact plane.
+                let packBottom = placement.position.y - size.y * 0.5
+                let skidY = packBottom - 0.012
+                let skidLength = max(size.z + 0.026, 0.085)
+                for x: Float in [-1, 1] {
+                    let skidX = placement.position.x
+                        + x * (size.x * 0.5 + 0.010)
+                    let skid = SCNCapsule(
+                        capRadius: 0.0022,
+                        height: CGFloat(skidLength))
+                    skid.radialSegmentCount = 18
+                    skid.capSegmentCount = 6
+                    skid.materials = [rubber]
+                    let skidNode = SCNNode(geometry: skid)
+                    skidNode.eulerAngles.x = .pi / 2
+                    skidNode.simdPosition = SIMD3<Float>(
+                        skidX, skidY, placement.position.z)
+                    root.addChildNode(skidNode)
+
+                    for z: Float in [-1, 1] {
+                        root.addChildNode(beamNode(
+                            from: SIMD3<Float>(
+                                placement.position.x
+                                    + x * (size.x * 0.5 + 0.003),
+                                support.bottom,
+                                placement.position.z + z * size.z * 0.38),
+                            to: SIMD3<Float>(
+                                skidX,
+                                skidY,
+                                placement.position.z + z * size.z * 0.38),
+                            radius: 0.0015,
+                            material: hardware))
+                    }
+                }
+            }
+
+        case .gps:
+            let plate = plateNode(extraX: 0.006, extraZ: 0.006)
+            root.addChildNode(plate)
+            let plateBottom = plate.simdPosition.y - plateThickness * 0.5
+            let anchorY: Float
+            if frame.architecture == .multicopter {
+                anchorY = support.top
+            } else {
+                // Wing skin, not fuselage roof: the GNSS pad sits in the
+                // clear RF zone selected by the layout resolver.
+                let span = max(Float(frame.sizeMeters.x), 0.45)
+                let length = max(Float(frame.sizeMeters.z), 0.36)
+                let area = max(Float(frame.wingAreaM2), span * length * 0.18)
+                let chord = min(max(area / span, length * 0.20), length * 0.52)
+                anchorY = min(max(chord * 0.055, 0.010), 0.024) * 0.5
+            }
+            let mastHeight = max(plateBottom - anchorY, 0.003)
+            let mast = SCNCylinder(
+                radius: frame.frameClass == .tinyWhoop ? 0.0010 : 0.0022,
+                height: CGFloat(mastHeight))
+            mast.radialSegmentCount = 20
+            mast.materials = [carbonFiberMaterial()]
+            let mastNode = SCNNode(geometry: mast)
+            mastNode.simdPosition = SIMD3<Float>(
+                placement.position.x,
+                anchorY + mastHeight * 0.5,
+                placement.position.z)
+            root.addChildNode(mastNode)
+
+            let foot = SCNCylinder(
+                radius: CGFloat(max(min(size.x * 0.36, 0.012), 0.005)),
+                height: CGFloat(plateThickness))
+            foot.radialSegmentCount = 24
+            foot.materials = [plateMaterial]
+            let footNode = SCNNode(geometry: foot)
+            footNode.simdPosition = SIMD3<Float>(
+                placement.position.x,
+                anchorY + plateThickness * 0.5,
+                placement.position.z)
+            root.addChildNode(footNode)
+
+        case .receiver:
+            // RX body is retained inside the protected bay on a thin foam
+            // cradle. Antennas are routed separately to external clips.
+            let plate = plateNode(extraX: 0.004, extraZ: 0.004)
+            plate.geometry?.materials = [rubber]
+            root.addChildNode(plate)
+            connectPlateToFrame(plate, extraX: 0.004, extraZ: 0.004)
+            for z: Float in [-0.32, 0.32] {
+                let tie = SCNBox(
+                    width: CGFloat(size.x + 0.005),
+                    height: 0.0008,
+                    length: 0.0015,
+                    chamferRadius: 0.00035)
+                tie.materials = [wovenStrapMaterial("#30353B")]
+                let tieNode = SCNNode(geometry: tie)
+                tieNode.simdPosition = SIMD3<Float>(
+                    placement.position.x,
+                    placement.position.y + size.y * 0.5 + 0.0003,
+                    placement.position.z + z * size.z)
+                root.addChildNode(tieNode)
+            }
+
         case .landingGear:
             // Landing gear surrounds a central payload bay, so a full solid
             // plate would reintroduce the very overlap the layout resolver
@@ -399,6 +605,192 @@ enum WorkbenchModelBuilder {
                 }
             }
         }
+        return root
+    }
+
+    private static func cablePolylineNode(
+        _ points: [SIMD3<Float>],
+        radius: Float,
+        material cableMaterial: SCNMaterial
+    ) -> SCNNode {
+        let root = SCNNode()
+        guard points.count >= 2 else { return root }
+        for index in 0..<(points.count - 1) {
+            guard simd_distance(points[index], points[index + 1]) > 0.0002 else { continue }
+            root.addChildNode(beamNode(
+                from: points[index],
+                to: points[index + 1],
+                radius: radius,
+                material: cableMaterial))
+        }
+        return root
+    }
+
+    private static func powerHarnessNode(
+        battery: WorkbenchResolvedComponentPlacement,
+        esc: WorkbenchResolvedComponentPlacement,
+        frame: WorkbenchResolvedFrame
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = "workbench.harness.power"
+        let support = WorkbenchBuildAnalyzer.mountingEnvelope(for: frame)
+        let exitZ = battery.position.z - battery.size.z * 0.49
+        let routeX = min(
+            max(battery.size.x * 0.5 + 0.004, support.width * 0.34),
+            max(support.width * 0.47, 0.014))
+        let routeY: Float
+        if battery.surface == .bottom {
+            routeY = min(battery.position.y, esc.position.y) - 0.002
+        } else if battery.surface == .internalBay {
+            routeY = max(support.bottom + 0.005, min(battery.position.y, esc.position.y))
+        } else {
+            routeY = min(battery.position.y - battery.size.y * 0.35, support.top + 0.004)
+        }
+
+        let colors = ["#202327", "#C94A43"]
+        for (index, color) in colors.enumerated() {
+            let separation: Float = index == 0 ? -0.0018 : 0.0018
+            let start = SIMD3<Float>(
+                battery.position.x + separation,
+                battery.position.y,
+                exitZ)
+            let channelX = battery.position.x + routeX + separation
+            let points = [
+                start,
+                SIMD3<Float>(channelX, routeY, exitZ - 0.004),
+                SIMD3<Float>(channelX, routeY, esc.position.z),
+                SIMD3<Float>(esc.position.x + separation * 1.6,
+                             esc.position.y,
+                             esc.position.z),
+            ]
+            root.addChildNode(cablePolylineNode(
+                points,
+                radius: 0.00105,
+                material: material(color, metalness: 0.01, roughness: 0.78)))
+        }
+
+        // Fixed XT holder: the connector is no longer a loose block at the
+        // end of two unsupported wires.
+        let connector = SCNBox(
+            width: 0.012,
+            height: 0.007,
+            length: 0.009,
+            chamferRadius: 0.0012)
+        connector.materials = [material("#D8A52D", metalness: 0.05, roughness: 0.56)]
+        let connectorNode = SCNNode(geometry: connector)
+        connectorNode.simdPosition = SIMD3<Float>(
+            battery.position.x,
+            battery.position.y,
+            exitZ - 0.002)
+        root.addChildNode(connectorNode)
+
+        for z in [exitZ - 0.004, esc.position.z] {
+            let clip = SCNBox(
+                width: 0.007,
+                height: 0.0012,
+                length: 0.003,
+                chamferRadius: 0.0005)
+            clip.materials = [rubberMaterial("#24292E")]
+            let clipNode = SCNNode(geometry: clip)
+            clipNode.simdPosition = SIMD3<Float>(
+                battery.position.x + routeX,
+                routeY - 0.001,
+                z)
+            root.addChildNode(clipNode)
+        }
+        return root
+    }
+
+    private static func receiverAntennaHarnessNode(
+        receiver: WorkbenchResolvedComponentPlacement,
+        frame: WorkbenchResolvedFrame
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = "workbench.harness.receiver"
+        let support = WorkbenchBuildAnalyzer.mountingEnvelope(for: frame)
+        let coax = rubberMaterial("#22272C")
+        let active = material("#C9C1AD", metalness: 0.08, roughness: 0.66)
+
+        let firstStart: SIMD3<Float>
+        let firstEnd: SIMD3<Float>
+        let secondStart: SIMD3<Float>
+        let secondEnd: SIMD3<Float>
+        if frame.architecture == .multicopter {
+            let y = max(support.bottom + 0.006, receiver.position.y)
+            let rear = support.rearZ - 0.010
+            firstStart = SIMD3<Float>(-support.width * 0.18, y, rear)
+            firstEnd = SIMD3<Float>(-support.width * 0.18 - 0.030, y, rear)
+            secondStart = SIMD3<Float>(support.width * 0.18, y, rear)
+            secondEnd = SIMD3<Float>(support.width * 0.18, y, rear - 0.030)
+        } else {
+            let span = max(Float(frame.sizeMeters.x), 0.45)
+            let length = max(Float(frame.sizeMeters.z), 0.36)
+            let y = max(0.002, receiver.position.y)
+            firstStart = SIMD3<Float>(-support.width * 0.52, y, -length * 0.22)
+            firstEnd = SIMD3<Float>(-min(span * 0.24, 0.34), y, -length * 0.22)
+            secondStart = SIMD3<Float>(support.width * 0.26, y, -length * 0.28)
+            secondEnd = SIMD3<Float>(support.width * 0.26, y + 0.018, -length * 0.40)
+        }
+
+        let bodyExit = receiver.position + SIMD3<Float>(0, 0, -receiver.size.z * 0.45)
+        for (index, pair) in [(firstStart, firstEnd), (secondStart, secondEnd)].enumerated() {
+            let spread: Float = index == 0 ? -0.0015 : 0.0015
+            let routeStart = bodyExit + SIMD3<Float>(spread, 0, 0)
+            root.addChildNode(cablePolylineNode(
+                [routeStart,
+                 SIMD3<Float>(pair.0.x, routeStart.y, pair.0.z),
+                 pair.0],
+                radius: 0.00048,
+                material: coax))
+            root.addChildNode(cablePolylineNode(
+                [pair.0, pair.1],
+                radius: 0.00068,
+                material: active))
+
+            for point in [pair.0, pair.1] {
+                let clip = SCNSphere(radius: 0.00125)
+                clip.segmentCount = 12
+                clip.materials = [rubberMaterial("#30363C")]
+                let clipNode = SCNNode(geometry: clip)
+                clipNode.simdPosition = point
+                root.addChildNode(clipNode)
+            }
+        }
+        return root
+    }
+
+    private static func signalHarnessNode(
+        from peripheral: WorkbenchResolvedComponentPlacement,
+        to controller: WorkbenchResolvedComponentPlacement,
+        frame: WorkbenchResolvedFrame
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = "workbench.harness.signal.\(peripheral.kind.rawValue)"
+        let support = WorkbenchBuildAnalyzer.mountingEnvelope(for: frame)
+        let surfaceY: Float
+        switch peripheral.surface {
+        case .bottom:
+            surfaceY = support.bottom - 0.0015
+        case .top, .automatic:
+            surfaceY = frame.architecture == .multicopter ? support.top + 0.0015 : 0.008
+        case .internalBay:
+            surfaceY = peripheral.position.y
+        case .front, .rear, .left, .right:
+            surfaceY = min(peripheral.position.y, support.top)
+        }
+        let bodyEdgeX = peripheral.position.x == 0
+            ? support.width * 0.34
+            : copysignf(support.width * 0.48, peripheral.position.x)
+        let points = [
+            peripheral.position,
+            SIMD3<Float>(bodyEdgeX, surfaceY, peripheral.position.z),
+            SIMD3<Float>(bodyEdgeX, controller.position.y, controller.position.z),
+            controller.position,
+        ]
+        root.addChildNode(cablePolylineNode(
+            points,
+            radius: 0.00050,
+            material: material("#667787", metalness: 0.02, roughness: 0.76)))
         return root
     }
 
@@ -513,6 +905,7 @@ enum WorkbenchModelBuilder {
 
         let arm = Float(frame.armLengthM)
         let isMicro = frame.frameClass == .tinyWhoop
+        let support = WorkbenchBuildAnalyzer.mountingEnvelope(for: frame)
         let deckWidth = CGFloat(isMicro ? max(arm * 0.78, 0.026) : min(max(arm * 0.54, 0.060), 0.092))
         let deckLength = CGFloat(isMicro ? max(arm * 0.92, 0.030) : min(max(arm * 0.68, 0.076), 0.116))
         let lowerPlate = SCNBox(
@@ -530,7 +923,7 @@ enum WorkbenchModelBuilder {
             chamferRadius: isMicro ? 0.0015 : 0.004)
         upperPlate.materials = [carbonEdge]
         let upperNode = SCNNode(geometry: upperPlate)
-        upperNode.simdPosition.y = isMicro ? 0.005 : 0.0085
+        upperNode.simdPosition.y = support.top - Float(upperPlate.height) * 0.5
         root.addChildNode(upperNode)
 
         let armWidth = isMicro ? max(arm * 0.11, 0.0032) : max(arm * 0.095, 0.0090)
@@ -608,7 +1001,9 @@ enum WorkbenchModelBuilder {
 
         // Four real stack standoffs and screw heads replace the former solid
         // silver block and give the frame a readable layered construction.
-        let standoffHeight: CGFloat = isMicro ? 0.006 : 0.013
+        let standoffHeight = CGFloat(max(
+            support.top - Float(upperPlate.height),
+            isMicro ? 0.006 : 0.018))
         for x in [-Float(deckWidth) * 0.31, Float(deckWidth) * 0.31] {
             for z in [-Float(deckLength) * 0.25, Float(deckLength) * 0.25] {
                 let post = SCNCylinder(radius: isMicro ? 0.0007 : 0.00145,
@@ -623,12 +1018,13 @@ enum WorkbenchModelBuilder {
                 screw.radialSegmentCount = 20
                 screw.materials = [hardware]
                 let screwNode = SCNNode(geometry: screw)
-                screwNode.simdPosition = SIMD3<Float>(x, Float(standoffHeight) + 0.001, z)
+                screwNode.simdPosition = SIMD3<Float>(x, support.top + 0.0005, z)
                 root.addChildNode(screwNode)
             }
         }
 
-        // Camera cage and woven hook-and-loop battery strap.
+        // Camera cage. Battery retention belongs to the selected battery bay,
+        // so an empty frame no longer carries a floating decorative strap.
         if !isMicro {
             for x in [-Float(deckWidth) * 0.34, Float(deckWidth) * 0.34] {
                 let post = SCNCylinder(radius: 0.00155, height: 0.028)
@@ -638,18 +1034,6 @@ enum WorkbenchModelBuilder {
                 postNode.simdPosition = SIMD3<Float>(x, 0.014, Float(deckLength) * 0.34)
                 root.addChildNode(postNode)
             }
-            let strap = SCNBox(
-                width: deckWidth * 0.90,
-                height: 0.0016,
-                length: max(deckLength * 0.16, 0.012),
-                chamferRadius: 0.0015)
-            strap.materials = [wovenStrapMaterial(accentHex)]
-            let strapNode = SCNNode(geometry: strap)
-            strapNode.simdPosition = SIMD3<Float>(
-                frame.batteryTray.x,
-                0.0105,
-                frame.batteryTray.z)
-            root.addChildNode(strapNode)
         }
         return root
     }
@@ -780,6 +1164,50 @@ enum WorkbenchModelBuilder {
             length * 0.105)
         canopyNode.name = "workbench.airframe.canopy"
         root.addChildNode(canopyNode)
+
+        // Service hatch above the enclosed battery/avionics rail. The pack,
+        // FC, ESC and RX remain inside the fuselage as on a real survey wing;
+        // the exterior still communicates how those parts are accessed.
+        let hatchLength = min(max(fuselageLength * 0.38, 0.19), 0.34)
+        let hatch = SCNBox(
+            width: CGFloat(bodyRadius * 1.48),
+            height: 0.004,
+            length: CGFloat(hatchLength),
+            chamferRadius: 0.004)
+        hatch.materials = [carbon]
+        let hatchNode = SCNNode(geometry: hatch)
+        hatchNode.simdPosition = SIMD3<Float>(
+            0,
+            bodyRadius * 1.105,
+            -length * 0.095)
+        hatchNode.name = "workbench.airframe.avionicsHatch"
+        root.addChildNode(hatchNode)
+
+        let hatchLabel = surfaceLabelNode(
+            width: bodyRadius * 1.02,
+            height: hatchLength * 0.46,
+            title: "AVIONICS",
+            subtitle: "BATTERY  •  CG RAIL",
+            accentHex: "#D4DADE")
+        hatchLabel.eulerAngles.x = -.pi / 2
+        hatchLabel.simdPosition = SIMD3<Float>(
+            0,
+            hatchNode.simdPosition.y + 0.0022,
+            hatchNode.simdPosition.z)
+        root.addChildNode(hatchLabel)
+        for x: Float in [-bodyRadius * 0.58, bodyRadius * 0.58] {
+            for z: Float in [-hatchLength * 0.40, hatchLength * 0.40] {
+                let fastener = SCNCylinder(radius: 0.00135, height: 0.0012)
+                fastener.radialSegmentCount = 16
+                fastener.materials = [hardware]
+                let fastenerNode = SCNNode(geometry: fastener)
+                fastenerNode.simdPosition = SIMD3<Float>(
+                    x,
+                    hatchNode.simdPosition.y + 0.0025,
+                    hatchNode.simdPosition.z + z)
+                root.addChildNode(fastenerNode)
+            }
+        }
 
         // Independent horizontal and vertical tail surfaces.
         let tailCenterZ = -length * 0.39
@@ -1122,30 +1550,32 @@ enum WorkbenchModelBuilder {
         strapNode.simdPosition = SIMD3<Float>(0, s.y * 0.525, 0)
         root.addChildNode(strapNode)
 
-        let leadLength = max(packLength * 0.58, 0.020)
-        for (x, color) in [(-packWidth * 0.16, "#202329"), (packWidth * 0.16, "#C94943")] {
-            let lead = SCNCylinder(radius: 0.00125, height: CGFloat(leadLength))
-            lead.radialSegmentCount = 14
-            lead.materials = [material(color, metalness: 0.02, roughness: 0.72)]
-            let leadNode = SCNNode(geometry: lead)
-            leadNode.eulerAngles.x = .pi / 2
-            leadNode.simdPosition = SIMD3<Float>(x, s.y * 0.29, -packLength * 0.72)
-            root.addChildNode(leadNode)
+        // A recessed terminal is part of the pack. The actual red/black lead
+        // is generated by `powerHarnessNode` only when the pack is installed,
+        // so it always terminates at the selected ESC instead of dangling in
+        // empty space (and thumbnails remain clean product views).
+        let terminalWidth = max(min(packWidth * 0.44, 0.018), 0.008)
+        let terminal = SCNBox(
+            width: CGFloat(terminalWidth),
+            height: CGFloat(max(s.y * 0.28, 0.005)),
+            length: 0.0022,
+            chamferRadius: 0.0007)
+        terminal.materials = [material("#D8A52D", metalness: 0.04, roughness: 0.58)]
+        let terminalNode = SCNNode(geometry: terminal)
+        terminalNode.simdPosition = SIMD3<Float>(0, 0, -packLength * 0.505)
+        root.addChildNode(terminalNode)
+        for x: Float in [-terminalWidth * 0.20, terminalWidth * 0.20] {
+            let socket = SCNCylinder(radius: 0.00115, height: 0.0025)
+            socket.radialSegmentCount = 14
+            socket.materials = [material(
+                x < 0 ? "#202329" : "#C94943",
+                metalness: 0.03,
+                roughness: 0.70)]
+            let socketNode = SCNNode(geometry: socket)
+            socketNode.eulerAngles.x = .pi / 2
+            socketNode.simdPosition = SIMD3<Float>(x, 0, -packLength * 0.515)
+            root.addChildNode(socketNode)
         }
-
-        let connectorSize = max(min(packWidth * 0.42, 0.018), 0.008)
-        let connector = SCNBox(
-            width: CGFloat(connectorSize),
-            height: CGFloat(connectorSize * 0.62),
-            length: CGFloat(connectorSize * 0.78),
-            chamferRadius: CGFloat(connectorSize * 0.10))
-        connector.materials = [material("#D8A52D", metalness: 0.04, roughness: 0.58)]
-        let connectorNode = SCNNode(geometry: connector)
-        connectorNode.simdPosition = SIMD3<Float>(
-            0,
-            s.y * 0.29,
-            -packLength - connectorSize * 0.25)
-        root.addChildNode(connectorNode)
         return root
     }
 
@@ -1283,27 +1713,15 @@ enum WorkbenchModelBuilder {
         label.eulerAngles.x = -.pi / 2
         label.simdPosition.y = s.y * 0.5 + 0.00025
         root.addChildNode(label)
-        for x: Float in [-s.x * 0.32, s.x * 0.32] {
-            let length = Float(max(s.z * 1.65, 0.030))
-            let antenna = SCNCylinder(radius: 0.00048, height: CGFloat(length))
-            antenna.radialSegmentCount = 12
-            antenna.materials = [rubberMaterial("#292D32")]
-            let node = SCNNode(geometry: antenna)
+        for x: Float in [-s.x * 0.30, s.x * 0.30] {
+            let socket = SCNTorus(ringRadius: 0.0010, pipeRadius: 0.00028)
+            socket.ringSegmentCount = 14
+            socket.pipeSegmentCount = 6
+            socket.materials = [material("#C2A75B", metalness: 0.72, roughness: 0.24)]
+            let node = SCNNode(geometry: socket)
             node.eulerAngles.x = .pi / 2
-            node.eulerAngles.z = x < 0 ? -0.28 : 0.28
-            node.simdPosition = SIMD3<Float>(x, 0.002, -s.z * 0.70)
+            node.simdPosition = SIMD3<Float>(x, 0, -s.z * 0.51)
             root.addChildNode(node)
-
-            let activeTip = SCNCylinder(radius: 0.00065, height: CGFloat(length * 0.34))
-            activeTip.radialSegmentCount = 12
-            activeTip.materials = [material("#D0C7AE", metalness: 0.12, roughness: 0.62)]
-            let tipNode = SCNNode(geometry: activeTip)
-            tipNode.eulerAngles = node.eulerAngles
-            tipNode.simdPosition = SIMD3<Float>(
-                x + (x < 0 ? -0.004 : 0.004),
-                0.002,
-                -s.z * 0.70 - length * 0.48)
-            root.addChildNode(tipNode)
         }
         return root
     }
@@ -1819,7 +2237,18 @@ enum WorkbenchModelBuilder {
             guard let placement = componentLayout[kind] else { continue }
             let markerLift = max(Float(spec.proxy.size.y) * 0.5 + 0.006, 0.010)
             let markerDirection: Float = placement.surface == .bottom ? -1 : 1
-            addHotspot(position: placement.position + SIMD3<Float>(0, markerLift * markerDirection, 0),
+            let markerPosition: SIMD3<Float>
+            if placement.surface == .internalBay {
+                let support = WorkbenchBuildAnalyzer.mountingEnvelope(for: frame)
+                markerPosition = SIMD3<Float>(
+                    placement.position.x,
+                    support.top + markerLift,
+                    placement.position.z)
+            } else {
+                markerPosition = placement.position
+                    + SIMD3<Float>(0, markerLift * markerDirection, 0)
+            }
+            addHotspot(position: markerPosition,
                        key: kind.rawValue, selected: selectedCategory == .slot(kind), to: root)
         }
     }

@@ -623,7 +623,7 @@ struct WorkbenchView: View {
                             get: { viewModel.mountSurface(for: component.kind) },
                             set: { viewModel.setMountSurface($0, for: component.kind) }
                         )) {
-                            ForEach(WorkbenchMountSurface.allCases) { surface in
+                            ForEach(allowedMountSurfaces(for: component)) { surface in
                                 Text(surface.displayName).tag(surface)
                             }
                         }
@@ -631,7 +631,17 @@ struct WorkbenchView: View {
                         .pickerStyle(.menu)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         if component.kind == .battery {
-                            Text("АКБ можно закрепить сверху или снизу; раскладчик добавит салазки, ремни и безопасный зазор.")
+                            Text(viewModel.build.vehicleArchitecture == .multicopter
+                                 ? "АКБ крепится на отдельном верхнем или нижнем лотке. Для нижнего положения добавляются салазки и клиренс над столом."
+                                 : "АКБ размещается внутри фюзеляжа на продольной CG-направляющей под сервисным люком.")
+                                .font(.system(size: 9))
+                                .foregroundStyle(GroundControlPalette.textSecondary)
+                        } else if component.kind == .gps {
+                            Text("GNSS устанавливается только в верхней чистой зоне: на одной жёсткой мачте либо на верхней панели крыла.")
+                                .font(.system(size: 9))
+                                .foregroundStyle(GroundControlPalette.textSecondary)
+                        } else if component.kind == .receiver {
+                            Text("Корпус RX защищён внутри рамы; наружу по клипсам выводятся только антенны.")
                                 .font(.system(size: 9))
                                 .foregroundStyle(GroundControlPalette.textSecondary)
                         }
@@ -788,6 +798,47 @@ struct WorkbenchView: View {
     }
 
     // MARK: Helpers
+
+    /// Offer only mount zones that have a physical support and make sense for
+    /// the component's field of view. Imported/legacy Blueprints are also
+    /// normalised by the analyzer, so this menu is guidance rather than the
+    /// only safety boundary.
+    private func allowedMountSurfaces(
+        for component: WorkbenchComponentSpec
+    ) -> [WorkbenchMountSurface] {
+        let architecture = viewModel.build.vehicleArchitecture
+        let identity = "\(component.id) \(component.displayName)".lowercased()
+
+        switch component.kind {
+        case .battery:
+            return architecture == .multicopter
+                ? [.automatic, .top, .bottom]
+                : [.automatic, .internalBay]
+        case .gps:
+            return [.automatic, .top]
+        case .receiver, .flightController, .esc:
+            return [.automatic, .internalBay]
+        case .camera:
+            return [.automatic, .front, .bottom]
+        case .sensor:
+            if identity.contains("360") || identity.contains("obstacle-array") {
+                return [.automatic, .top]
+            }
+            if identity.contains("radar") || identity.contains("flow")
+                || identity.contains("range") || identity.contains("altimeter") {
+                return [.automatic, .bottom]
+            }
+            return [.automatic, .internalBay, .top, .bottom, .front]
+        case .payload:
+            return [.automatic, .bottom, .internalBay]
+        case .landingGear:
+            return [.automatic, .bottom]
+        case .servo:
+            return [.automatic, .internalBay]
+        case .motor, .propeller:
+            return [.automatic]
+        }
+    }
 
     private func componentProperties(_ component: WorkbenchComponentSpec) -> [(String, String)] {
         let p = WorkbenchComponentSpec.ParamKey.self

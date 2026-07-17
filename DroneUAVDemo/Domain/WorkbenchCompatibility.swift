@@ -107,6 +107,37 @@ enum WorkbenchCompatibility {
             issues.append(.init(severity: .warning, message: "Нет приёмника управления."))
         }
 
+        // Placement guardrails are repeated here for imported and older
+        // Blueprints. The layout resolver safely normalises these values, and
+        // the warning explains why the rendered position differs from the
+        // stored legacy intent.
+        if build.spec(for: .gps) != nil {
+            let surface = build.placement(for: .gps).surface
+            if surface != .automatic && surface != .top {
+                issues.append(.init(
+                    severity: .warning,
+                    message: "GNSS перенесён в верхнюю чистую зону: снизу и рядом с силовой проводкой спутниковый приём ненадёжен."))
+            }
+        }
+        if frame.architecture != .multicopter,
+           build.spec(for: .battery) != nil {
+            let surface = build.placement(for: .battery).surface
+            if surface != .automatic && surface != .internalBay {
+                issues.append(.init(
+                    severity: .warning,
+                    message: "АКБ самолётного аппарата перенесён во внутренний CG-отсек под сервисным люком."))
+            }
+        }
+        for kind in [WorkbenchComponentKind.receiver, .flightController, .esc] {
+            guard build.spec(for: kind) != nil else { continue }
+            let surface = build.placement(for: kind).surface
+            if surface != .automatic && surface != .internalBay {
+                issues.append(.init(
+                    severity: .warning,
+                    message: "\(kind.displayName) перенесён в защищённый внутренний отсек с реальным креплением."))
+            }
+        }
+
         let propDiameter = build.spec(for: .propeller)?.param(p.propDiameterInch)
         if let diameter = propDiameter {
             if diameter > frame.propMaxInch + 0.05 {
