@@ -19,7 +19,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
     var displayName: String {
         switch self {
         case .overview: return "Сборка"
-        case .blueprints: return "Чертежи"
+        case .blueprints: return "Пользовательские"
         case .frame: return "Рама"
         case let .slot(kind): return kind.shortName
         }
@@ -79,7 +79,7 @@ final class WorkbenchViewModel: ObservableObject {
 
     init(build: WorkbenchBuild = .defaultQuad()) {
         self.build = build
-        stats = WorkbenchBuildAnalyzer.analyze(build)
+        stats = Self.resolvedStats(for: build)
         refreshBlueprints()
     }
 
@@ -107,12 +107,19 @@ final class WorkbenchViewModel: ObservableObject {
         build.specID(for: kind)
     }
 
+    func mountSurface(for kind: WorkbenchComponentKind) -> WorkbenchMountSurface {
+        build.placement(for: kind).surface
+    }
+
     // MARK: Mutations
 
     func selectLibraryFrame(_ id: String) {
         guard selectedLibraryFrameID != id else { return }
         pushUndo()
         build.frame = .library(id: id)
+        if let frame = WorkbenchFrameLibrary.spec(id: id) {
+            build.vehicleArchitecture = frame.architecture
+        }
         build.revision += 1
         recompute()
         statusMessage = "Установлена рама «\(build.resolvedFrame.name)»."
@@ -130,6 +137,14 @@ final class WorkbenchViewModel: ObservableObject {
         }
     }
 
+    func setMountSurface(_ surface: WorkbenchMountSurface, for kind: WorkbenchComponentKind) {
+        guard build.placement(for: kind).surface != surface else { return }
+        pushUndo()
+        build.setMountSurface(surface, for: kind)
+        recompute()
+        statusMessage = "\(kind.displayName): монтаж — \(surface.displayName.lowercased())."
+    }
+
     func rename(_ name: String) {
         guard build.name != name else { return }
         build.name = name
@@ -140,15 +155,18 @@ final class WorkbenchViewModel: ObservableObject {
         build.buildDescription = description
     }
 
-    func newBuild() {
+    func newBuild(_ architecture: WorkbenchVehicleArchitecture = .multicopter) {
         pushUndo()
-        build = .defaultQuad()
+        switch architecture {
+        case .multicopter: build = .defaultQuad()
+        case .fixedWing: build = .defaultFixedWing()
+        case .liftCruiseVTOL: build = .defaultVTOL()
+        }
         build.id = UUID()
-        build.name = "Новая сборка"
         build.revision += 1
         selectedCategory = .overview
         recompute()
-        statusMessage = "Создан новый чертёж на основе лётного шаблона."
+        statusMessage = "Создан новый аппарат: \(architecture.displayName)."
     }
 
     func undo() {
@@ -166,7 +184,35 @@ final class WorkbenchViewModel: ObservableObject {
     }
 
     private func recompute() {
-        stats = WorkbenchBuildAnalyzer.analyze(build)
+        stats = Self.resolvedStats(for: build)
+    }
+
+    /// Analyzer totals retain every propulsion unit for electrical sizing.
+    /// In a lift+cruise aircraft the forward propeller cannot contribute to
+    /// hover, so the inspector/readiness values must use only lift rotors.
+    private static func resolvedStats(for build: WorkbenchBuild) -> WorkbenchBuildStats {
+        var result = WorkbenchBuildAnalyzer.analyze(build)
+        let frame = build.resolvedFrame
+        guard frame.architecture == .liftCruiseVTOL else { return result }
+
+        let p = WorkbenchComponentSpec.ParamKey.self
+        let singleThrust = build.spec(for: .motor)?.param(p.motorMaxThrustN) ?? 0
+        result.totalMaxThrustN = singleThrust * Double(frame.liftMotorCount)
+        let weight = result.totalMassKg * 9.80665
+        result.thrustToWeight = weight > 0 ? result.totalMaxThrustN / weight : 0
+
+        if result.batteryEnergyWh > 0,
+           let motorPower = build.spec(for: .motor)?.param(p.motorMaxPowerW),
+           motorPower > 0,
+           frame.liftMotorCount > 0,
+           result.thrustToWeight > 0 {
+            let hoverThrottle = sqrt(min(1, 1 / result.thrustToWeight))
+            let hoverPower = motorPower * Double(frame.liftMotorCount)
+                * pow(hoverThrottle, 1.55)
+            result.estimatedHoverTimeMin = result.batteryEnergyWh
+                / max(hoverPower, 1) * 60 * 0.82
+        }
+        return result
     }
 
     private func pushUndo() {
@@ -188,11 +234,17 @@ final class WorkbenchViewModel: ObservableObject {
         }
     }
 
-    func applyPendingImport(as role: WorkbenchAssemblyRole) {
+    func applyPendingImport(
+        as role: WorkbenchAssemblyRole,
+        frameArchitecture: WorkbenchVehicleArchitecture? = nil
+    ) {
         guard let imported = pendingImport else { return }
         pushUndo()
         switch role {
         case .frame:
+            if let frameArchitecture {
+                build.vehicleArchitecture = frameArchitecture
+            }
             build.frame = .imported(imported.construction)
             build.revision += 1
             selectedCategory = .frame
@@ -251,7 +303,7 @@ final class WorkbenchViewModel: ObservableObject {
         do {
             _ = try WorkbenchBuildStore.saveToLibrary(build)
             refreshBlueprints()
-            statusMessage = "Чертёж «\(build.name)» сохранён в избранное."
+            statusMessage = "Модель «\(build.name)» сохранена в каталог «Пользовательские»."
         } catch {
             statusMessage = "Не удалось сохранить чертёж: \(error.localizedDescription)"
         }
@@ -269,7 +321,7 @@ final class WorkbenchViewModel: ObservableObject {
         do {
             try WorkbenchBuildStore.deleteFromLibrary(summary)
             refreshBlueprints()
-            statusMessage = "Чертёж удалён из избранного."
+            statusMessage = "Модель удалена из каталога «Пользовательские»."
         } catch {
             statusMessage = "Не удалось удалить чертёж: \(error.localizedDescription)"
         }

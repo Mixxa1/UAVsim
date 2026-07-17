@@ -29,17 +29,37 @@ struct UAVCatalogView: View {
                     .foregroundStyle(GroundControlPalette.textSecondary)
                     .padding(.vertical, 6)
             } else {
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(selectionState.filteredEntries) { entry in
-                        catalogCard(
-                            entry: entry,
-                            isSelected: selectionState.activeEntry?.id == entry.id
-                        )
+                let builtInEntries = selectionState.filteredEntries.filter { !$0.isWorkbench }
+                let userEntries = selectionState.filteredEntries.filter(\.isWorkbench)
+                VStack(alignment: .leading, spacing: 12) {
+                    if !builtInEntries.isEmpty {
+                        Text("КАТАЛОГ")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                        LazyVGrid(columns: columns, spacing: 8) {
+                            ForEach(builtInEntries) { entry in
+                                catalogCard(
+                                    entry: entry,
+                                    isSelected: selectionState.activeEntry?.id == entry.id)
+                            }
+                        }
+                    }
+                    if !userEntries.isEmpty {
+                        Text("ПОЛЬЗОВАТЕЛЬСКИЕ")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(GroundControlPalette.accent)
+                        LazyVGrid(columns: columns, spacing: 8) {
+                            ForEach(userEntries) { entry in
+                                catalogCard(
+                                    entry: entry,
+                                    isSelected: selectionState.activeEntry?.id == entry.id)
+                            }
+                        }
                     }
                 }
             }
 
-            if selectionState.activeEntry?.isCustom == true {
+            if selectionState.activeEntry?.isAbstract == true {
                 Button("uav.catalog.edit_abstract") {
                     onEditAbstract()
                 }
@@ -56,11 +76,12 @@ struct UAVCatalogView: View {
                 name: entry.profile.localizedDisplayName,
                 manufacturer: entry.profile.localizedManufacturer,
                 previewProfile: entry.profile,
+                runtimePreviewProfile: entry.runtimeProfile,
                 massKg: entry.profile.payloadDataResolution.maxTakeoffMass ?? entry.profile.payloadDataResolution.baseMass,
                 speedMps: entry.profile.nominalCruiseSpeedMps,
                 flightTimeSec: entry.profile.nominalFlightTimeSec,
                 rangeMeters: entry.profile.nominalMaxRangeM,
-                badgeText: entry.isCustom ? localized("uav.badge.custom") : entry.profile.specConfidence.catalogTitle.uppercased(),
+                badgeText: entry.isWorkbench ? "ПОЛЬЗОВАТЕЛЬСКИЙ" : (entry.isCustom ? localized("uav.badge.custom") : entry.profile.specConfidence.catalogTitle.uppercased()),
                 badgeTint: entry.isCustom ? .orange : badgeTint(for: entry.profile.specConfidence),
                 isSelected: isSelected
             ) {

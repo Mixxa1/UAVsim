@@ -68,6 +68,10 @@ enum WorkbenchBuildStore {
         .sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
+    static func listLibraryBuilds() -> [WorkbenchBuild] {
+        listLibrary().compactMap { try? load(from: $0.url) }
+    }
+
     static func deleteFromLibrary(_ summary: WorkbenchBlueprintSummary) throws {
         try FileManager.default.removeItem(at: summary.url)
     }

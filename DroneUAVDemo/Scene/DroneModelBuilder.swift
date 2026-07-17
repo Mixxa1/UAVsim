@@ -52,7 +52,12 @@ struct DroneVisualModel {
 enum DroneModelBuilder {
     static func build(profile: DroneModelProfile) -> DroneVisualModel {
         let rawModel: DroneVisualModel
-        if let uavProfile = profile.resolvedUAVProfile {
+        if let workbenchBuild = profile.workbenchBuild {
+            rawModel = WorkbenchModelBuilder.simulationVisual(for: workbenchBuild)
+            if profile.airframeClass == .multirotor {
+                rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
+            }
+        } else if let uavProfile = profile.resolvedUAVProfile {
             rawModel = UAVVisualFactory.build(profile: uavProfile)
             if profile.airframeClass == .multirotor {
                 // Keep new real-world rotorcraft aligned with the legacy chase-camera frame.

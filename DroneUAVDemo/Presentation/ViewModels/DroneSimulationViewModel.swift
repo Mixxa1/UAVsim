@@ -1664,6 +1664,12 @@ final class DroneSimulationViewModel: ObservableObject {
         self.abstractParameters = abstract
         let repository = LIPODroneModelRepository(abstractParameters: abstract)
         var models = repository.allProfiles
+        for build in WorkbenchBuildStore.listLibraryBuilds() {
+            let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: build)
+            if !models.contains(where: { $0.id == profile.id }) {
+                models.append(profile)
+            }
+        }
         if let initialDroneProfile {
             if let index = models.firstIndex(where: { $0.id == initialDroneProfile.id }) {
                 models[index] = initialDroneProfile
@@ -9378,11 +9384,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func buildProjectSnapshot() -> ProjectSnapshot {
         ProjectSnapshot(
-            schemaVersion: 1,
+            schemaVersion: 2,
             projectID: currentProjectID,
             projectName: currentProjectName,
             savedAt: Date(),
             selectedDroneModelID: selectedDroneProfile.id,
+            workbenchBuild: selectedDroneProfile.workbenchBuild,
             flightModeRaw: mode.rawValue,
             flightControlModeRaw: flightControlMode.rawValue,
             diagnosticModeRaw: diagnosticMode.rawValue,
@@ -9505,9 +9512,27 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionRadiusMeters: snapshot.abstractParameters.collisionRadiusMeters
         )
         abstractParameters = abstract
-        availableDroneProfiles = LIPODroneModelRepository(abstractParameters: abstract).allProfiles
+        var restoredProfiles = LIPODroneModelRepository(abstractParameters: abstract).allProfiles
+        for build in WorkbenchBuildStore.listLibraryBuilds() {
+            let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: build)
+            if let index = restoredProfiles.firstIndex(where: { $0.id == profile.id }) {
+                restoredProfiles[index] = profile
+            } else {
+                restoredProfiles.append(profile)
+            }
+        }
+        if let embeddedBuild = snapshot.workbenchBuild {
+            let embeddedProfile = UAVBuildProfileSynthesizer.synthesizeProfile(for: embeddedBuild)
+            if let index = restoredProfiles.firstIndex(where: { $0.id == embeddedProfile.id }) {
+                restoredProfiles[index] = embeddedProfile
+            } else {
+                restoredProfiles.append(embeddedProfile)
+            }
+        }
+        availableDroneProfiles = restoredProfiles
 
-        let selectedModelID = LIPODroneModelRepository.canonicalModelID(snapshot.selectedDroneModelID)
+        let selectedModelID = snapshot.workbenchBuild.map(UAVBuildProfileSynthesizer.profileID(for:))
+            ?? LIPODroneModelRepository.canonicalModelID(snapshot.selectedDroneModelID)
         if let profile = availableDroneProfiles.first(where: { $0.id == selectedModelID }) {
             selectedDroneProfile = profile
             activeUAVProfile = Self.resolveActiveUAVProfile(for: profile, abstractParameters: abstract)

@@ -501,6 +501,9 @@ struct DroneModelProfile: Identifiable, Hashable {
     let notes: String
     let sourceURL: URL?
     let uavProfileID: String?
+    /// Exact self-contained Workbench assembly used for user-authored models.
+    /// Nil for the built-in and legacy abstract catalog profiles.
+    let workbenchBuild: WorkbenchBuild?
 
     init(
         id: String,
@@ -533,7 +536,8 @@ struct DroneModelProfile: Identifiable, Hashable {
         propulsionUnitTemplate: [PropulsionUnit] = [],
         notes: String,
         sourceURL: URL?,
-        uavProfileID: String? = nil
+        uavProfileID: String? = nil,
+        workbenchBuild: WorkbenchBuild? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -568,6 +572,7 @@ struct DroneModelProfile: Identifiable, Hashable {
         self.notes = notes
         self.sourceURL = sourceURL
         self.uavProfileID = uavProfileID
+        self.workbenchBuild = workbenchBuild
     }
 
     var isAbstract: Bool {
@@ -575,6 +580,9 @@ struct DroneModelProfile: Identifiable, Hashable {
     }
 
     var resolvedUAVProfile: UAVProfile? {
+        if let workbenchBuild {
+            return UAVBuildProfileSynthesizer.catalogProfile(for: workbenchBuild)
+        }
         guard let uavProfileID else {
             return nil
         }

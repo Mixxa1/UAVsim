@@ -269,16 +269,36 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         )
     }
 
-    lazy var missionUAVProfiles: [DroneModelProfile] = {
-        LIPODroneModelRepository(abstractParameters: .default).allProfiles
-    }()
+    /// Mission setup reads this each time it is presented, so a model saved from
+    /// Workbench immediately appears under the mission UAV choices without an
+    /// application restart. Keeping the exact synthesized profile (and therefore
+    /// its embedded `WorkbenchBuild`) also prevents the mission preview/runtime
+    /// from degrading to the legacy abstract airframe.
+    var missionUAVProfiles: [DroneModelProfile] {
+        var profiles = LIPODroneModelRepository(abstractParameters: .default).allProfiles
+        for build in WorkbenchBuildStore.listLibraryBuilds() {
+            let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: build)
+            if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+                profiles[index] = profile
+            } else {
+                profiles.append(profile)
+            }
+        }
+        return profiles
+    }
 
     func launchMission(config: MissionScenarioConfiguration) {
+        // Carry the selected runtime profile into the new simulation in addition
+        // to its stable ID, preserving the embedded exact Workbench assembly.
+        let selectedProfile = missionUAVProfiles.first {
+            $0.id == config.selectedUAVProfileID
+        }
         activeSimulation?.stopRuntimeForExit()
         activeSimulation = DroneSimulationViewModel(
             projectStorage: projectStorage,
             initialProjectID: projectStorage.createProjectID(),
             initialProjectName: NSLocalizedString("mission.project.name", comment: ""),
+            initialDroneProfile: selectedProfile,
             missionScenarioContext: config
         )
     }

@@ -169,10 +169,16 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             let size = maximum - minimum
             let extent = max(size.x, size.z, size.y * 2.8, Float(0.18))
             let target = center + SIMD3<Float>(extent * 0.09, -extent * 0.045, 0)
+            let isWinged = viewModel.build.vehicleArchitecture != .multicopter
             cameraOrbitTarget = target
-            minimumCameraDistance = max(extent * 1.0, 0.34)
-            maximumCameraDistance = min(max(extent * 2.25, 0.86), 1.02)
-            let initialDistance = min(max(extent * 1.9, 0.78), maximumCameraDistance)
+            minimumCameraDistance = max(extent * (isWinged ? 0.68 : 1.0), 0.34)
+            maximumCameraDistance = max(
+                minimumCameraDistance + 0.16,
+                min(max(extent * (isWinged ? 1.42 : 2.25), 0.86), isWinged ? 1.65 : 1.02))
+            let initialDistance = min(
+                max(extent * (isWinged ? 1.24 : 1.9), 0.78),
+                maximumCameraDistance)
+            camera.camera?.fieldOfView = isWinged ? 42 : 34
             let viewingDirection = simd_normalize(SIMD3<Float>(0.84, 0.62, 1.18))
             camera.simdPosition = target + viewingDirection * initialDistance
             camera.look(at: SCNVector3(target.x, target.y, target.z))
@@ -966,6 +972,10 @@ struct WorkbenchPartPreview: NSViewRepresentable {
     var frame: WorkbenchFrameSpec?
     var component: WorkbenchComponentSpec?
 
+    final class Coordinator {
+        var representedKey: String?
+    }
+
     init(frame: WorkbenchFrameSpec) {
         self.frame = frame
         component = nil
@@ -976,27 +986,50 @@ struct WorkbenchPartPreview: NSViewRepresentable {
         self.component = component
     }
 
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
     func makeNSView(context: Context) -> SCNView {
         let view = SCNView(frame: .zero)
         view.backgroundColor = .clear
         view.autoenablesDefaultLighting = false
-        view.antialiasingMode = .multisampling4X
+        view.antialiasingMode = .multisampling2X
+        view.rendersContinuously = false
         view.scene = thumbnailScene()
         view.pointOfView = view.scene?.rootNode.childNode(withName: "preview.camera", recursively: false)
+        context.coordinator.representedKey = identityKey
         return view
     }
 
     func updateNSView(_ nsView: SCNView, context: Context) {
+        guard context.coordinator.representedKey != identityKey else { return }
         nsView.scene = thumbnailScene()
         nsView.pointOfView = nsView.scene?.rootNode.childNode(withName: "preview.camera", recursively: false)
+        context.coordinator.representedKey = identityKey
+    }
+
+    private var identityKey: String {
+        if let frame { return "frame.\(frame.id).\(frame.hashValue)" }
+        if let component { return "component.\(component.id).\(component.hashValue)" }
+        return "empty"
     }
 
     private func thumbnailScene() -> SCNScene {
         let scene = SCNScene()
-        let model = frame.map { WorkbenchModelBuilder.previewNode(for: $0) }
-            ?? component.map { WorkbenchModelBuilder.previewNode(for: $0) }
-            ?? SCNNode()
-        prepareMaterialsForPreview(in: model)
+        scene.lightingEnvironment.contents = NSColor(deviceWhite: 0.58, alpha: 1)
+        scene.lightingEnvironment.intensity = 0.42
+        let cacheKey = identityKey as NSString
+        let model: SCNNode
+        if let cached = Self.modelCache.object(forKey: cacheKey) {
+            model = cached.clone()
+        } else {
+            model = frame.map { WorkbenchModelBuilder.previewNode(for: $0) }
+                ?? component.map { WorkbenchModelBuilder.previewNode(for: $0) }
+                ?? SCNNode()
+            prepareMaterialsForPreview(in: model)
+            Self.modelCache.setObject(model.clone(), forKey: cacheKey, cost: model.childNodes.count + 1)
+        }
         scene.rootNode.addChildNode(model)
 
         let bounds = model.boundingBox
@@ -1006,10 +1039,14 @@ struct WorkbenchPartPreview: NSViewRepresentable {
         let extent = max(simd_length(hi - lo), Float(0.025))
 
         let camera = SCNCamera()
-        camera.fieldOfView = 31
+        camera.usesOrthographicProjection = true
+        camera.orthographicScale = Double(extent * 0.86)
         camera.zNear = 0.001
         camera.zFar = 20
         camera.wantsHDR = false
+        camera.wantsExposureAdaptation = false
+        camera.exposureOffset = -0.35
+        camera.screenSpaceAmbientOcclusionIntensity = 0
         camera.bloomIntensity = 0
         let cameraNode = SCNNode()
         cameraNode.name = "preview.camera"
@@ -1018,42 +1055,80 @@ struct WorkbenchPartPreview: NSViewRepresentable {
         cameraNode.look(at: SCNVector3(center.x, center.y, center.z))
         scene.rootNode.addChildNode(cameraNode)
 
+        // A restrained radial surface grounds the product without turning the
+        // transparent card into a miniature boxed diorama.
+        let catcher = SCNPlane(
+            width: CGFloat(extent * 1.34),
+            height: CGFloat(extent * 1.34))
+        let catcherMaterial = SCNMaterial()
+        catcherMaterial.lightingModel = .physicallyBased
+        catcherMaterial.diffuse.contents = Self.previewShadowTexture
+        catcherMaterial.roughness.contents = NSNumber(value: 0.92)
+        catcherMaterial.metalness.contents = NSNumber(value: 0.0)
+        catcherMaterial.blendMode = .alpha
+        catcherMaterial.isDoubleSided = true
+        catcher.materials = [catcherMaterial]
+        let catcherNode = SCNNode(geometry: catcher)
+        catcherNode.eulerAngles.x = -.pi / 2
+        catcherNode.simdPosition = SIMD3<Float>(center.x, lo.y - extent * 0.018, center.z)
+        catcherNode.castsShadow = false
+        scene.rootNode.addChildNode(catcherNode)
+
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.color = NSColor(deviceWhite: 0.86, alpha: 1)
-        ambient.light?.intensity = 90
+        ambient.light?.color = NSColor(deviceRed: 0.78, green: 0.81, blue: 0.84, alpha: 1)
+        ambient.light?.intensity = 24
         scene.rootNode.addChildNode(ambient)
 
         let key = SCNNode()
         key.light = SCNLight()
         key.light?.type = .directional
-        key.light?.color = NSColor(deviceRed: 0.96, green: 0.95, blue: 0.92, alpha: 1)
-        key.light?.intensity = 260
+        key.light?.color = NSColor(deviceRed: 1.0, green: 0.95, blue: 0.88, alpha: 1)
+        key.light?.intensity = 112
+        // The radial catcher already supplies a readable contact shadow. A
+        // shadow map per card is disproportionately expensive in a large shelf.
+        key.light?.castsShadow = false
         key.eulerAngles = SCNVector3(-0.72, 0.48, -0.30)
         scene.rootNode.addChildNode(key)
 
         let fill = SCNNode()
         fill.light = SCNLight()
         fill.light?.type = .omni
-        fill.light?.color = NSColor(deviceRed: 0.82, green: 0.84, blue: 0.86, alpha: 1)
-        fill.light?.intensity = 45
+        fill.light?.color = NSColor(deviceRed: 0.72, green: 0.82, blue: 0.94, alpha: 1)
+        fill.light?.intensity = 18
         fill.simdPosition = center + SIMD3<Float>(-extent, extent * 0.4, extent * 0.7)
         scene.rootNode.addChildNode(fill)
+
+        let rim = SCNNode()
+        rim.light = SCNLight()
+        rim.light?.type = .directional
+        rim.light?.color = NSColor(deviceRed: 0.78, green: 0.86, blue: 0.96, alpha: 1)
+        rim.light?.intensity = 28
+        rim.eulerAngles = SCNVector3(-0.38, -2.22, 0.12)
+        scene.rootNode.addChildNode(rim)
         return scene
     }
 
     private func prepareMaterialsForPreview(in node: SCNNode) {
         func prepare(_ geometry: SCNGeometry?) {
             geometry?.materials.forEach { material in
-                // Card previews must not inherit the exposure-sensitive PBR setup
-                // used by the full workshop scene. Blinn keeps catalogue colours
-                // stable even when the window or card size changes.
-                material.lightingModel = .blinn
+                // Preserve the same roughness, metalness and normal response as
+                // the assembled model. Flattening everything to Blinn made metal,
+                // carbon, heat-shrink and ceramic look like identical painted toys.
+                if material.lightingModel != .constant {
+                    material.lightingModel = .physicallyBased
+                }
                 material.emission.contents = NSColor.black
-                material.multiply.contents = NSColor.white
-                material.specular.contents = NSColor(deviceWhite: 0.30, alpha: 1)
-                material.shininess = 0.22
+                if material.multiply.contents == nil {
+                    material.multiply.contents = NSColor.white
+                }
+                if material.roughness.contents == nil {
+                    material.roughness.contents = NSNumber(value: 0.52)
+                }
+                if material.metalness.contents == nil {
+                    material.metalness.contents = NSNumber(value: 0.05)
+                }
             }
         }
 
@@ -1062,4 +1137,29 @@ struct WorkbenchPartPreview: NSViewRepresentable {
             prepare(child.geometry)
         }
     }
+
+    private static let previewShadowTexture: NSImage = {
+        let size = NSSize(width: 256, height: 256)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        let colors = [
+            NSColor(deviceWhite: 0.035, alpha: 0.33),
+            NSColor(deviceWhite: 0.035, alpha: 0.12),
+            NSColor(deviceWhite: 0.035, alpha: 0.0),
+        ]
+        let locations: [CGFloat] = [0.0, 0.52, 1.0]
+        let gradient = NSGradient(colors: colors, atLocations: locations, colorSpace: .deviceRGB)
+        gradient?.draw(in: NSRect(origin: .zero, size: size), relativeCenterPosition: .zero)
+        image.unlockFocus()
+        return image
+    }()
+
+    private static let modelCache: NSCache<NSString, SCNNode> = {
+        let cache = NSCache<NSString, SCNNode>()
+        cache.countLimit = 160
+        cache.totalCostLimit = 12_000
+        return cache
+    }()
 }

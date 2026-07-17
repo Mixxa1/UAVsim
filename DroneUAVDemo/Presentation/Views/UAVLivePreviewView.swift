@@ -9,11 +9,15 @@ import SwiftUI
 /// scrollable card grid.
 struct UAVLivePreviewView: View {
     let profile: UAVProfile?
+    var runtimeProfile: DroneModelProfile? = nil
     var isSpinning: Bool = true
 
     var body: some View {
         if let profile {
-            UAVLivePreviewRepresentable(profile: profile, isSpinning: isSpinning)
+            UAVLivePreviewRepresentable(
+                profile: profile,
+                runtimeProfile: runtimeProfile,
+                isSpinning: isSpinning)
         } else {
             Image(systemName: "questionmark.square.dashed")
                 .font(.title2)
@@ -25,6 +29,7 @@ struct UAVLivePreviewView: View {
 
 private struct UAVLivePreviewRepresentable: NSViewRepresentable {
     let profile: UAVProfile
+    let runtimeProfile: DroneModelProfile?
     let isSpinning: Bool
 
     func makeNSView(context: Context) -> SCNView {
@@ -35,12 +40,16 @@ private struct UAVLivePreviewRepresentable: NSViewRepresentable {
         view.autoenablesDefaultLighting = false
         view.preferredFramesPerSecond = 20
         view.rendersContinuously = false
-        context.coordinator.apply(profile: profile, isSpinning: isSpinning, to: view)
+        context.coordinator.apply(
+            profile: profile, runtimeProfile: runtimeProfile,
+            isSpinning: isSpinning, to: view)
         return view
     }
 
     func updateNSView(_ nsView: SCNView, context: Context) {
-        context.coordinator.apply(profile: profile, isSpinning: isSpinning, to: nsView)
+        context.coordinator.apply(
+            profile: profile, runtimeProfile: runtimeProfile,
+            isSpinning: isSpinning, to: nsView)
     }
 
     static func dismantleNSView(_ nsView: SCNView, coordinator: Coordinator) {
@@ -54,10 +63,20 @@ private struct UAVLivePreviewRepresentable: NSViewRepresentable {
         private var loadedProfileID: String?
         private var rootNode: SCNNode?
 
-        func apply(profile: UAVProfile, isSpinning: Bool, to view: SCNView) {
-            if loadedProfileID != profile.id {
-                loadedProfileID = profile.id
-                let (scene, root) = UAVPreviewSceneBuilder.makeScene(for: profile)
+        func apply(
+            profile: UAVProfile,
+            runtimeProfile: DroneModelProfile?,
+            isSpinning: Bool,
+            to view: SCNView
+        ) {
+            let visualID = runtimeProfile?.workbenchBuild.map {
+                "\(runtimeProfile?.id ?? profile.id).\($0.revision)"
+            } ?? profile.id
+            if loadedProfileID != visualID {
+                loadedProfileID = visualID
+                let (scene, root) = runtimeProfile?.workbenchBuild == nil
+                    ? UAVPreviewSceneBuilder.makeScene(for: profile)
+                    : UAVPreviewSceneBuilder.makeScene(for: runtimeProfile!)
                 view.scene = scene
                 rootNode = root
             }
@@ -76,8 +95,15 @@ private struct UAVLivePreviewRepresentable: NSViewRepresentable {
 }
 
 private enum UAVPreviewSceneBuilder {
+    static func makeScene(for runtimeProfile: DroneModelProfile) -> (scene: SCNScene, root: SCNNode) {
+        makeScene(model: DroneModelBuilder.build(profile: runtimeProfile))
+    }
+
     static func makeScene(for profile: UAVProfile) -> (scene: SCNScene, root: SCNNode) {
-        let model = UAVVisualFactory.build(profile: profile)
+        makeScene(model: UAVVisualFactory.build(profile: profile))
+    }
+
+    private static func makeScene(model: DroneVisualModel) -> (scene: SCNScene, root: SCNNode) {
         let scene = SCNScene()
         scene.rootNode.addChildNode(model.rootNode)
 

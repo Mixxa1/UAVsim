@@ -320,6 +320,7 @@ struct MissionSetupView: View {
                                         name: profile.uiDisplayName,
                                         manufacturer: profile.manufacturer,
                                         previewProfile: previewProfile(for: profile),
+                                        runtimePreviewProfile: profile,
                                         massKg: profile.takeoffMassKg,
                                         speedMps: profile.resolvedUAVProfile?.nominalCruiseSpeedMps ?? profile.maxHorizontalSpeedMps,
                                         flightTimeSec: profile.resolvedUAVProfile?.nominalFlightTimeSec ?? profile.maxFlightTimeMin * 60.0,

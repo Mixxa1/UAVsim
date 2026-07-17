@@ -1,11 +1,26 @@
 import Foundation
 
+enum UAVCatalogSource: Hashable {
+    case builtIn
+    case abstract
+    case workbench(UUID)
+}
+
 struct UAVCatalogEntry: Identifiable, Hashable {
     let runtimeProfile: DroneModelProfile
     let profile: UAVProfile
+    let source: UAVCatalogSource
 
     var id: String { runtimeProfile.id }
     var isCustom: Bool { profile.specConfidence == .custom }
+    var isWorkbench: Bool {
+        if case .workbench = source { return true }
+        return false
+    }
+    var isAbstract: Bool {
+        if case .abstract = source { return true }
+        return false
+    }
 }
 
 enum UAVCatalog {
@@ -17,7 +32,15 @@ enum UAVCatalog {
             guard let profile = resolveProfile(for: runtimeProfile, abstractParameters: abstractParameters) else {
                 return nil
             }
-            return UAVCatalogEntry(runtimeProfile: runtimeProfile, profile: profile)
+            let source: UAVCatalogSource
+            if let build = runtimeProfile.workbenchBuild {
+                source = .workbench(build.id)
+            } else if runtimeProfile.isAbstract {
+                source = .abstract
+            } else {
+                source = .builtIn
+            }
+            return UAVCatalogEntry(runtimeProfile: runtimeProfile, profile: profile, source: source)
         }
     }
 

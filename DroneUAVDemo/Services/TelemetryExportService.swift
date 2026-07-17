@@ -153,6 +153,10 @@ struct ProjectSnapshot: Codable {
     var savedAt: Date
 
     var selectedDroneModelID: String
+    /// Exact, self-contained Workbench assembly. Optional keeps projects
+    /// written before schema 2 decodable and also lets a project reopen after
+    /// its catalog entry has been deleted from the user's library.
+    var workbenchBuild: WorkbenchBuild?
     var flightModeRaw: String
     var flightControlModeRaw: String
     var diagnosticModeRaw: String

@@ -12,6 +12,7 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
     let name: String
     let manufacturer: String?
     let previewProfile: UAVProfile?
+    let runtimePreviewProfile: DroneModelProfile?
     let massKg: Float?
     let speedMps: Float?
     let flightTimeSec: Float?
@@ -25,6 +26,7 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
         name: String,
         manufacturer: String?,
         previewProfile: UAVProfile?,
+        runtimePreviewProfile: DroneModelProfile? = nil,
         massKg: Float?,
         speedMps: Float?,
         flightTimeSec: Float?,
@@ -37,6 +39,7 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
         self.name = name
         self.manufacturer = manufacturer
         self.previewProfile = previewProfile
+        self.runtimePreviewProfile = runtimePreviewProfile
         self.massKg = massKg
         self.speedMps = speedMps
         self.flightTimeSec = flightTimeSec
@@ -49,7 +52,7 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            UAVLivePreviewView(profile: previewProfile)
+            UAVLivePreviewView(profile: previewProfile, runtimeProfile: runtimePreviewProfile)
                 .frame(height: 108)
                 .background(GroundControlPalette.shell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 

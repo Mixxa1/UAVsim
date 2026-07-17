@@ -10,6 +10,7 @@ struct WorkbenchView: View {
     var onClose: () -> Void
 
     @State private var importRole: WorkbenchAssemblyRole = .frame
+    @State private var importArchitecture: WorkbenchVehicleArchitecture = .multicopter
     @State private var isInspectorVisible = true
 
     private let accent = GroundControlPalette.accent
@@ -235,10 +236,8 @@ struct WorkbenchView: View {
 
     private var overviewShelf: some View {
         HStack(spacing: 12) {
-            quickAction("plus.square.on.square", "Новая сборка", "Начать с лётного шаблона") {
-                viewModel.newBuild()
-            }
-            quickAction("star.fill", "В избранное", "Сохранить текущий Blueprint") {
+            newAircraftMenu
+            quickAction("square.stack.3d.up.fill", "В каталог", "Сохранить в «Пользовательские»") {
                 viewModel.saveFavorite()
             }
             quickAction("doc.badge.arrow.up", "Экспорт", ".uavbuild с CAD-мешами") {
@@ -250,6 +249,41 @@ struct WorkbenchView: View {
             Spacer()
         }
         .padding(16)
+    }
+
+    private var newAircraftMenu: some View {
+        Menu {
+            Button("Мультиротор", systemImage: "circle.grid.cross") {
+                viewModel.newBuild(.multicopter)
+            }
+            Button("Самолёт", systemImage: "airplane") {
+                viewModel.newBuild(.fixedWing)
+            }
+            Button("Lift + Cruise VTOL", systemImage: "airplane.circle") {
+                viewModel.newBuild(.liftCruiseVTOL)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "plus.square.on.square")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Новый аппарат").font(.system(size: 12, weight: .bold))
+                    Text("Коптер · самолёт · VTOL")
+                        .font(.system(size: 9))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+            }
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .padding(.horizontal, 14)
+            .frame(width: 190, height: 72, alignment: .leading)
+            .background(raised, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(GroundControlPalette.borderStrong))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     private func quickAction(
@@ -295,7 +329,7 @@ struct WorkbenchView: View {
 
     private func horizontalCards<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) { content() }
+            LazyHStack(spacing: 10) { content() }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
         }
@@ -396,7 +430,7 @@ struct WorkbenchView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "plus")
                         .font(.system(size: 30, weight: .light)).foregroundStyle(accent)
-                    Text("Сохранить текущий")
+                    Text("Сохранить в каталог")
                         .font(.caption.weight(.bold))
                 }
                 .foregroundStyle(GroundControlPalette.textPrimary)
@@ -525,13 +559,16 @@ struct WorkbenchView: View {
                     .background(inset, in: RoundedRectangle(cornerRadius: 6))
             }
             inspectorSection("Характеристики", icon: "gauge.with.dots.needle.67percent") {
+                statRow("Тип аппарата", viewModel.build.vehicleArchitecture.displayName)
                 statRow("Рама", viewModel.frameName)
                 statRow("Взлётная масса", formatMass(viewModel.stats.totalMassKg))
                 statRow("Макс. тяга", String(format: "%.1f Н", viewModel.stats.totalMaxThrustN))
                 statRow("Тяга / вес", String(format: "%.2f", viewModel.stats.thrustToWeight))
                 statRow("Макс. RPM", formatNumber(viewModel.stats.maxRPM))
                 statRow("Расчётная скорость", String(format: "%.1f м/с", viewModel.stats.estimatedMaxSpeedMps))
-                statRow("Время висения", String(format: "%.1f мин", viewModel.stats.estimatedHoverTimeMin))
+                statRow(viewModel.build.vehicleArchitecture == .fixedWing
+                        ? "Время полёта" : "Время висения",
+                        String(format: "%.1f мин", viewModel.stats.estimatedHoverTimeMin))
             }
         }
     }
@@ -540,8 +577,15 @@ struct WorkbenchView: View {
         let frame = viewModel.build.resolvedFrame
         return inspectorSection("Установленная рама", icon: "square.on.square.intersection.dashed") {
             Text(frame.name).font(.system(size: 15, weight: .bold))
+            statRow("Архитектура", frame.architecture.displayName)
             statRow("Класс", frame.frameClass.displayName)
-            statRow("Моторных лучей", "\(frame.motorMounts.count)")
+            statRow("Силовых установок", "\(frame.motorMounts.count)")
+            if frame.architecture == .liftCruiseVTOL {
+                statRow("Подъёмных моторов", "\(frame.liftMotorCount)")
+            }
+            if !frame.servoMounts.isEmpty {
+                statRow("Сервоприводов", "\(frame.servoMounts.count)")
+            }
             statRow("Макс. пропеллер", String(format: "%.1f\"", frame.propMaxInch))
             statRow("Макс. статор", String(format: "%.0f мм", frame.motorStatorMaxMm))
             statRow("Масса", formatMass(frame.massKg))
@@ -561,6 +605,38 @@ struct WorkbenchView: View {
                     Text(component.summary).font(.system(size: 10)).foregroundStyle(GroundControlPalette.textSecondary)
                 }
                 statRow("Масса", formatMass(component.massKg))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("МЕСТО УСТАНОВКИ")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                    if component.kind == .motor || component.kind == .propeller {
+                        Text("Повторяется во всех силовых точках выбранной рамы.")
+                            .font(.system(size: 9))
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                    } else if component.kind == .servo,
+                              !viewModel.build.resolvedFrame.servoMounts.isEmpty {
+                        Text("Повторяется в \(viewModel.build.resolvedFrame.servoMounts.count) точках рулевых поверхностей.")
+                            .font(.system(size: 9))
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                    } else {
+                        Picker("Место установки", selection: Binding(
+                            get: { viewModel.mountSurface(for: component.kind) },
+                            set: { viewModel.setMountSurface($0, for: component.kind) }
+                        )) {
+                            ForEach(WorkbenchMountSurface.allCases) { surface in
+                                Text(surface.displayName).tag(surface)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if component.kind == .battery {
+                            Text("АКБ можно закрепить сверху или снизу; раскладчик добавит салазки, ремни и безопасный зазор.")
+                                .font(.system(size: 9))
+                                .foregroundStyle(GroundControlPalette.textSecondary)
+                        }
+                    }
+                }
                 ForEach(componentProperties(component), id: \.0) { property in
                     statRow(property.0, property.1)
                 }
@@ -660,6 +736,15 @@ struct WorkbenchView: View {
             Text("Роль определяет точку установки, расчёт массы и правила совместимости.")
                 .font(.callout).foregroundStyle(.secondary)
 
+            if importRole == .frame {
+                Picker("Архитектура аппарата", selection: $importArchitecture) {
+                    ForEach(WorkbenchVehicleArchitecture.allCases, id: \.self) { architecture in
+                        Text(architecture.displayName).tag(architecture)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
                     ForEach(WorkbenchAssemblyRole.all) { role in
@@ -690,7 +775,11 @@ struct WorkbenchView: View {
             HStack {
                 Spacer()
                 Button("Отмена") { viewModel.cancelPendingImport() }
-                Button("Добавить в сборку") { viewModel.applyPendingImport(as: importRole) }
+                Button("Добавить в сборку") {
+                    viewModel.applyPendingImport(
+                        as: importRole,
+                        frameArchitecture: importRole == .frame ? importArchitecture : nil)
+                }
                     .buttonStyle(.borderedProminent).tint(accent)
             }
         }
@@ -706,6 +795,7 @@ struct WorkbenchView: View {
         switch component.kind {
         case .motor:
             if let value = component.param(p.motorKv) { result.append(("KV", String(format: "%.0f", value))) }
+            if let value = component.param(p.motorStatorMm) { result.append(("Статор", String(format: "%.0f мм", value))) }
             if let value = component.param(p.motorMaxPowerW) { result.append(("Мощность", String(format: "%.0f Вт", value))) }
             if let value = component.param(p.motorMaxThrustN) { result.append(("Тяга", String(format: "%.1f Н", value))) }
         case .propeller:
@@ -713,14 +803,50 @@ struct WorkbenchView: View {
                let pitch = component.param(p.propPitchInch) {
                 result.append(("Размер", String(format: "%.1f × %.1f\"", diameter, pitch)))
             }
+            if let blades = component.param(p.propBladeCount) { result.append(("Лопасти", String(format: "%.0f", blades))) }
         case .battery:
             if let cells = component.param(p.batteryCells) { result.append(("Напряжение", String(format: "%.0fS · %.1f В", cells, cells * 3.7))) }
             if let capacity = component.param(p.batteryCapacityMah) { result.append(("Ёмкость", String(format: "%.0f мА·ч", capacity))) }
             if let energy = component.param(p.batteryEnergyWh) { result.append(("Энергия", String(format: "%.1f Вт·ч", energy))) }
+            if let cRating = component.param(p.batteryContinuousC) { result.append(("Токоотдача", String(format: "%.0fC", cRating))) }
+            if let length = component.param(p.batteryLengthMm),
+               let width = component.param(p.batteryWidthMm),
+               let height = component.param(p.batteryHeightMm) {
+                result.append(("Габариты", String(format: "%.0f×%.0f×%.0f мм", length, width, height)))
+            }
         case .esc:
             if let current = component.param(p.escMaxCurrentA) { result.append(("Макс. ток", String(format: "%.0f A", current))) }
-            if let cells = component.param(p.escMaxCells) { result.append(("Питание", String(format: "до %.0fS", cells))) }
-        default: break
+            if let minimum = component.param(p.escMinCells),
+               let maximum = component.param(p.escMaxCells) {
+                result.append(("Питание", String(format: "%.0f–%.0fS", minimum, maximum)))
+            }
+        case .servo:
+            if let torque = component.param(p.servoTorqueNm) { result.append(("Момент", String(format: "%.2f Н·м", torque))) }
+            if let speed = component.param(p.servoSpeedSec60) { result.append(("Скорость", String(format: "%.3f с/60°", speed))) }
+            if let minimum = component.param(p.servoMinVolts),
+               let maximum = component.param(p.servoMaxVolts) {
+                result.append(("Питание", String(format: "%.1f–%.1f В", minimum, maximum)))
+            }
+        case .flightController:
+            if let mount = component.param(p.flightControllerMountMm) { result.append(("Монтаж", String(format: "%.1f×%.1f мм", mount, mount))) }
+            if let uarts = component.param(p.flightControllerUartCount) { result.append(("UART", String(format: "%.0f", uarts))) }
+        case .receiver:
+            if let frequency = component.param(p.receiverFrequencyMHz) { result.append(("Частота", String(format: "%.0f МГц", frequency))) }
+            if let range = component.param(p.receiverRangeKm) { result.append(("Дальность", String(format: "%.0f км", range))) }
+        case .camera:
+            if let fov = component.param(p.cameraFovDegrees) { result.append(("Угол обзора", String(format: "%.0f°", fov))) }
+            if let resolution = component.param(p.cameraResolutionMP) { result.append(("Матрица", String(format: "%.1f Мп", resolution))) }
+        case .gps:
+            if let accuracy = component.param(p.gpsAccuracyM) { result.append(("Точность", String(format: "%.2f м", accuracy))) }
+            if let frequency = component.param(p.gpsUpdateHz) { result.append(("Обновление", String(format: "%.0f Гц", frequency))) }
+        case .sensor:
+            if let range = component.param(p.sensorRangeM), range > 0 { result.append(("Дальность", String(format: "%.0f м", range))) }
+            if let fov = component.param(p.sensorFovDegrees) { result.append(("Поле зрения", String(format: "%.0f°", fov))) }
+        case .payload:
+            if let power = component.param(p.payloadPowerW) { result.append(("Потребление", String(format: "%.1f Вт", power))) }
+            if let range = component.param(p.sensorRangeM) { result.append(("Дальность", String(format: "%.0f м", range))) }
+        case .landingGear:
+            if let clearance = component.param(p.landingGearClearanceMm) { result.append(("Клиренс", String(format: "%.0f мм", clearance))) }
         }
         return result
     }
@@ -741,6 +867,7 @@ struct WorkbenchView: View {
     private func frameCandidateStats(_ frame: WorkbenchFrameSpec) -> WorkbenchBuildStats {
         var candidate = viewModel.build
         candidate.frame = .library(id: frame.id)
+        candidate.vehicleArchitecture = frame.architecture
         return WorkbenchBuildAnalyzer.analyze(candidate)
     }
 
@@ -764,6 +891,7 @@ struct WorkbenchView: View {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         importRole = preferredRole
+        importArchitecture = viewModel.build.vehicleArchitecture
         viewModel.prepareImport(from: url)
     }
 
