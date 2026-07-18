@@ -1122,6 +1122,12 @@ final class DroneSimulationViewModel: ObservableObject {
     private(set) var componentGraph: VehicleComponentGraph = .empty
     private(set) var vehicleContactProfile: VehicleContactProfile = .empty
     private var vehicleMassProperties: VehicleMassProperties = .fallback
+    /// Pristine rotor layout from the builder; `vehicleRotorModel` is the
+    /// same layout with damage/failure thrust factors baked in.
+    private var pristineRotorModel: VehicleRotorModel = .empty
+    private(set) var vehicleRotorModel: VehicleRotorModel = .empty
+    private var vehicleAeroDamage: FixedWingAeroDamage = .pristine
+    private let componentFailureRuntime = ComponentFailureRuntime()
     private let batteryThermalService: BatteryThermalSimulationService
     private let telemetryExporter: TelemetryExporting
     private let projectStorage: ProjectStorageManaging
@@ -5183,6 +5189,11 @@ final class DroneSimulationViewModel: ObservableObject {
         collisionCooldown = max(0.0, collisionCooldown - dt)
         supportReacquireBlockTimer = max(0.0, supportReacquireBlockTimer - dt)
         decayFixedWingAssistOverrideTimers(deltaTime: dt)
+        componentFailureRuntime.tick(deltaTime: dt)
+        if !componentFailureRuntime.isEmpty {
+            // Intermittent failures toggle over time — re-bake their factors.
+            refreshDamagePhysicsModels()
+        }
 
         applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
         updateHandLaunchPOVWalk(deltaTime: dt)
@@ -5225,7 +5236,10 @@ final class DroneSimulationViewModel: ObservableObject {
             vehicleMassModel: vehicleMassModel,
             fixedWingLaunchDynamics: activeFixedWingLaunchDynamics,
             vehicleMassProperties: vehicleMassProperties,
-            contactProfile: vehicleContactProfile
+            contactProfile: vehicleContactProfile,
+            rotorModel: vehicleRotorModel,
+            aeroDamage: vehicleAeroDamage,
+            jammedSurfaces: componentFailureRuntime.jammedSurfaces()
         )
 
         let previousState = state
@@ -5425,6 +5439,9 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let renderStart = CACurrentMediaTime()
         if !performancePolicy.stopRendering {
+            sceneController.setDamageVibrationLevel(
+                vehicleRotorModel.vibrationLevel * state.motorThrottle
+            )
             sceneController.applyWeatherVisual(weather)
             sceneController.update(
                 with: state,
@@ -5569,6 +5586,26 @@ final class DroneSimulationViewModel: ObservableObject {
             // Localized damage went into the graph — project onto the legacy
             // DamageState so overlay/diagnostics/battery model keep working.
             damageState = componentGraph.projectedLegacyDamageState(base: damageState)
+
+            // Roll for new failure modes and re-bake the physics-facing
+            // damage models (rotor thrust factors, aero deltas).
+            let assignedFailures = componentFailureRuntime.noteDamage(
+                entries: report.damage,
+                graph: componentGraph,
+                currentAileron: state.aileronDeflection,
+                currentElevator: state.elevatorDeflection,
+                currentRudder: state.rudderDeflection
+            )
+            refreshDamagePhysicsModels()
+            #if DEBUG
+            if !assignedFailures.isEmpty {
+                print("[DamageFx] failures assigned: \(assignedFailures.joined(separator: ", "))")
+            }
+            let factors = vehicleRotorModel.rotors
+                .map { "\($0.slot)=\(String(format: "%.2f", $0.thrustFactor))" }
+                .joined(separator: " ")
+            print("[DamageFx] rotors: \(factors) vib=\(String(format: "%.2f", vehicleRotorModel.vibrationLevel))")
+            #endif
         }
 
         let severityGain: Float
@@ -9699,10 +9736,34 @@ final class DroneSimulationViewModel: ObservableObject {
                     graph.setIntegrity(component.integrity, id: component.id)
                 }
             }
+        } else {
+            componentFailureRuntime.reset()
         }
         componentGraph = graph
         vehicleContactProfile = output.contactProfile
         vehicleMassProperties = graph.massProperties
+        pristineRotorModel = output.rotorModel
+        refreshDamagePhysicsModels()
+    }
+
+    /// Bakes graph integrity + active failure modes into the physics-facing
+    /// damage models: per-rotor thrust/vibration factors and the fixed-wing
+    /// aero deltas. Called after every damage event, after graph rebuilds,
+    /// and every tick while intermittent failures are toggling.
+    private func refreshDamagePhysicsModels() {
+        var model = pristineRotorModel
+        for index in model.rotors.indices {
+            let slot = model.rotors[index].slot
+            let propIntegrity = componentGraph.integrity(id: "propeller.\(slot)")
+            let motorIntegrity = componentGraph.integrity(id: "motor.\(slot)")
+            let factor = VehicleRotorModel.propellerThrustFactor(integrity: propIntegrity) *
+                VehicleRotorModel.motorThrustFactor(integrity: motorIntegrity) *
+                componentFailureRuntime.motorFailureFactor(slot: slot)
+            model.rotors[index].thrustFactor = min(1.0, max(0.0, factor))
+            model.rotors[index].vibration01 = VehicleRotorModel.propellerVibration(integrity: propIntegrity)
+        }
+        vehicleRotorModel = model
+        vehicleAeroDamage = FixedWingAeroDamage.build(from: componentGraph)
     }
 
     private func syncPayloadLifecycleEvents() {
@@ -17199,12 +17260,21 @@ final class DroneSimulationViewModel: ObservableObject {
         let angularSpeed = simd_length(state.angularVelocity)
         let supportY = supportSurfaceY(for: state.position)
         let previousSupportY = supportSurfaceY(for: previousState.position)
-        let nearGround = (state.position.y - supportY) <= 0.08
+        // Contact-aware: a tilted/tipped airframe rests with its origin at
+        // clearance(attitude) above the support (phase-1 ground clamp), so
+        // every height threshold here must include it. Without this, a
+        // tipped-over copter (clearance > 0.08) never read as nearGround,
+        // never met severeAttitudeOnGround -> never crashed, and kept
+        // thrashing on the ground under power; a fixed-wing that touched
+        // down slightly rolled never reached .landed and never leveled.
+        let groundClearance = vehicleGroundClearance()
+        let nearGround = (state.position.y - supportY) <= groundClearance + 0.08
         let stableGroundContact = nearGround &&
             abs(state.velocity.y) <= 0.24 &&
             planarSpeed <= 0.75 &&
             angularSpeed <= 1.8
-        let confidentlyAirborne = (state.position.y - supportY) >= 0.18 || (!nearGround && abs(state.velocity.y) > 0.28)
+        let confidentlyAirborne = (state.position.y - supportY) >= groundClearance + 0.18 ||
+            (!nearGround && abs(state.velocity.y) > 0.28)
         let groundedBaseline = resolvedFlightBaseline(for: mode)
         let takeoffThrottleThreshold = groundedBaseline.groundedTakeoffThreshold
         let lowThrottle = max(Float(controlValues.throttle), state.throttle, state.motorThrottle) <= groundedBaseline.groundedIdleThreshold
@@ -17227,7 +17297,8 @@ final class DroneSimulationViewModel: ObservableObject {
             airborneAccumulator = 0.0
         }
 
-        if previousState.position.y > previousSupportY + 0.06 && state.position.y <= supportY + 0.02 {
+        if previousState.position.y > previousSupportY + groundClearance + 0.06,
+           state.position.y <= supportY + groundClearance + 0.02 {
             // Same tailsitter carve-out as severeAttitudeOnGround below: a
             // correct nose-up touchdown (pitch ~ +90°) shouldn't itself
             // count as impact severity — measure deviation from the
@@ -17315,7 +17386,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         let contact = supportSurfaceContact(for: state.position)
         let supportY = contact?.height ?? 0.0
-        guard state.position.y <= supportY + 0.08 else {
+        guard state.position.y <= supportY + vehicleGroundClearance() + 0.08 else {
             // A resting drone whose support VANISHED (as opposed to one climbing away from a
             // still-present surface) has slid past a roof edge — arm the re-acquisition block.
             if restSupportNormalLatch != nil, contact == nil {

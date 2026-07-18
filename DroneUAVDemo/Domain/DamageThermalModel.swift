@@ -176,8 +176,13 @@ struct DamageState {
     var batteryPenaltyMultiplier: Float {
         let batteryHealth = health(for: .battery)
         let escHealth = health(for: .escPower)
-        let penalty = 1.0 + (1.0 - batteryHealth) * 0.6 + (1.0 - escHealth) * 0.35
-        return penalty.clamped(to: 1.0...2.0)
+        // Damaged propellers/motors force the healthy ones to compensate —
+        // real current draw goes up with the same commanded flight.
+        let propHealth = averageHealth(for: [.propellerFL, .propellerFR, .propellerRL, .propellerRR])
+        let motorHealth = averageHealth(for: [.motorFL, .motorFR, .motorRL, .motorRR])
+        let penalty = 1.0 + (1.0 - batteryHealth) * 0.6 + (1.0 - escHealth) * 0.35 +
+            (1.0 - propHealth) * 0.35 + (1.0 - motorHealth) * 0.25
+        return penalty.clamped(to: 1.0...2.2)
     }
 
     var severity: DamageSeverity {

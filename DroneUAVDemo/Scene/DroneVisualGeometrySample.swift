@@ -17,6 +17,9 @@ struct DroneVisualGeometryComponentBox: Hashable {
 struct DroneVisualGeometryPropeller: Hashable {
     let center: SIMD3<Float>
     let radius: Float
+    /// +1 / -1 blade spin direction (from the visual rig's
+    /// `propellerSpinDirections`, index-aligned with the propeller nodes).
+    let spinDirection: Float
 }
 
 struct DroneVisualGeometrySample: Hashable {
@@ -75,13 +78,17 @@ struct DroneVisualGeometrySample: Hashable {
         }
 
         var propellers: [DroneVisualGeometryPropeller] = []
-        for propNode in model.propellerNodes {
+        for (index, propNode) in model.propellerNodes.enumerated() {
             guard let aabb = accumulateBounds(of: propNode, in: bodyFrameNode) else { continue }
             let halfExtents = (aabb.max - aabb.min) * 0.5
+            let spin = index < model.propellerSpinDirections.count
+                ? model.propellerSpinDirections[index]
+                : (index.isMultiple(of: 2) ? 1.0 : -1.0)
             propellers.append(
                 DroneVisualGeometryPropeller(
                     center: (aabb.min + aabb.max) * 0.5,
-                    radius: max(halfExtents.x, halfExtents.y, halfExtents.z, 0.02)
+                    radius: max(halfExtents.x, halfExtents.y, halfExtents.z, 0.02),
+                    spinDirection: spin >= 0.0 ? 1.0 : -1.0
                 )
             )
         }

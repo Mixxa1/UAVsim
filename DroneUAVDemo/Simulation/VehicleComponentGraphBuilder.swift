@@ -10,9 +10,14 @@ enum VehicleComponentGraphBuilder {
     struct Output {
         let graph: VehicleComponentGraph
         let contactProfile: VehicleContactProfile
+        let rotorModel: VehicleRotorModel
 
-        static let empty = Output(graph: .empty, contactProfile: .empty)
+        static let empty = Output(graph: .empty, contactProfile: .empty, rotorModel: .empty)
     }
+
+    /// slot <-> propeller-geometry association carried out of the draft
+    /// builders so the rotor model shares the graph's slot naming exactly.
+    private typealias RotorSlotPair = (slot: String, propeller: DroneVisualGeometryPropeller)
 
     // MARK: - Strength table
     //
@@ -92,13 +97,14 @@ enum VehicleComponentGraphBuilder {
         let structuralBudget = max(0.05, totalMass - payloadMass - batteryMass)
 
         var drafts: [ComponentDraft]
+        let rotorSlots: [RotorSlotPair]
         switch profile.airframeClass {
         case .multirotor:
-            drafts = multirotorDrafts(geometry: geometry)
+            (drafts, rotorSlots) = multirotorDrafts(geometry: geometry)
         case .fixedWing:
-            drafts = fixedWingDrafts(geometry: geometry, includeLiftRotors: false, profile: profile)
+            (drafts, rotorSlots) = fixedWingDrafts(geometry: geometry, includeLiftRotors: false, profile: profile)
         case .hybridVTOL:
-            drafts = fixedWingDrafts(geometry: geometry, includeLiftRotors: true, profile: profile)
+            (drafts, rotorSlots) = fixedWingDrafts(geometry: geometry, includeLiftRotors: true, profile: profile)
         }
 
         // Shared internals every airframe carries.
@@ -181,7 +187,57 @@ enum VehicleComponentGraphBuilder {
             geometry: geometry,
             drafts: drafts
         )
-        return Output(graph: graph, contactProfile: contactProfile)
+        return Output(
+            graph: graph,
+            contactProfile: contactProfile,
+            rotorModel: rotorModel(from: rotorSlots, massProperties: graph.massProperties)
+        )
+    }
+
+    private static func rotorModel(
+        from rotorSlots: [RotorSlotPair],
+        massProperties: VehicleMassProperties
+    ) -> VehicleRotorModel {
+        guard !rotorSlots.isEmpty else { return .empty }
+
+        // Lever arms are taken about the ROTOR-PLANE CENTROID, not the graph
+        // CoM. The graph's CoM sits off the rotor centroid on almost every
+        // airframe (nose gimbal, low battery), and centering the mixer there
+        // makes the collective base thrust produce a constant parasitic
+        // pitch/roll moment the rate loop can only balance with a steady
+        // tilt — a pristine copter drifted ~1.5 m/s in hover and orbited
+        // waypoints instead of capturing them. The legacy model applies
+        // thrust through the CG by construction (a real FC trims this bias
+        // out); the centroid keeps that contract, while damage asymmetry
+        // still produces honest moments via per-rotor thrust factors.
+        var centroid = SIMD3<Float>(repeating: 0.0)
+        for pair in rotorSlots {
+            centroid += pair.propeller.center
+        }
+        centroid /= Float(rotorSlots.count)
+
+        var rotors: [VehicleRotor] = []
+        rotors.reserveCapacity(rotorSlots.count)
+        var armSum: Float = 0.0
+        for pair in rotorSlots {
+            let offset = pair.propeller.center - centroid
+            armSum += simd_length(SIMD2<Float>(offset.x, offset.z))
+            rotors.append(
+                VehicleRotor(
+                    slot: pair.slot,
+                    offsetBody: offset,
+                    spinSign: pair.propeller.spinDirection,
+                    laneIndex: VehicleRotor.laneIndex(forSlot: pair.slot),
+                    thrustFactor: 1.0,
+                    vibration01: 0.0
+                )
+            )
+        }
+        let meanArm = armSum / Float(rotors.count)
+        // κ scales with arm length so yaw authority stays proportionate
+        // across airframe sizes (0.02 N·m/N at a typical 0.15 m arm).
+        let kappa = max(0.004, 0.02 * meanArm / 0.15)
+        return VehicleRotorModel(rotors: rotors, torqueToThrustRatio: kappa)
     }
 
     // MARK: - Drafts
@@ -263,10 +319,13 @@ enum VehicleComponentGraphBuilder {
         }
     }
 
-    private static func multirotorDrafts(geometry: DroneVisualGeometrySample) -> [ComponentDraft] {
+    private static func multirotorDrafts(
+        geometry: DroneVisualGeometrySample
+    ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair]) {
         let center = geometry.boundsCenter
         let size = geometry.boundsSize
         var drafts: [ComponentDraft] = []
+        var rotorSlots: [RotorSlotPair] = []
 
         let frame = ComponentDraft(
             kind: .frame,
@@ -284,6 +343,7 @@ enum VehicleComponentGraphBuilder {
                 quadrant = quadrantSlot(of: prop.center, center: center, index: max(4, index))
             }
             usedSlots.insert(quadrant.slot)
+            rotorSlots.append((quadrant.slot, prop))
 
             let armVector = prop.center - center
             let armMid = center + armVector * 0.55
@@ -322,17 +382,18 @@ enum VehicleComponentGraphBuilder {
             legacy: nil
         ))
 
-        return drafts
+        return (drafts, rotorSlots)
     }
 
     private static func fixedWingDrafts(
         geometry: DroneVisualGeometrySample,
         includeLiftRotors: Bool,
         profile: DroneModelProfile
-    ) -> [ComponentDraft] {
+    ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair]) {
         let center = geometry.boundsCenter
         let size = geometry.boundsSize
         var drafts: [ComponentDraft] = []
+        var rotorSlots: [RotorSlotPair] = []
 
         let fuselage = ComponentDraft(
             kind: .fuselage,
@@ -423,6 +484,7 @@ enum VehicleComponentGraphBuilder {
                 propLegacy = .propellerFL
             }
             usedSlots.insert(slot)
+            rotorSlots.append((slot, prop))
 
             drafts.append(ComponentDraft(
                 kind: .motor(slot: slot),
@@ -448,7 +510,7 @@ enum VehicleComponentGraphBuilder {
             legacy: nil
         ))
 
-        return drafts
+        return (drafts, rotorSlots)
     }
 
     // MARK: - Contact profile

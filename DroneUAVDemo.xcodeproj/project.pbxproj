@@ -89,6 +89,9 @@
 		100000000000000000000A29 /* PayloadFireCapsuleController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2A /* PayloadFireCapsuleController.swift */; };
 		10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000013F /* PayloadCapabilityCheck.swift */; };
 		10000000000000000000023D /* VehicleMassModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000140 /* VehicleMassModel.swift */; };
+		10000000000000000000F100 /* VehicleRotorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F101 /* VehicleRotorModel.swift */; };
+		10000000000000000000F102 /* FixedWingAeroDamage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F103 /* FixedWingAeroDamage.swift */; };
+		10000000000000000000F104 /* ComponentFailureRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F105 /* ComponentFailureRuntime.swift */; };
 		10000000000000000000F000 /* VehicleComponentGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F001 /* VehicleComponentGraph.swift */; };
 		10000000000000000000F002 /* DroneVisualGeometrySample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F003 /* DroneVisualGeometrySample.swift */; };
 		10000000000000000000F004 /* VehicleComponentGraphBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */; };
@@ -456,6 +459,9 @@
 		100000000000000000000A2A /* PayloadFireCapsuleController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadFireCapsuleController.swift; sourceTree = "<group>"; };
 		10000000000000000000013F /* PayloadCapabilityCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadCapabilityCheck.swift; sourceTree = "<group>"; };
 		100000000000000000000140 /* VehicleMassModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleMassModel.swift; sourceTree = "<group>"; };
+		10000000000000000000F101 /* VehicleRotorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleRotorModel.swift; sourceTree = "<group>"; };
+		10000000000000000000F103 /* FixedWingAeroDamage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAeroDamage.swift; sourceTree = "<group>"; };
+		10000000000000000000F105 /* ComponentFailureRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentFailureRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000F001 /* VehicleComponentGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleComponentGraph.swift; sourceTree = "<group>"; };
 		10000000000000000000F003 /* DroneVisualGeometrySample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneVisualGeometrySample.swift; sourceTree = "<group>"; };
 		10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleComponentGraphBuilder.swift; sourceTree = "<group>"; };
@@ -884,6 +890,8 @@
 				100000000000000000000133 /* UAVVisualPreset.swift */,
 				100000000000000000000140 /* VehicleMassModel.swift */,
 				10000000000000000000F001 /* VehicleComponentGraph.swift */,
+				10000000000000000000F101 /* VehicleRotorModel.swift */,
+				10000000000000000000F103 /* FixedWingAeroDamage.swift */,
 				100000000000000000000107 /* DroneState.swift */,
 				10000000000000000000010A /* TelemetrySnapshot.swift */,
 				100000000000000000000112 /* TerrainModel.swift */,
@@ -917,6 +925,7 @@
 				100000000000000000000118 /* CollisionAnalysisService.swift */,
 				10000000000000000000F007 /* ImpactResolutionService.swift */,
 				10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */,
+				10000000000000000000F105 /* ComponentFailureRuntime.swift */,
 				10000000000000000000011F /* DroneFleetManager.swift */,
 				10000000000000000000010B /* DronePhysicsEngine.swift */,
 				100000000000000000000119 /* DroneSimulationContext.swift */,
@@ -1543,6 +1552,9 @@
 				10000000000000000000023C /* PayloadCapabilityCheck.swift in Sources */,
 				10000000000000000000023D /* VehicleMassModel.swift in Sources */,
 				10000000000000000000F000 /* VehicleComponentGraph.swift in Sources */,
+				10000000000000000000F100 /* VehicleRotorModel.swift in Sources */,
+				10000000000000000000F102 /* FixedWingAeroDamage.swift in Sources */,
+				10000000000000000000F104 /* ComponentFailureRuntime.swift in Sources */,
 				10000000000000000000F002 /* DroneVisualGeometrySample.swift in Sources */,
 				10000000000000000000F004 /* VehicleComponentGraphBuilder.swift in Sources */,
 				10000000000000000000F006 /* ImpactResolutionService.swift in Sources */,

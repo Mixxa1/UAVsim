@@ -44,30 +44,37 @@ struct BreakpointTable1D {
 /// which is the nonlinear behavior that lets a real aircraft depart into a
 /// spin instead of just losing lift uniformly.
 struct FixedWingAerodynamics {
-    let wingArea: Float
+    // `var` (not `let`) fields are the ones structural damage modifies via
+    // `applyingDamage` — everything else stays immutable airframe identity.
+    var wingArea: Float
     let wingSpan: Float
     let meanChord: Float
     let stallAlphaRad: Float
 
     let clTable: BreakpointTable1D
-    let cd0: Float
+    var cd0: Float
     let inducedDragFactor: Float
     let stallDragBump: Float
 
     let cm0: Float
-    let cmAlpha: Float
-    let cmDeltaE: Float
-    let cmq: Float
+    var cmAlpha: Float
+    var cmDeltaE: Float
+    var cmq: Float
 
     let clBeta: Float
-    let clDeltaA: Float
+    var clDeltaA: Float
     let clp: Float
 
-    let cnBeta: Float
-    let cnDeltaR: Float
-    let cnr: Float
+    var cnBeta: Float
+    var cnDeltaR: Float
+    var cnr: Float
 
     let cyBeta: Float
+
+    /// Constant rolling/yawing-moment offsets from asymmetric structural
+    /// damage (see FixedWingAeroDamage). Zero for a pristine airframe.
+    var clRollDamageOffset: Float = 0.0
+    var cnYawDamageOffset: Float = 0.0
 
     let maxElevatorRad: Float
     let maxAileronRad: Float
@@ -138,19 +145,41 @@ struct FixedWingAerodynamics {
         return cm0 + effectiveCmAlpha * alphaRad + cmDeltaE * elevatorFraction + effectiveCmq * qHat
     }
 
-    /// Rolling moment coefficient: sideslip (dihedral) + aileron + roll-rate damping.
+    /// Rolling moment coefficient: sideslip (dihedral) + aileron + roll-rate
+    /// damping + the constant asymmetric-damage offset.
     func rollMoment(alphaRad: Float, betaRad: Float, aileronFraction: Float, pHat: Float) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
         let effectiveClp = clp * (1.0 - 0.5 * blend)
-        return clBeta * betaRad + clDeltaA * aileronFraction + effectiveClp * pHat
+        return clBeta * betaRad + clDeltaA * aileronFraction + effectiveClp * pHat + clRollDamageOffset
     }
 
-    /// Yawing moment coefficient: sideslip (weathercock) + rudder + yaw-rate damping.
+    /// Yawing moment coefficient: sideslip (weathercock) + rudder + yaw-rate
+    /// damping + the constant asymmetric-damage offset.
     func yawMoment(alphaRad: Float, betaRad: Float, rudderFraction: Float, rHat: Float) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
         let effectiveCnBeta = cnBeta * (1.0 - 0.5 * blend)
         let effectiveCnr = cnr * (1.0 - 0.5 * blend)
-        return effectiveCnBeta * betaRad + cnDeltaR * rudderFraction + effectiveCnr * rHat
+        return effectiveCnBeta * betaRad + cnDeltaR * rudderFraction + effectiveCnr * rHat + cnYawDamageOffset
+    }
+
+    /// Applies structural-damage deltas on top of the pristine model.
+    /// Neutral deltas return the model untouched, so the undamaged flight
+    /// path stays bit-identical.
+    func applyingDamage(_ damage: FixedWingAeroDamage) -> FixedWingAerodynamics {
+        guard !damage.isPristine else { return self }
+        var damaged = self
+        damaged.wingArea = wingArea * max(0.2, damage.liftScale)
+        damaged.cd0 = cd0 + max(0.0, damage.cd0Extra)
+        damaged.clDeltaA = clDeltaA * damage.aileronScale.clampedUnit()
+        damaged.cmDeltaE = cmDeltaE * damage.elevatorScale.clampedUnit()
+        damaged.cmAlpha = cmAlpha * damage.pitchStabilityScale.clampedUnit()
+        damaged.cmq = cmq * damage.pitchStabilityScale.clampedUnit()
+        damaged.cnDeltaR = cnDeltaR * damage.rudderScale.clampedUnit()
+        damaged.cnBeta = cnBeta * damage.yawStabilityScale.clampedUnit()
+        damaged.cnr = cnr * damage.yawStabilityScale.clampedUnit()
+        damaged.clRollDamageOffset = clRollDamageOffset + damage.clRollOffset
+        damaged.cnYawDamageOffset = cnYawDamageOffset + damage.cnYawOffset
+        return damaged
     }
 
     static func build(

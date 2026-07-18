@@ -215,6 +215,13 @@ final class DroneSceneController {
     /// Body-frame geometry of the currently built visual, captured once per
     /// build — the component-graph/contact-profile source for physics.
     private(set) var currentVisualGeometry: DroneVisualGeometrySample = .empty
+    /// 0...1 blade-imbalance level from damaged propellers (set per frame by
+    /// the view model) — modulates FPV camera shake.
+    private var damageVibrationLevel: Float = 0.0
+
+    func setDamageVibrationLevel(_ level: Float) {
+        damageVibrationLevel = level.clamped(to: 0.0...1.0)
+    }
     private let droneCollisionProxyNode = SCNNode()
     private var droneCollisionProxyRadius: Float = 0.18
     private var fpvObstructionHidingActive: Bool = false
@@ -4262,8 +4269,10 @@ final class DroneSceneController {
         topCameraNode.simdPosition = simd_mix(topCameraNode.simdPosition, topPosition, SIMD3<Float>(repeating: response))
         topCameraNode.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
 
-        cameraNoisePhase += deltaTime * 5.6
-        let shake = settings.fpv.shake.clamped(to: 0.0...0.3)
+        // Damaged-propeller imbalance adds onto the configured baseline
+        // shake: higher frequency than the normal sway (blade-rate buzz).
+        cameraNoisePhase += deltaTime * (5.6 + damageVibrationLevel * 22.0)
+        let shake = (settings.fpv.shake + damageVibrationLevel * 0.22).clamped(to: 0.0...0.42)
         let sway = SIMD3<Float>(
             sin(cameraNoisePhase * 2.7) * 0.015 * shake,
             sin(cameraNoisePhase * 1.9 + 0.5) * 0.010 * shake,

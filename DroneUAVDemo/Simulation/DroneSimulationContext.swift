@@ -42,6 +42,15 @@ struct DroneSimulationContext {
     /// Multi-sphere physical contact profile of the built visual. Empty
     /// profile falls back to the legacy single-point ground clamp.
     let contactProfile: VehicleContactProfile
+    /// Per-rotor thrust model with damage/failure factors baked in — the
+    /// multirotor mixer and VTOL per-unit thrust sums consume this. Empty
+    /// model keeps the legacy single-virtual-rotor math.
+    let rotorModel: VehicleRotorModel
+    /// Aerodynamic deltas from structural damage (wing sections, tails).
+    let aeroDamage: FixedWingAeroDamage
+    /// Control surfaces seized by servo/structure failures: channel ->
+    /// frozen deflection fraction, bypassing command and slew.
+    let jammedSurfaces: [FlightSurfaceChannel: Float]
 
     init(
         profile: DroneModelProfile,
@@ -54,7 +63,10 @@ struct DroneSimulationContext {
         vehicleMassModel: VehicleMassModel,
         fixedWingLaunchDynamics: FixedWingLaunchDynamics? = nil,
         vehicleMassProperties: VehicleMassProperties = .fallback,
-        contactProfile: VehicleContactProfile = .empty
+        contactProfile: VehicleContactProfile = .empty,
+        rotorModel: VehicleRotorModel = .empty,
+        aeroDamage: FixedWingAeroDamage = .pristine,
+        jammedSurfaces: [FlightSurfaceChannel: Float] = [:]
     ) {
         self.profile = profile
         self.activeUAVProfile = activeUAVProfile
@@ -67,5 +79,8 @@ struct DroneSimulationContext {
         self.fixedWingLaunchDynamics = fixedWingLaunchDynamics
         self.vehicleMassProperties = vehicleMassProperties
         self.contactProfile = contactProfile
+        self.rotorModel = rotorModel
+        self.aeroDamage = aeroDamage
+        self.jammedSurfaces = jammedSurfaces
     }
 }

@@ -21,6 +21,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// since it's filter state, not physical state — fixed-wing only.
     private var windGustState = SIMD3<Float>(repeating: 0.0)
 
+    /// Oscillator phase for the blade-imbalance vibration disturbance —
+    /// engine-instance filter state, like `windGustState` above.
+    private var vibrationPhase: Float = 0.0
+
     func step(
         state: DroneState,
         control: DroneControlInput,
@@ -147,15 +151,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             angularDamping = SIMD3<Float>(14.0, 14.0, 11.0)
         }
 
-        let angularAccel = (desiredRates - state.angularVelocity) * rateGain - state.angularVelocity * angularDamping
+        let commandedAngularAccel = (desiredRates - state.angularVelocity) * rateGain - state.angularVelocity * angularDamping
 
-        next.angularVelocity = state.angularVelocity + angularAccel * dt
-        next.angularVelocity = clampMagnitude(next.angularVelocity, limit: 8.0)
-        next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
-
-        let q = orientationQuaternion(from: next.orientation)
         let liftPenalty = baseline.liftPenaltyMultiplier.clamped(to: 0.78...1.02)
-        let thrustMagnitude = rotorBorneThrustMagnitude(
+        let commandedThrust = rotorBorneThrustMagnitude(
             motorThrottle: motorThrottle,
             baseline: baseline,
             authority: authority,
@@ -163,6 +162,80 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             batteryFactor: batteryFactor,
             liftPenalty: liftPenalty
         )
+
+        // --- Per-rotor control allocation. The commanded torque is the
+        // legacy rate-loop's angular acceleration times the graph inertia —
+        // for a pristine, unsaturated, symmetric layout the mixer reproduces
+        // it exactly, so the tuned flight feel is preserved; damage and
+        // saturation bend it physically (a dead rotor leaves an honest
+        // residual moment the loop cannot trim out).
+        let rotorModel = context.rotorModel
+        let angularAccel: SIMD3<Float>
+        let thrustMagnitude: Float
+        // Per-lane commanded-thrust fractions for the rotor spin visuals
+        // (FL/FR/RL/RR); pristine default mirrors the collective throttle.
+        var laneThrustFraction = SIMD4<Float>(repeating: motorThrottle)
+        var laneAlive = SIMD4<Float>(repeating: 1.0)
+        if rotorModel.isEmpty {
+            angularAccel = commandedAngularAccel
+            thrustMagnitude = commandedThrust
+        } else {
+            // Inertia in the engine's (roll, pitch, yaw) rate order: roll is
+            // about body Z, pitch about X, yaw about Y.
+            let inertiaXYZ = simd_max(
+                context.vehicleMassProperties.inertiaDiagonal,
+                SIMD3<Float>(repeating: 0.0005)
+            )
+            let inertiaRates = SIMD3<Float>(inertiaXYZ.z, inertiaXYZ.x, inertiaXYZ.y)
+            let desiredTorque = commandedAngularAccel * inertiaRates
+
+            let maxTotalThrust = rotorBorneThrustMagnitude(
+                motorThrottle: 1.0,
+                baseline: baseline,
+                authority: authority,
+                mass: mass,
+                batteryFactor: batteryFactor,
+                liftPenalty: liftPenalty
+            )
+            let maxRotorThrust = maxTotalThrust / Float(max(1, rotorModel.rotors.count))
+            let allocation = rotorModel.allocate(
+                desiredTorque: desiredTorque,
+                desiredCollective: commandedThrust,
+                maxRotorThrust: maxRotorThrust
+            )
+
+            var accel = allocation.actualTorque / inertiaRates
+            // Blade-imbalance vibration: a small oscillating disturbance
+            // torque proportional to damage and rotor speed.
+            let vibration = rotorModel.vibrationLevel
+            if vibration > 0.001, motorThrottle > 0.05 {
+                vibrationPhase += dt * (70.0 + motorThrottle * 50.0)
+                // Wrap at 200π: exact for sin(phase) and, since
+                // 1.31·200π == 131·2π, for the 1.31-ratio channel too.
+                if vibrationPhase > 200.0 * .pi {
+                    vibrationPhase -= 200.0 * .pi
+                }
+                let wobble = vibration * motorThrottle * 2.6
+                accel.x += sin(vibrationPhase) * wobble
+                accel.y += sin(vibrationPhase * 1.31 + 0.9) * wobble * 0.8
+            }
+            angularAccel = accel
+            thrustMagnitude = allocation.actualCollective
+
+            for (index, rotor) in rotorModel.rotors.enumerated() {
+                guard let lane = rotor.laneIndex, index < allocation.thrusts.count else { continue }
+                laneThrustFraction[lane] = maxRotorThrust > 0.0001
+                    ? (allocation.thrusts[index] / maxRotorThrust).clamped(to: 0.0...1.0)
+                    : 0.0
+                laneAlive[lane] = rotor.thrustFactor > 0.01 ? 1.0 : 0.0
+            }
+        }
+
+        next.angularVelocity = state.angularVelocity + angularAccel * dt
+        next.angularVelocity = clampMagnitude(next.angularVelocity, limit: 8.0)
+        next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
+
+        let q = orientationQuaternion(from: next.orientation)
         let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
 
         let gravityForce = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
@@ -246,13 +319,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             }
         }
 
-        let rotorOmega: Float
+        let rotorOmega: SIMD4<Float>
         if state.physicalState == .crashed || !control.isArmed {
-            rotorOmega = 0.0
+            rotorOmega = SIMD4<Float>(repeating: 0.0)
         } else if groundRestState && throttleCommand <= groundRestThrottleThreshold {
-            rotorOmega = 58.0
+            rotorOmega = SIMD4<Float>(repeating: 58.0) * laneAlive
         } else {
-            rotorOmega = 120.0 + motorThrottle * 640.0
+            // Per-lane speeds from the mixer's actual per-rotor commands: a
+            // compensating rotor audibly/visibly spins harder, a dead one
+            // stops (laneAlive zeroes it).
+            rotorOmega = (SIMD4<Float>(repeating: 120.0) + laneThrustFraction * 640.0) * laneAlive
         }
         if state.physicalState == .crashed || !control.isArmed {
             next.throttle = 0.0
@@ -262,7 +338,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             next.throttle = motorThrottle
         }
         next.motorThrottle = next.throttle
-        next.rotorAngularSpeed = SIMD4<Float>(repeating: rotorOmega)
+        next.rotorAngularSpeed = rotorOmega
         next.forwardAirspeed = simd_length(SIMD2<Float>(next.velocity.x, next.velocity.z))
 
         return next
@@ -468,7 +544,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             heightM: realHeightMm / 1000.0,
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps
-        )
+        ).applyingDamage(context.aeroDamage)
 
         // --- Control surface mapping: stick/angle commands -> elevator/aileron/rudder deflection fractions.
         var elevatorFraction: Float = 0.0
@@ -547,6 +623,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         elevatorFraction = approach(current: state.elevatorDeflection, target: elevatorFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
         aileronFraction = approach(current: state.aileronDeflection, target: aileronFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
         rudderFraction = approach(current: state.rudderDeflection, target: rudderFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        // Seized/frozen servos override command and slew alike — a jammed
+        // surface holds its deflection no matter who is flying.
+        if let frozen = context.jammedSurfaces[.elevator] { elevatorFraction = frozen }
+        if let frozen = context.jammedSurfaces[.aileron] { aileronFraction = frozen }
+        if let frozen = context.jammedSurfaces[.rudder] { rudderFraction = frozen }
         next.elevatorDeflection = elevatorFraction
         next.aileronDeflection = aileronFraction
         next.rudderDeflection = rudderFraction
@@ -607,7 +688,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let dragAtCruise = 0.5 * airDensity * cruiseSpeed * cruiseSpeed * aero.wingArea * cdTrim
         let referenceThrottle = max(0.2, baseline.cruiseReferenceThrottle)
         let maxThrust = max(0.5, dragAtCruise / referenceThrottle) * batteryFactor
-        let thrustMagnitude = (crashOrDisarmed ? 0.0 : motorThrottle) * maxThrust
+        let thrustMagnitude = (crashOrDisarmed ? 0.0 : motorThrottle) * maxThrust *
+            context.rotorModel.cruiseThrustFactor
         let thrustForceBody = SIMD3<Float>(0, 0, -1) * thrustMagnitude
 
         // --- Propulsion-airframe coupling: prop wash on the tail, torque
@@ -905,7 +987,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             heightM: realHeightMm / 1000.0,
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps
-        )
+        ).applyingDamage(context.aeroDamage)
 
         // --- 2. Control surfaces: identical stick/angle -> elevator/aileron/
         // rudder mapping as stepFixedWingAerodynamic (reused verbatim so the
@@ -963,6 +1045,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         elevatorFraction = approach(current: state.elevatorDeflection, target: elevatorFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
         aileronFraction = approach(current: state.aileronDeflection, target: aileronFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
         rudderFraction = approach(current: state.rudderDeflection, target: rudderFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
+        // Seized/frozen servos override command and slew alike — a jammed
+        // surface holds its deflection no matter who is flying.
+        if let frozen = context.jammedSurfaces[.elevator] { elevatorFraction = frozen }
+        if let frozen = context.jammedSurfaces[.aileron] { aileronFraction = frozen }
+        if let frozen = context.jammedSurfaces[.rudder] { rudderFraction = frozen }
 
         // --- 3. Aerodynamics: identical angle-of-attack model as
         // stepFixedWingAerodynamic. No hover-gating needed — `airspeed` is
@@ -1416,8 +1503,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             case .cruiseProp:
                 magnitude = perCruiseUnitThrustMagnitude
             }
-            thrustForceBody += units[index].thrustDirectionBody * magnitude
-            units[index].rotationalSpeedRadPerSec = s.crashOrDisarmed ? 0.0 : (120.0 + s.motorThrottle * 640.0)
+            // Damage: each unit delivers only what its (geometrically
+            // nearest) rotor's propeller/motor integrity still allows.
+            let damageFactor = context.rotorModel.thrustFactor(
+                nearMount: units[index].mountOffset,
+                centerOfMass: context.vehicleMassProperties.centerOfMassOffset
+            )
+            thrustForceBody += units[index].thrustDirectionBody * (magnitude * damageFactor)
+            units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
+                ? 0.0
+                : (120.0 + s.motorThrottle * 640.0) * (0.4 + 0.6 * damageFactor)
         }
 
         // --- 8. Attitude authority blend: aero moments alone (~zero at
@@ -1528,8 +1623,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         var thrustForceBody = SIMD3<Float>(repeating: 0.0)
         for index in units.indices {
-            thrustForceBody += units[index].thrustDirectionBody * perUnitThrustMagnitude
-            units[index].rotationalSpeedRadPerSec = s.crashOrDisarmed ? 0.0 : (120.0 + s.motorThrottle * 640.0)
+            // Damage: nearest-rotor propeller/motor integrity caps the unit.
+            let damageFactor = context.rotorModel.thrustFactor(
+                nearMount: units[index].mountOffset,
+                centerOfMass: context.vehicleMassProperties.centerOfMassOffset
+            )
+            thrustForceBody += units[index].thrustDirectionBody * (perUnitThrustMagnitude * damageFactor)
+            units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
+                ? 0.0
+                : (120.0 + s.motorThrottle * 640.0) * (0.4 + 0.6 * damageFactor)
         }
 
         // --- 8 (tailsitter variant). Roll/yaw stay under ordinary body-rate
