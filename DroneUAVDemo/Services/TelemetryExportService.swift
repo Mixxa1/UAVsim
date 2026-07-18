@@ -147,6 +147,45 @@ struct ProjectSnapshot: Codable {
         var forwardAirspeed: Float
     }
 
+    struct ComponentDamageRuntime: Codable {
+        var componentID: String
+        var integrity: Float
+        var residualStrength: Float
+        var stiffnessScale: Float
+        var bendRadians: Vec3
+        var translationMeters: Vec3
+        var vibrationScale: Float
+        var attachmentStateRaw: String
+        var forceScale: Float
+        var torqueScale: Float
+        var efficiencyScale: Float
+        var responseSpeedScale: Float
+        var rangeScale: Float
+        var dragScale: Float
+        var performanceVibrationScale: Float
+    }
+
+    struct ConnectionDamageRuntime: Codable {
+        var childComponentID: String
+        var residualStrength: Float
+        var stiffnessScale: Float
+        var attachmentStateRaw: String
+    }
+
+    struct ActiveFailureRuntime: Codable {
+        var componentID: String
+        var modeRaw: String
+        var frozenSurfaceValue: Float?
+        var intermittentActive: Bool
+        var intermittentTimer: Float
+    }
+
+    struct FailureRuntime: Codable {
+        var seed: UInt64
+        var generatorState: UInt64
+        var failures: [ActiveFailureRuntime]
+    }
+
     var schemaVersion: Int
     var projectID: String
     var projectName: String
@@ -175,6 +214,12 @@ struct ProjectSnapshot: Codable {
     var thermalByComponent: [String: Float]
     var missionTimeline: MissionTimeline?
     var missionDebrief: MissionDebrief?
+    /// Added in schema 3. Optional fields preserve decoding of schema 1/2
+    /// projects and fall back to the legacy health projection when absent.
+    var componentDamageRuntime: [ComponentDamageRuntime]? = nil
+    var connectionDamageRuntime: [ConnectionDamageRuntime]? = nil
+    var failureRuntime: FailureRuntime? = nil
+    var massPropertiesRevision: UInt64? = nil
 }
 
 protocol ProjectStorageManaging {
@@ -618,6 +663,13 @@ final class TelemetryExportService: TelemetryExporting {
         "emergency_action",
         "damage_summary",
         "thermal_summary",
+        "damage_event_sequence",
+        "damage_event_type",
+        "damage_event_component_id",
+        "damage_event_collider_id",
+        "damage_event_energy_j",
+        "damage_event_integrity",
+        "damage_mass_revision",
         "fleet_mode",
         "wingman_count",
         "inter_drone_risk",
@@ -695,6 +747,13 @@ final class TelemetryExportService: TelemetryExporting {
             snapshot.emergencyAction,
             snapshot.damageSummary,
             snapshot.thermalSummary,
+            String(snapshot.damageEventSequence),
+            snapshot.damageEventType,
+            snapshot.damageEventComponentID,
+            snapshot.damageEventColliderID,
+            String(format: "%.3f", snapshot.damageEventEnergyJ),
+            String(format: "%.5f", snapshot.damageEventIntegrity),
+            String(snapshot.damageMassPropertiesRevision),
             snapshot.fleetMode,
             String(snapshot.wingmanCount),
             String(format: "%.2f", snapshot.interDroneRisk),

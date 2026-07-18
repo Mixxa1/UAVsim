@@ -7,14 +7,26 @@ struct ImpactSurfaceMaterial: Hashable {
     let restitution: Float
     let friction: Float
     let damageFactor: Float
+    /// Relative resistance of the contacted surface.  This is kept separate
+    /// from restitution: a soft surface can still bounce while absorbing a
+    /// large part of the energy.
+    let hardness: Float
+    let energyAbsorption: Float
+    let cuttingFactor: Float
+    let abrasionFactor: Float
     let isFoliage: Bool
 
-    static let hardStructure = ImpactSurfaceMaterial(restitution: 0.30, friction: 0.60, damageFactor: 1.15, isFoliage: false)
-    static let metalVehicle = ImpactSurfaceMaterial(restitution: 0.30, friction: 0.50, damageFactor: 1.10, isFoliage: false)
-    static let woodTrunk = ImpactSurfaceMaterial(restitution: 0.25, friction: 0.50, damageFactor: 1.00, isFoliage: false)
-    static let foliage = ImpactSurfaceMaterial(restitution: 0.00, friction: 0.10, damageFactor: 0.25, isFoliage: true)
-    static let soil = ImpactSurfaceMaterial(restitution: 0.18, friction: 0.70, damageFactor: 0.85, isFoliage: false)
-    static let generic = ImpactSurfaceMaterial(restitution: 0.25, friction: 0.60, damageFactor: 1.00, isFoliage: false)
+    static let hardStructure = ImpactSurfaceMaterial(restitution: 0.30, friction: 0.60, damageFactor: 1.15, hardness: 0.95, energyAbsorption: 0.12, cuttingFactor: 0.08, abrasionFactor: 0.75, isFoliage: false)
+    static let metalVehicle = ImpactSurfaceMaterial(restitution: 0.30, friction: 0.50, damageFactor: 1.10, hardness: 0.90, energyAbsorption: 0.18, cuttingFactor: 0.15, abrasionFactor: 0.62, isFoliage: false)
+    static let asphalt = ImpactSurfaceMaterial(restitution: 0.24, friction: 0.82, damageFactor: 1.10, hardness: 0.90, energyAbsorption: 0.15, cuttingFactor: 0.03, abrasionFactor: 1.00, isFoliage: false)
+    static let glass = ImpactSurfaceMaterial(restitution: 0.12, friction: 0.35, damageFactor: 0.88, hardness: 0.72, energyAbsorption: 0.42, cuttingFactor: 0.90, abrasionFactor: 0.55, isFoliage: false)
+    static let woodTrunk = ImpactSurfaceMaterial(restitution: 0.25, friction: 0.50, damageFactor: 1.00, hardness: 0.68, energyAbsorption: 0.30, cuttingFactor: 0.42, abrasionFactor: 0.48, isFoliage: false)
+    static let foliage = ImpactSurfaceMaterial(restitution: 0.00, friction: 0.10, damageFactor: 0.00, hardness: 0.02, energyAbsorption: 0.95, cuttingFactor: 0.00, abrasionFactor: 0.00, isFoliage: true)
+    static let soil = ImpactSurfaceMaterial(restitution: 0.18, friction: 0.70, damageFactor: 0.85, hardness: 0.45, energyAbsorption: 0.55, cuttingFactor: 0.00, abrasionFactor: 0.58, isFoliage: false)
+    static let sand = ImpactSurfaceMaterial(restitution: 0.05, friction: 0.72, damageFactor: 0.55, hardness: 0.18, energyAbsorption: 0.82, cuttingFactor: 0.00, abrasionFactor: 0.78, isFoliage: false)
+    static let snow = ImpactSurfaceMaterial(restitution: 0.03, friction: 0.34, damageFactor: 0.32, hardness: 0.08, energyAbsorption: 0.90, cuttingFactor: 0.00, abrasionFactor: 0.15, isFoliage: false)
+    static let water = ImpactSurfaceMaterial(restitution: 0.02, friction: 0.08, damageFactor: 0.62, hardness: 0.12, energyAbsorption: 0.78, cuttingFactor: 0.00, abrasionFactor: 0.04, isFoliage: false)
+    static let generic = ImpactSurfaceMaterial(restitution: 0.25, friction: 0.60, damageFactor: 1.00, hardness: 0.70, energyAbsorption: 0.30, cuttingFactor: 0.05, abrasionFactor: 0.55, isFoliage: false)
 }
 
 // MARK: - Report
@@ -32,12 +44,14 @@ enum ImpactOutcomeTier: String {
 
 struct ImpactReport {
     let componentID: String
+    let obstacleID: UUID
     let obstacleSource: String?
     let material: ImpactSurfaceMaterial
     let impactEnergyJ: Float
     let normalClosingSpeed: Float
     let tier: ImpactOutcomeTier
     let damage: [VehicleComponentGraph.ImpactDamageEntry]
+    let connectionDamage: [VehicleComponentGraph.ConnectionDamageEntry]
     let contactPoint: SIMD3<Float>
     let contactNormal: SIMD3<Float>
     let appliedImpulse: Float
@@ -78,6 +92,9 @@ final class ImpactResolutionService {
             let isTrunk = heightFraction < 0.35 || planarDistance < obstacle.radius * 0.30
             return isTrunk ? .woodTrunk : .foliage
         }
+        if source.contains("glass") || source.contains("window") {
+            return .glass
+        }
         if source.contains("container") || source.contains("building") ||
             source.contains("wall") || source.contains("concrete") ||
             source.contains("crate") || source.contains("structure") {
@@ -85,6 +102,18 @@ final class ImpactResolutionService {
         }
         if source.contains("truck") || source.contains("vehicle") || source.contains("metal") {
             return .metalVehicle
+        }
+        if source.contains("asphalt") || source.contains("runway") || source.contains("road") {
+            return .asphalt
+        }
+        if source.contains("sand") {
+            return .sand
+        }
+        if source.contains("snow") || source.contains("ice") {
+            return .snow
+        }
+        if source.contains("water") || source.contains("river") || source.contains("lake") {
+            return .water
         }
         if source.contains("ground") || source.contains("terrain") || source.contains("soil") {
             return .soil
@@ -131,12 +160,23 @@ final class ImpactResolutionService {
         let orientation = attitudeQuaternion(state: state, airframeClass: airframeClass)
         let normal = simd_normalize(contact.contactNormal)
         let mass = max(0.2, massProperties.totalMassKg)
+        let travel: SIMD3<Float> = state.position - previousPosition
+        let poseAtHit: SIMD3<Float> = previousPosition + travel * contact.hitFraction
+        let contactBodyAtHit = simd_act(
+            orientation.conjugate,
+            contact.contactPoint - poseAtHit
+        )
+        let resolvedComponentID = nearestComponentID(
+            to: contactBodyAtHit,
+            preferred: contact.componentID,
+            graph: graph
+        )
 
         // Contact kinematics are evaluated before touching the position so a
         // resting/tangential contact (a parked aircraft brushing a wall, a
         // gear sphere kissing a container roof at zero approach speed) does
         // NOT get shoved around every tick.
-        let worldCoM = state.position + simd_act(orientation, massProperties.centerOfMassOffset)
+        let worldCoM = poseAtHit + simd_act(orientation, massProperties.centerOfMassOffset)
         let leverArm = contact.contactPoint - worldCoM
         let omegaWorld = worldAngularVelocity(state: state, orientation: orientation, airframeClass: airframeClass)
         let contactVelocity = state.velocity + simd_cross(omegaWorld, leverArm)
@@ -153,12 +193,14 @@ final class ImpactResolutionService {
             }
             return ImpactReport(
                 componentID: contact.componentID,
+                obstacleID: contact.obstacle.id,
                 obstacleSource: contact.obstacle.source,
                 material: material,
                 impactEnergyJ: 0.0,
                 normalClosingSpeed: max(0.0, normalClosingSpeed),
                 tier: .lightTouch,
                 damage: [],
+                connectionDamage: [],
                 contactPoint: contact.contactPoint,
                 contactNormal: normal,
                 appliedImpulse: 0.0
@@ -169,8 +211,6 @@ final class ImpactResolutionService {
         // (its own path — not a jump to some other point), with a small
         // normal separation so the next tick doesn't immediately re-collide.
         let separation = max(0.005, contact.sphereRadius * 0.04)
-        let travel: SIMD3<Float> = state.position - previousPosition
-        let poseAtHit: SIMD3<Float> = previousPosition + travel * contact.hitFraction
         state.position = poseAtHit + normal * separation
 
         // Effective mass along the contact normal: 1/K with the standard
@@ -217,14 +257,19 @@ final class ImpactResolutionService {
 
         // Localized damage from the energy the contact actually absorbed.
         let impactEnergy = 0.5 * effectiveMass * normalClosingSpeed * normalClosingSpeed
-        let primaryStrength = max(0.5, graph.component(id: contact.componentID)?.strengthJ ?? 40.0)
+        let absorption = min(1.0, max(0.0, material.energyAbsorption))
+        let transmittedNormalEnergy = impactEnergy * (1.0 - absorption * 0.65)
+        let abrasionEnergy = 0.5 * effectiveMass * tangentialSpeed * tangentialSpeed *
+            material.abrasionFactor * 0.16
+        let damageEnergy = transmittedNormalEnergy + abrasionEnergy
+        let primaryStrength = max(0.5, graph.component(id: resolvedComponentID)?.strengthJ ?? 40.0)
         var damageFactor = material.damageFactor
-        if rotorsSpinning, isPropellerComponent(contact.componentID, graph: graph) {
+        if rotorsSpinning, isPropellerComponent(resolvedComponentID, graph: graph) {
             // A spinning blade striking anything sheds far more of itself
             // than a static one.
-            damageFactor *= 1.6
+            damageFactor *= 1.6 + material.cuttingFactor * 0.25
         }
-        let energyRatio = impactEnergy * damageFactor / primaryStrength
+        let energyRatio = damageEnergy * damageFactor / primaryStrength
 
         let tier: ImpactOutcomeTier
         switch energyRatio {
@@ -235,30 +280,37 @@ final class ImpactResolutionService {
         }
 
         var damage: [VehicleComponentGraph.ImpactDamageEntry] = []
-        if tier != .lightTouch, applyDamage {
-            let contactBody = simd_act(orientation.conjugate, contact.contactPoint - state.position)
-            let primaryID = nearestComponentID(
-                to: contactBody,
-                preferred: contact.componentID,
-                graph: graph
-            )
+        var connectionDamage: [VehicleComponentGraph.ConnectionDamageEntry] = []
+        if applyDamage, damageEnergy > 0.0001, damageFactor > 0.0 {
             let spreadRadius = 0.15 + 0.45 * min(1.0, energyRatio)
             damage = graph.applyImpact(
-                primaryComponentID: primaryID,
-                energyJ: impactEnergy,
+                primaryComponentID: resolvedComponentID,
+                energyJ: damageEnergy,
                 damageFactor: damageFactor,
-                spreadRadius: spreadRadius
+                spreadRadius: spreadRadius,
+                contactPointBody: contactBodyAtHit
+            )
+            let impulseBody = simd_act(orientation.conjugate, normal * impulseMagnitude)
+            connectionDamage = graph.applyConnectionImpact(
+                primaryComponentID: resolvedComponentID,
+                contactPointBody: contactBodyAtHit,
+                impulseBody: impulseBody,
+                energyJ: damageEnergy,
+                damageFactor: damageFactor * max(0.15, material.hardness),
+                contactDuration: max(0.008, min(0.045, deltaTime))
             )
         }
 
         return ImpactReport(
-            componentID: contact.componentID,
+            componentID: resolvedComponentID,
+            obstacleID: contact.obstacle.id,
             obstacleSource: contact.obstacle.source,
             material: material,
             impactEnergyJ: impactEnergy,
             normalClosingSpeed: normalClosingSpeed,
             tier: tier,
             damage: damage,
+            connectionDamage: connectionDamage,
             contactPoint: contact.contactPoint,
             contactNormal: normal,
             appliedImpulse: impulseMagnitude
@@ -313,7 +365,8 @@ final class ImpactResolutionService {
     // MARK: Foliage
 
     /// Canopy contact: no rigid bounce — viscous drag through the branches
-    /// plus light propeller damage. The aircraft keeps flying through. The
+    /// without rigid-body or structural damage. The aircraft keeps flying
+    /// through. The
     /// contact fires every tick while inside the crown, so the damping must
     /// be dt-scaled (a per-invocation constant factor would stop the
     /// aircraft dead within a handful of frames).
@@ -333,26 +386,16 @@ final class ImpactResolutionService {
         state.angularVelocity *= angularDamping
         state.bodyAngularVelocity *= angularDamping
 
-        var damage: [VehicleComponentGraph.ImpactDamageEntry] = []
-        if applyDamage, rotorsSpinning, speed > 1.0 {
-            // Spinning blades chew through leaves and take chips doing it.
-            let energy = 0.5 * speed * speed * 0.05
-            damage = graph.applyImpact(
-                primaryComponentID: contact.componentID,
-                energyJ: energy,
-                damageFactor: material.damageFactor,
-                spreadRadius: 0.10
-            )
-        }
-
         return ImpactReport(
             componentID: contact.componentID,
+            obstacleID: contact.obstacle.id,
             obstacleSource: contact.obstacle.source,
             material: material,
             impactEnergyJ: 0.0,
             normalClosingSpeed: speed,
-            tier: damage.isEmpty ? .lightTouch : .scrape,
-            damage: damage,
+            tier: .lightTouch,
+            damage: [],
+            connectionDamage: [],
             contactPoint: contact.contactPoint,
             contactNormal: contact.contactNormal,
             appliedImpulse: 0.0
@@ -447,9 +490,26 @@ final class ImpactResolutionService {
         preferred: String,
         graph: VehicleComponentGraph
     ) -> String {
-        let candidates = graph.components(within: 0.05, of: bodyPoint)
-        let structural = candidates.first(where: { $0.kind.isStructural })
-        return structural?.id ?? preferred
+        func distanceToBounds(_ component: VehicleComponent) -> Float {
+            let delta = simd_abs(bodyPoint - component.localPosition) - component.boundingHalfExtents
+            return simd_length(simd_max(delta, SIMD3<Float>(repeating: 0.0)))
+        }
+
+        if let preferredComponent = graph.component(id: preferred),
+           preferredComponent.isAttached,
+           distanceToBounds(preferredComponent) <= 0.015 {
+            return preferred
+        }
+        return graph.attachedComponents
+            .filter { $0.kind.isStructural }
+            .min { lhs, rhs in
+                let lhsDistance = distanceToBounds(lhs)
+                let rhsDistance = distanceToBounds(rhs)
+                if abs(lhsDistance - rhsDistance) < 0.0001 {
+                    return lhs.id < rhs.id
+                }
+                return lhsDistance < rhsDistance
+            }?.id ?? preferred
     }
 
     private func orientationQuaternion(from euler: SIMD3<Float>) -> simd_quatf {

@@ -36,6 +36,42 @@ enum DronePhysicalState: String, CaseIterable {
     }
 }
 
+/// Orthogonal physical state axes.  `DronePhysicalState` remains as the
+/// compatibility lifecycle used by existing UI, while these values prevent
+/// arming, movement, damage and control authority from being collapsed into
+/// one terminal `crashed` flag.
+enum UAVArmState: String, CaseIterable, Codable {
+    case disarmed
+    case armed
+}
+
+enum UAVMotionState: String, CaseIterable, Codable {
+    case grounded
+    case airborne
+    case falling
+    case tumbling
+    case sliding
+    case rolling
+    case floating
+    case settled
+}
+
+enum UAVDamageState: String, CaseIterable, Codable {
+    case nominal
+    case degraded
+    case critical
+    case uncontrolled
+    case destroyed
+}
+
+enum UAVControlState: String, CaseIterable, Codable {
+    case full
+    case reduced
+    case emergency
+    case insufficient
+    case none
+}
+
 struct DroneState {
     var position: SIMD3<Float>
     var velocity: SIMD3<Float>
@@ -47,6 +83,10 @@ struct DroneState {
     var forwardAirspeed: Float
     var physicalState: DronePhysicalState
     var mode: DroneFlightMode
+    var armState: UAVArmState = .disarmed
+    var motionState: UAVMotionState = .grounded
+    var damageCondition: UAVDamageState = .nominal
+    var controlState: UAVControlState = .full
 
     // MARK: - Fixed-wing 6DOF state
     //

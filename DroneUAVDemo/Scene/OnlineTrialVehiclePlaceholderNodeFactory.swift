@@ -34,6 +34,7 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
 
         // Tint visual root slightly cyan to distinguish from local UAV.
         tintNode(visual.visualRootNode, color: NSColor(red: 0.72, green: 0.90, blue: 1.0, alpha: 1.0))
+        tagDamageComponentNodes(visual.componentNodes)
 
         // Participant name label above the UAV.
         let label = makeLabelNode(participantName)
@@ -120,5 +121,20 @@ enum OnlineTrialVehiclePlaceholderNodeFactory {
             }
         }
         node.childNodes.forEach { tintNode($0, color: color) }
+    }
+
+    /// Keep the replica lightweight while retaining enough semantic mapping
+    /// for LAN component detachments to hide the corresponding geometry.
+    private static func tagDamageComponentNodes(_ nodesByComponent: [DamageComponent: [SCNNode]]) {
+        for (component, nodes) in nodesByComponent {
+            guard let index = DamageComponent.allCases.firstIndex(of: component) else { continue }
+            let componentBit = 1 << (8 + index)
+            for node in nodes {
+                // Remote replicas are visual-only; the otherwise-unused high
+                // category bits make the mapping clone-safe without KVC or a
+                // controller-side object registry.
+                node.categoryBitMask |= componentBit
+            }
+        }
     }
 }

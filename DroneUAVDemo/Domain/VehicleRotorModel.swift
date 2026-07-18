@@ -8,7 +8,10 @@ struct VehicleRotor: Hashable {
     let slot: String
     /// Rotor position relative to the airframe's center of mass, body frame
     /// (+Y up, -Z forward). CoM-relative so torque lever arms are direct.
-    let offsetBody: SIMD3<Float>
+    var offsetBody: SIMD3<Float>
+    /// Actual thrust axis after structural deformation, body frame.
+    /// Pristine multirotors point along +Y.
+    var thrustDirectionBody: SIMD3<Float> = SIMD3<Float>(0.0, 1.0, 0.0)
     /// +1 / -1 blade spin direction (yaw reaction torque sign).
     let spinSign: Float
     /// SIMD4 telemetry lane (FL/FR/RL/RR -> 0-3) for `rotorAngularSpeed`;
@@ -98,6 +101,9 @@ struct VehicleRotorModel: Hashable {
         let actualTorque: SIMD3<Float>
         /// Actually produced collective thrust, N.
         let actualCollective: Float
+        /// Vector sum of every rotor force in body axes. This differs from a
+        /// scalar collective once an arm/mount bends.
+        let actualForceBody: SIMD3<Float>
     }
 
     /// Control allocation: distribute the commanded collective thrust and
@@ -119,7 +125,8 @@ struct VehicleRotorModel: Hashable {
             return AllocationResult(
                 thrusts: [],
                 actualTorque: desiredTorque,
-                actualCollective: desiredCollective
+                actualCollective: desiredCollective,
+                actualForceBody: SIMD3<Float>(0.0, desiredCollective, 0.0)
             )
         }
 
@@ -136,10 +143,9 @@ struct VehicleRotorModel: Hashable {
 
         var thrusts: [Float] = []
         thrusts.reserveCapacity(rotors.count)
-        var actualRoll: Float = 0.0
-        var actualPitch: Float = 0.0
-        var actualYaw: Float = 0.0
+        var actualTorqueAxes = SIMD3<Float>(repeating: 0.0)
         var actualCollective: Float = 0.0
+        var actualForceBody = SIMD3<Float>(repeating: 0.0)
 
         for rotor in rotors {
             // Least-squares per-channel distribution (exact for symmetric
@@ -154,16 +160,21 @@ struct VehicleRotorModel: Hashable {
             let actual = commanded.clamped(to: 0.0...max(0.0, ceiling))
             thrusts.append(actual)
 
-            actualRoll += rotor.offsetBody.x * actual
-            actualPitch += -rotor.offsetBody.z * actual
-            actualYaw += rotor.spinSign * kappa * actual
-            actualCollective += actual
+            let direction = simd_length_squared(rotor.thrustDirectionBody) > 0.0001
+                ? simd_normalize(rotor.thrustDirectionBody)
+                : SIMD3<Float>(0.0, 1.0, 0.0)
+            let force = direction * actual
+            let reactionTorque = direction * (rotor.spinSign * kappa * actual)
+            actualTorqueAxes += simd_cross(rotor.offsetBody, force) + reactionTorque
+            actualForceBody += force
+            actualCollective += max(0.0, force.y)
         }
 
         return AllocationResult(
             thrusts: thrusts,
-            actualTorque: SIMD3<Float>(actualRoll, actualPitch, actualYaw),
-            actualCollective: actualCollective
+            actualTorque: SIMD3<Float>(actualTorqueAxes.z, actualTorqueAxes.x, actualTorqueAxes.y),
+            actualCollective: actualCollective,
+            actualForceBody: actualForceBody
         )
     }
 
@@ -190,7 +201,7 @@ struct VehicleRotorModel: Hashable {
     /// fully destroyed (nothing left to shake).
     static func propellerVibration(integrity: Float) -> Float {
         let n = integrity.clamped(to: 0.0...1.0)
-        guard n > 0.001 else { return 0.15 }
+        guard n > 0.001 else { return 0.0 }
         return (2.2 * n * (1.0 - n)).clamped(to: 0.0...1.0)
     }
 }

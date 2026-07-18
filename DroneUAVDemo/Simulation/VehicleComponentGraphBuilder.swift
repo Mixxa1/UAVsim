@@ -75,11 +75,12 @@ enum VehicleComponentGraphBuilder {
         case .battery, .esc:
             return [.efficiencyLoss, .intermittent, .totalFailure]
         case .flightController, .radio:
-            return [.intermittent, .holdLastCommand, .totalFailure]
+            return [.efficiencyLoss, .intermittent, .totalFailure]
         case .cameraGimbal:
             return [.intermittent, .totalFailure]
-        case .wingSection, .horizontalTail, .verticalTail, .arm, .frame, .fuselage,
-             .landingGear, .payloadMount:
+        case .wingSection(_, .outer), .horizontalTail, .verticalTail:
+            return [.efficiencyLoss, .jam, .holdLastCommand, .totalFailure]
+        case .wingSection(_, .root), .arm, .frame, .fuselage, .landingGear, .payloadMount:
             return [.efficiencyLoss, .totalFailure]
         }
     }
@@ -162,6 +163,7 @@ enum VehicleComponentGraphBuilder {
 
         var components: [VehicleComponent] = []
         components.reserveCapacity(drafts.count)
+        let strengthReferenceMass = max(0.20, totalMass - payloadMass)
         for draft in drafts {
             let mass = draft.fixedMass ?? massWeight(for: draft.kind) * massPerWeight
             components.append(
@@ -172,10 +174,13 @@ enum VehicleComponentGraphBuilder {
                     massKg: max(0.001, mass),
                     localPosition: draft.position,
                     boundingHalfExtents: simd_max(draft.halfExtents, SIMD3<Float>(repeating: 0.005)),
-                    strengthJ: strengthJPerKg(for: draft.kind) * totalMass,
+                    strengthJ: strengthJPerKg(for: draft.kind) * strengthReferenceMass,
                     integrity: 1.0,
                     legacyComponent: draft.legacy,
-                    functionalDependencies: draft.parentID.map { [$0] } ?? [],
+                    functionalDependencies: drafts
+                        .filter { $0.parentID == draft.id }
+                        .map(\.id)
+                        .sorted(),
                     failureModes: failureModes(for: draft.kind)
                 )
             )
@@ -200,27 +205,19 @@ enum VehicleComponentGraphBuilder {
     ) -> VehicleRotorModel {
         guard !rotorSlots.isEmpty else { return .empty }
 
-        // Lever arms are taken about the ROTOR-PLANE CENTROID, not the graph
-        // CoM. The graph's CoM sits off the rotor centroid on almost every
-        // airframe (nose gimbal, low battery), and centering the mixer there
-        // makes the collective base thrust produce a constant parasitic
-        // pitch/roll moment the rate loop can only balance with a steady
-        // tilt — a pristine copter drifted ~1.5 m/s in hover and orbited
-        // waypoints instead of capturing them. The legacy model applies
-        // thrust through the CG by construction (a real FC trims this bias
-        // out); the centroid keeps that contract, while damage asymmetry
-        // still produces honest moments via per-rotor thrust factors.
-        var centroid = SIMD3<Float>(repeating: 0.0)
-        for pair in rotorSlots {
-            centroid += pair.propeller.center
-        }
-        centroid /= Float(rotorSlots.count)
+        // Geometry samples and graph components use the aircraft state
+        // origin (the ground/gear reference), while `VehicleRotor.offsetBody`
+        // is explicitly CoM-relative. Keep that convention literal: it makes
+        // both the moment arm and VTOL nearest-mount lookup agree after a CoM
+        // shift (the latter reconstructs origin-relative geometry by adding
+        // the current center of mass back to the rotor offset).
+        let centerOfMass = massProperties.centerOfMassOffset
 
         var rotors: [VehicleRotor] = []
         rotors.reserveCapacity(rotorSlots.count)
         var armSum: Float = 0.0
         for pair in rotorSlots {
-            let offset = pair.propeller.center - centroid
+            let offset = pair.propeller.center - centerOfMass
             armSum += simd_length(SIMD2<Float>(offset.x, offset.z))
             rotors.append(
                 VehicleRotor(
@@ -337,10 +334,15 @@ enum VehicleComponentGraphBuilder {
         drafts.append(frame)
 
         var usedSlots: Set<String> = []
+        var nextExtraSlot = 5
         for (index, prop) in geometry.propellers.enumerated() {
             var quadrant = quadrantSlot(of: prop.center, center: center, index: index)
             if usedSlots.contains(quadrant.slot) {
-                quadrant = quadrantSlot(of: prop.center, center: center, index: max(4, index))
+                while usedSlots.contains("M\(nextExtraSlot)") {
+                    nextExtraSlot += 1
+                }
+                quadrant = ("M\(nextExtraSlot)", quadrant.motor, quadrant.propeller, quadrant.arm)
+                nextExtraSlot += 1
             }
             usedSlots.insert(quadrant.slot)
             rotorSlots.append((quadrant.slot, prop))
@@ -408,13 +410,16 @@ enum VehicleComponentGraphBuilder {
         )
         drafts.append(fuselage)
 
-        // The wing: visual builders map it onto .armFL/.armFR. Take the union
-        // box and split it spanwise into root/outer halves per side.
-        let wingBox = geometry.unionBox(for: .armFL) ?? geometry.unionBox(for: .armFR)
-        let wingCenter = wingBox?.center ?? center
-        let wingHalfSpan = wingBox.map { $0.halfExtents.x } ?? size.x * 0.5
-        let wingHalfChord = wingBox.map { max(0.03, $0.halfExtents.z) } ?? max(0.03, size.z * 0.16)
-        let wingHalfThickness = wingBox.map { max(0.008, $0.halfExtents.y) } ?? max(0.008, size.y * 0.06)
+        // The visual builders map the two wing halves onto .armFL/.armFR.
+        // Merge *both* sets of boxes before splitting the resulting full-span
+        // envelope; falling back from one side to the other silently modeled
+        // only half a fixed wing whenever both mappings existed.
+        let wingBoxes = geometry.boxes(for: .armFL) + geometry.boxes(for: .armFR)
+        let wingBounds = unionBounds(of: wingBoxes)
+        let wingCenter = wingBounds?.center ?? center
+        let wingHalfSpan = wingBounds?.halfExtents.x ?? size.x * 0.5
+        let wingHalfChord = max(0.03, wingBounds?.halfExtents.z ?? size.z * 0.16)
+        let wingHalfThickness = max(0.008, wingBounds?.halfExtents.y ?? size.y * 0.06)
 
         for side in [VehicleBodySide.left, .right] {
             let sign: Float = side == .left ? -1.0 : 1.0
@@ -467,19 +472,42 @@ enum VehicleComponentGraphBuilder {
         // Propulsion from the actual propeller geometry (pusher/tractor and,
         // for hybrid VTOL, the lift rotors as well).
         var usedSlots: Set<String> = []
+        var nextExtraSlot = 5
         for (index, prop) in geometry.propellers.enumerated() {
             let isLiftRotor = includeLiftRotors && abs(prop.center.y - center.y) < size.y * 0.5 &&
                 abs(prop.center.x - center.x) > size.x * 0.10
+            let isWingMounted = abs(prop.center.x - center.x) > size.x * 0.10
+            let wingParentID: String? = isWingMounted
+                ? drafts.compactMap { draft -> (String, Float)? in
+                    guard case .wingSection = draft.kind else { return nil }
+                    let delta = simd_abs(prop.center - draft.position) - draft.halfExtents
+                    return (draft.id, simd_length(simd_max(delta, .zero)))
+                }.min(by: { $0.1 < $1.1 })?.0
+                : nil
             let slot: String
             let motorLegacy: DamageComponent?
             let propLegacy: DamageComponent?
             if isLiftRotor {
                 let quadrant = quadrantSlot(of: prop.center, center: center, index: index)
-                slot = usedSlots.contains(quadrant.slot) ? "M\(index + 1)" : quadrant.slot
+                if usedSlots.contains(quadrant.slot) {
+                    while usedSlots.contains("M\(nextExtraSlot)") {
+                        nextExtraSlot += 1
+                    }
+                    slot = "M\(nextExtraSlot)"
+                    nextExtraSlot += 1
+                } else {
+                    slot = quadrant.slot
+                }
                 motorLegacy = quadrant.motor
                 propLegacy = quadrant.propeller
             } else {
-                slot = "cruise\(index == 0 ? "" : String(index + 1))"
+                var cruiseSlot = "cruise\(index == 0 ? "" : String(index + 1))"
+                var suffix = index + 2
+                while usedSlots.contains(cruiseSlot) {
+                    cruiseSlot = "cruise\(suffix)"
+                    suffix += 1
+                }
+                slot = cruiseSlot
                 motorLegacy = .motorFL
                 propLegacy = .propellerFL
             }
@@ -490,7 +518,7 @@ enum VehicleComponentGraphBuilder {
                 kind: .motor(slot: slot),
                 position: prop.center,
                 halfExtents: SIMD3<Float>(repeating: max(0.015, prop.radius * 0.2)),
-                parentID: fuselage.id,
+                parentID: wingParentID ?? fuselage.id,
                 legacy: motorLegacy
             ))
             drafts.append(ComponentDraft(
@@ -514,6 +542,25 @@ enum VehicleComponentGraphBuilder {
     }
 
     // MARK: - Contact profile
+
+    private static func unionBounds(
+        of boxes: [DroneVisualGeometryComponentBox]
+    ) -> (center: SIMD3<Float>, halfExtents: SIMD3<Float>)? {
+        guard !boxes.isEmpty else { return nil }
+        var minimum = SIMD3<Float>(repeating: Float.greatestFiniteMagnitude)
+        var maximum = SIMD3<Float>(repeating: -Float.greatestFiniteMagnitude)
+        for box in boxes {
+            minimum = simd_min(minimum, box.center - box.halfExtents)
+            maximum = simd_max(maximum, box.center + box.halfExtents)
+        }
+        return (
+            center: (minimum + maximum) * 0.5,
+            halfExtents: simd_max(
+                (maximum - minimum) * 0.5,
+                SIMD3<Float>(repeating: 0.005)
+            )
+        )
+    }
 
     private static func contactProfile(
         for profile: DroneModelProfile,
@@ -542,12 +589,21 @@ enum VehicleComponentGraphBuilder {
             return bestID
         }
 
-        func addSphere(at point: SIMD3<Float>, radius: Float, componentID: String? = nil) {
+        func addSphere(
+            at point: SIMD3<Float>,
+            radius: Float,
+            componentID: String? = nil,
+            preserveComponentMapping: Bool = false
+        ) {
             let clampedRadius = max(0.02, radius)
             // Merge near-duplicates (e.g. a prop sphere landing on a wingtip).
             for existing in spheres where simd_distance(existing.offset, point) < clampedRadius * 0.5 {
-                _ = existing
-                return
+                // Propulsion contacts are added first. Distinct coaxial or
+                // closely spaced units must retain their component mapping;
+                // optional structural samples may share either one sphere.
+                if !preserveComponentMapping || existing.componentID == componentID {
+                    return
+                }
             }
             spheres.append(
                 VehicleContactSphere(
@@ -557,6 +613,50 @@ enum VehicleComponentGraphBuilder {
                 )
             )
         }
+
+        // Propeller disks (also covers multirotor arm/motor tips) are the
+        // critical localized contacts. Add every mapped propulsion unit
+        // before optional body samples so a static cap can never discard M8
+        // on an octocopter or the later lift rotors on a hybrid VTOL.
+        let propellerDrafts = drafts.filter {
+            if case .propeller = $0.kind { return true }
+            return false
+        }
+        for (index, prop) in geometry.propellers.enumerated() {
+            let propID = index < propellerDrafts.count ? propellerDrafts[index].id : nil
+            // Approximate the swept disc with a thin five-sphere pattern,
+            // not one full-radius ball (which falsely collides a whole rotor
+            // radius above/below the actual disc plane).
+            let proxyRadius = max(0.02, prop.radius * 0.28)
+            let ringRadius = max(0.0, prop.radius * 0.65)
+            let isLiftDisc = profile.airframeClass == .multirotor ||
+                (profile.airframeClass == .hybridVTOL &&
+                    abs(prop.center.x - center.x) > size.x * 0.10)
+            let discOffsets: [SIMD3<Float>] = isLiftDisc
+                ? [
+                    .zero,
+                    SIMD3<Float>(ringRadius, 0.0, 0.0),
+                    SIMD3<Float>(-ringRadius, 0.0, 0.0),
+                    SIMD3<Float>(0.0, 0.0, ringRadius),
+                    SIMD3<Float>(0.0, 0.0, -ringRadius)
+                ]
+                : [
+                    .zero,
+                    SIMD3<Float>(ringRadius, 0.0, 0.0),
+                    SIMD3<Float>(-ringRadius, 0.0, 0.0),
+                    SIMD3<Float>(0.0, ringRadius, 0.0),
+                    SIMD3<Float>(0.0, -ringRadius, 0.0)
+                ]
+            for offset in discOffsets {
+                addSphere(
+                    at: prop.center + offset,
+                    radius: proxyRadius,
+                    componentID: propID,
+                    preserveComponentMapping: true
+                )
+            }
+        }
+        let criticalSphereCount = spheres.count
 
         // Core body sphere.
         let bodyRadius = max(0.04, min(halfSize.x, halfSize.y, halfSize.z) * 0.9)
@@ -606,22 +706,12 @@ enum VehicleComponentGraphBuilder {
             addSphere(at: SIMD3<Float>(center.x, center.y, boundsMax.z - noseRadius), radius: noseRadius)
         }
 
-        // Propeller disks (also covers multirotor arm tips).
-        for (index, prop) in geometry.propellers.enumerated() {
-            guard spheres.count < 12 else { break }
-            let propID = drafts.first(where: {
-                if case .propeller = $0.kind {
-                    return simd_distance($0.position, prop.center) < max(0.05, prop.radius)
-                }
-                return false
-            })?.id
-            addSphere(at: prop.center, radius: prop.radius, componentID: propID)
-            _ = index
-        }
-
-        // Hard cap for the swept narrow phase.
-        if spheres.count > 12 {
-            spheres = Array(spheres.prefix(12))
+        // Bound only the optional body/gear/extremity budget. The total cap is
+        // dynamic so every real propulsion contact remains represented while
+        // narrow-phase work stays linear in a small constant beyond it.
+        let maximumContactSpheres = criticalSphereCount + 12
+        if spheres.count > maximumContactSpheres {
+            spheres = Array(spheres.prefix(maximumContactSpheres))
         }
 
         var boundingRadius: Float = profile.collisionRadius

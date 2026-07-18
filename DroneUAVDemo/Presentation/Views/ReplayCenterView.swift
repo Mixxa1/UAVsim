@@ -1173,6 +1173,13 @@ struct ReplayCenterView: View {
         case .payloadAttached:       return "bag"
         case .payloadReleased:       return "bag.badge.minus"
         case .payloadImpact:         return "burst"
+        case .impact:                return "waveform.path.ecg.rectangle"
+        case .componentDamaged:      return "wrench.and.screwdriver"
+        case .componentDetached:     return "link.badge.plus"
+        case .subsystemFailed:       return "exclamationmark.octagon.fill"
+        case .massPropertiesChanged: return "scalemass"
+        case .controlAuthorityReduced: return "steeringwheel.exclamationmark"
+        case .vehicleSettled:        return "checkmark.circle"
         }
     }
 
@@ -1206,6 +1213,16 @@ struct ReplayCenterView: View {
             return Color(red: 0.95, green: 0.80, blue: 0.15)
         case .payloadImpact:
             return Color.red
+        case .impact, .componentDamaged:
+            return Color.orange
+        case .componentDetached, .subsystemFailed:
+            return Color.red
+        case .massPropertiesChanged:
+            return Color.purple
+        case .controlAuthorityReduced:
+            return GroundControlPalette.warning
+        case .vehicleSettled:
+            return Color(white: 0.65)
         }
     }
 
@@ -1339,7 +1356,8 @@ struct ReplayCenterView: View {
                     timestamp: event.timestamp - range.startTime,
                     type: event.type,
                     message: event.message,
-                    position: event.position
+                    position: event.position,
+                    damage: event.damage
                 )
             }
     }

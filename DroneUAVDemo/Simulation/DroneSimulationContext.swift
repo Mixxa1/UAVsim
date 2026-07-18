@@ -51,6 +51,11 @@ struct DroneSimulationContext {
     /// Control surfaces seized by servo/structure failures: channel ->
     /// frozen deflection fraction, bypassing command and slew.
     let jammedSurfaces: [FlightSurfaceChannel: Float]
+    /// Functional derating independent from stored charge/integrity. Battery
+    /// faults reduce available propulsion power; controller faults reduce
+    /// closed-loop command authority while the airframe remains simulated.
+    let powerSystemFactor: Float
+    let controlSystemFactor: Float
 
     init(
         profile: DroneModelProfile,
@@ -66,7 +71,9 @@ struct DroneSimulationContext {
         contactProfile: VehicleContactProfile = .empty,
         rotorModel: VehicleRotorModel = .empty,
         aeroDamage: FixedWingAeroDamage = .pristine,
-        jammedSurfaces: [FlightSurfaceChannel: Float] = [:]
+        jammedSurfaces: [FlightSurfaceChannel: Float] = [:],
+        powerSystemFactor: Float = 1.0,
+        controlSystemFactor: Float = 1.0
     ) {
         self.profile = profile
         self.activeUAVProfile = activeUAVProfile
@@ -82,5 +89,7 @@ struct DroneSimulationContext {
         self.rotorModel = rotorModel
         self.aeroDamage = aeroDamage
         self.jammedSurfaces = jammedSurfaces
+        self.powerSystemFactor = powerSystemFactor
+        self.controlSystemFactor = controlSystemFactor
     }
 }

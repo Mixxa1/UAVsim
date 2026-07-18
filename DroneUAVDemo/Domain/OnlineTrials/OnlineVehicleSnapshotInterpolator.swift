@@ -8,6 +8,13 @@ struct OnlineVehicleInterpolatedState: Codable, Equatable {
     var kinematics: OnlineVehicleKinematics
     var isArmed: Bool
     var flightModeLabel: String
+    /// Damage is discrete authoritative state, so interpolation always takes
+    /// it from the newest endpoint rather than blending integrity across two
+    /// network packets.
+    var componentDamage: [OnlineVehicleComponentDamageSnapshot]
+    var massPropertiesRevision: UInt64
+    var damageEventSequence: UInt64
+    var damageEvents: [OnlineVehicleDamageEventSnapshot]
     // Age measured in receiver-local time so clock skew between sender/receiver does not inflate it.
     var sourceSnapshotAge: TimeInterval
 }
@@ -147,6 +154,10 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
             kinematics: e.snapshot.kinematics,
             isArmed: e.snapshot.isArmed,
             flightModeLabel: e.snapshot.flightModeLabel,
+            componentDamage: e.snapshot.componentDamage,
+            massPropertiesRevision: e.snapshot.massPropertiesRevision,
+            damageEventSequence: e.snapshot.damageEventSequence,
+            damageEvents: e.snapshot.damageEvents,
             sourceSnapshotAge: age
         )
     }
@@ -160,6 +171,10 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
             kinematics: s.kinematics,
             isArmed: s.isArmed,
             flightModeLabel: s.flightModeLabel,
+            componentDamage: s.componentDamage,
+            massPropertiesRevision: s.massPropertiesRevision,
+            damageEventSequence: s.damageEventSequence,
+            damageEvents: s.damageEvents,
             sourceSnapshotAge: sourceAge
         )
     }
@@ -195,6 +210,10 @@ struct OnlineVehicleSnapshotInterpolationBuffer: Equatable {
             kinematics: kinematics,
             isArmed: b.isArmed,
             flightModeLabel: b.flightModeLabel,
+            componentDamage: b.componentDamage,
+            massPropertiesRevision: b.massPropertiesRevision,
+            damageEventSequence: b.damageEventSequence,
+            damageEvents: b.damageEvents,
             sourceSnapshotAge: sourceAge
         )
     }

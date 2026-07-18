@@ -37,15 +37,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         var remaining = clampedDelta
         while remaining > 0.0 {
             let dt = min(Tuning.fixedStep, remaining)
-            if next.physicalState == .crashed {
-                // A crashed airframe stops being an aircraft but keeps being a
-                // physical body: ballistic tumble with per-contact-sphere
-                // ground collisions instead of the old "pin flat to the
-                // ground" damping.
-                next = stepUncontrolledBody(state: next, context: context, dt: dt)
-                remaining -= dt
-                continue
-            }
+            // `crashed` is a compatibility/UI lifecycle label, not a switch
+            // to a different universe. The normal airframe solver keeps
+            // surviving aero surfaces, rotors and their asymmetric forces;
+            // disarm/control failure already removes only unavailable input.
             switch context.profile.airframeClass {
             case .multirotor:
                 next = stepMultirotorBaseline(state: next, control: control, context: context, dt: dt)
@@ -93,9 +88,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             flightMode: control.mode
         )
         let maneuverAuthorityPenalty = baseline.maneuverAuthorityMultiplier
-        let authority = (context.damageState.controlAuthorityMultiplier * maneuverAuthorityPenalty).clamped(to: 0.18...1.00)
-        let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
-        let mass = max(0.20, payloadMassModel.resolvedCurrentTotalMass)
+        let authority = (resolvedControlAuthority(context: context) * maneuverAuthorityPenalty).clamped(to: 0.05...1.00)
+        let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
+            context.powerSystemFactor.clamped(to: 0.0...1.0)
+        let mass = resolvedVehicleMass(
+            context: context,
+            fallback: payloadMassModel.resolvedCurrentTotalMass,
+            minimum: 0.20
+        )
         let hoverThrottle = baseline.hoverLockThrottle.clamped(to: 0.20...0.90)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
         let groundRestThrottleThreshold = max(0.18, hoverThrottle * 0.68)
@@ -171,22 +171,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // residual moment the loop cannot trim out).
         let rotorModel = context.rotorModel
         let angularAccel: SIMD3<Float>
-        let thrustMagnitude: Float
+        let thrustBody: SIMD3<Float>
         // Per-lane commanded-thrust fractions for the rotor spin visuals
         // (FL/FR/RL/RR); pristine default mirrors the collective throttle.
         var laneThrustFraction = SIMD4<Float>(repeating: motorThrottle)
         var laneAlive = SIMD4<Float>(repeating: 1.0)
         if rotorModel.isEmpty {
             angularAccel = commandedAngularAccel
-            thrustMagnitude = commandedThrust
+            thrustBody = SIMD3<Float>(0.0, commandedThrust, 0.0)
         } else {
             // Inertia in the engine's (roll, pitch, yaw) rate order: roll is
             // about body Z, pitch about X, yaw about Y.
-            let inertiaXYZ = simd_max(
-                context.vehicleMassProperties.inertiaDiagonal,
-                SIMD3<Float>(repeating: 0.0005)
+            let inertiaRates = resolvedRateOrderedInertia(
+                context: context,
+                fallback: SIMD3<Float>(repeating: 0.02),
+                minimum: 0.0005
             )
-            let inertiaRates = SIMD3<Float>(inertiaXYZ.z, inertiaXYZ.x, inertiaXYZ.y)
             let desiredTorque = commandedAngularAccel * inertiaRates
 
             let maxTotalThrust = rotorBorneThrustMagnitude(
@@ -220,7 +220,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 accel.y += sin(vibrationPhase * 1.31 + 0.9) * wobble * 0.8
             }
             angularAccel = accel
-            thrustMagnitude = allocation.actualCollective
+            thrustBody = allocation.actualForceBody
 
             for (index, rotor) in rotorModel.rotors.enumerated() {
                 guard let lane = rotor.laneIndex, index < allocation.thrusts.count else { continue }
@@ -236,7 +236,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.orientation = wrappedAngles(state.orientation + next.angularVelocity * dt)
 
         let q = orientationQuaternion(from: next.orientation)
-        let thrustWorld = simd_act(q, SIMD3<Float>(0.0, thrustMagnitude, 0.0))
+        let thrustWorld = simd_act(q, thrustBody)
 
         let gravityForce = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
         let horizontalMax = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
@@ -475,8 +475,9 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             flightMode: control.mode
         )
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
-        let authority = (context.damageState.controlAuthorityMultiplier * authorityPenalty).clamped(to: 0.18...1.00)
-        let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
+        let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
+        let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
+            context.powerSystemFactor.clamped(to: 0.0...1.0)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
 
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
@@ -536,9 +537,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let realFuselageLengthMm = catalogDimensions?.fuselageLengthMillimeters ?? (realWingSpanMm * 0.55)
         let realHeightMm = catalogDimensions?.heightMillimeters ?? (realWingSpanMm * 0.12)
 
+        let mass = resolvedVehicleMass(
+            context: context,
+            fallback: payloadMassModel.resolvedCurrentTotalMass,
+            minimum: 0.10
+        )
         let aero = FixedWingAerodynamics.build(
             family: wing.family,
-            massKg: payloadMassModel.resolvedCurrentTotalMass,
+            massKg: mass,
             wingSpanM: realWingSpanMm / 1000.0,
             fuselageLengthM: realFuselageLengthMm / 1000.0,
             heightM: realHeightMm / 1000.0,
@@ -727,7 +733,6 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         }
 
         // --- Integration: semi-implicit Euler (unconditionally stable for damped oscillatory systems).
-        let mass = max(0.1, payloadMassModel.resolvedCurrentTotalMass)
         let totalForceWorld = simd_act(state.fixedWingOrientationQuat, aeroForceBody + thrustForceBody)
             + SIMD3<Float>(0, -mass * Tuning.gravity, 0)
         let acceleration = totalForceWorld / mass
@@ -735,7 +740,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.velocity = state.velocity + acceleration * dt
         next.position = state.position + next.velocity * dt
 
-        let angularAccel = momentBody / aero.inertiaTensor
+        let inertiaRates = resolvedRateOrderedInertia(
+            context: context,
+            fallback: aero.inertiaTensor,
+            minimum: 0.001
+        )
+        let angularAccel = momentBody / inertiaRates
         next.bodyAngularVelocity = clampMagnitude(state.bodyAngularVelocity + angularAccel * dt, limit: 10.0)
         next.fixedWingOrientationQuat = integrateFixedWingOrientation(
             state.fixedWingOrientationQuat,
@@ -824,7 +834,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let priorSpeed = max(0.0, simd_dot(previousState.velocity, direction))
             let targetSpeed = max(0.1, dynamics.targetReleaseSpeedMps)
             let requiredAcceleration = (targetSpeed * targetSpeed) / (2.0 * travelLength)
-            let actualMass = max(0.2, context.vehicleMassModel.resolvedCurrentTotalMass)
+            let actualMass = resolvedVehicleMass(
+                context: context,
+                fallback: context.vehicleMassModel.resolvedCurrentTotalMass,
+                minimum: 0.20
+            )
             let forceLimitedAcceleration = dynamics.maximumAccelerationMps2 *
                 max(0.2, dynamics.nominalLaunchMassKg) / actualMass
             let acceleration = min(
@@ -844,7 +858,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             constrainAttitudeAndRates(&next)
 
         case .handRelease:
-            let actualMass = max(0.2, context.vehicleMassModel.resolvedCurrentTotalMass)
+            let actualMass = resolvedVehicleMass(
+                context: context,
+                fallback: context.vehicleMassModel.resolvedCurrentTotalMass,
+                minimum: 0.20
+            )
             let throwMassScale = sqrt(max(0.2, dynamics.nominalLaunchMassKg) / actualMass)
                 .clamped(to: 0.65...1.15)
             let massAdjustedThrowSpeed = dynamics.targetReleaseSpeedMps * throwMassScale
@@ -965,9 +983,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             flightMode: control.mode
         )
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
-        let authority = (context.damageState.controlAuthorityMultiplier * authorityPenalty).clamped(to: 0.18...1.00)
-        let batteryFactor = max(0.10, context.batteryState.chargePercent / 100.0)
-        let mass = max(0.20, payloadMassModel.resolvedCurrentTotalMass)
+        let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
+        let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
+            context.powerSystemFactor.clamped(to: 0.0...1.0)
+        let mass = resolvedVehicleMass(
+            context: context,
+            fallback: payloadMassModel.resolvedCurrentTotalMass,
+            minimum: 0.20
+        )
         let liftPenalty = baseline.liftPenaltyMultiplier.clamped(to: 0.78...1.02)
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
 
@@ -981,7 +1004,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         let aero = FixedWingAerodynamics.build(
             family: wing.family,
-            massKg: payloadMassModel.resolvedCurrentTotalMass,
+            massKg: mass,
             wingSpanM: realWingSpanMm / 1000.0,
             fuselageLengthM: realFuselageLengthMm / 1000.0,
             heightM: realHeightMm / 1000.0,
@@ -1507,7 +1530,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             // nearest) rotor's propeller/motor integrity still allows.
             let damageFactor = context.rotorModel.thrustFactor(
                 nearMount: units[index].mountOffset,
-                centerOfMass: context.vehicleMassProperties.centerOfMassOffset
+                centerOfMass: resolvedCenterOfMass(context: context)
             )
             thrustForceBody += units[index].thrustDirectionBody * (magnitude * damageFactor)
             units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
@@ -1526,7 +1549,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let hoverRateGain = SIMD3<Float>(7.2 * s.authority, 7.2 * s.authority, 4.8 * s.authority)
         let hoverAngularDamping = SIMD3<Float>(2.8, 2.8, 2.2)
         let hoverAngularAccel = (desiredRates - state.bodyAngularVelocity) * hoverRateGain - state.bodyAngularVelocity * hoverAngularDamping
-        let aeroAngularAccel = s.aeroMomentBody / s.aero.inertiaTensor
+        let inertiaRates = resolvedRateOrderedInertia(
+            context: context,
+            fallback: s.aero.inertiaTensor,
+            minimum: 0.001
+        )
+        let aeroAngularAccel = s.aeroMomentBody / inertiaRates
         let angularAccel = hoverAngularAccel * (1.0 - s.wingborneBlend) + aeroAngularAccel * s.wingborneBlend
 
         next = integrateVTOLBody(
@@ -1626,7 +1654,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             // Damage: nearest-rotor propeller/motor integrity caps the unit.
             let damageFactor = context.rotorModel.thrustFactor(
                 nearMount: units[index].mountOffset,
-                centerOfMass: context.vehicleMassProperties.centerOfMassOffset
+                centerOfMass: resolvedCenterOfMass(context: context)
             )
             thrustForceBody += units[index].thrustDirectionBody * (perUnitThrustMagnitude * damageFactor)
             units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
@@ -1696,7 +1724,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let hoverRateGain = SIMD3<Float>(4.2 * s.authority, 6.4 * s.authority, 3.2 * s.authority)
         let hoverAngularDamping = SIMD3<Float>(5.2, 3.2, 4.8)
         let hoverAngularAccel = (hoverDesiredRates - state.bodyAngularVelocity) * hoverRateGain - state.bodyAngularVelocity * hoverAngularDamping
-        let aeroAngularAccel = s.aeroMomentBody / s.aero.inertiaTensor
+        let inertiaRates = resolvedRateOrderedInertia(
+            context: context,
+            fallback: s.aero.inertiaTensor,
+            minimum: 0.001
+        )
+        let aeroAngularAccel = s.aeroMomentBody / inertiaRates
         // Attitude authority blends by *pilot-commanded* progress here, not
         // by wingborneBlend (unlike Wingcopter, where thrust direction is
         // already locked to the tilt angle regardless of aero authority).
@@ -1936,6 +1969,80 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         verticalDebugCooldown = 0.25
     }
 
+    // MARK: - Live component-graph mass properties
+
+    /// The contact profile is created together with the component graph and
+    /// is empty for legacy callers. That makes it the compatibility gate for
+    /// consuming live attached-component mass properties: old contexts keep
+    /// their original mass/inertia models bit-for-bit, while a built graph
+    /// immediately reflects detached mass, shifted CoM and changed inertia.
+    private func resolvedGraphMassProperties(
+        context: DroneSimulationContext
+    ) -> VehicleMassProperties? {
+        guard !context.contactProfile.isEmpty else {
+            return nil
+        }
+
+        let properties = context.vehicleMassProperties
+        guard properties.totalMassKg.isFinite,
+              properties.totalMassKg > 0.0,
+              properties.centerOfMassOffset.x.isFinite,
+              properties.centerOfMassOffset.y.isFinite,
+              properties.centerOfMassOffset.z.isFinite,
+              properties.inertiaDiagonal.x.isFinite,
+              properties.inertiaDiagonal.y.isFinite,
+              properties.inertiaDiagonal.z.isFinite else {
+            return nil
+        }
+        return properties
+    }
+
+    private func resolvedVehicleMass(
+        context: DroneSimulationContext,
+        fallback: Float,
+        minimum: Float
+    ) -> Float {
+        let mass = resolvedGraphMassProperties(context: context)?.totalMassKg ?? fallback
+        return max(minimum, mass)
+    }
+
+    private func resolvedCenterOfMass(
+        context: DroneSimulationContext
+    ) -> SIMD3<Float> {
+        resolvedGraphMassProperties(context: context)?.centerOfMassOffset ?? .zero
+    }
+
+    /// Legacy damage authority averages motors, propellers and structure.
+    /// Those channels are already represented locally by the rotor mixer and
+    /// sectional aero model when a component graph exists; applying the old
+    /// aggregate again would double-count the same broken arm/propeller. In
+    /// graph mode only the flight-controller health scales command authority.
+    private func resolvedControlAuthority(context: DroneSimulationContext) -> Float {
+        guard resolvedGraphMassProperties(context: context) != nil else {
+            return context.damageState.controlAuthorityMultiplier
+        }
+        let controllerHealth = context.damageState.health(for: .flightControllerCore)
+        return (controllerHealth * context.controlSystemFactor).clamped(to: 0.0...1.0)
+    }
+
+    /// `VehicleMassProperties` stores literal body-axis `(Ixx, Iyy, Izz)`.
+    /// This engine stores angular rates/moments as `(roll, pitch, yaw)`, where
+    /// roll is rotation about body Z, pitch about X and yaw about Y. Therefore
+    /// the live tensor must be reordered to `(Izz, Ixx, Iyy)` before division.
+    /// The fixed-wing fallback is already rate-ordered and is not remapped.
+    private func resolvedRateOrderedInertia(
+        context: DroneSimulationContext,
+        fallback: SIMD3<Float>,
+        minimum: Float
+    ) -> SIMD3<Float> {
+        guard let properties = resolvedGraphMassProperties(context: context) else {
+            return simd_max(fallback, SIMD3<Float>(repeating: minimum))
+        }
+        let bodyAxes = properties.inertiaDiagonal
+        let rateAxes = SIMD3<Float>(bodyAxes.z, bodyAxes.x, bodyAxes.y)
+        return simd_max(rateAxes, SIMD3<Float>(repeating: minimum))
+    }
+
     // MARK: - Uncontrolled (crashed) body
 
     /// Free-body integrator for a crashed airframe: gravity + quadratic drag,
@@ -1952,9 +2059,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     ) -> DroneState {
         var next = state
 
-        let massProperties = context.contactProfile.isEmpty
-            ? VehicleMassProperties.fallback
-            : context.vehicleMassProperties
+        let massProperties = resolvedGraphMassProperties(context: context)
+            ?? VehicleMassProperties.fallback
         let mass = max(0.2, massProperties.totalMassKg)
         let isQuaternionAirframe = context.profile.airframeClass != .multirotor
 

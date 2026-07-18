@@ -92,6 +92,7 @@
 		10000000000000000000F100 /* VehicleRotorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F101 /* VehicleRotorModel.swift */; };
 		10000000000000000000F102 /* FixedWingAeroDamage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F103 /* FixedWingAeroDamage.swift */; };
 		10000000000000000000F104 /* ComponentFailureRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F105 /* ComponentFailureRuntime.swift */; };
+		10000000000000000000F106 /* UAVDamageRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F107 /* UAVDamageRuntime.swift */; };
 		10000000000000000000F000 /* VehicleComponentGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F001 /* VehicleComponentGraph.swift */; };
 		10000000000000000000F002 /* DroneVisualGeometrySample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F003 /* DroneVisualGeometrySample.swift */; };
 		10000000000000000000F004 /* VehicleComponentGraphBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */; };
@@ -466,6 +467,7 @@
 		10000000000000000000F003 /* DroneVisualGeometrySample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneVisualGeometrySample.swift; sourceTree = "<group>"; };
 		10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleComponentGraphBuilder.swift; sourceTree = "<group>"; };
 		10000000000000000000F007 /* ImpactResolutionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImpactResolutionService.swift; sourceTree = "<group>"; };
+		10000000000000000000F107 /* UAVDamageRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVDamageRuntime.swift; sourceTree = "<group>"; };
 		100000000000000000000141 /* PayloadController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadController.swift; sourceTree = "<group>"; };
 		100000000000000000000142 /* FPVCameraAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVCameraAnchor.swift; sourceTree = "<group>"; };
 		100000000000000000000143 /* PayloadVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadVisualFactory.swift; sourceTree = "<group>"; };
@@ -926,6 +928,7 @@
 				10000000000000000000F007 /* ImpactResolutionService.swift */,
 				10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */,
 				10000000000000000000F105 /* ComponentFailureRuntime.swift */,
+				10000000000000000000F107 /* UAVDamageRuntime.swift */,
 				10000000000000000000011F /* DroneFleetManager.swift */,
 				10000000000000000000010B /* DronePhysicsEngine.swift */,
 				100000000000000000000119 /* DroneSimulationContext.swift */,
@@ -1555,6 +1558,7 @@
 				10000000000000000000F100 /* VehicleRotorModel.swift in Sources */,
 				10000000000000000000F102 /* FixedWingAeroDamage.swift in Sources */,
 				10000000000000000000F104 /* ComponentFailureRuntime.swift in Sources */,
+				10000000000000000000F106 /* UAVDamageRuntime.swift in Sources */,
 				10000000000000000000F002 /* DroneVisualGeometrySample.swift in Sources */,
 				10000000000000000000F004 /* VehicleComponentGraphBuilder.swift in Sources */,
 				10000000000000000000F006 /* ImpactResolutionService.swift in Sources */,

@@ -103,6 +103,13 @@ struct TelemetrySnapshot {
 
     var damageSummary: String
     var thermalSummary: String
+    var damageEventSequence: UInt64
+    var damageEventType: String
+    var damageEventComponentID: String
+    var damageEventColliderID: String
+    var damageEventEnergyJ: Double
+    var damageEventIntegrity: Double
+    var damageMassPropertiesRevision: UInt64
 
     var fleetMode: String
     var fleetModeKey: String
@@ -210,6 +217,13 @@ struct TelemetrySnapshot {
         emergencyActionKey: CollisionEmergencyAction.none.titleKey,
         damageSummary: NSLocalizedString("summary.damage.none", comment: ""),
         thermalSummary: "BAT:33C FC:33C",
+        damageEventSequence: 0,
+        damageEventType: "n/a",
+        damageEventComponentID: "n/a",
+        damageEventColliderID: "n/a",
+        damageEventEnergyJ: .nan,
+        damageEventIntegrity: .nan,
+        damageMassPropertiesRevision: 0,
         fleetMode: FormationMode.off.title,
         fleetModeKey: FormationMode.off.titleKey,
         wingmanCount: 0,

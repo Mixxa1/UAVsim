@@ -1639,7 +1639,7 @@ final class MissionReplaySceneController {
         let capped = Array(events.prefix(200))
         for event in capped {
             guard let pos = markerPosition(for: event, frames: frames) else { continue }
-            let node = makeMarkerNode(for: event.type)
+            let node = makeMarkerNode(for: event)
             node.simdPosition = SIMD3<Float>(pos.x, pos.y + 0.5, pos.z)
             eventMarkersNode.addChildNode(node)
         }
@@ -1657,8 +1657,8 @@ final class MissionReplaySceneController {
         )
     }
 
-    private func makeMarkerNode(for type: MissionReplayEventType) -> SCNNode {
-        let (geometry, color) = markerAppearance(for: type)
+    private func makeMarkerNode(for event: MissionReplayEvent) -> SCNNode {
+        let (geometry, color) = markerAppearance(for: event.type)
         let mat = SCNMaterial()
         mat.diffuse.contents = color
         mat.emission.contents = color.withAlphaComponent(0.28)
@@ -1667,6 +1667,52 @@ final class MissionReplaySceneController {
         geometry.materials = [mat]
         let node = SCNNode(geometry: geometry)
         node.castsShadow = false
+        if let damage = event.damage {
+            if let energy = damage.energyJ, energy > 0.0 {
+                let scale = min(Float(2.2), 1.0 + log10(1.0 + energy) * 0.22)
+                node.simdScale = SIMD3<Float>(repeating: scale)
+            }
+
+            let canonicalType = damage.canonicalEventTypeRawValue ?? event.type.rawValue
+            let subject = damage.componentID.map { " · \($0)" } ?? ""
+            let labelGeometry = SCNText(
+                string: "#\(damage.sequenceNumber) \(canonicalType)\(subject)",
+                extrusionDepth: 0.002
+            )
+            labelGeometry.font = NSFont.monospacedSystemFont(ofSize: 7.5, weight: .medium)
+            labelGeometry.firstMaterial?.diffuse.contents = color
+            labelGeometry.firstMaterial?.emission.contents = color.withAlphaComponent(0.30)
+            labelGeometry.firstMaterial?.lightingModel = .constant
+            let label = SCNNode(geometry: labelGeometry)
+            label.simdScale = SIMD3<Float>(repeating: 0.008)
+            label.simdPosition = SIMD3<Float>(0.18, 0.20, 0.0)
+            label.constraints = [SCNBillboardConstraint()]
+            node.addChildNode(label)
+
+            for (index, _) in damage.detachedComponentIDs.prefix(8).enumerated() {
+                let fragment = SCNNode(
+                    geometry: SCNBox(
+                        width: 0.055,
+                        height: 0.035,
+                        length: 0.075,
+                        chamferRadius: 0.004
+                    )
+                )
+                fragment.geometry?.materials = [mat]
+                let angle = Float(index) * 2.399_963
+                let radius = 0.16 + Float(index % 3) * 0.045
+                fragment.simdPosition = SIMD3<Float>(
+                    cos(angle) * radius,
+                    0.04 + Float(index % 2) * 0.05,
+                    sin(angle) * radius
+                )
+                fragment.simdOrientation = simd_quatf(
+                    angle: angle * 0.6,
+                    axis: SIMD3<Float>(0.3, 1.0, 0.2)
+                )
+                node.addChildNode(fragment)
+            }
+        }
         return node
     }
 
@@ -1714,6 +1760,21 @@ final class MissionReplaySceneController {
         case .payloadImpact:
             return (SCNBox(width: 0.28, height: 0.14, length: 0.28, chamferRadius: 0.02),
                     NSColor(red: 0.95, green: 0.20, blue: 0.15, alpha: 1))
+        case .impact, .componentDamaged:
+            return (SCNSphere(radius: 0.20),
+                    NSColor(red: 1.00, green: 0.48, blue: 0.08, alpha: 1))
+        case .componentDetached, .subsystemFailed:
+            return (SCNBox(width: 0.25, height: 0.25, length: 0.25, chamferRadius: 0.01),
+                    NSColor(red: 0.95, green: 0.12, blue: 0.12, alpha: 1))
+        case .massPropertiesChanged:
+            return (SCNTorus(ringRadius: 0.17, pipeRadius: 0.045),
+                    NSColor(red: 0.68, green: 0.30, blue: 0.90, alpha: 1))
+        case .controlAuthorityReduced:
+            return (SCNPyramid(width: 0.30, height: 0.36, length: 0.30),
+                    NSColor(red: 1.00, green: 0.68, blue: 0.05, alpha: 1))
+        case .vehicleSettled:
+            return (SCNCylinder(radius: 0.16, height: 0.08),
+                    NSColor(red: 0.55, green: 0.62, blue: 0.68, alpha: 1))
         }
     }
 

@@ -32,7 +32,8 @@ struct ReplayTrimmer {
                     timestamp: event.timestamp - clampedRange.startTime,
                     type: event.type,
                     message: event.message,
-                    position: event.position
+                    position: event.position,
+                    damage: event.damage
                 )
             }
 
