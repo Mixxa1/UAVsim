@@ -180,7 +180,13 @@ struct UAVStructuralLoadSolver {
                 case .verticalTail:
                     let area = max(0.003, member.boundingHalfExtents.y * member.boundingHalfExtents.z * 4.0)
                     aerodynamicForce += dynamicPressure * area * 0.72
-                case .frame, .fuselage, .arm, .battery, .flightController, .esc,
+                case .elevator:
+                    let area = max(0.002, member.boundingHalfExtents.x * member.boundingHalfExtents.z * 4.0)
+                    aerodynamicForce += dynamicPressure * area * 0.48
+                case .rudder:
+                    let area = max(0.002, member.boundingHalfExtents.y * member.boundingHalfExtents.z * 4.0)
+                    aerodynamicForce += dynamicPressure * area * 0.48
+                case .frame, .fuselage, .arm, .tailSection, .battery, .flightController, .esc,
                      .radio, .cameraGimbal, .payloadMount, .landingGear:
                     break
                 }

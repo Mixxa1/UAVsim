@@ -29,16 +29,20 @@ enum VehicleComponentKind: Hashable {
     case cameraGimbal
     case payloadMount
     case wingSection(side: VehicleBodySide, segment: VehicleWingSegment)
+    case tailSection
     case horizontalTail
     case verticalTail
+    case elevator
+    case rudder
     case landingGear(slot: String)
 
     /// Structural components carry contact geometry and shed impact energy;
     /// internal ones (battery, FC, radio...) are damaged through proximity.
     var isStructural: Bool {
         switch self {
-        case .frame, .fuselage, .arm, .propeller, .wingSection,
-             .horizontalTail, .verticalTail, .landingGear, .motor:
+        case .frame, .fuselage, .arm, .propeller, .wingSection, .tailSection,
+             .horizontalTail, .verticalTail, .elevator, .rudder,
+             .landingGear, .motor:
             return true
         case .battery, .flightController, .esc, .radio, .cameraGimbal, .payloadMount:
             return false
@@ -72,6 +76,7 @@ enum VehicleConnectionType: String, Hashable, Codable {
     case rigid
     case bolted
     case bonded
+    case hinge
     case compositeTransition
     case shaft
     case suspended
@@ -637,9 +642,24 @@ struct VehicleComponentGraph: Hashable {
             let bendingRatio = bendingMoment / max(0.01, connection.bendingLimitNm)
             let torsionRatio = torsionalMoment / max(0.01, connection.torsionLimitNm)
             let energyRatio = energyJ / max(0.5, child.strengthJ)
-            let severity = max(tensileRatio, shearRatio, bendingRatio, torsionRatio, energyRatio * 0.85) *
-                damageFactor * propagation
-            let loss = max(0.0, severity - 0.25) * 0.55
+            let structuralRatio = max(tensileRatio, shearRatio, bendingRatio, torsionRatio)
+            let residualCapacity = max(0.015, connection.residualStrength)
+            // Structural force and moment travel through the whole load path.
+            // Do not attenuate them while walking from a wing tip toward the
+            // fuselage: the root sees the same impulse at a longer lever arm.
+            // Energy spreading still decays with depth because skin/internal
+            // damage is absorbed locally.
+            let exceedsResidualCapacity = structuralRatio > residualCapacity
+            let severity = max(
+                structuralRatio / residualCapacity,
+                energyRatio * 0.85 * damageFactor * propagation
+            )
+            // A joint that exceeds its residual load envelope fails in this
+            // contact. Sub-limit contacts can still bend/loosen it and make a
+            // later, smaller hit decisive.
+            let loss = exceedsResidualCapacity
+                ? connection.residualStrength
+                : max(0.0, severity - 0.25) * 0.55
 
             if loss > 0.0005 {
                 let residualBefore = connection.residualStrength
@@ -664,6 +684,14 @@ struct VehicleComponentGraph: Hashable {
                         components[componentIndex].deformation.bendRadians,
                         SIMD3<Float>(repeating: -Float(25.0).degreesToRadians),
                         SIMD3<Float>(repeating: Float(25.0).degreesToRadians)
+                    )
+                    components[componentIndex].residualStrength = min(
+                        components[componentIndex].residualStrength,
+                        structuralConnections[connectionIndex].residualStrength
+                    )
+                    components[componentIndex].stiffnessScale = min(
+                        components[componentIndex].stiffnessScale,
+                        structuralConnections[connectionIndex].stiffnessScale
                     )
                     components[componentIndex].attachmentState = structuralConnections[connectionIndex].state
                 }
@@ -739,11 +767,25 @@ struct VehicleComponentGraph: Hashable {
     }
 
     var failedConnectionRootIDs: [String] {
-        structuralConnections.compactMap { connection in
+        let failedChildren: [String] = structuralConnections.compactMap { connection in
             guard connection.state != .detached,
                   connection.residualStrength <= 0.015 else { return nil }
             return connection.childComponentID
         }
+        let candidates = Set(failedChildren)
+        // If both an outer section and its root fail in the same impact,
+        // detach the highest failed ancestor once. Otherwise the outer piece
+        // would be spawned first and the remaining wing root as a second body.
+        return candidates.filter { candidate in
+            var parentID = component(id: candidate)?.parentID
+            var depth = 0
+            while let parent = parentID, depth < 32 {
+                if candidates.contains(parent) { return false }
+                parentID = component(id: parent)?.parentID
+                depth += 1
+            }
+            return true
+        }.sorted()
     }
 
     /// Detaches a joint's entire dependent subtree and returns the rigid-body
@@ -843,8 +885,12 @@ struct VehicleComponentGraph: Hashable {
             switch child.kind {
             case .propeller, .motor:
                 connectionType = .shaft
-            case .wingSection:
+            case .wingSection, .tailSection:
                 connectionType = .compositeTransition
+            case .horizontalTail, .verticalTail:
+                connectionType = .bonded
+            case .elevator, .rudder:
+                connectionType = .hinge
             case .landingGear:
                 connectionType = .landingMount
             case .payloadMount:

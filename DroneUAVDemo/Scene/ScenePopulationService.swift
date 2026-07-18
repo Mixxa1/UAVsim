@@ -1246,7 +1246,10 @@ final class ScenePopulationService {
     // supportsLanding so drones never try to perch on a tree collision box.
     static func treeCollisionParts(size: SIMD3<Float>) -> [EnvironmentCollisionPart] {
         let canopyBaseY = size.y * 0.40
-        let trunkTopY = size.y * 0.46            // slight overlap into the canopy, no vertical gap
+        // The trunk remains a narrow rigid member inside most of the crown.
+        // Ending it at 46% made every upper-tree strike pure foliage, so a
+        // wing could pass through the visual trunk without structural load.
+        let trunkTopY = size.y * 0.86
         let trunkWidth = max(0.7, size.x * 0.22) // real trunk footprint, not the canopy span
         let trunkDepth = max(0.7, size.z * 0.22)
         let canopyHeight = size.y - canopyBaseY

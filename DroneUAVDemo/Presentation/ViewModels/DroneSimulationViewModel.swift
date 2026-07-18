@@ -6088,6 +6088,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 inheritedAngularVelocity: omegaBodyAxes
             )
         }
+        sceneController.reconcileDetachedVehicleVisuals(componentGraph)
         refreshDamagePhysicsModels()
         damageEventRecorder.record(
             timestamp: TimeInterval(simulationTime),
@@ -18171,7 +18172,7 @@ final class DroneSimulationViewModel: ObservableObject {
             switch component.kind {
             case .frame, .fuselage, .arm, .motor, .propeller, .battery,
                  .flightController, .esc, .radio, .wingSection,
-                 .horizontalTail, .verticalTail:
+                 .tailSection, .horizontalTail, .verticalTail, .elevator, .rudder:
                 return true
             case .cameraGimbal, .payloadMount, .landingGear:
                 return false
@@ -18183,7 +18184,7 @@ final class DroneSimulationViewModel: ObservableObject {
             switch component.kind {
             case .frame, .fuselage, .arm, .motor, .propeller, .battery,
                  .flightController, .esc, .radio, .wingSection,
-                 .horizontalTail, .verticalTail:
+                 .tailSection, .horizontalTail, .verticalTail, .elevator, .rudder:
                 return true
             case .cameraGimbal, .payloadMount, .landingGear:
                 return false
@@ -18277,7 +18278,8 @@ final class DroneSimulationViewModel: ObservableObject {
             guard !component.isAttached else { return false }
             switch component.kind {
             case .frame, .fuselage, .arm, .motor, .propeller, .battery,
-                 .flightController, .esc, .wingSection, .horizontalTail, .verticalTail:
+                 .flightController, .esc, .wingSection, .tailSection,
+                 .horizontalTail, .verticalTail, .elevator, .rudder:
                 return true
             case .radio, .cameraGimbal, .payloadMount, .landingGear:
                 return false

@@ -81,6 +81,12 @@ final class ImpactResolutionService {
             return .generic
         }
 
+        if source.contains("trunk") || source.contains("branch") {
+            return .woodTrunk
+        }
+        if source.contains("canopy") || source.contains("foliage") || source.contains("leaves") {
+            return .foliage
+        }
         if source.contains("tree") {
             guard let obstacle else { return .woodTrunk }
             let height = max(0.1, obstacle.topY - obstacle.baseY)

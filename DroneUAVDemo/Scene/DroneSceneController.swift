@@ -246,6 +246,12 @@ final class DroneSceneController {
     private(set) var detachedVehicleComponentIDs: Set<String> = []
     private var detachedVehicleLegacyComponents: Set<DamageComponent> = []
     private var detachedVehicleVisualNodeIDs: Set<ObjectIdentifier> = []
+    /// Some procedural fixed-wing models use one render node for both wing
+    /// halves, while the physical graph has root/outer sections per side.
+    /// Once only part of such a node remains attached, compact section boxes
+    /// replace that indivisible source mesh so the visual topology continues
+    /// to match the authoritative graph.
+    private let retainedVehicleSectionProxiesNode = SCNNode()
     private var visualBoundsCenter = SIMD3<Float>(repeating: 0.0)
     private var visualBoundsSize = SIMD3<Float>(repeating: 0.36)
     private var cachedSubjectScale: Float = 0.36
@@ -413,6 +419,9 @@ final class DroneSceneController {
         self.currentVisualGeometry = DroneVisualGeometrySample.capture(from: droneVisual)
 
         scene.rootNode.addChildNode(droneNode)
+
+        retainedVehicleSectionProxiesNode.name = "retainedVehicleSectionProxiesNode"
+        visualRootNode.addChildNode(retainedVehicleSectionProxiesNode)
 
         detachedVehiclePartsRootNode.name = "detachedVehiclePartsRootNode"
         scene.rootNode.addChildNode(detachedVehiclePartsRootNode)
@@ -3023,14 +3032,105 @@ final class DroneSceneController {
         detachedVehiclePartCollisionRuntime.removeAll()
         pendingDetachedVehiclePartImpactEvents.removeAll(keepingCapacity: false)
 
-        let previouslyDetachedLegacyComponents = detachedVehicleLegacyComponents
+        let previouslyHiddenNodeIDs = detachedVehicleVisualNodeIDs
         detachedVehicleComponentIDs.removeAll()
         detachedVehicleLegacyComponents.removeAll()
         detachedVehicleVisualNodeIDs.removeAll()
-        for component in previouslyDetachedLegacyComponents {
-            for node in componentNodes[component] ?? [] {
+        retainedVehicleSectionProxiesNode.childNodes.forEach { $0.removeFromParentNode() }
+        for nodes in componentNodes.values {
+            for node in nodes where previouslyHiddenNodeIDs.contains(ObjectIdentifier(node)) {
                 node.isHidden = false
             }
+        }
+        lastComponentOverlaySignature = nil
+    }
+
+    /// Reconciles indivisible legacy meshes with the graph after one or more
+    /// subtrees detach. Normal, independently mapped source nodes keep their
+    /// original high-detail geometry. Shared or partially detached nodes are
+    /// hidden and only their still-attached physical sections are redrawn.
+    func reconcileDetachedVehicleVisuals(_ graph: VehicleComponentGraph) {
+        retainedVehicleSectionProxiesNode.childNodes.forEach { $0.removeFromParentNode() }
+        if retainedVehicleSectionProxiesNode.parent !== visualRootNode {
+            retainedVehicleSectionProxiesNode.removeFromParentNode()
+            visualRootNode.addChildNode(retainedVehicleSectionProxiesNode)
+        }
+
+        let attachedLegacy = Set(graph.attachedComponents.compactMap(\.legacyComponent))
+        let detachedLegacy = Set(
+            graph.components.lazy
+                .filter { !$0.isAttached }
+                .compactMap(\.legacyComponent)
+        )
+        let partiallyDetachedLegacy = attachedLegacy.intersection(detachedLegacy)
+        var proxyLegacy = partiallyDetachedLegacy
+
+        // A node may be registered in both armFL and armFR (or both tail
+        // buckets). If any of its owners detached, the mesh cannot represent
+        // the remaining topology and must be replaced for every retained owner.
+        var ownersByNodeID: [ObjectIdentifier: Set<DamageComponent>] = [:]
+        var nodeByID: [ObjectIdentifier: SCNNode] = [:]
+        for (legacy, nodes) in componentNodes {
+            for node in nodes {
+                let id = ObjectIdentifier(node)
+                ownersByNodeID[id, default: []].insert(legacy)
+                nodeByID[id] = node
+            }
+        }
+        for (nodeID, owners) in ownersByNodeID {
+            let hasDetachedOwner = !owners.intersection(detachedLegacy).isEmpty
+            let retainedOwners = owners.intersection(attachedLegacy)
+            guard hasDetachedOwner, !retainedOwners.isEmpty,
+                  let node = nodeByID[nodeID] else { continue }
+            node.isHidden = true
+            detachedVehicleVisualNodeIDs.insert(nodeID)
+            proxyLegacy.formUnion(retainedOwners)
+        }
+
+        for legacy in partiallyDetachedLegacy {
+            for node in componentNodes[legacy] ?? [] {
+                node.isHidden = true
+                detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(node))
+            }
+        }
+
+        for component in graph.attachedComponents
+        where component.kind.isStructural {
+            guard let legacy = component.legacyComponent,
+                  proxyLegacy.contains(legacy) else { continue }
+
+            let halfExtents = simd_max(
+                component.boundingHalfExtents,
+                SIMD3<Float>(repeating: 0.006)
+            )
+            let geometry = SCNBox(
+                width: CGFloat(halfExtents.x * 2.0),
+                height: CGFloat(halfExtents.y * 2.0),
+                length: CGFloat(halfExtents.z * 2.0),
+                chamferRadius: CGFloat(min(halfExtents.x, halfExtents.y, halfExtents.z) * 0.08)
+            )
+            if let sourceMaterial = componentNodes[legacy]?
+                .lazy
+                .compactMap({ $0.geometry?.firstMaterial })
+                .first,
+               let material = sourceMaterial.copy() as? SCNMaterial {
+                geometry.materials = [material]
+            } else {
+                geometry.materials = [detachedVehiclePartFallbackMaterial()]
+            }
+
+            let proxy = SCNNode(geometry: geometry)
+            proxy.name = "retainedVehicleSection.\(component.id)"
+            proxy.simdPosition = component.localPosition + component.deformation.translationMeters
+            let bend = component.deformation.bendRadians
+            let bendMagnitude = simd_length(bend)
+            if bendMagnitude > 0.0001 {
+                proxy.simdOrientation = simd_quatf(
+                    angle: min(Float(25.0).degreesToRadians, bendMagnitude),
+                    axis: bend / bendMagnitude
+                )
+            }
+            retainedVehicleSectionProxiesNode.addChildNode(proxy)
         }
         lastComponentOverlaySignature = nil
     }
@@ -3247,6 +3347,7 @@ final class DroneSceneController {
                 node.isHidden = true
             }
         }
+        reconcileDetachedVehicleVisuals(graph)
         lastComponentOverlaySignature = nil
     }
 
@@ -3384,6 +3485,8 @@ final class DroneSceneController {
         visualBoundsSize = droneVisual.visualBoundsSize
         cachedSubjectScale = droneVisual.subjectScale
         currentVisualGeometry = DroneVisualGeometrySample.capture(from: droneVisual)
+        retainedVehicleSectionProxiesNode.removeFromParentNode()
+        visualRootNode.addChildNode(retainedVehicleSectionProxiesNode)
         fpvLookAngles = .zero
         orbitLookAngles = .zero
         topLookAngles = .zero
@@ -6599,6 +6702,17 @@ final class DroneSceneController {
                 }
             }
         }
+
+        // A mesh registered under several legacy buckets is indivisible (a
+        // common example is one full-span wing used by armFL + armFR). It
+        // cannot be an accurate detached subtree, so let the physical-bounds
+        // fallback represent the debris and rebuild retained sections below.
+        let ownershipCount: [ObjectIdentifier: Int] = componentNodes.reduce(into: [:]) { result, entry in
+            for node in Set(entry.value.map(ObjectIdentifier.init)) {
+                result[node, default: 0] += 1
+            }
+        }
+        candidates.removeAll { ownershipCount[ObjectIdentifier($0), default: 0] > 1 }
 
         let candidateIDs = Set(candidates.map(ObjectIdentifier.init))
         return candidates.filter { candidate in

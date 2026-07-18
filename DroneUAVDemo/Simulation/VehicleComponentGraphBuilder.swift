@@ -31,12 +31,14 @@ enum VehicleComponentGraphBuilder {
         case .propeller: return 6.0
         case .cameraGimbal: return 12.0
         case .wingSection(_, .outer): return 20.0
+        case .elevator, .rudder: return 14.0
         case .horizontalTail, .verticalTail: return 25.0
         case .flightController, .radio: return 30.0
         case .arm: return 30.0
         case .esc, .payloadMount: return 35.0
         case .landingGear: return 40.0
         case .motor, .battery: return 45.0
+        case .tailSection: return 50.0
         case .wingSection(_, .root): return 55.0
         case .fuselage: return 80.0
         case .frame: return 90.0
@@ -60,8 +62,11 @@ enum VehicleComponentGraphBuilder {
         case .payloadMount: return 0.015
         case .wingSection(_, .root): return 0.11
         case .wingSection(_, .outer): return 0.07
+        case .tailSection: return 0.055
         case .horizontalTail: return 0.045
         case .verticalTail: return 0.035
+        case .elevator: return 0.014
+        case .rudder: return 0.010
         case .landingGear: return 0.035
         }
     }
@@ -78,9 +83,9 @@ enum VehicleComponentGraphBuilder {
             return [.efficiencyLoss, .intermittent, .totalFailure]
         case .cameraGimbal:
             return [.intermittent, .totalFailure]
-        case .wingSection(_, .outer), .horizontalTail, .verticalTail:
+        case .wingSection(_, .outer), .horizontalTail, .verticalTail, .elevator, .rudder:
             return [.efficiencyLoss, .jam, .holdLastCommand, .totalFailure]
-        case .wingSection(_, .root), .arm, .frame, .fuselage, .landingGear, .payloadMount:
+        case .wingSection(_, .root), .tailSection, .arm, .frame, .fuselage, .landingGear, .payloadMount:
             return [.efficiencyLoss, .totalFailure]
         }
     }
@@ -281,8 +286,11 @@ enum VehicleComponentGraphBuilder {
             case .cameraGimbal: base = "cameraGimbal"
             case .payloadMount: base = "payloadMount"
             case .wingSection(let side, let segment): base = "wing.\(side.rawValue).\(segment.rawValue)"
+            case .tailSection: base = "tail.section"
             case .horizontalTail: base = "tail.horizontal"
             case .verticalTail: base = "tail.vertical"
+            case .elevator: base = "tail.elevator"
+            case .rudder: base = "tail.rudder"
             case .landingGear(let slot): base = "gear.\(slot)"
             }
             if let suffix { return "\(base).\(suffix)" }
@@ -453,19 +461,52 @@ enum VehicleComponentGraphBuilder {
         }
 
         // Tail group at the rear extreme (+Z in the body frame — nose is -Z).
+        // A separate root lets one stabilizer fail locally while a stronger
+        // tail strike can detach the entire empennage as one dependent subtree.
         let tailZ = center.z + size.z * 0.42
-        drafts.append(ComponentDraft(
-            kind: .horizontalTail,
-            position: SIMD3<Float>(center.x, center.y, tailZ),
-            halfExtents: SIMD3<Float>(size.x * 0.18, max(0.008, size.y * 0.05), max(0.03, size.z * 0.08)),
+        let tailSection = ComponentDraft(
+            kind: .tailSection,
+            position: SIMD3<Float>(center.x, center.y, center.z + size.z * 0.30),
+            halfExtents: SIMD3<Float>(
+                max(0.018, size.x * 0.055),
+                max(0.018, size.y * 0.12),
+                max(0.035, size.z * 0.14)
+            ),
             parentID: fuselage.id,
+            legacy: nil
+        )
+        drafts.append(tailSection)
+        let horizontalHalfChord = max(0.03, size.z * 0.08)
+        let horizontalTail = ComponentDraft(
+            kind: .horizontalTail,
+            position: SIMD3<Float>(center.x, center.y, tailZ - horizontalHalfChord * 0.30),
+            halfExtents: SIMD3<Float>(size.x * 0.18, max(0.008, size.y * 0.05), horizontalHalfChord * 0.70),
+            parentID: tailSection.id,
+            legacy: .armRL
+        )
+        drafts.append(horizontalTail)
+        drafts.append(ComponentDraft(
+            kind: .elevator,
+            position: SIMD3<Float>(center.x, center.y, tailZ + horizontalHalfChord * 0.70),
+            halfExtents: SIMD3<Float>(size.x * 0.17, max(0.006, size.y * 0.04), horizontalHalfChord * 0.30),
+            parentID: horizontalTail.id,
             legacy: .armRL
         ))
-        drafts.append(ComponentDraft(
+
+        let verticalHalfChord = max(0.03, size.z * 0.08)
+        let verticalTail = ComponentDraft(
             kind: .verticalTail,
-            position: SIMD3<Float>(center.x, center.y + size.y * 0.25, tailZ),
-            halfExtents: SIMD3<Float>(max(0.008, size.x * 0.02), size.y * 0.25, max(0.03, size.z * 0.08)),
-            parentID: fuselage.id,
+            position: SIMD3<Float>(center.x, center.y + size.y * 0.25, tailZ - verticalHalfChord * 0.30),
+            halfExtents: SIMD3<Float>(max(0.008, size.x * 0.02), size.y * 0.25, verticalHalfChord * 0.70),
+            parentID: tailSection.id,
+            legacy: .armRR
+        )
+        drafts.append(verticalTail)
+        drafts.append(ComponentDraft(
+            kind: .rudder,
+            position: SIMD3<Float>(center.x, center.y + size.y * 0.25, tailZ + verticalHalfChord * 0.70),
+            halfExtents: SIMD3<Float>(max(0.006, size.x * 0.015), size.y * 0.23, verticalHalfChord * 0.30),
+            parentID: verticalTail.id,
             legacy: .armRR
         ))
 
@@ -656,6 +697,59 @@ enum VehicleComponentGraphBuilder {
                 )
             }
         }
+
+        // Fixed-wing lifting surfaces need continuous contact coverage, not
+        // only one sphere at each visual extremity. Use compact grids across
+        // their actual planes. A single bounding sphere would extend far
+        // below a thin wing, producing false ground/roof contacts.
+        if profile.airframeClass == .fixedWing || profile.airframeClass == .hybridVTOL {
+            for draft in drafts {
+                switch draft.kind {
+                case .wingSection, .horizontalTail, .elevator:
+                    addSurfaceContactGrid(
+                        draft: draft,
+                        primaryAxis: 0,
+                        secondaryAxis: 2,
+                        thicknessAxis: 1,
+                        addSphere: addSphere
+                    )
+                case .verticalTail, .rudder:
+                    addSurfaceContactGrid(
+                        draft: draft,
+                        primaryAxis: 1,
+                        secondaryAxis: 2,
+                        thicknessAxis: 0,
+                        addSphere: addSphere
+                    )
+                case .tailSection:
+                    let radius = max(
+                        0.022,
+                        sqrt(
+                            draft.halfExtents.x * draft.halfExtents.x +
+                            draft.halfExtents.y * draft.halfExtents.y
+                        )
+                    )
+                    let count = min(4, max(1, Int((draft.halfExtents.z / radius).rounded(.up))))
+                    let interval = draft.halfExtents.z * 2.0 / Float(count)
+                    for index in 0..<count {
+                        addSphere(
+                            at: draft.position + SIMD3<Float>(
+                                0.0,
+                                0.0,
+                                -draft.halfExtents.z + interval * (Float(index) + 0.5)
+                            ),
+                            radius: max(radius, interval * 0.52),
+                            componentID: draft.id,
+                            preserveComponentMapping: true
+                        )
+                    }
+                case .frame, .fuselage, .arm, .motor, .propeller, .battery,
+                     .flightController, .esc, .radio, .cameraGimbal,
+                     .payloadMount, .landingGear:
+                    break
+                }
+            }
+        }
         let criticalSphereCount = spheres.count
 
         // Core body sphere.
@@ -720,5 +814,43 @@ enum VehicleComponentGraphBuilder {
         }
 
         return VehicleContactProfile(spheres: spheres, boundingRadius: boundingRadius)
+    }
+
+    private static func addSurfaceContactGrid(
+        draft: ComponentDraft,
+        primaryAxis: Int,
+        secondaryAxis: Int,
+        thicknessAxis: Int,
+        addSphere: (SIMD3<Float>, Float, String?, Bool) -> Void
+    ) {
+        let primaryHalf = draft.halfExtents[primaryAxis]
+        let secondaryHalf = draft.halfExtents[secondaryAxis]
+        let thicknessHalf = draft.halfExtents[thicknessAxis]
+        let radius = min(
+            0.16,
+            max(0.022, thicknessHalf * 1.5, min(primaryHalf, secondaryHalf) * 0.30)
+        )
+        let preferredSpacing = max(0.04, radius * 1.75)
+        let primaryCount = min(
+            4,
+            max(1, Int((primaryHalf * 2.0 / preferredSpacing).rounded(.up)))
+        )
+        let secondaryCount = min(
+            3,
+            max(1, Int((secondaryHalf * 2.0 / preferredSpacing).rounded(.up)))
+        )
+        let primaryInterval = primaryHalf * 2.0 / Float(primaryCount)
+        let secondaryInterval = secondaryHalf * 2.0 / Float(secondaryCount)
+
+        for primaryIndex in 0..<primaryCount {
+            for secondaryIndex in 0..<secondaryCount {
+                var point = draft.position
+                point[primaryAxis] += -primaryHalf +
+                    primaryInterval * (Float(primaryIndex) + 0.5)
+                point[secondaryAxis] += -secondaryHalf +
+                    secondaryInterval * (Float(secondaryIndex) + 0.5)
+                addSphere(point, radius, draft.id, true)
+            }
+        }
     }
 }

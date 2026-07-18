@@ -41,8 +41,14 @@ struct FixedWingAeroDamage: Hashable {
         let leftOuter = graph.integrity(id: "wing.left.outer")
         let rightRoot = graph.integrity(id: "wing.right.root")
         let rightOuter = graph.integrity(id: "wing.right.outer")
-        let hTail = graph.integrity(id: "tail.horizontal")
-        let vTail = graph.integrity(id: "tail.vertical")
+        let tailSection = graph.integrity(id: "tail.section")
+        let hTail = min(graph.integrity(id: "tail.horizontal"), tailSection)
+        let vTail = min(graph.integrity(id: "tail.vertical"), tailSection)
+        // Older/restored graphs may predate independent hinged surfaces. In
+        // that case retain the stabilizer's legacy authority instead of
+        // treating an absent component as a detached one.
+        let elevator = graph.component(id: "tail.elevator").map { min($0.isAttached ? $0.integrity : 0.0, hTail) } ?? hTail
+        let rudder = graph.component(id: "tail.rudder").map { min($0.isAttached ? $0.integrity : 0.0, vTail) } ?? vTail
 
         let totalSectionDamage = (1.0 - leftRoot) + (1.0 - leftOuter) + (1.0 - rightRoot) + (1.0 - rightOuter)
         // Right-minus-left damage asymmetry; outer sections carry the longer
@@ -63,12 +69,13 @@ struct FixedWingAeroDamage: Hashable {
             clRollOffset: clRollOffset,
             cnYawOffset: cnYawOffset,
             aileronScale: ((leftOuter + rightOuter) * 0.5).clamped(to: 0.0...1.0),
-            elevatorScale: hTail.clamped(to: 0.0...1.0),
-            rudderScale: vTail.clamped(to: 0.0...1.0),
-            // Some pitch/yaw stiffness survives the tail (fuselage, wing) —
-            // scales floor above zero so the model stays integrable.
-            pitchStabilityScale: (0.35 + 0.65 * hTail).clamped(to: 0.35...1.0),
-            yawStabilityScale: (0.45 + 0.55 * vTail).clamped(to: 0.45...1.0)
+            elevatorScale: elevator.clamped(to: 0.0...1.0),
+            rudderScale: rudder.clamped(to: 0.0...1.0),
+            // A little damping remains in the fuselage/wing, but loss of the
+            // complete empennage must permit real pitch/yaw divergence and
+            // tumbling instead of retaining almost half the pristine stability.
+            pitchStabilityScale: (0.08 + 0.92 * hTail).clamped(to: 0.08...1.0),
+            yawStabilityScale: (0.10 + 0.90 * vTail).clamped(to: 0.10...1.0)
         )
     }
 }
