@@ -166,6 +166,25 @@ struct DiagnosticsModuleView: View {
             VStack(alignment: .leading, spacing: 8) {
                 TelemetryPanelView(telemetry: viewModel.telemetry)
 
+                ModuleMetricGrid {
+                    ModuleMetricCell(
+                        labelKey: "telemetry.battery_voltage",
+                        value: String(format: "%.1fV", viewModel.batteryState.packVoltage)
+                    )
+                    ModuleMetricCell(
+                        labelKey: "telemetry.cell_voltage",
+                        value: String(format: "%.2fV/S", viewModel.batteryState.cellVoltage)
+                    )
+                    ModuleMetricCell(
+                        labelKey: "telemetry.current_draw",
+                        value: String(format: "%.1fA", viewModel.batteryState.currentDrawA)
+                    )
+                    ModuleMetricCell(
+                        labelKey: "telemetry.mah_drawn",
+                        value: String(format: "%.0f mAh", viewModel.batteryState.mahDrawn)
+                    )
+                }
+
                 HStack(spacing: 8) {
                     OperationalActionButton(
                         titleKey: "telemetry.export",

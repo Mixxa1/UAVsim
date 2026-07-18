@@ -336,6 +336,7 @@
 "warning.control_reduced" = "Снижена управляемость";
 "warning.weather_severe" = "Сложные погодные условия";
 "warning.battery_low" = "Низкий заряд батареи";
+"warning.battery_fire" = "Возгорание батареи";
 "warning.integrity_low" = "Низкая структурная целостность";
 "warning.fixedwing_low_speed" = "Низкая скорость самолётного БПЛА / риск сваливания";
 "warning.fleet_risk" = "Риск в построении группы";
@@ -784,6 +785,10 @@
 "telemetry.control_mode" = "Режим управления";
 "telemetry.nearest_obstacle_source" = "Источник ближайшего препятствия";
 "telemetry.frame_time" = "Время кадра";
+"telemetry.battery_voltage" = "Напряжение батареи";
+"telemetry.cell_voltage" = "Напряжение на банку";
+"telemetry.current_draw" = "Потребляемый ток";
+"telemetry.mah_drawn" = "Израсходовано мА·ч";
 "telemetry.physics_time" = "Время физики";
 "telemetry.render_time" = "Время рендера";
 "telemetry.path_time" = "Время поиска пути";
@@ -1185,7 +1190,7 @@
 "overlay.pfd.metric.battery" = "АКБ";
 
 "hud.compact.position" = "ПОЗ  x %.1f  y %.1f  z %.1f";
-"hud.compact.speed_battery" = "СКР  %.1f м/с   АКБ %.0f%%";
+"hud.compact.speed_battery" = "СКР  %.1f м/с   АКБ %.0f%%   %.1fV";
 "hud.compact.auto_nav" = "АВТО %@  ДИСТ %@  ПЕЛ %@";
 
 "hud.fpv.mode.acro" = "Акро";

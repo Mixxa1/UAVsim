@@ -144,6 +144,7 @@ private struct DroneWarningBuilder {
     let collisionAnalysis: CollisionAnalysisSnapshot
     let weather: WeatherModel
     let batteryState: BatteryState
+    let batteryFireActive: Bool
     let damageState: DamageState
     let collisionAftermathState: CollisionAftermathState
     let signalLossCause: SignalLossCause?
@@ -163,6 +164,7 @@ private struct DroneWarningBuilder {
         if activelyFlying, collisionAnalysis.riskScore >= 0.65 { output.append("warning.collision_high") }
         if weather.severityScore >= 0.7 { output.append("warning.weather_severe") }
         if batteryState.chargePercent <= 20 { output.append("warning.battery_low") }
+        if batteryFireActive { output.append("warning.battery_fire") }
         if damageState.averageHealth <= 0.70 { output.append("warning.integrity_low") }
         if damageState.isFlightCritical { output.append("warning.integrity_critical") }
         switch collisionAftermathState {
@@ -1131,6 +1133,23 @@ final class DroneSimulationViewModel: ObservableObject {
     private(set) var vehicleRotorModel: VehicleRotorModel = .empty
     private var vehicleAeroDamage: FixedWingAeroDamage = .pristine
     private let componentFailureRuntime = ComponentFailureRuntime()
+    /// Battery thermal-runaway/rupture consequence (impact puncture or sustained
+    /// overheat/over-discharge under load) — visual + instant power loss only, see
+    /// `igniteBatteryFireIfNeeded`/`updateBatteryFireState`.
+    @Published private(set) var batteryFireActive: Bool = false
+    private var batteryFireIgnitedAtSimulationTime: TimeInterval?
+    private static let batteryFireFlameDurationSec: Float = 6.0
+    private static let batteryFireSmokeTailDurationSec: Float = 10.0
+    /// Seconds of *continuous* near-100% throttle — resets the instant the operator eases off,
+    /// by design (see `updateBatteryFireState`): this is specifically about refusing to let go of
+    /// the stick/E, not cumulative time spent near max throttle across a flight.
+    private var sustainedMaxThrottleSeconds: Float = 0.0
+    private static let batteryOverheatThrottleThreshold: Float = 0.97
+    private static let batteryOverheatDurationSec: Float = 12.0
+    /// Generic hobby-LiPo continuous discharge rating used to derive a "safe" continuous current
+    /// from pack capacity alone (no per-aircraft C-rating field exists) — real packs commonly run
+    /// 15-25C continuous; 15C is the conservative end.
+    private static let batteryContinuousDischargeCRating: Float = 15.0
     private let batteryThermalService: BatteryThermalSimulationService
     private let telemetryExporter: TelemetryExporting
     private let projectStorage: ProjectStorageManaging
@@ -2650,6 +2669,9 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
         isArmed = true
+        // Per-flight consumption counter, mirrors a real FC's flight log — charge level itself
+        // (chargePercent) is untouched, only the "since arm" mAh tally resets.
+        batteryState.mahDrawn = 0.0
         // Assisted-launch fixed wings have no ground takeoff: arming while
         // grounded returns the airframe to its launcher (the operator picks
         // it up / the shuttle receives it), ready for the next launch.
@@ -4638,6 +4660,76 @@ final class DroneSimulationViewModel: ObservableObject {
         lockControlsToCurrentState(overrideThrottle: Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle))
     }
 
+    /// Battery thermal-runaway/rupture: visual consequence only (flame + smoke, instant power
+    /// loss) — no secondary component damage, matching a fire that starts *because* the pack
+    /// failed rather than one more structural failure of its own. Idempotent: a second trigger
+    /// while already on fire is a no-op, so the impact path and the per-tick overheat/discharge
+    /// checks can both call this without double-igniting.
+    private func igniteBatteryFireIfNeeded(reason: String) {
+        guard !batteryFireActive, componentGraph.component(id: "battery") != nil else { return }
+        batteryFireActive = true
+        batteryFireIgnitedAtSimulationTime = TimeInterval(simulationTime)
+        // Otherwise this would still read >= batteryOverheatDurationSec on the very next check
+        // once the fire's own timeline clears batteryFireActive, re-igniting it immediately.
+        sustainedMaxThrottleSeconds = 0.0
+        batteryState.chargePercent = 0.0
+        damageEventRecorder.record(
+            timestamp: TimeInterval(simulationTime),
+            type: .subsystemFailed,
+            componentID: "battery",
+            reason: reason
+        )
+    }
+
+    /// Per-tick ignition check plus the flame → smoke-tail → out timeline once burning.
+    ///
+    /// Overheat trigger: holding throttle at (near) 100% continuously for
+    /// `batteryOverheatDurationSec` — eases off the instant the operator lets go, by design (a
+    /// pilot who backs off periodically is managing the pack, not abusing it). At that point the
+    /// pack is asked to sustain its computed "critical" continuous current — capacity x a generic
+    /// hobby-LiPo C-rating — and real packs can't do that indefinitely without heat damage.
+    /// Requiring *both* the duration and the current actually being at/above that critical level
+    /// (rather than duration alone) means a already-weakened/damaged pack, which draws more
+    /// current for the same throttle, can cross it sooner — consequence compounds on prior damage.
+    /// The over-discharge leg specifically wants continued *load* on an empty pack (a paperweight
+    /// sitting at 0% on the ground is not the failure mode) — mirrors `BatteryState.isDepleted`'s
+    /// 0.1% floor.
+    private func updateBatteryFireState(deltaTime: Float) {
+        if !batteryFireActive {
+            if isArmed, state.throttle >= Self.batteryOverheatThrottleThreshold {
+                sustainedMaxThrottleSeconds += deltaTime
+            } else {
+                sustainedMaxThrottleSeconds = 0.0
+            }
+
+            let criticalContinuousCurrentA = (selectedDroneProfile.batteryCapacitymAh / 1000.0) *
+                Self.batteryContinuousDischargeCRating
+            let isDrawingCriticalCurrent = batteryState.currentDrawA >= criticalContinuousCurrentA * 0.9
+
+            if sustainedMaxThrottleSeconds >= Self.batteryOverheatDurationSec, isDrawingCriticalCurrent {
+                igniteBatteryFireIfNeeded(reason: "battery_sustained_overcurrent")
+            } else if batteryState.chargePercent <= 0.1, batteryState.powerDrawW > 5.0 {
+                igniteBatteryFireIfNeeded(reason: "battery_over_discharge")
+            }
+        }
+
+        guard batteryFireActive, let ignitedAt = batteryFireIgnitedAtSimulationTime else {
+            return
+        }
+        let elapsed = Float(TimeInterval(simulationTime) - ignitedAt)
+        let flameActive = elapsed < Self.batteryFireFlameDurationSec
+        let smokeActive = elapsed < Self.batteryFireFlameDurationSec + Self.batteryFireSmokeTailDurationSec
+        sceneController.updateBatteryFireVisual(
+            flameActive: flameActive,
+            smokeActive: smokeActive,
+            localPosition: componentGraph.component(id: "battery")?.localPosition ?? .zero
+        )
+        if !flameActive, !smokeActive {
+            batteryFireActive = false
+            batteryFireIgnitedAtSimulationTime = nil
+        }
+    }
+
     func simulateAgainFromStart() {
         showBatteryDepletedDialog = false
         reset()
@@ -5365,7 +5457,8 @@ final class DroneSimulationViewModel: ObservableObject {
                     airframeClass: selectedDroneProfile.airframeClass,
                     rotorsSpinning: state.throttle > 0.05 && isArmed,
                     deltaTime: dt,
-                    applyDamage: collisionCooldown <= 0.0
+                    applyDamage: collisionCooldown <= 0.0,
+                    restingSpeedThreshold: crashResolutionRestingSpeedThreshold
                 )
                 impactReport = report
                 postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
@@ -5527,6 +5620,7 @@ final class DroneSimulationViewModel: ObservableObject {
             maneuverAggressiveness: maneuverAggressiveness,
             deltaTime: dt
         )
+        updateBatteryFireState(deltaTime: dt)
 
         if batteryState.isDepleted {
             disarm(forceEmergency: true)
@@ -5733,6 +5827,10 @@ final class DroneSimulationViewModel: ObservableObject {
                     residualStrengthAfter: entry.residualStrengthAfter,
                     reason: "localized_impact"
                 )
+                if entry.componentID == "battery", entry.integrityAfter <= 0.0001,
+                   entry.integrityBefore > 0.0001, report.tier == .criticalImpact {
+                    igniteBatteryFireIfNeeded(reason: "battery_impact_rupture")
+                }
             }
             for assigned in assignedFailures {
                 let componentID = assigned.split(separator: ":", maxSplits: 1).first.map(String.init)
@@ -5863,7 +5961,8 @@ final class DroneSimulationViewModel: ObservableObject {
             airframeClass: selectedDroneProfile.airframeClass,
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: deltaTime,
-            applyDamage: true
+            applyDamage: true,
+            restingSpeedThreshold: crashResolutionRestingSpeedThreshold
         )
         groundImpactCooldown = report.tier == .lightTouch ? 0.05 : 0.16
         return report
@@ -5963,7 +6062,8 @@ final class DroneSimulationViewModel: ObservableObject {
             airframeClass: selectedDroneProfile.airframeClass,
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: deltaTime,
-            applyDamage: true
+            applyDamage: true,
+            restingSpeedThreshold: crashResolutionRestingSpeedThreshold
         )
         groundImpactCooldown = report.tier == .lightTouch ? 0.05 : 0.16
         return report
@@ -6367,7 +6467,8 @@ final class DroneSimulationViewModel: ObservableObject {
             airframeClass: selectedDroneProfile.airframeClass,
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: 1.0 / 60.0,
-            applyDamage: collisionCooldown <= 0.0
+            applyDamage: collisionCooldown <= 0.0,
+            restingSpeedThreshold: crashResolutionRestingSpeedThreshold
         )
         applyImpactConsequences(report)
         if report.tier != .lightTouch, collisionCooldown <= 0.0 {
@@ -9892,6 +9993,7 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionAnalysis: collisionAnalysis,
             weather: weather,
             batteryState: batteryState,
+            batteryFireActive: batteryFireActive,
             damageState: damageState,
             collisionAftermathState: collisionAftermathState,
             signalLossCause: signalLossCause,
@@ -10438,6 +10540,10 @@ final class DroneSimulationViewModel: ObservableObject {
             groundImpactCooldown = 0.0
             replayStopPendingAfterDisarm = missionReplayRecorder.isRecording
             sceneController.clearDetachedVehicleParts()
+            sceneController.clearBatteryFireVisual()
+            batteryFireActive = false
+            batteryFireIgnitedAtSimulationTime = nil
+            sustainedMaxThrottleSeconds = 0.0
         }
         componentGraph = graph
         pristineVehicleContactProfile = output.contactProfile
@@ -10897,6 +11003,9 @@ final class DroneSimulationViewModel: ObservableObject {
             batteryHealthPercent: Double(batteryState.healthPercent),
             powerDrawW: Double(batteryState.powerDrawW.isFinite ? batteryState.powerDrawW : 0.0),
             estimatedRemainingMin: Double(batteryState.remainingTimeSec / 60.0),
+            batteryVoltage: Double(batteryState.packVoltage.isFinite ? batteryState.packVoltage : 0.0),
+            batteryCellVoltage: Double(batteryState.cellVoltage.isFinite ? batteryState.cellVoltage : 0.0),
+            batteryCurrentDrawA: Double(batteryState.currentDrawA.isFinite ? batteryState.currentDrawA : 0.0),
             weatherPreset: weather.preset.title,
             weatherPresetKey: weather.preset.titleKey,
             weatherIntensity: Double(weather.normalizedIntensity),
@@ -17813,9 +17922,15 @@ final class DroneSimulationViewModel: ObservableObject {
 
         // Only clamp a drone that was resting on / descending onto the surface. A drone that
         // is genuinely below it (e.g. flew in under an overhang) must not be shoved up through
-        // the surface, so require it to have been at or above the surface on the previous tick.
+        // the surface, so require it to have been at or above the surface on the previous tick —
+        // except an uncontrolled crashed body, which has no "intentionally flew under it" reading:
+        // stepUncontrolledBody's fall only ever stops at the flat world ground (it has no
+        // knowledge of building geometry), so a fast post-crash tumble can cross a roof within
+        // one tick and land on the far side of this guard. It must still be caught here rather
+        // than left to free-fall through the structure's mesh toward world Y=0.
         let comeFromAboveTolerance = max(0.05, selectedDroneProfile.collisionRadius * 0.5)
-        guard previousState.position.y >= supportY + clearance - comeFromAboveTolerance else {
+        guard physicalState == .crashed ||
+            previousState.position.y >= supportY + clearance - comeFromAboveTolerance else {
             return
         }
 
@@ -17823,6 +17938,19 @@ final class DroneSimulationViewModel: ObservableObject {
         if state.velocity.y < 0.0 {
             state.velocity.y = 0.0
         }
+    }
+
+    /// ImpactResolutionService's live-flight default (0.01 m/s) treats almost any positive
+    /// closing speed as a fresh collision worth a bounce impulse. That is correct while flying,
+    /// but an uncontrolled crashed body can sit embedded against an obstacle (a building wall,
+    /// a tree) where gravity re-creates a small positive closing speed every tick — with the
+    /// live-flight threshold each of those re-triggers a full bounce, "dancing" the wreck in
+    /// place indefinitely. stepUncontrolledBody already avoids this for the flat ground via its
+    /// own resting/support-polygon branch; raising the threshold here gives the general
+    /// obstacle-contact path the same "settled, not colliding" reading once armed control is
+    /// gone, without weakening the live-flight collision response at all.
+    private var crashResolutionRestingSpeedThreshold: Float {
+        physicalState == .crashed ? 0.6 : 0.01
     }
 
     /// Rest-normalized ground clearance of the vehicle contact profile at the
@@ -17986,7 +18114,53 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    /// `collisionService.analyze()` / `resolveObstaclePenetration`'s "nearest obstacle distance"
+    /// is a nearest-SURFACE-POINT query: a body resting in the middle of a room reads as "far
+    /// from any obstacle" (a large positive clearance to whichever wall happens to be nearest),
+    /// because the query only ever measures proximity to a surface, never containment. It can
+    /// therefore never catch "trapped inside a building" the way it catches "overlapping a
+    /// specific wall" — and `settleDisarmedGroundedState` only ever corrects Y (nearest
+    /// support-surface height), trusting whatever X/Z the vehicle already has. A body that
+    /// tunneled horizontally into a building (a fast swept step crossing a thin/gappy wall) is
+    /// therefore left to settle calmly inside it forever, with nothing in the per-tick pipeline
+    /// ever revisiting horizontal position once armed control is gone. This coarse footprint
+    /// check — bounding circle + height band, both already computed per mesh obstacle for the
+    /// swept/analysis paths, no new geometry — catches exactly that: if settling lands inside a
+    /// building's overall footprint, shove it back out past the bounding radius instead of
+    /// leaving it resting inside the walls. Deliberately approximate (the circumscribing circle
+    /// over-covers a rectangular footprint's corners) — acceptable because this only fires once,
+    /// at the rare moment of settling to a full stop, not every tick.
+    private func ejectFromEnclosingBuildingFootprintIfNeeded() {
+        let obstacles = sceneController.nearbyEnvironmentObstacles(
+            near: state.position,
+            radius: collisionService.spatialQueryRadius
+        )
+        let planar = SIMD2<Float>(state.position.x, state.position.z)
+        for obstacle in obstacles where obstacle.hasMeshCollision {
+            guard state.position.y >= obstacle.baseY, state.position.y <= obstacle.topY else {
+                continue
+            }
+            let toDrone = planar - obstacle.planarCenter
+            let distance = simd_length(toDrone)
+            guard distance < obstacle.radius else { continue }
+
+            let outward = distance > 0.001 ? toDrone / distance : SIMD2<Float>(1.0, 0.0)
+            let pushedPlanar = obstacle.planarCenter +
+                outward * (obstacle.radius + max(0.3, selectedDroneProfile.collisionRadius))
+            state.position.x = pushedPlanar.x
+            state.position.z = pushedPlanar.y
+            damageEventRecorder.record(
+                timestamp: TimeInterval(simulationTime),
+                type: .vehicleSettled,
+                colliderID: obstacle.id.uuidString,
+                worldPoint: state.position,
+                reason: "ejected_from_building_footprint"
+            )
+        }
+    }
+
     private func settleDisarmedGroundedState() {
+        ejectFromEnclosingBuildingFootprintIfNeeded()
         let hasPhysicalDamage = componentGraph.components.contains {
             !$0.isAttached || $0.integrity < 0.999 || $0.residualStrength < 0.999
         }

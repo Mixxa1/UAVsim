@@ -90,7 +90,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let maneuverAuthorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * maneuverAuthorityPenalty).clamped(to: 0.05...1.00)
         let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
-            context.powerSystemFactor.clamped(to: 0.0...1.0)
+            context.powerSystemFactor.clamped(to: 0.0...1.0) *
+            context.batteryState.voltageSagFactor
         let mass = resolvedVehicleMass(
             context: context,
             fallback: payloadMassModel.resolvedCurrentTotalMass,
@@ -519,7 +520,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
         let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
-            context.powerSystemFactor.clamped(to: 0.0...1.0)
+            context.powerSystemFactor.clamped(to: 0.0...1.0) *
+            context.batteryState.voltageSagFactor
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
 
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
@@ -1027,7 +1029,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
         let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
-            context.powerSystemFactor.clamped(to: 0.0...1.0)
+            context.powerSystemFactor.clamped(to: 0.0...1.0) *
+            context.batteryState.voltageSagFactor
         let mass = resolvedVehicleMass(
             context: context,
             fallback: payloadMassModel.resolvedCurrentTotalMass,

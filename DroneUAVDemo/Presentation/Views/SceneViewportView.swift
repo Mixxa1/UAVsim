@@ -2263,7 +2263,7 @@ struct FPVViewportOverlayView: View {
                 // Top-left — flight mode + battery.
                 VStack(alignment: .leading, spacing: 9) {
                     FPVModeBadge(mode: flightControlMode)
-                    FPVBatteryGauge(percent: telemetry.batteryPercent)
+                    FPVBatteryGauge(percent: telemetry.batteryPercent, voltage: telemetry.batteryVoltage)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.leading, 22)
@@ -2331,6 +2331,7 @@ private struct FPVModeBadge: View {
 
 private struct FPVBatteryGauge: View {
     let percent: Double
+    let voltage: Double
 
     private var fraction: CGFloat { CGFloat(min(max(percent / 100.0, 0.0), 1.0)) }
 
@@ -2361,6 +2362,11 @@ private struct FPVBatteryGauge: View {
             Text(String(format: "%.0f%%", max(0.0, percent)))
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tint)
+            if voltage > 0.1 {
+                Text(String(format: "%.1fV", voltage))
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
         }
     }
 }

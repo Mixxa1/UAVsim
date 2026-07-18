@@ -39,6 +39,9 @@ struct TelemetrySnapshot {
     var batteryHealthPercent: Double
     var powerDrawW: Double
     var estimatedRemainingMin: Double
+    var batteryVoltage: Double
+    var batteryCellVoltage: Double
+    var batteryCurrentDrawA: Double
 
     var weatherPreset: String
     var weatherPresetKey: String
@@ -156,6 +159,9 @@ struct TelemetrySnapshot {
         batteryHealthPercent: 100.0,
         powerDrawW: 0.0,
         estimatedRemainingMin: 0.0,
+        batteryVoltage: 0.0,
+        batteryCellVoltage: 0.0,
+        batteryCurrentDrawA: 0.0,
         weatherPreset: WeatherPreset.normal.title,
         weatherPresetKey: WeatherPreset.normal.titleKey,
         weatherIntensity: 0.0,

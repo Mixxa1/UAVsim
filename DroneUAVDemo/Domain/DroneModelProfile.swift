@@ -497,6 +497,9 @@ struct DroneModelProfile: Identifiable, Hashable {
     /// Static template of propulsion units seeded into `DroneState.propulsionUnits`
     /// on arm/spawn/reset. Empty for airframes that aren't hybridVTOL.
     let propulsionUnitTemplate: [PropulsionUnit]
+    /// Structural build-quality multiplier scaling `VehicleComponentGraphBuilder`'s
+    /// per-component-kind strength table for this specific airframe. 1.0 = unmodified table.
+    let structuralQualityFactor: Float
 
     let notes: String
     let sourceURL: URL?
@@ -537,7 +540,8 @@ struct DroneModelProfile: Identifiable, Hashable {
         notes: String,
         sourceURL: URL?,
         uavProfileID: String? = nil,
-        workbenchBuild: WorkbenchBuild? = nil
+        workbenchBuild: WorkbenchBuild? = nil,
+        structuralQualityFactor: Float = 1.0
     ) {
         self.id = id
         self.displayName = displayName
@@ -573,6 +577,7 @@ struct DroneModelProfile: Identifiable, Hashable {
         self.sourceURL = sourceURL
         self.uavProfileID = uavProfileID
         self.workbenchBuild = workbenchBuild
+        self.structuralQualityFactor = structuralQualityFactor
     }
 
     var isAbstract: Bool {
@@ -601,6 +606,23 @@ struct DroneModelProfile: Identifiable, Hashable {
     var massKg: Float { takeoffMassKg }
     var batteryCapacityWh: Float { batteryEnergyWh }
     var collisionRadius: Float { collisionRadiusMeters }
+
+    /// LiPo cell count (S rating) bracketed by pack energy — a computed default rather than a
+    /// per-profile field so it applies consistently across the whole catalog without threading a
+    /// new constructor parameter through every call site. Brackets follow real-world pack scaling
+    /// (micro/toy packs 2S ~7.4V, small consumer/prosumer 4S ~14.8V, professional enterprise 6S
+    /// ~22.2V, heavy professional/cargo 12S ~44.4V, heavy industrial/agri 18S ~66.6V, extreme
+    /// heavy-lift/military-scale 24S ~88.8V). Cell counts are always even in practice.
+    var batteryCellCount: Int {
+        switch batteryEnergyWh {
+        case ..<20: return 2
+        case ..<150: return 4
+        case ..<600: return 6
+        case ..<3000: return 12
+        case ..<10000: return 18
+        default: return 24
+        }
+    }
 
     var dimensions: DroneDimensionsMeters {
         let meters = dimensionsUnfoldedMm.meters
@@ -717,7 +739,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             propulsionUnitTemplate: tuning.propulsionUnitTemplate,
             notes: uavProfile.notes,
             sourceURL: UAVReferenceCatalog.sourceURL(for: uavProfile.id),
-            uavProfileID: uavProfile.id
+            uavProfileID: uavProfile.id,
+            structuralQualityFactor: tuning.structuralQualityFactor
         )
     }
 
@@ -773,7 +796,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.74,
                 hoverThrottle: 0.57,
                 cameraPreset: DroneCameraPreset(fpvFov: 82.0, followDistance: 11.2, followHeight: 4.0),
-                collisionRadiusMeters: 0.38
+                collisionRadiusMeters: 0.38,
+                structuralQualityFactor: 1.15
             )
         case .djiMavic4Pro:
             return RuntimeTuning(
@@ -797,7 +821,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.84,
                 hoverThrottle: 0.53,
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
-                collisionRadiusMeters: 0.24
+                collisionRadiusMeters: 0.24,
+                structuralQualityFactor: 0.95
             )
         case .djiNeo:
             return RuntimeTuning(
@@ -821,7 +846,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.92,
                 hoverThrottle: 0.50,
                 cameraPreset: DroneCameraPreset(fpvFov: 92.0, followDistance: 4.8, followHeight: 1.5),
-                collisionRadiusMeters: 0.12
+                collisionRadiusMeters: 0.12,
+                structuralQualityFactor: 0.65
             )
         case .djiPhantom3Standard:
             return RuntimeTuning(
@@ -845,7 +871,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.70,
                 hoverThrottle: 0.54,
                 cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 9.5, followHeight: 3.1),
-                collisionRadiusMeters: 0.28
+                collisionRadiusMeters: 0.28,
+                structuralQualityFactor: 0.85
             )
         case .freeflyAltaX:
             return RuntimeTuning(
@@ -869,7 +896,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.62,
                 hoverThrottle: 0.60,
                 cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 16.0, followHeight: 5.8),
-                collisionRadiusMeters: 0.62
+                collisionRadiusMeters: 0.62,
+                structuralQualityFactor: 1.25
             )
         case .wingtraOneGenII:
             return RuntimeTuning(
@@ -919,7 +947,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 propulsionUnitTemplate: [
                     .cruiseProp(id: "wingtra_prop_left", mountOffset: SIMD3<Float>(-0.29, 0.060, 0.14)),
                     .cruiseProp(id: "wingtra_prop_right", mountOffset: SIMD3<Float>(0.29, 0.060, 0.14))
-                ]
+                ],
+                structuralQualityFactor: 1.1
             )
         case .quantumSystemsTrinityPro:
             return RuntimeTuning(
@@ -974,7 +1003,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     .tiltRotor(id: "trinitypro_tilt_rl_lower", mountOffset: SIMD3<Float>(-0.52, 0.08, -0.14)),
                     .tiltRotor(id: "trinitypro_tilt_rr_upper", mountOffset: SIMD3<Float>(0.52, 0.11, -0.14)),
                     .tiltRotor(id: "trinitypro_tilt_rr_lower", mountOffset: SIMD3<Float>(0.52, 0.08, -0.14))
-                ]
+                ],
+                structuralQualityFactor: 1.1
             )
         case .djiFlyCart30:
             return RuntimeTuning(
@@ -998,7 +1028,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.52,
                 hoverThrottle: 0.63,
                 cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 18.5, followHeight: 6.2),
-                collisionRadiusMeters: 0.82
+                collisionRadiusMeters: 0.82,
+                structuralQualityFactor: 1.2
             )
         case .griff30:
             return RuntimeTuning(
@@ -1022,7 +1053,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.54,
                 hoverThrottle: 0.62,
                 cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 17.0, followHeight: 6.0),
-                collisionRadiusMeters: 0.78
+                collisionRadiusMeters: 0.78,
+                structuralQualityFactor: 1.2
             )
         case .griff60:
             return RuntimeTuning(
@@ -1046,7 +1078,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.46,
                 hoverThrottle: 0.66,
                 cameraPreset: DroneCameraPreset(fpvFov: 76.0, followDistance: 21.0, followHeight: 7.4),
-                collisionRadiusMeters: 0.96
+                collisionRadiusMeters: 0.96,
+                structuralQualityFactor: 1.25
             )
         case .wildfireEmber40:
             return RuntimeTuning(
@@ -1070,7 +1103,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.58,
                 hoverThrottle: 0.60,
                 cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 17.5, followHeight: 6.1),
-                collisionRadiusMeters: 0.66
+                collisionRadiusMeters: 0.66,
+                structuralQualityFactor: 1.2
             )
         case .pyroliftTalon60:
             return RuntimeTuning(
@@ -1094,7 +1128,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.50,
                 hoverThrottle: 0.64,
                 cameraPreset: DroneCameraPreset(fpvFov: 77.0, followDistance: 19.5, followHeight: 6.8),
-                collisionRadiusMeters: 0.86
+                collisionRadiusMeters: 0.86,
+                structuralQualityFactor: 1.25
             )
         case .colossusCA8Vulcan:
             return RuntimeTuning(
@@ -1118,7 +1153,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.42,
                 hoverThrottle: 0.69,
                 cameraPreset: DroneCameraPreset(fpvFov: 74.0, followDistance: 24.0, followHeight: 8.2),
-                collisionRadiusMeters: 1.15
+                collisionRadiusMeters: 1.15,
+                structuralQualityFactor: 1.3
             )
         case .colossusCA12Atlas:
             return RuntimeTuning(
@@ -1142,7 +1178,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.36,
                 hoverThrottle: 0.73,
                 cameraPreset: DroneCameraPreset(fpvFov: 72.0, followDistance: 28.0, followHeight: 9.4),
-                collisionRadiusMeters: 1.40
+                collisionRadiusMeters: 1.40,
+                structuralQualityFactor: 1.35
             )
         case .agroWingTitanAT40:
             return RuntimeTuning(
@@ -1166,7 +1203,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.44,
                 hoverThrottle: 0.68,
                 cameraPreset: DroneCameraPreset(fpvFov: 75.0, followDistance: 22.0, followHeight: 7.5),
-                collisionRadiusMeters: 1.05
+                collisionRadiusMeters: 1.05,
+                structuralQualityFactor: 1.1
             )
         case .avidrone490TL:
             return RuntimeTuning(
@@ -1190,7 +1228,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.48,
                 hoverThrottle: 0.60,
                 cameraPreset: DroneCameraPreset(fpvFov: 76.0, followDistance: 15.5, followHeight: 5.6),
-                collisionRadiusMeters: 0.70
+                collisionRadiusMeters: 0.70,
+                structuralQualityFactor: 1.15
             )
         case .mq9bSkyGuardian:
             return RuntimeTuning(
@@ -1237,7 +1276,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.20,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 54.0, followDistance: 10.8, followHeight: 3.6),
-                collisionRadiusMeters: 0.58
+                collisionRadiusMeters: 0.58,
+                structuralQualityFactor: 1.35
             )
         case .hermes900:
             return RuntimeTuning(
@@ -1284,7 +1324,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.24,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 56.0, followDistance: 9.4, followHeight: 3.0),
-                collisionRadiusMeters: 0.52
+                collisionRadiusMeters: 0.52,
+                structuralQualityFactor: 1.3
             )
         case .ft5Los:
             return RuntimeTuning(
@@ -1329,7 +1370,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.40,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 64.0, followDistance: 8.0, followHeight: 2.5),
-                collisionRadiusMeters: 0.42
+                collisionRadiusMeters: 0.42,
+                structuralQualityFactor: 1.05
             )
         case .lightFixedWingSurvey:
             return RuntimeTuning(
@@ -1374,7 +1416,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.52,
                 hoverThrottle: 0.0,
                 cameraPreset: DroneCameraPreset(fpvFov: 68.0, followDistance: 6.2, followHeight: 1.9),
-                collisionRadiusMeters: 0.28
+                collisionRadiusMeters: 0.28,
+                structuralQualityFactor: 0.85
             )
         }
     }
@@ -1399,7 +1442,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.84,
                 hoverThrottle: 0.53,
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
-                collisionRadiusMeters: 0.24
+                collisionRadiusMeters: 0.24,
+                structuralQualityFactor: 0.95
             )
         case "dji-matrice-4t":
             return multirotorRuntimeTuning(
@@ -1417,7 +1461,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.82,
                 hoverThrottle: 0.52,
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
-                collisionRadiusMeters: 0.26
+                collisionRadiusMeters: 0.26,
+                structuralQualityFactor: 1.1
             )
         case "dji-matrice-30t":
             return multirotorRuntimeTuning(
@@ -1435,7 +1480,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.72,
                 hoverThrottle: 0.57,
                 cameraPreset: DroneCameraPreset(fpvFov: 82.0, followDistance: 10.8, followHeight: 3.8),
-                collisionRadiusMeters: 0.35
+                collisionRadiusMeters: 0.35,
+                structuralQualityFactor: 1.15
             )
         case "dji-matrice-400":
             return multirotorRuntimeTuning(
@@ -1453,7 +1499,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.62,
                 hoverThrottle: 0.59,
                 cameraPreset: DroneCameraPreset(fpvFov: 78.0, followDistance: 14.8, followHeight: 5.4),
-                collisionRadiusMeters: 0.58
+                collisionRadiusMeters: 0.58,
+                structuralQualityFactor: 1.2
             )
         case "fotokite-sigma":
             return multirotorRuntimeTuning(
@@ -1471,7 +1518,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.58,
                 hoverThrottle: 0.50,
                 cameraPreset: DroneCameraPreset(fpvFov: 76.0, followDistance: 8.0, followHeight: 2.8),
-                collisionRadiusMeters: 0.26
+                collisionRadiusMeters: 0.26,
+                structuralQualityFactor: 1.1
             )
         case "everdrone-first-on-scene":
             return multirotorRuntimeTuning(
@@ -1489,7 +1537,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.66,
                 hoverThrottle: 0.58,
                 cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 10.5, followHeight: 3.6),
-                collisionRadiusMeters: 0.36
+                collisionRadiusMeters: 0.36,
+                structuralQualityFactor: 1.15
             )
         case "zipline-platform-1":
             return fixedWingRuntimeTuning(
@@ -1526,7 +1575,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     maxInitialBankDeg: 13.0,
                     catapultExitSpeed: 23.0,
                     initialClimbTargetAltitude: 24.0
-                )
+                ),
+                structuralQualityFactor: 1.15
             )
         case "wingcopter-198":
             return hybridVTOLRuntimeTuning(
@@ -1575,7 +1625,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     .tiltRotor(id: "wingcopter198_tilt_rl_lower", mountOffset: SIMD3<Float>(-0.52, 0.08, -0.14)),
                     .tiltRotor(id: "wingcopter198_tilt_rr_upper", mountOffset: SIMD3<Float>(0.52, 0.11, -0.14)),
                     .tiltRotor(id: "wingcopter198_tilt_rr_lower", mountOffset: SIMD3<Float>(0.52, 0.08, -0.14))
-                ]
+                ],
+                structuralQualityFactor: 1.1
             )
         case "matternet-m2":
             return multirotorRuntimeTuning(
@@ -1593,7 +1644,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.64,
                 hoverThrottle: 0.58,
                 cameraPreset: DroneCameraPreset(fpvFov: 80.0, followDistance: 9.5, followHeight: 3.2),
-                collisionRadiusMeters: 0.34
+                collisionRadiusMeters: 0.34,
+                structuralQualityFactor: 1.1
             )
         case "skydio-x10":
             return multirotorRuntimeTuning(
@@ -1611,7 +1663,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.84,
                 hoverThrottle: 0.53,
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 8.8, followHeight: 3.0),
-                collisionRadiusMeters: 0.27
+                collisionRadiusMeters: 0.27,
+                structuralQualityFactor: 1.15
             )
         case "dji-matrice-4td-dock-3":
             return multirotorRuntimeTuning(
@@ -1629,7 +1682,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.78,
                 hoverThrottle: 0.54,
                 cameraPreset: DroneCameraPreset(fpvFov: 84.0, followDistance: 9.0, followHeight: 3.2),
-                collisionRadiusMeters: 0.29
+                collisionRadiusMeters: 0.29,
+                structuralQualityFactor: 1.1
             )
         case "brinc-lemur-2":
             // BRINC publishes weight, endurance, dimensions, and sensors, but not a numeric max speed.
@@ -1648,7 +1702,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.90,
                 hoverThrottle: 0.52,
                 cameraPreset: DroneCameraPreset(fpvFov: 92.0, followDistance: 5.2, followHeight: 1.6),
-                collisionRadiusMeters: 0.14
+                collisionRadiusMeters: 0.14,
+                structuralQualityFactor: 1.2
             )
         case "dji-neo":
             return multirotorRuntimeTuning(
@@ -1666,7 +1721,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 controlResponsiveness: 0.92,
                 hoverThrottle: 0.50,
                 cameraPreset: DroneCameraPreset(fpvFov: 92.0, followDistance: 4.8, followHeight: 1.5),
-                collisionRadiusMeters: 0.12
+                collisionRadiusMeters: 0.12,
+                structuralQualityFactor: 0.65
             )
         case "sensefly-ebee-tac":
             return fixedWingRuntimeTuning(
@@ -1704,7 +1760,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     maxInitialBankDeg: 15.0,
                     handThrowSpeed: 16.4,
                     initialClimbTargetAltitude: 16.0
-                )
+                ),
+                structuralQualityFactor: 0.7
             )
         case "rq-21-integrator":
             return fixedWingRuntimeTuning(
@@ -1741,7 +1798,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     maxInitialBankDeg: 12.0,
                     catapultExitSpeed: 24.0,
                     initialClimbTargetAltitude: 24.0
-                )
+                ),
+                structuralQualityFactor: 1.25
             )
         default:
             return nil
@@ -1764,7 +1822,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
         controlResponsiveness: Float,
         hoverThrottle: Float,
         cameraPreset: DroneCameraPreset,
-        collisionRadiusMeters: Float
+        collisionRadiusMeters: Float,
+        structuralQualityFactor: Float = 1.0
     ) -> RuntimeTuning {
         RuntimeTuning(
             fallbackTakeoffMass: fallbackTakeoffMass,
@@ -1787,7 +1846,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             controlResponsiveness: controlResponsiveness,
             hoverThrottle: hoverThrottle,
             cameraPreset: cameraPreset,
-            collisionRadiusMeters: collisionRadiusMeters
+            collisionRadiusMeters: collisionRadiusMeters,
+            structuralQualityFactor: structuralQualityFactor
         )
     }
 
@@ -1809,7 +1869,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
         controlResponsiveness: Float,
         cameraPreset: DroneCameraPreset,
         collisionRadiusMeters: Float,
-        fixedWingParameters: FixedWingParameters
+        fixedWingParameters: FixedWingParameters,
+        structuralQualityFactor: Float = 1.0
     ) -> RuntimeTuning {
         RuntimeTuning(
             fallbackTakeoffMass: fallbackTakeoffMass,
@@ -1833,7 +1894,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             controlResponsiveness: controlResponsiveness,
             hoverThrottle: 0.0,
             cameraPreset: cameraPreset,
-            collisionRadiusMeters: collisionRadiusMeters
+            collisionRadiusMeters: collisionRadiusMeters,
+            structuralQualityFactor: structuralQualityFactor
         )
     }
 
@@ -1856,7 +1918,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
         cameraPreset: DroneCameraPreset,
         collisionRadiusMeters: Float,
         fixedWingParameters: FixedWingParameters,
-        propulsionUnitTemplate: [PropulsionUnit]
+        propulsionUnitTemplate: [PropulsionUnit],
+        structuralQualityFactor: Float = 1.0
     ) -> RuntimeTuning {
         RuntimeTuning(
             fallbackTakeoffMass: fallbackTakeoffMass,
@@ -1881,7 +1944,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             hoverThrottle: 0.0,
             cameraPreset: cameraPreset,
             collisionRadiusMeters: collisionRadiusMeters,
-            propulsionUnitTemplate: propulsionUnitTemplate
+            propulsionUnitTemplate: propulsionUnitTemplate,
+            structuralQualityFactor: structuralQualityFactor
         )
     }
 
@@ -1944,6 +2008,13 @@ private struct RuntimeTuning {
     let cameraPreset: DroneCameraPreset
     let collisionRadiusMeters: Float
     let propulsionUnitTemplate: [PropulsionUnit]
+    /// Structural build-quality multiplier on top of the component-kind strength table
+    /// (`VehicleComponentGraphBuilder.strengthJPerKg`) — a flimsier toy-grade shell and a
+    /// reinforced industrial/military airframe of the same mass do not fail at the same impact
+    /// energy. 1.0 = today's unmodified strength table; hand-calibrated per airframe below, not
+    /// derived from any other field, so it defaults to neutral for every profile not explicitly
+    /// tuned.
+    let structuralQualityFactor: Float
 
     init(
         fallbackTakeoffMass: Float,
@@ -1968,7 +2039,8 @@ private struct RuntimeTuning {
         hoverThrottle: Float,
         cameraPreset: DroneCameraPreset,
         collisionRadiusMeters: Float,
-        propulsionUnitTemplate: [PropulsionUnit] = []
+        propulsionUnitTemplate: [PropulsionUnit] = [],
+        structuralQualityFactor: Float = 1.0
     ) {
         self.fallbackTakeoffMass = fallbackTakeoffMass
         self.fallbackDimensions = fallbackDimensions
@@ -1993,6 +2065,7 @@ private struct RuntimeTuning {
         self.cameraPreset = cameraPreset
         self.collisionRadiusMeters = collisionRadiusMeters
         self.propulsionUnitTemplate = propulsionUnitTemplate
+        self.structuralQualityFactor = structuralQualityFactor
     }
 }
 

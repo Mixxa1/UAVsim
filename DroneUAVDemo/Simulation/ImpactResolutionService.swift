@@ -156,7 +156,8 @@ final class ImpactResolutionService {
         airframeClass: AirframeClass,
         rotorsSpinning: Bool,
         deltaTime: Float,
-        applyDamage: Bool = true
+        applyDamage: Bool = true,
+        restingSpeedThreshold: Float = 0.01
     ) -> ImpactReport {
         let material = Self.material(
             forObstacleSource: contact.obstacle.source,
@@ -203,8 +204,10 @@ final class ImpactResolutionService {
         let contactVelocity = state.velocity + simd_cross(omegaWorld, leverArm)
         let normalClosingSpeed = -simd_dot(contactVelocity, normal)
 
-        guard normalClosingSpeed > 0.01 else {
-            // Receding or tangential contact: nothing to bounce off. If the
+        guard normalClosingSpeed > restingSpeedThreshold else {
+            // Receding, tangential, or (for an uncontrolled/crashed body, whose caller raises
+            // restingSpeedThreshold above the live-flight default) a settled resting contact:
+            // nothing to bounce off. If the
             // sweep started already penetrating (hitFraction ~ 0) AND the
             // vehicle is actually moving, bleed out of the surface gently
             // instead of allowing a slow burrow. A resting body is left
@@ -486,7 +489,8 @@ final class ImpactResolutionService {
         airframeClass: AirframeClass,
         rotorsSpinning: Bool,
         deltaTime: Float,
-        applyDamage: Bool = true
+        applyDamage: Bool = true,
+        restingSpeedThreshold: Float = 0.01
     ) -> ImpactReport {
         let normal = simd_normalize(contactNormal)
         state.position += normal * (max(0.0, penetrationDepth) + max(0.005, sphereRadius * 0.04))
@@ -510,7 +514,8 @@ final class ImpactResolutionService {
             airframeClass: airframeClass,
             rotorsSpinning: rotorsSpinning,
             deltaTime: deltaTime,
-            applyDamage: applyDamage
+            applyDamage: applyDamage,
+            restingSpeedThreshold: restingSpeedThreshold
         )
     }
 

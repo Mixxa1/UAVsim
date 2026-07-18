@@ -246,6 +246,8 @@ final class DroneSceneController {
     private(set) var detachedVehicleComponentIDs: Set<String> = []
     private var detachedVehicleLegacyComponents: Set<DamageComponent> = []
     private var detachedVehicleVisualNodeIDs: Set<ObjectIdentifier> = []
+    private var batteryFireFlameNode: SCNNode?
+    private var batteryFireSmokeNode: SCNNode?
     /// Some procedural fixed-wing models use one render node for both wing
     /// halves, while the physical graph has root/outer sections per side.
     /// Once only part of such a node remains attached, compact section boxes
@@ -3048,6 +3050,58 @@ final class DroneSceneController {
             }
         }
         lastComponentOverlaySignature = nil
+    }
+
+    /// Battery thermal-runaway/rupture consequence: a small flame (reusing the Fire Response
+    /// flame flipbook) plus rising smoke, parented under the drone's own node at the battery
+    /// component's local position so it tracks the airframe — including a post-crash tumble —
+    /// without per-tick repositioning. Flame and smoke are driven independently so the caller can
+    /// let the flame burn out first and the smoke linger, matching how a real LiPo fire behaves.
+    /// Nodes are created once and reused; call with both flags false (or `clearBatteryFireVisual`)
+    /// to tear them down.
+    func updateBatteryFireVisual(flameActive: Bool, smokeActive: Bool, localPosition: SIMD3<Float>) {
+        guard flameActive || smokeActive else {
+            clearBatteryFireVisual()
+            return
+        }
+        let position = SCNVector3(localPosition.x, localPosition.y, localPosition.z)
+        if batteryFireFlameNode == nil {
+            let flame = FireVisualAssetLoader.shared.makeFlameNode(heightMeters: 0.4)
+            flame.name = "batteryFire.flame"
+            flame.position = position
+            droneNode.addChildNode(flame)
+            batteryFireFlameNode = flame
+        }
+        if batteryFireSmokeNode == nil {
+            let smoke = FireVisualAssetLoader.shared.makeSmokeNode()
+            smoke.name = "batteryFire.smoke"
+            smoke.position = position
+            droneNode.addChildNode(smoke)
+            batteryFireSmokeNode = smoke
+        }
+        if let flame = batteryFireFlameNode {
+            flame.isHidden = !flameActive
+            FireVisualAssetLoader.shared.setFlameAnimating(flame, isAnimating: flameActive)
+        }
+        if let smoke = batteryFireSmokeNode {
+            smoke.isHidden = !smokeActive
+            FireVisualAssetLoader.shared.setSmokeActive(smoke, isActive: smokeActive)
+        }
+    }
+
+    /// Tears down the battery-fire nodes (reset/profile change/graph rebuild) — mirrors
+    /// `clearDetachedVehicleParts`.
+    func clearBatteryFireVisual() {
+        if let flame = batteryFireFlameNode {
+            FireVisualAssetLoader.shared.setFlameAnimating(flame, isAnimating: false)
+            flame.removeFromParentNode()
+            batteryFireFlameNode = nil
+        }
+        if let smoke = batteryFireSmokeNode {
+            FireVisualAssetLoader.shared.setSmokeActive(smoke, isActive: false)
+            smoke.removeFromParentNode()
+            batteryFireSmokeNode = nil
+        }
     }
 
     /// Reconciles indivisible legacy meshes with the graph after one or more

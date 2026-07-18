@@ -12,7 +12,12 @@ struct CompactTelemetryHUDView: View {
 
             Text(String(format: localized("hud.compact.position"), telemetry.x, telemetry.y, telemetry.z))
                 .font(.caption2.monospaced())
-            Text(String(format: localized("hud.compact.speed_battery"), telemetry.speed, telemetry.batteryPercent))
+            Text(String(
+                format: localized("hud.compact.speed_battery"),
+                telemetry.speed,
+                telemetry.batteryPercent,
+                telemetry.batteryVoltage
+            ))
                 .font(.caption2.monospaced())
             if telemetry.autoNavigationActive || telemetry.targetDistanceMeters.isFinite {
                 Text(autoNavigationLine)

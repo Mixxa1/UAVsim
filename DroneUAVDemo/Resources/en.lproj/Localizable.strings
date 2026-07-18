@@ -336,6 +336,7 @@
 "warning.control_reduced" = "Control authority reduced";
 "warning.weather_severe" = "Severe weather conditions";
 "warning.battery_low" = "Low battery";
+"warning.battery_fire" = "Battery fire";
 "warning.integrity_low" = "Structural integrity low";
 "warning.fixedwing_low_speed" = "Fixed-wing low-speed / stall risk";
 "warning.fleet_risk" = "Fleet separation risk";
@@ -789,6 +790,10 @@
 "telemetry.control_mode" = "Control mode";
 "telemetry.nearest_obstacle_source" = "Nearest obstacle source";
 "telemetry.frame_time" = "Frame time";
+"telemetry.battery_voltage" = "Battery voltage";
+"telemetry.cell_voltage" = "Cell voltage";
+"telemetry.current_draw" = "Current draw";
+"telemetry.mah_drawn" = "mAh drawn";
 "telemetry.physics_time" = "Physics update";
 "telemetry.render_time" = "Render update";
 "telemetry.path_time" = "Pathfinding";
@@ -1190,7 +1195,7 @@
 "overlay.pfd.metric.battery" = "BAT";
 
 "hud.compact.position" = "POS  x %.1f  y %.1f  z %.1f";
-"hud.compact.speed_battery" = "SPD  %.1f m/s   BAT %.0f%%";
+"hud.compact.speed_battery" = "SPD  %.1f m/s   BAT %.0f%%   %.1fV";
 "hud.compact.auto_nav" = "AUTO %@  DST %@  BRG %@";
 
 "hud.fpv.mode.acro" = "Acro";

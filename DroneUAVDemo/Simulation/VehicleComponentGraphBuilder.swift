@@ -179,7 +179,7 @@ enum VehicleComponentGraphBuilder {
                     massKg: max(0.001, mass),
                     localPosition: draft.position,
                     boundingHalfExtents: simd_max(draft.halfExtents, SIMD3<Float>(repeating: 0.005)),
-                    strengthJ: strengthJPerKg(for: draft.kind) * strengthReferenceMass,
+                    strengthJ: strengthJPerKg(for: draft.kind) * strengthReferenceMass * profile.structuralQualityFactor,
                     integrity: 1.0,
                     legacyComponent: draft.legacy,
                     functionalDependencies: drafts
