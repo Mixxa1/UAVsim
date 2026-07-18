@@ -5774,7 +5774,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
         detachFailedSubtrees(
             rootComponentIDs: componentGraph.failedConnectionRootIDs,
-            reason: "impact_connection_failure"
+            reason: "impact_connection_failure",
+            impactMotions: Dictionary(
+                uniqueKeysWithValues: report.detachedPartMotions.map {
+                    ($0.rootComponentID, $0)
+                }
+            )
         )
 
         guard report.tier != .lightTouch else { return }
@@ -6047,7 +6052,11 @@ final class DroneSimulationViewModel: ObservableObject {
         disarm(forceEmergency: true, preserveCrashDynamics: false)
     }
 
-    private func detachFailedSubtrees(rootComponentIDs: [String], reason: String) {
+    private func detachFailedSubtrees(
+        rootComponentIDs: [String],
+        reason: String,
+        impactMotions: [String: ImpactDetachedPartMotion] = [:]
+    ) {
         var detachedParts: [VehicleDetachedSubtree] = []
         for rootID in Set(rootComponentIDs).sorted() {
             if let part = componentGraph.detachSubtree(rootComponentID: rootID) {
@@ -6079,13 +6088,16 @@ final class DroneSimulationViewModel: ObservableObject {
             componentGraph.attachedComponents.compactMap(\.legacyComponent)
         )
         for part in detachedParts {
+            let impactMotion = impactMotions[part.rootComponentID]
             sceneController.spawnDetachedVehiclePart(
                 part,
                 retainedLegacyComponents: retainedLegacyComponents,
                 vehicleWorldPosition: state.position,
                 vehicleOrientation: orientation,
                 inheritedVelocity: state.velocity,
-                inheritedAngularVelocity: omegaBodyAxes
+                inheritedAngularVelocity: omegaBodyAxes,
+                initialCenterOfMassVelocityWorld: impactMotion?.centerOfMassVelocityWorld,
+                initialAngularVelocityWorld: impactMotion?.angularVelocityWorld
             )
         }
         sceneController.reconcileDetachedVehicleVisuals(componentGraph)
@@ -7176,7 +7188,6 @@ final class DroneSimulationViewModel: ObservableObject {
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = 0.0
-                values.yaw = Double(state.orientation.z.radiansToDegrees)
                 let throttleTarget = hoverBaseline.clamped(to: 0.0...1.0)
                 values.throttle = values.throttle + (throttleTarget - values.throttle) * 0.18
                 if selectedDroneProfile.airframeClass == .hybridVTOL {
@@ -9213,6 +9224,11 @@ final class DroneSimulationViewModel: ObservableObject {
             case .manual, .hover, .emergencyStop:
                 break
             }
+        }
+
+        if selectedDroneProfile.airframeClass == .multirotor,
+           mode == .hover {
+            return .hoverAssist
         }
 
         if selectedDroneProfile.airframeClass == .multirotor,

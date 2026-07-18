@@ -122,16 +122,17 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             dt: dt
         )
 
+        let effectiveControl = hoverHoldingControl(control: control, state: state, authority: authority)
         var desiredRates = crashOrDisarmed ? SIMD3<Float>(repeating: 0.0) : desiredMultirotorRates(
-            control: control,
+            control: effectiveControl,
             state: state,
             authority: authority
         )
 
-        var rateGain = control.controlMode.isRateMode
+        var rateGain = effectiveControl.controlMode.isRateMode
             ? SIMD3<Float>(8.6 * authority, 8.6 * authority, 5.6 * authority)
             : SIMD3<Float>(7.2 * authority, 7.2 * authority, 4.8 * authority)
-        var angularDamping = control.controlMode.isRateMode
+        var angularDamping = effectiveControl.controlMode.isRateMode
             ? SIMD3<Float>(1.6, 1.6, 1.5)
             : SIMD3<Float>(2.8, 2.8, 2.2)
 
@@ -163,12 +164,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             liftPenalty: liftPenalty
         )
 
-        // --- Per-rotor control allocation. The commanded torque is the
-        // legacy rate-loop's angular acceleration times the graph inertia —
-        // for a pristine, unsaturated, symmetric layout the mixer reproduces
-        // it exactly, so the tuned flight feel is preserved; damage and
-        // saturation bend it physically (a dead rotor leaves an honest
-        // residual moment the loop cannot trim out).
+        // --- Per-rotor control allocation. A pristine aircraft deliberately
+        // stays on the legacy symmetric baseline: catalog geometry is visual
+        // data and is not guaranteed to be perfectly centered, so feeding it
+        // through the damage mixer would introduce a false trim moment. Once
+        // a rotor loses thrust or its mount bends, allocation becomes active
+        // and the resulting asymmetric force/moment is physical.
         let rotorModel = context.rotorModel
         let angularAccel: SIMD3<Float>
         let thrustBody: SIMD3<Float>
@@ -176,7 +177,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // (FL/FR/RL/RR); pristine default mirrors the collective throttle.
         var laneThrustFraction = SIMD4<Float>(repeating: motorThrottle)
         var laneAlive = SIMD4<Float>(repeating: 1.0)
-        if rotorModel.isEmpty {
+        if rotorModel.isEmpty || rotorModel.isPristine {
             angularAccel = commandedAngularAccel
             thrustBody = SIMD3<Float>(0.0, commandedThrust, 0.0)
         } else {
@@ -242,7 +243,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let horizontalMax = profile.maxHorizontalSpeedMps.clamped(to: 3.0...42.0)
         let horizontalDragDamping = multirotorHorizontalDragDamping(
             profile: profile,
-            controlMode: control.controlMode,
+            controlMode: effectiveControl.controlMode,
             weather: weather
         )
         let verticalDragDamping = (1.45 + weather.dragMultiplier * 0.45).clamped(to: 1.20...2.40)
@@ -440,6 +441,47 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 )
             )
         }
+    }
+
+    /// Converts the point captured by the Space/hover command into a modest
+    /// attitude correction. The old hover path held altitude and level only;
+    /// any existing horizontal velocity (or a small trim error) therefore
+    /// remained as drift. This controller damps that velocity and returns to
+    /// the captured X/Z point while keeping the ordinary attitude/rate loop
+    /// responsible for the actual motion.
+    private func hoverHoldingControl(
+        control: DroneControlInput,
+        state: DroneState,
+        authority: Float
+    ) -> DroneControlInput {
+        guard control.mode == .hover else { return control }
+
+        var held = control
+        held.controlMode = .hoverAssist
+
+        let positionErrorWorld = SIMD3<Float>(
+            control.targetPosition.x - state.position.x,
+            0.0,
+            control.targetPosition.z - state.position.z
+        )
+        let horizontalVelocityWorld = SIMD3<Float>(
+            state.velocity.x,
+            0.0,
+            state.velocity.z
+        )
+        var desiredAccelerationWorld = positionErrorWorld * 0.9 - horizontalVelocityWorld * 1.6
+        let maximumTilt = Float(18.0).degreesToRadians * authority.clamped(to: 0.35...1.0)
+        let maximumAcceleration = Tuning.gravity * tan(maximumTilt)
+        desiredAccelerationWorld = clampMagnitude(desiredAccelerationWorld, limit: maximumAcceleration)
+
+        let inverseYaw = simd_quatf(
+            angle: -state.orientation.z,
+            axis: SIMD3<Float>(0.0, 1.0, 0.0)
+        )
+        let desiredAccelerationBody = simd_act(inverseYaw, desiredAccelerationWorld)
+        held.targetOrientation.x = -atan2(desiredAccelerationBody.x, Tuning.gravity)
+        held.targetOrientation.y = atan2(desiredAccelerationBody.z, Tuning.gravity)
+        return held
     }
 
     private func stepFixedWingAerodynamic(

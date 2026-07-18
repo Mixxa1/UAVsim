@@ -2860,15 +2860,18 @@ final class DroneSceneController {
     }
 
     /// Spawns a SceneKit rigid body for a subtree already detached by the
-    /// authoritative component graph. Angular velocity is expected in the
-    /// vehicle body frame, matching the structural/flight-physics model.
+    /// authoritative component graph. Inherited angular velocity is expected
+    /// in the vehicle body frame. An impact may override both velocities with
+    /// the post-fracture world-space solution calculated at the failed joint.
     func spawnDetachedVehiclePart(
         _ part: VehicleDetachedSubtree,
         retainedLegacyComponents: Set<DamageComponent>,
         vehicleWorldPosition: SIMD3<Float>,
         vehicleOrientation: simd_quatf,
         inheritedVelocity: SIMD3<Float>,
-        inheritedAngularVelocity: SIMD3<Float>
+        inheritedAngularVelocity: SIMD3<Float>,
+        initialCenterOfMassVelocityWorld: SIMD3<Float>? = nil,
+        initialAngularVelocityWorld: SIMD3<Float>? = nil
     ) {
         let key = part.rootComponentID
         if let existingNode = detachedVehiclePartNodes.removeValue(forKey: key) {
@@ -2956,13 +2959,15 @@ final class DroneSceneController {
         body.collisionBitMask = PhysicsCategory.environment | PhysicsCategory.detachedVehiclePart | PhysicsCategory.drone
         body.contactTestBitMask = PhysicsCategory.environment | PhysicsCategory.detachedVehiclePart | PhysicsCategory.drone
 
-        let worldAngularVelocity = simd_act(vehicleOrientation, inheritedAngularVelocity)
+        let worldAngularVelocity = initialAngularVelocityWorld ??
+            simd_act(vehicleOrientation, inheritedAngularVelocity)
         let worldCenterOfMassOffset = simd_act(
             vehicleOrientation,
             part.massProperties.centerOfMassOffset
         )
-        let centerOfMassVelocity = inheritedVelocity +
-            simd_cross(worldAngularVelocity, worldCenterOfMassOffset)
+        let centerOfMassVelocity = initialCenterOfMassVelocityWorld ?? (
+            inheritedVelocity + simd_cross(worldAngularVelocity, worldCenterOfMassOffset)
+        )
         body.velocity = SCNVector3(
             centerOfMassVelocity.x,
             centerOfMassVelocity.y,

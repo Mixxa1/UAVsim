@@ -63,7 +63,12 @@ struct VehicleRotorModel: Hashable {
     }
 
     var isPristine: Bool {
-        rotors.allSatisfy { $0.thrustFactor > 0.999 && $0.vibration01 < 0.001 }
+        let nominalAxis = SIMD3<Float>(0.0, 1.0, 0.0)
+        return rotors.allSatisfy { rotor in
+            rotor.thrustFactor > 0.999 &&
+                rotor.vibration01 < 0.001 &&
+                simd_distance_squared(rotor.thrustDirectionBody, nominalAxis) < 0.000001
+        }
     }
 
     /// Mean thrust factor of cruise rotors (slot prefix "cruise"); a pure

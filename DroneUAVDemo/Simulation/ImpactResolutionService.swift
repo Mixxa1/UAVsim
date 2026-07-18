@@ -55,6 +55,19 @@ struct ImpactReport {
     let contactPoint: SIMD3<Float>
     let contactNormal: SIMD3<Float>
     let appliedImpulse: Float
+    /// Explicit post-fracture motion for subtrees hit during this contact.
+    /// The main airframe receives only the reaction transmitted through the
+    /// failed joint; the remainder of the obstacle impulse stays with the
+    /// separating part.
+    let detachedPartMotions: [ImpactDetachedPartMotion]
+}
+
+struct ImpactDetachedPartMotion: Hashable {
+    let rootComponentID: String
+    let centerOfMassVelocityWorld: SIMD3<Float>
+    let angularVelocityWorld: SIMD3<Float>
+    let obstacleImpulseWorld: SIMD3<Float>
+    let transmittedJointImpulseWorld: SIMD3<Float>
 }
 
 // MARK: - Service
@@ -185,6 +198,8 @@ final class ImpactResolutionService {
         let worldCoM = poseAtHit + simd_act(orientation, massProperties.centerOfMassOffset)
         let leverArm = contact.contactPoint - worldCoM
         let omegaWorld = worldAngularVelocity(state: state, orientation: orientation, airframeClass: airframeClass)
+        let incomingLinearVelocity = state.velocity
+        let failedRootsBeforeImpact = Set(graph.failedConnectionRootIDs)
         let contactVelocity = state.velocity + simd_cross(omegaWorld, leverArm)
         let normalClosingSpeed = -simd_dot(contactVelocity, normal)
 
@@ -209,7 +224,8 @@ final class ImpactResolutionService {
                 connectionDamage: [],
                 contactPoint: contact.contactPoint,
                 contactNormal: normal,
-                appliedImpulse: 0.0
+                appliedImpulse: 0.0,
+                detachedPartMotions: []
             )
         }
 
@@ -232,15 +248,15 @@ final class ImpactResolutionService {
         let kNormal = 1.0 / mass + simd_dot(angularTermNormal.velocityAtContact, normal)
         let effectiveMass = 1.0 / max(0.0001, kNormal)
 
-        let impulseMagnitude = (1.0 + material.restitution) * normalClosingSpeed * effectiveMass
-        state.velocity += normal * (impulseMagnitude / mass)
-        var deltaOmegaWorld = angularTermNormal.omegaPerUnitImpulse * impulseMagnitude
+        let candidateNormalImpulse = (1.0 + material.restitution) * normalClosingSpeed * effectiveMass
 
         // Coulomb-ish friction impulse against the tangential contact velocity.
         let tangentialVelocity = contactVelocity + normal * normalClosingSpeed
         let tangentialSpeed = simd_length(tangentialVelocity)
+        var tangent = SIMD3<Float>(repeating: 0.0)
+        var candidateFrictionImpulse: Float = 0.0
         if tangentialSpeed > 0.05 {
-            let tangent = tangentialVelocity / tangentialSpeed
+            tangent = tangentialVelocity / tangentialSpeed
             let angularTermTangent = angularResponse(
                 leverArm: leverArm,
                 direction: tangent,
@@ -249,17 +265,8 @@ final class ImpactResolutionService {
             )
             let kTangent = 1.0 / mass + simd_dot(angularTermTangent.velocityAtContact, tangent)
             let stoppingImpulse = tangentialSpeed / max(0.0001, kTangent)
-            let frictionImpulse = min(material.friction * impulseMagnitude, stoppingImpulse)
-            state.velocity -= tangent * (frictionImpulse / mass)
-            deltaOmegaWorld -= angularTermTangent.omegaPerUnitImpulse * frictionImpulse
+            candidateFrictionImpulse = min(material.friction * candidateNormalImpulse, stoppingImpulse)
         }
-
-        applyWorldAngularDelta(
-            deltaOmegaWorld,
-            state: &state,
-            orientation: orientation,
-            airframeClass: airframeClass
-        )
 
         // Localized damage from the energy the contact actually absorbed.
         let impactEnergy = 0.5 * effectiveMass * normalClosingSpeed * normalClosingSpeed
@@ -296,7 +303,10 @@ final class ImpactResolutionService {
                 spreadRadius: spreadRadius,
                 contactPointBody: contactBodyAtHit
             )
-            let impulseBody = simd_act(orientation.conjugate, normal * impulseMagnitude)
+            // Use the intact-body candidate impulse to decide whether the
+            // joint can carry the contact. The impulse is not applied to the
+            // aircraft until this structural decision is known.
+            let impulseBody = simd_act(orientation.conjugate, normal * candidateNormalImpulse)
             connectionDamage = graph.applyConnectionImpact(
                 primaryComponentID: resolvedComponentID,
                 contactPointBody: contactBodyAtHit,
@@ -304,6 +314,141 @@ final class ImpactResolutionService {
                 energyJ: damageEnergy,
                 damageFactor: damageFactor * max(0.15, material.hardness),
                 contactDuration: max(0.008, min(0.045, deltaTime))
+            )
+        }
+
+        let newlyFailedRoots = graph.failedConnectionRootIDs.filter {
+            !failedRootsBeforeImpact.contains($0)
+        }
+        let contactDuration = max(0.008, min(0.045, deltaTime))
+        var appliedNormalImpulse = candidateNormalImpulse
+        var detachedPartMotions: [ImpactDetachedPartMotion] = []
+
+        // A contact that breaks its load path is no longer a collision of the
+        // entire intact aircraft. Only the root's finite reaction reaches the
+        // retained airframe; the remaining obstacle impulse stays with the
+        // separating subtree. This prevents a wing-tip strike from making the
+        // fuselage rebound like a single rigid ball.
+        if let failedRootID = newlyFailedRoots.first(where: { rootID in
+            graph.detachedSubtreePreview(rootComponentID: rootID)?
+                .componentIDs.contains(resolvedComponentID) == true
+        }),
+           let part = graph.detachedSubtreePreview(rootComponentID: failedRootID),
+           let rootConnection = graph.connection(childComponentID: failedRootID),
+           let rootComponent = graph.component(id: failedRootID),
+           let parentComponent = graph.component(id: rootConnection.parentComponentID) {
+            // Fracture consumes the restitution part of the candidate impulse:
+            // the detached piece may deflect, but the broken assembly does not
+            // receive an elastic whole-aircraft rebound.
+            let fractureNormalImpulse = candidateNormalImpulse /
+                max(1.0, 1.0 + material.restitution)
+            let fractureFrictionImpulse = min(
+                candidateFrictionImpulse,
+                material.friction * fractureNormalImpulse
+            )
+            let obstacleImpulse = normal * fractureNormalImpulse -
+                tangent * fractureFrictionImpulse
+            appliedNormalImpulse = fractureNormalImpulse
+
+            let residualBefore = connectionDamage.first {
+                $0.childComponentID == failedRootID
+            }?.residualStrengthBefore ?? max(0.015, rootConnection.residualStrength)
+            let normalBody = simd_act(orientation.conjugate, normal)
+            let transmissibleNormalImpulse = min(
+                fractureNormalImpulse,
+                jointImpulseCapacity(
+                    connection: rootConnection,
+                    parent: parentComponent,
+                    child: rootComponent,
+                    contactPointBody: contactBodyAtHit,
+                    impulseDirectionBody: normalBody,
+                    residualStrength: residualBefore,
+                    contactDuration: contactDuration
+                )
+            )
+            let transmissionFraction = (
+                transmissibleNormalImpulse / max(0.0001, fractureNormalImpulse)
+            )
+            let clampedTransmissionFraction = min(1.0, max(0.0, transmissionFraction))
+            let transmittedJointImpulse = normal * transmissibleNormalImpulse -
+                tangent * (fractureFrictionImpulse * clampedTransmissionFraction)
+
+            let jointBodyPoint = (parentComponent.localPosition + rootComponent.localPosition) * 0.5
+            let jointWorldPoint = poseAtHit + simd_act(orientation, jointBodyPoint)
+            let retainedProperties = graph.massProperties(
+                excludingComponentIDs: part.componentIDs
+            )
+            let retainedMass = max(0.2, retainedProperties.totalMassKg)
+            let retainedCoMWorld = poseAtHit + simd_act(
+                orientation,
+                retainedProperties.centerOfMassOffset
+            )
+            // `state.velocity` is the CoM velocity in the impact solver. Move
+            // it from the old combined CoM to the new retained CoM before
+            // applying the limited joint reaction.
+            state.velocity = incomingLinearVelocity +
+                simd_cross(omegaWorld, retainedCoMWorld - worldCoM) +
+                transmittedJointImpulse / retainedMass
+            let retainedAngularDelta = angularVelocityDelta(
+                leverArm: jointWorldPoint - retainedCoMWorld,
+                impulse: transmittedJointImpulse,
+                orientation: orientation,
+                inertiaDiagonal: retainedProperties.inertiaDiagonal
+            )
+            applyWorldAngularDelta(
+                retainedAngularDelta,
+                state: &state,
+                orientation: orientation,
+                airframeClass: airframeClass
+            )
+
+            let partMass = max(0.005, part.massProperties.totalMassKg)
+            let partCoMWorld = poseAtHit + simd_act(
+                orientation,
+                part.massProperties.centerOfMassOffset
+            )
+            let partInitialVelocity = incomingLinearVelocity +
+                simd_cross(omegaWorld, partCoMWorld - worldCoM)
+            let partNetImpulse = obstacleImpulse - transmittedJointImpulse
+            let partContactAngularDelta = angularVelocityDelta(
+                leverArm: contact.contactPoint - partCoMWorld,
+                impulse: obstacleImpulse,
+                orientation: orientation,
+                inertiaDiagonal: part.massProperties.inertiaDiagonal
+            )
+            let partJointAngularDelta = angularVelocityDelta(
+                leverArm: jointWorldPoint - partCoMWorld,
+                impulse: -transmittedJointImpulse,
+                orientation: orientation,
+                inertiaDiagonal: part.massProperties.inertiaDiagonal
+            )
+            detachedPartMotions.append(
+                ImpactDetachedPartMotion(
+                    rootComponentID: failedRootID,
+                    centerOfMassVelocityWorld: partInitialVelocity + partNetImpulse / partMass,
+                    angularVelocityWorld: clampMagnitude(
+                        omegaWorld + partContactAngularDelta + partJointAngularDelta,
+                        limit: 35.0
+                    ),
+                    obstacleImpulseWorld: obstacleImpulse,
+                    transmittedJointImpulseWorld: transmittedJointImpulse
+                )
+            )
+        } else {
+            let rigidImpulse = normal * candidateNormalImpulse -
+                tangent * candidateFrictionImpulse
+            state.velocity += rigidImpulse / mass
+            let rigidAngularDelta = angularVelocityDelta(
+                leverArm: leverArm,
+                impulse: rigidImpulse,
+                orientation: orientation,
+                inertiaDiagonal: massProperties.inertiaDiagonal
+            )
+            applyWorldAngularDelta(
+                rigidAngularDelta,
+                state: &state,
+                orientation: orientation,
+                airframeClass: airframeClass
             )
         }
 
@@ -319,7 +464,8 @@ final class ImpactResolutionService {
             connectionDamage: connectionDamage,
             contactPoint: contact.contactPoint,
             contactNormal: normal,
-            appliedImpulse: impulseMagnitude
+            appliedImpulse: appliedNormalImpulse,
+            detachedPartMotions: detachedPartMotions
         )
     }
 
@@ -404,7 +550,8 @@ final class ImpactResolutionService {
             connectionDamage: [],
             contactPoint: contact.contactPoint,
             contactNormal: contact.contactNormal,
-            appliedImpulse: 0.0
+            appliedImpulse: 0.0,
+            detachedPartMotions: []
         )
     }
 
@@ -433,6 +580,59 @@ final class ImpactResolutionService {
             omegaPerUnitImpulse: omegaWorld,
             velocityAtContact: simd_cross(omegaWorld, leverArm)
         )
+    }
+
+    /// Angular-velocity change from an arbitrary world-space impulse.
+    private func angularVelocityDelta(
+        leverArm: SIMD3<Float>,
+        impulse: SIMD3<Float>,
+        orientation: simd_quatf,
+        inertiaDiagonal: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        let angularImpulseWorld = simd_cross(leverArm, impulse)
+        let angularImpulseBody = simd_act(orientation.conjugate, angularImpulseWorld)
+        let inertia = simd_max(inertiaDiagonal, SIMD3<Float>(repeating: 0.0005))
+        return simd_act(orientation, angularImpulseBody / inertia)
+    }
+
+    /// Maximum scalar impulse that the joint could transmit along the impact
+    /// direction before reaching its pre-impact residual force/moment limit.
+    /// The ratios deliberately mirror `applyConnectionImpact` so structural
+    /// failure and retained-body reaction use the same load envelope.
+    private func jointImpulseCapacity(
+        connection: VehicleStructuralConnection,
+        parent: VehicleComponent,
+        child: VehicleComponent,
+        contactPointBody: SIMD3<Float>,
+        impulseDirectionBody: SIMD3<Float>,
+        residualStrength: Float,
+        contactDuration: Float
+    ) -> Float {
+        let directionLength = simd_length(impulseDirectionBody)
+        guard directionLength > 0.0001 else { return 0.0 }
+        let direction = impulseDirectionBody / directionLength
+        let duration = max(0.004, contactDuration)
+        let forcePerImpulse = direction / duration
+        let lever = contactPointBody - parent.localPosition
+        let momentPerImpulse = simd_cross(lever, forcePerImpulse)
+        let jointAxisRaw = child.localPosition - parent.localPosition
+        let jointAxis = simd_length_squared(jointAxisRaw) > 0.000001
+            ? simd_normalize(jointAxisRaw)
+            : SIMD3<Float>(0.0, 1.0, 0.0)
+        let axialForce = simd_dot(forcePerImpulse, jointAxis)
+        let tensilePerImpulse = abs(axialForce)
+        let shearPerImpulse = simd_length(forcePerImpulse - jointAxis * axialForce)
+        let axialMoment = simd_dot(momentPerImpulse, jointAxis)
+        let torsionPerImpulse = abs(axialMoment)
+        let bendingPerImpulse = simd_length(momentPerImpulse - jointAxis * axialMoment)
+        let ratioPerImpulse = max(
+            tensilePerImpulse / max(0.01, connection.tensileLimitN),
+            shearPerImpulse / max(0.01, connection.shearLimitN),
+            bendingPerImpulse / max(0.01, connection.bendingLimitNm),
+            torsionPerImpulse / max(0.01, connection.torsionLimitNm)
+        )
+        guard ratioPerImpulse > 0.000001 else { return .greatestFiniteMagnitude }
+        return max(0.0, residualStrength) / ratioPerImpulse
     }
 
     private func attitudeQuaternion(state: DroneState, airframeClass: AirframeClass) -> simd_quatf {

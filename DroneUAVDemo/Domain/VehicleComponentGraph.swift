@@ -455,6 +455,17 @@ struct VehicleComponentGraph: Hashable {
         Self.massProperties(for: attachedComponents)
     }
 
+    /// Rigid-body properties of the still-attached airframe after excluding
+    /// a subtree that is about to separate during the current impact.  The
+    /// graph is intentionally not mutated here: the impact solver needs both
+    /// bodies' properties before the presentation layer performs the actual
+    /// detach operation.
+    func massProperties(excludingComponentIDs excludedIDs: Set<String>) -> VehicleMassProperties {
+        Self.massProperties(
+            for: attachedComponents.filter { !excludedIDs.contains($0.id) }
+        )
+    }
+
     private static func massProperties(for components: [VehicleComponent]) -> VehicleMassProperties {
         guard !components.isEmpty else { return .fallback }
 
@@ -788,9 +799,11 @@ struct VehicleComponentGraph: Hashable {
         }.sorted()
     }
 
-    /// Detaches a joint's entire dependent subtree and returns the rigid-body
-    /// properties needed by the visual/physics detached-part manager.
-    mutating func detachSubtree(rootComponentID: String) -> VehicleDetachedSubtree? {
+    /// Returns the complete attached subtree and its rigid-body properties
+    /// without changing attachment state. This lets an impact be resolved as
+    /// two bodies as soon as a joint fails, rather than first bouncing the
+    /// still-intact aircraft and detaching it one stage later.
+    func detachedSubtreePreview(rootComponentID: String) -> VehicleDetachedSubtree? {
         guard let root = component(id: rootComponentID),
               root.parentID != nil,
               root.isAttached else { return nil }
@@ -811,7 +824,23 @@ struct VehicleComponentGraph: Hashable {
             maximum = simd_max(maximum, component.localPosition + component.boundingHalfExtents)
         }
 
-        for id in ids {
+        return VehicleDetachedSubtree(
+            rootComponentID: rootComponentID,
+            components: detached,
+            massProperties: Self.massProperties(for: detached),
+            localBoundsCenter: (minimum + maximum) * 0.5,
+            localBoundsHalfExtents: simd_max((maximum - minimum) * 0.5, SIMD3<Float>(repeating: 0.01))
+        )
+    }
+
+    /// Detaches a joint's entire dependent subtree and returns the rigid-body
+    /// properties needed by the visual/physics detached-part manager.
+    mutating func detachSubtree(rootComponentID: String) -> VehicleDetachedSubtree? {
+        guard let detachedPart = detachedSubtreePreview(rootComponentID: rootComponentID) else {
+            return nil
+        }
+
+        for id in detachedPart.componentIDs {
             if let index = indexByID[id] {
                 components[index].attachmentState = .detached
             }
@@ -822,14 +851,7 @@ struct VehicleComponentGraph: Hashable {
             }
         }
         massPropertiesRevision &+= 1
-
-        return VehicleDetachedSubtree(
-            rootComponentID: rootComponentID,
-            components: detached,
-            massProperties: Self.massProperties(for: detached),
-            localBoundsCenter: (minimum + maximum) * 0.5,
-            localBoundsHalfExtents: simd_max((maximum - minimum) * 0.5, SIMD3<Float>(repeating: 0.01))
-        )
+        return detachedPart
     }
 
     // MARK: Legacy projection
