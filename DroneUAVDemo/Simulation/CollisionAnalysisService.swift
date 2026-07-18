@@ -316,6 +316,24 @@ struct CollisionSweepResult {
     let isSupportSurfaceContact: Bool
 }
 
+/// Earliest narrow-phase contact of the vehicle's multi-sphere contact
+/// profile over one integration step. Unlike the legacy single-sphere sweep,
+/// `contactPoint` is the actual surface point (for impulse lever arms) and
+/// the struck sphere's component provenance is carried along.
+struct VehicleSweptContact {
+    let obstacle: CollisionObstacle
+    let componentID: String
+    /// World-space point on the striking sphere's surface at the moment of contact.
+    let contactPoint: SIMD3<Float>
+    /// Outward normal (pointing away from the obstacle, toward the vehicle).
+    let contactNormal: SIMD3<Float>
+    let hitFraction: Float
+    let isSupportSurfaceContact: Bool
+    /// Body-frame offset of the striking contact sphere.
+    let sphereOffset: SIMD3<Float>
+    let sphereRadius: Float
+}
+
 struct CollisionAnalysisInput {
     let dronePosition: SIMD3<Float>
     let droneVelocity: SIMD3<Float>
@@ -579,6 +597,269 @@ final class CollisionAnalysisService {
             best = hit
         }
         return best
+    }
+
+    /// Multi-sphere narrow phase for the vehicle contact profile: sweeps every
+    /// contact sphere (attitude-aware — offsets rotate with the airframe) and
+    /// returns the earliest contact. Unlike the legacy single-sphere sweep,
+    /// sphere positions here are true centers (not gear-reference points), and
+    /// plain cylinder obstacles (tree trunks) are swept as well instead of
+    /// being left to the post-hoc penetration path.
+    func firstSweptVehicleCollision(
+        contactSpheres: [VehicleContactSphere],
+        fromPosition: SIMD3<Float>,
+        toPosition: SIMD3<Float>,
+        fromOrientation: simd_quatf,
+        toOrientation: simd_quatf,
+        obstacles: [CollisionObstacle]
+    ) -> VehicleSweptContact? {
+        guard !contactSpheres.isEmpty, !obstacles.isEmpty else {
+            return nil
+        }
+
+        var best: VehicleSweptContact?
+        for sphere in contactSpheres {
+            let start = fromPosition + simd_act(fromOrientation, sphere.offset)
+            let end = toPosition + simd_act(toOrientation, sphere.offset)
+            guard simd_length_squared(end - start) > 0.000001 else {
+                continue
+            }
+
+            for obstacle in obstacles {
+                let hit: (fraction: Float, normal: SIMD3<Float>, isSupport: Bool)?
+                if obstacle.hasMeshCollision {
+                    hit = sweepCenterAgainstMesh(
+                        centerStart: start,
+                        centerEnd: end,
+                        radius: sphere.radius,
+                        obstacle: obstacle
+                    )
+                } else if let halfExtents = obstacle.planarHalfExtents {
+                    hit = sweepCenterAgainstBox(
+                        centerStart: start,
+                        centerEnd: end,
+                        radius: sphere.radius,
+                        obstacle: obstacle,
+                        halfExtents: halfExtents
+                    )
+                } else {
+                    hit = sweepCenterAgainstCylinder(
+                        centerStart: start,
+                        centerEnd: end,
+                        radius: sphere.radius,
+                        obstacle: obstacle
+                    )
+                }
+
+                guard let hit,
+                      best == nil || hit.fraction < (best?.hitFraction ?? 1.0) else {
+                    continue
+                }
+                let centerAtHit = start + (end - start) * hit.fraction
+                best = VehicleSweptContact(
+                    obstacle: obstacle,
+                    componentID: sphere.componentID,
+                    contactPoint: centerAtHit - hit.normal * sphere.radius,
+                    contactNormal: hit.normal,
+                    hitFraction: hit.fraction,
+                    isSupportSurfaceContact: hit.isSupport,
+                    sphereOffset: sphere.offset,
+                    sphereRadius: sphere.radius
+                )
+            }
+        }
+        return best
+    }
+
+    private func sweepCenterAgainstMesh(
+        centerStart: SIMD3<Float>,
+        centerEnd: SIMD3<Float>,
+        radius: Float,
+        obstacle: CollisionObstacle
+    ) -> (fraction: Float, normal: SIMD3<Float>, isSupport: Bool)? {
+        guard let triangles = obstacle.meshTriangles,
+              !triangles.isEmpty else {
+            return nil
+        }
+
+        let movement = centerEnd - centerStart
+        var best: (fraction: Float, normal: SIMD3<Float>, isSupport: Bool)?
+
+        for triangle in triangles {
+            guard segmentBoundsMayIntersectTriangle(
+                from: centerStart,
+                to: centerEnd,
+                radius: radius,
+                triangle: triangle
+            ) else {
+                continue
+            }
+
+            if let planeHit = spherePlaneTriangleHit(
+                from: centerStart,
+                movement: movement,
+                radius: radius,
+                triangle: triangle
+            ), best == nil || planeHit.fraction < (best?.fraction ?? 1.0) {
+                best = (planeHit.fraction, planeHit.normal, planeHit.isSupportSurfaceContact)
+            }
+
+            if let edgeHit = sphereEdgeTriangleHit(
+                from: centerStart,
+                to: centerEnd,
+                radius: radius,
+                triangle: triangle
+            ), best == nil || edgeHit.fraction < (best?.fraction ?? 1.0) {
+                best = (edgeHit.fraction, edgeHit.normal, false)
+            }
+        }
+        return best
+    }
+
+    /// Center-based box sweep with symmetric radius padding on every axis —
+    /// unlike the legacy gear-reference sweep, whose asymmetric Y padding
+    /// encodes "position.y is the gear point". A gear sphere's bottom kissing
+    /// the roof is exactly center == topY + radius here.
+    private func sweepCenterAgainstBox(
+        centerStart: SIMD3<Float>,
+        centerEnd: SIMD3<Float>,
+        radius: Float,
+        obstacle: CollisionObstacle,
+        halfExtents: SIMD2<Float>
+    ) -> (fraction: Float, normal: SIMD3<Float>, isSupport: Bool)? {
+        let localStartXZ = rotate(
+            SIMD2<Float>(centerStart.x, centerStart.z) - obstacle.planarCenter,
+            radians: -obstacle.yawRadians
+        )
+        let localEndXZ = rotate(
+            SIMD2<Float>(centerEnd.x, centerEnd.z) - obstacle.planarCenter,
+            radians: -obstacle.yawRadians
+        )
+        let localStart = SIMD3<Float>(localStartXZ.x, centerStart.y, localStartXZ.y)
+        let localEnd = SIMD3<Float>(localEndXZ.x, centerEnd.y, localEndXZ.y)
+        let boxMin = SIMD3<Float>(
+            -halfExtents.x - radius,
+            obstacle.baseY - radius,
+            -halfExtents.y - radius
+        )
+        let boxMax = SIMD3<Float>(
+            halfExtents.x + radius,
+            obstacle.topY + radius,
+            halfExtents.y + radius
+        )
+
+        guard let slabHit = segmentBoxIntersection(
+            from: localStart,
+            to: localEnd,
+            boxMin: boxMin,
+            boxMax: boxMax
+        ) else {
+            return nil
+        }
+
+        // Same thin-slab rule as the legacy sweep: floor/roof slabs only act
+        // as obstacles when crossed vertically.
+        let isThinSlab = (obstacle.topY - obstacle.baseY) <= 0.3
+        if isThinSlab, abs(slabHit.normal.y) < 0.5 {
+            return nil
+        }
+
+        let worldNormalXZ = rotate(
+            SIMD2<Float>(slabHit.normal.x, slabHit.normal.z),
+            radians: obstacle.yawRadians
+        )
+        let normal = SIMD3<Float>(
+            worldNormalXZ.x,
+            slabHit.normal.y,
+            worldNormalXZ.y
+        )
+        return (slabHit.fraction, normal, false)
+    }
+
+    /// Center-based sweep against a plain finite cylinder (tree trunks and
+    /// other radius-only obstacles): side wall via 2D ray-circle, caps via
+    /// plane crossings, start-penetration reported at fraction 0.
+    private func sweepCenterAgainstCylinder(
+        centerStart: SIMD3<Float>,
+        centerEnd: SIMD3<Float>,
+        radius: Float,
+        obstacle: CollisionObstacle
+    ) -> (fraction: Float, normal: SIMD3<Float>, isSupport: Bool)? {
+        let combinedRadius = obstacle.radius + radius
+        let p0 = SIMD2<Float>(centerStart.x, centerStart.z) - obstacle.planarCenter
+        let d = SIMD2<Float>(centerEnd.x - centerStart.x, centerEnd.z - centerStart.z)
+        let yStart = centerStart.y
+        let dy = centerEnd.y - centerStart.y
+        let yMin = obstacle.baseY - radius
+        let yMax = obstacle.topY + radius
+
+        var bestFraction: Float?
+        var bestNormal = SIMD3<Float>(0.0, 1.0, 0.0)
+
+        func consider(_ fraction: Float, _ normal: SIMD3<Float>) {
+            if bestFraction == nil || fraction < (bestFraction ?? 1.0) {
+                bestFraction = fraction
+                bestNormal = normal
+            }
+        }
+
+        let startPlanarDistanceSq = simd_dot(p0, p0)
+        let startInsideWall = startPlanarDistanceSq <= combinedRadius * combinedRadius
+        let startInsideY = yStart >= yMin && yStart <= yMax
+
+        if startInsideWall, startInsideY {
+            let outward: SIMD3<Float>
+            if startPlanarDistanceSq > 0.000001 {
+                let planarNormal = p0 / sqrt(startPlanarDistanceSq)
+                outward = SIMD3<Float>(planarNormal.x, 0.0, planarNormal.y)
+            } else {
+                outward = SIMD3<Float>(0.0, 1.0, 0.0)
+            }
+            return (0.0, outward, false)
+        }
+
+        let a = simd_dot(d, d)
+        if a > 0.000001 {
+            let b = 2.0 * simd_dot(p0, d)
+            let c = startPlanarDistanceSq - combinedRadius * combinedRadius
+            let discriminant = b * b - 4.0 * a * c
+            if discriminant >= 0.0 {
+                let t = (-b - sqrt(discriminant)) / (2.0 * a)
+                if t >= 0.0, t <= 1.0 {
+                    let yAtHit = yStart + dy * t
+                    if yAtHit >= yMin, yAtHit <= yMax {
+                        let planarAtHit = p0 + d * t
+                        let normalXZ = simd_length_squared(planarAtHit) > 0.000001
+                            ? simd_normalize(planarAtHit)
+                            : SIMD2<Float>(0.0, 1.0)
+                        consider(t, SIMD3<Float>(normalXZ.x, 0.0, normalXZ.y))
+                    }
+                }
+            }
+        }
+
+        if abs(dy) > 0.000001 {
+            let capRadiusSq = obstacle.radius * obstacle.radius
+            let tTop = (yMax - yStart) / dy
+            if dy < 0.0, tTop >= 0.0, tTop <= 1.0 {
+                let planar = p0 + d * tTop
+                if simd_dot(planar, planar) <= capRadiusSq {
+                    consider(tTop, SIMD3<Float>(0.0, 1.0, 0.0))
+                }
+            }
+            let tBottom = (yMin - yStart) / dy
+            if dy > 0.0, tBottom >= 0.0, tBottom <= 1.0 {
+                let planar = p0 + d * tBottom
+                if simd_dot(planar, planar) <= capRadiusSq {
+                    consider(tBottom, SIMD3<Float>(0.0, -1.0, 0.0))
+                }
+            }
+        }
+
+        guard let fraction = bestFraction else {
+            return nil
+        }
+        return (fraction, bestNormal, false)
     }
 
     private func nearestMeshContact(

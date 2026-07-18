@@ -212,6 +212,9 @@ final class DroneSceneController {
     private var visualBoundsCenter = SIMD3<Float>(repeating: 0.0)
     private var visualBoundsSize = SIMD3<Float>(repeating: 0.36)
     private var cachedSubjectScale: Float = 0.36
+    /// Body-frame geometry of the currently built visual, captured once per
+    /// build — the component-graph/contact-profile source for physics.
+    private(set) var currentVisualGeometry: DroneVisualGeometrySample = .empty
     private let droneCollisionProxyNode = SCNNode()
     private var droneCollisionProxyRadius: Float = 0.18
     private var fpvObstructionHidingActive: Bool = false
@@ -361,6 +364,7 @@ final class DroneSceneController {
         self.visualBoundsCenter = droneVisual.visualBoundsCenter
         self.visualBoundsSize = droneVisual.visualBoundsSize
         self.cachedSubjectScale = droneVisual.subjectScale
+        self.currentVisualGeometry = DroneVisualGeometrySample.capture(from: droneVisual)
 
         scene.rootNode.addChildNode(droneNode)
 
@@ -2803,6 +2807,7 @@ final class DroneSceneController {
         visualBoundsCenter = droneVisual.visualBoundsCenter
         visualBoundsSize = droneVisual.visualBoundsSize
         cachedSubjectScale = droneVisual.subjectScale
+        currentVisualGeometry = DroneVisualGeometrySample.capture(from: droneVisual)
         fpvLookAngles = .zero
         orbitLookAngles = .zero
         topLookAngles = .zero

@@ -36,6 +36,12 @@ struct DroneSimulationContext {
     let windVector: SIMD3<Float>
     let vehicleMassModel: VehicleMassModel
     let fixedWingLaunchDynamics: FixedWingLaunchDynamics?
+    /// Component-graph-derived rigid-body summary (CoM offset, inertia) for
+    /// contact impulses and the uncontrolled-tumble integrator.
+    let vehicleMassProperties: VehicleMassProperties
+    /// Multi-sphere physical contact profile of the built visual. Empty
+    /// profile falls back to the legacy single-point ground clamp.
+    let contactProfile: VehicleContactProfile
 
     init(
         profile: DroneModelProfile,
@@ -46,7 +52,9 @@ struct DroneSimulationContext {
         collisionRisk: Float,
         windVector: SIMD3<Float>,
         vehicleMassModel: VehicleMassModel,
-        fixedWingLaunchDynamics: FixedWingLaunchDynamics? = nil
+        fixedWingLaunchDynamics: FixedWingLaunchDynamics? = nil,
+        vehicleMassProperties: VehicleMassProperties = .fallback,
+        contactProfile: VehicleContactProfile = .empty
     ) {
         self.profile = profile
         self.activeUAVProfile = activeUAVProfile
@@ -57,5 +65,7 @@ struct DroneSimulationContext {
         self.windVector = windVector
         self.vehicleMassModel = vehicleMassModel
         self.fixedWingLaunchDynamics = fixedWingLaunchDynamics
+        self.vehicleMassProperties = vehicleMassProperties
+        self.contactProfile = contactProfile
     }
 }

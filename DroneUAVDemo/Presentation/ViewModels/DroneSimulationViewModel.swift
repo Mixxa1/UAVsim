@@ -257,12 +257,6 @@ struct SignalInterferencePresentation: Equatable {
     }
 }
 
-private enum CollisionSeverity {
-    case minorContact
-    case moderateImpact
-    case severeImpact
-}
-
 private enum CollisionAftermathState: String {
     case nominal
     case impactRecovery
@@ -1120,6 +1114,14 @@ final class DroneSimulationViewModel: ObservableObject {
     private let remoteInputProvider: RemoteInputProvider
     private let inputManager: InputManager
     private let collisionService: CollisionAnalysisService
+    private let impactResolutionService = ImpactResolutionService()
+    /// Component graph + physical contact profile of the selected aircraft,
+    /// rebuilt from the freshly built visual whenever the model (or the
+    /// installed mass) changes. `damageState` stays the legacy UI projection
+    /// of this graph.
+    private(set) var componentGraph: VehicleComponentGraph = .empty
+    private(set) var vehicleContactProfile: VehicleContactProfile = .empty
+    private var vehicleMassProperties: VehicleMassProperties = .fallback
     private let batteryThermalService: BatteryThermalSimulationService
     private let telemetryExporter: TelemetryExporting
     private let projectStorage: ProjectStorageManaging
@@ -1862,6 +1864,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.sceneController.setPayloadCameraOpticsState(self.payloadCameraOpticsState)
         sceneController.regenerateEnvironment(terrain)
         sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
+        rebuildVehicleComponentGraph()
         let initialLaunchDraft = defaultLaunchConfiguredDraft()
         committedTacticalMissionDraft = initialLaunchDraft
         workingTacticalMissionDraft = initialLaunchDraft
@@ -2671,6 +2674,9 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if !preserveCrashDynamics,
            !launchCradleHoldActive,
+           // A crashed airframe is still tumbling under the uncontrolled-body
+           // integrator — settling would snap it flat mid-motion.
+           physicalState != .crashed,
            (heightAboveSupportSurface(for: state.position) <= 0.08 || physicalState.isGroundRestState) {
             settleDisarmedGroundedState()
         }
@@ -2707,6 +2713,7 @@ final class DroneSimulationViewModel: ObservableObject {
         controlValues = DroneControlValues()
         batteryState = .full
         damageState = .pristine
+        rebuildVehicleComponentGraph()
         thermalState = .nominal
         diagnosticMode = .normal
         collisionAnalysis = .safe
@@ -4533,6 +4540,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func resetDamageState() {
         damageState = .pristine
+        rebuildVehicleComponentGraph()
         thermalState = .nominal
         diagnosticMode = .normal
     }
@@ -5215,7 +5223,9 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionRisk: collisionAnalysis.riskScore,
             windVector: weather.windVector,
             vehicleMassModel: vehicleMassModel,
-            fixedWingLaunchDynamics: activeFixedWingLaunchDynamics
+            fixedWingLaunchDynamics: activeFixedWingLaunchDynamics,
+            vehicleMassProperties: vehicleMassProperties,
+            contactProfile: vehicleContactProfile
         )
 
         let previousState = state
@@ -5235,32 +5245,49 @@ final class DroneSimulationViewModel: ObservableObject {
         let sweptCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
             from: previousState.position,
             to: state.position,
-            margin: selectedDroneProfile.collisionRadius + 1.0
+            margin: max(selectedDroneProfile.collisionRadius, vehicleContactProfile.boundingRadius) + 1.0
         )
-        if let sweptCollision = collisionService.firstSweptCollision(
-            from: previousState.position,
-            to: state.position,
-            droneRadius: selectedDroneProfile.collisionRadius,
+        var impactReport: ImpactReport?
+        if let vehicleContact = collisionService.firstSweptVehicleCollision(
+            contactSpheres: vehicleContactProfile.spheres,
+            fromPosition: previousState.position,
+            toPosition: state.position,
+            fromOrientation: attitudeQuaternion(of: previousState),
+            toOrientation: attitudeQuaternion(of: state),
             obstacles: sweptCollisionObstacles
         ) {
-            if sweptCollision.isSupportSurfaceContact {
+            if vehicleContact.isSupportSurfaceContact {
                 // Descent onto a roof / container top: this is a landing, not a wall
                 // strike. The support-surface floor clamp (applySupportSurfaceConstraint)
                 // has already placed the gear on the surface and applyGroundedSafetyIfNeeded
-                // settles it. Teleporting to the contact point + emergencyStop here is what
-                // fought those and produced the roof-edge jitter, so treat it as safe.
+                // settles it — treat it as safe (see the roof-edge jitter note there).
                 postPhysicsCollisionAnalysis = .safe
             } else {
-                let separation = max(0.025, selectedDroneProfile.collisionRadius * 0.06)
-                state.position = sweptCollision.contactPoint + sweptCollision.contactNormal * separation
+                // Impulse-based contact: the vehicle stops at its own pose along
+                // the step, receives a proper linear+angular impulse with lever
+                // arm and material restitution/friction, and takes damage
+                // localized to the struck component. No teleport, no velocity
+                // zeroing, no forced disarm here.
+                let report = impactResolutionService.resolve(
+                    contact: vehicleContact,
+                    previousPosition: previousState.position,
+                    state: &state,
+                    graph: &componentGraph,
+                    massProperties: vehicleMassProperties,
+                    airframeClass: selectedDroneProfile.airframeClass,
+                    rotorsSpinning: state.throttle > 0.05 && isArmed,
+                    deltaTime: dt,
+                    applyDamage: collisionCooldown <= 0.0
+                )
+                impactReport = report
                 postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
                     riskScore: 1.0,
-                    nearestObstacleDistance: -separation,
-                    nearestObstacleID: sweptCollision.obstacle.id,
-                    nearestObstacleSource: sweptCollision.obstacle.source,
+                    nearestObstacleDistance: -0.02,
+                    nearestObstacleID: vehicleContact.obstacle.id,
+                    nearestObstacleSource: vehicleContact.obstacle.source,
                     timeToCollision: 0.0,
-                    emergencyAction: .emergencyStop,
-                    contactNormal: sweptCollision.contactNormal
+                    emergencyAction: collisionEmergencyAction(for: report.tier),
+                    contactNormal: vehicleContact.contactNormal
                 )
             }
         } else {
@@ -5281,17 +5308,19 @@ final class DroneSimulationViewModel: ObservableObject {
 
         collisionAnalysis = postPhysicsCollisionAnalysis
         var needsCollisionAnalysisRefresh = false
-        // Top faces of support surfaces (roofs, container/crate tops) are excluded from the
-        // collision analysis (see CollisionAnalysisService.isPassiveTopSupport*), and the
-        // support-surface floor clamp has already seated a landed drone, so any penetration
-        // reported here is a genuine wall / underside strike.
-        if postPhysicsCollisionAnalysis.nearestObstacleDistance <= -0.02 {
-            if simd_length(state.velocity) > 0.45, collisionCooldown <= 0.0 {
-                handleObstacleCollision(using: postPhysicsCollisionAnalysis)
-                collisionCooldown = collisionCooldownDuration(for: postPhysicsCollisionAnalysis.nearestObstacleSource)
-                enforceRuntimeSafetyAndBounds(context: "tick.collision_damage")
-                needsCollisionAnalysisRefresh = true
-            } else if resolveObstaclePenetration(using: postPhysicsCollisionAnalysis) {
+        if let report = impactReport {
+            applyImpactConsequences(report)
+            if report.tier != .lightTouch, collisionCooldown <= 0.0 {
+                collisionCooldown = collisionCooldownDuration(for: report.obstacleSource)
+            }
+            enforceRuntimeSafetyAndBounds(context: "tick.collision_damage")
+            needsCollisionAnalysisRefresh = true
+        } else if postPhysicsCollisionAnalysis.nearestObstacleDistance <= -0.02 {
+            // Top faces of support surfaces (roofs, container/crate tops) are excluded from the
+            // collision analysis (see CollisionAnalysisService.isPassiveTopSupport*), and the
+            // support-surface floor clamp has already seated a landed drone, so any penetration
+            // reported here is a genuine wall / underside strike the sweep missed (slow push).
+            if resolveObstaclePenetration(using: postPhysicsCollisionAnalysis) {
                 enforceRuntimeSafetyAndBounds(context: "tick.collision_resolve")
                 needsCollisionAnalysisRefresh = true
             }
@@ -5497,27 +5526,128 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func handleObstacleCollision(using analysis: CollisionAnalysisSnapshot) {
-        if let id = analysis.nearestObstacleID, let obstacle = sceneController.obstacle(for: id) {
-            let halfExtents = obstacle.planarHalfExtents
-            let hxz = halfExtents.map { String(format: "%.1f,%.1f", $0.x, $0.y) } ?? "r=\(String(format: "%.1f", obstacle.radius))"
-            lastCollisionDetail = String(
-                format: "c=%.1f,%.1f,%.1f h=%@ y=%.1f-%.1f yaw=%.0f° d=%.2f",
-                obstacle.center.x, obstacle.center.y, obstacle.center.z,
-                hxz, obstacle.baseY, obstacle.topY,
-                obstacle.yawRadians * 180.0 / .pi,
-                analysis.nearestObstacleDistance
+    /// HUD/state consequences of an impulse-resolved impact. The physical
+    /// response (impulse, positional correction, localized graph damage) has
+    /// already been applied by `ImpactResolutionService` — this maps the
+    /// report onto aftermath state, severity accumulation, the legacy damage
+    /// projection and possible internal failures. Signal/FPV loss is no
+    /// longer automatic on a severe hit: it only happens when the hit
+    /// actually took out the radio/flight controller
+    /// (`evaluateImpactInternalFailures`).
+    private func applyImpactConsequences(_ report: ImpactReport) {
+        lastCollisionSource = report.obstacleSource ?? lastCollisionSource
+        lastCollisionDetail = String(
+            format: "comp=%@ E=%.1fJ vN=%.2f j=%.2f tier=%@",
+            report.componentID,
+            report.impactEnergyJ,
+            report.normalClosingSpeed,
+            report.appliedImpulse,
+            report.tier.rawValue
+        )
+
+        #if DEBUG
+        if report.tier != .lightTouch {
+            let damageSummary = report.damage
+                .map { entry in
+                    "\(entry.componentID):\(String(format: "%.2f", entry.integrityBefore))→\(String(format: "%.2f", entry.integrityAfter))"
+                }
+                .joined(separator: ",")
+            print(
+                "[Impact] tier=\(report.tier.rawValue) comp=\(report.componentID) " +
+                "src=\(report.obstacleSource ?? "?") E=\(String(format: "%.1f", report.impactEnergyJ))J " +
+                "vN=\(String(format: "%.2f", report.normalClosingSpeed)) " +
+                "j=\(String(format: "%.2f", report.appliedImpulse)) dmg=[\(damageSummary)]"
             )
-        } else {
-            lastCollisionDetail = "n/a"
         }
-        switch obstacleImpactClass(for: analysis.nearestObstacleSource) {
-        case .foliage:
-            applyFoliageCollisionResponse(using: analysis)
-        case .softSurface:
-            applySoftSurfaceCollisionResponse(using: analysis)
-        case .hardSurface:
-            applyCollisionDamage(using: analysis)
+        #endif
+
+        guard report.tier != .lightTouch else {
+            return
+        }
+
+        if !report.damage.isEmpty {
+            // Localized damage went into the graph — project onto the legacy
+            // DamageState so overlay/diagnostics/battery model keep working.
+            damageState = componentGraph.projectedLegacyDamageState(base: damageState)
+        }
+
+        let severityGain: Float
+        switch report.tier {
+        case .lightTouch:
+            severityGain = 0.0
+        case .scrape:
+            severityGain = 0.45
+        case .heavyImpact:
+            severityGain = 0.9
+        case .criticalImpact:
+            severityGain = 1.4
+        }
+        impactSeverityAccumulator = max(
+            impactSeverityAccumulator,
+            report.normalClosingSpeed * severityGain
+        )
+
+        switch report.tier {
+        case .lightTouch:
+            break
+        case .scrape:
+            collisionAftermathState = .impactRecovery
+            if mode.isAutoControlled {
+                setFlightMode(.manual, reason: "auto_mode_cancelled_minor_collision")
+            }
+        case .heavyImpact:
+            collisionAftermathState = .damaged
+            if selectedDroneProfile.airframeClass == .multirotor, physicalState != .crashed {
+                setFlightMode(.hover, reason: "multicopter_collision_hover_recovery")
+            }
+            evaluateImpactInternalFailures(report)
+        case .criticalImpact:
+            // No forced disarm/signal-cut: `updatePhysicalState` sees the
+            // severity/damage and transitions to .crashed; the physics keeps
+            // integrating the airframe as an uncontrolled body to rest.
+            collisionAftermathState = .crashed
+            evaluateImpactInternalFailures(report)
+        }
+    }
+
+    private func collisionEmergencyAction(for tier: ImpactOutcomeTier) -> CollisionEmergencyAction {
+        switch tier {
+        case .lightTouch:
+            return .none
+        case .scrape:
+            return .slowDown
+        case .heavyImpact:
+            return .avoid
+        case .criticalImpact:
+            return .emergencyStop
+        }
+    }
+
+    /// Post-impact internal failures — since the impulse rework this is the
+    /// ONLY collision path that cuts signal/video: a static overlay now means
+    /// the radio actually died, not "the hit was hard". Proximity damage has
+    /// already reduced internal-component integrity in the graph; destroyed
+    /// or heavily damaged electronics produce their functional effect here.
+    private func evaluateImpactInternalFailures(_ report: ImpactReport) {
+        // Radio: destroyed → immediate link loss; badly damaged → a chance,
+        // growing as integrity drops.
+        if signalLossCause == nil {
+            let radioIntegrity = componentGraph.integrity(id: "radio")
+            let radioFailed = radioIntegrity <= 0.05 ||
+                (radioIntegrity < 0.45 && Float.random(in: 0.0...1.0) < (0.45 - radioIntegrity) * 0.8)
+            if radioFailed {
+                signalLossCause = .impactDamage
+                enterSignalLostState(cause: .impactDamage)
+            }
+        }
+
+        // Flight controller destroyed → total control loss: motors stop, but
+        // the airframe keeps existing as a physical body and tumbles to rest.
+        if componentGraph.integrity(id: "flightController") <= 0.05, isArmed {
+            disarm(forceEmergency: true, preserveCrashDynamics: true)
+            updateControlValues({ values in
+                values.throttle = 0.0
+            }, markManual: false)
         }
     }
 
@@ -5543,43 +5673,10 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func collisionSeverity(
-        for analysis: CollisionAnalysisSnapshot,
-        impact: Float
-    ) -> CollisionSeverity {
-        let sourceScale = collisionCooldownDuration(for: analysis.nearestObstacleSource) * 2.0
-        let penetration = max(0.0, -analysis.nearestObstacleDistance)
-        let verticalComponent = abs(state.velocity.y)
-        let lateralComponent = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
-        let airframeScale: Float
-
-        switch selectedDroneProfile.airframeClass {
-        case .fixedWing, .hybridVTOL:
-            airframeScale = 1.18
-        case .multirotor:
-            airframeScale = 0.96
-        }
-
-        let severityScore =
-            impact * sourceScale * airframeScale +
-            verticalComponent * 0.28 +
-            lateralComponent * 0.12 +
-            penetration * 2.8
-
-        // Calibrated against a multirotor hitting a hard surface (containers): severe — the
-        // tier that cuts the signal and force-disarms — now needs roughly an 8.5 m/s impact,
-        // not ~3.4 m/s. The old thresholds dated from before the container collision geometry
-        // fixes, when bogus multi-meter penetration depths inflated the score on minor grazes.
-        switch severityScore {
-        case ..<6.0:
-            return .minorContact
-        case ..<12.5:
-            return .moderateImpact
-        default:
-            return .severeImpact
-        }
-    }
-
+    /// Scripted-event crash (mission scenario `forcedCrashRequired`, payload
+    /// proximity events) — NOT reachable from physical collisions anymore;
+    /// those go through `applyImpactConsequences`, where signal loss only
+    /// follows an actual radio failure.
     private func applySevereCollisionConsequences(source: String?) {
         lastCollisionSource = source ?? lastCollisionSource
         collisionAftermathState = .crashed
@@ -5589,83 +5686,6 @@ final class DroneSimulationViewModel: ObservableObject {
         updateControlValues({ values in
             values.throttle = 0.0
         }, markManual: false)
-    }
-
-    private func applyFoliageCollisionResponse(using analysis: CollisionAnalysisSnapshot) {
-        let impact = simd_length(state.velocity)
-        lastCollisionSource = analysis.nearestObstacleSource ?? "unknown"
-        _ = resolveObstaclePenetration(using: analysis)
-        let severity = collisionSeverity(for: analysis, impact: impact)
-
-        impactSeverityAccumulator = max(
-            impactSeverityAccumulator,
-            impact * 0.36 + max(0.0, -analysis.nearestObstacleDistance) * 1.6
-        )
-
-        let planar = SIMD2<Float>(state.velocity.x, state.velocity.z)
-        let planarSpeed = simd_length(planar)
-        if planarSpeed > 0.001 {
-            let damped = simd_normalize(planar) * (min(planarSpeed, 1.4) * 0.32)
-            state.velocity.x = damped.x
-            state.velocity.z = damped.y
-        } else {
-            state.velocity.x = 0.0
-            state.velocity.z = 0.0
-        }
-
-        if state.velocity.y < 0.0 {
-            state.velocity.y = max(-0.16, state.velocity.y * 0.28)
-        } else {
-            state.velocity.y *= 0.68
-        }
-
-        state.angularVelocity *= SIMD3<Float>(0.44, 0.44, 0.56)
-        state.orientation.x *= 0.88
-        state.orientation.y *= 0.88
-
-        switch severity {
-        case .minorContact:
-            collisionAftermathState = .impactRecovery
-        case .moderateImpact:
-            collisionAftermathState = .damaged
-        case .severeImpact:
-            applySevereCollisionConsequences(source: analysis.nearestObstacleSource)
-        }
-    }
-
-    private func applySoftSurfaceCollisionResponse(using analysis: CollisionAnalysisSnapshot) {
-        let impact = simd_length(state.velocity)
-        lastCollisionSource = analysis.nearestObstacleSource ?? "unknown"
-        let severity = collisionSeverity(for: analysis, impact: impact)
-
-        if impact > 2.2 {
-            let impactScale: Float = severity == .moderateImpact ? 0.42 : 0.60
-            damageState = damageState.applyingCollisionDamage(impactEnergy: impact * impactScale)
-        }
-
-        _ = resolveObstaclePenetration(using: analysis)
-
-        let planar = SIMD2<Float>(state.velocity.x, state.velocity.z)
-        let planarSpeed = simd_length(planar)
-        if planarSpeed > 0.001 {
-            let damped = simd_normalize(planar) * (min(planarSpeed, 1.6) * 0.28)
-            state.velocity.x = damped.x
-            state.velocity.z = damped.y
-        }
-        state.velocity.y = max(-0.24, state.velocity.y * 0.34)
-        state.angularVelocity *= SIMD3<Float>(0.22, 0.22, 0.34)
-
-        switch severity {
-        case .minorContact:
-            collisionAftermathState = .impactRecovery
-        case .moderateImpact:
-            collisionAftermathState = .damaged
-            if selectedDroneProfile.airframeClass == .multirotor {
-                setFlightMode(.hover, reason: "soft_surface_collision_hover_recovery")
-            }
-        case .severeImpact:
-            applySevereCollisionConsequences(source: analysis.nearestObstacleSource)
-        }
     }
 
     /// Real, localized strikes rather than the old full-screen sun-intensity flash (removed from
@@ -5722,87 +5742,6 @@ final class DroneSimulationViewModel: ObservableObject {
             Float.random(in: -0.4...0.4),
             Float.random(in: -0.8...0.8)
         )
-    }
-
-    private func applyCollisionDamage(using analysis: CollisionAnalysisSnapshot) {
-        let impact = simd_length(state.velocity)
-        lastCollisionSource = analysis.nearestObstacleSource ?? "unknown"
-        let severity = collisionSeverity(for: analysis, impact: impact)
-        let damageEnergy: Float
-        switch severity {
-        case .minorContact:
-            damageEnergy = impact * 0.42
-        case .moderateImpact:
-            damageEnergy = impact * 0.74
-        case .severeImpact:
-            damageEnergy = impact
-        }
-        damageState = damageState.applyingCollisionDamage(impactEnergy: damageEnergy)
-        impactSeverityAccumulator = max(
-            impactSeverityAccumulator,
-            impact + simd_length(state.angularVelocity) * 0.42 + max(0.0, -analysis.nearestObstacleDistance) * 3.4
-        )
-
-        let penetration = max(0.0, -analysis.nearestObstacleDistance)
-        if penetration > 0.0001 {
-            let away: SIMD3<Float>
-            if let contactNormal = analysis.contactNormal,
-               simd_length_squared(contactNormal) > 0.0001 {
-                away = simd_normalize(contactNormal)
-            } else if let obstacleID = analysis.nearestObstacleID,
-                      let obstacle = sceneController.obstacle(for: obstacleID) {
-                away = horizontalPushNormal(awayFrom: obstacle)
-            } else {
-                away = SIMD3<Float>(0.0, 0.0, 1.0)
-            }
-            let pushDistance = penetration + max(0.04, selectedDroneProfile.collisionRadius * 0.10)
-            state.position += away * pushDistance
-        }
-
-        let planar = SIMD2<Float>(state.velocity.x, state.velocity.z)
-        let planarSpeed = simd_length(planar)
-        if planarSpeed > 0.001 {
-            let limited = min(planarSpeed, 1.9)
-            let damped = simd_normalize(planar) * (limited * 0.24)
-            state.velocity.x = damped.x
-            state.velocity.z = damped.y
-        } else {
-            state.velocity.x = 0.0
-            state.velocity.z = 0.0
-        }
-
-        if state.velocity.y < 0.0 {
-            state.velocity.y = max(-0.32, state.velocity.y * 0.14)
-        } else {
-            state.velocity.y *= 0.34
-        }
-
-        state.angularVelocity *= SIMD3<Float>(0.14, 0.14, 0.22)
-        state.orientation.x *= 0.74
-        state.orientation.y *= 0.74
-        if abs(state.orientation.x) < 0.002 { state.orientation.x = 0.0 }
-        if abs(state.orientation.y) < 0.002 { state.orientation.y = 0.0 }
-        resyncFixedWingAttitudeFromEuler()
-
-        switch severity {
-        case .minorContact:
-            collisionAftermathState = .impactRecovery
-            if mode.isAutoControlled {
-                setFlightMode(.manual, reason: "auto_mode_cancelled_minor_collision")
-            }
-        case .moderateImpact:
-            collisionAftermathState = selectedDroneProfile.airframeClass == .fixedWing ? .emergencyDescent : .damaged
-            if selectedDroneProfile.airframeClass == .multirotor {
-                setFlightMode(.hover, reason: "multicopter_collision_hover_recovery")
-            } else {
-                setFlightMode(.emergencyStop, reason: "fixed_wing_collision_emergency_stop")
-            }
-            updateControlValues({ values in
-                values.throttle = min(values.throttle, 0.38)
-            }, markManual: false)
-        case .severeImpact:
-            applySevereCollisionConsequences(source: analysis.nearestObstacleSource)
-        }
     }
 
     private func resolveObstaclePenetration(using analysis: CollisionAnalysisSnapshot) -> Bool {
@@ -9738,6 +9677,32 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadState: payloadState,
             installedFiberSpool: installedFiberSpoolModule
         )
+        // Mass distribution changed (payload mounted/released) — rebuild the
+        // physical graph but keep the damage already sustained.
+        rebuildVehicleComponentGraph(preservingIntegrity: true)
+    }
+
+    /// Rebuilds the component graph and contact profile from the currently
+    /// built visual + the current mass model. `preservingIntegrity` carries
+    /// accumulated damage across payload/mass refreshes; a model switch or
+    /// reset starts pristine.
+    private func rebuildVehicleComponentGraph(preservingIntegrity: Bool = false) {
+        let output = VehicleComponentGraphBuilder.build(
+            profile: selectedDroneProfile,
+            vehicleMassModel: vehicleMassModel,
+            geometry: sceneController.currentVisualGeometry
+        )
+        var graph = output.graph
+        if preservingIntegrity, !componentGraph.isEmpty {
+            for component in componentGraph.components where component.integrity < 1.0 {
+                if graph.component(id: component.id) != nil {
+                    graph.setIntegrity(component.integrity, id: component.id)
+                }
+            }
+        }
+        componentGraph = graph
+        vehicleContactProfile = output.contactProfile
+        vehicleMassProperties = graph.massProperties
     }
 
     private func syncPayloadLifecycleEvents() {
@@ -17011,12 +16976,16 @@ final class DroneSimulationViewModel: ObservableObject {
         guard supportReacquireBlockTimer <= 0.0 else {
             return
         }
+        // Attitude-aware clearance (0 at rest attitude — the roof hard-floor
+        // clamp contract `position.y == supportY` at rest is preserved; only
+        // a tilted airframe rests higher, on its actual lowest structure).
+        let clearance = vehicleGroundClearance()
         let supportY = supportSurfaceY(
             for: state.position,
             maximumHeight: max(previousState.position.y, state.position.y) +
                 max(0.18, selectedDroneProfile.collisionRadius * 0.50)
         )
-        guard supportY > 0.0, state.position.y < supportY else {
+        guard supportY > 0.0, state.position.y < supportY + clearance else {
             return
         }
 
@@ -17024,13 +16993,40 @@ final class DroneSimulationViewModel: ObservableObject {
         // is genuinely below it (e.g. flew in under an overhang) must not be shoved up through
         // the surface, so require it to have been at or above the surface on the previous tick.
         let comeFromAboveTolerance = max(0.05, selectedDroneProfile.collisionRadius * 0.5)
-        guard previousState.position.y >= supportY - comeFromAboveTolerance else {
+        guard previousState.position.y >= supportY + clearance - comeFromAboveTolerance else {
             return
         }
 
-        state.position.y = supportY
+        state.position.y = supportY + clearance
         if state.velocity.y < 0.0 {
             state.velocity.y = 0.0
+        }
+    }
+
+    /// Rest-normalized ground clearance of the vehicle contact profile at the
+    /// current attitude — see `VehicleContactProfile.groundClearanceOffset`.
+    private func vehicleGroundClearance() -> Float {
+        guard !vehicleContactProfile.isEmpty else {
+            return 0.0
+        }
+        return vehicleContactProfile.groundClearanceOffset(
+            orientation: attitudeQuaternion(of: state),
+            restOrientation: VehicleContactProfile.restOrientation(for: selectedDroneProfile.airframeStyle)
+        )
+    }
+
+    /// The attitude quaternion physics actually flies with: the fixed-wing
+    /// quaternion for fixed-wing/hybrid airframes, Euler-composed for
+    /// multirotors (same yaw*pitch*roll order as the physics engine).
+    private func attitudeQuaternion(of droneState: DroneState) -> simd_quatf {
+        switch selectedDroneProfile.airframeClass {
+        case .fixedWing, .hybridVTOL:
+            return droneState.fixedWingOrientationQuat
+        case .multirotor:
+            let yaw = simd_quatf(angle: droneState.orientation.z, axis: SIMD3<Float>(0.0, 1.0, 0.0))
+            let pitch = simd_quatf(angle: droneState.orientation.y, axis: SIMD3<Float>(1.0, 0.0, 0.0))
+            let roll = simd_quatf(angle: droneState.orientation.x, axis: SIMD3<Float>(0.0, 0.0, 1.0))
+            return yaw * pitch * roll
         }
     }
 
@@ -17304,7 +17300,12 @@ final class DroneSimulationViewModel: ObservableObject {
         transitionPhysicalState(nextPhysicalState)
 
         if nextPhysicalState == .crashed, isArmed {
-            disarm(forceEmergency: true)
+            // preserveCrashDynamics: the crash disarm must NOT run
+            // settleDisarmedGroundedState (snap-to-ground, zeroed velocities,
+            // leveled attitude — the old "teleports onto the ground" bug).
+            // The uncontrolled-body integrator carries the airframe to its
+            // natural rest instead.
+            disarm(forceEmergency: true, preserveCrashDynamics: true)
         }
     }
 
@@ -17370,14 +17371,15 @@ final class DroneSimulationViewModel: ObservableObject {
             state.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - deltaTime * 12.0))
             holdRestAttitude = true
         case .crashed:
-            state.position.y = supportY
-            state.velocity.x *= max(0.0, 1.0 - deltaTime * 12.0)
-            state.velocity.z *= max(0.0, 1.0 - deltaTime * 12.0)
-            state.velocity.y = 0.0
-            state.angularVelocity *= SIMD3<Float>(repeating: max(0.0, 1.0 - deltaTime * 14.0))
+            // Motors are dead, but the airframe's motion belongs to the
+            // uncontrolled-body integrator now — no snapping to the support
+            // height, no velocity zeroing (the old teleport-flat behavior).
+            // applySupportSurfaceConstraint keeps it from sinking through an
+            // elevated support at its actual lowest structure.
             state.throttle = 0.0
             state.motorThrottle = 0.0
-            state.rotorAngularSpeed = .zero
+            restSupportNormalLatch = nil
+            return
         case .disarmed, .armedOnGround, .landed:
             if !isArmed {
                 settleDisarmedGroundedState()

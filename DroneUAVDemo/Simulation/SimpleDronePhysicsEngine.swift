@@ -33,6 +33,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         var remaining = clampedDelta
         while remaining > 0.0 {
             let dt = min(Tuning.fixedStep, remaining)
+            if next.physicalState == .crashed {
+                // A crashed airframe stops being an aircraft but keeps being a
+                // physical body: ballistic tumble with per-contact-sphere
+                // ground collisions instead of the old "pin flat to the
+                // ground" damping.
+                next = stepUncontrolledBody(state: next, context: context, dt: dt)
+                remaining -= dt
+                continue
+            }
             switch context.profile.airframeClass {
             case .multirotor:
                 next = stepMultirotorBaseline(state: next, control: control, context: context, dt: dt)
@@ -205,16 +214,17 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.velocity.y = next.velocity.y.clamped(to: -verticalDownMax...verticalUpMax)
 
         next.position = state.position + next.velocity * dt
-        if next.position.y < 0.0 {
-            next.position.y = 0.0
+        let groundClearance = contactGroundClearance(context: context, orientation: q)
+        if next.position.y < groundClearance {
+            next.position.y = groundClearance
             if next.velocity.y < 0.0 {
                 next.velocity.y = 0.0
             }
         }
 
-        let groundRestState = next.position.y <= 0.03 && state.physicalState.isGroundRestState
+        let groundRestState = next.position.y <= groundClearance + 0.03 && state.physicalState.isGroundRestState
         if groundRestState {
-            next.position.y = 0.0
+            next.position.y = groundClearance
             next.velocity.x *= max(0.0, 1.0 - dt * 14.0)
             next.velocity.z *= max(0.0, 1.0 - dt * 14.0)
             next.velocity.y = 0.0
@@ -658,14 +668,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.sideslipAngle = beta
 
         // --- Ground handling.
-        if next.position.y < 0.0 {
-            next.position.y = 0.0
+        let groundClearance = contactGroundClearance(context: context, orientation: next.fixedWingOrientationQuat)
+        if next.position.y < groundClearance {
+            next.position.y = groundClearance
             if next.velocity.y < 0.0 {
                 next.velocity.y = 0.0
             }
         }
 
-        let groundRestState = next.position.y <= 0.03 && state.physicalState.isGroundRestState && motorThrottle < 0.18
+        let groundRestState = next.position.y <= groundClearance + 0.03 && state.physicalState.isGroundRestState && motorThrottle < 0.18
         if groundRestState {
             next.velocity.x *= max(0.0, 1.0 - dt * 10.0)
             next.velocity.z *= max(0.0, 1.0 - dt * 10.0)
@@ -1222,6 +1233,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         wingborneBlend: Float,
         wing: FixedWingParameters,
         profile: DroneModelProfile,
+        context: DroneSimulationContext,
         ratedDescent: Float,
         alpha: Float,
         beta: Float,
@@ -1301,14 +1313,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // hover throttle). The tail/ground visual gap is handled purely as a
         // rendering offset in DroneSceneController instead — physics keeps
         // position.y == 0 at rest for every airframe, tailsitter included.
-        if next.position.y < 0.0 {
-            next.position.y = 0.0
+        // (contactGroundClearance is rest-normalized for exactly this
+        // reason: it stays 0 at the rest attitude and only lifts the origin
+        // at non-rest attitudes, e.g. a banked wingtip near the ground.)
+        let groundClearance = contactGroundClearance(context: context, orientation: next.fixedWingOrientationQuat)
+        if next.position.y < groundClearance {
+            next.position.y = groundClearance
             if next.velocity.y < 0.0 {
                 next.velocity.y = 0.0
             }
         }
 
-        let groundRestState = next.position.y <= 0.03 && state.physicalState.isGroundRestState && motorThrottle < 0.18
+        let groundRestState = next.position.y <= groundClearance + 0.03 && state.physicalState.isGroundRestState && motorThrottle < 0.18
         if groundRestState {
             next.velocity.x *= max(0.0, 1.0 - dt * 10.0)
             next.velocity.z *= max(0.0, 1.0 - dt * 10.0)
@@ -1428,6 +1444,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             wingborneBlend: s.wingborneBlend,
             wing: s.wing,
             profile: s.profile,
+            context: context,
             ratedDescent: s.ratedDescent,
             alpha: s.alpha,
             beta: s.beta,
@@ -1611,6 +1628,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             wingborneBlend: s.wingborneBlend,
             wing: s.wing,
             profile: s.profile,
+            context: context,
             ratedDescent: s.ratedDescent,
             alpha: s.alpha,
             beta: s.beta,
@@ -1816,11 +1834,237 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         verticalDebugCooldown = 0.25
     }
 
+    // MARK: - Uncontrolled (crashed) body
+
+    /// Free-body integrator for a crashed airframe: gravity + quadratic drag,
+    /// full 3D rotation, and iterative contact impulses of the vehicle's
+    /// contact spheres against the world ground plane (restitution +
+    /// friction), settling to natural rest. Elevated supports (roofs) are
+    /// still handled by the view model's support-surface clamp after the
+    /// step. Deliberately NOT a full LCP solver — two impulse iterations per
+    /// substep are plenty at 90 Hz for a believable tumble.
+    private func stepUncontrolledBody(
+        state: DroneState,
+        context: DroneSimulationContext,
+        dt: Float
+    ) -> DroneState {
+        var next = state
+
+        let massProperties = context.contactProfile.isEmpty
+            ? VehicleMassProperties.fallback
+            : context.vehicleMassProperties
+        let mass = max(0.2, massProperties.totalMassKg)
+        let isQuaternionAirframe = context.profile.airframeClass != .multirotor
+
+        // --- Forces: gravity + quadratic body drag.
+        let referenceRadius = max(0.12, context.contactProfile.boundingRadius)
+        let referenceArea = Float.pi * referenceRadius * referenceRadius * 0.35
+        let speed = simd_length(state.velocity)
+        var force = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
+        if speed > 0.01 {
+            let dragMagnitude = 0.5 * 1.225 * referenceArea * 1.0 * speed * speed
+            force -= (state.velocity / speed) * dragMagnitude
+        }
+        next.velocity = state.velocity + (force / mass) * dt
+
+        // --- Rotation: light aero damping, full 3D integration.
+        let rotationalDamping = max(0.0, 1.0 - dt * 0.6)
+        var rates = (isQuaternionAirframe ? state.bodyAngularVelocity : state.angularVelocity) * rotationalDamping
+
+        // --- Attitude integration.
+        var attitude: simd_quatf
+        if isQuaternionAirframe {
+            attitude = integrateFixedWingOrientation(
+                state.fixedWingOrientationQuat,
+                rollRate: rates.x,
+                pitchRate: rates.y,
+                yawRate: rates.z,
+                dt: dt
+            )
+        } else {
+            // Multirotor keeps its legacy Euler-rate integration (rendering
+            // and telemetry read Euler for this airframe class).
+            next.orientation = wrappedAngles(state.orientation + rates * dt)
+            attitude = orientationQuaternion(from: next.orientation)
+        }
+
+        next.position = state.position + next.velocity * dt
+
+        // --- Ground contacts.
+        //
+        // A dynamic hit (real falling speed onto few points) gets a point
+        // impulse with restitution. A RESTING body — two or more spheres in
+        // ground contact, or a slow approach — must NOT receive point
+        // impulses: applying the whole gravity-accumulated impulse at
+        // whichever corner happens to be deepest each substep alternates
+        // corners and rocks the airframe indefinitely (the post-crash
+        // "dancing in place" bug, violent on small airframes whose inertia
+        // is tiny). Rest is handled as a support polygon: kill the vertical
+        // approach, damp horizontal slide and rotation.
+        let spheres = context.contactProfile.spheres
+        if !spheres.isEmpty {
+            let inertia = simd_max(massProperties.inertiaDiagonal, SIMD3<Float>(repeating: 0.0005))
+
+            var deepestSphere: VehicleContactSphere?
+            var deepestBottom: Float = 0.0
+            for sphere in spheres {
+                let center = sphere.worldCenter(position: next.position, orientation: attitude)
+                let bottom = center.y - sphere.radius
+                if bottom < deepestBottom {
+                    deepestBottom = bottom
+                    deepestSphere = sphere
+                }
+            }
+
+            if let contactSphere = deepestSphere {
+                // Single positional correction: deepest sphere exactly on the ground.
+                next.position.y -= deepestBottom
+
+                var groundedContactCount = 0
+                for sphere in spheres {
+                    let bottom = sphere.worldCenter(position: next.position, orientation: attitude).y - sphere.radius
+                    if bottom <= 0.02 {
+                        groundedContactCount += 1
+                    }
+                }
+
+                let worldCoM = next.position + simd_act(attitude, massProperties.centerOfMassOffset)
+                let sphereCenter = contactSphere.worldCenter(position: next.position, orientation: attitude)
+                let contactPoint = SIMD3<Float>(sphereCenter.x, 0.0, sphereCenter.z)
+                let leverArm = contactPoint - worldCoM
+                let ratesAxes = SIMD3<Float>(rates.y, rates.z, rates.x)
+                let omegaWorld = simd_act(attitude, ratesAxes)
+                let contactVelocity = next.velocity + simd_cross(omegaWorld, leverArm)
+
+                let isDynamicHit = contactVelocity.y < -0.35 && groundedContactCount < 2
+                if isDynamicHit {
+                    let normal = SIMD3<Float>(0.0, 1.0, 0.0)
+                    let torquePerImpulse = simd_cross(leverArm, normal)
+                    let torqueBody = simd_act(attitude.conjugate, torquePerImpulse)
+                    let omegaPerImpulseWorld = simd_act(attitude, torqueBody / inertia)
+                    let kNormal = 1.0 / mass + simd_dot(simd_cross(omegaPerImpulseWorld, leverArm), normal)
+                    // Restitution threshold: only a genuine fall bounces —
+                    // micro-approach speeds would otherwise keep the body
+                    // hopping forever.
+                    let restitution: Float = contactVelocity.y < -1.2 ? 0.18 : 0.0
+                    let impulse = -(1.0 + restitution) * contactVelocity.y / max(0.0001, kNormal)
+
+                    next.velocity.y += impulse / mass
+                    var deltaOmegaWorld = omegaPerImpulseWorld * impulse
+
+                    // Friction against the tangential contact motion.
+                    let tangential = SIMD3<Float>(contactVelocity.x, 0.0, contactVelocity.z)
+                    let tangentialSpeed = simd_length(tangential)
+                    if tangentialSpeed > 0.03 {
+                        let tangent = tangential / tangentialSpeed
+                        let torquePerFriction = simd_cross(leverArm, tangent)
+                        let frictionOmegaWorld = simd_act(attitude, simd_act(attitude.conjugate, torquePerFriction) / inertia)
+                        let kTangent = 1.0 / mass + simd_dot(simd_cross(frictionOmegaWorld, leverArm), tangent)
+                        let stoppingImpulse = tangentialSpeed / max(0.0001, kTangent)
+                        let frictionImpulse = min(0.65 * impulse, stoppingImpulse)
+                        next.velocity -= tangent * (frictionImpulse / mass)
+                        deltaOmegaWorld -= frictionOmegaWorld * frictionImpulse
+                    }
+
+                    let deltaAxes = simd_act(attitude.conjugate, deltaOmegaWorld)
+                    var contactRatesDelta = SIMD3<Float>(deltaAxes.z, deltaAxes.x, deltaAxes.y)
+                    // A single point impulse on a tiny-inertia airframe can
+                    // compute an absurd spin — cap what one contact may add.
+                    contactRatesDelta = clampMagnitude(contactRatesDelta, limit: 4.0)
+                    rates = clampMagnitude(rates + contactRatesDelta, limit: 10.0)
+                } else {
+                    // Resting contact (support polygon or slow touch).
+                    if next.velocity.y < 0.0 {
+                        next.velocity.y = 0.0
+                    }
+                    let slideDamping = exp(-dt * 6.0)
+                    next.velocity.x *= slideDamping
+                    next.velocity.z *= slideDamping
+                    rates *= exp(-dt * 5.0)
+
+                    if groundedContactCount < 2 {
+                        // Balanced on one point: the ground reaction force
+                        // torque tips the body until more points land (an
+                        // inverted airframe rolls onto its back instead of
+                        // freezing on a corner).
+                        let reactionForce = SIMD3<Float>(0.0, mass * Tuning.gravity, 0.0)
+                        let tipTorqueWorld = simd_cross(leverArm, reactionForce)
+                        let tipTorqueBody = simd_act(attitude.conjugate, tipTorqueWorld)
+                        let tipAccelAxes = tipTorqueBody / inertia
+                        let tipAccelRates = SIMD3<Float>(tipAccelAxes.z, tipAccelAxes.x, tipAccelAxes.y)
+                        rates += clampMagnitude(tipAccelRates, limit: 12.0) * dt
+                        rates = clampMagnitude(rates, limit: 10.0)
+                    }
+                }
+            }
+        } else if next.position.y < 0.0 {
+            next.position.y = 0.0
+            if next.velocity.y < 0.0 {
+                next.velocity.y = 0.0
+            }
+        }
+
+        // --- Rest/sleep: once slow and supported, bleed the residual motion
+        // out instead of jittering forever on the contact impulses.
+        let lowestBottom = spheres.reduce(Float.greatestFiniteMagnitude) { lowest, sphere in
+            min(lowest, sphere.worldCenter(position: next.position, orientation: attitude).y - sphere.radius)
+        }
+        let isSupported = spheres.isEmpty ? next.position.y <= 0.01 : lowestBottom <= 0.02
+        if isSupported, simd_length(next.velocity) < 0.5, simd_length(rates) < 1.0 {
+            let sleepDamping = max(0.0, 1.0 - dt * 8.0)
+            next.velocity *= sleepDamping
+            rates *= sleepDamping
+            if simd_length(next.velocity) < 0.03 { next.velocity = .zero }
+            if simd_length(rates) < 0.03 { rates = .zero }
+        }
+
+        if isQuaternionAirframe {
+            next.bodyAngularVelocity = rates
+            next.angularVelocity = rates
+            next.fixedWingOrientationQuat = attitude
+            next.orientation = eulerFromFixedWingQuaternion(attitude, fallback: state.orientation)
+        } else {
+            next.angularVelocity = rates
+            next.fixedWingOrientationQuat = attitude
+        }
+
+        next.throttle = 0.0
+        next.motorThrottle = 0.0
+        let rotorDecay = max(0.0, 1.0 - dt * 3.0)
+        next.rotorAngularSpeed = state.rotorAngularSpeed * rotorDecay
+        next.forwardAirspeed = simd_length(next.velocity)
+
+        return next
+    }
+
     private func orientationQuaternion(from euler: SIMD3<Float>) -> simd_quatf {
         let yaw = simd_quatf(angle: euler.z, axis: SIMD3<Float>(0.0, 1.0, 0.0))
         let pitch = simd_quatf(angle: euler.y, axis: SIMD3<Float>(1.0, 0.0, 0.0))
         let roll = simd_quatf(angle: euler.x, axis: SIMD3<Float>(0.0, 0.0, 1.0))
         return yaw * pitch * roll
+    }
+
+    /// Attitude-aware ground clearance from the vehicle's contact profile:
+    /// the world-ground clamp compares `position.y` against this instead of
+    /// 0, so a banked wing or a tumbling airframe rests on its actual lowest
+    /// structure instead of sinking to the gear reference. Rest-normalized —
+    /// exactly 0 at the airframe's rest attitude — because
+    /// `position.y == supportSurfaceY` at rest is a load-bearing contract for
+    /// arming/takeoff/landing checks (see the tailsitter note in
+    /// `integrateVTOLBody`). Empty profile (no graph built) keeps the legacy
+    /// behavior.
+    private func contactGroundClearance(
+        context: DroneSimulationContext,
+        orientation: simd_quatf
+    ) -> Float {
+        let profile = context.contactProfile
+        guard !profile.isEmpty else {
+            return 0.0
+        }
+        return profile.groundClearanceOffset(
+            orientation: orientation,
+            restOrientation: VehicleContactProfile.restOrientation(for: context.profile.airframeStyle)
+        )
     }
 
     private func wrap(_ value: Float) -> Float {
