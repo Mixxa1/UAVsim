@@ -521,12 +521,22 @@ final class ImpactResolutionService {
 
     // MARK: Foliage
 
-    /// Canopy contact: no rigid bounce — viscous drag through the branches
-    /// without rigid-body or structural damage. The aircraft keeps flying
-    /// through. The
-    /// contact fires every tick while inside the crown, so the damping must
-    /// be dt-scaled (a per-invocation constant factor would stop the
-    /// aircraft dead within a handful of frames).
+    /// Canopy contact: no rigid bounce — viscous drag through the branches, the aircraft keeps
+    /// flying through rather than bouncing. The contact fires every tick while inside the crown,
+    /// so the damping must be dt-scaled (a per-invocation constant factor would stop the aircraft
+    /// dead within a handful of frames).
+    ///
+    /// Soft leaves alone genuinely shouldn't scratch paint, but "foliage" here is the whole canopy
+    /// — twigs and thin branches too, not just leaf mass — and a real branch snags/nicks a
+    /// spinning prop or a delicate micro-frame (tinywhoop-class) the way it never bothers a heavy
+    /// commercial airframe shrugging through soft leaves. A flat "foliage never damages anything"
+    /// rule doesn't capture that asymmetry, so this applies a small, deliberately gentle damage
+    /// term — reusing the same `graph.applyImpact`/`strengthJ` math as a real hit, just against a
+    /// tiny reference "twig" energy instead of the vehicle's own kinetic energy — so it comes out
+    /// automatically fragility-scaled: a light/fragile component takes a real, visible nick, while
+    /// the same contact on a heavy/tough one is correctly still negligible. Below a slow walking
+    /// pace (`0.6 m/s`) it stays exactly zero either way — gently brushing leaves at a crawl still
+    /// shouldn't do anything.
     private func resolveFoliageContact(
         contact: VehicleSweptContact,
         material: ImpactSurfaceMaterial,
@@ -543,15 +553,30 @@ final class ImpactResolutionService {
         state.angularVelocity *= angularDamping
         state.bodyAngularVelocity *= angularDamping
 
+        var damage: [VehicleComponentGraph.ImpactDamageEntry] = []
+        var branchEnergyJ: Float = 0.0
+        if applyDamage, speed > 0.6, let target = graph.component(id: contact.componentID) {
+            let strikingProp = rotorsSpinning && isPropellerComponent(contact.componentID, graph: graph)
+            // ~30g reference "twig" mass — deliberately small next to a rigid-material hit, where
+            // the vehicle's own (much larger) effective mass drives the energy instead.
+            branchEnergyJ = 0.5 * 0.03 * speed * speed * (strikingProp ? 1.8 : 1.0)
+            damage = graph.applyImpact(
+                primaryComponentID: target.id,
+                energyJ: branchEnergyJ,
+                damageFactor: 0.35,
+                spreadRadius: 0.08
+            )
+        }
+
         return ImpactReport(
             componentID: contact.componentID,
             obstacleID: contact.obstacle.id,
             obstacleSource: contact.obstacle.source,
             material: material,
-            impactEnergyJ: 0.0,
+            impactEnergyJ: branchEnergyJ,
             normalClosingSpeed: speed,
             tier: .lightTouch,
-            damage: [],
+            damage: damage,
             connectionDamage: [],
             contactPoint: contact.contactPoint,
             contactNormal: contact.contactNormal,

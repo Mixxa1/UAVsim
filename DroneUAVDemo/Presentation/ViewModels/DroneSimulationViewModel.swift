@@ -5513,7 +5513,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if let report = impactReport {
             applyImpactConsequences(report)
             if report.tier != .lightTouch, collisionCooldown <= 0.0 {
-                collisionCooldown = collisionCooldownDuration(for: report.obstacleSource)
+                collisionCooldown = collisionCooldownDuration(for: report.obstacleSource, tier: report.tier)
             }
             enforceRuntimeSafetyAndBounds(context: "tick.collision_damage")
             needsCollisionAnalysisRefresh = true
@@ -6335,14 +6335,33 @@ final class DroneSimulationViewModel: ObservableObject {
         return .hardSurface
     }
 
-    private func collisionCooldownDuration(for source: String?) -> Float {
+    /// The material duration is the ceiling for a genuinely violent hit; a tier that only just
+    /// cleared `.lightTouch` (a graze, a slow scrape settling against a trunk) gets a much
+    /// shorter cooldown instead of the same flat material duration — otherwise a single scrape
+    /// blocks the *same ongoing contact* from registering again for most of a second, which is
+    /// exactly what made sustained light contact (drifting into a tree, settling against a wall)
+    /// barely damage anything: one small tick, then silence while the aircraft is still touching
+    /// it. `.lightTouch` itself never reaches this function (see call sites' `tier != .lightTouch`
+    /// guard) — it never needs a cooldown since it does no damage to rate-limit in the first place.
+    private func collisionCooldownDuration(for source: String?, tier: ImpactOutcomeTier) -> Float {
+        let materialDuration: Float
         switch obstacleImpactClass(for: source) {
         case .foliage:
-            return 0.18
+            materialDuration = 0.18
         case .softSurface:
-            return 0.34
+            materialDuration = 0.34
         case .hardSurface:
-            return 0.70
+            materialDuration = 0.70
+        }
+        switch tier {
+        case .lightTouch:
+            return 0.0
+        case .scrape:
+            return materialDuration * 0.18
+        case .heavyImpact:
+            return materialDuration * 0.55
+        case .criticalImpact:
+            return materialDuration
         }
     }
 
@@ -6472,7 +6491,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         applyImpactConsequences(report)
         if report.tier != .lightTouch, collisionCooldown <= 0.0 {
-            collisionCooldown = collisionCooldownDuration(for: report.obstacleSource)
+            collisionCooldown = collisionCooldownDuration(for: report.obstacleSource, tier: report.tier)
         }
         return true
     }
