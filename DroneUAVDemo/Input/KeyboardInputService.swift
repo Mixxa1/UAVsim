@@ -467,7 +467,12 @@ final class KeyboardInputService: KeyboardInputProviding {
         .cameraYawRight: KeyBindingDescriptor(command: .cameraYawRight, keyCode: 124, keyLabel: "→"),
         .cameraPitchUp: KeyBindingDescriptor(command: .cameraPitchUp, keyCode: 126, keyLabel: "↑"),
         .cameraPitchDown: KeyBindingDescriptor(command: .cameraPitchDown, keyCode: 125, keyLabel: "↓"),
-        .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V")
+        .resetCameraOrientation: KeyBindingDescriptor(command: .resetCameraOrientation, keyCode: 9, keyLabel: "V"),
+        // Canonical so a historical rebind (this settings screen supports arbitrary remapping,
+        // including swapping some other command onto "+"/"-") can never silently strand zoom —
+        // `sanitizeCanonicalFlightCameraBindings()` below reclaims these two on every launch.
+        .zoomIn: KeyBindingDescriptor(command: .zoomIn, keyCode: 24, keyLabel: "+"),
+        .zoomOut: KeyBindingDescriptor(command: .zoomOut, keyCode: 27, keyLabel: "-")
     ]
 
     init(profile: KeyBindingProfile? = nil, userDefaults: UserDefaults = .standard) {

@@ -157,6 +157,17 @@ final class DroneSceneController {
     private let orbitCameraNode = SCNNode()
     private let topCameraNode = SCNNode()
     private let spectatorCameraNode = SCNNode()
+    /// A short-lived stand-in `pointOfView` for `beginCameraTransition` — SceneKit's
+    /// `pointOfView` is a single discrete node reference (no built-in cross-camera blend), and
+    /// this project keeps one dedicated, continuously-updated node per mode rather than one
+    /// shared camera reused across modes. Blending two *different* nodes' live transforms into a
+    /// third node and pointing the view at that instead, for a short window, is the standard way
+    /// to fake a smooth cut between them without touching that per-mode-node architecture.
+    private let cameraTransitionNode = SCNNode()
+    private var cameraTransitionFromNode: SCNNode?
+    private var cameraTransitionElapsed: Float = 0.0
+    private var cameraTransitionDuration: Float = 0.35
+    private var cameraTransitionActive: Bool = false
 
     private let sunLightNode: SCNNode
     private let defaultSunLightPosition: SCNVector3
@@ -439,6 +450,8 @@ final class DroneSceneController {
         configureCameraNode(orbitCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(topCameraNode, fov: initialProfile.cameraPreset.fpvFov)
         configureCameraNode(spectatorCameraNode, fov: initialProfile.cameraPreset.fpvFov)
+        configureCameraNode(cameraTransitionNode, fov: initialProfile.cameraPreset.fpvFov)
+        scene.rootNode.addChildNode(cameraTransitionNode)
 
         followRigNode.name = "followRigNode"
         followRigNode.addChildNode(followCameraNode)
@@ -550,6 +563,16 @@ final class DroneSceneController {
     }
 
     func pointOfView(for mode: CameraMode) -> SCNNode {
+        if cameraTransitionActive {
+            return cameraTransitionNode
+        }
+        return resolvedPointOfView(for: mode)
+    }
+
+    /// The real per-mode lookup `pointOfView(for:)` normally delegates to — kept separate so
+    /// `beginCameraTransition`/the per-frame blend can resolve the actual target node even while
+    /// `pointOfView(for:)` itself is busy returning the transition stand-in.
+    private func resolvedPointOfView(for mode: CameraMode) -> SCNNode {
         // The pre-launch hand-hold is always experienced first-person,
         // regardless of which regular camera mode is selected underneath.
         if isHandLaunchPOVActive {
@@ -2847,6 +2870,20 @@ final class DroneSceneController {
         }
     }
 
+    /// Starts a short blend from whatever `oldMode`'s camera was showing toward the point of
+    /// view `CameraConfiguration.mode` resolves to once the caller applies its already-decided
+    /// mode change — call this *before* flipping the mode (it captures the "from" transform right
+    /// now), the per-frame update in `updateCameras` then resolves the "to" transform live each
+    /// frame off the (by-then-new) mode. Deliberately scoped to the zoom-triggered FPV
+    /// engage/exit (see `DroneSimulationViewModel.engageFPVFromZoom`/`exitFPVFromZoom`) rather
+    /// than every mode switch — `cycleCameraMode`/camera presets keep their existing instant cut.
+    func beginCameraTransition(from oldMode: CameraMode, duration: Float = 0.35) {
+        cameraTransitionFromNode = resolvedPointOfView(for: oldMode)
+        cameraTransitionElapsed = 0.0
+        cameraTransitionDuration = max(0.05, duration)
+        cameraTransitionActive = true
+    }
+
     func obstacleSourceLabel(for id: UUID) -> String? {
         obstacleSourceByID[id]
     }
@@ -4928,19 +4965,42 @@ final class DroneSceneController {
         let chaseHeightRange: ClosedRange<Float>
         let anchorLift: Float
         if activeProfile.airframeClass == .fixedWing {
-            chaseDistanceRange = max(3.4, subjectScale * 3.0)...max(7.2, subjectScale * 5.6)
-            chaseHeightRange = max(0.8, subjectScale * 0.22)...max(2.2, subjectScale * 0.68)
+            // Lower bound deliberately tiny, not a "comfortable viewing distance" — this is also
+            // the floor `DroneSimulationViewModel.fpvAutoEngageDistance` mirrors, so holding zoom
+            // in actually carries the camera visually into the airframe before handing off to
+            // FPV, instead of stalling at a earlier, still-external distance.
+            chaseDistanceRange = max(0.15, subjectScale * 0.16)...max(7.2, subjectScale * 5.6)
+            chaseHeightRange = max(0.03, subjectScale * 0.04)...max(2.2, subjectScale * 0.68)
             anchorLift = max(0.20, subjectScale * 0.10)
         } else {
-            chaseDistanceRange = max(1.6, subjectScale * 2.8)...max(3.9, subjectScale * 5.0)
-            chaseHeightRange = max(0.36, subjectScale * 0.18)...max(1.35, subjectScale * 0.52)
+            chaseDistanceRange = max(0.10, subjectScale * 0.14)...max(3.9, subjectScale * 5.0)
+            chaseHeightRange = max(0.02, subjectScale * 0.03)...max(1.35, subjectScale * 0.52)
             anchorLift = max(0.10, subjectScale * 0.08)
+        }
+
+        // Distance alone closing in while height stays pinned at its normal chase-camera ceiling
+        // would slide the camera horizontally closer while it keeps hovering well above the
+        // aircraft — never actually reading as "inside" it. Only within the final approach (the
+        // bottom `heightCollapseFraction` of the distance range — ordinary zoom well above that
+        // is untouched) does the height ceiling itself collapse toward the same tiny floor the
+        // distance range now has, so both close in together and the camera genuinely passes into
+        // the airframe's own silhouette right before the FPV hand-off.
+        func heightCollapseProgress(requested: Float, distanceRange: ClosedRange<Float>) -> Float {
+            let heightCollapseFraction: Float = 0.12
+            let zoneWidth = (distanceRange.upperBound - distanceRange.lowerBound) * heightCollapseFraction
+            guard zoneWidth > 0.0001 else { return 0.0 }
+            return (1.0 - (requested - distanceRange.lowerBound) / zoneWidth).clamped(to: 0.0...1.0)
         }
 
         let chaseDistanceRequested = settings.follow.distance.clamped(to: settings.follow.minDistance...settings.follow.maxDistance)
         let chaseDistance = chaseDistanceRequested.clamped(to: chaseDistanceRange)
+        let chaseHeightCollapse = heightCollapseProgress(requested: chaseDistanceRequested, distanceRange: chaseDistanceRange)
+        let effectiveChaseHeightCeiling = chaseHeightRange.upperBound +
+            (chaseHeightRange.lowerBound - chaseHeightRange.upperBound) * chaseHeightCollapse
         let chaseHeightRequested = settings.follow.height + (activeProfile.airframeClass == .fixedWing ? Float(0.30) : Float(0.14))
-        let chaseHeight = chaseHeightRequested.clamped(to: chaseHeightRange)
+        let chaseHeight = chaseHeightRequested.clamped(
+            to: chaseHeightRange.lowerBound...max(chaseHeightRange.lowerBound, effectiveChaseHeightCeiling)
+        )
         let chaseAnchor = dronePos + up * anchorLift
         let chaseVerticalOffset = up * max(0.12, subjectScale * 0.14)
 
@@ -4952,7 +5012,7 @@ final class DroneSceneController {
             chaseHeight,
             chaseDistance
         )
-        followLocalPosition.y = max(followLocalPosition.y, max(0.30, subjectScale * 0.28))
+        followLocalPosition.y = max(followLocalPosition.y, max(0.02, subjectScale * 0.03))
         followCameraNode.simdPosition = followLocalPosition
 
         let followLocalLookTarget = SIMD3<Float>(0.0, chaseVerticalOffset.y, 0.0)
@@ -4965,14 +5025,21 @@ final class DroneSceneController {
         followCameraNode.simdOrientation = followOrientation
 
         orbitAngle += deltaTime * settings.orbit.angularSpeed.clamped(to: 0.05...2.0)
+        // Lower bounds mirror `chaseDistanceRange`'s (see the comment there) so holding zoom in
+        // while orbiting also carries the camera into the airframe before the FPV hand-off.
         let orbitDistanceRange: ClosedRange<Float> = activeProfile.airframeClass == .fixedWing
-            ? max(4.0, subjectScale * 3.4)...max(8.0, subjectScale * 6.4)
-            : max(2.2, subjectScale * 3.6)...max(5.0, subjectScale * 6.2)
-        let orbitDistance = settings.orbit.distance
+            ? max(0.15, subjectScale * 0.16)...max(8.0, subjectScale * 6.4)
+            : max(0.10, subjectScale * 0.14)...max(5.0, subjectScale * 6.2)
+        let orbitDistanceRequested = settings.orbit.distance
             .clamped(to: settings.orbit.minDistance...settings.orbit.maxDistance)
-            .clamped(to: orbitDistanceRange)
+        let orbitDistance = orbitDistanceRequested.clamped(to: orbitDistanceRange)
+        // Same distance/height coupling as the chase camera above, in the final approach only.
+        let orbitHeightCollapse = heightCollapseProgress(requested: orbitDistanceRequested, distanceRange: orbitDistanceRange)
+        let orbitHeightRange = max(0.02, subjectScale * 0.03)...max(2.4, subjectScale * 0.80)
+        let effectiveOrbitHeightCeiling = orbitHeightRange.upperBound +
+            (orbitHeightRange.lowerBound - orbitHeightRange.upperBound) * orbitHeightCollapse
         let orbitHeight = (settings.orbit.height + max(0.10, subjectScale * 0.10))
-            .clamped(to: max(0.5, subjectScale * 0.16)...max(2.4, subjectScale * 0.80))
+            .clamped(to: orbitHeightRange.lowerBound...max(orbitHeightRange.lowerBound, effectiveOrbitHeightCeiling))
         let orbitPos = SIMD3<Float>(
             chaseAnchor.x + cos(orbitAngle) * orbitDistance,
             chaseAnchor.y + orbitHeight,
@@ -5087,6 +5154,34 @@ final class DroneSceneController {
                 target: target,
                 groundY: max(Float(groundNode.presentation.position.y), 0.0)
             )
+        }
+
+        cameraTransitionNode.camera?.fieldOfView = fov
+        cameraTransitionNode.camera?.zNear = fpvCameraNode.camera?.zNear ?? 0.01
+        if cameraTransitionActive {
+            cameraTransitionElapsed += deltaTime
+            let rawProgress = (cameraTransitionElapsed / cameraTransitionDuration).clamped(to: 0.0...1.0)
+            // Smoothstep, not linear — reads like an actual camera move easing in/out rather
+            // than a mechanical constant-speed slide.
+            let progress = rawProgress * rawProgress * (3.0 - 2.0 * rawProgress)
+            let fromNode = cameraTransitionFromNode ?? resolvedPointOfView(for: settings.mode)
+            let toNode = resolvedPointOfView(for: settings.mode)
+            let fromPosition = fromNode.presentation.simdWorldPosition
+            let toPosition = toNode.presentation.simdWorldPosition
+            let fromOrientation = simd_quatf(fromNode.presentation.simdWorldTransform)
+            let toOrientation = simd_quatf(toNode.presentation.simdWorldTransform)
+            cameraTransitionNode.simdPosition = simd_mix(
+                fromPosition,
+                toPosition,
+                SIMD3<Float>(repeating: progress)
+            )
+            cameraTransitionNode.simdOrientation = simd_normalize(
+                simd_slerp(fromOrientation, toOrientation, progress)
+            )
+            if rawProgress >= 1.0 {
+                cameraTransitionActive = false
+                cameraTransitionFromNode = nil
+            }
         }
     }
 

@@ -593,6 +593,15 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var weather: WeatherModel
     @Published private(set) var terrain: TerrainConfiguration
     @Published private(set) var cameraConfiguration: CameraConfiguration
+    /// The chase/orbit mode auto-zoom-into-FPV last engaged from — where zooming back out of
+    /// FPV returns to. See `applyContinuousCameraZoom`'s `.fpv` case.
+    private var lastDistanceCameraMode: CameraMode = .follow
+    /// True only while the current FPV session was entered via `engageFPVFromZoom()` (holding
+    /// "+" in chase/orbit until it passes into the airframe). Gates the zoom-out-exits-FPV
+    /// behavior so it does NOT fire when FPV was entered directly (e.g. the "4" hotkey via
+    /// `setCameraMode`/`cycleCameraMode`/preset selection) — in that case "-" should only narrow
+    /// FPV's own FOV zoom back down, exactly like before this feature existed.
+    private var fpvEnteredViaZoomEngage: Bool = false
 
     // Matches the weather envelope sphere's own visibility gate in DroneSceneController
     // (`updateWeatherEnvelope`), which shows the haze at preset selection alone — its opacity
@@ -1750,52 +1759,23 @@ final class DroneSimulationViewModel: ObservableObject {
 
         self.weather = .normal
         self.terrain = .default
-        self.cameraConfiguration = CameraConfiguration(
-            mode: simulationRunMode.isSpectator ? .spectator : .follow,
-            fov: selectedProfile.cameraPreset.fpvFov,
-            sensitivity: 1.0,
-            smoothing: 0.72,
-            invertLookX: false,
-            invertLookY: false,
-            sensitivityProfile: .medium,
-            lookNudgeStepDeg: 2.0,
-            free: FreeCameraState(
-                moveSpeed: 4.2,
-                zoomSensitivity: 1.0,
-                distance: 14.0,
-                minDistance: 2.0,
-                maxDistance: 80.0
-            ),
-            follow: FollowCameraState(
-                distance: selectedProfile.cameraPreset.followDistance,
-                height: selectedProfile.cameraPreset.followHeight,
-                lateralOffset: 0.0,
-                minDistance: 2.0,
-                maxDistance: 26.0
-            ),
-            orbit: OrbitCameraState(
-                distance: selectedProfile.cameraPreset.followDistance,
-                height: selectedProfile.cameraPreset.followHeight,
-                angularSpeed: 0.42,
-                minDistance: 2.0,
-                maxDistance: 32.0
-            ),
-            fpv: FPVCameraState(
-                stabilization: 0.45,
-                shake: 0.07,
-                yawLimitDeg: 24.0,
-                pitchLimitDeg: 18.0,
-                nearClip: 0.02,
-                mountOffset: SIMD3<Float>(0.0, 0.006, -0.014),
-                hideObstructingParts: true
-            ),
-            top: TopCameraState(
-                height: 34.0,
-                minHeight: 8.0,
-                maxHeight: 120.0,
-                forwardLead: 0.0
-            )
-        )
+        // Start from `.default` (single source of truth for the size-aware zoom-to-FPV floors —
+        // see `fpvAutoEngageDistance`/`DroneSceneController.updateCameras`) and only override the
+        // fields that are genuinely per-profile at launch. This used to hand-construct the whole
+        // struct with its own hardcoded minDistance/maxDistance (stale pre-zoom-to-FPV values,
+        // e.g. `follow.minDistance: 2.0`), silently shadowing every `.default` floor change made
+        // this session — the actual reason zoom never approached past ~2m regardless of how many
+        // times the render-side floors were lowered.
+        var initialCameraConfiguration = CameraConfiguration.default
+        initialCameraConfiguration.mode = simulationRunMode.isSpectator ? .spectator : .follow
+        initialCameraConfiguration.fov = selectedProfile.cameraPreset.fpvFov
+        initialCameraConfiguration.lookNudgeStepDeg = 2.0
+        initialCameraConfiguration.free.moveSpeed = 4.2
+        initialCameraConfiguration.follow.distance = selectedProfile.cameraPreset.followDistance
+        initialCameraConfiguration.follow.height = selectedProfile.cameraPreset.followHeight
+        initialCameraConfiguration.orbit.distance = selectedProfile.cameraPreset.followDistance
+        initialCameraConfiguration.orbit.height = selectedProfile.cameraPreset.followHeight
+        self.cameraConfiguration = initialCameraConfiguration
 
         self.batteryState = .full
         self.collisionAnalysis = .safe
@@ -4005,6 +3985,7 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
+        fpvEnteredViaZoomEngage = false
         cameraConfiguration.mode = mode
         syncCameraSystem(from: oldMode)
         refreshPayloadCameraStatus()
@@ -4020,6 +4001,7 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadCameraController.leavePayloadViewManually()
         }
         let nextMode = cameraConfiguration.mode.next()
+        fpvEnteredViaZoomEngage = false
         cameraConfiguration.mode = nextMode
         syncCameraSystem(from: oldMode)
         refreshPayloadCameraStatus()
@@ -4031,6 +4013,7 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadCameraController.leavePayloadViewManually()
         }
         selectedCameraPreset = preset
+        fpvEnteredViaZoomEngage = false
         cameraConfiguration.applyPreset(preset)
         syncCameraSystem(from: previousMode, resetOrientation: true)
         refreshPayloadCameraStatus()
@@ -4041,6 +4024,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if previousMode == .payload {
             payloadCameraController.leavePayloadViewManually()
         }
+        fpvEnteredViaZoomEngage = false
         cameraConfiguration.applyPreset(selectedCameraPreset)
         syncCameraSystem(from: previousMode, resetOrientation: true)
         refreshPayloadCameraStatus()
@@ -7239,18 +7223,69 @@ final class DroneSimulationViewModel: ObservableObject {
             cameraConfiguration.free.distance = (cameraConfiguration.free.distance - Float(zoomDirection * zoomStep))
                 .clamped(to: cameraConfiguration.free.minDistance...cameraConfiguration.free.maxDistance)
             sceneController.dollyFreeCamera(by: Float(-zoomDirection * zoomStep))
-        case .follow, .orbit, .top:
+        case .follow, .orbit:
+            let zoomStep = 6.5 * speedMultiplier * Double(deltaTime) * Double(cameraConfiguration.free.zoomSensitivity)
+            let prospectiveDistance = cameraConfiguration.cameraDistance - Float(zoomDirection * zoomStep)
+            if zoomInActive, prospectiveDistance <= fpvAutoEngageDistance(for: cameraConfiguration.mode) {
+                engageFPVFromZoom()
+            } else {
+                cameraConfiguration.setCameraDistance(prospectiveDistance)
+            }
+        case .top:
             let zoomStep = 6.5 * speedMultiplier * Double(deltaTime) * Double(cameraConfiguration.free.zoomSensitivity)
             cameraConfiguration.setCameraDistance(
                 cameraConfiguration.cameraDistance - Float(zoomDirection * zoomStep)
             )
         case .fpv:
-            cameraConfiguration.fov = (
-                cameraConfiguration.fov - Float(zoomDirection * 24.0 * speedMultiplier * Double(deltaTime))
-            ).clamped(to: 30.0...110.0)
+            let fovDelta = Float(zoomDirection * 24.0 * speedMultiplier * Double(deltaTime))
+            let prospectiveFov = cameraConfiguration.fov - fovDelta
+            if fpvEnteredViaZoomEngage, zoomOutActive, cameraConfiguration.fov >= 109.5, prospectiveFov >= 110.0 {
+                exitFPVFromZoom()
+            } else {
+                cameraConfiguration.fov = prospectiveFov.clamped(to: 30.0...110.0)
+            }
         case .payload, .spectator:
             return
         }
+    }
+
+    /// How close the chase/orbit camera gets before handing off to FPV — mirrors
+    /// `DroneSceneController.updateCameras`'s `chaseDistanceRange`/`orbitDistanceRange` lower
+    /// bound exactly (both now a small fraction of the airframe's own size, not a "comfortable
+    /// viewing distance"), so holding zoom in actually carries the camera visually into the
+    /// airframe — passing through it — right up to the point FPV takes over, rather than
+    /// stalling at an earlier, still-external distance and cutting to FPV from there.
+    private func fpvAutoEngageDistance(for mode: CameraMode) -> Float {
+        let dims = selectedDroneProfile.dimensions
+        let subjectScale = max(selectedDroneProfile.collisionRadius * 2.0, max(dims.widthM, dims.lengthM))
+        let isFixedWing = selectedDroneProfile.airframeClass == .fixedWing
+        return isFixedWing ? max(0.15, subjectScale * 0.16) : max(0.10, subjectScale * 0.14)
+    }
+
+    /// Holding zoom-in past the chase camera's closest point hands off to FPV instead of just
+    /// sitting at the floor — "keep pressing + until you're inside the aircraft."
+    private func engageFPVFromZoom() {
+        guard cameraConfiguration.mode != .fpv else { return }
+        let previousMode = cameraConfiguration.mode
+        lastDistanceCameraMode = previousMode
+        fpvEnteredViaZoomEngage = true
+        cameraConfiguration.mode = .fpv
+        syncCameraSystem(from: previousMode)
+        sceneController.beginCameraTransition(from: previousMode)
+    }
+
+    /// Mirror of `engageFPVFromZoom`: holding zoom-out past FPV's own widest field of view
+    /// leaves FPV for whichever chase/orbit mode it was entered from, picking back up exactly at
+    /// the distance it left off at so the reverse transition reads as continuous too.
+    private func exitFPVFromZoom() {
+        guard cameraConfiguration.mode == .fpv else { return }
+        let previousMode = cameraConfiguration.mode
+        let targetMode = lastDistanceCameraMode
+        fpvEnteredViaZoomEngage = false
+        cameraConfiguration.mode = targetMode
+        cameraConfiguration.setCameraDistance(fpvAutoEngageDistance(for: targetMode))
+        syncCameraSystem(from: previousMode)
+        sceneController.beginCameraTransition(from: previousMode)
     }
 
     private func adjustCameraZoom(inward: Bool) {
@@ -7262,10 +7297,22 @@ final class DroneSimulationViewModel: ObservableObject {
             cameraConfiguration.free.distance = (cameraConfiguration.free.distance + sign * zoomStep)
                 .clamped(to: cameraConfiguration.free.minDistance...cameraConfiguration.free.maxDistance)
             sceneController.dollyFreeCamera(by: sign * zoomStep)
-        case .follow, .orbit, .top:
+        case .follow, .orbit:
+            let prospectiveDistance = cameraConfiguration.cameraDistance + sign * zoomStep
+            if inward, prospectiveDistance <= fpvAutoEngageDistance(for: cameraConfiguration.mode) {
+                engageFPVFromZoom()
+            } else {
+                cameraConfiguration.setCameraDistance(prospectiveDistance)
+            }
+        case .top:
             cameraConfiguration.setCameraDistance(cameraConfiguration.cameraDistance + sign * zoomStep)
         case .fpv:
-            cameraConfiguration.fov = (cameraConfiguration.fov + sign * 1.2).clamped(to: 30.0...110.0)
+            let prospectiveFov = cameraConfiguration.fov + sign * 1.2
+            if fpvEnteredViaZoomEngage, !inward, cameraConfiguration.fov >= 109.5, prospectiveFov >= 110.0 {
+                exitFPVFromZoom()
+            } else {
+                cameraConfiguration.fov = prospectiveFov.clamped(to: 30.0...110.0)
+            }
         case .payloadOptics:
             let delta = inward ? 0.5 : -0.5
             if payloadCameraOpticsState.isAvailable {
@@ -10312,6 +10359,7 @@ final class DroneSimulationViewModel: ObservableObject {
         isBoundaryBarrierVisible = snapshot.terrain.showsBoundaryBarrier ?? false
 
         if let cameraMode = CameraMode.fromStoredRaw(snapshot.camera.modeRaw) {
+            fpvEnteredViaZoomEngage = false
             cameraConfiguration.mode = cameraMode == .payload ? .follow : cameraMode
         }
         cameraConfiguration.fov = snapshot.camera.fov
@@ -10321,27 +10369,20 @@ final class DroneSimulationViewModel: ObservableObject {
         cameraConfiguration.invertLookY = snapshot.camera.invertLookY
         cameraConfiguration.sensitivityProfile = CameraSensitivityProfile(rawValue: snapshot.camera.sensitivityProfileRaw) ?? .medium
         cameraConfiguration.lookNudgeStepDeg = snapshot.camera.lookNudgeStepDeg
-        cameraConfiguration.free = FreeCameraState(
-            moveSpeed: snapshot.camera.freeMoveSpeed,
-            zoomSensitivity: snapshot.camera.freeZoomSensitivity,
-            distance: snapshot.camera.freeDistance,
-            minDistance: snapshot.camera.freeMinDistance,
-            maxDistance: snapshot.camera.freeMaxDistance
-        )
-        cameraConfiguration.follow = FollowCameraState(
-            distance: snapshot.camera.followDistance,
-            height: snapshot.camera.followHeight,
-            lateralOffset: snapshot.camera.followLateralOffset,
-            minDistance: snapshot.camera.followMinDistance,
-            maxDistance: snapshot.camera.followMaxDistance
-        )
-        cameraConfiguration.orbit = OrbitCameraState(
-            distance: snapshot.camera.orbitDistance,
-            height: snapshot.camera.orbitHeight,
-            angularSpeed: snapshot.camera.orbitAngularSpeed,
-            minDistance: snapshot.camera.orbitMinDistance,
-            maxDistance: snapshot.camera.orbitMaxDistance
-        )
+        // minDistance/maxDistance are intentionally NOT restored from the snapshot: they are
+        // derived, size-aware safety floors (see `fpvAutoEngageDistance`/`updateCameras`'s
+        // `chaseDistanceRange`), not a user preference, and an older save predating a floor
+        // change would otherwise silently reintroduce a stale, larger floor that fights the
+        // current one — the exact bug behind "zoom stops well short of the aircraft."
+        cameraConfiguration.free.moveSpeed = snapshot.camera.freeMoveSpeed
+        cameraConfiguration.free.zoomSensitivity = snapshot.camera.freeZoomSensitivity
+        cameraConfiguration.free.distance = snapshot.camera.freeDistance
+        cameraConfiguration.follow.distance = snapshot.camera.followDistance
+        cameraConfiguration.follow.height = snapshot.camera.followHeight
+        cameraConfiguration.follow.lateralOffset = snapshot.camera.followLateralOffset
+        cameraConfiguration.orbit.distance = snapshot.camera.orbitDistance
+        cameraConfiguration.orbit.height = snapshot.camera.orbitHeight
+        cameraConfiguration.orbit.angularSpeed = snapshot.camera.orbitAngularSpeed
         cameraConfiguration.fpv = FPVCameraState(
             stabilization: snapshot.camera.fpvStabilization,
             shake: snapshot.camera.fpvShake,

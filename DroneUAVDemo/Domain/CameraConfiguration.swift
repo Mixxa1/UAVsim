@@ -347,14 +347,19 @@ struct CameraConfiguration {
             distance: 6.8,
             height: 2.4,
             lateralOffset: 0.0,
-            minDistance: 2.0,
+            // Low enough that zooming in never bottoms out on this floor before the FPV
+            // auto-engage threshold does (see `DroneSimulationViewModel.fpvAutoEngageDistance`) —
+            // that threshold is now deliberately tiny too (a fraction of the airframe's own
+            // size, letting the camera pass visually into the model before the hand-off), so
+            // this floor has to sit below it, not just below the old, much larger one.
+            minDistance: 0.05,
             maxDistance: 24.0
         ),
         orbit: OrbitCameraState(
             distance: 6.8,
             height: 2.4,
             angularSpeed: 0.42,
-            minDistance: 2.0,
+            minDistance: 0.05,
             maxDistance: 28.0
         ),
         fpv: FPVCameraState(
