@@ -401,6 +401,60 @@ struct MeshCollisionIndex {
         return deepest
     }
 
+    // MARK: - Local extraction
+
+    /// Triangle corners overlapping an axis-aligned box, as flat triples.
+    ///
+    /// Exists so the flight model can be handed the small patch of city around the aircraft and
+    /// run its own swept-sphere solver against it, rather than this index having to reimplement
+    /// contact resolution. Vertical extent is honoured as well as horizontal — over a city the
+    /// column above and below matters as much as the neighbourhood, since a rooftop and the
+    /// street below it share the same grid cells.
+    func triangleCorners(inBox minimum: SIMD3<Float>, maximum: SIMD3<Float>) -> [SIMD3<Float>] {
+        guard triangleCount > 0 else { return [] }
+        guard maximum.x >= bounds.minimum.x, minimum.x <= bounds.maximum.x,
+              maximum.y >= bounds.minimum.y, minimum.y <= bounds.maximum.y,
+              maximum.z >= bounds.minimum.z, minimum.z <= bounds.maximum.z else {
+            return []
+        }
+
+        let columnStart = Self.clampIndex((minimum.x - minimumXZ.x) / cellSize, limit: columns)
+        let columnEnd = Self.clampIndex((maximum.x - minimumXZ.x) / cellSize, limit: columns)
+        let rowStart = Self.clampIndex((minimum.z - minimumXZ.y) / cellSize, limit: rows)
+        let rowEnd = Self.clampIndex((maximum.z - minimumXZ.y) / cellSize, limit: rows)
+
+        var result: [SIMD3<Float>] = []
+        var seen = Set<Int32>()
+
+        for row in rowStart...rowEnd {
+            for column in columnStart...columnEnd {
+                let cell = row * columns + column
+                guard cell + 1 < cellStarts.count else { continue }
+                for slot in Int(cellStarts[cell])..<Int(cellStarts[cell + 1]) {
+                    let triangle = cellTriangles[slot]
+                    // A triangle straddling cells appears in each of them.
+                    guard seen.insert(triangle).inserted else { continue }
+
+                    let base = Int(triangle) * 3
+                    let a = corners[base], b = corners[base + 1], c = corners[base + 2]
+                    // Reject on the triangle's own extent, so a cell that merely overlaps the box
+                    // does not drag in triangles sitting far above or below it.
+                    let low = simd_min(simd_min(a, b), c)
+                    let high = simd_max(simd_max(a, b), c)
+                    guard high.x >= minimum.x, low.x <= maximum.x,
+                          high.y >= minimum.y, low.y <= maximum.y,
+                          high.z >= minimum.z, low.z <= maximum.z else {
+                        continue
+                    }
+                    result.append(a)
+                    result.append(b)
+                    result.append(c)
+                }
+            }
+        }
+        return result
+    }
+
     private func closestPointOnTriangle(
         point: SIMD3<Float>,
         a: SIMD3<Float>,

@@ -70,6 +70,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     @Published var projects: [ProjectRecordSummary] = []
     @Published var searchQuery: String = ""
     @Published var sortOrder: ProjectSortOrder = .newest
+    @Published var worldLoad: WorldLoadState?
     @Published var showUnsavedPrompt: Bool = false
     @Published var globalAlert: TelemetryExportAlert?
 
@@ -160,7 +161,13 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         projects = projectStorage.listProjects()
     }
 
-    func createProject(named name: String?) {
+    /// Progress of a photogrammetric world being prepared, or `nil` when nothing is loading.
+    struct WorldLoadState: Equatable {
+        var tileKey: String
+        var stage: MeshWorldRuntime.LoadStage
+    }
+
+    func createProject(named name: String?, mapSelection: MapSelection) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let finalName = trimmed.isEmpty ? projectStorage.defaultProjectName() : trimmed
         let projectID = projectStorage.createProjectID()
@@ -170,8 +177,46 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             initialProjectID: projectID,
             initialProjectName: finalName
         )
-        activeSimulation = vm
 
+        switch mapSelection {
+        case .standard(let preset):
+            vm.setTerrainPreset(preset)
+            activeSimulation = vm
+        case .photogrammetric(let tileKey, let directory):
+            // The world is prepared before the session becomes active: dropping the user into a
+            // flight scene that is still assembling its own ground would let them take off from
+            // nothing.
+            worldLoad = WorldLoadState(tileKey: tileKey, stage: .indexing)
+            Task { [weak self] in
+                let runtime = await MeshWorldRuntime.load(
+                    tileDirectory: directory,
+                    cacheDirectory: Self.meshWorldCacheDirectory(),
+                    progress: { stage in
+                        Task { @MainActor [weak self] in
+                            self?.worldLoad?.stage = stage
+                        }
+                    }
+                )
+                guard let self else { return }
+                self.worldLoad = nil
+                guard let runtime else {
+                    self.globalAlert = TelemetryExportAlert(
+                        titleKey: "world.load.failed",
+                        message: tileKey
+                    )
+                    return
+                }
+                vm.attachMeshWorld(runtime)
+                self.activeSimulation = vm
+                self.persist(vm)
+            }
+            return
+        }
+
+        persist(vm)
+    }
+
+    private func persist(_ vm: DroneSimulationViewModel) {
         switch vm.saveProject() {
         case .success:
             refreshProjects()
@@ -181,6 +226,13 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 message: error.localizedDescription
             )
         }
+    }
+
+    /// Derived caches (bounds index, collision soup) live beside the tiles they belong to, so
+    /// deleting a world reclaims everything it cost.
+    private static func meshWorldCacheDirectory() -> URL {
+        InternalStorePaths.worlds(fileManager: .default)
+            .appendingPathComponent("MeshCaches", isDirectory: true)
     }
 
     func launchLANSession(role: OnlineTrialRole, isHost: Bool) {
@@ -1095,6 +1147,8 @@ struct ContentView: View {
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
 
     @State private var nameDialogMode: NameDialogMode?
+    @State private var pendingProjectName: String?
+    @State private var showingMapSelection = false
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
     @State private var isReplayCenterPresented: Bool = false
@@ -1152,6 +1206,27 @@ struct ContentView: View {
             }
             .frame(width: 0, height: 0)
         )
+        .sheet(isPresented: $showingMapSelection) {
+            MapSelectionView(
+                airframeClass: .multirotor,
+                onConfirm: { selection in
+                    showingMapSelection = false
+                    appShell.createProject(named: pendingProjectName, mapSelection: selection)
+                    pendingProjectName = nil
+                },
+                onCancel: {
+                    showingMapSelection = false
+                    pendingProjectName = nil
+                }
+            )
+        }
+        // A world can take tens of seconds to prepare on a cold cache; the overlay both reports
+        // where that time is going and blocks a second start while it does.
+        .overlay {
+            if let load = appShell.worldLoad {
+                WorldLoadOverlay(load: load)
+            }
+        }
         .sheet(item: $nameDialogMode) { mode in
             projectNameSheet(mode: mode)
         }
@@ -2180,7 +2255,12 @@ struct ContentView: View {
     private func submitProjectNameDialog(_ mode: NameDialogMode) {
         switch mode {
         case .create:
-            appShell.createProject(named: nameDraft)
+            // The map is chosen before the project exists: which world it is decides which scene
+            // pipeline gets built, so it cannot be an afterthought applied to a running session.
+            pendingProjectName = nameDraft
+            nameDialogMode = nil
+            showingMapSelection = true
+            return
         case .saveAs:
             appShell.saveActiveProjectAs(name: nameDraft)
         case .duplicate:
@@ -2241,5 +2321,41 @@ struct ContentView: View {
 
     private func toggleFullscreen() {
         appShell.toggleFullscreen()
+    }
+}
+
+
+/// Progress shown while a photogrammetric world is being prepared.
+private struct WorldLoadOverlay: View {
+    let load: AppShellViewModel.WorldLoadState
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L10n.f("world.load.title", load.tileKey))
+                    .font(.headline)
+                ProgressView(value: load.stage.fraction)
+                    .frame(width: 360)
+                HStack {
+                    Text(LocalizedStringKey(load.stage.titleKey))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.0f%%", load.stage.fraction * 100))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 360)
+                Text("world.load.first_time")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 360, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(24)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
     }
 }

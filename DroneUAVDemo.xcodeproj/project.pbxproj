@@ -398,6 +398,8 @@
 		CC18249632F11320BD1FE131 /* UAVWorldStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA97C7FDB74C236B4528340 /* UAVWorldStudioView.swift */; };
 		C2E9CA95EBED75F43151933C /* MeshCollisionIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */; };
 		DBEE744CE1184264FE9FDC47 /* MeshCollisionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */; };
+		241D83684AAF8DBBFF937EB1 /* MeshWorldRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */; };
+		F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -796,6 +798,8 @@
 		5FA97C7FDB74C236B4528340 /* UAVWorldStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldStudioView.swift; sourceTree = "<group>"; };
 		9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCollisionIndex.swift; sourceTree = "<group>"; };
 		3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCollisionBuilder.swift; sourceTree = "<group>"; };
+		5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWorldRuntime.swift; sourceTree = "<group>"; };
+		90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapSelectionView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1366,6 +1370,7 @@
 		3536A3A22D175347C0EBA163 /* World */ = {
 			isa = PBXGroup;
 			children = (
+				5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */,
 				D1FB9EB44C17A55068CD83B4 /* UAVWorldMeshStreamer.swift */,
 				F4FBFF962404005E57CB5BC0 /* ContextCaptureOBJLoader.swift */,
 				E3FC26BCB5EBD4A58E067B72 /* UAVWorldSceneAssembler.swift */,
@@ -1378,6 +1383,7 @@
 		7D8D1E626A72AF9F180DAD8B /* World */ = {
 			isa = PBXGroup;
 			children = (
+				90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */,
 				5FA97C7FDB74C236B4528340 /* UAVWorldStudioView.swift */,
 				1ACB791D577D5E8DC6C732D1 /* UAVWorldMeshBrowserView.swift */,
 				A17775F5DB425F7A70BE0DF7 /* UAVWorldPreviewView.swift */,
@@ -1490,6 +1496,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */,
+				241D83684AAF8DBBFF937EB1 /* MeshWorldRuntime.swift in Sources */,
 				DBEE744CE1184264FE9FDC47 /* MeshCollisionBuilder.swift in Sources */,
 				C2E9CA95EBED75F43151933C /* MeshCollisionIndex.swift in Sources */,
 				CC18249632F11320BD1FE131 /* UAVWorldStudioView.swift in Sources */,

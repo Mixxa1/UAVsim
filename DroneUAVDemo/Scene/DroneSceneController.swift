@@ -311,6 +311,38 @@ final class DroneSceneController {
     private var fireCapsuleTargetReticleRingNode: SCNNode?
     private var fireCapsuleTargetReticleDiscNode: SCNNode?
 
+    /// Collision surface of an imported photogrammetric world, when one is loaded.
+    ///
+    /// Additive rather than a replacement: the procedural obstacle catalogue still applies, so
+    /// mission props (fire trucks, mannequins, dropped capsules) keep working on top of a real
+    /// city. While this is `nil` every query below behaves exactly as it did before, which is what
+    /// makes it safe to land alongside the existing terrain presets rather than replacing them.
+    private(set) var meshCollision: MeshCollisionIndex?
+    private(set) var meshWorldRuntime: MeshWorldRuntime?
+    /// Viewport height the streaming error metric is computed against. A standing value rather
+    /// than a live read: the selection only needs the right order of magnitude, and reading the
+    /// live drawable size every tick would mean touching the view from the model layer.
+    var meshStreamingViewportHeight: Float = 900
+
+    /// Side of one cached collision cell, in metres. Large enough that a tick's movement rarely
+    /// crosses more than one boundary, small enough that a cell holds a few hundred triangles
+    /// rather than a few thousand.
+    private static let meshCollisionCellSize: Float = 24.0
+    private static let meshCollisionCellCacheLimit = 900
+
+    private struct MeshCollisionCellKey: Hashable {
+        let column: Int
+        let row: Int
+    }
+
+    /// `obstacle` is `nil` for a cell that genuinely holds no geometry — cached as a negative
+    /// result so open water and sky are not re-extracted on every tick.
+    private struct MeshCollisionCell {
+        let obstacle: CollisionObstacle?
+    }
+
+    private var meshCollisionCellCache: [MeshCollisionCellKey: MeshCollisionCell] = [:]
+
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
     private var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty
@@ -2169,16 +2201,32 @@ final class DroneSceneController {
         var bestObstacleID: UUID?
         var hasHit = false
 
-        // Flat ground plane — same reference height the payload drop camera uses. Model position
-        // (not `.presentation`): the ground never animates, so they're equal, but the model read
-        // avoids the render-thread scene-lock sync `.presentation` forces.
-        let groundY = max(Float(groundNode.position.y), 0.0)
-        if dir.y < -0.0001 {
-            let t = (groundY - origin.y) / dir.y
-            if t > 0.0001, t < bestDistance {
-                bestDistance = t
+        // An imported mesh world replaces the flat plane entirely — it carries the terrain, the
+        // water surface, the quaysides and every rooftop. Its own spatial index does the work, so
+        // this stays a single call rather than the linear obstacle sweep below, which is the only
+        // reason a three-quarter-million-triangle city is affordable on the per-tick sensor path.
+        if let meshCollision {
+            if let hit = meshCollision.raycast(
+                origin: origin,
+                direction: dir,
+                maxDistance: bestDistance
+            ) {
+                bestDistance = hit.distance
                 bestObstacleID = nil
                 hasHit = true
+            }
+        } else {
+            // Flat ground plane — same reference height the payload drop camera uses. Model
+            // position (not `.presentation`): the ground never animates, so they're equal, but the
+            // model read avoids the render-thread scene-lock sync `.presentation` forces.
+            let groundY = max(Float(groundNode.position.y), 0.0)
+            if dir.y < -0.0001 {
+                let t = (groundY - origin.y) / dir.y
+                if t > 0.0001, t < bestDistance {
+                    bestDistance = t
+                    bestObstacleID = nil
+                    hasHit = true
+                }
             }
         }
 
@@ -3761,11 +3809,91 @@ final class DroneSceneController {
         invalidateThermalScene()
     }
 
+    /// Installs an imported photogrammetric world into the live flight scene.
+    ///
+    /// The procedural ground plane is hidden rather than removed: a great deal of existing code
+    /// reads `groundNode.position.y` as a reference height, and deleting the node would strand all
+    /// of it. Hidden, it keeps answering those queries while the mesh — which is consulted first
+    /// everywhere that matters — provides the real surface.
+    /// `MeshWorldRuntime` is main-actor isolated because it owns the streamer that mutates the
+    /// scene graph, and that isolation is worth keeping rather than weakening. This controller is
+    /// not annotated, but every path that reaches these methods originates in the main-actor view
+    /// model — `assumeIsolated` states that explicitly and traps if it ever stops being true,
+    /// which is preferable to hopping asynchronously and letting the world install a frame late.
+    func installMeshWorld(_ runtime: MeshWorldRuntime?) {
+        MainActor.assumeIsolated {
+            meshWorldRuntime?.rootNode.removeFromParentNode()
+            meshWorldRuntime = runtime
+
+            guard let runtime else {
+                groundNode.isHidden = false
+                setMeshCollision(nil)
+                return
+            }
+
+            scene.rootNode.addChildNode(runtime.rootNode)
+            groundNode.isHidden = true
+            setMeshCollision(runtime.collision)
+
+            #if DEBUG
+            let report = runtime.report
+            print("[MeshWorld] installed \(report.tileKey): \(report.visualNodes) LOD nodes, "
+                  + "\(report.collisionTriangles) collision triangles, origin "
+                  + report.originCoordinate.displayString)
+            #endif
+        }
+    }
+
+    /// Drives level-of-detail streaming from whichever camera is actually rendering.
+    ///
+    /// Called from the per-tick `update`, which runs on the main actor from the view model — not
+    /// from a render callback, which this project has established is neither guaranteed to be the
+    /// main thread nor safe for scene-graph mutation.
+    private func updateMeshWorldStreaming(cameraMode: CameraMode) {
+        guard let meshWorldRuntime else { return }
+        MainActor.assumeIsolated {
+        let pointOfView = resolvedPointOfView(for: cameraMode)
+        let transform = pointOfView.simdWorldTransform
+        let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        // A camera looks down its own local -Z.
+        let forward = -SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        let fieldOfView = Float(pointOfView.camera?.fieldOfView ?? 55)
+
+        meshWorldRuntime.update(
+            cameraPosition: position,
+            forward: forward,
+            fieldOfViewDegrees: fieldOfView,
+            viewportHeight: meshStreamingViewportHeight
+        )
+        }
+    }
+
+    /// Installs (or clears, with `nil`) the collision surface of an imported photogrammetric
+    /// world. Passing `nil` restores the flat-plane behaviour exactly.
+    func setMeshCollision(_ index: MeshCollisionIndex?) {
+        meshCollision = index
+        // Synthesised cells belong to the world that produced them; keeping them across a swap
+        // would leave the previous city's walls standing invisibly in the new one.
+        meshCollisionCellCache.removeAll(keepingCapacity: false)
+        environmentRevision &+= 1
+        #if DEBUG
+        if let index {
+            print("[MeshWorld] collision installed: \(index.triangleCount) triangles, "
+                  + String(format: "%.1f MB", Double(index.memoryFootprintBytes) / 1_048_576.0))
+        } else {
+            print("[MeshWorld] collision cleared")
+        }
+        #endif
+    }
+
     func nearbyEnvironmentObstacles(
         near position: SIMD3<Float>,
         radius: Float
     ) -> [CollisionObstacle] {
-        environmentObstacleIndex.query(near: position, radius: radius)
+        var obstacles = environmentObstacleIndex.query(near: position, radius: radius)
+        obstacles.append(contentsOf: meshObstacles(inBox: position - SIMD3<Float>(repeating: radius),
+                                                  maximum: position + SIMD3<Float>(repeating: radius)))
+        return obstacles
     }
 
     func nearbyEnvironmentObstacles(
@@ -3773,7 +3901,127 @@ final class DroneSceneController {
         to end: SIMD3<Float>,
         margin: Float
     ) -> [CollisionObstacle] {
-        environmentObstacleIndex.query(from: start, to: end, margin: margin)
+        var obstacles = environmentObstacleIndex.query(from: start, to: end, margin: margin)
+        let low = simd_min(start, end) - SIMD3<Float>(repeating: margin)
+        let high = simd_max(start, end) + SIMD3<Float>(repeating: margin)
+        obstacles.append(contentsOf: meshObstacles(inBox: low, maximum: high))
+        return obstacles
+    }
+
+    /// Mesh-world geometry presented to the flight model as ordinary obstacles.
+    ///
+    /// `CollisionObstacle` already carries triangle soup and `CollisionAnalysisService` already
+    /// solves swept spheres against it, so an imported city needs no change to the physics at
+    /// all — it only has to arrive in the same shape as everything else.
+    ///
+    /// Results are cached per grid cell because the aircraft re-queries almost the same
+    /// neighbourhood every tick, and re-extracting a few hundred triangles sixty times a second
+    /// would be pure waste. The cache is keyed on the cell, not the aircraft, so a second vehicle
+    /// flying the same street reuses it.
+    private func meshObstacles(
+        inBox minimum: SIMD3<Float>,
+        maximum: SIMD3<Float>
+    ) -> [CollisionObstacle] {
+        guard meshCollision != nil else { return [] }
+
+        let cell = Self.meshCollisionCellSize
+        let columnStart = Int(floor(minimum.x / cell))
+        let columnEnd = Int(floor(maximum.x / cell))
+        let rowStart = Int(floor(minimum.z / cell))
+        let rowEnd = Int(floor(maximum.z / cell))
+
+        // A query spanning an implausible number of cells means something asked for the whole
+        // city at once; answering it would allocate megabytes on the tick path.
+        let spanned = (columnEnd - columnStart + 1) * (rowEnd - rowStart + 1)
+        guard spanned > 0, spanned <= 64 else { return [] }
+
+        var result: [CollisionObstacle] = []
+        result.reserveCapacity(spanned)
+        for row in rowStart...rowEnd {
+            for column in columnStart...columnEnd {
+                if let obstacle = meshObstacle(column: column, row: row) {
+                    result.append(obstacle)
+                }
+            }
+        }
+        return result
+    }
+
+    private func meshObstacle(column: Int, row: Int) -> CollisionObstacle? {
+        let key = MeshCollisionCellKey(column: column, row: row)
+        if let cached = meshCollisionCellCache[key] {
+            return cached.obstacle
+        }
+        guard let meshCollision else { return nil }
+
+        let cell = Self.meshCollisionCellSize
+        // Cells are extracted with a margin so a triangle straddling the boundary is present in
+        // both, rather than falling through the crack between two adjacent queries.
+        let margin: Float = 1.5
+        let low = SIMD3<Float>(
+            Float(column) * cell - margin,
+            meshCollision.bounds.minimum.y - 1.0,
+            Float(row) * cell - margin
+        )
+        let high = SIMD3<Float>(
+            Float(column + 1) * cell + margin,
+            meshCollision.bounds.maximum.y + 1.0,
+            Float(row + 1) * cell + margin
+        )
+
+        let corners = meshCollision.triangleCorners(inBox: low, maximum: high)
+        guard corners.count >= 3 else {
+            meshCollisionCellCache[key] = MeshCollisionCell(obstacle: nil)
+            return nil
+        }
+
+        var triangles: [CollisionMeshTriangle] = []
+        triangles.reserveCapacity(corners.count / 3)
+        var boundsLow = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var boundsHigh = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+
+        for index in stride(from: 0, to: corners.count - 2, by: 3) {
+            let a = corners[index], b = corners[index + 1], c = corners[index + 2]
+            // A near-horizontal face is landable; a facade is not. The mesh has no semantics, so
+            // slope is the only available signal — and it is the right one, since what matters to
+            // a settling aircraft is whether the surface can hold it.
+            let normal = simd_cross(b - a, c - a)
+            let length = simd_length(normal)
+            let landable = length > 1e-9 && abs(normal.y / length) > 0.7
+            guard let triangle = CollisionMeshTriangle(
+                point0: a,
+                point1: b,
+                point2: c,
+                supportsLandingSurface: landable
+            ) else { continue }
+            triangles.append(triangle)
+            boundsLow = simd_min(boundsLow, triangle.minimum)
+            boundsHigh = simd_max(boundsHigh, triangle.maximum)
+        }
+
+        guard !triangles.isEmpty else {
+            meshCollisionCellCache[key] = MeshCollisionCell(obstacle: nil)
+            return nil
+        }
+
+        let center = (boundsLow + boundsHigh) * 0.5
+        let obstacle = CollisionObstacle(
+            id: UUID(),
+            center: center,
+            radius: simd_length(boundsHigh - boundsLow) * 0.5,
+            source: "world.mesh.cell.\(column).\(row)",
+            baseY: boundsLow.y,
+            topY: boundsHigh.y,
+            meshTriangles: triangles
+        )
+
+        // Bound the cache: a long flight would otherwise accumulate the whole tile in synthesised
+        // form alongside the index it came from.
+        if meshCollisionCellCache.count > Self.meshCollisionCellCacheLimit {
+            meshCollisionCellCache.removeAll(keepingCapacity: true)
+        }
+        meshCollisionCellCache[key] = MeshCollisionCell(obstacle: obstacle)
+        return obstacle
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {
@@ -4074,6 +4322,10 @@ final class DroneSceneController {
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
 
+        // Stream the imported world around wherever the view actually is. A no-op when no mesh
+        // world is installed.
+        updateMeshWorldStreaming(cameraMode: camera.mode)
+
         skyCloudsNode.position = SCNVector3(
             CGFloat(state.position.x),
             CGFloat(state.position.y + Self.skyCloudAltitudeAboveDrone),
@@ -4265,6 +4517,33 @@ final class DroneSceneController {
         maximumHeight: Float
     ) -> (height: Float, normal: SIMD3<Float>)? {
         var best: (height: Float, normal: SIMD3<Float>)?
+
+        // An imported mesh world *is* the terrain and the rooftops, so it is consulted first and
+        // then competes with the procedural surfaces on height like any other candidate. The
+        // query starts from `maximumHeight` rather than from the sky so that standing under a
+        // bridge or an arcade finds the deck above only when the caller asked to look that high.
+        if let meshCollision {
+            let ceiling = maximumHeight.isFinite
+                ? maximumHeight + 0.08
+                : meshCollision.bounds.maximum.y + 10.0
+            if let surface = meshCollision.surfaceHeight(
+                x: planarPosition.x,
+                z: planarPosition.y,
+                startingFrom: ceiling
+            ) {
+                // Re-cast for the normal: a pitched roof must be reported with its true slope so
+                // a resting aircraft lies flush instead of hovering level over it.
+                let probe = meshCollision.raycast(
+                    origin: SIMD3<Float>(planarPosition.x, surface + 0.5, planarPosition.y),
+                    direction: SIMD3<Float>(0, -1, 0),
+                    maxDistance: 1.5
+                )
+                var normal = probe?.normal ?? SIMD3<Float>(0, 1, 0)
+                if normal.y < 0 { normal = -normal }
+                best = (surface, normal)
+            }
+        }
+
         for surface in supportSurfaces {
             guard planarPoint(planarPosition, intersects: surface, clearanceRadius: clearanceRadius) else {
                 continue

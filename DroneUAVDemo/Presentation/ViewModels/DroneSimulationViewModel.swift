@@ -4526,6 +4526,33 @@ final class DroneSimulationViewModel: ObservableObject {
     func setWindSpeed(_ value: Double) { weather.windSpeedMps = Float(value) }
     func setWindGusts(_ value: Double) { weather.gusts = Float(value) }
 
+    /// Adopts an imported photogrammetric world as the flight environment.
+    ///
+    /// Called once, before the session becomes active. The procedural terrain still exists
+    /// underneath — the preset is forced to the cheapest one so `ScenePopulationService` does not
+    /// spend its budget scattering trees inside a real city that will hide them anyway, while the
+    /// terrain configuration keeps supplying map scale, weather and the other session settings
+    /// that are not the ground itself.
+    func attachMeshWorld(_ runtime: MeshWorldRuntime) {
+        terrain.preset = .gridDemo
+        terrain.density = 0.0
+        sceneController.installMeshWorld(runtime)
+
+        // Start on a real surface rather than at the origin, which in a photogrammetric tile is
+        // as likely to be open water or a rooftop as an apron.
+        if let spawn = runtime.findSpawnPoint() {
+            state.position = SIMD3<Float>(spawn.x, spawn.y, spawn.z)
+            lastFiniteState = state
+            let geo = runtime.origin.geographic(ofLocalPosition: spawn)
+            #if DEBUG
+            print("[MeshWorld] spawn at \(geo.displayString), "
+                  + String(format: "%.1f m MSL", geo.altitudeMetersMSL))
+            #endif
+        }
+
+        scheduleTerrainRegeneration(resetAfter: false)
+    }
+
     func setTerrainPreset(_ preset: TerrainPreset) {
         let compatiblePreset = preset.compatiblePreset(for: selectedDroneProfile.airframeClass)
         terrain.preset = compatiblePreset
