@@ -26,6 +26,34 @@ private final class CreditsWindowController: NSWindowController {
     }
 }
 
+/// Authoring window for real-world map packages. Follows `CreditsWindowController`'s pattern: a
+/// standalone window with no connection to the simulation, so the map builder can be used and
+/// judged without touching the flight path.
+private final class WorldBuilderWindowController: NSWindowController {
+    static let shared = WorldBuilderWindowController()
+
+    init() {
+        let view = NSHostingView(rootView: UAVWorldStudioView())
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = NSLocalizedString("world.preview.title", comment: "")
+        window.contentView = view
+        window.center()
+        super.init(window: window)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func show() {
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+    }
+}
+
 @MainActor
 enum WindowFullscreenController {
     private static var transitioningWindowIDs: Set<ObjectIdentifier> = []
@@ -77,6 +105,10 @@ struct DroneUAVDemoApp: App {
             CommandMenu("cadnext.menu.title") {
                 Button("cadnext.menu.open") {
                     CADNextLauncherService.shared.openCADNext()
+                }
+                Divider()
+                Button("world.preview.menu") {
+                    WorldBuilderWindowController.shared.show()
                 }
             }
             CommandGroup(after: .help) {

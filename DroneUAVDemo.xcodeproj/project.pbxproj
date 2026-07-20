@@ -372,6 +372,32 @@
 		F2000000000000000000000B /* WorkbenchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000B /* WorkbenchView.swift */; };
 		F2000000000000000000000C /* WorkbenchModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000C /* WorkbenchModelBuilder.swift */; };
 		F2000000000000000000000D /* WorkbenchPartPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* WorkbenchPartPreview.swift */; };
+		1D2BF0DD638C9799A4CC2F9C /* GeoCoordinate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45510383520E4C68073B1E77 /* GeoCoordinate.swift */; };
+		C4DE9518A3B1FACF50B8FF04 /* GeoOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE359B21C7278EA48792544F /* GeoOrigin.swift */; };
+		D398450014473326D88F6FEF /* GeoBoundingBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BE4760CB32D8246B725719 /* GeoBoundingBox.swift */; };
+		EB4819F8A8C4D3404133DFBC /* UAVWorldModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4FF2AF814097C6EB4AF762D /* UAVWorldModel.swift */; };
+		62B86C5B8AAFB486DC0D02A6 /* UAVWorldBuildingClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FBD9B53755BBD2B230ABC8 /* UAVWorldBuildingClassifier.swift */; };
+		0E6DFCB455C2B780B78BB802 /* UAVWorldBuildingSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2B5C670EE2676DEC113D778 /* UAVWorldBuildingSource.swift */; };
+		24A43FD81AAD7EB74FE0DDBF /* OverpassBuildingSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A6989401C35D249A47DEFE2 /* OverpassBuildingSource.swift */; };
+		7963683E07003F29F70E9EBC /* UAVWorldBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3227CB58EFB4A3E8C993074 /* UAVWorldBuilder.swift */; };
+		3E0FA5A50FBF5A0C926B7A00 /* UAVWorldPackageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2787507E799DE0173F70B3E8 /* UAVWorldPackageStore.swift */; };
+		81F625D0C4C9FF665A94611F /* PolygonTriangulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 310AF78CDF84F2A4AA961597 /* PolygonTriangulator.swift */; };
+		816B6862686FC0575F8C43BD /* UAVWorldBuildingGeometryFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3BCD42EE369586EB66400A8 /* UAVWorldBuildingGeometryFactory.swift */; };
+		140D6A1BE895ECDC8069BA1D /* UAVWorldFacadeMaterialFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C1E75AEB38900CA084C832 /* UAVWorldFacadeMaterialFactory.swift */; };
+		7748FA1AF86EE0944380791F /* UAVWorldSceneAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3FC26BCB5EBD4A58E067B72 /* UAVWorldSceneAssembler.swift */; };
+		91CE4BE30ED9A3D41386B26C /* UAVWorldPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17775F5DB425F7A70BE0DF7 /* UAVWorldPreviewView.swift */; };
+		25EB84F03F86F03579C03518 /* TransverseMercatorProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC510E3C4D0733F289309CD /* TransverseMercatorProjection.swift */; };
+		13F4633F6C0268125D1CCE15 /* ContextCaptureTileIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5E5F10A65C47B5519CB149 /* ContextCaptureTileIndex.swift */; };
+		5322E0C3FA8326B86C1E195D /* ContextCaptureOBJLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FBFF962404005E57CB5BC0 /* ContextCaptureOBJLoader.swift */; };
+		9FF258B05CBB5F11A4F4EE8B /* MeshQuadtree.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C16EAD97295262B9651F20 /* MeshQuadtree.swift */; };
+		CDAE2735DD7685CCC8F02F3C /* MeshStreamingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30B639A9D9A45BBDC1EB8FB4 /* MeshStreamingPolicy.swift */; };
+		A920F1B89B8426DAB1886647 /* UAVWorldMeshStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FB9EB44C17A55068CD83B4 /* UAVWorldMeshStreamer.swift */; };
+		506CE03809FBBA8E831FAA9C /* MeshTileCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE38BDC9CBB8075D1F555A53 /* MeshTileCatalog.swift */; };
+		E34F3B80CF41A1ED3D5B38D2 /* MeshTileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAAAE052C14D37549BF68917 /* MeshTileStore.swift */; };
+		359FC795639D9D2B4A22CD1A /* UAVWorldMeshBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ACB791D577D5E8DC6C732D1 /* UAVWorldMeshBrowserView.swift */; };
+		CC18249632F11320BD1FE131 /* UAVWorldStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA97C7FDB74C236B4528340 /* UAVWorldStudioView.swift */; };
+		C2E9CA95EBED75F43151933C /* MeshCollisionIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */; };
+		DBEE744CE1184264FE9FDC47 /* MeshCollisionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -744,6 +770,32 @@
 		F1000000000000000000000B /* WorkbenchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchView.swift; sourceTree = "<group>"; };
 		F1000000000000000000000C /* WorkbenchModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchModelBuilder.swift; sourceTree = "<group>"; };
 		F1000000000000000000000D /* WorkbenchPartPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchPartPreview.swift; sourceTree = "<group>"; };
+		45510383520E4C68073B1E77 /* GeoCoordinate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoCoordinate.swift; sourceTree = "<group>"; };
+		DE359B21C7278EA48792544F /* GeoOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoOrigin.swift; sourceTree = "<group>"; };
+		21BE4760CB32D8246B725719 /* GeoBoundingBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoBoundingBox.swift; sourceTree = "<group>"; };
+		C4FF2AF814097C6EB4AF762D /* UAVWorldModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldModel.swift; sourceTree = "<group>"; };
+		64FBD9B53755BBD2B230ABC8 /* UAVWorldBuildingClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldBuildingClassifier.swift; sourceTree = "<group>"; };
+		C2B5C670EE2676DEC113D778 /* UAVWorldBuildingSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldBuildingSource.swift; sourceTree = "<group>"; };
+		4A6989401C35D249A47DEFE2 /* OverpassBuildingSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverpassBuildingSource.swift; sourceTree = "<group>"; };
+		A3227CB58EFB4A3E8C993074 /* UAVWorldBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldBuilder.swift; sourceTree = "<group>"; };
+		2787507E799DE0173F70B3E8 /* UAVWorldPackageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldPackageStore.swift; sourceTree = "<group>"; };
+		310AF78CDF84F2A4AA961597 /* PolygonTriangulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolygonTriangulator.swift; sourceTree = "<group>"; };
+		C3BCD42EE369586EB66400A8 /* UAVWorldBuildingGeometryFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldBuildingGeometryFactory.swift; sourceTree = "<group>"; };
+		92C1E75AEB38900CA084C832 /* UAVWorldFacadeMaterialFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldFacadeMaterialFactory.swift; sourceTree = "<group>"; };
+		E3FC26BCB5EBD4A58E067B72 /* UAVWorldSceneAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldSceneAssembler.swift; sourceTree = "<group>"; };
+		A17775F5DB425F7A70BE0DF7 /* UAVWorldPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldPreviewView.swift; sourceTree = "<group>"; };
+		ADC510E3C4D0733F289309CD /* TransverseMercatorProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransverseMercatorProjection.swift; sourceTree = "<group>"; };
+		CF5E5F10A65C47B5519CB149 /* ContextCaptureTileIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextCaptureTileIndex.swift; sourceTree = "<group>"; };
+		F4FBFF962404005E57CB5BC0 /* ContextCaptureOBJLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextCaptureOBJLoader.swift; sourceTree = "<group>"; };
+		E9C16EAD97295262B9651F20 /* MeshQuadtree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshQuadtree.swift; sourceTree = "<group>"; };
+		30B639A9D9A45BBDC1EB8FB4 /* MeshStreamingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshStreamingPolicy.swift; sourceTree = "<group>"; };
+		D1FB9EB44C17A55068CD83B4 /* UAVWorldMeshStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldMeshStreamer.swift; sourceTree = "<group>"; };
+		FE38BDC9CBB8075D1F555A53 /* MeshTileCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshTileCatalog.swift; sourceTree = "<group>"; };
+		CAAAE052C14D37549BF68917 /* MeshTileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshTileStore.swift; sourceTree = "<group>"; };
+		1ACB791D577D5E8DC6C732D1 /* UAVWorldMeshBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldMeshBrowserView.swift; sourceTree = "<group>"; };
+		5FA97C7FDB74C236B4528340 /* UAVWorldStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVWorldStudioView.swift; sourceTree = "<group>"; };
+		9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCollisionIndex.swift; sourceTree = "<group>"; };
+		3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCollisionBuilder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -793,6 +845,8 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				079C97B31B69F3979A164863 /* World */,
+				613D16934A68B6BE2BF98090 /* Geo */,
 				F10000000000000000000001 /* WorkbenchBuild.swift */,
 				F10000000000000000000002 /* WorkbenchBuildAnalyzer.swift */,
 				F10000000000000000000003 /* WorkbenchBuildStore.swift */,
@@ -978,6 +1032,7 @@
 		100000000000000000000013 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
+				3536A3A22D175347C0EBA163 /* World */,
 				F1000000000000000000000C /* WorkbenchModelBuilder.swift */,
 				10000000000000000000010E /* DroneModelBuilder.swift */,
 				10000000000000000000F003 /* DroneVisualGeometrySample.swift */,
@@ -1032,6 +1087,7 @@
 		100000000000000000000015 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				7D8D1E626A72AF9F180DAD8B /* World */,
 				F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */,
 				F1000000000000000000000D /* WorkbenchPartPreview.swift */,
 				F1000000000000000000000B /* WorkbenchView.swift */,
@@ -1132,6 +1188,7 @@
 		100000000000000000000018 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				9235F9D6D84F0D14A4063490 /* World */,
 				10000000000000000000011B /* TelemetryExportService.swift */,
 				1000000000000000000002D1 /* MissionReplayStorageService.swift */,
 				1000000000000000000002D2 /* MissionReplaySettingsStore.swift */,
@@ -1267,6 +1324,67 @@
 			path = Thermal;
 			sourceTree = "<group>";
 		};
+		613D16934A68B6BE2BF98090 /* Geo */ = {
+			isa = PBXGroup;
+			children = (
+				ADC510E3C4D0733F289309CD /* TransverseMercatorProjection.swift */,
+				21BE4760CB32D8246B725719 /* GeoBoundingBox.swift */,
+				DE359B21C7278EA48792544F /* GeoOrigin.swift */,
+				45510383520E4C68073B1E77 /* GeoCoordinate.swift */,
+			);
+			path = Geo;
+			sourceTree = "<group>";
+		};
+		079C97B31B69F3979A164863 /* World */ = {
+			isa = PBXGroup;
+			children = (
+				310AF78CDF84F2A4AA961597 /* PolygonTriangulator.swift */,
+				C2B5C670EE2676DEC113D778 /* UAVWorldBuildingSource.swift */,
+				64FBD9B53755BBD2B230ABC8 /* UAVWorldBuildingClassifier.swift */,
+				C4FF2AF814097C6EB4AF762D /* UAVWorldModel.swift */,
+			);
+			path = World;
+			sourceTree = "<group>";
+		};
+		9235F9D6D84F0D14A4063490 /* World */ = {
+			isa = PBXGroup;
+			children = (
+				3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */,
+				9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */,
+				CAAAE052C14D37549BF68917 /* MeshTileStore.swift */,
+				FE38BDC9CBB8075D1F555A53 /* MeshTileCatalog.swift */,
+				30B639A9D9A45BBDC1EB8FB4 /* MeshStreamingPolicy.swift */,
+				E9C16EAD97295262B9651F20 /* MeshQuadtree.swift */,
+				CF5E5F10A65C47B5519CB149 /* ContextCaptureTileIndex.swift */,
+				2787507E799DE0173F70B3E8 /* UAVWorldPackageStore.swift */,
+				A3227CB58EFB4A3E8C993074 /* UAVWorldBuilder.swift */,
+				4A6989401C35D249A47DEFE2 /* OverpassBuildingSource.swift */,
+			);
+			path = World;
+			sourceTree = "<group>";
+		};
+		3536A3A22D175347C0EBA163 /* World */ = {
+			isa = PBXGroup;
+			children = (
+				D1FB9EB44C17A55068CD83B4 /* UAVWorldMeshStreamer.swift */,
+				F4FBFF962404005E57CB5BC0 /* ContextCaptureOBJLoader.swift */,
+				E3FC26BCB5EBD4A58E067B72 /* UAVWorldSceneAssembler.swift */,
+				92C1E75AEB38900CA084C832 /* UAVWorldFacadeMaterialFactory.swift */,
+				C3BCD42EE369586EB66400A8 /* UAVWorldBuildingGeometryFactory.swift */,
+			);
+			path = World;
+			sourceTree = "<group>";
+		};
+		7D8D1E626A72AF9F180DAD8B /* World */ = {
+			isa = PBXGroup;
+			children = (
+				5FA97C7FDB74C236B4528340 /* UAVWorldStudioView.swift */,
+				1ACB791D577D5E8DC6C732D1 /* UAVWorldMeshBrowserView.swift */,
+				A17775F5DB425F7A70BE0DF7 /* UAVWorldPreviewView.swift */,
+			);
+			path = World;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1372,6 +1490,32 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DBEE744CE1184264FE9FDC47 /* MeshCollisionBuilder.swift in Sources */,
+				C2E9CA95EBED75F43151933C /* MeshCollisionIndex.swift in Sources */,
+				CC18249632F11320BD1FE131 /* UAVWorldStudioView.swift in Sources */,
+				359FC795639D9D2B4A22CD1A /* UAVWorldMeshBrowserView.swift in Sources */,
+				E34F3B80CF41A1ED3D5B38D2 /* MeshTileStore.swift in Sources */,
+				506CE03809FBBA8E831FAA9C /* MeshTileCatalog.swift in Sources */,
+				A920F1B89B8426DAB1886647 /* UAVWorldMeshStreamer.swift in Sources */,
+				CDAE2735DD7685CCC8F02F3C /* MeshStreamingPolicy.swift in Sources */,
+				9FF258B05CBB5F11A4F4EE8B /* MeshQuadtree.swift in Sources */,
+				5322E0C3FA8326B86C1E195D /* ContextCaptureOBJLoader.swift in Sources */,
+				13F4633F6C0268125D1CCE15 /* ContextCaptureTileIndex.swift in Sources */,
+				25EB84F03F86F03579C03518 /* TransverseMercatorProjection.swift in Sources */,
+				91CE4BE30ED9A3D41386B26C /* UAVWorldPreviewView.swift in Sources */,
+				7748FA1AF86EE0944380791F /* UAVWorldSceneAssembler.swift in Sources */,
+				140D6A1BE895ECDC8069BA1D /* UAVWorldFacadeMaterialFactory.swift in Sources */,
+				816B6862686FC0575F8C43BD /* UAVWorldBuildingGeometryFactory.swift in Sources */,
+				81F625D0C4C9FF665A94611F /* PolygonTriangulator.swift in Sources */,
+				3E0FA5A50FBF5A0C926B7A00 /* UAVWorldPackageStore.swift in Sources */,
+				7963683E07003F29F70E9EBC /* UAVWorldBuilder.swift in Sources */,
+				24A43FD81AAD7EB74FE0DDBF /* OverpassBuildingSource.swift in Sources */,
+				0E6DFCB455C2B780B78BB802 /* UAVWorldBuildingSource.swift in Sources */,
+				62B86C5B8AAFB486DC0D02A6 /* UAVWorldBuildingClassifier.swift in Sources */,
+				EB4819F8A8C4D3404133DFBC /* UAVWorldModel.swift in Sources */,
+				D398450014473326D88F6FEF /* GeoBoundingBox.swift in Sources */,
+				C4DE9518A3B1FACF50B8FF04 /* GeoOrigin.swift in Sources */,
+				1D2BF0DD638C9799A4CC2F9C /* GeoCoordinate.swift in Sources */,
 				F20000000000000000000001 /* WorkbenchBuild.swift in Sources */,
 				F20000000000000000000002 /* WorkbenchBuildAnalyzer.swift in Sources */,
 				F20000000000000000000003 /* WorkbenchBuildStore.swift in Sources */,

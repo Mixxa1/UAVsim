@@ -21,6 +21,13 @@ struct InternalStorePaths {
         root(fileManager: fileManager).appendingPathComponent("Telemetry", isDirectory: true)
     }
 
+    /// Imported real-world map packages (`.uavworld`). Kept out of the app bundle because these
+    /// are user-generated, can reach gigabytes once imagery and terrain are included, and must
+    /// survive an app update.
+    static func worlds(fileManager: FileManager) -> URL {
+        root(fileManager: fileManager).appendingPathComponent("Worlds", isDirectory: true)
+    }
+
     static func index(fileManager: FileManager) -> URL {
         root(fileManager: fileManager).appendingPathComponent("Index", isDirectory: true)
     }
