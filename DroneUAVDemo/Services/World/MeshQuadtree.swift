@@ -29,6 +29,15 @@ struct MeshQuadtree {
         var radius: Float { simd_length(maximum - minimum) * 0.5 }
         var isLeaf: Bool { childIndices.isEmpty }
 
+        /// True when `other` lies in this node's subtree — a same-group quadrant-path prefix test,
+        /// matching how the export encodes the tree.
+        func isAncestorPath(of other: Node) -> Bool {
+            group == other.group
+                && namePrefix == other.namePrefix
+                && other.level > level
+                && other.quadPath.hasPrefix(quadPath)
+        }
+
         /// World-space size of the detail this node fails to represent — the standard driver for
         /// level-of-detail selection.
         ///

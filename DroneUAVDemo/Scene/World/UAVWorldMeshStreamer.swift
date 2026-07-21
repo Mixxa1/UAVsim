@@ -22,6 +22,12 @@ final class UAVWorldMeshStreamer {
         var budgetExhausted = false
         /// Nodes drawn at a coarser level than requested because the finer one is still loading.
         var substitutedByAncestor = 0
+        /// Cumulative geometries dropped from the cache. If this climbs during steady flight the
+        /// working set does not fit and nodes are being reloaded — visible as a sector going blurry
+        /// and sharpening again.
+        var evictions = 0
+        /// Cumulative loads of a node that had already been loaded and discarded earlier.
+        var reloads = 0
     }
 
     var policy = MeshStreamingPolicy()
@@ -53,8 +59,10 @@ final class UAVWorldMeshStreamer {
 
         let queue = OperationQueue()
         queue.name = "uavsim.world.mesh.loader"
-        // Bounded concurrency: the loader is I/O plus JPEG decode, and letting it run unbounded
-        // starves the render thread of memory bandwidth exactly when the camera is moving fastest.
+        // Four workers kept continuously busy. A priority scheduler was tried here and measured
+        // far worse: choosing the next load only after the previous one's completion had hopped
+        // back to the main actor turned a continuous pipeline into a stepped one, and visible
+        // nodes collapsed from ~460 to ~60 under a fast turn.
         queue.maxConcurrentOperationCount = 4
         queue.qualityOfService = .userInitiated
         self.loadQueue = queue
@@ -82,27 +90,49 @@ final class UAVWorldMeshStreamer {
         let selection = policy.select(tree: tree, camera: camera)
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
 
-        var resolved = Set<Int>()
-        var substituted = 0
+        debugLastSelection = Set(selection.nodeIndices)
+        // Two kinds of node end up on screen, and they are kept apart deliberately.
+        //
+        // A *direct hit* is wanted by the policy and already resident: it is the real answer and is
+        // never given up. A *stand-in* is a coarse ancestor drawn only because something finer has
+        // not arrived yet, so that no hole opens under the aircraft.
+        var direct = Set<Int>()
+        var standIns = Set<Int>()
 
-        // Resolve each desired node to something that is actually loaded. Falling back to a
-        // loaded ancestor is what prevents a hole appearing while finer geometry streams in —
-        // showing nothing would make the ground vanish under the aircraft.
         for index in selection.nodeIndices {
             if geometries[index] != nil {
-                resolved.insert(index)
+                direct.insert(index)
                 continue
             }
             requestLoad(index)
             if let ancestor = nearestLoadedAncestor(of: index) {
-                resolved.insert(ancestor)
-                substituted += 1
+                standIns.insert(ancestor)
             }
         }
 
-        // An ancestor standing in for several pending children is inserted once, and any
-        // descendant of a resolved node is redundant.
-        let pruned = removingDescendants(of: resolved)
+        let keptDirect = removingDescendants(of: direct)
+
+        // A stand-in that encloses geometry we already have is thrown away rather than drawn.
+        //
+        // This is the whole fix for the flicker. The nearest *loaded* ancestor of a missing level-21
+        // node is very often the level-13 root, because the levels in between were never requested
+        // and so were never loaded. Treating that root as ordinary coverage let it enclose — and
+        // therefore delete — every resident fine node in its subtree. Measured on straight and level
+        // flight over central Helsinki, one pending node repainted 58 sectors at once from level 21
+        // down to level 13: a kilometre of city dropping to its blurriest representation to patch a
+        // gap of a few metres, then snapping back a frame later. That is the sector-wide texture
+        // change reported from the air, and it needs no camera rotation to happen.
+        //
+        // Dropping the stand-in cannot open the hole it was meant to fill: `applyVisible` keeps a
+        // node on screen until something actually replaces it, so the patch keeps showing whatever
+        // it was already showing until its own geometry arrives.
+        let usefulStandIns = standIns.filter { candidate in
+            !keptDirect.contains { tree.nodes[candidate].isAncestorPath(of: tree.nodes[$0]) }
+                && !keptDirect.contains { tree.nodes[$0].isAncestorPath(of: tree.nodes[candidate]) }
+                && !keptDirect.contains(candidate)
+        }
+        let substituted = usefulStandIns.count
+        let pruned = removingDescendants(of: keptDirect.union(usefulStandIns))
 
         applyVisible(pruned)
         evictIfNeeded(keeping: pruned)
@@ -118,13 +148,28 @@ final class UAVWorldMeshStreamer {
         }
     }
 
+    /// Diagnostics only: was this node's geometry resident at the last update?
+    func debugIsLoaded(_ index: Int) -> Bool { geometries[index] != nil }
+    /// Diagnostics only: did the policy ask for this node on the last update?
+    private(set) var debugLastSelection: Set<Int> = []
+
+    /// Currently-parented node indices, for diagnostics only.
+    func debugVisibleNodeIndices() -> [Int] { Array(sceneNodes.keys) }
+
     // MARK: - Visibility
 
+    /// Swaps the visible set, **adding before removing**.
+    ///
+    /// The order is the guarantee. Removing first leaves a frame — however brief — in which the
+    /// ground under the aircraft is simply absent, and any node whose geometry turned out to be
+    /// missing (evicted, still loading, failed) silently widened that gap because the add loop
+    /// skipped it. Adding first means a replacement is provably on screen before its predecessor
+    /// leaves, and a node that cannot be added keeps its predecessor instead of punching a hole.
+    ///
+    /// The cost is one frame of overlap where both the coarse and the fine version of a patch are
+    /// drawn. That is invisible — they occupy the same surface — and vastly preferable to a gap.
     private func applyVisible(_ desired: Set<Int>) {
-        for index in visibleIndices.subtracting(desired) {
-            sceneNodes[index]?.removeFromParentNode()
-            sceneNodes[index] = nil
-        }
+        var installed = Set<Int>()
         for index in desired.subtracting(visibleIndices) {
             guard let geometry = geometries[index] else { continue }
             let node = SCNNode(geometry: geometry)
@@ -132,7 +177,29 @@ final class UAVWorldMeshStreamer {
             node.castsShadow = false
             rootNode.addChildNode(node)
             sceneNodes[index] = node
+            installed.insert(index)
         }
+
+        // Anything that was wanted but could not be installed keeps whatever is already covering
+        // it, so the retired set is only what genuinely has a successor.
+        let unavailable = desired.subtracting(visibleIndices).subtracting(installed)
+        var retiring = visibleIndices.subtracting(desired)
+        if !unavailable.isEmpty {
+            retiring = retiring.filter { old in
+                // Keep an old node alive while it still covers something that failed to install.
+                !unavailable.contains { missing in
+                    tree.nodes[old].isAncestorPath(of: tree.nodes[missing])
+                        || tree.nodes[missing].isAncestorPath(of: tree.nodes[old])
+                }
+            }
+        }
+
+        for index in retiring {
+            sceneNodes[index]?.removeFromParentNode()
+            sceneNodes[index] = nil
+        }
+
+        let desired = desired.intersection(sceneNodes.keys).union(visibleIndices.subtracting(retiring))
         for index in desired {
             lastUsed[index] = tickClock()
         }
@@ -141,18 +208,44 @@ final class UAVWorldMeshStreamer {
 
     /// Drops any node that is a descendant of another node in the set, so an ancestor standing in
     /// for pending children does not draw on top of a sibling that already loaded.
+    /// Drops any node already covered by a coarser node in the set.
+    ///
+    /// Compares **quadrant paths**, not parent pointers. Walking `parentIndex` upwards looks
+    /// equivalent and is not: the chain has gaps. A node whose own parent was skipped at build
+    /// time — the export contains zero-byte placeholder OBJs, which yield no bounds — is promoted
+    /// to a root, and the walk from any of its descendants stops there instead of reaching the
+    /// real ancestor.
+    ///
+    /// Measured on the central Helsinki tile, that left **35 ancestor/descendant pairs drawn
+    /// simultaneously on every single frame** — an L13 root rendered on top of its own L20
+    /// descendants. Two near-coincident surfaces then fight for the depth buffer and the winner
+    /// changes frame to frame, which is seen not as geometry moving but as the texture on a sector
+    /// abruptly switching between the coarse and the detailed version.
+    ///
+    /// A path prefix cannot have gaps, so it answers correctly regardless of what the tree build
+    /// managed to link.
     private func removingDescendants(of set: Set<Int>) -> Set<Int> {
         guard set.count > 1 else { return set }
-        var result = set
+
+        // Only nodes from the same sub-tile can cover each other, so the comparison is confined
+        // to small buckets rather than being quadratic over the whole visible set.
+        var buckets: [String: [Int]] = [:]
         for index in set {
-            var cursor = parentIndex[index]
-            while let parent = cursor {
-                if result.contains(parent) {
-                    result.remove(index)
-                    break
-                }
-                cursor = parentIndex[parent]
+            let node = tree.nodes[index]
+            buckets["\(node.group)/\(node.namePrefix)", default: []].append(index)
+        }
+
+        var result: Set<Int> = []
+        for (_, bucket) in buckets {
+            // Coarsest first: a node is kept only if nothing already kept encloses it.
+            let ordered = bucket.sorted { tree.nodes[$0].level < tree.nodes[$1].level }
+            var kept: [Int] = []
+            for index in ordered {
+                let node = tree.nodes[index]
+                let covered = kept.contains { tree.nodes[$0].isAncestorPath(of: node) }
+                if !covered { kept.append(index) }
             }
+            result.formUnion(kept)
         }
         return result
     }
@@ -193,6 +286,7 @@ final class UAVWorldMeshStreamer {
                 guard let self else { return }
                 self.pending.remove(index)
                 guard let loaded else { return }
+                if self.everLoaded.contains(index) { self.statistics.reloads += 1 }
                 self.geometries[index] = loaded.geometry
                 self.triangleCounts[index] = loaded.triangleCount
                 self.lastUsed[index] = self.tickClock()
@@ -228,7 +322,9 @@ final class UAVWorldMeshStreamer {
 
         let ordered = evictable.sorted { (lastUsed[$0] ?? 0) < (lastUsed[$1] ?? 0) }
         let excess = geometries.count - maximumCachedGeometries
+        statistics.evictions += min(excess, ordered.count)
         for index in ordered.prefix(excess) {
+            everLoaded.insert(index)
             geometries[index] = nil
             triangleCounts[index] = nil
             lastUsed[index] = nil
@@ -238,6 +334,7 @@ final class UAVWorldMeshStreamer {
     // MARK: - Support
 
     private var triangleCounts: [Int: Int] = [:]
+    private var everLoaded: Set<Int> = []
 
     /// Parent lookup, built once. Walking `childIndices` to find a parent would be O(n) per query
     /// and this runs inside the per-frame path.

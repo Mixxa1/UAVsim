@@ -319,6 +319,8 @@ final class DroneSceneController {
     /// makes it safe to land alongside the existing terrain presets rather than replacing them.
     private(set) var meshCollision: MeshCollisionIndex?
     private(set) var meshWorldRuntime: MeshWorldRuntime?
+    /// Last camera position streaming actually ran from, used to recognise an unplaced camera node.
+    private var lastStreamedCameraPosition: SIMD3<Float>?
     /// Viewport height the streaming error metric is computed against. A standing value rather
     /// than a live read: the selection only needs the right order of magnitude, and reading the
     /// live drawable size every tick would mean touching the view from the model layer.
@@ -3856,8 +3858,21 @@ final class DroneSceneController {
         let transform = pointOfView.simdWorldTransform
         let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
         // A camera looks down its own local -Z.
-        let forward = -SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        var forward = -SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
         let fieldOfView = Float(pointOfView.camera?.fieldOfView ?? 55)
+
+        // A camera node that has not been placed yet carries the identity transform, which points
+        // the selection at the world origin and produces a completely unrelated node set for that
+        // frame — visible as the whole view changing and changing back. Rather than stream from a
+        // position that is certainly wrong, keep last frame's selection until the node is real.
+        guard position.x.isFinite, position.y.isFinite, position.z.isFinite else { return }
+        let forwardLength = simd_length(forward)
+        guard forwardLength > 0.001 else { return }
+        forward /= forwardLength
+        if simd_length_squared(position) < 0.000001, lastStreamedCameraPosition != nil {
+            return
+        }
+        lastStreamedCameraPosition = position
 
         meshWorldRuntime.update(
             cameraPosition: position,
@@ -4322,9 +4337,6 @@ final class DroneSceneController {
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
 
-        // Stream the imported world around wherever the view actually is. A no-op when no mesh
-        // world is installed.
-        updateMeshWorldStreaming(cameraMode: camera.mode)
 
         skyCloudsNode.position = SCNVector3(
             CGFloat(state.position.x),
@@ -4373,6 +4385,12 @@ final class DroneSceneController {
             weather: currentWeather
         )
         updateDetachedVehiclePartObstacleCollisions(deltaTime: deltaTime)
+
+        // Streamed last, deliberately. The camera nodes are positioned and blended earlier in this
+        // same function, so selecting level of detail before that ran meant choosing geometry for
+        // where the camera *was*, and — during a camera-mode change — for a node that had not been
+        // placed yet at all. A no-op when no mesh world is installed.
+        updateMeshWorldStreaming(cameraMode: camera.mode)
     }
 
     func updateCollisionDebug(risk: CollisionAnalysisSnapshot, enabled: Bool) {
