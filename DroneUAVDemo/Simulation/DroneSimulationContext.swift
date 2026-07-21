@@ -57,6 +57,18 @@ struct DroneSimulationContext {
     let powerSystemFactor: Float
     let controlSystemFactor: Float
 
+    /// Elevation of the surface directly beneath the aircraft, in world metres.
+    ///
+    /// Zero for the procedural presets, whose ground genuinely is the y = 0 plane. An imported
+    /// photogrammetric world supplies the real height here, which is what lets the aircraft rest on
+    /// a shoreline, a quay or a hillside instead of on an invisible plane at the origin's elevation.
+    ///
+    /// This is a *transport*, not a second opinion: the value is produced by the same
+    /// `supportSurfaceY` query the view model already uses for rooftops, because the physics engine
+    /// has no access to the scene and cannot ask for itself. Defaulted so every procedural
+    /// construction site keeps compiling and behaving exactly as before.
+    var groundHeight: Float = 0.0
+
     init(
         profile: DroneModelProfile,
         activeUAVProfile: UAVProfile?,
@@ -73,7 +85,8 @@ struct DroneSimulationContext {
         aeroDamage: FixedWingAeroDamage = .pristine,
         jammedSurfaces: [FlightSurfaceChannel: Float] = [:],
         powerSystemFactor: Float = 1.0,
-        controlSystemFactor: Float = 1.0
+        controlSystemFactor: Float = 1.0,
+        groundHeight: Float = 0.0
     ) {
         self.profile = profile
         self.activeUAVProfile = activeUAVProfile
@@ -91,5 +104,6 @@ struct DroneSimulationContext {
         self.jammedSurfaces = jammedSurfaces
         self.powerSystemFactor = powerSystemFactor
         self.controlSystemFactor = controlSystemFactor
+        self.groundHeight = groundHeight
     }
 }

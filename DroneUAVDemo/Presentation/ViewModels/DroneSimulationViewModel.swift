@@ -2398,6 +2398,10 @@ final class DroneSimulationViewModel: ObservableObject {
         // behind.
         fiberLinkState = FiberLinkState()
         fiberOpticPathLengthUsedMeters = 0.0
+        // Same reasoning as the fiber latch above: a drowned airframe from the previous attempt
+        // must not keep sinking the freshly respawned one.
+        isDrowned = false
+        waterContactSeconds = 0.0
         fiberOpticSnagRisk = 0.0
         clearFiberPolyline()
         sceneController.clearFiberTetherVisual()
@@ -2760,6 +2764,10 @@ final class DroneSimulationViewModel: ObservableObject {
         fiberOpticPathLengthUsedMeters = 0.0
         fiberOpticSnagRisk = 0.0
         clearFiberPolyline()
+        // Same reasoning as the fiber latch above: a drowned airframe from the previous attempt
+        // must not keep sinking the freshly respawned one.
+        isDrowned = false
+        waterContactSeconds = 0.0
         sceneController.clearFiberTetherVisual()
         installedFiberSpoolModule?.deployedLengthMeters = 0.0
         controlLinkFailsafeStage = .none
@@ -4533,14 +4541,49 @@ final class DroneSimulationViewModel: ObservableObject {
     /// spend its budget scattering trees inside a real city that will hide them anyway, while the
     /// terrain configuration keeps supplying map scale, weather and the other session settings
     /// that are not the ground itself.
-    func attachMeshWorld(_ runtime: MeshWorldRuntime) {
+    /// Smallest map scale whose boundary encloses an imported tile, so the geofence never fires on
+    /// ground the aircraft is meant to be flying over. Falls back to the largest available.
+    private static func mapScale(
+        covering bounds: (minimum: SIMD3<Float>, maximum: SIMD3<Float>)
+    ) -> MapScale {
+        let reach = max(
+            max(abs(bounds.minimum.x), abs(bounds.maximum.x)),
+            max(abs(bounds.minimum.z), abs(bounds.maximum.z))
+        )
+        return MapScale.allCases.first { $0.worldHalfExtentMeters >= reach }
+            ?? MapScale.allCases[MapScale.allCases.count - 1]
+    }
+
+    /// Set once a world is attached, and written into every subsequent save so reopening the
+    /// project restores the same city rather than dropping the pilot onto the procedural grid the
+    /// preset was forced to.
+    private(set) var attachedMeshWorld: ProjectSnapshot.MeshWorld?
+
+    /// Read by the shell after `loadProject` to decide whether a world still has to be loaded.
+    var meshWorldToRestore: ProjectSnapshot.MeshWorld? { attachedMeshWorld }
+
+    func attachMeshWorld(_ runtime: MeshWorldRuntime, sourceIdentifier: String) {
+        attachedMeshWorld = ProjectSnapshot.MeshWorld(
+            sourceIdentifier: sourceIdentifier,
+            tileKey: runtime.report.tileKey
+        )
         terrain.preset = .gridDemo
         terrain.density = 0.0
+        // The world has to be at least as big as the world.
+        //
+        // Map scale still drives the boundary geofence, and the procedural default is far smaller
+        // than an imported tile: x4 gives a half-extent of 200 m and x8 gives 400 m, while this
+        // tile reaches beyond 1000 m and its own chosen start point sits 424 m from the origin.
+        // The aircraft therefore spawned *outside* the world and the geofence did exactly its job —
+        // carrying it off, disarming it and leaving it in the sea. That reads as "the aircraft moved
+        // by itself", and no amount of work on terrain height or water could have fixed it.
+        terrain.mapScale = Self.mapScale(covering: runtime.report.bounds)
         sceneController.installMeshWorld(runtime)
+        isAwaitingImportedWorld = false
 
         // Start on a real surface rather than at the origin, which in a photogrammetric tile is
         // as likely to be open water or a rooftop as an apron.
-        if let spawn = runtime.findSpawnPoint() {
+        if let spawn = runtime.spawnPoint {
             state.position = SIMD3<Float>(spawn.x, spawn.y, spawn.z)
             lastFiniteState = state
             let geo = runtime.origin.geographic(ofLocalPosition: spawn)
@@ -5312,7 +5355,15 @@ final class DroneSimulationViewModel: ObservableObject {
         applyContinuousCameraLook(deltaTime: dt, controlState: interactionAwareInput)
         applyContinuousCameraZoom(deltaTime: dt)
 
-        guard isSimulationRunning else {
+        // Physics must not run before the ground exists.
+        //
+        // An imported world takes tens of seconds to prepare, and the session is live throughout.
+        // Measured at startup: eight ticks of free fall before `[MeshWorld] collision installed`,
+        // velocity already −0.57 m/s and accelerating, because with no collision surface the support
+        // query returns nothing and the safety floor sits a metre under a ground height that is
+        // still zero. The aircraft was therefore *below the terrain* by the time the terrain
+        // arrived — seen as being carried off the pad and left under the textures.
+        guard !isAwaitingImportedWorld, isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
             if !performancePolicy.stopRendering {
@@ -5399,7 +5450,8 @@ final class DroneSimulationViewModel: ObservableObject {
             aeroDamage: vehicleAeroDamage,
             jammedSurfaces: componentFailureRuntime.jammedSurfaces(),
             powerSystemFactor: componentFailureRuntime.functionalFactor(componentID: "battery"),
-            controlSystemFactor: componentFailureRuntime.functionalFactor(componentID: "flightController")
+            controlSystemFactor: componentFailureRuntime.functionalFactor(componentID: "flightController"),
+            groundHeight: currentGroundHeight()
         )
 
         let previousState = state
@@ -5410,8 +5462,32 @@ final class DroneSimulationViewModel: ObservableObject {
             context: context,
             deltaTime: dt
         )
+        #if DEBUG
+        let afterPhysicsY = state.position.y
+        let afterPhysicsVY = state.velocity.y
+        #endif
         enforceRuntimeSafetyAndBounds(context: "tick.physics")
+        #if DEBUG
+        let afterSafetyY = state.position.y
+        #endif
         applySupportSurfaceConstraint(previousState: previousState)
+        applyWaterImmersionIfNeeded(deltaTime: dt)
+        #if DEBUG
+        // Which stage of the vertical chain is holding the aircraft down. Prints only while armed
+        // and commanding climb, roughly twice a second, so a short takeoff attempt is readable.
+        if isArmed, controlValues.throttle > 0.6 {
+            verticalDebugTicks += 1
+            if verticalDebugTicks % 30 == 0 {
+                print(String(format:
+                    "[Vert] тяга %.2f | до физики y %.3f → после физики %.3f (vy %+.3f) → после границ %.3f → после опоры %.3f | земля %.3f | сост %@",
+                    controlValues.throttle, previousState.position.y, afterPhysicsY, afterPhysicsVY,
+                    afterSafetyY, state.position.y, lastKnownGroundHeight,
+                    String(describing: physicalState)))
+            }
+        } else {
+            verticalDebugTicks = 0
+        }
+        #endif
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
         let structuralLoadState = state
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
@@ -10287,7 +10363,8 @@ final class DroneSimulationViewModel: ObservableObject {
                         )
                     }
             ),
-            massPropertiesRevision: componentGraph.massPropertiesRevision
+            massPropertiesRevision: componentGraph.massPropertiesRevision,
+            meshWorld: attachedMeshWorld
         )
     }
 
@@ -10365,6 +10442,7 @@ final class DroneSimulationViewModel: ObservableObject {
         weather.windSpeedMps = snapshot.weather.windSpeedMps
         weather.gusts = snapshot.weather.gusts
 
+        attachedMeshWorld = snapshot.meshWorld
         if let terrainPreset = TerrainPreset(rawValue: snapshot.terrain.presetRaw) {
             terrain.preset = terrainPreset
         }
@@ -17267,7 +17345,11 @@ final class DroneSimulationViewModel: ObservableObject {
         if !isFinite(state.position) || !isFinite(state.velocity) || !isFinite(state.orientation) || !isFinite(state.angularVelocity) || !state.throttle.isFinite || !state.motorThrottle.isFinite {
             print("[RuntimeSafety][\(context)] Non-finite state detected, restoring last finite state.")
             state = lastFiniteState
-            state.position = SIMD3<Float>(state.position.x, max(0.0, state.position.y), state.position.z)
+            state.position = SIMD3<Float>(
+                state.position.x,
+                max(lastKnownGroundHeight, state.position.y),
+                state.position.z
+            )
             setFlightMode(.manual, reason: "runtime_safety_non_finite_restore")
             transitionPhysicalState(isArmed ? .armedOnGround : .disarmed)
             controlValues = neutralControls(from: state)
@@ -17277,8 +17359,20 @@ final class DroneSimulationViewModel: ObservableObject {
         let halfExtent = terrain.worldHalfExtent
         let maxAltitude = max(80.0, terrain.maxFlightAltitude)
 
-        if state.position.y < 0.0 {
-            state.position.y = 0.0
+        // The floor is the surface below the aircraft, not the world origin.
+        //
+        // This ran immediately after the physics step and before every other constraint, so a hard
+        // clamp at zero here silently overrode the terrain no matter what the engine, the support
+        // surface or the water rule had decided. Two flights ended with the aircraft pinned at
+        // exactly y = 0.0 over a harbour whose water plane is at −0.25: it could not reach the water
+        // to drown in it, and equally could not descend into any terrain lying below sea level —
+        // three quarters of this tile.
+        //
+        // A metre of slack below the surface keeps this a *safety* net catching a runaway fall,
+        // rather than a second ground contact competing with the constraint that owns that job.
+        let floor = lastKnownGroundHeight - 1.0
+        if state.position.y < floor {
+            state.position.y = floor
             if state.velocity.y < 0.0 {
                 state.velocity.y = 0.0
             }
@@ -17800,11 +17894,166 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func supportSurfaceY(for position: SIMD3<Float>, maximumHeight: Float) -> Float {
+        supportSurfaceYIfAny(for: position, maximumHeight: maximumHeight) ?? 0.0
+    }
+
+    /// The same query, keeping "nothing under here" distinct from "the surface is at zero".
+    ///
+    /// Collapsing the two was safe only while every world was flat and every support surface was a
+    /// rooftop standing above the y = 0 plane. On imported terrain a real surface can sit at or below
+    /// zero — a quay, a shoreline, anything referenced to a vertical datum whose origin is sea level
+    /// — and treating that as "no support" is what let the aircraft sink through the ground near the
+    /// water's edge.
+    private func supportSurfaceYIfAny(for position: SIMD3<Float>, maximumHeight: Float) -> Float? {
         sceneController.supportSurfaceHeight(
             at: SIMD2<Float>(position.x, position.z),
             clearanceRadius: supportQueryClearanceRadius,
             maximumHeight: maximumHeight
-        ) ?? 0.0
+        )
+    }
+
+    /// Surface elevation under the aircraft, remembered between ticks.
+    ///
+    /// A query legitimately misses — beyond the imported tile's edge, or over a hole in the mesh —
+    /// and answering zero there would drop the aircraft to sea level for one tick and snap it back
+    /// on the next. Ground does not teleport, so the last known elevation is a far better answer
+    /// than the world origin. Stays at zero for the procedural presets, where no query ever
+    /// succeeds and the ground genuinely is the y = 0 plane.
+    private func currentGroundHeight() -> Float {
+        if let surface = supportSurfaceYIfAny(for: state.position, maximumHeight: state.position.y) {
+            lastKnownGroundHeight = surface
+        }
+        return lastKnownGroundHeight
+    }
+
+    private var lastKnownGroundHeight: Float = 0.0
+    #if DEBUG
+    private var verticalDebugTicks = 0
+    #endif
+
+    /// How long the airframe has been in contact with the water, in seconds.
+    private var waterContactSeconds: Float = 0.0
+
+    /// Set once the aircraft has been lost to the water, cleared when it is recovered.
+    ///
+    /// Needed as its own flag because "crashed" alone cannot express it: a wreck on land rests on
+    /// the surface it hit, which is exactly what must *not* happen here. Without this the drowned
+    /// aircraft sat on the sea intact and merely disarmed — technically lost, and reading to the
+    /// pilot as nothing having happened at all.
+    private(set) var isDrowned = false
+
+    /// True between choosing an imported world and that world being installed.
+    private(set) var isAwaitingImportedWorld = false
+
+    /// Called by the shell before it starts loading an imported world, so the flight model holds
+    /// still instead of falling through a world that does not exist yet.
+    func beginAwaitingImportedWorld() {
+        isAwaitingImportedWorld = true
+        state.velocity = .zero
+        state.angularVelocity = .zero
+    }
+
+    /// Releases the hold without a world — the load failed, and a frozen session with no explanation
+    /// would be worse than procedural ground.
+    func endAwaitingImportedWorld() {
+        isAwaitingImportedWorld = false
+    }
+
+    /// Ends the flight when the aircraft meets water it cannot survive.
+    ///
+    /// A photogrammetric harbour is collision geometry like any other, so without this the aircraft
+    /// simply rests on the sea as though it were asphalt — the single most obviously wrong thing in
+    /// a coastal city, and one this project created for itself by teaching the support surface to
+    /// accept elevations at and below zero (nearly three quarters of the Helsinki tile).
+    ///
+    /// The outcome is a property of the airframe, not of the water: an unsealed multirotor is gone
+    /// the moment it touches, a weather-sealed one survives a brief slap of the surface but not
+    /// going under, and a buoyant hull simply floats and is left alone — the support surface is
+    /// already holding it up, which is exactly what floating looks like.
+    private func applyWaterImmersionIfNeeded(deltaTime: Float) {
+        guard let water = sceneController.meshWater else { return }
+        if isDrowned {
+            // Self-correcting: a drowned airframe that is no longer over water is not drowning any
+            // more, whatever set the flag. Without this, one stale flag sank the aircraft forever —
+            // including while parked on dry ground two metres up, where the 0.55 m/s descent exactly
+            // cancelled the climb and looked, from the cockpit, like the throttle had stopped
+            // working. It cost several test flights to find, so the flag is no longer trusted on its
+            // own.
+            guard water.isWater(x: state.position.x, z: state.position.z) else {
+                isDrowned = false
+                waterContactSeconds = 0.0
+                return
+            }
+            sinkDrownedAircraft(water: water, deltaTime: deltaTime)
+            return
+        }
+        guard physicalState != .crashed else { return }
+        guard water.isWater(x: state.position.x, z: state.position.z) else {
+            waterContactSeconds = 0.0
+            return
+        }
+
+        // Contact is decided against the surface actually under the aircraft, not against the fitted
+        // water plane.
+        //
+        // A photogrammetric sea is not flat: reconstructed from imagery, it carries the swell it was
+        // photographed with. Measured across three points where the aircraft was reported sitting on
+        // the water "like asphalt", the mesh surface read −0.193, −0.247 and −0.355 m against a fitted
+        // plane of −0.250 — a spread of 16 cm, with points *above* the plane. Comparing the hull to
+        // that plane therefore concluded the aircraft was airborne while it was parked on the sea,
+        // and whether an aircraft drowned came down to which wave it happened to land on.
+        //
+        // The plane stays the right tool for *classification* — deciding which columns are water at
+        // all — and the wrong one for contact. If the aircraft is resting on a surface and that
+        // surface is water, it is in the water, whatever height the water happens to be at there.
+        let surfaceY = supportSurfaceYIfAny(for: state.position, maximumHeight: state.position.y)
+            ?? water.level
+        let hullY = state.position.y - vehicleGroundClearance()
+        let depth = surfaceY - hullY
+
+        guard depth > -0.15 else {
+            waterContactSeconds = 0.0
+            return
+        }
+
+        let protection = selectedDroneProfile.waterProtection
+        // Under the surface by more than the airframe's own radius: the hull is in, not skimming.
+        let submerged = depth > max(0.25, selectedDroneProfile.collisionRadius)
+        if submerged && protection.submersionIsTerminal {
+            loseAircraftToWater(reason: "submerged", depth: depth)
+            return
+        }
+
+        waterContactSeconds += deltaTime
+        if waterContactSeconds > protection.surfaceContactToleranceSeconds {
+            loseAircraftToWater(reason: "surface contact", depth: depth)
+        }
+    }
+
+    private static let drownedSettlingDepth: Float = 0.8
+
+    /// Sinks a lost airframe until it is under the surface, then lets it rest there.
+    private func sinkDrownedAircraft(water: WaterSurfaceModel, deltaTime: Float) {
+        let target = water.level - Self.drownedSettlingDepth + vehicleGroundClearance()
+        guard state.position.y > target else {
+            state.position.y = target
+            state.velocity = .zero
+            return
+        }
+        // A flooded multirotor goes down steadily rather than dropping like a stone: it is nearly
+        // neutrally buoyant for the first moment and the water resists the frame broadside.
+        state.position.y = max(target, state.position.y - 0.55 * deltaTime)
+        state.velocity.y = min(state.velocity.y, 0.0)
+    }
+
+    private func loseAircraftToWater(reason: String, depth: Float) {
+        #if DEBUG
+        print(String(format: "[Water] aircraft lost (%@, %.2f m) — protection %@",
+                     reason, depth, selectedDroneProfile.waterProtection.rawValue))
+        #endif
+        waterContactSeconds = 0.0
+        isDrowned = true
+        disarm(forceEmergency: true, preserveCrashDynamics: true)
     }
 
     private func supportSurfaceContact(for position: SIMD3<Float>) -> (height: Float, normal: SIMD3<Float>)? {
@@ -17989,6 +18238,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// the drone is actually grounded is handled solely by `applyGroundedSafetyIfNeeded`, which
     /// mirrors the physics engine's own y=0 ground-rest contract at the elevated height.
     private func applySupportSurfaceConstraint(previousState: DroneState) {
+        // A drowned airframe is not resting on anything — the surface below it is the water that
+        // took it, and clamping to that is what kept the wreck floating.
+        guard !isDrowned else { return }
         // See supportReacquireBlockTimer: a drone that just slid off a roof edge must fall clear,
         // not get re-clamped to the plane it left.
         guard supportReacquireBlockTimer <= 0.0 else {
@@ -17998,12 +18250,12 @@ final class DroneSimulationViewModel: ObservableObject {
         // clamp contract `position.y == supportY` at rest is preserved; only
         // a tilted airframe rests higher, on its actual lowest structure).
         let clearance = vehicleGroundClearance()
-        let supportY = supportSurfaceY(
+        let supportY = supportSurfaceYIfAny(
             for: state.position,
             maximumHeight: max(previousState.position.y, state.position.y) +
                 max(0.18, selectedDroneProfile.collisionRadius * 0.50)
         )
-        guard supportY > 0.0, state.position.y < supportY + clearance else {
+        guard let supportY, state.position.y < supportY + clearance else {
             return
         }
 
@@ -18223,6 +18475,29 @@ final class DroneSimulationViewModel: ObservableObject {
             radius: collisionService.spatialQueryRadius
         )
         let planar = SIMD2<Float>(state.position.x, state.position.z)
+
+        // Being inside a bounding circle is not being inside a building.
+        //
+        // That test was written when every mesh obstacle was a discrete structure, so "inside the
+        // circle, within the height band" could only mean trapped indoors. An imported
+        // photogrammetric world breaks the assumption completely: its obstacles are 24 m *terrain
+        // cells*, and an aircraft parked on open ground is inside its own cell's circle and height
+        // band by definition. It was therefore shoved out past the cell radius, landed in the
+        // neighbouring cell, was shoved again, and cascaded roughly 70 m off the pad into the
+        // harbour — deterministically, on every session, before the pilot had even armed.
+        //
+        // What actually distinguishes indoors is a roof: something solid directly overhead. An
+        // aircraft standing on terrain or on a rooftop has nothing above it and is left alone.
+        let overheadClearanceRequired = max(1.5, selectedDroneProfile.collisionRadius * 3.0)
+        let highestHere = sceneController.supportSurfaceHeight(
+            at: planar,
+            clearanceRadius: max(0.05, selectedDroneProfile.collisionRadius * 0.12),
+            maximumHeight: .greatestFiniteMagnitude
+        )
+        guard let highestHere, highestHere > state.position.y + overheadClearanceRequired else {
+            return
+        }
+
         for obstacle in obstacles where obstacle.hasMeshCollision {
             guard state.position.y >= obstacle.baseY, state.position.y <= obstacle.topY else {
                 continue

@@ -400,6 +400,7 @@
 		DBEE744CE1184264FE9FDC47 /* MeshCollisionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */; };
 		241D83684AAF8DBBFF937EB1 /* MeshWorldRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */; };
 		F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */; };
+		9A7516BEC87DDFD6D290E075 /* WaterSurfaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -800,6 +801,7 @@
 		3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshCollisionBuilder.swift; sourceTree = "<group>"; };
 		5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWorldRuntime.swift; sourceTree = "<group>"; };
 		90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapSelectionView.swift; sourceTree = "<group>"; };
+		79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterSurfaceModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1353,6 +1355,7 @@
 		9235F9D6D84F0D14A4063490 /* World */ = {
 			isa = PBXGroup;
 			children = (
+				79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */,
 				3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */,
 				9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */,
 				CAAAE052C14D37549BF68917 /* MeshTileStore.swift */,
@@ -1496,6 +1499,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A7516BEC87DDFD6D290E075 /* WaterSurfaceModel.swift in Sources */,
 				F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */,
 				241D83684AAF8DBBFF937EB1 /* MeshWorldRuntime.swift in Sources */,
 				DBEE744CE1184264FE9FDC47 /* MeshCollisionBuilder.swift in Sources */,
@@ -1874,6 +1878,7 @@
 		10000000000000000000000B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				SDKROOT = macosx;
 			};
@@ -1890,6 +1895,7 @@
 		10000000000000000000000D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_STYLE = Automatic;

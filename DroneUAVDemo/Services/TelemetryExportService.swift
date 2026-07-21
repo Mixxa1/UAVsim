@@ -94,6 +94,17 @@ struct ProjectSnapshot: Codable {
         var showsBoundaryBarrier: Bool?
     }
 
+    /// The imported photogrammetric world this project flies in, if any.
+    ///
+    /// Recorded as a source identifier plus a tile key rather than a path, because the tile store
+    /// owns where the data lives — an absolute URL saved here would break the moment the store moved
+    /// or the project was opened on another machine, and would break silently, as a project that
+    /// quietly reverts to procedural ground.
+    struct MeshWorld: Codable {
+        var sourceIdentifier: String
+        var tileKey: String
+    }
+
     struct Camera: Codable {
         var modeRaw: String
         var fov: Float
@@ -227,6 +238,8 @@ struct ProjectSnapshot: Codable {
     var connectionDamageRuntime: [ConnectionDamageRuntime]? = nil
     var failureRuntime: FailureRuntime? = nil
     var massPropertiesRevision: UInt64? = nil
+    /// Optional so every project saved before imported worlds existed still decodes.
+    var meshWorld: MeshWorld? = nil
 }
 
 protocol ProjectStorageManaging {

@@ -319,6 +319,10 @@ final class DroneSceneController {
     /// makes it safe to land alongside the existing terrain presets rather than replacing them.
     private(set) var meshCollision: MeshCollisionIndex?
     private(set) var meshWorldRuntime: MeshWorldRuntime?
+    /// Start point of the installed imported world, cached off the runtime at install time.
+    private var meshSpawnPoint: SIMD3<Float>?
+    /// Water plane of the installed imported world, if it has one.
+    private(set) var meshWater: WaterSurfaceModel?
     /// Last camera position streaming actually ran from, used to recognise an unplaced camera node.
     private var lastStreamedCameraPosition: SIMD3<Float>?
     /// Viewport height the streaming error metric is computed against. A standing value rather
@@ -3772,16 +3776,32 @@ final class DroneSceneController {
         if printProceduralDiagnostics {
             EnvironmentObjectFactory.printDiagnostics()
         }
-        applyTerrainVisualStyle(terrain)
+        // An imported world *is* the environment: its ground, its relief, its edges, its obstacles.
+        //
+        // Letting the procedural pipeline run underneath it too was not harmless decoration. It laid
+        // a generated landscape over the real city — the green hillock that survived every attempt to
+        // remove it — walled the map at the procedural extent, and, worst of all,
+        // `buildSupplementalCollisionObstacles` filled the tile with collision volumes sized to a
+        // world that is not there. Those are the invisible walls the aircraft landed on, and the
+        // geometry a reset dropped it inside of.
+        //
+        // The dock is deliberately still positioned: it is the launch pad, not scenery, and it has
+        // its own imported-world branch that puts it on the real spawn point.
+        let hasImportedWorld = meshCollision != nil
+        if !hasImportedWorld {
+            applyTerrainVisualStyle(terrain)
+        }
         updateDockStationPosition(for: terrain)
-        updateWorldBoundsVisual(for: terrain)
+        if !hasImportedWorld {
+            updateWorldBoundsVisual(for: terrain)
 
-        let supplementalObstacles = buildSupplementalCollisionObstacles(for: terrain)
-        for entry in supplementalObstacles {
-            obstacles.append(entry.obstacle)
-            obstacleSourceByID[entry.obstacle.id] = entry.obstacle.source
-            if let node = entry.highlightNode {
-                obstacleMap[entry.obstacle.id] = node
+            let supplementalObstacles = buildSupplementalCollisionObstacles(for: terrain)
+            for entry in supplementalObstacles {
+                obstacles.append(entry.obstacle)
+                obstacleSourceByID[entry.obstacle.id] = entry.obstacle.source
+                if let node = entry.highlightNode {
+                    obstacleMap[entry.obstacle.id] = node
+                }
             }
         }
 
@@ -3802,7 +3822,9 @@ final class DroneSceneController {
         pathGoalMarkerNode.isHidden = true
         pathCurrentWaypointNode.isHidden = true
 
-        buildSnowDecorations(for: terrain)
+        if !hasImportedWorld {
+            buildSnowDecorations(for: terrain)
+        }
         if terrain.preset == .city {
             printCityGenerationDiagnostics(descriptors: descriptors)
         }
@@ -3829,6 +3851,8 @@ final class DroneSceneController {
 
             guard let runtime else {
                 groundNode.isHidden = false
+                meshSpawnPoint = nil
+                meshWater = nil
                 setMeshCollision(nil)
                 return
             }
@@ -3836,6 +3860,10 @@ final class DroneSceneController {
             scene.rootNode.addChildNode(runtime.rootNode)
             groundNode.isHidden = true
             setMeshCollision(runtime.collision)
+            // Resolved here, on the main actor, so the dock placement — which runs nonisolated —
+            // can read it without touching the runtime.
+            meshSpawnPoint = runtime.spawnPoint
+            meshWater = runtime.water
 
             #if DEBUG
             let report = runtime.report
@@ -6919,6 +6947,18 @@ final class DroneSceneController {
     }
 
     private func updateDockStationPosition(for terrain: TerrainConfiguration) {
+        // An imported world has no world-origin apron: (0, 0, 0) in a photogrammetric tile is an
+        // arbitrary point, in this city usually open harbour, and always at the vertical datum's
+        // zero rather than on the ground. Since `currentDockSpawnPoint()` is what every reset and
+        // the home point resolve to, leaving it at the origin teleported the aircraft under the
+        // terrain on the first reset — including the one at session start, which is why the
+        // aircraft appeared beneath the surface instead of on its deck.
+        if let meshSpawn = meshSpawnPoint {
+            dockSpawnPosition = meshSpawn
+            dockStationNode.simdPosition = meshSpawn + SIMD3<Float>(0.0, -dockDeckSurfaceHeight, 0.0)
+            return
+        }
+
         let extent = max(terrain.safeSpawnRadius + 3.0, terrain.worldHalfExtent - 4.0)
         let dockCenter = SIMD3<Float>(0.0, 0.0, 0.0)
         dockSpawnPosition = SIMD3<Float>(

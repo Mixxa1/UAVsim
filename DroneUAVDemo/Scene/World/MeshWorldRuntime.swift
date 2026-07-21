@@ -24,6 +24,14 @@ final class MeshWorldRuntime {
     let quadtree: MeshQuadtree
     let streamer: UAVWorldMeshStreamer
     let collision: MeshCollisionIndex
+
+    /// Where the water is, or nil for a landlocked tile.
+    ///
+    /// Derived during the off-main-thread preparation alongside the collision index, because it
+    /// reads the same surface queries and finishes in a fraction of a second — making it a separate
+    /// load step would only add a stage to the progress bar for no measurable time.
+    let water: WaterSurfaceModel?
+
     /// Real-world anchor of scene (0, 0, 0), so telemetry, waypoints and replay stay geographic.
     let origin: GeoOrigin
     let report: LoadReport
@@ -73,6 +81,7 @@ final class MeshWorldRuntime {
         let tileIndex: ContextCaptureTileIndex
         let quadtree: MeshQuadtree
         let collision: MeshCollisionIndex
+        let water: WaterSurfaceModel?
         let collisionTriangles: Int
         let originOffset: SIMD3<Double>
         let originCoordinate: GeoCoordinate
@@ -108,6 +117,7 @@ final class MeshWorldRuntime {
         self.tileIndex = prepared.tileIndex
         self.quadtree = prepared.quadtree
         self.collision = prepared.collision
+        self.water = prepared.water
         self.origin = GeoOrigin(coordinate: prepared.originCoordinate, geoidSeparationMeters: 0)
         self.streamer = UAVWorldMeshStreamer(
             tree: prepared.quadtree,
@@ -188,6 +198,7 @@ final class MeshWorldRuntime {
             cacheURL: collisionCache
         )
         self.collision = collisionResult.index
+        self.water = WaterSurfaceDetector.detect(collision: collisionResult.index).model
 
         self.report = LoadReport(
             tileKey: tileKey,
@@ -253,10 +264,21 @@ final class MeshWorldRuntime {
             cacheURL: cacheDirectory?.appendingPathComponent("\(tileKey)-collision-L\(collisionLevel).bin")
         )
 
+        let waterResult = WaterSurfaceDetector.detect(collision: collisionResult.index)
+        #if DEBUG
+        if let water = waterResult.model {
+            print(String(format: "[MeshWorld] water plane at %.2f m covering %.1f%% of the tile",
+                         water.level, water.coverageFraction * 100))
+        } else {
+            print("[MeshWorld] no water: \(waterResult.rejection ?? "unknown")")
+        }
+        #endif
+
         return Preparation(
             tileIndex: tileIndex,
             quadtree: quadtree,
             collision: collisionResult.index,
+            water: waterResult.model,
             collisionTriangles: collisionResult.triangleCount,
             originOffset: originOffset,
             originCoordinate: GeoCoordinate(
@@ -282,6 +304,13 @@ final class MeshWorldRuntime {
         )
     }
 
+    /// The chosen start point, resolved once.
+    ///
+    /// Cached because three separate consumers need the *same* answer — the launch deck, the
+    /// reset/home point and the initial aircraft state. Letting each run its own search would put
+    /// the deck in one place and the aircraft in another.
+    private(set) lazy var spawnPoint: SIMD3<Float>? = findSpawnPoint()
+
     /// A clear spot to start from: a level patch of ground away from walls, with headroom.
     ///
     /// Searched outward from the tile centre in a spiral rather than taken at the centre itself,
@@ -294,6 +323,7 @@ final class MeshWorldRuntime {
             collision.bounds.maximum.z - collision.bounds.minimum.z
         ) * 0.45
 
+        var candidates: [Candidate] = []
         var radius: Float = 0
         while radius < maximumRadius {
             let samples = max(8, Int(radius / 12) * 8)
@@ -325,10 +355,123 @@ final class MeshWorldRuntime {
                 )
                 guard overhead == nil else { continue }
 
-                return SIMD3<Float>(x, surface, z)
+                guard footprintSpread(x: x, z: z) <= Self.maximumFootprintSpread else { continue }
+                let survey = surroundings(x: x, z: z, surface: surface)
+                guard survey.openness >= Self.minimumLateralClearance else { continue }
+                candidates.append(
+                    Candidate(
+                        point: SIMD3<Float>(x, surface, z),
+                        openness: survey.openness,
+                        standsAbove: surface - survey.lowestNeighbour
+                    )
+                )
+                // Keep looking until there are enough *ground-level* options, not merely enough
+                // options: the first candidates found are near the tile centre, which in a city
+                // centre means rooftops, and stopping there is what parked the launch pad 19 m up.
+                if candidates.filter(\.isGroundLevel).count >= 24 { return bestCandidate(candidates) }
             }
             radius += 12
         }
-        return nil
+        return bestCandidate(candidates)
+    }
+
+    /// A start point must have room *around* it, not just above it.
+    ///
+    /// Level ground and clear sky are both true inside a six-metre light well between two blocks,
+    /// which is where the search actually put the aircraft in central Helsinki: walls 6 m west, 6 m
+    /// south and 10 m east of a rooftop 7.5 m up, reported to the pilot as a dark box with a patch
+    /// of sky and a standing collision warning. Flatness was measured over a 3 m probe and the
+    /// headroom ray went straight up, so neither test could see the walls.
+    private static let minimumLateralClearance: Float = 14.0
+    private static let opennessProbeLimit: Float = 45.0
+
+    /// What counts as being in the way.
+    ///
+    /// Set at 2.5 m this missed parked cars, and the search duly delivered the aircraft into a car
+    /// park wedged between vehicles: 34 m of clearance by the old measure, 1 m by any measure that
+    /// can see a van. A drone cares about anything it can strike, and 1.2 m catches cars, bollards
+    /// and railings while still ignoring kerbs and low walls.
+    private static let obstructionHeight: Float = 1.2
+
+    /// An apron is smooth; a car park, a rubble field and a tree line are not. Measured as the
+    /// height spread across the immediate footprint, this rejects them all without needing to know
+    /// what they are — and it is the test that would have caught the car park on its own.
+    private static let maximumFootprintSpread: Float = 1.0
+
+    /// How far a surface may stand above its own surroundings and still count as ground.
+    ///
+    /// A roof is not distinguished by its absolute height — terrain varies and the vertical datum is
+    /// arbitrary — but by standing above everything around it. One generous storey is the line: it
+    /// keeps quaysides, which sit a couple of metres over the water they look onto, and rejects the
+    /// rooftops that an openness-only test happily selects.
+    private static let groundLevelTolerance: Float = 5.0
+
+    private struct Candidate {
+        let point: SIMD3<Float>
+        let openness: Float
+        let standsAbove: Float
+        var isGroundLevel: Bool { standsAbove <= MeshWorldRuntime.groundLevelTolerance }
+    }
+
+    /// Height spread over the patch the aircraft actually stands on.
+    private func footprintSpread(x: Float, z: Float) -> Float {
+        var lowest = Float.greatestFiniteMagnitude
+        var highest = -Float.greatestFiniteMagnitude
+        for stepX in -3...3 {
+            for stepZ in -3...3 {
+                guard let height = collision.highestSurface(
+                    x: x + Float(stepX) * 1.5,
+                    z: z + Float(stepZ) * 1.5
+                ) else { continue }
+                lowest = min(lowest, height)
+                highest = max(highest, height)
+            }
+        }
+        return highest > lowest ? highest - lowest : .greatestFiniteMagnitude
+    }
+
+    /// Walks eight directions once, answering both questions the choice depends on: how far the
+    /// clear space extends, and how far the surface drops away around it.
+    private func surroundings(
+        x: Float,
+        z: Float,
+        surface: Float
+    ) -> (openness: Float, lowestNeighbour: Float) {
+        var worst = Self.opennessProbeLimit
+        var lowest = surface
+        for step in 0..<8 {
+            let angle = Float(step) / 8 * 2 * .pi
+            let dx = cos(angle), dz = sin(angle)
+            var distance: Float = 2
+            while distance < Self.opennessProbeLimit {
+                guard let height = collision.highestSurface(x: x + dx * distance, z: z + dz * distance)
+                else { break }
+                lowest = min(lowest, height)
+                if height > surface + Self.obstructionHeight { break }
+                distance += 2
+            }
+            worst = min(worst, distance)
+        }
+        return (worst, lowest)
+    }
+
+    /// The most open of the candidates found, and among equally open ones the lowest.
+    ///
+    /// Openness alone happily selects a large flat roof — it is level, it has sky above it and
+    /// nothing taller nearby, which is precisely the definition being tested. But a roof nineteen
+    /// metres up is a strange place to find a launch pad parked, and a quayside or a plaza reads as
+    /// the apron it is meant to be. Since the openness probe saturates, ties are common and the
+    /// elevation tie-break does the real work here.
+    private func bestCandidate(_ candidates: [Candidate]) -> SIMD3<Float>? {
+        // Ground wins outright when any exists; a rooftop is accepted only when the tile offers
+        // nothing else, which is better than refusing to start at all.
+        let ground = candidates.filter(\.isGroundLevel)
+        let pool = ground.isEmpty ? candidates : ground
+        return pool.max { left, right in
+            if abs(left.openness - right.openness) > 1.0 {
+                return left.openness < right.openness
+            }
+            return left.standsAbove > right.standsAbove
+        }?.point
     }
 }

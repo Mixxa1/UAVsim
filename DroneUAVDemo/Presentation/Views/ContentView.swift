@@ -187,6 +187,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             // flight scene that is still assembling its own ground would let them take off from
             // nothing.
             worldLoad = WorldLoadState(tileKey: tileKey, stage: .indexing)
+            vm.beginAwaitingImportedWorld()
             Task { [weak self] in
                 let runtime = await MeshWorldRuntime.load(
                     tileDirectory: directory,
@@ -200,13 +201,16 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 guard let self else { return }
                 self.worldLoad = nil
                 guard let runtime else {
+                    // Release the hold, or a failed load would leave the flight model frozen with
+                    // no indication why.
+                    vm.endAwaitingImportedWorld()
                     self.globalAlert = TelemetryExportAlert(
                         titleKey: "world.load.failed",
                         message: tileKey
                     )
                     return
                 }
-                vm.attachMeshWorld(runtime)
+                vm.attachMeshWorld(runtime, sourceIdentifier: MeshTileSource.helsinki2017.identifier)
                 self.activeSimulation = vm
                 self.persist(vm)
             }
@@ -384,6 +388,15 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         )
         switch vm.loadProject(id: summary.id) {
         case .success:
+            // A project saved in an imported city has to rebuild that city before it becomes
+            // active. Without this the snapshot restored everything *except* the ground, and the
+            // pilot was returned to a procedural grid — the terrain preset attachMeshWorld forces
+            // to `.gridDemo` is what gets saved, so the grid was faithfully restored and the city
+            // was never recorded at all.
+            if let reference = vm.meshWorldToRestore {
+                restoreMeshWorld(reference, into: vm)
+                return
+            }
             activeSimulation = vm
             refreshProjects()
         case let .failure(error):
@@ -391,6 +404,52 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 titleKey: "project.open.failure",
                 message: error.localizedDescription
             )
+        }
+    }
+
+    /// Reloads the imported world a saved project was flown in, then activates the session.
+    ///
+    /// Shares the creation path's progress reporting: a cold collision cache costs tens of seconds,
+    /// and reopening a project is exactly when the cache is most likely to be cold.
+    private func restoreMeshWorld(
+        _ reference: ProjectSnapshot.MeshWorld,
+        into vm: DroneSimulationViewModel
+    ) {
+        guard let source = MeshTileCatalog.source(withIdentifier: reference.sourceIdentifier) else {
+            globalAlert = TelemetryExportAlert(
+                titleKey: "world.load.failed",
+                message: reference.tileKey
+            )
+            return
+        }
+        let directory = MeshTileStore().tileDirectory(for: source, key: reference.tileKey)
+        worldLoad = WorldLoadState(tileKey: reference.tileKey, stage: .indexing)
+        vm.beginAwaitingImportedWorld()
+        Task { [weak self] in
+            let runtime = await MeshWorldRuntime.load(
+                tileDirectory: directory,
+                cacheDirectory: Self.meshWorldCacheDirectory(),
+                progress: { stage in
+                    Task { @MainActor [weak self] in
+                        self?.worldLoad?.stage = stage
+                    }
+                }
+            )
+            guard let self else { return }
+            self.worldLoad = nil
+            guard let runtime else {
+                // The tile was removed from the store since the project was saved. Say so, rather
+                // than opening the project on ground it was never flown on.
+                vm.endAwaitingImportedWorld()
+                self.globalAlert = TelemetryExportAlert(
+                    titleKey: "world.load.failed",
+                    message: reference.tileKey
+                )
+                return
+            }
+            vm.attachMeshWorld(runtime, sourceIdentifier: reference.sourceIdentifier)
+            self.activeSimulation = vm
+            self.refreshProjects()
         }
     }
 

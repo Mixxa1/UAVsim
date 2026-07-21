@@ -101,6 +101,16 @@ struct MeshTileDescriptor: Identifiable, Sendable {
 /// has rather than a list baked into this app that silently goes stale.
 struct MeshTileCatalog {
 
+    /// Every source the application can import from.
+    ///
+    /// Exists so a persisted project can name its world by identifier and find it again. Adding a
+    /// source without listing it here would let projects be saved that cannot be reopened.
+    static let allSources: [MeshTileSource] = [.helsinki2017]
+
+    static func source(withIdentifier identifier: String) -> MeshTileSource? {
+        allSources.first { $0.identifier == identifier }
+    }
+
     enum CatalogError: LocalizedError {
         case unreachable(String)
         case unreadableListing

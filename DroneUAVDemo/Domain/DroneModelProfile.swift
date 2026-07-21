@@ -436,6 +436,43 @@ struct FixedWingParameters: Hashable {
     }
 }
 
+/// How much water the airframe can take before it stops being an aircraft.
+///
+/// Deliberately not a number. Real ingress ratings do not form a scale that predicts ditching: an
+/// IP55 airframe is sealed against a hose from any direction and still floods in a second under the
+/// surface, because immersion is a different test from spray. So the cases here are the three
+/// outcomes that actually differ in flight, and the ratings map onto them rather than the reverse.
+enum WaterIngressProtection: String, Codable, Hashable, CaseIterable {
+    /// No meaningful sealing. Touching the surface ends the flight.
+    case unsealed
+    /// IP4x-IP5x class: rain and spray are survivable, and so is a brief touch of the surface, but
+    /// going under is still terminal.
+    case weatherSealed
+    /// Purpose-built to float and be recovered — hulled airframes and marine-rescue platforms.
+    case buoyant
+
+    var localizationKey: String {
+        switch self {
+        case .unsealed: return "uav.water.protection.unsealed"
+        case .weatherSealed: return "uav.water.protection.weather_sealed"
+        case .buoyant: return "uav.water.protection.buoyant"
+        }
+    }
+
+    /// Seconds the airframe keeps flying while in contact with the surface but not submerged.
+    /// Zero means contact alone is immediately fatal.
+    var surfaceContactToleranceSeconds: Float {
+        switch self {
+        case .unsealed: return 0.0
+        case .weatherSealed: return 2.5
+        case .buoyant: return .greatestFiniteMagnitude
+        }
+    }
+
+    /// Does going under the surface end the flight regardless of how briefly?
+    var submersionIsTerminal: Bool { self != .buoyant }
+}
+
 struct AbstractDroneParameters: Hashable {
     var massKg: Float
     var unfoldedMm: DroneDimensionsMM
@@ -500,6 +537,11 @@ struct DroneModelProfile: Identifiable, Hashable {
     /// Structural build-quality multiplier scaling `VehicleComponentGraphBuilder`'s
     /// per-component-kind strength table for this specific airframe. 1.0 = unmodified table.
     let structuralQualityFactor: Float
+
+    /// Defaulted to `.unsealed` because that is what almost every real airframe is: consumer and
+    /// commercial multirotors carry no immersion rating at all. Aircraft that genuinely differ are
+    /// marked individually in the catalogue rather than the default being softened for everyone.
+    var waterProtection: WaterIngressProtection = .unsealed
 
     let notes: String
     let sourceURL: URL?

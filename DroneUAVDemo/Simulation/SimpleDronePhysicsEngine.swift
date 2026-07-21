@@ -137,7 +137,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             ? SIMD3<Float>(1.6, 1.6, 1.5)
             : SIMD3<Float>(2.8, 2.8, 2.2)
 
-        let groundedLowThrottleSafety = state.position.y <= 0.08 &&
+        // Height *above the surface*, not above the world origin. On a 20 m hill the raw y never
+        // approaches these thresholds, so neither the low-throttle safety nor the landing damping
+        // would ever engage and a parked aircraft would keep skittering.
+        let heightAboveGround = state.position.y - context.groundHeight
+        let groundedLowThrottleSafety = heightAboveGround <= 0.08 &&
             state.physicalState.isGroundRestState &&
             throttleCommand <= groundRestThrottleThreshold
 
@@ -145,7 +149,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             desiredRates *= SIMD3<Float>(repeating: 0.06)
             rateGain *= SIMD3<Float>(repeating: 0.22)
             angularDamping *= SIMD3<Float>(4.8, 4.8, 4.2)
-        } else if state.physicalState == .landing && state.position.y <= 0.18 {
+        } else if state.physicalState == .landing && heightAboveGround <= 0.18 {
             angularDamping *= SIMD3<Float>(1.5, 1.5, 1.35)
         } else if state.physicalState == .crashed {
             desiredRates = .zero
@@ -2250,8 +2254,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                     }
                 }
             }
-        } else if next.position.y < 0.0 {
-            next.position.y = 0.0
+        } else if next.position.y < context.groundHeight {
+            next.position.y = context.groundHeight
             if next.velocity.y < 0.0 {
                 next.velocity.y = 0.0
             }
@@ -2262,7 +2266,9 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let lowestBottom = spheres.reduce(Float.greatestFiniteMagnitude) { lowest, sphere in
             min(lowest, sphere.worldCenter(position: next.position, orientation: attitude).y - sphere.radius)
         }
-        let isSupported = spheres.isEmpty ? next.position.y <= 0.01 : lowestBottom <= 0.02
+        let isSupported = spheres.isEmpty
+            ? next.position.y <= context.groundHeight + 0.01
+            : lowestBottom <= context.groundHeight + 0.02
         if isSupported, simd_length(next.velocity) < 0.5, simd_length(rates) < 1.0 {
             let sleepDamping = max(0.0, 1.0 - dt * 8.0)
             next.velocity *= sleepDamping
@@ -2306,15 +2312,21 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// arming/takeoff/landing checks (see the tailsitter note in
     /// `integrateVTOLBody`). Empty profile (no graph built) keeps the legacy
     /// behavior.
+    /// Height the airframe origin rests at, given the surface beneath it.
+    ///
+    /// Shifting the whole world so the launch pad sat at y = 0 would **not** substitute for this: it
+    /// only makes the contract true at one point, and everywhere the real terrain falls below the
+    /// launch elevation — in a coastal city, most of it — the aircraft would still stop on the
+    /// invisible zero plane and hover above the actual ground.
     private func contactGroundClearance(
         context: DroneSimulationContext,
         orientation: simd_quatf
     ) -> Float {
         let profile = context.contactProfile
         guard !profile.isEmpty else {
-            return 0.0
+            return context.groundHeight
         }
-        return profile.groundClearanceOffset(
+        return context.groundHeight + profile.groundClearanceOffset(
             orientation: orientation,
             restOrientation: VehicleContactProfile.restOrientation(for: context.profile.airframeStyle)
         )
