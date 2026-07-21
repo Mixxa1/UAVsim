@@ -2743,3 +2743,18 @@
 "world.load.title" = "Подготовка %@";
 "world.load.first_time" = "Первая загрузка мира занимает время, дальше он берётся из кэша.";
 "world.load.failed" = "Не удалось загрузить мир «%@».";
+
+"map.family.open_data" = "Из открытых данных";
+"map.select.prompt_package" = "Выберите построенную карту";
+"map.open_data.empty.title" = "Построенных карт нет";
+"map.open_data.empty.hint" = "Откройте конструктор реальных карт, постройте район из открытых геоданных и сохраните пакет — он появится здесь.";
+"map.open_data.buildings" = "Зданий: %d";
+"uav.water.protection.unsealed" = "Без защиты от воды";
+"uav.water.protection.weather_sealed" = "Защита от брызг";
+"uav.water.protection.buoyant" = "Плавучий";
+
+"map.open_data.build" = "Построить новую карту";
+
+"world.build.stage.water" = "Водные объекты";
+
+"world.build.stage.elevation" = "Рельеф местности";

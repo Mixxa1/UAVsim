@@ -215,6 +215,19 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 self.persist(vm)
             }
             return
+
+        case .openData(let packageIdentifier):
+            guard let runtime = Self.makeOpenDataWorld(packageIdentifier: packageIdentifier) else {
+                globalAlert = TelemetryExportAlert(
+                    titleKey: "world.load.failed",
+                    message: packageIdentifier
+                )
+                return
+            }
+            vm.attachOpenDataWorld(runtime)
+            activeSimulation = vm
+            persist(vm)
+            return
         }
 
         persist(vm)
@@ -397,6 +410,23 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
                 restoreMeshWorld(reference, into: vm)
                 return
             }
+            if let reference = vm.openDataWorldToRestore {
+                // Cheap enough to build synchronously — a few hundred buildings, no gigabyte tile
+                // to index — so unlike the photogrammetric path this needs no progress stage.
+                guard let runtime = Self.makeOpenDataWorld(
+                    packageIdentifier: reference.packageIdentifier
+                ) else {
+                    globalAlert = TelemetryExportAlert(
+                        titleKey: "world.load.failed",
+                        message: reference.packageIdentifier
+                    )
+                    return
+                }
+                vm.attachOpenDataWorld(runtime)
+                activeSimulation = vm
+                refreshProjects()
+                return
+            }
             activeSimulation = vm
             refreshProjects()
         case let .failure(error):
@@ -451,6 +481,23 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             self.activeSimulation = vm
             self.refreshProjects()
         }
+    }
+
+    /// Reads a saved package and turns it into a flyable world.
+    @MainActor
+    private static func makeOpenDataWorld(packageIdentifier: String) -> OpenDataWorldRuntime? {
+        let store = UAVWorldPackageStore()
+        let url = store.packageURL(identifier: packageIdentifier)
+        guard let manifest = try? store.readManifest(at: url),
+              let buildings = try? store.readBuildings(at: url) else {
+            return nil
+        }
+        return OpenDataWorldRuntime(
+            manifest: manifest,
+            buildings: buildings,
+            waterRings: store.readWaterRings(at: url),
+            elevation: store.readElevation(at: url)
+        )
     }
 
     private func onlineTrialRole(for role: LANParticipantRole) -> OnlineTrialRole {

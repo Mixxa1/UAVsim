@@ -401,6 +401,13 @@
 		241D83684AAF8DBBFF937EB1 /* MeshWorldRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */; };
 		F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */; };
 		9A7516BEC87DDFD6D290E075 /* WaterSurfaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */; };
+		709981F4B40D35FF61FB3CB3 /* WorldSpawnFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF41D9DC932BE45C95F3A60 /* WorldSpawnFinder.swift */; };
+		4376F08634A863074FBCF187 /* FlyableWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = E93B266087576FFA944498A1 /* FlyableWorld.swift */; };
+		B88974BEFD5CBC1CDDFA8F8B /* OpenDataWorldRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2126B8DD08F781136E842D1 /* OpenDataWorldRuntime.swift */; };
+		2D1AAAD4928F4D524FF98AA2 /* OverpassWaterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924EC180BDA1A9B65A5FA4EC /* OverpassWaterSource.swift */; };
+		77619B7964BC1A660E4B0FA6 /* WaterSurfaceGeometryFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */; };
+		CC4CA384E99B4F73C8A90C4C /* TerrariumElevationSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5468C7D1DBA67888A5CB4F8 /* TerrariumElevationSource.swift */; };
+		30904D445A4478912AF993C7 /* TerrainMeshFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B389E25FF939CD57E99793E3 /* TerrainMeshFactory.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -802,6 +809,13 @@
 		5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeshWorldRuntime.swift; sourceTree = "<group>"; };
 		90DEDCA4E484B8671CC17E93 /* MapSelectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapSelectionView.swift; sourceTree = "<group>"; };
 		79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterSurfaceModel.swift; sourceTree = "<group>"; };
+		EDF41D9DC932BE45C95F3A60 /* WorldSpawnFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldSpawnFinder.swift; sourceTree = "<group>"; };
+		E93B266087576FFA944498A1 /* FlyableWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyableWorld.swift; sourceTree = "<group>"; };
+		A2126B8DD08F781136E842D1 /* OpenDataWorldRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenDataWorldRuntime.swift; sourceTree = "<group>"; };
+		924EC180BDA1A9B65A5FA4EC /* OverpassWaterSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverpassWaterSource.swift; sourceTree = "<group>"; };
+		48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterSurfaceGeometryFactory.swift; sourceTree = "<group>"; };
+		E5468C7D1DBA67888A5CB4F8 /* TerrariumElevationSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumElevationSource.swift; sourceTree = "<group>"; };
+		B389E25FF939CD57E99793E3 /* TerrainMeshFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainMeshFactory.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1355,6 +1369,9 @@
 		9235F9D6D84F0D14A4063490 /* World */ = {
 			isa = PBXGroup;
 			children = (
+				E5468C7D1DBA67888A5CB4F8 /* TerrariumElevationSource.swift */,
+				924EC180BDA1A9B65A5FA4EC /* OverpassWaterSource.swift */,
+				EDF41D9DC932BE45C95F3A60 /* WorldSpawnFinder.swift */,
 				79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */,
 				3D2B4048771DD4863F05CD86 /* MeshCollisionBuilder.swift */,
 				9C600B76478456E1921E9FBC /* MeshCollisionIndex.swift */,
@@ -1373,6 +1390,10 @@
 		3536A3A22D175347C0EBA163 /* World */ = {
 			isa = PBXGroup;
 			children = (
+				B389E25FF939CD57E99793E3 /* TerrainMeshFactory.swift */,
+				48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */,
+				A2126B8DD08F781136E842D1 /* OpenDataWorldRuntime.swift */,
+				E93B266087576FFA944498A1 /* FlyableWorld.swift */,
 				5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */,
 				D1FB9EB44C17A55068CD83B4 /* UAVWorldMeshStreamer.swift */,
 				F4FBFF962404005E57CB5BC0 /* ContextCaptureOBJLoader.swift */,
@@ -1499,6 +1520,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				30904D445A4478912AF993C7 /* TerrainMeshFactory.swift in Sources */,
+				CC4CA384E99B4F73C8A90C4C /* TerrariumElevationSource.swift in Sources */,
+				77619B7964BC1A660E4B0FA6 /* WaterSurfaceGeometryFactory.swift in Sources */,
+				2D1AAAD4928F4D524FF98AA2 /* OverpassWaterSource.swift in Sources */,
+				B88974BEFD5CBC1CDDFA8F8B /* OpenDataWorldRuntime.swift in Sources */,
+				4376F08634A863074FBCF187 /* FlyableWorld.swift in Sources */,
+				709981F4B40D35FF61FB3CB3 /* WorldSpawnFinder.swift in Sources */,
 				9A7516BEC87DDFD6D290E075 /* WaterSurfaceModel.swift in Sources */,
 				F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */,
 				241D83684AAF8DBBFF937EB1 /* MeshWorldRuntime.swift in Sources */,

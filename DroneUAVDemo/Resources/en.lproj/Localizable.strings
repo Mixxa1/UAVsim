@@ -2748,3 +2748,18 @@
 "world.load.title" = "Preparing %@";
 "world.load.first_time" = "First load of a world takes a while; it is cached afterwards.";
 "world.load.failed" = "Could not load the world “%@”.";
+
+"map.family.open_data" = "From open data";
+"map.select.prompt_package" = "Choose a built map";
+"map.open_data.empty.title" = "No built maps yet";
+"map.open_data.empty.hint" = "Open the real map constructor, build a district from open geodata and save the package — it will appear here.";
+"map.open_data.buildings" = "Buildings: %d";
+"uav.water.protection.unsealed" = "No water protection";
+"uav.water.protection.weather_sealed" = "Splash resistant";
+"uav.water.protection.buoyant" = "Buoyant";
+
+"map.open_data.build" = "Build a new map";
+
+"world.build.stage.water" = "Water bodies";
+
+"world.build.stage.elevation" = "Ground relief";

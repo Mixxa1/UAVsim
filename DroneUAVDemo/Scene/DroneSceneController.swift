@@ -318,7 +318,8 @@ final class DroneSceneController {
     /// city. While this is `nil` every query below behaves exactly as it did before, which is what
     /// makes it safe to land alongside the existing terrain presets rather than replacing them.
     private(set) var meshCollision: MeshCollisionIndex?
-    private(set) var meshWorldRuntime: MeshWorldRuntime?
+    /// The installed imported world, whatever built it.
+    private(set) var installedWorld: (any FlyableWorld)?
     /// Start point of the installed imported world, cached off the runtime at install time.
     private var meshSpawnPoint: SIMD3<Float>?
     /// Water plane of the installed imported world, if it has one.
@@ -3788,9 +3789,7 @@ final class DroneSceneController {
         // The dock is deliberately still positioned: it is the launch pad, not scenery, and it has
         // its own imported-world branch that puts it on the real spawn point.
         let hasImportedWorld = meshCollision != nil
-        if !hasImportedWorld {
-            applyTerrainVisualStyle(terrain)
-        }
+        applyTerrainVisualStyle(terrain)
         updateDockStationPosition(for: terrain)
         if !hasImportedWorld {
             updateWorldBoundsVisual(for: terrain)
@@ -3844,12 +3843,12 @@ final class DroneSceneController {
     /// not annotated, but every path that reaches these methods originates in the main-actor view
     /// model — `assumeIsolated` states that explicitly and traps if it ever stops being true,
     /// which is preferable to hopping asynchronously and letting the world install a frame late.
-    func installMeshWorld(_ runtime: MeshWorldRuntime?) {
+    func installWorld(_ world: (any FlyableWorld)?) {
         MainActor.assumeIsolated {
-            meshWorldRuntime?.rootNode.removeFromParentNode()
-            meshWorldRuntime = runtime
+            installedWorld?.rootNode.removeFromParentNode()
+            installedWorld = world
 
-            guard let runtime else {
+            guard let world else {
                 groundNode.isHidden = false
                 meshSpawnPoint = nil
                 meshWater = nil
@@ -3857,19 +3856,18 @@ final class DroneSceneController {
                 return
             }
 
-            scene.rootNode.addChildNode(runtime.rootNode)
+            scene.rootNode.addChildNode(world.rootNode)
             groundNode.isHidden = true
-            setMeshCollision(runtime.collision)
+            setMeshCollision(world.collision)
             // Resolved here, on the main actor, so the dock placement — which runs nonisolated —
-            // can read it without touching the runtime.
-            meshSpawnPoint = runtime.spawnPoint
-            meshWater = runtime.water
+            // can read it without touching the world.
+            meshSpawnPoint = world.spawnPoint
+            meshWater = world.water
 
             #if DEBUG
-            let report = runtime.report
-            print("[MeshWorld] installed \(report.tileKey): \(report.visualNodes) LOD nodes, "
-                  + "\(report.collisionTriangles) collision triangles, origin "
-                  + report.originCoordinate.displayString)
+            print("[World] installed: origin \(world.origin.coordinate.displayString), "
+                  + "bounds \(Int(world.worldBounds.maximum.x - world.worldBounds.minimum.x)) m, "
+                  + "water \(world.water == nil ? "none" : "yes")")
             #endif
         }
     }
@@ -3880,7 +3878,7 @@ final class DroneSceneController {
     /// from a render callback, which this project has established is neither guaranteed to be the
     /// main thread nor safe for scene-graph mutation.
     private func updateMeshWorldStreaming(cameraMode: CameraMode) {
-        guard let meshWorldRuntime else { return }
+        guard let installedWorld else { return }
         MainActor.assumeIsolated {
         let pointOfView = resolvedPointOfView(for: cameraMode)
         let transform = pointOfView.simdWorldTransform
@@ -3902,11 +3900,14 @@ final class DroneSceneController {
         }
         lastStreamedCameraPosition = position
 
-        meshWorldRuntime.update(
-            cameraPosition: position,
-            forward: forward,
-            fieldOfViewDegrees: fieldOfView,
-            viewportHeight: meshStreamingViewportHeight
+        installedWorld.updateStreaming(
+            camera: MeshStreamingPolicy.Camera(
+                position: position,
+                forward: forward,
+                verticalFieldOfViewRadians: max(fieldOfView, 20) * .pi / 180.0,
+                viewportHeightPixels: max(meshStreamingViewportHeight, 240),
+                aspectRatio: 16.0 / 9.0
+            )
         )
         }
     }
@@ -5917,6 +5918,20 @@ final class DroneSceneController {
     }
 
     private func applyTerrainVisualStyle(_ terrain: TerrainConfiguration) {
+        // An imported world overrides procedural styling wherever the request comes from.
+        //
+        // This guard lived at one call site — the terrain regeneration — and leaked immediately,
+        // because two other paths call this too. `attachWorld` forces the preset to `.gridDemo` so
+        // the procedural populator stays cheap, and this function reads that preset as "show the
+        // grid and axes": reopening a project therefore drew a reference grid underneath a real
+        // city. Suppression belongs to the function, not to whoever happens to call it.
+        guard meshCollision == nil else {
+            gridNode.isHidden = true
+            axesNode.isHidden = true
+            groundNode.isHidden = true
+            return
+        }
+
         configureWorldSurfaceGeometry(for: terrain)
         applyLightingProfile(for: terrain.preset)
 

@@ -7,6 +7,8 @@ enum MapSelection: Equatable {
     case standard(TerrainPreset)
     /// An installed photogrammetric world, identified by its tile directory.
     case photogrammetric(tileKey: String, directory: URL)
+    /// A world built from open geodata and saved as a package.
+    case openData(packageIdentifier: String)
 }
 
 /// Map picker shown when a project is created.
@@ -21,6 +23,7 @@ struct MapSelectionView: View {
     enum Family: String, CaseIterable, Identifiable {
         case standard
         case photogrammetric
+        case openData
 
         var id: String { rawValue }
 
@@ -28,6 +31,7 @@ struct MapSelectionView: View {
             switch self {
             case .standard: return "map.family.standard"
             case .photogrammetric: return "map.family.real_geo"
+            case .openData: return "map.family.open_data"
             }
         }
     }
@@ -40,7 +44,18 @@ struct MapSelectionView: View {
     @State private var highlightedPreset: TerrainPreset?
     @State private var highlightedWorld: InstalledWorld?
     @State private var installedWorlds: [InstalledWorld] = []
+    @State private var packages: [BuiltPackage] = []
+    @State private var highlightedPackage: BuiltPackage?
+
+    /// A world the user built in the map constructor and saved.
+    struct BuiltPackage: Identifiable, Equatable, Hashable {
+        let identifier: String
+        let displayName: String
+        let buildingCount: Int
+        var id: String { identifier }
+    }
     @State private var showingCatalog = false
+    @State private var showingBuilder = false
 
     struct InstalledWorld: Identifiable, Equatable, Hashable {
         let key: String
@@ -73,6 +88,8 @@ struct MapSelectionView: View {
                     standardGrid
                 case .photogrammetric:
                     photogrammetricList
+                case .openData:
+                    openDataList
                 }
             }
 
@@ -80,7 +97,18 @@ struct MapSelectionView: View {
             footer
         }
         .frame(minWidth: 860, minHeight: 620)
-        .onAppear(perform: refreshInstalledWorlds)
+        .onAppear {
+            refreshInstalledWorlds()
+            refreshPackages()
+        }
+        .sheet(isPresented: $showingBuilder) {
+            OpenDataBuilderSheet(
+                onClose: {
+                    showingBuilder = false
+                    refreshPackages()
+                }
+            )
+        }
         .sheet(isPresented: $showingCatalog) {
             MeshTileCatalogSheet(
                 onClose: {
@@ -164,6 +192,10 @@ struct MapSelectionView: View {
                         onConfirm(.photogrammetric(tileKey: highlightedWorld.key,
                                                    directory: highlightedWorld.directory))
                     }
+                case .openData:
+                    if let highlightedPackage {
+                        onConfirm(.openData(packageIdentifier: highlightedPackage.identifier))
+                    }
                 }
             }
             .keyboardShortcut(.defaultAction)
@@ -176,6 +208,7 @@ struct MapSelectionView: View {
         switch family {
         case .standard: return highlightedPreset != nil
         case .photogrammetric: return highlightedWorld != nil
+        case .openData: return highlightedPackage != nil
         }
     }
 
@@ -187,7 +220,62 @@ struct MapSelectionView: View {
         case .photogrammetric:
             guard let highlightedWorld else { return L10n.s("map.select.prompt_world") }
             return "\(highlightedWorld.key) — \(highlightedWorld.sizeBytes.formattedByteSize)"
+        case .openData:
+            guard let highlightedPackage else { return L10n.s("map.select.prompt_package") }
+            return "\(highlightedPackage.displayName) — \(highlightedPackage.buildingCount)"
         }
+    }
+
+    /// Worlds built in the constructor. Listing them here is what finally connects the constructor
+    /// to a flight: it could build, preview and save a package, and nothing could then fly in it.
+    @ViewBuilder
+    private var openDataList: some View {
+        if packages.isEmpty {
+            VStack(spacing: 10) {
+                Text("map.open_data.empty.title").font(.headline)
+                Text("map.open_data.empty.hint")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("map.open_data.build") { showingBuilder = true }
+                    .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 44)
+        } else {
+            LazyVStack(spacing: 8) {
+                ForEach(packages) { package in
+                    BuiltPackageRow(package: package, isSelected: highlightedPackage == package)
+                        .contentShape(Rectangle())
+                        .onTapGesture { highlightedPackage = package }
+                }
+                Button("map.open_data.build") { showingBuilder = true }
+                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
+            }
+            .padding(14)
+        }
+    }
+
+    private func refreshPackages() {
+        let store = UAVWorldPackageStore()
+        let directory = store.packagesDirectory()
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )) ?? []
+        packages = contents
+            .filter { $0.pathExtension == "uavworld" }
+            .compactMap { url in
+                guard let manifest = try? store.readManifest(at: url) else { return nil }
+                return BuiltPackage(
+                    identifier: manifest.identifier,
+                    displayName: manifest.displayName,
+                    buildingCount: manifest.statistics.buildingCount
+                )
+            }
+            .sorted { $0.displayName < $1.displayName }
+        if highlightedPackage == nil { highlightedPackage = packages.first }
     }
 
     private func refreshInstalledWorlds() {
@@ -346,5 +434,59 @@ private struct MeshTileCatalogSheet: View {
             .padding(12)
         }
         .frame(minWidth: 1000, minHeight: 680)
+    }
+}
+
+
+private struct BuiltPackageRow: View {
+    let package: MapSelectionView.BuiltPackage
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "building.2")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(package.displayName).font(.headline)
+                Text(L10n.f("map.open_data.buildings", package.buildingCount))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.black.opacity(0.18))
+        )
+    }
+}
+
+
+/// Wraps the map constructor so a district can be built without leaving project creation.
+///
+/// Mirrors `MeshTileCatalogSheet` deliberately: both tabs now answer "I do not have a world yet" the
+/// same way, in place, and return to the list with the new world in it. Presenting the existing
+/// constructor rather than rebuilding its form here keeps the 3D preview — seeing what you built
+/// before committing to fly in it is most of the point of the constructor.
+private struct OpenDataBuilderSheet: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            UAVWorldPreviewView()
+            Divider()
+            HStack {
+                Spacer()
+                Button("map.real_geo.done", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(minWidth: 1000, minHeight: 700)
     }
 }

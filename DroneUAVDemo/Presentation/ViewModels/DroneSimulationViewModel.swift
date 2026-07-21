@@ -4559,14 +4559,33 @@ final class DroneSimulationViewModel: ObservableObject {
     /// preset was forced to.
     private(set) var attachedMeshWorld: ProjectSnapshot.MeshWorld?
 
+    private(set) var attachedOpenDataWorld: ProjectSnapshot.OpenDataWorld?
+
     /// Read by the shell after `loadProject` to decide whether a world still has to be loaded.
     var meshWorldToRestore: ProjectSnapshot.MeshWorld? { attachedMeshWorld }
+    var openDataWorldToRestore: ProjectSnapshot.OpenDataWorld? { attachedOpenDataWorld }
 
     func attachMeshWorld(_ runtime: MeshWorldRuntime, sourceIdentifier: String) {
         attachedMeshWorld = ProjectSnapshot.MeshWorld(
             sourceIdentifier: sourceIdentifier,
             tileKey: runtime.report.tileKey
         )
+        attachedOpenDataWorld = nil
+        attachWorld(runtime)
+    }
+
+    /// Attaches a world built from open geodata.
+    func attachOpenDataWorld(_ runtime: OpenDataWorldRuntime) {
+        attachedOpenDataWorld = ProjectSnapshot.OpenDataWorld(packageIdentifier: runtime.identifier)
+        attachedMeshWorld = nil
+        attachWorld(runtime)
+    }
+
+    /// Everything that is true of *any* imported world, regardless of what built it.
+    ///
+    /// Kept in one place deliberately. Each step here exists because of a specific flight failure,
+    /// and a second attach path that forgot one of them would reproduce that failure exactly.
+    private func attachWorld(_ world: any FlyableWorld) {
         terrain.preset = .gridDemo
         terrain.density = 0.0
         // The world has to be at least as big as the world.
@@ -4577,18 +4596,23 @@ final class DroneSimulationViewModel: ObservableObject {
         // The aircraft therefore spawned *outside* the world and the geofence did exactly its job —
         // carrying it off, disarming it and leaving it in the sea. That reads as "the aircraft moved
         // by itself", and no amount of work on terrain height or water could have fixed it.
-        terrain.mapScale = Self.mapScale(covering: runtime.report.bounds)
-        sceneController.installMeshWorld(runtime)
+        terrain.mapScale = Self.mapScale(covering: world.worldBounds)
+        sceneController.installWorld(world)
         isAwaitingImportedWorld = false
 
-        // Start on a real surface rather than at the origin, which in a photogrammetric tile is
-        // as likely to be open water or a rooftop as an apron.
-        if let spawn = runtime.spawnPoint {
-            state.position = SIMD3<Float>(spawn.x, spawn.y, spawn.z)
+        // Start on a real surface rather than at the origin, which in an imported world is as
+        // likely to be open water or a rooftop as an apron.
+        if let spawn = world.spawnPoint {
+            state.position = spawn
+            // Velocity too, not just position: anything accumulated while the world was loading
+            // must not be carried into the first tick on real ground.
+            state.velocity = .zero
+            state.angularVelocity = .zero
+            lastKnownGroundHeight = spawn.y
             lastFiniteState = state
-            let geo = runtime.origin.geographic(ofLocalPosition: spawn)
+            let geo = world.origin.geographic(ofLocalPosition: spawn)
             #if DEBUG
-            print("[MeshWorld] spawn at \(geo.displayString), "
+            print("[World] spawn at \(geo.displayString), "
                   + String(format: "%.1f m MSL", geo.altitudeMetersMSL))
             #endif
         }
@@ -10364,7 +10388,8 @@ final class DroneSimulationViewModel: ObservableObject {
                     }
             ),
             massPropertiesRevision: componentGraph.massPropertiesRevision,
-            meshWorld: attachedMeshWorld
+            meshWorld: attachedMeshWorld,
+            openDataWorld: attachedOpenDataWorld
         )
     }
 
@@ -10443,6 +10468,7 @@ final class DroneSimulationViewModel: ObservableObject {
         weather.gusts = snapshot.weather.gusts
 
         attachedMeshWorld = snapshot.meshWorld
+        attachedOpenDataWorld = snapshot.openDataWorld
         if let terrainPreset = TerrainPreset(rawValue: snapshot.terrain.presetRaw) {
             terrain.preset = terrainPreset
         }

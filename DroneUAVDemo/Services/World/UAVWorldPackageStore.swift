@@ -39,6 +39,8 @@ struct UAVWorldPackageStore {
     static let packageExtension = "uavworld"
     private static let manifestFileName = "manifest.json"
     private static let buildingsFileName = "buildings.json"
+    private static let waterFileName = "water.json"
+    private static let elevationFileName = "elevation.json"
 
     private let fileManager: FileManager
 
@@ -107,6 +109,17 @@ struct UAVWorldPackageStore {
                 .write(to: staging.appendingPathComponent(Self.manifestFileName))
             try encoder.encode(result.buildings)
                 .write(to: staging.appendingPathComponent(Self.buildingsFileName))
+            // Written only when there is water, so its absence is a fact about the district rather
+            // than about the package's age — a reader can tell "no water here" from "saved before
+            // water existed" by whether the manifest lists the layer.
+            if !result.waterRings.isEmpty {
+                try encoder.encode(result.waterRings)
+                    .write(to: staging.appendingPathComponent(Self.waterFileName))
+            }
+            if let elevation = result.elevation {
+                try encoder.encode(elevation)
+                    .write(to: staging.appendingPathComponent(Self.elevationFileName))
+            }
 
             if fileManager.fileExists(atPath: destination.path) {
                 _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
@@ -150,6 +163,20 @@ struct UAVWorldPackageStore {
             )
         }
         return manifest
+    }
+
+    /// Ground relief, or nil for a package built without it.
+    func readElevation(at packageURL: URL) -> TerrariumElevationSource.Grid? {
+        let url = packageURL.appendingPathComponent(Self.elevationFileName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(TerrariumElevationSource.Grid.self, from: data)
+    }
+
+    /// Water rings, or empty when the district has none.
+    func readWaterRings(at packageURL: URL) -> [[SIMD2<Float>]] {
+        let url = packageURL.appendingPathComponent(Self.waterFileName)
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return (try? JSONDecoder().decode([[SIMD2<Float>]].self, from: data)) ?? []
     }
 
     func readBuildings(at packageURL: URL) throws -> [UAVWorldBuilding] {

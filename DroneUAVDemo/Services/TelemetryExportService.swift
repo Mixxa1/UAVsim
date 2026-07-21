@@ -105,6 +105,16 @@ struct ProjectSnapshot: Codable {
         var tileKey: String
     }
 
+    /// A world built from open geodata, referenced by its package identifier.
+    ///
+    /// Kept as its own field rather than folded into `MeshWorld` with a discriminator, because the
+    /// two references genuinely differ — a photogrammetric tile is a source plus a tile key inside
+    /// it, an open-data world is one self-contained package — and because projects already saved
+    /// with a `meshWorld` must keep decoding untouched.
+    struct OpenDataWorld: Codable {
+        var packageIdentifier: String
+    }
+
     struct Camera: Codable {
         var modeRaw: String
         var fov: Float
@@ -240,6 +250,7 @@ struct ProjectSnapshot: Codable {
     var massPropertiesRevision: UInt64? = nil
     /// Optional so every project saved before imported worlds existed still decodes.
     var meshWorld: MeshWorld? = nil
+    var openDataWorld: OpenDataWorld? = nil
 }
 
 protocol ProjectStorageManaging {

@@ -42,6 +42,13 @@ struct WaterSurfaceModel {
     }
 
     /// Is the surface under this column water?
+    /// Cell-indexed lookup, for callers walking the grid rather than sampling a position — the
+    /// geometry factory needs to know where the runs of water are, not whether one point is wet.
+    func isWaterCell(column: Int, row: Int) -> Bool {
+        guard column >= 0, column < columns, row >= 0, row < rows else { return false }
+        return mask[row * columns + column]
+    }
+
     func isWater(x: Float, z: Float) -> Bool {
         let column = Int((x - minimum.x) / cellSize)
         let row = Int((z - minimum.y) / cellSize)

@@ -54,6 +54,10 @@ struct UAVWorldBuildDiagnostics: Sendable {
 struct UAVWorldBuildResult: Sendable {
     let manifest: UAVWorldManifest
     let buildings: [UAVWorldBuilding]
+    /// Closed water rings in local metres. Empty is a normal answer, not a failure.
+    let waterRings: [[SIMD2<Float>]]
+    /// Ground relief, or nil when the elevation service could not be reached.
+    let elevation: TerrariumElevationSource.Grid?
     let diagnostics: UAVWorldBuildDiagnostics
 }
 
@@ -102,12 +106,45 @@ final class UAVWorldBuilder {
 
         var diagnostics = UAVWorldBuildDiagnostics()
         var accepted: [UAVWorldBuilding] = []
+        var waterRings: [[SIMD2<Float>]] = []
+        var elevation: TerrariumElevationSource.Grid?
         var index = BuildingOverlapIndex()
 
         // Highest-fidelity source first, so a municipal survey claims a building before the
         // crowd-sourced outline of the same building can.
         let ordered = sources.sorted { $0.fidelityRank > $1.fidelityRank }
         let fetchBounds = request.bounds.expanded(byMeters: Self.boundsMarginMeters)
+
+        // Relief, like water, is fetched but never fatal — a world with flat ground is still a
+        // world, and losing the buildings because an elevation tile server was busy would not be.
+        do {
+            try Task.checkCancellation()
+            progress?(L10n.s("world.build.stage.elevation"))
+            let size = request.bounds.approximateSizeMeters()
+            let halfSpan = Float(max(size.width, size.height) * 0.5) + 200
+            elevation = try await TerrariumElevationSource().fetchGrid(
+                bounds: request.bounds,
+                origin: origin,
+                halfSpanMeters: halfSpan
+            )
+        } catch is CancellationError {
+            throw UAVWorldImportError.cancelled
+        } catch {
+            elevation = nil
+        }
+
+        // Water is fetched but never fatal. A district with no mapped water is completely ordinary,
+        // and a failing water query must not cost the user the buildings they waited for.
+        do {
+            try Task.checkCancellation()
+            progress?(L10n.s("world.build.stage.water"))
+            let rings = try await OverpassWaterSource().fetchWaterRings(in: request.bounds)
+            waterRings = rings.map { project(ring: $0, origin: origin) }
+        } catch is CancellationError {
+            throw UAVWorldImportError.cancelled
+        } catch {
+            waterRings = []
+        }
 
         for source in ordered {
             try Task.checkCancellation()
@@ -127,6 +164,7 @@ final class UAVWorldBuilder {
                     from: raw,
                     origin: origin,
                     datasetIdentifier: source.attribution.datasetIdentifier,
+                    elevation: elevation,
                     diagnostics: &diagnostics
                 ) else {
                     continue
@@ -169,7 +207,12 @@ final class UAVWorldBuilder {
             regionName: request.regionName,
             origin: origin,
             bounds: request.bounds,
-            layers: [.buildings],
+            layers: {
+                var layers: Set<UAVWorldLayer> = [.buildings]
+                if !waterRings.isEmpty { layers.insert(.water) }
+                if elevation != nil { layers.insert(.terrain) }
+                return layers
+            }(),
             attributions: ordered.map(\.attribution),
             importerVersion: importerVersion,
             statistics: statistics
@@ -178,6 +221,8 @@ final class UAVWorldBuilder {
         return UAVWorldBuildResult(
             manifest: manifest,
             buildings: accepted,
+            waterRings: waterRings,
+            elevation: elevation,
             diagnostics: diagnostics
         )
     }
@@ -188,6 +233,7 @@ final class UAVWorldBuilder {
         from raw: UAVWorldRawBuilding,
         origin: GeoOrigin,
         datasetIdentifier: String,
+        elevation: TerrariumElevationSource.Grid?,
         diagnostics: inout UAVWorldBuildDiagnostics
     ) -> UAVWorldBuilding? {
         var footprint = project(ring: raw.outerRing, origin: origin)
@@ -247,6 +293,15 @@ final class UAVWorldBuilder {
             id: UUID(),
             footprint: footprint,
             holes: holes,
+            // Stored at zero; seating is the runtime's job, not the importer's.
+            //
+            // This used to bake the DEM height at the footprint, but the stored grid is a raw surface
+            // model, so the sample landed on a rooftop as often as on the ground and the bases came
+            // out scattered from −6 to +13 m — which the constructor preview drew as buildings
+            // floating and sinking at random. `OpenDataWorldRuntime` now re-seats every building on
+            // the same bare-earth field it builds the terrain from, so a value baked here would only
+            // be overwritten. Zero also makes the flat preview, which has no terrain, show the city
+            // sitting cleanly on the ground.
             baseElevationMeters: 0.0,
             heightMeters: resolvedHeight.heightMeters,
             roofHeightMeters: UAVWorldBuildingClassifier.roofRiseMeters(

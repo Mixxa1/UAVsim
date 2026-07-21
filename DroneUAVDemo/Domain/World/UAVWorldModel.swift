@@ -193,7 +193,7 @@ struct UAVWorldBuilding: Codable, Sendable {
 
     /// Ground elevation at the footprint, in local metres (Y). Separate from height so a
     /// building on a slope sits correctly once real terrain exists.
-    let baseElevationMeters: Float
+    var baseElevationMeters: Float
     /// Wall height above `baseElevationMeters`, to the eaves.
     let heightMeters: Float
     /// Additional rise from eaves to ridge for non-flat roofs.

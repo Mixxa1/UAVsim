@@ -1,0 +1,41 @@
+import SceneKit
+import simd
+
+/// What the simulator needs from an imported world, whatever it was built from.
+///
+/// Two very different pipelines produce a world here — a photogrammetric mesh tile and a map
+/// constructed from open vector data — and everything downstream of this protocol is indifferent to
+/// which one it got. That indifference is the point, and it is not a stylistic preference: the
+/// ground-height contract, the water rule, the launch pad, the boundary geofence, the suppression of
+/// procedural scenery and the project's saved reference were all built and debugged once, against a
+/// photogrammetric world. Wiring a second world in beside them would have re-derived every one of
+/// those assumptions, and the flight tests that found them the first time were expensive.
+///
+/// The requirements are deliberately few. A world is flyable when it can say where its surfaces are,
+/// where its water is, where an aircraft may start, and how far it extends.
+@MainActor
+protocol FlyableWorld: AnyObject {
+
+    /// Scene content. Parented into the live scene on install and removed on replacement.
+    var rootNode: SCNNode { get }
+
+    /// Every surface the aircraft can touch: ground, quaysides, rooftops, walls.
+    var collision: MeshCollisionIndex { get }
+
+    /// Where the water is, or nil for a landlocked world — or one whose source has no water data.
+    var water: WaterSurfaceModel? { get }
+
+    /// A clear, level, open patch to start from, or nil if the world offers none.
+    var spawnPoint: SIMD3<Float>? { get }
+
+    /// Real-world anchor of scene (0, 0, 0), so telemetry and waypoints stay geographic.
+    var origin: GeoOrigin { get }
+
+    /// Extent in scene metres. The world boundary and its geofence are sized from this — a world
+    /// larger than the boundary would strand the aircraft outside its own map.
+    var worldBounds: (minimum: SIMD3<Float>, maximum: SIMD3<Float>) { get }
+
+    /// Per-frame level-of-detail work. A world that holds all its geometry at once does nothing
+    /// here, which is why this is not optional to *call* but is trivial to *implement*.
+    func updateStreaming(camera: MeshStreamingPolicy.Camera)
+}
