@@ -444,11 +444,22 @@ extension DroneSimulationViewModel {
         let footprint: SIMD2<Float>
     }
 
+    enum TerrainMapBasemapStyle: String, Equatable, Hashable, Sendable {
+        case standard
+        case satellite
+    }
+
+    struct TerrainMapGeographicReference: Equatable, Hashable, Sendable {
+        let coordinate: GeoCoordinate
+        let style: TerrainMapBasemapStyle
+    }
+
     struct TerrainMapSnapshot: Equatable {
         let preset: TerrainPreset
         let mapScale: MapScale
         let worldHalfExtent: Float
         let terrainSeed: UInt64
+        let geographicReference: TerrainMapGeographicReference?
         let operationalRadius: Float
         let linkQualityRadius: Float
         let degradedLinkRadius: Float
@@ -476,6 +487,7 @@ extension DroneSimulationViewModel {
             mapScale: TerrainConfiguration.default.mapScale,
             worldHalfExtent: TerrainConfiguration.default.worldHalfExtent,
             terrainSeed: TerrainConfiguration.default.seed,
+            geographicReference: nil,
             operationalRadius: 0.0,
             linkQualityRadius: 0.0,
             degradedLinkRadius: 0.0,
@@ -15687,6 +15699,12 @@ final class DroneSimulationViewModel: ObservableObject {
             assistTarget: assistInterceptTarget?.position
         )
         let operationalStatus = currentMissionOperationalStatus()
+        let geographicReference = sceneController.installedWorld.map {
+            TerrainMapGeographicReference(
+                coordinate: $0.origin.coordinate,
+                style: attachedMeshWorld == nil ? .standard : .satellite
+            )
+        }
 
         if recordTrail {
             appendTerrainMapTrailSample(dronePlanarPosition)
@@ -15699,6 +15717,7 @@ final class DroneSimulationViewModel: ObservableObject {
             mapScale: terrain.mapScale,
             worldHalfExtent: extent,
             terrainSeed: terrain.seed,
+            geographicReference: geographicReference,
             operationalRadius: operationalStatus.operationalRadiusM,
             linkQualityRadius: operationalStatus.linkQualityRadiusM,
             degradedLinkRadius: operationalStatus.degradedLinkRadiusM,

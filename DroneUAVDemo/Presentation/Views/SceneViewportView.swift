@@ -1394,8 +1394,11 @@ struct TerrainMapCanvas: View {
     let dropZone: DropZoneState?
     let highlightDropZone: Bool
     var zoomFactor: CGFloat = 1.0
+    @ObservedObject private var basemapStore = TerrainMapBasemapStore.shared
 
     var body: some View {
+        let basemapImage = basemapStore.image(for: snapshot)
+
         Canvas(rendersAsynchronously: true) { context, size in
             let projection = TerrainMapProjection(
                 snapshot: snapshot,
@@ -1405,7 +1408,11 @@ struct TerrainMapCanvas: View {
 
             drawMapBase(in: &context, projection: projection)
             context.clip(to: Path(projection.mapRect))
-            drawSatelliteTexture(in: &context, projection: projection)
+            drawBasemap(
+                in: &context,
+                projection: projection,
+                geographicImage: basemapImage
+            )
             drawSceneTerrainDetails(in: &context, projection: projection)
             for object in snapshot.objects {
                 drawObject(object, in: &context, projection: projection)
@@ -1436,6 +1443,9 @@ struct TerrainMapCanvas: View {
                 with: .color(GroundControlPalette.borderStrong),
                 lineWidth: 1.2
             )
+        }
+        .task(id: TerrainMapBasemapStore.requestKey(for: snapshot)) {
+            basemapStore.request(for: snapshot)
         }
     }
 
@@ -1471,11 +1481,13 @@ struct TerrainMapCanvas: View {
         }
     }
 
-    private func drawSatelliteTexture(
+    private func drawBasemap(
         in context: inout GraphicsContext,
-        projection: TerrainMapProjection
+        projection: TerrainMapProjection,
+        geographicImage: CGImage?
     ) {
-        let texture = TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset)
+        let texture = geographicImage
+            ?? TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset)
         let image = Image(decorative: texture, scale: 1.0, orientation: .up)
         let halfExtent = max(1.0, snapshot.worldHalfExtent)
         let worldRect = projection.projectedRect(
@@ -1483,7 +1495,36 @@ struct TerrainMapCanvas: View {
             size: SIMD2<Float>(halfExtent * 2.0, halfExtent * 2.0)
         )
         context.draw(image, in: worldRect.integral.insetBy(dx: -0.5, dy: -0.5))
-        context.fill(Path(projection.mapRect), with: .color(satelliteColorGrade.opacity(0.18)))
+        context.fill(
+            Path(projection.mapRect),
+            with: .color(basemapColorGrade.opacity(basemapColorGradeOpacity))
+        )
+    }
+
+    private var basemapColorGradeOpacity: Double {
+        guard let reference = snapshot.geographicReference else {
+            return 0.18
+        }
+
+        switch reference.style {
+        case .standard:
+            return 0.08
+        case .satellite:
+            return 0.13
+        }
+    }
+
+    private var basemapColorGrade: Color {
+        guard let reference = snapshot.geographicReference else {
+            return satelliteColorGrade
+        }
+
+        switch reference.style {
+        case .standard:
+            return Color(red: 0.03, green: 0.08, blue: 0.12)
+        case .satellite:
+            return Color.black
+        }
     }
 
     private var satelliteColorGrade: Color {
@@ -2069,9 +2110,15 @@ struct TerrainMapProjection {
     let zoomFactor: CGFloat
     let panOffset: CGSize
     let fillsAvailableSpace: Bool
-    // Mirror the operator-facing map horizontally so the scene reads
-    // left-to-right the same way as in the reference screenshots.
-    private let transform = TerrainMapTransform.mirroredHorizontally
+    // Imported worlds are georeferenced: +X is east and +Z is north. Keeping north at the
+    // top makes the satellite/standard basemap, overlays, mini-map and tap conversion share
+    // one orientation instead of silently mirroring the real city. Procedural presets retain
+    // their established operator-facing orientation because they have no real north.
+    private var transform: TerrainMapTransform {
+        snapshot.geographicReference == nil
+            ? .mirroredHorizontally
+            : .defaultNorthUp
+    }
 
     init(
         snapshot: DroneSimulationViewModel.TerrainMapSnapshot,

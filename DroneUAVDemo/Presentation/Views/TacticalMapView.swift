@@ -1,7 +1,117 @@
 import AppKit
+import MapKit
 import SceneKit
 import SwiftUI
 import simd
+
+final class TerrainMapBasemapStore: ObservableObject {
+    struct RequestKey: Hashable {
+        let style: DroneSimulationViewModel.TerrainMapBasemapStyle
+        let latitudeE7: Int64
+        let longitudeE7: Int64
+        let spanMeters: Int
+    }
+
+    static let shared = TerrainMapBasemapStore()
+
+    @Published private var images: [RequestKey: CGImage] = [:]
+    private var snapshotters: [RequestKey: MKMapSnapshotter] = [:]
+    private var cacheOrder: [RequestKey] = []
+    private let snapshotSize = CGSize(width: 1_024, height: 1_024)
+    private let maximumCachedImages = 8
+
+    private init() {}
+
+    static func requestKey(
+        for snapshot: DroneSimulationViewModel.TerrainMapSnapshot
+    ) -> RequestKey? {
+        guard let reference = snapshot.geographicReference,
+              reference.coordinate.isPlausible else {
+            return nil
+        }
+
+        return RequestKey(
+            style: reference.style,
+            latitudeE7: Int64((reference.coordinate.latitudeDegrees * 10_000_000.0).rounded()),
+            longitudeE7: Int64((reference.coordinate.longitudeDegrees * 10_000_000.0).rounded()),
+            spanMeters: max(100, Int((snapshot.worldHalfExtent * 2.0).rounded()))
+        )
+    }
+
+    func image(
+        for snapshot: DroneSimulationViewModel.TerrainMapSnapshot
+    ) -> CGImage? {
+        guard let key = Self.requestKey(for: snapshot) else {
+            return nil
+        }
+        return images[key]
+    }
+
+    func request(
+        for snapshot: DroneSimulationViewModel.TerrainMapSnapshot
+    ) {
+        guard let reference = snapshot.geographicReference,
+              let key = Self.requestKey(for: snapshot),
+              images[key] == nil,
+              snapshotters[key] == nil else {
+            return
+        }
+
+        let options = MKMapSnapshotter.Options()
+        options.region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: reference.coordinate.latitudeDegrees,
+                longitude: reference.coordinate.longitudeDegrees
+            ),
+            latitudinalMeters: CLLocationDistance(key.spanMeters),
+            longitudinalMeters: CLLocationDistance(key.spanMeters)
+        )
+        options.size = snapshotSize
+        options.appearance = NSAppearance(named: .aqua)
+
+        switch reference.style {
+        case .standard:
+            options.preferredConfiguration = MKStandardMapConfiguration(
+                elevationStyle: .flat,
+                emphasisStyle: .muted
+            )
+        case .satellite:
+            options.preferredConfiguration = MKImageryMapConfiguration(
+                elevationStyle: .flat
+            )
+        }
+
+        let snapshotter = MKMapSnapshotter(options: options)
+        snapshotters[key] = snapshotter
+        snapshotter.start(with: DispatchQueue.global(qos: .utility)) { [weak self] snapshot, _ in
+            let image = snapshot?.image.cgImage(
+                forProposedRect: nil,
+                context: nil,
+                hints: nil
+            )
+
+            DispatchQueue.main.async {
+                self?.finishRequest(key: key, image: image)
+            }
+        }
+    }
+
+    private func finishRequest(key: RequestKey, image: CGImage?) {
+        snapshotters[key] = nil
+        guard let image else {
+            return
+        }
+
+        images[key] = image
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+
+        while cacheOrder.count > maximumCachedImages {
+            let evicted = cacheOrder.removeFirst()
+            images[evicted] = nil
+        }
+    }
+}
 
 struct TacticalMapView: View {
     let snapshot: DroneSimulationViewModel.TerrainMapSnapshot
@@ -625,8 +735,11 @@ private struct TacticalMapCanvas: View {
     let executionState: MissionExecutionState
     let zoomFactor: CGFloat
     let panOffset: CGSize
+    @ObservedObject private var basemapStore = TerrainMapBasemapStore.shared
 
     var body: some View {
+        let basemapImage = basemapStore.image(for: snapshot)
+
         Canvas(rendersAsynchronously: true) { context, size in
             let projection = TerrainMapProjection(
                 snapshot: snapshot,
@@ -638,7 +751,11 @@ private struct TacticalMapCanvas: View {
 
             drawMapBase(in: &context, projection: projection)
             context.clip(to: Path(projection.mapRect))
-            drawSatelliteTexture(in: &context, projection: projection)
+            drawBasemap(
+                in: &context,
+                projection: projection,
+                geographicImage: basemapImage
+            )
             drawSceneTerrainDetails(in: &context, projection: projection)
             drawObjects(in: &context, projection: projection)
             drawGrid(in: &context, projection: projection)
@@ -660,6 +777,9 @@ private struct TacticalMapCanvas: View {
                 with: .color(GroundControlPalette.borderStrong),
                 lineWidth: 1.2
             )
+        }
+        .task(id: TerrainMapBasemapStore.requestKey(for: snapshot)) {
+            basemapStore.request(for: snapshot)
         }
     }
 
@@ -702,11 +822,13 @@ private struct TacticalMapCanvas: View {
         )
     }
 
-    private func drawSatelliteTexture(
+    private func drawBasemap(
         in context: inout GraphicsContext,
-        projection: TerrainMapProjection
+        projection: TerrainMapProjection,
+        geographicImage: CGImage?
     ) {
-        let texture = TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset)
+        let texture = geographicImage
+            ?? TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset)
         let image = Image(decorative: texture, scale: 1.0, orientation: .up)
         let halfExtent = max(1.0, snapshot.worldHalfExtent)
         let worldRect = projection.projectedRect(
@@ -715,7 +837,36 @@ private struct TacticalMapCanvas: View {
         )
         context.draw(image, in: worldRect.integral.insetBy(dx: -0.5, dy: -0.5))
 
-        context.fill(Path(projection.mapRect), with: .color(satelliteColorGrade.opacity(0.18)))
+        context.fill(
+            Path(projection.mapRect),
+            with: .color(basemapColorGrade.opacity(basemapColorGradeOpacity))
+        )
+    }
+
+    private var basemapColorGradeOpacity: Double {
+        guard let reference = snapshot.geographicReference else {
+            return 0.18
+        }
+
+        switch reference.style {
+        case .standard:
+            return 0.08
+        case .satellite:
+            return 0.13
+        }
+    }
+
+    private var basemapColorGrade: Color {
+        guard let reference = snapshot.geographicReference else {
+            return satelliteColorGrade
+        }
+
+        switch reference.style {
+        case .standard:
+            return Color(red: 0.03, green: 0.08, blue: 0.12)
+        case .satellite:
+            return Color.black
+        }
     }
 
     private var satelliteColorGrade: Color {
