@@ -589,10 +589,19 @@ final class OpenDataWorldRuntime: FlyableWorld {
             // The top stays faithful to the bare-earth DEM; this matching skirt closes the short
             // quay face to the water. Both are used for collision, so every solid face is visible;
             // the unrelated terrain grid which used to continue invisibly under the river is gone.
-            let shorelineIndices = polygon.indices.filter { polygon[$0].isShoreline }
-            if shorelineIndices.count == 2 {
-                let topA = top[shorelineIndices[0]]
-                let topB = top[shorelineIndices[1]]
+            // Every contour edge is a pair of consecutive shoreline points in the polygon's cyclic
+            // order. Walking that order matters: sorting two indices reverses the closing edge
+            // (last → first), flipping its normal and producing the alternating black/grey triangles
+            // seen along an otherwise straight quay. Handling all consecutive pairs also closes both
+            // sides of an ambiguous diagonal cell, whose connected land polygon has four shoreline
+            // points rather than two.
+            for index in polygon.indices {
+                let next = polygon.index(after: index) == polygon.endIndex
+                    ? polygon.startIndex
+                    : polygon.index(after: index)
+                guard polygon[index].isShoreline, polygon[next].isShoreline else { continue }
+                let topA = top[index]
+                let topB = top[next]
                 let bottomA = SIMD3<Float>(topA.x, waterLevel, topA.z)
                 let bottomB = SIMD3<Float>(topB.x, waterLevel, topB.z)
                 appendShorelineWallTriangle(topA, bottomB, bottomA)
@@ -677,31 +686,11 @@ final class OpenDataWorldRuntime: FlyableWorld {
                             }
                             guard dry.contains(true) else { continue }
 
-                            let diagonalSaddle = dry[0] == dry[2]
-                                && dry[1] == dry[3]
-                                && dry[0] != dry[1]
-                            if diagonalSaddle {
-                                for index in 0..<4 where dry[index] {
-                                    let previous = (index + 3) % 4
-                                    let next = (index + 1) % 4
-                                    let mapped = isMappedLand(positions[index])
-                                    appendPolygon([
-                                        (positions[index], false, mapped),
-                                        (
-                                            shorelinePoint(positions[index], positions[next]),
-                                            true,
-                                            mapped
-                                        ),
-                                        (
-                                            shorelinePoint(positions[previous], positions[index]),
-                                            true,
-                                            mapped
-                                        )
-                                    ])
-                                }
-                                continue
-                            }
-
+                            // In the diagonal saddle, water deliberately remains two disconnected
+                            // corner triangles (see WaterSurfaceGeometryFactory). Land must therefore
+                            // be the connected six-point complement. Splitting *both* materials into
+                            // corner triangles leaves the central diamond completely uncovered — the
+                            // blue holes through the world visible around the narrow mapped piers.
                             var polygon: [LandPoint] = []
                             for index in 0..<4 {
                                 if dry[index] {
