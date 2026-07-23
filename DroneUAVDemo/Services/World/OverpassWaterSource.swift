@@ -107,7 +107,11 @@ struct OverpassWaterSource: Sendable {
     /// `natural=coastline` is an oriented line, not an area. It is nevertheless essential here:
     /// OSM does not wrap the Atlantic, Hudson or New York Harbor in `natural=water` polygons. The
     /// rasteriser uses the tag's direction contract (land left, sea right) to fill the marine side.
-    /// Area piers are fetched in the same response so the water mask can subtract real mapped land.
+    /// Piers are fetched in the same response so the water mask can subtract real mapped land.
+    /// OSM permits an area pier to be a closed `man_made=pier` way without the redundant
+    /// `area=yes` tag. The geometry parser below already rejects open ways as rings, so querying
+    /// every pier preserves linear piers as lines while no longer missing closed areas such as
+    /// Lower Manhattan's City Pier A.
     static func waterQuery(bounds: GeoBoundingBox, timeoutSeconds: Int) -> String {
         let box = bounds.overpassBoundsString
         return """
@@ -118,7 +122,7 @@ struct OverpassWaterSource: Sendable {
           way["waterway"="riverbank"](\(box));
           relation["waterway"="riverbank"]["type"="multipolygon"](\(box));
           way["natural"="coastline"](\(box));
-          way["man_made"="pier"]["area"="yes"](\(box));
+          way["man_made"="pier"](\(box));
           relation["man_made"="pier"]["type"="multipolygon"](\(box));
         );
         out geom;
@@ -236,9 +240,10 @@ extension WaterSurfaceModel {
     /// meant teaching all of them to speak two.
     /// - Parameters:
     ///   - geometry: role-preserving OSM water, islands and pier polygons.
-    ///   - cellSize: 2 m by default. The visible mesh interpolates the boundary between cell centres,
-    ///     so this resolves a shoreline to about a metre without turning a city into millions of
-    ///     individual SceneKit nodes.
+    ///   - cellSize: 1 m by default. The visible mesh interpolates the boundary between cell centres,
+    ///     resolving the shoreline to roughly half a metre. Its fully wet interior is coalesced into
+    ///     larger quads by `WaterSurfaceGeometryFactory`, so this precision is spent at the coast
+    ///     rather than on millions of redundant open-water triangles.
     ///   - denoise: removes isolated raster cells for ordinary water. Disable for an auxiliary mask
     ///     of mapped piers, where a one-cell-wide tip is intentional source geometry.
     ///   - excludedFootprints: optional hard exclusions for non-OSM callers. Imported buildings are
@@ -247,7 +252,7 @@ extension WaterSurfaceModel {
         geometry: UAVWorldWaterGeometry,
         halfSpan: Float,
         level: Float,
-        cellSize: Float = 2.0,
+        cellSize: Float = 1.0,
         denoise: Bool = true,
         excludedFootprints: [[SIMD2<Float>]] = []
     ) -> WaterSurfaceModel? {
@@ -357,7 +362,7 @@ extension WaterSurfaceModel {
         rings: [[SIMD2<Float>]],
         halfSpan: Float,
         level: Float,
-        cellSize: Float = 2.0,
+        cellSize: Float = 1.0,
         denoise: Bool = true,
         excludedFootprints: [[SIMD2<Float>]] = []
     ) -> WaterSurfaceModel? {

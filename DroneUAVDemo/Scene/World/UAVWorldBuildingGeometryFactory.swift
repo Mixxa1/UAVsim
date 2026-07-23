@@ -33,15 +33,30 @@ enum UAVWorldBuildingGeometryFactory {
 
         let base = building.baseElevationMeters
         let eaveHeight = base + building.heightMeters
+        let roofRise = building.roofForm.hasRaisedProfile ? building.roofHeightMeters : 0
+        let roofField = DisplacementField(
+            form: building.roofForm,
+            footprint: footprint,
+            rise: roofRise
+        )
 
         var positions: [SCNVector3] = []
         var normals: [SCNVector3] = []
         var uvs: [CGPoint] = []
 
-        let wallTriangleCount = appendWalls(
+        var wallTriangleCount = appendWalls(
             footprint: footprint,
             baseY: base,
             topY: eaveHeight,
+            positions: &positions,
+            normals: &normals,
+            uvs: &uvs
+        )
+        wallTriangleCount += appendRaisedRoofEdgeWalls(
+            footprint: footprint,
+            eaveY: eaveHeight,
+            wallHeight: building.heightMeters,
+            field: roofField,
             positions: &positions,
             normals: &normals,
             uvs: &uvs
@@ -51,7 +66,7 @@ enum UAVWorldBuildingGeometryFactory {
         let roofTriangleCount = appendRoof(
             footprint: footprint,
             eaveY: eaveHeight,
-            building: building,
+            field: roofField,
             positions: &positions,
             normals: &normals,
             uvs: &uvs
@@ -141,6 +156,84 @@ enum UAVWorldBuildingGeometryFactory {
         return triangleCount
     }
 
+    /// Closes the vertical faces between the eaves and a raised roof profile.
+    ///
+    /// The main wall extrusion deliberately stops at the eaves. That is sufficient for a flat
+    /// roof, but it left the triangular ends of gabled roofs and the tapering sides of hipped,
+    /// pyramidal and skillion roofs completely open. From the air those openings looked like
+    /// missing roof polygons and exposed the inside of the world.
+    ///
+    /// Edge subdivision matters because the ridge of a gable often crosses the middle of one long
+    /// footprint edge. It uses the same eight equal subdivisions as the roof tessellation, making
+    /// their boundary vertices identical rather than merely close.
+    @discardableResult
+    private static func appendRaisedRoofEdgeWalls(
+        footprint: [SIMD2<Float>],
+        eaveY: Float,
+        wallHeight: Float,
+        field: DisplacementField,
+        positions: inout [SCNVector3],
+        normals: inout [SCNVector3],
+        uvs: inout [CGPoint]
+    ) -> Int {
+        guard field.rise > 0 else { return 0 }
+
+        var triangleCount = 0
+        for index in footprint.indices {
+            let edgeStart = footprint[index]
+            let edgeEnd = footprint[(index + 1) % footprint.count]
+            let delta = edgeEnd - edgeStart
+            let edgeLength = simd_length(delta)
+            guard edgeLength > 0.001 else { continue }
+
+            let segmentCount = 1 << raisedRoofSubdivisionDepth
+            let normal = simd_normalize(SIMD3<Float>(delta.y, 0, -delta.x))
+            let scnNormal = SCNVector3(normal.x, normal.y, normal.z)
+
+            for segment in 0..<segmentCount {
+                let t0 = Float(segment) / Float(segmentCount)
+                let t1 = Float(segment + 1) / Float(segmentCount)
+                let start = edgeStart + delta * t0
+                let end = edgeStart + delta * t1
+                let startRise = field.height(at: start)
+                let endRise = field.height(at: end)
+                guard max(startRise, endRise) > 0.001 else { continue }
+
+                let bottomLeft = SCNVector3(start.x, eaveY, start.y)
+                let bottomRight = SCNVector3(end.x, eaveY, end.y)
+                let topLeft = SCNVector3(start.x, eaveY + startRise, start.y)
+                let topRight = SCNVector3(end.x, eaveY + endRise, end.y)
+                let u0 = CGFloat(edgeLength * t0)
+                let u1 = CGFloat(edgeLength * t1)
+                let baseV = CGFloat(wallHeight)
+
+                // At a gable corner one rise can be exactly zero, making the corresponding
+                // half of the trapezoid degenerate. Emit only halves which have area.
+                if endRise > 0.001 {
+                    positions.append(contentsOf: [bottomLeft, topRight, bottomRight])
+                    normals.append(contentsOf: [scnNormal, scnNormal, scnNormal])
+                    uvs.append(contentsOf: [
+                        CGPoint(x: u0, y: baseV),
+                        CGPoint(x: u1, y: baseV + CGFloat(endRise)),
+                        CGPoint(x: u1, y: baseV)
+                    ])
+                    triangleCount += 1
+                }
+                if startRise > 0.001 {
+                    positions.append(contentsOf: [bottomLeft, topLeft, topRight])
+                    normals.append(contentsOf: [scnNormal, scnNormal, scnNormal])
+                    uvs.append(contentsOf: [
+                        CGPoint(x: u0, y: baseV),
+                        CGPoint(x: u0, y: baseV + CGFloat(startRise)),
+                        CGPoint(x: u1, y: baseV + CGFloat(endRise))
+                    ])
+                    triangleCount += 1
+                }
+            }
+        }
+        return triangleCount
+    }
+
     // MARK: - Roof
 
     /// Roofs are built as a **vertical displacement field over the triangulated footprint**
@@ -155,7 +248,7 @@ enum UAVWorldBuildingGeometryFactory {
     private static func appendRoof(
         footprint: [SIMD2<Float>],
         eaveY: Float,
-        building: UAVWorldBuilding,
+        field: DisplacementField,
         positions: inout [SCNVector3],
         normals: inout [SCNVector3],
         uvs: inout [CGPoint]
@@ -167,46 +260,90 @@ enum UAVWorldBuildingGeometryFactory {
             return 0
         }
 
-        let rise = building.roofForm.hasRaisedProfile ? building.roofHeightMeters : 0
-        let field = DisplacementField(
-            form: building.roofForm,
-            footprint: footprint,
-            rise: rise
-        )
-
         var triangleCount = 0
         for index in stride(from: 0, to: indices.count, by: 3) {
             let a2 = footprint[indices[index]]
             let b2 = footprint[indices[index + 1]]
             let c2 = footprint[indices[index + 2]]
-
-            let a = SIMD3<Float>(a2.x, eaveY + field.height(at: a2), a2.y)
-            let b = SIMD3<Float>(b2.x, eaveY + field.height(at: b2), b2.y)
-            let c = SIMD3<Float>(c2.x, eaveY + field.height(at: c2), c2.y)
-
-            // The triangulator returns triangles wound counter-clockwise in 2D (x, y); mapping
-            // y onto z flips the handedness, so the order is reversed here to make the face
-            // normal point up rather than into the building.
-            let normal = faceNormal(a, c, b)
-            let scnNormal = SCNVector3(normal.x, normal.y, normal.z)
-
-            positions.append(contentsOf: [
-                SCNVector3(a.x, a.y, a.z),
-                SCNVector3(c.x, c.y, c.z),
-                SCNVector3(b.x, b.y, b.z)
-            ])
-            normals.append(contentsOf: [scnNormal, scnNormal, scnNormal])
-            // Roof UVs are plan-projected metres, so roofing texture scale matches the walls.
-            uvs.append(contentsOf: [
-                CGPoint(x: CGFloat(a2.x), y: CGFloat(a2.y)),
-                CGPoint(x: CGFloat(c2.x), y: CGFloat(c2.y)),
-                CGPoint(x: CGFloat(b2.x), y: CGFloat(b2.y))
-            ])
-            triangleCount += 1
+            triangleCount += appendRoofTriangle(
+                a2,
+                b2,
+                c2,
+                eaveY: eaveY,
+                field: field,
+                subdivisionDepth: field.rise > 0 ? raisedRoofSubdivisionDepth : 0,
+                positions: &positions,
+                normals: &normals,
+                uvs: &uvs
+            )
         }
 
         return triangleCount
     }
+
+    /// Tessellates a displaced roof triangle before evaluating the height field.
+    ///
+    /// Ear-clipping triangles can span an entire concave building. Evaluating a nonlinear roof
+    /// profile only at those three remote corners turns it into a handful of giant arbitrary
+    /// planes. Uniform subdivision gives adjacent source triangles identical edge vertices, so
+    /// the profile remains closed and continuous.
+    private static func appendRoofTriangle(
+        _ a2: SIMD2<Float>,
+        _ b2: SIMD2<Float>,
+        _ c2: SIMD2<Float>,
+        eaveY: Float,
+        field: DisplacementField,
+        subdivisionDepth: Int,
+        positions: inout [SCNVector3],
+        normals: inout [SCNVector3],
+        uvs: inout [CGPoint]
+    ) -> Int {
+        if subdivisionDepth > 0 {
+            let ab = (a2 + b2) * 0.5
+            let bc = (b2 + c2) * 0.5
+            let ca = (c2 + a2) * 0.5
+            let nextDepth = subdivisionDepth - 1
+            return appendRoofTriangle(
+                a2, ab, ca,
+                eaveY: eaveY, field: field, subdivisionDepth: nextDepth,
+                positions: &positions, normals: &normals, uvs: &uvs
+            ) + appendRoofTriangle(
+                ab, b2, bc,
+                eaveY: eaveY, field: field, subdivisionDepth: nextDepth,
+                positions: &positions, normals: &normals, uvs: &uvs
+            ) + appendRoofTriangle(
+                ca, bc, c2,
+                eaveY: eaveY, field: field, subdivisionDepth: nextDepth,
+                positions: &positions, normals: &normals, uvs: &uvs
+            ) + appendRoofTriangle(
+                ab, bc, ca,
+                eaveY: eaveY, field: field, subdivisionDepth: nextDepth,
+                positions: &positions, normals: &normals, uvs: &uvs
+            )
+        }
+
+        let a = SIMD3<Float>(a2.x, eaveY + field.height(at: a2), a2.y)
+        let b = SIMD3<Float>(b2.x, eaveY + field.height(at: b2), b2.y)
+        let c = SIMD3<Float>(c2.x, eaveY + field.height(at: c2), c2.y)
+
+        // Mapping the 2D polygon's y coordinate onto SceneKit z flips handedness.
+        let normal = faceNormal(a, c, b)
+        let scnNormal = SCNVector3(normal.x, normal.y, normal.z)
+        positions.append(contentsOf: [
+            SCNVector3(a.x, a.y, a.z),
+            SCNVector3(c.x, c.y, c.z),
+            SCNVector3(b.x, b.y, b.z)
+        ])
+        normals.append(contentsOf: [scnNormal, scnNormal, scnNormal])
+        uvs.append(contentsOf: [
+            CGPoint(x: CGFloat(a2.x), y: CGFloat(a2.y)),
+            CGPoint(x: CGFloat(c2.x), y: CGFloat(c2.y)),
+            CGPoint(x: CGFloat(b2.x), y: CGFloat(b2.y))
+        ])
+        return 1
+    }
+
+    private static let raisedRoofSubdivisionDepth = 3
 
     /// Height of the roof surface above the eaves, as a function of position in the footprint.
     private struct DisplacementField {

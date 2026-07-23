@@ -171,6 +171,14 @@ final class OverpassBuildingSource: UAVWorldBuildingSource {
         let tags = element.tags ?? [:]
         // `building=no` explicitly marks a footprint that is not a building.
         guard let buildingTag = tags["building"], buildingTag != "no" else { return nil }
+        // Some OSM sculptures carry `building=yes` solely to give renderers a closed 3D outline.
+        // Extruding those as occupied masonry produces a conspicuous fake building. The American
+        // Merchant Mariners' Memorial is the local example: it is a bronze sinking-vessel
+        // composition in the harbour, explicitly tagged `memorial=statue`.
+        guard tags["memorial"] != "statue",
+              tags["artwork_type"] != "sculpture" else {
+            return nil
+        }
 
         let record = UAVWorldBuildingSourceRecord(
             useClass: normalizedUseClass(buildingTag: buildingTag, tags: tags),

@@ -89,8 +89,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let maneuverAuthorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * maneuverAuthorityPenalty).clamped(to: 0.05...1.00)
-        let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
-            context.powerSystemFactor.clamped(to: 0.0...1.0) *
+        // State of charge is stored energy, not an instantaneous thrust control. The old model
+        // multiplied maximum thrust by charge percentage, so a healthy pack at 55% charge could
+        // produce only 55% thrust and a perfectly intact aircraft became unable to take off long
+        // before the battery was empty. A LiPo pack holds a broad voltage plateau through its
+        // usable middle; the battery service already models that voltage curve and load sag.
+        // Apply only that electrical derating here. `isDepleted` below remains the hard cutoff.
+        let batteryFactor = context.powerSystemFactor.clamped(to: 0.0...1.0) *
             context.batteryState.voltageSagFactor
         let mass = resolvedVehicleMass(
             context: context,
@@ -523,8 +528,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
-        let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
-            context.powerSystemFactor.clamped(to: 0.0...1.0) *
+        let batteryFactor = context.powerSystemFactor.clamped(to: 0.0...1.0) *
             context.batteryState.voltageSagFactor
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
 
@@ -1032,8 +1036,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
-        let batteryFactor = max(0.0, context.batteryState.chargePercent / 100.0) *
-            context.powerSystemFactor.clamped(to: 0.0...1.0) *
+        let batteryFactor = context.powerSystemFactor.clamped(to: 0.0...1.0) *
             context.batteryState.voltageSagFactor
         let mass = resolvedVehicleMass(
             context: context,

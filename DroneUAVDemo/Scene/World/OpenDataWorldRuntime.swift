@@ -41,7 +41,12 @@ final class OpenDataWorldRuntime: FlyableWorld {
         self.origin = manifest.origin
         self.identifier = manifest.identifier
         self.displayName = manifest.displayName
-        self.buildingCount = buildings.count
+        // Compatibility for packages imported before sculpture-like OSM features were excluded
+        // from the building source. The memorial remains real scenery, but rendering its tiny
+        // sinking-vessel outline with brick walls and windows is less truthful than omitting it
+        // until the simulator has a dedicated artwork/monument layer.
+        let renderableBuildings = buildings.compactMap(Self.buildingForRendering)
+        self.buildingCount = renderableBuildings.count
 
         // Ground has to reach at least as far as the things standing on it.
         //
@@ -52,7 +57,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
         // existence and there was no ground beneath it to prefer.
         let halfSpan = max(
             Self.halfSpanMeters(of: manifest),
-            Self.buildingReachMeters(buildings)
+            Self.buildingReachMeters(renderableBuildings)
         ) + 30.0
 
         // Bare-earth is applied here, at load, not at fetch. The package stores the raw surface
@@ -95,6 +100,36 @@ final class OpenDataWorldRuntime: FlyableWorld {
             elevation: preliminaryGround,
             marineLevel: Float(-manifest.origin.coordinate.altitudeMetersMSL)
         )
+
+        // Packages made before closed OSM piers were queried without requiring `area=yes` can
+        // legitimately contain a waterfront building but lack the matching pier ring. Recover
+        // those packages at load time instead of asking the user to rebuild the world: if the
+        // centre and a clear majority of a building's outline lie in the uncut OSM water
+        // envelope, its exact footprint is an authoritative minimum support deck. This does not
+        // move the coastline or invent a broad island; it only prevents water from passing through
+        // an opaque building. New imports normally get the larger, explicit OSM pier polygon.
+        var envelopeGeometry = floodableGeometry
+        envelopeGeometry.landRings = []
+        envelopeGeometry.landInnerRings = []
+        let waterEnvelope = WaterSurfaceModel.rasterizing(
+            geometry: envelopeGeometry,
+            halfSpan: halfSpan,
+            level: surfaceLevel
+        )
+        let inferredBuildingSupports = Self.inferredWaterfrontBuildingSupports(
+            buildings: renderableBuildings,
+            waterEnvelope: waterEnvelope
+        )
+        floodableGeometry.landRings.append(contentsOf: inferredBuildingSupports)
+        #if DEBUG
+        if !inferredBuildingSupports.isEmpty {
+            print(
+                "[OpenDataWorld] recovered \(inferredBuildingSupports.count) "
+                + "waterfront building support footprint(s)"
+            )
+        }
+        #endif
+
         let waterModel = WaterSurfaceModel.rasterizing(
             geometry: floodableGeometry,
             halfSpan: halfSpan,
@@ -142,16 +177,6 @@ final class OpenDataWorldRuntime: FlyableWorld {
         } else {
             ground = filteredGround
         }
-        // The uncut water envelope is used only to recognise waterfront structures when seating
-        // buildings. It is not rendered and does not affect water physics.
-        var envelopeGeometry = floodableGeometry
-        envelopeGeometry.landRings = []
-        envelopeGeometry.landInnerRings = []
-        let waterEnvelope = WaterSurfaceModel.rasterizing(
-            geometry: envelopeGeometry,
-            halfSpan: halfSpan,
-            level: surfaceLevel
-        )
         let pierGeometry = UAVWorldWaterGeometry(
             outerRings: floodableGeometry.landRings,
             innerRings: floodableGeometry.landInnerRings,
@@ -176,7 +201,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
         // ground drawn under it or be buried to its second floor. Re-seating every building on the
         // *same* height field the terrain is built from is the only thing that keeps them consistent,
         // and it has to be the bare-earth field, or a building would climb onto its own rooftop.
-        let seatedBuildings = buildings.map { building -> UAVWorldBuilding in
+        let seatedBuildings = renderableBuildings.map { building -> UAVWorldBuilding in
             var copy = building
             // Seated on the *lowest* ground under the footprint, not the centroid.
             //
@@ -224,7 +249,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
 
         // Collision must be the surface the pilot sees. The old collision terrain was an
         // independent 12 m grid which continued through water and cut diagonally across the exact
-        // 2 m shoreline. Those hidden triangles were the "invisible wall" under the Battery.
+        // 1 m shoreline. Those hidden triangles were the "invisible wall" under the Battery.
         // Reuse the clipped render mesh instead; water remains semantic (immersion/sinking), not a
         // solid floor an aircraft can land on.
         let waterClippedGround = waterModel.map {
@@ -282,7 +307,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
         // floating over open sky.
 
         // Water and land must share one contour. Reusing the coarse 12 m collision terrain visually
-        // made its shoreline triangles protrude through the 2 m water mask as the large beige teeth
+        // made its shoreline triangles protrude through the 1 m water mask as the large beige teeth
         // seen in the screenshots. Around water, build an adaptive land mesh from the same mask;
         // inland it still collapses to coarse blocks, while boundary cells meet the water exactly.
         if waterModel != nil,
@@ -316,8 +341,8 @@ final class OpenDataWorldRuntime: FlyableWorld {
         // polygons are self-touching and non-simple, and the ear-clipping triangulator rejected 15
         // of 15 of them, so the water simply vanished. The grid does not care about polygon
         // simplicity: it asks "is this cell inside any ring" and nothing else, which is why it is
-        // robust where triangulation is fragile. The cost is a stair-stepped shoreline at the cell
-        // size; that is the honest trade for water that is actually always there.
+        // robust where triangulation is fragile. The remaining sub-metre stepping follows the
+        // one-metre semantic mask and is below the positional precision of the source coastline.
         if let waterModel, let surface = WaterSurfaceGeometryFactory.makeNode(for: waterModel) {
             // Lift the visible sheet slightly to make the water line unambiguous. The semantic
             // physics datum stays at `waterModel.level`; there is deliberately no solid collision
@@ -337,6 +362,43 @@ final class OpenDataWorldRuntime: FlyableWorld {
         }
         return reach
     }
+
+    private static func buildingForRendering(_ building: UAVWorldBuilding) -> UAVWorldBuilding? {
+        guard building.provenance.datasetIdentifier == "osm" else { return building }
+        let featureIdentifier = building.provenance.featureIdentifier
+        guard !legacyNonBuildingOSMFeatures.contains(featureIdentifier) else { return nil }
+        guard legacyInferredRoofOSMFeatures.contains(featureIdentifier) else { return building }
+
+        // Older packages stored the classifier's inferred roof form, but did not preserve whether
+        // it came from an explicit OSM `roof:shape`. Correct the known Lower Manhattan feature
+        // whose complex footprint was turned into the giant open canopy reported in flight.
+        // Rebuilt packages no longer need this migration because the classifier does not invent a
+        // raised roof when the source omits its shape.
+        return UAVWorldBuilding(
+            id: building.id,
+            footprint: building.footprint,
+            holes: building.holes,
+            baseElevationMeters: building.baseElevationMeters,
+            heightMeters: building.heightMeters,
+            roofHeightMeters: 0,
+            roofForm: .flat,
+            facadeClass: building.facadeClass,
+            levels: building.levels,
+            yearBuilt: building.yearBuilt,
+            name: building.name,
+            provenance: building.provenance
+        )
+    }
+
+    /// OSM features known to be artwork rather than occupiable building volumes. New imports
+    /// reject these by semantic tags; IDs are retained only to migrate already-saved packages.
+    private static let legacyNonBuildingOSMFeatures: Set<String> = [
+        "way/1015975228" // American Merchant Mariners' Memorial, memorial=statue
+    ]
+
+    private static let legacyInferredRoofOSMFeatures: Set<String> = [
+        "way/278053534" // Shrine of Saint Elizabeth Ann Bayley Seton; no roof:shape in OSM
+    ]
 
     /// Half the world's side length, in scene metres, taken from the manifest's geographic bounds.
     private static func halfSpanMeters(of manifest: UAVWorldManifest) -> Float {
@@ -436,6 +498,53 @@ final class OpenDataWorldRuntime: FlyableWorld {
     /// Never apply the lowland correction to a genuinely elevated coast or cliff.
     private static let maximumCoastalLowlandHeightMeters: Float = 5.0
 
+    /// Finds opaque buildings which are predominantly on the marine side of the OSM shoreline.
+    ///
+    /// Vertices alone can all sit on the water side of a concave footprint while most of its area
+    /// remains on land, so every edge midpoint is sampled too. Requiring the centroid to be wet and
+    /// at least 60% of all probes to be wet keeps an ordinary shoreline building from being
+    /// reclassified because one corner crosses a shoreline raster cell.
+    private static func inferredWaterfrontBuildingSupports(
+        buildings: [UAVWorldBuilding],
+        waterEnvelope: WaterSurfaceModel?
+    ) -> [[SIMD2<Float>]] {
+        guard let waterEnvelope else { return [] }
+
+        return buildings.compactMap { building in
+            let footprint = building.footprint
+            guard footprint.count >= 3,
+                  ringArea(footprint) >= minimumWaterfrontBuildingAreaSquareMeters,
+                  waterEnvelope.isWater(
+                    x: building.centroid.x,
+                    z: building.centroid.y
+                  ) else {
+                return nil
+            }
+
+            var probes: [SIMD2<Float>] = [building.centroid]
+            probes.reserveCapacity(footprint.count * 2 + 1)
+            for index in footprint.indices {
+                let current = footprint[index]
+                let next = footprint[(index + 1) % footprint.count]
+                probes.append(current)
+                probes.append((current + next) * 0.5)
+            }
+
+            let wetProbeCount = probes.reduce(into: 0) { count, probe in
+                if waterEnvelope.isWater(x: probe.x, z: probe.y) {
+                    count += 1
+                }
+            }
+            let wetFraction = Float(wetProbeCount) / Float(probes.count)
+            return wetFraction >= minimumWaterfrontBuildingWetFraction ? footprint : nil
+        }
+    }
+
+    /// Ignores tiny sheds and kiosks which may sit beside a rasterised shoreline cell.
+    private static let minimumWaterfrontBuildingAreaSquareMeters: Float = 40.0
+
+    private static let minimumWaterfrontBuildingWetFraction: Float = 0.60
+
     /// Absolute area of a closed ring in square metres (shoelace).
     private static func ringArea(_ ring: [SIMD2<Float>]) -> Float {
         guard ring.count >= 3 else { return 0 }
@@ -475,8 +584,8 @@ final class OpenDataWorldRuntime: FlyableWorld {
 
     /// Visible land tessellated against the exact same cell-centre contour as the water surface.
     ///
-    /// Six-by-six groups of wholly dry cells use one coarse 12 m centre fan whose perimeter retains
-    /// every two-metre grid point. Groups touching the shoreline become the matching marching-
+    /// Twelve-by-twelve groups of wholly dry cells use one coarse 12 m centre fan whose perimeter
+    /// retains every one-metre grid point. Groups touching the shoreline become the matching marching-
     /// squares complement. The common perimeter prevents LOD cracks without turning the entire
     /// 1.7 km city into a uniform million-triangle terrain mesh.
     private struct VisibleGroundGeometry {
@@ -490,7 +599,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
         mappedLand: WaterSurfaceModel?,
         waterLevel: Float
     ) -> VisibleGroundGeometry {
-        let blockSize = 6
+        let blockSize = 12
         var result = VisibleGroundGeometry()
         result.surfaceCorners.reserveCapacity(
             ((water.columns / blockSize) + 2) * ((water.rows / blockSize) + 2) * 6
@@ -617,7 +726,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
         ) {
             guard startColumn < endColumn, startRow < endRow else { return }
 
-            // Keep every two-metre boundary vertex even though the block interior is coarse.
+            // Keep every one-metre boundary vertex even though the block interior is coarse.
             // A neighbouring mixed shoreline block uses those same vertices. The previous two-
             // triangle quad skipped the intermediate points, creating a T-junction: its straight
             // edge and the detailed neighbour had different heights between the endpoints, leaving

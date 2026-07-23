@@ -33,56 +33,96 @@ enum WaterSurfaceGeometryFactory {
             )
         }
 
-        // Squares span adjacent cell centres, so the last row/column of centres bounds the grid; a
-        // cell just outside is dry, which lets the contour close cleanly at the world edge.
-        for row in -1..<model.rows {
-            for column in -1..<model.columns {
-                let cornerColumns = [column, column + 1, column + 1, column]
-                let cornerRows = [row, row, row + 1, row + 1]
-                let positions = (0..<4).map { centre(cornerColumns[$0], cornerRows[$0]) }
-                let wet = (0..<4).map { model.isWaterCell(column: cornerColumns[$0], row: cornerRows[$0]) }
-                guard wet.contains(true) else { continue }
-
-                func append(_ polygon: [SIMD2<Float>]) {
-                    guard polygon.count >= 3 else { return }
-                    // Positions walk counter-clockwise in XZ, which points down in SceneKit's
-                    // right-handed coordinates. Reverse each fan triangle so its face points up.
-                    for k in 1..<(polygon.count - 1) {
-                        corners.append(SIMD3<Float>(polygon[0].x, y, polygon[0].y))
-                        corners.append(SIMD3<Float>(polygon[k + 1].x, y, polygon[k + 1].y))
-                        corners.append(SIMD3<Float>(polygon[k].x, y, polygon[k].y))
-                    }
-                }
-
-                // Opposite wet corners are two disconnected water regions, not one hexagon through
-                // the dry centre. Joining them was a subtle source of square diamonds along a
-                // one-cell-wide bank, so emit one triangle around each wet centre instead.
-                let diagonalSaddle = wet[0] == wet[2]
-                    && wet[1] == wet[3]
-                    && wet[0] != wet[1]
-                if diagonalSaddle {
-                    for index in 0..<4 where wet[index] {
-                        let previous = (index + 3) % 4
-                        let next = (index + 1) % 4
-                        append([
-                            positions[index],
-                            (positions[index] + positions[next]) * 0.5,
-                            (positions[previous] + positions[index]) * 0.5
-                        ])
-                    }
-                    continue
-                }
-
-                var polygon: [SIMD2<Float>] = []
-                for i in 0..<4 {
-                    if wet[i] { polygon.append(positions[i]) }
-                    let next = (i + 1) % 4
-                    if wet[i] != wet[next] {
-                        polygon.append((positions[i] + positions[next]) * 0.5)
-                    }
-                }
-                append(polygon)
+        func append(_ polygon: [SIMD2<Float>]) {
+            guard polygon.count >= 3 else { return }
+            // Positions walk counter-clockwise in XZ, which points down in SceneKit's
+            // right-handed coordinates. Reverse each fan triangle so its face points up.
+            for index in 1..<(polygon.count - 1) {
+                corners.append(SIMD3<Float>(polygon[0].x, y, polygon[0].y))
+                corners.append(SIMD3<Float>(polygon[index + 1].x, y, polygon[index + 1].y))
+                corners.append(SIMD3<Float>(polygon[index].x, y, polygon[index].y))
             }
+        }
+
+        func appendBoundarySquare(column: Int, row: Int) {
+            let cornerColumns = [column, column + 1, column + 1, column]
+            let cornerRows = [row, row, row + 1, row + 1]
+            let positions = (0..<4).map { centre(cornerColumns[$0], cornerRows[$0]) }
+            let wet = (0..<4).map {
+                model.isWaterCell(column: cornerColumns[$0], row: cornerRows[$0])
+            }
+            guard wet.contains(true) else { return }
+
+            // Opposite wet corners are two disconnected water regions, not one hexagon through
+            // the dry centre. Joining them was a subtle source of square diamonds along a
+            // one-cell-wide bank, so emit one triangle around each wet centre instead.
+            let diagonalSaddle = wet[0] == wet[2]
+                && wet[1] == wet[3]
+                && wet[0] != wet[1]
+            if diagonalSaddle {
+                for index in 0..<4 where wet[index] {
+                    let previous = (index + 3) % 4
+                    let next = (index + 1) % 4
+                    append([
+                        positions[index],
+                        (positions[index] + positions[next]) * 0.5,
+                        (positions[previous] + positions[index]) * 0.5
+                    ])
+                }
+                return
+            }
+
+            var polygon: [SIMD2<Float>] = []
+            for index in 0..<4 {
+                if wet[index] { polygon.append(positions[index]) }
+                let next = (index + 1) % 4
+                if wet[index] != wet[next] {
+                    polygon.append((positions[index] + positions[next]) * 0.5)
+                }
+            }
+            append(polygon)
+        }
+
+        // At one-metre resolution, emitting two triangles for every square of open harbour would
+        // spend nearly all geometry on a perfectly flat interior. Fixed blocks that are wet at
+        // every corner collapse to one quad; only blocks touching a shoreline use marching
+        // squares at full precision. Because all vertices remain on the same centre grid, the
+        // coarse and detailed regions meet without cracks.
+        let blockSize = 8
+        var blockRow = -1
+        while blockRow < model.rows {
+            let endRow = min(blockRow + blockSize, model.rows)
+            var blockColumn = -1
+            while blockColumn < model.columns {
+                let endColumn = min(blockColumn + blockSize, model.columns)
+                var fullyWet = true
+                for row in blockRow...endRow {
+                    for column in blockColumn...endColumn
+                    where !model.isWaterCell(column: column, row: row) {
+                        fullyWet = false
+                        break
+                    }
+                    if !fullyWet { break }
+                }
+
+                if fullyWet {
+                    append([
+                        centre(blockColumn, blockRow),
+                        centre(endColumn, blockRow),
+                        centre(endColumn, endRow),
+                        centre(blockColumn, endRow)
+                    ])
+                } else {
+                    for row in blockRow..<endRow {
+                        for column in blockColumn..<endColumn {
+                            appendBoundarySquare(column: column, row: row)
+                        }
+                    }
+                }
+
+                blockColumn = endColumn
+            }
+            blockRow = endRow
         }
 
         return corners

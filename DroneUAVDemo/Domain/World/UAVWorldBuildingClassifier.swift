@@ -183,22 +183,12 @@ enum UAVWorldBuildingClassifier {
             break
         }
 
-        // Otherwise infer. Pitched roofs belong to small, low buildings; anything tall or with a
-        // large plate is flat in practice, and guessing a pitch on a city block produces a
-        // distinctly wrong, village-like skyline.
-        let area = record.footprintAreaSquareMeters
-        let levels = record.levels ?? 0
-        switch normalized(record.useClass) {
-        case "house", "detached", "bungalow", "terrace", "hut", "shed", "garage":
-            return area < 400 ? .gabled : .flat
-        case "church", "cathedral":
-            return .gabled
-        default:
-            if levels > 0, levels <= 2, area < 300 {
-                return .gabled
-            }
-            return .flat
-        }
+        // OSM `building=*` describes use, not roof geometry. Inferring a gable from "church",
+        // "house" or a low level count invents a ridge which is especially destructive on a
+        // concave/compound footprint: one mathematical roof can bridge several real wings and
+        // appear as a giant, partly open canopy. Stay flat when the source has no `roof:shape`;
+        // explicit OSM roof tags above still retain their measured/mapped form.
+        return .flat
     }
 
     /// Rise from eaves to ridge. Proportional to the building's smaller plan dimension via its
