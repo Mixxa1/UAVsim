@@ -51,11 +51,75 @@ struct UAVWorldBuildDiagnostics: Sendable {
     }
 }
 
+/// Area semantics that must survive the trip from OSM to a saved world.
+///
+/// A flat list of rings is not enough for real coastlines. A water multipolygon can contain dry
+/// islands, while piers are separate OSM areas laid over the water and can themselves contain
+/// openings. Keeping the four roles explicit prevents a renderer from flooding an island or drawing
+/// water through a pier merely because all of them happen to be closed polygons.
+struct UAVWorldWaterGeometry: Codable, Sendable {
+    var outerRings: [[SIMD2<Float>]]
+    var innerRings: [[SIMD2<Float>]]
+    var landRings: [[SIMD2<Float>]]
+    var landInnerRings: [[SIMD2<Float>]]
+    /// Directed OSM coastline ways. OSM deliberately stores the sea as a line rather than a giant
+    /// polygon: land is on the left of every segment and seawater is on the right. Keeping the
+    /// direction lets the runtime recover Hudson River and New York Harbor instead of mistaking
+    /// every place outside a `natural=water` river polygon for dry land.
+    var coastlineSegments: [[SIMD2<Float>]]
+
+    init(
+        outerRings: [[SIMD2<Float>]],
+        innerRings: [[SIMD2<Float>]],
+        landRings: [[SIMD2<Float>]],
+        landInnerRings: [[SIMD2<Float>]],
+        coastlineSegments: [[SIMD2<Float>]] = []
+    ) {
+        self.outerRings = outerRings
+        self.innerRings = innerRings
+        self.landRings = landRings
+        self.landInnerRings = landInnerRings
+        self.coastlineSegments = coastlineSegments
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case outerRings
+        case innerRings
+        case landRings
+        case landInnerRings
+        case coastlineSegments
+    }
+
+    /// Packages written before coastline support remain readable. They still render their stored
+    /// river polygons; rebuilding the package adds the missing open-sea classification.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        outerRings = try container.decode([[SIMD2<Float>]].self, forKey: .outerRings)
+        innerRings = try container.decode([[SIMD2<Float>]].self, forKey: .innerRings)
+        landRings = try container.decode([[SIMD2<Float>]].self, forKey: .landRings)
+        landInnerRings = try container.decode([[SIMD2<Float>]].self, forKey: .landInnerRings)
+        coastlineSegments = try container.decodeIfPresent(
+            [[SIMD2<Float>]].self,
+            forKey: .coastlineSegments
+        ) ?? []
+    }
+
+    static let empty = UAVWorldWaterGeometry(
+        outerRings: [],
+        innerRings: [],
+        landRings: [],
+        landInnerRings: [],
+        coastlineSegments: []
+    )
+
+    var isEmpty: Bool { outerRings.isEmpty && coastlineSegments.isEmpty }
+}
+
 struct UAVWorldBuildResult: Sendable {
     let manifest: UAVWorldManifest
     let buildings: [UAVWorldBuilding]
-    /// Closed water rings in local metres. Empty is a normal answer, not a failure.
-    let waterRings: [[SIMD2<Float>]]
+    /// OSM water and the dry areas which cut it, all projected into local metres.
+    let waterGeometry: UAVWorldWaterGeometry
     /// Ground relief, or nil when the elevation service could not be reached.
     let elevation: TerrariumElevationSource.Grid?
     let diagnostics: UAVWorldBuildDiagnostics
@@ -80,9 +144,14 @@ final class UAVWorldBuilder {
     /// clipped in half; anything whose centroid lands beyond this margin is dropped.
     static let boundsMarginMeters: Double = 120.0
 
+    /// Coastline has to cross the complete visible square so its direction can classify the sea on
+    /// every scanline. Whole waterfront footprints can reach farther than the building-centroid
+    /// margin, hence the intentionally wider apron.
+    static let waterBoundsMarginMeters: Double = 450.0
+
     let importerVersion: String
 
-    init(importerVersion: String = "1.0.0") {
+    init(importerVersion: String = "1.3.0") {
         self.importerVersion = importerVersion
     }
 
@@ -106,7 +175,7 @@ final class UAVWorldBuilder {
 
         var diagnostics = UAVWorldBuildDiagnostics()
         var accepted: [UAVWorldBuilding] = []
-        var waterRings: [[SIMD2<Float>]] = []
+        var waterGeometry = UAVWorldWaterGeometry.empty
         var elevation: TerrariumElevationSource.Grid?
         var index = BuildingOverlapIndex()
 
@@ -121,9 +190,12 @@ final class UAVWorldBuilder {
             try Task.checkCancellation()
             progress?(L10n.s("world.build.stage.elevation"))
             let size = request.bounds.approximateSizeMeters()
-            let halfSpan = Float(max(size.width, size.height) * 0.5) + 200
+            let halfSpan = Float(
+                max(size.width, size.height) * 0.5 + Self.waterBoundsMarginMeters
+            )
+            let terrainBounds = request.bounds.expanded(byMeters: Self.waterBoundsMarginMeters)
             elevation = try await TerrariumElevationSource().fetchGrid(
-                bounds: request.bounds,
+                bounds: terrainBounds,
                 origin: origin,
                 halfSpanMeters: halfSpan
             )
@@ -138,12 +210,24 @@ final class UAVWorldBuilder {
         do {
             try Task.checkCancellation()
             progress?(L10n.s("world.build.stage.water"))
-            let rings = try await OverpassWaterSource().fetchWaterRings(in: request.bounds)
-            waterRings = rings.map { project(ring: $0, origin: origin) }
+            // Coastline ways are linear and may be split just outside the selected square. Fetch a
+            // wider apron than buildings so the directed coast still classifies every row of the
+            // runtime's ground mesh, including complete waterfront buildings that cross the box.
+            let waterBounds = request.bounds.expanded(byMeters: Self.waterBoundsMarginMeters)
+            let geometry = try await OverpassWaterSource().fetchWaterGeometry(in: waterBounds)
+            waterGeometry = UAVWorldWaterGeometry(
+                outerRings: geometry.outerRings.map { project(ring: $0, origin: origin) },
+                innerRings: geometry.innerRings.map { project(ring: $0, origin: origin) },
+                landRings: geometry.landRings.map { project(ring: $0, origin: origin) },
+                landInnerRings: geometry.landInnerRings.map { project(ring: $0, origin: origin) },
+                coastlineSegments: geometry.coastlineSegments.map {
+                    project(ring: $0, origin: origin)
+                }
+            )
         } catch is CancellationError {
             throw UAVWorldImportError.cancelled
         } catch {
-            waterRings = []
+            waterGeometry = .empty
         }
 
         for source in ordered {
@@ -198,6 +282,7 @@ final class UAVWorldBuilder {
         let measuredCount = accepted.filter { $0.provenance.heightAccuracy == .measured }.count
         let statistics = UAVWorldStatistics(
             buildingCount: accepted.count,
+            waterPolygonCount: waterGeometry.outerRings.count,
             measuredHeightFraction: Float(measuredCount) / Float(accepted.count)
         )
 
@@ -209,7 +294,7 @@ final class UAVWorldBuilder {
             bounds: request.bounds,
             layers: {
                 var layers: Set<UAVWorldLayer> = [.buildings]
-                if !waterRings.isEmpty { layers.insert(.water) }
+                if !waterGeometry.isEmpty { layers.insert(.water) }
                 if elevation != nil { layers.insert(.terrain) }
                 return layers
             }(),
@@ -221,7 +306,7 @@ final class UAVWorldBuilder {
         return UAVWorldBuildResult(
             manifest: manifest,
             buildings: accepted,
-            waterRings: waterRings,
+            waterGeometry: waterGeometry,
             elevation: elevation,
             diagnostics: diagnostics
         )

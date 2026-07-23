@@ -64,13 +64,65 @@ struct TerrariumElevationSource: Sendable {
         /// which is exactly the distinction wanted: a tower is narrow, a hill is not. The median pass
         /// runs first because opening alone would smear the isolated bathymetry pits *downward*
         /// instead of removing them.
-        func bareEarth(windowCells: Int = 3) -> Grid {
+        func bareEarth(
+            excluding water: WaterSurfaceModel? = nil,
+            rejectingDrySamplesBelow minimumDrySampleHeight: Float? = nil,
+            windowCells: Int = 3
+        ) -> Grid {
             guard columns > 2, rows > 2, windowCells > 0 else { return self }
-            let median = Self.filtered(heights, columns: columns, rows: rows, radius: 1) { $0.sorted()[$0.count / 2] }
-            let eroded = Self.filtered(median, columns: columns, rows: rows, radius: windowCells) { $0.min() ?? 0 }
-            let opened = Self.filtered(eroded, columns: columns, rows: rows, radius: windowCells) { $0.max() ?? 0 }
+
+            // Terrarium is a surface model on land and a bathymetric model under water. Feeding both
+            // into a morphological minimum spreads a -900 m harbour sounding onto the quay by the
+            // radius of the filter. Keep the water samples out of every window; their final values
+            // are immaterial because the runtime replaces submerged ground with the water datum.
+            let included: [Bool]?
+            if let water {
+                var dry = [Bool](repeating: true, count: heights.count)
+                for row in 0..<rows {
+                    for column in 0..<columns {
+                        let x = minimum.x + Float(column) * spacing
+                        let z = minimum.y + Float(row) * spacing
+                        let index = row * columns + column
+                        let plausibleDryHeight = minimumDrySampleHeight.map {
+                            heights[index] >= $0
+                        } ?? true
+                        dry[index] = !water.isWater(x: x, z: z) && plausibleDryHeight
+                    }
+                }
+                included = dry
+            } else {
+                included = nil
+            }
+
+            let median = Self.filtered(
+                heights,
+                columns: columns,
+                rows: rows,
+                radius: 1,
+                including: included
+            ) { $0.sorted()[$0.count / 2] }
+            let eroded = Self.filtered(
+                median,
+                columns: columns,
+                rows: rows,
+                radius: windowCells,
+                including: included
+            ) { $0.min() ?? 0 }
+            let opened = Self.filtered(
+                eroded,
+                columns: columns,
+                rows: rows,
+                radius: windowCells,
+                including: included
+            ) { $0.max() ?? 0 }
             // A final average takes the stair-steps off the opening without reintroducing structures.
-            let smoothed = Self.filtered(opened, columns: columns, rows: rows, radius: 1) {
+            let smoothed = Self.filtered(
+                opened,
+                columns: columns,
+                rows: rows,
+                radius: 1,
+                including: included
+            ) {
                 $0.reduce(0, +) / Float($0.count)
             }
             return Grid(
@@ -82,11 +134,151 @@ struct TerrariumElevationSource: Sendable {
             )
         }
 
+        /// Removes broad surface-model shelves beside a mapped marine shoreline.
+        ///
+        /// The generic opening above is intentionally conservative: it removes individual buildings
+        /// without flattening a real hill. A large terminal or wharf roof can still be wider than
+        /// that opening, however, and Terrarium then reports the roof as an eight-metre coastal
+        /// plateau. At the water boundary that produces both a visible cliff and a collision shelf.
+        ///
+        /// Dry samples whose neighbourhood reaches mapped water are eligible. Their height is capped
+        /// to the local dry 20th percentile plus a small permitted rise, so consistently high coastal
+        /// ground remains high while an isolated man-made shelf follows the surrounding lowland.
+        /// Coastal water placeholders receive the same upper bound: they are never rendered as
+        /// ground, but bilinear interpolation at the dry edge still reads them. The raw surface grid
+        /// supplies the dry mask, and those placeholders never participate in the percentile.
+        func suppressingCoastalSurfacePlateaus(
+            near water: WaterSurfaceModel,
+            usingDryMaskFrom surface: Grid,
+            rejectingDrySamplesBelow minimumDrySampleHeight: Float,
+            radiusCells: Int,
+            maximumRiseAboveLocalLowMeters: Float,
+            maximumLocalLowAboveWaterMeters: Float
+        ) -> Grid {
+            guard radiusCells > 0,
+                  maximumRiseAboveLocalLowMeters >= 0,
+                  maximumLocalLowAboveWaterMeters >= 0,
+                  surface.columns == columns,
+                  surface.rows == rows,
+                  surface.heights.count == heights.count,
+                  surface.minimum.x == minimum.x,
+                  surface.minimum.y == minimum.y,
+                  surface.spacing == spacing else {
+                return self
+            }
+
+            var included = [Bool](repeating: false, count: heights.count)
+            let waterMaximum = SIMD2<Float>(
+                water.minimum.x + Float(water.columns) * water.cellSize,
+                water.minimum.y + Float(water.rows) * water.cellSize
+            )
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let index = row * columns + column
+                    let x = minimum.x + Float(column) * spacing
+                    let z = minimum.y + Float(row) * spacing
+                    // The elevation package deliberately extends beyond the rendered world. Samples
+                    // there have no OSM water classification and must not masquerade as dry coastal
+                    // neighbours — at the Battery they are terminal-roof elevations outside the map
+                    // which otherwise raise the local percentile right on the southern boundary.
+                    let insideWaterCoverage = x >= water.minimum.x && x < waterMaximum.x
+                        && z >= water.minimum.y && z < waterMaximum.y
+                    included[index] = insideWaterCoverage
+                        && surface.heights[index] >= minimumDrySampleHeight
+                        && !water.isWater(x: x, z: z)
+                }
+            }
+
+            // Read every percentile from the immutable opened grid. Updating progressively would
+            // let one corrected sample pull down the next and manufacture a flat terrace.
+            let source = heights
+            var corrected = source
+            var candidates: [Float] = []
+            candidates.reserveCapacity((radiusCells * 2 + 1) * (radiusCells * 2 + 1))
+
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let centerIndex = row * columns + column
+                    let centerX = minimum.x + Float(column) * spacing
+                    let centerZ = minimum.y + Float(row) * spacing
+                    let centerIsCoastalWater = water.isWater(x: centerX, z: centerZ)
+                    guard included[centerIndex] || centerIsCoastalWater else { continue }
+
+                    candidates.removeAll(keepingCapacity: true)
+                    var nearestWaterDistanceCells = Int.max
+                    for dz in -radiusCells...radiusCells {
+                        let sampleRow = row + dz
+                        guard sampleRow >= 0, sampleRow < rows else { continue }
+                        for dx in -radiusCells...radiusCells {
+                            let sampleColumn = column + dx
+                            guard sampleColumn >= 0, sampleColumn < columns else { continue }
+                            let sampleIndex = sampleRow * columns + sampleColumn
+                            if included[sampleIndex] {
+                                candidates.append(source[sampleIndex])
+                            } else {
+                                let x = minimum.x + Float(sampleColumn) * spacing
+                                let z = minimum.y + Float(sampleRow) * spacing
+                                if water.isWater(x: x, z: z) {
+                                    nearestWaterDistanceCells = min(
+                                        nearestWaterDistanceCells,
+                                        max(abs(dx), abs(dz))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    guard nearestWaterDistanceCells <= radiusCells,
+                          !candidates.isEmpty else {
+                        continue
+                    }
+
+                    candidates.sort()
+                    let percentilePosition = Float(candidates.count - 1) * 0.20
+                    let lowerIndex = Int(floor(percentilePosition))
+                    let upperIndex = Int(ceil(percentilePosition))
+                    let fraction = percentilePosition - Float(lowerIndex)
+                    let localLow = candidates[lowerIndex] * (1 - fraction)
+                        + candidates[upperIndex] * fraction
+                    // This is a low-lying urban-coast correction, not a general cliff eraser.
+                    // A consistently elevated neighbourhood is real terrain and remains untouched.
+                    guard localLow <= water.level + maximumLocalLowAboveWaterMeters else {
+                        continue
+                    }
+                    let strictCap = localLow + maximumRiseAboveLocalLowMeters
+
+                    // Fade the cap over the outer two cells. A binary 120 m eligibility boundary
+                    // could replace a removed shelf with a new circular step; at the outer edge the
+                    // original height is therefore restored continuously.
+                    let fadeCells = min(2, max(0, radiusCells - 1))
+                    let fadeStart = radiusCells - fadeCells
+                    let originalWeight: Float
+                    if fadeCells > 0, nearestWaterDistanceCells > fadeStart {
+                        originalWeight = Float(nearestWaterDistanceCells - fadeStart)
+                            / Float(fadeCells)
+                    } else {
+                        originalWeight = 0
+                    }
+                    let softenedCap = strictCap
+                        + max(0, source[centerIndex] - strictCap) * originalWeight
+                    corrected[centerIndex] = min(source[centerIndex], softenedCap)
+                }
+            }
+
+            return Grid(
+                minimum: minimum,
+                spacing: spacing,
+                columns: columns,
+                rows: rows,
+                heights: corrected
+            )
+        }
+
         private static func filtered(
             _ source: [Float],
             columns: Int,
             rows: Int,
             radius: Int,
+            including included: [Bool]? = nil,
             _ reduce: ([Float]) -> Float
         ) -> [Float] {
             var result = source
@@ -101,10 +293,14 @@ struct TerrariumElevationSource: Sendable {
                         for dx in -radius...radius {
                             let x = column + dx
                             guard x >= 0, x < columns else { continue }
+                            if let included, !included[z * columns + x] { continue }
                             window.append(source[z * columns + x])
                         }
                     }
-                    result[row * columns + column] = reduce(window)
+                    // A sample well inside a broad water body has no dry neighbour in the window.
+                    // Its value is never rendered as terrain, but zero is a safe finite placeholder
+                    // for interpolation and cannot reintroduce the discarded bathymetry.
+                    result[row * columns + column] = window.isEmpty ? 0 : reduce(window)
                 }
             }
             return result

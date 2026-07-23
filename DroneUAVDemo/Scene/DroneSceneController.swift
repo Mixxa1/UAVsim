@@ -322,6 +322,17 @@ final class DroneSceneController {
     private(set) var installedWorld: (any FlyableWorld)?
     /// Start point of the installed imported world, cached off the runtime at install time.
     private var meshSpawnPoint: SIMD3<Float>?
+
+    /// Fallback ground height for launch-rig placement when a support query misses.
+    ///
+    /// The old fallback was `max(groundNode.y, 0)` — zero in an imported world, whose procedural
+    /// ground plane is hidden. When `supportSurfaceHeight` at the spawn returned nil, the catapult
+    /// and its aircraft were therefore seated at y ≈ deckHeight above *zero* while the real terrain
+    /// was metres up; the aircraft then jumped up through the ground and crashed on its rail angle.
+    /// The imported world's own chosen spawn height is the right answer, and it is already known.
+    private var launchGroundFallbackY: Float {
+        meshSpawnPoint?.y ?? max(Float(groundNode.presentation.position.y), 0.0)
+    }
     /// Water plane of the installed imported world, if it has one.
     private(set) var meshWater: WaterSurfaceModel?
     /// Last camera position streaming actually ran from, used to recognise an unplaced camera node.
@@ -1249,7 +1260,7 @@ final class DroneSceneController {
                 at: asset.position,
                 clearanceRadius: 0.28,
                 maximumHeight: .greatestFiniteMagnitude
-            ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+            ) ?? launchGroundFallbackY
             let forward = hand.horizontalDirection * LaunchRigMetrics.handHoldForwardOffset
             return SIMD3<Float>(
                 hand.position.x + forward.x,
@@ -1261,7 +1272,7 @@ final class DroneSceneController {
                 at: asset.position,
                 clearanceRadius: 0.28,
                 maximumHeight: .greatestFiniteMagnitude
-            ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+            ) ?? launchGroundFallbackY
             return SIMD3<Float>(
                 catapult.position.x,
                 supportY + LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset,
@@ -1285,7 +1296,7 @@ final class DroneSceneController {
             at: asset.position,
             clearanceRadius: 0.32,
             maximumHeight: .greatestFiniteMagnitude
-        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+        ) ?? launchGroundFallbackY
         launchAssetNode.simdPosition = SIMD3<Float>(asset.position.x, supportY, asset.position.y)
         launchAssetNode.eulerAngles = SCNVector3(
             0.0,
@@ -1377,7 +1388,7 @@ final class DroneSceneController {
             at: hand.position,
             clearanceRadius: 0.28,
             maximumHeight: .greatestFiniteMagnitude
-        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+        ) ?? launchGroundFallbackY
         handLaunchPOVCameraNode.simdPosition = SIMD3<Float>(
             hand.position.x,
             supportY + hand.releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease,
@@ -1445,7 +1456,7 @@ final class DroneSceneController {
             at: planar,
             clearanceRadius: 0.28,
             maximumHeight: .greatestFiniteMagnitude
-        ) ?? max(Float(groundNode.presentation.position.y), 0.0)
+        ) ?? launchGroundFallbackY
         handLaunchPOVCameraNode.simdPosition = SIMD3<Float>(
             planar.x,
             supportY + hand.releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease,
@@ -3857,12 +3868,31 @@ final class DroneSceneController {
             }
 
             scene.rootNode.addChildNode(world.rootNode)
+            // Hide every procedural visual the instant the world arrives, not on the next deferred
+            // terrain pass. On a reload the snapshot restores the `.gridDemo` preset, which draws the
+            // reference grid and axes; leaving them for `applyTerrainVisualStyle` to hide later let
+            // them flash for a frame under the real city.
             groundNode.isHidden = true
+            gridNode.isHidden = true
+            axesNode.isHidden = true
             setMeshCollision(world.collision)
             // Resolved here, on the main actor, so the dock placement — which runs nonisolated —
             // can read it without touching the world.
             meshSpawnPoint = world.spawnPoint
             meshWater = world.water
+
+            // Move the dock onto the spawn *now*, not on the next deferred terrain regeneration.
+            //
+            // `attachWorld` reads `currentSpawnPoint()` — which resolves through the dock — the
+            // instant this returns, to place the aircraft. If the dock is still at its old position
+            // then (the origin, on a reload), the aircraft is dropped at the origin and only the
+            // deferred `updateDockStationPosition` moves the pad, tens of metres away. Syncing the
+            // dock here closes that window.
+            if let spawn = world.spawnPoint {
+                dockSpawnPosition = spawn
+                dockStationNode.simdPosition = spawn
+                    + SIMD3<Float>(0.0, -dockDeckSurfaceHeight, 0.0)
+            }
 
             #if DEBUG
             print("[World] installed: origin \(world.origin.coordinate.displayString), "

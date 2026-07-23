@@ -40,6 +40,9 @@ struct UAVWorldPackageStore {
     private static let manifestFileName = "manifest.json"
     private static let buildingsFileName = "buildings.json"
     private static let waterFileName = "water.json"
+    /// Role-preserving water geometry. `water.json` remains as the legacy outer-ring layer so older
+    /// builds can still open a newly written package instead of silently losing all water.
+    private static let waterGeometryFileName = "water-geometry.json"
     private static let elevationFileName = "elevation.json"
 
     private let fileManager: FileManager
@@ -112,9 +115,11 @@ struct UAVWorldPackageStore {
             // Written only when there is water, so its absence is a fact about the district rather
             // than about the package's age — a reader can tell "no water here" from "saved before
             // water existed" by whether the manifest lists the layer.
-            if !result.waterRings.isEmpty {
-                try encoder.encode(result.waterRings)
+            if !result.waterGeometry.isEmpty {
+                try encoder.encode(result.waterGeometry.outerRings)
                     .write(to: staging.appendingPathComponent(Self.waterFileName))
+                try encoder.encode(result.waterGeometry)
+                    .write(to: staging.appendingPathComponent(Self.waterGeometryFileName))
             }
             if let elevation = result.elevation {
                 try encoder.encode(elevation)
@@ -177,6 +182,24 @@ struct UAVWorldPackageStore {
         let url = packageURL.appendingPathComponent(Self.waterFileName)
         guard let data = try? Data(contentsOf: url) else { return [] }
         return (try? JSONDecoder().decode([[SIMD2<Float>]].self, from: data)) ?? []
+    }
+
+    /// Full water geometry when available, with a transparent fallback for packages written before
+    /// islands and pier exclusions were persisted.
+    func readWaterGeometry(at packageURL: URL) -> UAVWorldWaterGeometry {
+        let geometryURL = packageURL.appendingPathComponent(Self.waterGeometryFileName)
+        if let data = try? Data(contentsOf: geometryURL),
+           let geometry = try? JSONDecoder().decode(UAVWorldWaterGeometry.self, from: data) {
+            return geometry
+        }
+        let rings = readWaterRings(at: packageURL)
+        guard !rings.isEmpty else { return .empty }
+        return UAVWorldWaterGeometry(
+            outerRings: rings,
+            innerRings: [],
+            landRings: [],
+            landInnerRings: []
+        )
     }
 
     func readBuildings(at packageURL: URL) throws -> [UAVWorldBuilding] {

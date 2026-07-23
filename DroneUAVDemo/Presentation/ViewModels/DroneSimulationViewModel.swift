@@ -2839,6 +2839,7 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadStatusMessageKey = nil
         }
 
+        syncLaunchObjectToImportedSpawn()
         sanitizeDynamicStateForSpawn(context: "reset")
         controlValues = neutralControls(from: state)
         sceneController.update(
@@ -4603,7 +4604,19 @@ final class DroneSimulationViewModel: ObservableObject {
         // Start on a real surface rather than at the origin, which in an imported world is as
         // likely to be open water or a rooftop as an apron.
         if let spawn = world.spawnPoint {
-            state.position = spawn
+            // Move the launch rig to the spawn first, or a fixed-wing's catapult and the hand-launch
+            // arm are left sitting at the map origin — tens of metres from where the aircraft
+            // actually starts — which is why the hand appeared to rise out of bare ground with no
+            // aircraft, and the glider lay on the apron with no catapult beneath it. The rig's XZ is
+            // the launch draft's, not the mesh spawn's, so it has to be told.
+            let planar = SIMD2<Float>(spawn.x, spawn.z)
+            committedTacticalMissionDraft.launchObject?.position = planar
+            workingTacticalMissionDraft.launchObject?.position = planar
+            refreshSceneLaunchAsset()
+
+            // With the rig in place, resolve the start through the normal path: a launch aircraft
+            // seats on its cradle, everything else rests on the ground. Both now land at the spawn.
+            state.position = currentSpawnPoint()
             // Velocity too, not just position: anything accumulated while the world was loading
             // must not be carried into the first tick on real ground.
             state.velocity = .zero
@@ -5486,32 +5499,9 @@ final class DroneSimulationViewModel: ObservableObject {
             context: context,
             deltaTime: dt
         )
-        #if DEBUG
-        let afterPhysicsY = state.position.y
-        let afterPhysicsVY = state.velocity.y
-        #endif
         enforceRuntimeSafetyAndBounds(context: "tick.physics")
-        #if DEBUG
-        let afterSafetyY = state.position.y
-        #endif
         applySupportSurfaceConstraint(previousState: previousState)
         applyWaterImmersionIfNeeded(deltaTime: dt)
-        #if DEBUG
-        // Which stage of the vertical chain is holding the aircraft down. Prints only while armed
-        // and commanding climb, roughly twice a second, so a short takeoff attempt is readable.
-        if isArmed, controlValues.throttle > 0.6 {
-            verticalDebugTicks += 1
-            if verticalDebugTicks % 30 == 0 {
-                print(String(format:
-                    "[Vert] тяга %.2f | до физики y %.3f → после физики %.3f (vy %+.3f) → после границ %.3f → после опоры %.3f | земля %.3f | сост %@",
-                    controlValues.throttle, previousState.position.y, afterPhysicsY, afterPhysicsVY,
-                    afterSafetyY, state.position.y, lastKnownGroundHeight,
-                    String(describing: physicalState)))
-            }
-        } else {
-            verticalDebugTicks = 0
-        }
-        #endif
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
         let structuralLoadState = state
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
@@ -16170,7 +16160,36 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshSceneLaunchAsset() {
+        syncLaunchObjectToImportedSpawn()
         sceneController.setLaunchAsset(activeLaunchAsset())
+    }
+
+    /// Homes the launch rig on the aircraft's start point in an imported world.
+    ///
+    /// A launch-requiring aircraft is chosen from the catalogue *after* the world is installed, and
+    /// its launch object is created at the tactical map's origin — tens of metres from the real
+    /// spawn, which is why the hand rose out of empty ground and the catapult was nowhere near the
+    /// glider. Re-homing it here, everywhere the rig is refreshed and before every reset places the
+    /// aircraft, keeps rig and aircraft together. A procedural world is left alone: there the launch
+    /// point is the one the operator drafted on the map and must be respected.
+    private func syncLaunchObjectToImportedSpawn() {
+        guard sceneController.installedWorld != nil else { return }
+        let dock = sceneController.currentDockSpawnPoint()
+        let planar = SIMD2<Float>(dock.x, dock.z)
+        if committedTacticalMissionDraft.launchObject != nil,
+           committedTacticalMissionDraft.launchObject?.position != planar {
+            committedTacticalMissionDraft.launchObject?.position = planar
+        }
+        if workingTacticalMissionDraft.launchObject != nil,
+           workingTacticalMissionDraft.launchObject?.position != planar {
+            workingTacticalMissionDraft.launchObject?.position = planar
+        }
+        #if DEBUG
+        print(String(format: "[Launch] rig homed to dock %.1f,%.1f  hasLaunchObject=%@ requiresLaunch=%@",
+                     planar.x, planar.y,
+                     committedTacticalMissionDraft.launchObject != nil ? "yes" : "no",
+                     activeLaunchMode().requiresLaunchObject ? "yes" : "no"))
+        #endif
     }
 
     private func resetTerrainMapTrail() {
@@ -17943,19 +17962,21 @@ final class DroneSimulationViewModel: ObservableObject {
     /// A query legitimately misses — beyond the imported tile's edge, or over a hole in the mesh —
     /// and answering zero there would drop the aircraft to sea level for one tick and snap it back
     /// on the next. Ground does not teleport, so the last known elevation is a far better answer
-    /// than the world origin. Stays at zero for the procedural presets, where no query ever
-    /// succeeds and the ground genuinely is the y = 0 plane.
+    /// than the world origin — except over classified water. Open-data water deliberately has no
+    /// collision floor, so retaining the last quay height there creates a real invisible platform:
+    /// both the physics context and the runtime safety floor keep the aircraft suspended over the
+    /// river. Water has its own known datum, which is the only valid fallback in that case.
     private func currentGroundHeight() -> Float {
         if let surface = supportSurfaceYIfAny(for: state.position, maximumHeight: state.position.y) {
             lastKnownGroundHeight = surface
+        } else if let water = sceneController.meshWater,
+                  water.isWater(x: state.position.x, z: state.position.z) {
+            lastKnownGroundHeight = water.level
         }
         return lastKnownGroundHeight
     }
 
     private var lastKnownGroundHeight: Float = 0.0
-    #if DEBUG
-    private var verticalDebugTicks = 0
-    #endif
 
     /// How long the airframe has been in contact with the water, in seconds.
     private var waterContactSeconds: Float = 0.0
@@ -18384,6 +18405,14 @@ final class DroneSimulationViewModel: ObservableObject {
             state.orientation = spawnOrientation(for: selectedDroneProfile)
             homePosition = spawn
             seatAircraftInLaunchCradleIfAvailable()
+            #if DEBUG
+            let assetPos = activeLaunchAsset()?.position
+            print(String(format: "[Launch] spawn resolved to %.1f,%.1f,%.1f | aircraft now %.1f,%.1f,%.1f | asset %@ | dock %.1f,%.1f",
+                         spawn.x, spawn.y, spawn.z,
+                         state.position.x, state.position.y, state.position.z,
+                         assetPos.map { String(format: "%.1f,%.1f", $0.x, $0.y) } ?? "nil",
+                         sceneController.currentDockSpawnPoint().x, sceneController.currentDockSpawnPoint().z))
+            #endif
         }
 
         if hardReset {

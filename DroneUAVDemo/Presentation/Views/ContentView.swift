@@ -495,7 +495,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         return OpenDataWorldRuntime(
             manifest: manifest,
             buildings: buildings,
-            waterRings: store.readWaterRings(at: url),
+            waterGeometry: store.readWaterGeometry(at: url),
             elevation: store.readElevation(at: url)
         )
     }

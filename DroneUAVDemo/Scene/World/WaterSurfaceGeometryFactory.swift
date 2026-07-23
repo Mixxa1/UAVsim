@@ -11,47 +11,89 @@ import simd
 /// something that was never drawn.
 enum WaterSurfaceGeometryFactory {
 
-    /// A flat surface covering exactly the masked cells.
+    /// A flat surface whose *edge* follows the water boundary at 45°, not in grid stair-steps.
     ///
-    /// Cells are merged into horizontal runs before being emitted. A four-metre mask over a
-    /// kilometre-and-a-half world is nearly two hundred thousand cells, and a quad each would cost
-    /// more triangles than the entire city; runs collapse a river into a few hundred long strips
-    /// because water is contiguous by nature.
-    @MainActor
-    static func makeNode(for model: WaterSurfaceModel) -> SCNNode? {
+    /// Marching-squares area fill. Each set of four adjacent cell centres forms a square; the water
+    /// boundary passes between the wet centres and the dry ones, and the square's water region is
+    /// emitted with that boundary cut at the edge midpoints. Walking the square's perimeter in order
+    /// — adding a corner when it is water and a midpoint whenever an edge changes state — yields a
+    /// simple polygon in every connected case. The two diagonal-saddle cases are emitted as two
+    /// separate triangles, because their water regions touch neither at an edge nor at the centre.
+    /// That robustness is the reason for this over triangulating raw, occasionally self-touching OSM
+    /// boundaries directly.
+    static func makeTriangleCorners(for model: WaterSurfaceModel) -> [SIMD3<Float>] {
         var corners: [SIMD3<Float>] = []
-        var normals: [SIMD3<Float>] = []
         let y = model.level
+        let cell = model.cellSize
 
-        for row in 0..<model.rows {
-            var column = 0
-            while column < model.columns {
-                guard model.isWaterCell(column: column, row: row) else {
-                    column += 1
+        func centre(_ column: Int, _ row: Int) -> SIMD2<Float> {
+            SIMD2<Float>(
+                model.minimum.x + (Float(column) + 0.5) * cell,
+                model.minimum.y + (Float(row) + 0.5) * cell
+            )
+        }
+
+        // Squares span adjacent cell centres, so the last row/column of centres bounds the grid; a
+        // cell just outside is dry, which lets the contour close cleanly at the world edge.
+        for row in -1..<model.rows {
+            for column in -1..<model.columns {
+                let cornerColumns = [column, column + 1, column + 1, column]
+                let cornerRows = [row, row, row + 1, row + 1]
+                let positions = (0..<4).map { centre(cornerColumns[$0], cornerRows[$0]) }
+                let wet = (0..<4).map { model.isWaterCell(column: cornerColumns[$0], row: cornerRows[$0]) }
+                guard wet.contains(true) else { continue }
+
+                func append(_ polygon: [SIMD2<Float>]) {
+                    guard polygon.count >= 3 else { return }
+                    // Positions walk counter-clockwise in XZ, which points down in SceneKit's
+                    // right-handed coordinates. Reverse each fan triangle so its face points up.
+                    for k in 1..<(polygon.count - 1) {
+                        corners.append(SIMD3<Float>(polygon[0].x, y, polygon[0].y))
+                        corners.append(SIMD3<Float>(polygon[k + 1].x, y, polygon[k + 1].y))
+                        corners.append(SIMD3<Float>(polygon[k].x, y, polygon[k].y))
+                    }
+                }
+
+                // Opposite wet corners are two disconnected water regions, not one hexagon through
+                // the dry centre. Joining them was a subtle source of square diamonds along a
+                // one-cell-wide bank, so emit one triangle around each wet centre instead.
+                let diagonalSaddle = wet[0] == wet[2]
+                    && wet[1] == wet[3]
+                    && wet[0] != wet[1]
+                if diagonalSaddle {
+                    for index in 0..<4 where wet[index] {
+                        let previous = (index + 3) % 4
+                        let next = (index + 1) % 4
+                        append([
+                            positions[index],
+                            (positions[index] + positions[next]) * 0.5,
+                            (positions[previous] + positions[index]) * 0.5
+                        ])
+                    }
                     continue
                 }
-                var runEnd = column
-                while runEnd + 1 < model.columns, model.isWaterCell(column: runEnd + 1, row: row) {
-                    runEnd += 1
+
+                var polygon: [SIMD2<Float>] = []
+                for i in 0..<4 {
+                    if wet[i] { polygon.append(positions[i]) }
+                    let next = (i + 1) % 4
+                    if wet[i] != wet[next] {
+                        polygon.append((positions[i] + positions[next]) * 0.5)
+                    }
                 }
-
-                let x0 = model.minimum.x + Float(column) * model.cellSize
-                let x1 = model.minimum.x + Float(runEnd + 1) * model.cellSize
-                let z0 = model.minimum.y + Float(row) * model.cellSize
-                let z1 = z0 + model.cellSize
-
-                let a = SIMD3<Float>(x0, y, z0)
-                let b = SIMD3<Float>(x1, y, z0)
-                let c = SIMD3<Float>(x1, y, z1)
-                let d = SIMD3<Float>(x0, y, z1)
-                corners.append(contentsOf: [a, c, b, a, d, c])
-                normals.append(contentsOf: Array(repeating: SIMD3<Float>(0, 1, 0), count: 6))
-
-                column = runEnd + 1
+                append(polygon)
             }
         }
 
+        return corners
+    }
+
+    @MainActor
+    static func makeNode(for model: WaterSurfaceModel) -> SCNNode? {
+        let corners = makeTriangleCorners(for: model)
+
         guard !corners.isEmpty else { return nil }
+        let normals = Array(repeating: SIMD3<Float>(0, 1, 0), count: corners.count)
 
         let geometry = SCNGeometry(
             sources: [
