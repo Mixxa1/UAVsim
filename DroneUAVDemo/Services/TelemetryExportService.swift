@@ -28,6 +28,16 @@ struct InternalStorePaths {
         root(fileManager: fileManager).appendingPathComponent("Worlds", isDirectory: true)
     }
 
+    /// User-facing LiDAR survey exports. Kept directly under `DroneUAVDemo` (not inside the opaque
+    /// `InternalStore`) because the pilot opens these files themselves.
+    static func lidarSurveys(fileManager: FileManager) -> URL {
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return appSupport
+            .appendingPathComponent("DroneUAVDemo", isDirectory: true)
+            .appendingPathComponent("LidarSurveys", isDirectory: true)
+    }
+
     static func index(fileManager: FileManager) -> URL {
         root(fileManager: fileManager).appendingPathComponent("Index", isDirectory: true)
     }

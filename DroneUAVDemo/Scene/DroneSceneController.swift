@@ -432,9 +432,20 @@ final class DroneSceneController {
         // Thermal proxy geometry: only the payload camera in thermal mode renders it. Every
         // other camera must clear this bit (cameras default to -1 = all bits set).
         static let thermalProxy = ThermalRenderCategory.proxyBit
-        static let standardVisible = Int.max & ~thermalProxy
+        /// The accumulated LiDAR returns. Visible to every ordinary camera *and* to the LiDAR
+        /// sensor camera, which renders this and nothing else.
+        static let lidarCloud = 1 << 8
+        /// The black shell that gives the LiDAR view its darkness. Only the sensor camera sees it —
+        /// ordinary cameras must never have a black sphere dropped in front of them.
+        static let lidarBackdrop = 1 << 9
+        static let standardVisible = Int.max & ~thermalProxy & ~lidarBackdrop
         static let visibleInFPV = standardVisible & ~droppedPayload
         static let visibleInPayloadOptics = standardVisible & ~mountedPayload
+        /// A real LiDAR feed is a cloud of returns in darkness — no terrain, no buildings, no
+        /// shadows. Restricting the sensor camera to those two bits is what makes it look right,
+        /// and it also stops the whole city being re-rendered from a second viewpoint (the lag on
+        /// entering this camera).
+        static let visibleInLidar = lidarCloud | lidarBackdrop
     }
 
     private enum CameraClipping {
@@ -4979,11 +4990,31 @@ final class DroneSceneController {
             camera.fieldOfView = 64.0
             camera.zNear = 0.05
             camera.zFar = CameraClipping.payloadOpticsFar
-            // Default category mask — NOT the restricted payload-optics mask the rangefinder/thermal
-            // use — so this camera sees the world *and* the accumulating point cloud.
+            // Sensor feed, not a photograph: only the returns and the dark shell behind them.
+            camera.categoryBitMask = RenderCategory.visibleInLidar
             node.camera = camera
             lidarPitchNode.addChildNode(node)
             lidarCameraNode = node
+
+            // The scene's sky background is drawn for every camera regardless of category masks,
+            // so darkness has to be geometry: an inside-out shell riding with the camera. It writes
+            // no depth and draws first, so returns at any range paint over it.
+            let shell = SCNSphere(radius: 60.0)
+            shell.segmentCount = 12
+            let shellMaterial = SCNMaterial()
+            shellMaterial.lightingModel = .constant
+            shellMaterial.diffuse.contents = NSColor.black
+            shellMaterial.emission.contents = NSColor(calibratedWhite: 0.015, alpha: 1.0)
+            shellMaterial.isDoubleSided = true
+            shellMaterial.writesToDepthBuffer = false
+            shellMaterial.readsFromDepthBuffer = false
+            shell.firstMaterial = shellMaterial
+            let shellNode = SCNNode(geometry: shell)
+            shellNode.name = "lidarBackdropShell"
+            shellNode.categoryBitMask = RenderCategory.lidarBackdrop
+            shellNode.renderingOrder = -10_000
+            shellNode.castsShadow = false
+            node.addChildNode(shellNode)
         }
 
         if lidarRigNode.parent !== payloadMountNode {
@@ -5073,9 +5104,12 @@ final class DroneSceneController {
 
         // Bake accumulated points into an immutable chunk node at a throttled cadence, so a
         // million-point survey never rebuilds the whole cloud in a frame.
+        // Chunks are one draw call each, and from the sensor's own viewpoint every chunk is on
+        // screen at once — so flush on a decent batch, not on a twitchy interval that would leave
+        // a long survey as hundreds of near-empty nodes.
         let now = CACurrentMediaTime()
         if !lidarPendingPoints.isEmpty,
-           lidarPendingPoints.count >= 4_000 || now - lidarLastBakeTime > 0.15 {
+           lidarPendingPoints.count >= 4_000 || now - lidarLastBakeTime > 0.6 {
             bakeLidarChunk(lidarPendingPoints)
             lidarPendingPoints.removeAll(keepingCapacity: true)
             lidarLastBakeTime = now
@@ -5100,10 +5134,12 @@ final class DroneSceneController {
                 minimum: range.minimum,
                 maximum: range.maximum
             )
+            // Lifted toward white: against the sensor's black field these read as glowing returns
+            // rather than flat paint. The exported cloud keeps the unboosted ramp.
             colors.append(SIMD4<Float>(
-                Float(color.red) / 255.0,
-                Float(color.green) / 255.0,
-                Float(color.blue) / 255.0,
+                min(1.0, Float(color.red) / 255.0 * 1.35 + 0.10),
+                min(1.0, Float(color.green) / 255.0 * 1.35 + 0.10),
+                min(1.0, Float(color.blue) / 255.0 * 1.35 + 0.10),
                 1.0
             ))
         }
@@ -5131,13 +5167,21 @@ final class DroneSceneController {
         let geometry = SCNGeometry(sources: [vertexSource, colorSource], elements: [element])
         let material = SCNMaterial()
         material.lightingModel = .constant
-        material.writesToDepthBuffer = false
+        // Points DO write depth. Looking straight down the sensor boresight stacks the whole cloud
+        // column into a few pixels; with depth writes off, every one of those overlapping sprites
+        // was shaded (fill-rate death → the lag on entering the LiDAR camera). Writing depth lets the
+        // nearest point win each pixel, collapsing the overdraw. The +0.08 m visual lift keeps them
+        // from z-fighting the surface they sit on.
+        material.writesToDepthBuffer = true
         material.readsFromDepthBuffer = true
         geometry.materials = [material]
 
         let node = SCNNode(geometry: geometry)
         node.name = "lidar.chunk"
         node.castsShadow = false
+        // Ordinary cameras carry this bit inside `standardVisible`, so the cloud is still visible
+        // in the normal 3-D view; the sensor camera carries only this and the backdrop.
+        node.categoryBitMask = RenderCategory.lidarCloud
         lidarCloudRootNode.addChildNode(node)
     }
 
@@ -5153,9 +5197,7 @@ final class DroneSceneController {
     func exportLidarCloud(origin: GeoOrigin?) -> [URL]? {
         guard !lidarCloud.isEmpty else { return nil }
         let fileManager = FileManager.default
-        guard let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
-        else { return nil }
-        let directory = documents.appendingPathComponent("LidarExports", isDirectory: true)
+        let directory = InternalStorePaths.lidarSurveys(fileManager: fileManager)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()
