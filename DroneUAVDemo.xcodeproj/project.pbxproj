@@ -412,6 +412,7 @@
 		57567931F932770C6C47D878 /* PayloadLidarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109F2DD79890186DA110B364 /* PayloadLidarState.swift */; };
 		031A0B18B44F42DC4842CC18 /* PayloadLidarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */; };
 		19877DEBBEDDCBB287B0EFF7 /* LidarModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */; };
+		E4DA452F20BA177F7709D69F /* LidarSurfaceClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98E36D74AF6EB000928EFE17 /* LidarSurfaceClass.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -824,6 +825,7 @@
 		109F2DD79890186DA110B364 /* PayloadLidarState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadLidarState.swift; sourceTree = "<group>"; };
 		FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadLidarController.swift; sourceTree = "<group>"; };
 		AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarModuleView.swift; sourceTree = "<group>"; };
+		98E36D74AF6EB000928EFE17 /* LidarSurfaceClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarSurfaceClass.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -873,6 +875,7 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				98E36D74AF6EB000928EFE17 /* LidarSurfaceClass.swift */,
 				FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */,
 				109F2DD79890186DA110B364 /* PayloadLidarState.swift */,
 				E2B4A8070BC60C142B1B843A /* LidarPointCloud.swift */,
@@ -1532,6 +1535,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E4DA452F20BA177F7709D69F /* LidarSurfaceClass.swift in Sources */,
 				19877DEBBEDDCBB287B0EFF7 /* LidarModuleView.swift in Sources */,
 				031A0B18B44F42DC4842CC18 /* PayloadLidarController.swift in Sources */,
 				57567931F932770C6C47D878 /* PayloadLidarState.swift in Sources */,

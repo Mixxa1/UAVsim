@@ -135,8 +135,14 @@ final class DroneSceneController {
     private let lidarCloudRootNode = SCNNode()
     private var lidarCloud = LidarPointCloud()
     /// New points captured since the last visual bake, awaiting a chunk node.
-    private var lidarPendingPoints: [SIMD3<Float>] = []
+    private var lidarPendingPoints: [LidarPointCloud.Point] = []
     private var lidarLastBakeTime: TimeInterval = 0
+    /// Sensor pose at the previous sweep, so a sweep can be cast from a pose interpolated across
+    /// its own duration — the source of the motion distortion a real scanner records.
+    private var lidarPreviousPose: (position: SIMD3<Float>, orientation: simd_quatf, time: TimeInterval)?
+    private var lidarNextScanID: UInt32 = 0
+    /// Wall-clock instant of the survey's first sweep; every timestamp is relative to it.
+    private var lidarEpoch: TimeInterval?
     private let hoseRigNode = SCNNode()
     private let hoseYawNode = SCNNode()
     private let hosePitchNode = SCNNode()
@@ -5042,23 +5048,43 @@ final class DroneSceneController {
         return lidarCameraNode
     }
 
-    /// One cross-track sweep: a fan of beams perpendicular to the flight line, each raycast into the
-    /// world, every hit geo-referenceable and accumulated (voxel-deduplicated) into the survey
-    /// cloud. Returns the live statistics for the HUD. This is the pushbroom pattern of a real
-    /// airborne scanner — points build up along the track as the aircraft advances.
-    func scanLidarSweep(state: PayloadLidarOpticsState) -> (pointCount: Int, coverageSquareMeters: Double, isBufferFull: Bool) {
+    /// One cross-track sweep of the scanner.
+    ///
+    /// The fan is not fired instantaneously. Beam `i` is cast from the sensor pose interpolated
+    /// between the previous sweep and this one and carries the timestamp of that instant, because
+    /// the aircraft really does move while the fan sweeps: the returns arrive slightly skewed, which
+    /// is the motion distortion a real scanner exhibits — present in the data to be measured rather
+    /// than assumed away. Every return keeps its range, intensity, channel and surface class, and
+    /// carries ranging noise, which is precisely what the voxel centroid filter averages back out.
+    /// Main-actor isolated because it asks the installed world about its water and its surface
+    /// provenance, both of which the `FlyableWorld` contract keeps on the main actor. The only
+    /// caller is the view model's per-tick refresh, which is already there.
+    @MainActor
+    func scanLidarSweep(state: PayloadLidarOpticsState) -> LidarScanStatistics {
         guard state.isAvailable, state.isPowered, state.isScanning else {
-            return (lidarCloud.count, Double(lidarCloud.coverageSquareMeters), lidarCloud.isFull)
+            return lidarStatistics()
         }
         ensureLidarRig()
 
-        let origin = lidarPitchNode.simdWorldPosition
-        let boresight = simd_normalize(simd_act(
-            simd_quatf(lidarPitchNode.simdWorldTransform),
-            SIMD3<Float>(0.0, 0.0, -1.0)
-        ))
-        // Horizontal flight axis (the drone's forward), the sweep rotates the boresight about it.
-        var axis = simd_act(simd_quatf(droneNode.simdWorldTransform), SIMD3<Float>(0.0, 0.0, -1.0))
+        let now = CACurrentMediaTime()
+        if lidarEpoch == nil { lidarEpoch = now }
+        let epoch = lidarEpoch ?? now
+
+        let sensorPosition = lidarPitchNode.simdWorldPosition
+        let sensorOrientation = simd_normalize(simd_quatf(lidarPitchNode.simdWorldTransform))
+        let vehiclePosition = droneNode.simdWorldPosition
+        let vehicleOrientation = simd_normalize(simd_quatf(droneNode.simdWorldTransform))
+
+        // The first sweep has no predecessor; treating it as a standstill leaves it undistorted.
+        let previous = lidarPreviousPose
+            ?? (position: sensorPosition, orientation: sensorOrientation, time: now)
+        lidarPreviousPose = (sensorPosition, sensorOrientation, now)
+
+        let scanID = lidarNextScanID
+        lidarNextScanID &+= 1
+
+        // Horizontal flight axis (the airframe's forward), about which the fan sweeps.
+        var axis = simd_act(vehicleOrientation, SIMD3<Float>(0.0, 0.0, -1.0))
         axis.y = 0.0
         let axisLength = simd_length(axis)
         let flightAxis = axisLength > 0.05 ? axis / axisLength : SIMD3<Float>(0.0, 0.0, 1.0)
@@ -5066,21 +5092,37 @@ final class DroneSceneController {
         let beamCount = max(2, state.beamCount)
         let fanRadians = Float(state.fanFieldOfViewDegrees).degreesToRadians
         let maxRange = max(1.0, Float(state.maxRangeMeters))
+        let water = installedWorld?.water
 
         for index in 0..<beamCount {
-            let t = Float(index) / Float(beamCount - 1)
-            let angle = (t - 0.5) * fanRadians
+            let fraction = Float(index) / Float(beamCount - 1)
+            let origin = simd_mix(
+                previous.position,
+                sensorPosition,
+                SIMD3<Float>(repeating: fraction)
+            )
+            let orientation = simd_slerp(previous.orientation, sensorOrientation, fraction)
+            let boresight = simd_normalize(simd_act(orientation, SIMD3<Float>(0.0, 0.0, -1.0)))
+            let angle = (fraction - 0.5) * fanRadians
             let direction = simd_normalize(simd_act(
                 simd_quatf(angle: angle, axis: flightAxis),
                 boresight
             ))
+            let timestamp = previous.time + Double(fraction) * (now - previous.time) - epoch
 
             var hitPoint: SIMD3<Float>?
             var hitNormal = SIMD3<Float>(0.0, 1.0, 0.0)
+            var classification = LidarSurfaceClass.unclassified
             if let meshCollision,
-               let hit = meshCollision.raycast(origin: origin, direction: direction, maxDistance: maxRange) {
+               let hit = meshCollision.raycast(
+                   origin: origin,
+                   direction: direction,
+                   maxDistance: maxRange
+               ) {
                 hitPoint = hit.point
                 hitNormal = hit.normal
+                classification = installedWorld?.surfaceClass(forTriangle: hit.triangleIndex)
+                    ?? .unclassified
             } else if let hit = analyticEnvironmentRayHit(
                 origin: origin,
                 direction: direction,
@@ -5089,50 +5131,139 @@ final class DroneSceneController {
                 hitPoint = origin + direction * hit.distance
             }
 
-            guard let point = hitPoint else { continue }
-            let range = simd_length(point - origin)
-            // Synthetic intensity: head-on returns and short ranges read strong, grazing and far
-            // returns weak — the shape of a real intensity channel.
-            let cosIncidence = abs(simd_dot(direction, simd_normalize(hitNormal)))
-            let rangeFactor = max(0.25, 1.0 - (range / maxRange) * 0.7)
-            let intensity = max(0.05, min(1.0, cosIncidence * rangeFactor))
+            // Water swallows a topographic scanner's beam: at these wavelengths the surface is
+            // specular and reflects it away, so most shots over water return nothing at all and the
+            // few that do are weak surface returns — not the riverbed the ray reaches geometrically
+            // (water carries no collision surface of its own).
+            if let water, direction.y < 0.0 {
+                let travel = (water.level - origin.y) / direction.y
+                let existing = hitPoint.map { simd_length($0 - origin) } ?? .greatestFiniteMagnitude
+                if travel > 0.0, travel <= maxRange, travel < existing {
+                    let surfacePoint = origin + direction * travel
+                    if water.isWater(x: surfacePoint.x, z: surfacePoint.z) {
+                        guard lidarBeamHash(scanID: scanID, ring: index, salt: 0x5EA) % 100 < 22
+                        else { continue }
+                        hitPoint = surfacePoint
+                        hitNormal = SIMD3<Float>(0.0, 1.0, 0.0)
+                        classification = .water
+                    }
+                }
+            }
 
-            if lidarCloud.insert(position: point, intensity: intensity) {
-                lidarPendingPoints.append(point)
+            guard let surface = hitPoint else { continue }
+
+            let trueRange = simd_length(surface - origin)
+            // Centimetre-class ranging noise, degrading slightly with distance. Zero-mean and
+            // reproducible for a given beam, so an identically re-flown survey is identical.
+            let measuredRange = max(
+                0.05,
+                trueRange + lidarRangeNoise(scanID: scanID, ring: index, range: trueRange)
+            )
+            let measuredPoint = origin + direction * measuredRange
+
+            let cosIncidence = abs(simd_dot(direction, simd_normalize(hitNormal)))
+            let rangeFactor = max(0.15, 1.0 - (measuredRange / maxRange) * 0.7)
+            let intensity = max(
+                0.01,
+                min(1.0, classification.reflectance * cosIncidence * rangeFactor * 1.6)
+            )
+
+            let result = lidarCloud.insert(LidarPointCloud.Point(
+                position: measuredPoint,
+                intensity: intensity,
+                range: measuredRange,
+                timestamp: timestamp,
+                scanID: scanID,
+                ring: UInt16(index),
+                classification: classification,
+                returnCount: 1
+            ))
+            // Only a genuinely new point needs drawing; a merge refines a centroid already on
+            // screen, by at most one voxel edge.
+            if case .inserted(let storedIndex) = result {
+                lidarPendingPoints.append(lidarCloud.points[storedIndex])
             }
         }
 
-        // Bake accumulated points into an immutable chunk node at a throttled cadence, so a
-        // million-point survey never rebuilds the whole cloud in a frame.
+        lidarCloud.recordScanPose(LidarPointCloud.ScanPose(
+            scanID: scanID,
+            startTimestamp: previous.time - epoch,
+            endTimestamp: now - epoch,
+            startPosition: previous.position,
+            endPosition: sensorPosition,
+            startOrientation: previous.orientation,
+            endOrientation: sensorOrientation,
+            vehiclePosition: vehiclePosition,
+            vehicleOrientation: vehicleOrientation
+        ))
+
         // Chunks are one draw call each, and from the sensor's own viewpoint every chunk is on
         // screen at once — so flush on a decent batch, not on a twitchy interval that would leave
         // a long survey as hundreds of near-empty nodes.
-        let now = CACurrentMediaTime()
         if !lidarPendingPoints.isEmpty,
            lidarPendingPoints.count >= 4_000 || now - lidarLastBakeTime > 0.6 {
-            bakeLidarChunk(lidarPendingPoints)
+            bakeLidarChunk(lidarPendingPoints, colorMode: state.colorMode)
             lidarPendingPoints.removeAll(keepingCapacity: true)
             lidarLastBakeTime = now
         }
 
-        return (lidarCloud.count, Double(lidarCloud.coverageSquareMeters), lidarCloud.isFull)
+        return lidarStatistics()
     }
 
-    private func bakeLidarChunk(_ positions: [SIMD3<Float>]) {
-        guard !positions.isEmpty else { return }
-        let range = lidarCloud.elevationRange ?? (positions[0].y, positions[0].y + 1.0)
+    private func lidarStatistics() -> LidarScanStatistics {
+        LidarScanStatistics(
+            pointCount: lidarCloud.count,
+            coverageSquareMeters: Double(lidarCloud.coverageSquareMeters),
+            meanReturnsPerPoint: Double(lidarCloud.meanReturnsPerPoint),
+            scanCount: lidarCloud.scanPoses.count,
+            isBufferFull: lidarCloud.isFull
+        )
+    }
+
+    /// Deterministic per-beam hash — SplitMix64 finalisation over the beam's identity.
+    private func lidarBeamHash(scanID: UInt32, ring: Int, salt: UInt64) -> UInt64 {
+        var value = UInt64(scanID) &* 0x9E37_79B9_7F4A_7C15
+        value ^= UInt64(UInt32(truncatingIfNeeded: ring)) &* 0xBF58_476D_1CE4_E5B9
+        value ^= salt
+        value ^= value >> 30
+        value = value &* 0xBF58_476D_1CE4_E5B9
+        value ^= value >> 27
+        value = value &* 0x94D0_49BB_1331_11EB
+        value ^= value >> 31
+        return value
+    }
+
+    private func lidarRangeNoise(scanID: UInt32, ring: Int, range: Float) -> Float {
+        let hash = lidarBeamHash(scanID: scanID, ring: ring, salt: 0x9E17_5E00)
+        let first = max(1e-7, Float(hash & 0xFF_FFFF) / Float(0xFF_FFFF))
+        let second = Float((hash >> 24) & 0xFF_FFFF) / Float(0xFF_FFFF)
+        // Box-Muller: uniform pair to a standard normal.
+        let gaussian = (-2.0 * log(first)).squareRoot() * cos(2.0 * .pi * second)
+        let sigma = 0.012 + range * 0.00005
+        return gaussian * sigma
+    }
+
+    private func bakeLidarChunk(_ points: [LidarPointCloud.Point], colorMode: LidarColorMode) {
+        guard !points.isEmpty else { return }
+        let range = lidarCloud.elevationRange
+            ?? (points[0].position.y, points[0].position.y + 1.0)
 
         var vertices: [SCNVector3] = []
-        vertices.reserveCapacity(positions.count)
+        vertices.reserveCapacity(points.count)
         var colors: [SIMD4<Float>] = []
-        colors.reserveCapacity(positions.count)
-        for position in positions {
+        colors.reserveCapacity(points.count)
+        for point in points {
             // Visual lift only — the exported cloud keeps the true hit position.
-            vertices.append(SCNVector3(position.x, position.y + 0.08, position.z))
-            let color = LidarPointCloud.elevationColor(
-                y: position.y,
-                minimum: range.minimum,
-                maximum: range.maximum
+            vertices.append(SCNVector3(
+                point.position.x,
+                point.position.y + 0.08,
+                point.position.z
+            ))
+            let color = LidarPointCloud.color(
+                for: point,
+                mode: colorMode,
+                elevationMinimum: range.minimum,
+                elevationMaximum: range.maximum
             )
             // Lifted toward white: against the sensor's black field these read as glowing returns
             // rather than flat paint. The exported cloud keeps the unboosted ramp.
@@ -5169,9 +5300,7 @@ final class DroneSceneController {
         material.lightingModel = .constant
         // Points DO write depth. Looking straight down the sensor boresight stacks the whole cloud
         // column into a few pixels; with depth writes off, every one of those overlapping sprites
-        // was shaded (fill-rate death → the lag on entering the LiDAR camera). Writing depth lets the
-        // nearest point win each pixel, collapsing the overdraw. The +0.08 m visual lift keeps them
-        // from z-fighting the surface they sit on.
+        // was shaded. Writing depth lets the nearest point win each pixel.
         material.writesToDepthBuffer = true
         material.readsFromDepthBuffer = true
         geometry.materials = [material]
@@ -5185,16 +5314,48 @@ final class DroneSceneController {
         lidarCloudRootNode.addChildNode(node)
     }
 
+    /// Re-colours the whole stored survey — the returns are untouched, only their RGB is re-derived,
+    /// so switching view mode is free of any data loss.
+    func rebuildLidarVisual(colorMode: LidarColorMode) {
+        lidarCloudRootNode.childNodes.forEach { $0.removeFromParentNode() }
+        lidarPendingPoints.removeAll(keepingCapacity: true)
+        guard !lidarCloud.isEmpty else { return }
+        let batch = 60_000
+        var start = 0
+        while start < lidarCloud.points.count {
+            let end = min(start + batch, lidarCloud.points.count)
+            bakeLidarChunk(Array(lidarCloud.points[start..<end]), colorMode: colorMode)
+            start = end
+        }
+    }
+
+    /// Applies a new filter configuration. Returns true when the stored survey had to be discarded
+    /// — a coarser cloud cannot be refined back, and raw returns a previous voxel pass threw away
+    /// cannot be recovered.
+    @discardableResult
+    func configureLidarFilter(voxelSizeMeters: Float, isRawMode: Bool) -> Bool {
+        guard lidarCloud.voxelSizeMeters != voxelSizeMeters || lidarCloud.isRawMode != isRawMode
+        else { return false }
+        let hadPoints = !lidarCloud.isEmpty
+        lidarCloud.reconfigure(voxelSizeMeters: voxelSizeMeters, isRawMode: isRawMode)
+        lidarPendingPoints.removeAll(keepingCapacity: true)
+        lidarCloudRootNode.childNodes.forEach { $0.removeFromParentNode() }
+        return hadPoints
+    }
+
     func clearLidarCloud() {
         lidarCloud.clear()
         lidarPendingPoints.removeAll(keepingCapacity: true)
+        lidarPreviousPose = nil
+        lidarEpoch = nil
+        lidarNextScanID = 0
         lidarCloudRootNode.childNodes.forEach { $0.removeFromParentNode() }
     }
 
-    /// Writes the accumulated survey to the app's `LidarExports` folder — a geo-referenced CSV
-    /// (WGS84 lat/lon/MSL per point) and a coloured PLY for point-cloud viewers — and returns the
-    /// written files. `origin` is the world's geo anchor; without it only the local PLY is written.
-    func exportLidarCloud(origin: GeoOrigin?) -> [URL]? {
+    /// Writes the survey to the app's `LidarSurveys` folder and returns the written files: a binary
+    /// PLY (position, RGB and every physical attribute), a geo-referenced CSV in WGS84, and the
+    /// sensor trajectory, one row per sweep, without which the cloud could not be de-skewed.
+    func exportLidarCloud(origin: GeoOrigin?, colorMode: LidarColorMode) -> [URL]? {
         guard !lidarCloud.isEmpty else { return nil }
         let fileManager = FileManager.default
         let directory = InternalStorePaths.lidarSurveys(fileManager: fileManager)
@@ -5203,10 +5364,14 @@ final class DroneSceneController {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let base = "lidar-\(formatter.string(from: Date()))"
+        let summary = lidarCloud.isRawMode
+            ? "raw scan, unfiltered returns"
+            : "voxel centroid filter \(lidarCloud.voxelSizeMeters) m"
 
         var written: [URL] = []
         let plyURL = directory.appendingPathComponent("\(base).ply")
-        if (try? lidarCloud.plyData().write(to: plyURL, options: .atomic)) != nil {
+        let ply = lidarCloud.binaryPLYData(colorMode: colorMode, comment: summary)
+        if (try? ply.write(to: plyURL, options: .atomic)) != nil {
             written.append(plyURL)
         }
         if let origin {
@@ -5215,9 +5380,13 @@ final class DroneSceneController {
                 written.append(csvURL)
             }
         }
+        let trajectoryURL = directory.appendingPathComponent("\(base)-trajectory.csv")
+        let trajectory = lidarCloud.trajectoryCSVData(origin: origin)
+        if (try? trajectory.write(to: trajectoryURL, options: .atomic)) != nil {
+            written.append(trajectoryURL)
+        }
         return written.isEmpty ? nil : written
     }
-
     // MARK: - Fire hose rig
 
     func ensureHoseRig() {

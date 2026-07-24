@@ -1,13 +1,16 @@
 import SwiftUI
 
-/// Compact ground-control panel for the LiDAR survey payload. Unlike the camera/rangefinder optics
-/// overlays, LiDAR is flown like a normal sortie while the geo-referenced cloud builds up in the
-/// main 3-D view — so this is a control-and-status panel (scan enable, live point count and
-/// coverage, gimbal pitch, clear, export), not a through-the-optics viewport.
+/// Ground-control panel for the LiDAR survey payload. Unlike the camera/rangefinder optics
+/// overlays, LiDAR is flown like a normal sortie while the geo-referenced cloud builds up — so this
+/// is a control-and-status panel (scan enable, filter, colour view, live statistics, clear, export)
+/// rather than a through-the-optics viewport.
 struct LidarModuleView: View {
     let state: PayloadLidarOpticsState
     let onToggleScan: () -> Void
     let onPitchDelta: (Double) -> Void
+    let onVoxelSize: (LidarVoxelSize) -> Void
+    let onRawMode: (Bool) -> Void
+    let onColorMode: (LidarColorMode) -> Void
     let onClear: () -> Void
     let onExport: () -> [URL]?
 
@@ -37,7 +40,45 @@ struct LidarModuleView: View {
 
             statRow(L10n.s("lidar.hud.points"), value: pointText)
             statRow(L10n.s("lidar.hud.coverage"), value: coverageText)
+            statRow(L10n.s("lidar.hud.returns_per_point"), value: returnsText)
+            statRow(L10n.s("lidar.hud.scans"), value: "\(state.scanCount)")
             statRow(L10n.s("lidar.hud.pitch"), value: String(format: "%.0f°", state.gimbalPitchDegrees))
+
+            Divider().overlay(GroundControlPalette.border)
+
+            // Filter: voxel edge length, or raw returns with no filtering at all.
+            Text(L10n.s("lidar.hud.filter"))
+                .font(.system(size: 9, weight: .semibold).monospaced())
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            HStack(spacing: 3) {
+                ForEach(LidarVoxelSize.allCases) { size in
+                    segmentButton(
+                        size.label,
+                        isSelected: !state.isRawMode && state.voxelSize == size,
+                        action: { onVoxelSize(size) }
+                    )
+                }
+                segmentButton(
+                    L10n.s("lidar.hud.raw"),
+                    isSelected: state.isRawMode,
+                    action: { onRawMode(!state.isRawMode) }
+                )
+            }
+
+            Text(L10n.s("lidar.hud.color"))
+                .font(.system(size: 9, weight: .semibold).monospaced())
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            HStack(spacing: 3) {
+                ForEach(LidarColorMode.allCases) { mode in
+                    segmentButton(
+                        L10n.s(mode.shortLabelKey),
+                        isSelected: state.colorMode == mode,
+                        action: { onColorMode(mode) }
+                    )
+                }
+            }
+
+            Divider().overlay(GroundControlPalette.border)
 
             HStack(spacing: 6) {
                 actionButton(
@@ -55,7 +96,7 @@ struct LidarModuleView: View {
                 })
                 actionButton(L10n.s("lidar.hud.export"), tint: GroundControlPalette.accent, action: {
                     if let urls = onExport(), let first = urls.first {
-                        exportNote = L10n.f("lidar.hud.saved", first.deletingLastPathComponent().lastPathComponent + "/" + first.lastPathComponent)
+                        exportNote = L10n.f("lidar.hud.saved", "\(urls.count)× \(first.deletingPathExtension().lastPathComponent)")
                     }
                 })
             }
@@ -65,11 +106,11 @@ struct LidarModuleView: View {
                     .font(.system(size: 9).monospaced())
                     .foregroundStyle(GroundControlPalette.textSecondary)
                     .lineLimit(2)
-                    .frame(maxWidth: 190, alignment: .leading)
+                    .frame(maxWidth: 210, alignment: .leading)
             }
         }
         .padding(12)
-        .frame(width: 214, alignment: .leading)
+        .frame(width: 238, alignment: .leading)
         .background(GroundControlPalette.panel.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -79,6 +120,9 @@ struct LidarModuleView: View {
 
     private var pointText: String {
         let count = state.capturedPointCount
+        if count >= 1_000_000 {
+            return String(format: "%.2fM", Double(count) / 1_000_000.0)
+        }
         if count >= 1_000 {
             return String(format: "%.1fk", Double(count) / 1_000.0)
         }
@@ -93,6 +137,10 @@ struct LidarModuleView: View {
         return String(format: "%.0f %@", squareMeters, L10n.s("lidar.hud.square_meters"))
     }
 
+    private var returnsText: String {
+        state.isRawMode ? "—" : String(format: "%.1f", state.meanReturnsPerPoint)
+    }
+
     private func statRow(_ label: String, value: String) -> some View {
         HStack {
             Text(label)
@@ -103,6 +151,28 @@ struct LidarModuleView: View {
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
                 .foregroundStyle(GroundControlPalette.textPrimary)
         }
+    }
+
+    private func segmentButton(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 9, weight: .semibold).monospaced())
+                .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(
+                    isSelected ? GroundControlPalette.accent.opacity(0.30) : GroundControlPalette.inset,
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .stroke(
+                            isSelected ? GroundControlPalette.accent.opacity(0.65) : GroundControlPalette.border,
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func actionButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {

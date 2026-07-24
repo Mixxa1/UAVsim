@@ -4174,15 +4174,56 @@ final class DroneSimulationViewModel: ObservableObject {
         lidarController.updateStatistics(
             capturedPointCount: 0,
             coverageSquareMeters: 0.0,
+            meanReturnsPerPoint: 0.0,
+            scanCount: 0,
             isBufferFull: false
         )
+        lidarOpticsState = lidarController.opticsState
+    }
+
+    /// Voxel edge length for the survey filter. Changing it discards the stored survey — a coarser
+    /// cloud cannot be refined back — which the panel makes visible.
+    func setLidarVoxelSize(_ size: LidarVoxelSize) {
+        guard lidarController.setVoxelSize(size) else { return }
+        applyLidarFilterConfiguration()
+    }
+
+    /// Raw scan keeps every return, unfiltered: the mode in which sensor noise, multi-hit structure
+    /// and motion distortion survive for analysis.
+    func setLidarRawMode(_ enabled: Bool) {
+        guard lidarController.setRawMode(enabled) else { return }
+        applyLidarFilterConfiguration()
+    }
+
+    private func applyLidarFilterConfiguration() {
+        sceneController.configureLidarFilter(
+            voxelSizeMeters: lidarController.opticsState.voxelSize.rawValue,
+            isRawMode: lidarController.opticsState.isRawMode
+        )
+        lidarController.updateStatistics(
+            capturedPointCount: 0,
+            coverageSquareMeters: 0.0,
+            meanReturnsPerPoint: 0.0,
+            scanCount: 0,
+            isBufferFull: false
+        )
+        lidarOpticsState = lidarController.opticsState
+    }
+
+    /// Colour view for the cloud. Purely a re-colouring: the stored returns are untouched.
+    func setLidarColorMode(_ mode: LidarColorMode) {
+        guard lidarController.setColorMode(mode) else { return }
+        sceneController.rebuildLidarVisual(colorMode: mode)
         lidarOpticsState = lidarController.opticsState
     }
 
     /// Writes the survey to disk, reveals it in Finder, and returns the files (nil when empty).
     @discardableResult
     func exportLidarCloud() -> [URL]? {
-        let urls = sceneController.exportLidarCloud(origin: sceneController.installedWorld?.origin)
+        let urls = sceneController.exportLidarCloud(
+            origin: sceneController.installedWorld?.origin,
+            colorMode: lidarController.opticsState.colorMode
+        )
         if let urls, !urls.isEmpty {
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         }
@@ -10179,6 +10220,8 @@ final class DroneSimulationViewModel: ObservableObject {
         lidarController.updateStatistics(
             capturedPointCount: stats.pointCount,
             coverageSquareMeters: stats.coverageSquareMeters,
+            meanReturnsPerPoint: stats.meanReturnsPerPoint,
+            scanCount: stats.scanCount,
             isBufferFull: stats.isBufferFull
         )
         lidarOpticsState = lidarController.opticsState

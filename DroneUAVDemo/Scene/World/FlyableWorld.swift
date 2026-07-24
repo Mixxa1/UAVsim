@@ -38,4 +38,15 @@ protocol FlyableWorld: AnyObject {
     /// Per-frame level-of-detail work. A world that holds all its geometry at once does nothing
     /// here, which is why this is not optional to *call* but is trivial to *implement*.
     func updateStreaming(camera: MeshStreamingPolicy.Camera)
+
+    /// What kind of surface a collision triangle is, when the world knows. A world assembled from
+    /// vector data built each triangle for a reason — ground, a wall, a carriageway, a deck, a tree
+    /// — and can say so; a photogrammetric mesh is one continuous textured surface with no such
+    /// provenance and returns nil. Used by the LiDAR payload to classify returns from fact rather
+    /// than from a plausible-looking guess about their normals.
+    func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass?
+}
+
+extension FlyableWorld {
+    func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass? { nil }
 }

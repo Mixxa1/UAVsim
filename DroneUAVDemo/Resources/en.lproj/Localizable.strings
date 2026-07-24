@@ -2779,3 +2779,13 @@
 "lidar.hud.saved" = "Saved: %@";
 "lidar.hud.hectares" = "ha";
 "lidar.hud.square_meters" = "m²";
+
+"lidar.hud.returns_per_point" = "Returns/point";
+"lidar.hud.scans" = "Sweeps";
+"lidar.hud.filter" = "FILTER, m";
+"lidar.hud.color" = "COLOUR";
+"lidar.hud.raw" = "RAW";
+"lidar.color.height" = "HGT";
+"lidar.color.intensity" = "INT";
+"lidar.color.material" = "MAT";
+"lidar.color.semantic" = "CLASS";

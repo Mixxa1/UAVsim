@@ -2774,3 +2774,13 @@
 "lidar.hud.saved" = "Сохранено: %@";
 "lidar.hud.hectares" = "га";
 "lidar.hud.square_meters" = "м²";
+
+"lidar.hud.returns_per_point" = "Возвр./точку";
+"lidar.hud.scans" = "Сканов";
+"lidar.hud.filter" = "ФИЛЬТР, м";
+"lidar.hud.color" = "ЦВЕТ";
+"lidar.hud.raw" = "RAW";
+"lidar.color.height" = "ВЫС";
+"lidar.color.intensity" = "ИНТ";
+"lidar.color.material" = "МАТ";
+"lidar.color.semantic" = "КЛАСС";

@@ -77,13 +77,42 @@ final class PayloadLidarController {
         opticsState.gimbalYawDegrees = 0.0
     }
 
+    /// Filter changes discard the survey: a coarser cloud cannot be refined back, and raw returns a
+    /// previous voxel pass threw away cannot be recovered. Returns true when the cloud must be
+    /// cleared, so the caller can do it and say so.
+    @discardableResult
+    func setVoxelSize(_ size: LidarVoxelSize) -> Bool {
+        guard opticsState.voxelSize != size else { return false }
+        opticsState.voxelSize = size
+        return true
+    }
+
+    @discardableResult
+    func setRawMode(_ enabled: Bool) -> Bool {
+        guard opticsState.isRawMode != enabled else { return false }
+        opticsState.isRawMode = enabled
+        return true
+    }
+
+    /// Purely a view change — the stored returns are untouched, only their colouring is re-derived.
+    @discardableResult
+    func setColorMode(_ mode: LidarColorMode) -> Bool {
+        guard opticsState.colorMode != mode else { return false }
+        opticsState.colorMode = mode
+        return true
+    }
+
     func updateStatistics(
         capturedPointCount: Int,
         coverageSquareMeters: Double,
+        meanReturnsPerPoint: Double,
+        scanCount: Int,
         isBufferFull: Bool
     ) {
         opticsState.capturedPointCount = capturedPointCount
         opticsState.coverageSquareMeters = coverageSquareMeters
+        opticsState.meanReturnsPerPoint = meanReturnsPerPoint
+        opticsState.scanCount = scanCount
         opticsState.isBufferFull = isBufferFull
     }
 

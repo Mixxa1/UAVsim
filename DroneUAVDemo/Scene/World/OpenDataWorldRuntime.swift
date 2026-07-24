@@ -18,6 +18,10 @@ final class OpenDataWorldRuntime: FlyableWorld {
 
     let rootNode: SCNNode
     let collision: MeshCollisionIndex
+    /// Half-open upper bounds, in triangles, of each contiguous run of collision triangles, paired
+    /// with the class this world built that run as. Ordered, so a lookup is a small linear scan
+    /// over a handful of spans.
+    private var collisionClassSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)] = []
     let water: WaterSurfaceModel?
     let origin: GeoOrigin
     let worldBounds: (minimum: SIMD3<Float>, maximum: SIMD3<Float>)
@@ -31,6 +35,14 @@ final class OpenDataWorldRuntime: FlyableWorld {
     private(set) lazy var spawnPoint: SIMD3<Float>? = WorldSpawnFinder(collision: collision, water: water).find()
 
     func updateStreaming(camera: MeshStreamingPolicy.Camera) {}
+
+    func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass? {
+        guard index >= 0 else { return nil }
+        for span in collisionClassSpans where index < span.upperBound {
+            return span.surfaceClass
+        }
+        return nil
+    }
 
     init(
         manifest: UAVWorldManifest,
@@ -315,6 +327,18 @@ final class OpenDataWorldRuntime: FlyableWorld {
                 corners.append(triangle.point2)
             }
         }
+        // Surface provenance for the LiDAR classifier, assembled in the same order as the corners
+        // above: ground first, then every building, then the OSM factory's own class runs.
+        var classSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)] = [
+            (collisionGroundCorners.count / 3, .ground),
+            (corners.count / 3, .building)
+        ]
+        let osmTriangleOffset = corners.count / 3
+        for span in osmAssembly.collisionClassSpans {
+            classSpans.append((osmTriangleOffset + span.upperBound / 3, span.surfaceClass))
+        }
+        self.collisionClassSpans = classSpans
+
         corners.append(contentsOf: osmAssembly.collisionCorners)
         self.collision = MeshCollisionIndex(triangleCorners: corners)
         self.worldBounds = (
@@ -910,6 +934,10 @@ private enum OSMSurfaceGeometryFactory {
     struct Assembly {
         let root: SCNNode
         let collisionCorners: [SIMD3<Float>]
+        /// Half-open upper bounds, in **corner** counts, of each contiguous run of collision
+        /// triangles, with the surface class the factory built that run as. Lets a sensor recover
+        /// what it hit from the triangle index alone.
+        let collisionClassSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)]
     }
 
     private enum RoadMaterialKey: Hashable {
@@ -1029,24 +1057,35 @@ private enum OSMSurfaceGeometryFactory {
             guard $0.outerRing.count >= 3 else { return nil }
             return ($0.outerRing, platformDeckLevel($0, terrainHeight: terrainHeight))
         }
-        for feature in features.transport where feature.centerline.count >= 2 {
-            appendTransport(
-                feature,
-                terrainHeight: terrainHeight,
-                network: bridgeNetwork,
-                buildings: buildings,
-                obstacles: obstacleIndex,
-                platforms: platforms,
-                pylons: pylons,
-                portalIndices: portalPylons,
-                pylonCrossings: &pylonCrossings,
-                suspensionRuns: &suspensionRuns,
-                roadCorners: &roadCorners,
-                bridgeDeck: &bridgeDeckCorners,
-                bridgeSides: &bridgeSideCorners,
-                bridgePillars: &bridgePillarCorners,
-                collision: &collision
-            )
+        // Ground roads and bridges are emitted in two passes rather than one interleaved loop, so
+        // that each contiguous stretch of collision triangles belongs to a single surface class.
+        // That is what lets a LiDAR return be classified from what the world actually built there
+        // instead of being guessed at from its normal. Bridges still precede the pylon and cable
+        // passes, which depend on the crossings and suspension runs those bridges record.
+        var collisionClassSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)] = []
+        for pass in 0..<2 {
+            let wantsBridges = pass == 1
+            for feature in features.transport
+            where feature.centerline.count >= 2 && feature.isBridge == wantsBridges {
+                appendTransport(
+                    feature,
+                    terrainHeight: terrainHeight,
+                    network: bridgeNetwork,
+                    buildings: buildings,
+                    obstacles: obstacleIndex,
+                    platforms: platforms,
+                    pylons: pylons,
+                    portalIndices: portalPylons,
+                    pylonCrossings: &pylonCrossings,
+                    suspensionRuns: &suspensionRuns,
+                    roadCorners: &roadCorners,
+                    bridgeDeck: &bridgeDeckCorners,
+                    bridgeSides: &bridgeSideCorners,
+                    bridgePillars: &bridgePillarCorners,
+                    collision: &collision
+                )
+            }
+            collisionClassSpans.append((collision.count, wantsBridges ? .bridgeDeck : .road))
         }
         var pylonTowerCorners: [SIMD3<Float>] = []
         for pylon in pylons {
@@ -1076,6 +1115,8 @@ private enum OSMSurfaceGeometryFactory {
             root.addChildNode(towers)
         }
 
+        collisionClassSpans.append((collision.count, .structure))
+
         // Suspension cables: any main deck that runs through portal towers gets its main cables
         // (sagging between towers, straight to the anchorages) and vertical hangers — the same
         // automatic data-driven path as every other structure here, no per-bridge tuning.
@@ -1099,6 +1140,8 @@ private enum OSMSurfaceGeometryFactory {
             cables.castsShadow = false
             root.addChildNode(cables)
         }
+        collisionClassSpans.append((collision.count, .structure))
+
         for area in features.bridgeAreas {
             appendBridgeArea(
                 area,
@@ -1110,6 +1153,7 @@ private enum OSMSurfaceGeometryFactory {
                 collision: &collision
             )
         }
+        collisionClassSpans.append((collision.count, .bridgeDeck))
 
         // Flat roads are coplanar decals: overlaps resolve by paint order, not depth. A footway and
         // the street it crosses no longer z-fight (the old striping) and no longer sit at visibly
@@ -1240,6 +1284,8 @@ private enum OSMSurfaceGeometryFactory {
                 )
             }
         }
+        collisionClassSpans.append((collision.count, .vegetation))
+
         if !treeRoot.childNodes.isEmpty {
             root.addChildNode(treeRoot)
         }
@@ -1262,7 +1308,11 @@ private enum OSMSurfaceGeometryFactory {
             root.addChildNode(canopies)
         }
 
-        return Assembly(root: root, collisionCorners: collision)
+        return Assembly(
+            root: root,
+            collisionCorners: collision,
+            collisionClassSpans: collisionClassSpans
+        )
     }
 
     /// Which OSM nodes a bridge deck must ramp down to versus stay elevated over. An **abutment** —
