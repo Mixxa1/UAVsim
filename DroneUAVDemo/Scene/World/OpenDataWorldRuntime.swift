@@ -980,20 +980,57 @@ private enum OSMSurfaceGeometryFactory {
 
         var trunkCorners: [SIMD3<Float>] = []
         var canopyCorners: [SIMD3<Float>] = []
+        let treeRoot = SCNNode()
+        treeRoot.name = "world.osm.vegetation.trees"
         for candidate in candidates {
             if water?.isWater(x: candidate.position.x, z: candidate.position.y) == true {
                 continue
             }
             let seed = stableHash(candidate.identifier)
-            appendPlant(
-                at: candidate.position,
-                kind: candidate.kind,
-                seed: seed,
-                ground: terrainHeight(candidate.position.x, candidate.position.y),
-                trunks: &trunkCorners,
-                canopies: &canopyCorners,
-                collision: &collision
-            )
+            let ground = terrainHeight(candidate.position.x, candidate.position.y)
+            let metrics = plantMetrics(kind: candidate.kind, seed: seed)
+
+            if let tree = PineTreeAssetLoader.shared.makeTreeNode(
+                targetHeightMeters: metrics.height,
+                yaw: metrics.yaw
+            ) {
+                // `clone()` shares the one loaded geometry and material, so a forest of thousands
+                // costs the memory of a single tree while SceneKit still frustum-culls each instance
+                // — the reason not to `flattenedClone` (that bakes 5.6k triangles per tree into one
+                // un-cullable buffer, ~gigabytes at this count). Collision uses the cheap procedural
+                // trunk+canopy proxy below, not the model's full foliage mesh, which the airframe
+                // could never feel the difference against and which would bloat the collision index.
+                tree.position = SCNVector3(candidate.position.x, ground, candidate.position.y)
+                treeRoot.addChildNode(tree)
+                appendPlant(
+                    at: candidate.position,
+                    seed: seed,
+                    ground: ground,
+                    height: metrics.height,
+                    shrub: metrics.shrub,
+                    emitVisual: false,
+                    trunks: &trunkCorners,
+                    canopies: &canopyCorners,
+                    collision: &collision
+                )
+            } else {
+                // Model unavailable — fall back to the original procedural cone tree, drawn as well
+                // as collided so the world is never treeless when the asset is missing.
+                appendPlant(
+                    at: candidate.position,
+                    seed: seed,
+                    ground: ground,
+                    height: metrics.height,
+                    shrub: metrics.shrub,
+                    emitVisual: true,
+                    trunks: &trunkCorners,
+                    canopies: &canopyCorners,
+                    collision: &collision
+                )
+            }
+        }
+        if !treeRoot.childNodes.isEmpty {
+            root.addChildNode(treeRoot)
         }
         if let trunks = makeNode(
             corners: trunkCorners,
@@ -1046,12 +1083,13 @@ private enum OSMSurfaceGeometryFactory {
             let length = simd_length(delta)
             guard length.isFinite, length > 0.05 else { continue }
             let perpendicular = SIMD2<Float>(-delta.y, delta.x) / length * halfWidth
+            let surfaceOffset = roadSurfaceOffset(key)
             let y0 = feature.isBridge
                 ? bridgeLift
-                : terrainHeight(start.x, start.y) + 0.09
+                : terrainHeight(start.x, start.y) + surfaceOffset
             let y1 = feature.isBridge
                 ? bridgeLift
-                : terrainHeight(end.x, end.y) + 0.09
+                : terrainHeight(end.x, end.y) + surfaceOffset
 
             let a = SIMD3<Float>(start.x + perpendicular.x, y0, start.y + perpendicular.y)
             let b = SIMD3<Float>(start.x - perpendicular.x, y0, start.y - perpendicular.y)
@@ -1059,11 +1097,19 @@ private enum OSMSurfaceGeometryFactory {
             let d = SIMD3<Float>(end.x + perpendicular.x, y1, end.y + perpendicular.y)
             let top = [a, c, b, a, d, c]
             corners[key, default: []].append(contentsOf: top)
+            // Every road surface — not just bridges — is a solid, landable ledge sitting
+            // `surfaceOffset` above the terrain. Without this the pilot's aircraft rests on the
+            // ground *under* a visible road and reads as sunk into the asphalt; with it, it rests
+            // on the road it can see. Only the flat top quads enter collision: the joint caps below
+            // are cosmetic gap-fillers and would roughly double road collision for a sub-metre wedge
+            // no airframe can fall into, so they stay out (bridges keep their cap collision because
+            // an elevated deck genuinely could be crossed at a joint).
+            collision.append(contentsOf: top)
             if index > 0 {
                 let joint = feature.centerline[index]
                 let jointY = feature.isBridge
                     ? bridgeLift
-                    : terrainHeight(joint.x, joint.y) + 0.09
+                    : terrainHeight(joint.x, joint.y) + surfaceOffset
                 let cap = circularCap(
                     centre: SIMD3<Float>(joint.x, jointY, joint.y),
                     radius: halfWidth
@@ -1073,7 +1119,6 @@ private enum OSMSurfaceGeometryFactory {
             }
 
             guard feature.isBridge else { continue }
-            collision.append(contentsOf: top)
             let thickness: Float = 0.65
             let belowA = a - SIMD3<Float>(0, thickness, 0)
             let belowB = b - SIMD3<Float>(0, thickness, 0)
@@ -1291,21 +1336,40 @@ private enum OSMSurfaceGeometryFactory {
         return result
     }
 
+    /// Deterministic per-plant size and orientation. Shared by the model-clone path (to scale and
+    /// yaw the `.usdz`) and the collision proxy, so the invisible collider always matches the tree
+    /// the pilot sees. Seed-derived, never random, because the world is rebuilt reproducibly.
+    private static func plantMetrics(
+        kind: UAVWorldVegetationKind,
+        seed: UInt64
+    ) -> (height: Float, shrub: Bool, yaw: Float) {
+        let variation = Float(seed & 0xffff) / 65_535
+        let shrub = kind == .scrub
+        let height: Float = shrub ? 2.0 + variation * 1.6 : 7.0 + variation * 8.0
+        let yaw = Float((seed >> 24) & 0xff) / 255 * (.pi * 2)
+        return (height, shrub, yaw)
+    }
+
+    /// Builds a hexagonal trunk-and-canopy plant. `emitVisual` draws it (procedural fallback for a
+    /// missing model); collision is always emitted — it is the cheap proxy standing in for the
+    /// `.usdz` foliage mesh when the model *is* present.
     private static func appendPlant(
         at position: SIMD2<Float>,
-        kind: UAVWorldVegetationKind,
         seed: UInt64,
         ground: Float,
+        height: Float,
+        shrub: Bool,
+        emitVisual: Bool,
         trunks: inout [SIMD3<Float>],
         canopies: inout [SIMD3<Float>],
         collision: inout [SIMD3<Float>]
     ) {
         let variation = Float(seed & 0xffff) / 65_535
-        let shrub = kind == .scrub
-        let height: Float = shrub ? 1.8 + variation : 5.5 + variation * 4
         let trunkHeight = shrub ? height * 0.25 : height * 0.55
         let trunkRadius: Float = shrub ? 0.12 : 0.20 + variation * 0.08
-        let canopyRadius: Float = shrub ? 1.1 : 1.4 + variation * 0.8
+        // Widen the collision canopy with the tree so a tall model's foliage still has a matching
+        // volume to stop against, rather than the old fixed ~1.4 m cone under a 15 m pine.
+        let canopyRadius: Float = shrub ? 1.1 : max(1.6, height * 0.16)
         let sides = 6
 
         let trunkBottom = ground + 0.02
@@ -1327,7 +1391,7 @@ private enum OSMSurfaceGeometryFactory {
             let c = SIMD3<Float>(b.x, trunkTop, b.z)
             let d = SIMD3<Float>(a.x, trunkTop, a.z)
             let face = [a, c, b, a, d, c]
-            trunks.append(contentsOf: face)
+            if emitVisual { trunks.append(contentsOf: face) }
             collision.append(contentsOf: face)
         }
 
@@ -1350,7 +1414,7 @@ private enum OSMSurfaceGeometryFactory {
                 position.y + sin(angle1) * canopyRadius
             )
             let faces = [a, top, b, a, b, bottom]
-            canopies.append(contentsOf: faces)
+            if emitVisual { canopies.append(contentsOf: faces) }
             collision.append(contentsOf: faces)
         }
     }
@@ -1383,6 +1447,27 @@ private enum OSMSurfaceGeometryFactory {
         case .pedestrian: return .pedestrian
         case .track: return .track
         case .railway: return .railway
+        }
+    }
+
+    /// Draw height above the terrain, per road class, so overlapping roads of different classes
+    /// stop fighting for the depth buffer.
+    ///
+    /// Every road used to sit at a single +0.09 m. Where two classes overlap — a service lane over a
+    /// street, a footway over a road — the two coplanar surfaces flickered in bands. Giving each
+    /// class its own step in a narrow band layers them cleanly instead. The order also keeps the
+    /// step small for the streets an aircraft usually lands on (least sink into the visible surface)
+    /// and lifts the rarely-landed motorways and rails on top where overlaps read correctly.
+    private static func roadSurfaceOffset(_ key: RoadMaterialKey) -> Float {
+        switch key {
+        case .pedestrian: return 0.030
+        case .track: return 0.040
+        case .street: return 0.050
+        case .service: return 0.060
+        case .bridgeSide: return 0.060
+        case .arterial: return 0.070
+        case .motorway: return 0.080
+        case .railway: return 0.090
         }
     }
 
