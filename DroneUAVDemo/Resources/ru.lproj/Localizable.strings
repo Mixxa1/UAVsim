@@ -2760,3 +2760,17 @@
 "world.build.stage.osm_surface" = "Дороги, мосты и растительность OSM";
 
 "world.build.stage.elevation" = "Рельеф местности";
+
+"lidar.hud.full" = "БУФЕР ПОЛОН";
+"lidar.hud.scanning" = "СКАНИРОВАНИЕ";
+"lidar.hud.standby" = "ОЖИДАНИЕ";
+"lidar.hud.points" = "Точки";
+"lidar.hud.coverage" = "Покрытие";
+"lidar.hud.pitch" = "Тангаж";
+"lidar.hud.scan" = "СКАН";
+"lidar.hud.stop" = "СТОП";
+"lidar.hud.clear" = "СБРОС";
+"lidar.hud.export" = "ЭКСПОРТ";
+"lidar.hud.saved" = "Сохранено: %@";
+"lidar.hud.hectares" = "га";
+"lidar.hud.square_meters" = "м²";

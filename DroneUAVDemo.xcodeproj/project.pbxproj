@@ -408,6 +408,10 @@
 		77619B7964BC1A660E4B0FA6 /* WaterSurfaceGeometryFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */; };
 		CC4CA384E99B4F73C8A90C4C /* TerrariumElevationSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5468C7D1DBA67888A5CB4F8 /* TerrariumElevationSource.swift */; };
 		30904D445A4478912AF993C7 /* TerrainMeshFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B389E25FF939CD57E99793E3 /* TerrainMeshFactory.swift */; };
+		7507A696DC88473376F6D034 /* LidarPointCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B4A8070BC60C142B1B843A /* LidarPointCloud.swift */; };
+		57567931F932770C6C47D878 /* PayloadLidarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 109F2DD79890186DA110B364 /* PayloadLidarState.swift */; };
+		031A0B18B44F42DC4842CC18 /* PayloadLidarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */; };
+		19877DEBBEDDCBB287B0EFF7 /* LidarModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -816,6 +820,10 @@
 		48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterSurfaceGeometryFactory.swift; sourceTree = "<group>"; };
 		E5468C7D1DBA67888A5CB4F8 /* TerrariumElevationSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumElevationSource.swift; sourceTree = "<group>"; };
 		B389E25FF939CD57E99793E3 /* TerrainMeshFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrainMeshFactory.swift; sourceTree = "<group>"; };
+		E2B4A8070BC60C142B1B843A /* LidarPointCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarPointCloud.swift; sourceTree = "<group>"; };
+		109F2DD79890186DA110B364 /* PayloadLidarState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadLidarState.swift; sourceTree = "<group>"; };
+		FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadLidarController.swift; sourceTree = "<group>"; };
+		AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarModuleView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -865,6 +873,9 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */,
+				109F2DD79890186DA110B364 /* PayloadLidarState.swift */,
+				E2B4A8070BC60C142B1B843A /* LidarPointCloud.swift */,
 				079C97B31B69F3979A164863 /* World */,
 				613D16934A68B6BE2BF98090 /* Geo */,
 				F10000000000000000000001 /* WorkbenchBuild.swift */,
@@ -1107,6 +1118,7 @@
 		100000000000000000000015 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */,
 				7D8D1E626A72AF9F180DAD8B /* World */,
 				F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */,
 				F1000000000000000000000D /* WorkbenchPartPreview.swift */,
@@ -1520,6 +1532,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				19877DEBBEDDCBB287B0EFF7 /* LidarModuleView.swift in Sources */,
+				031A0B18B44F42DC4842CC18 /* PayloadLidarController.swift in Sources */,
+				57567931F932770C6C47D878 /* PayloadLidarState.swift in Sources */,
+				7507A696DC88473376F6D034 /* LidarPointCloud.swift in Sources */,
 				30904D445A4478912AF993C7 /* TerrainMeshFactory.swift in Sources */,
 				CC4CA384E99B4F73C8A90C4C /* TerrariumElevationSource.swift in Sources */,
 				77619B7964BC1A660E4B0FA6 /* WaterSurfaceGeometryFactory.swift in Sources */,

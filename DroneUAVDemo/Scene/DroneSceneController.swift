@@ -125,6 +125,18 @@ final class DroneSceneController {
     private var rangefinderBeamNode: SCNNode?
     private var rangefinderCameraNode: SCNNode?
     private var rangefinderCamera: SCNCamera?
+    private let lidarRigNode = SCNNode()
+    private let lidarYawNode = SCNNode()
+    private let lidarPitchNode = SCNNode()
+    private var lidarCameraNode: SCNNode?
+    private var lidarOpticsState = PayloadLidarOpticsState()
+    /// World-space parent of the accumulated point cloud (baked in fixed chunks so a growing survey
+    /// never rebuilds the whole cloud per frame). Lives on the scene root, not the moving drone.
+    private let lidarCloudRootNode = SCNNode()
+    private var lidarCloud = LidarPointCloud()
+    /// New points captured since the last visual bake, awaiting a chunk node.
+    private var lidarPendingPoints: [SIMD3<Float>] = []
+    private var lidarLastBakeTime: TimeInterval = 0
     private let hoseRigNode = SCNNode()
     private let hoseYawNode = SCNNode()
     private let hosePitchNode = SCNNode()
@@ -640,7 +652,7 @@ final class DroneSceneController {
         case .top:
             return topCameraNode
         case .payloadOptics:
-            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? hoseCameraPointOfView() ?? capsuleCameraPointOfView() ?? followCameraNode
+            return payloadCameraPointOfView() ?? rangefinderCameraPointOfView() ?? lidarCameraPointOfView() ?? hoseCameraPointOfView() ?? capsuleCameraPointOfView() ?? followCameraNode
         case .payload:
             return payloadDropCameraController.cameraNode
         case .spectator:
@@ -3872,6 +3884,9 @@ final class DroneSceneController {
         MainActor.assumeIsolated {
             installedWorld?.rootNode.removeFromParentNode()
             installedWorld = world
+            // A survey cloud is geo-anchored to the world it was captured over; a new world would
+            // leave those points floating in the wrong place, so start each world clean.
+            clearLidarCloud()
 
             guard let world else {
                 groundNode.isHidden = false
@@ -4936,6 +4951,229 @@ final class DroneSceneController {
         beam.isHidden = false
         (beam.geometry as? SCNCylinder)?.height = CGFloat(length)
         beam.position = SCNVector3(0.0, 0.0, -length / 2.0)
+    }
+
+    // MARK: - LiDAR survey rig
+
+    func ensureLidarRig() {
+        if lidarYawNode.parent !== lidarRigNode {
+            lidarRigNode.name = "lidarRigNode"
+            lidarYawNode.name = "lidarYawNode"
+            lidarPitchNode.name = "lidarPitchNode"
+            lidarRigNode.removeFromParentNode()
+            lidarYawNode.removeFromParentNode()
+            lidarPitchNode.removeFromParentNode()
+            lidarRigNode.addChildNode(lidarYawNode)
+            lidarYawNode.addChildNode(lidarPitchNode)
+            lidarPitchNode.simdPosition = SIMD3<Float>(0.0, -0.04, 0.0)
+        }
+        if lidarCameraNode == nil {
+            let node = SCNNode()
+            node.name = "lidarCameraNode"
+            // Down the boresight, clear of the airframe. The pitch node's local −Z is the beam
+            // direction (world-down at −90° pitch), so a negative Z offset drops the camera below
+            // the aircraft and its payload housing — otherwise it stares straight into the drone's
+            // own white belly. It looks further along the beam from there, so the spray is in frame.
+            node.simdPosition = SIMD3<Float>(0.0, 0.0, -1.2)
+            let camera = SCNCamera()
+            camera.fieldOfView = 64.0
+            camera.zNear = 0.05
+            camera.zFar = CameraClipping.payloadOpticsFar
+            // Default category mask — NOT the restricted payload-optics mask the rangefinder/thermal
+            // use — so this camera sees the world *and* the accumulating point cloud.
+            node.camera = camera
+            lidarPitchNode.addChildNode(node)
+            lidarCameraNode = node
+        }
+
+        if lidarRigNode.parent !== payloadMountNode {
+            lidarRigNode.removeFromParentNode()
+            payloadMountNode.addChildNode(lidarRigNode)
+        }
+        // The cloud lives in world space: the points stay put on the terrain as the drone flies on.
+        if lidarCloudRootNode.parent == nil {
+            lidarCloudRootNode.name = "lidar.cloud.root"
+            scene.rootNode.addChildNode(lidarCloudRootNode)
+        }
+    }
+
+    func updateLidarGimbal(state: PayloadLidarOpticsState) {
+        lidarOpticsState = state
+        ensureLidarRig()
+        lidarRigNode.isHidden = !state.isAvailable
+        lidarYawNode.eulerAngles.y = CGFloat(Float(state.gimbalYawDegrees).degreesToRadians)
+        lidarPitchNode.eulerAngles.x = CGFloat(Float(state.gimbalPitchDegrees).degreesToRadians)
+    }
+
+    func lidarCameraPointOfView() -> SCNNode? {
+        guard lidarOpticsState.isAvailable else { return nil }
+        ensureLidarRig()
+        return lidarCameraNode
+    }
+
+    /// One cross-track sweep: a fan of beams perpendicular to the flight line, each raycast into the
+    /// world, every hit geo-referenceable and accumulated (voxel-deduplicated) into the survey
+    /// cloud. Returns the live statistics for the HUD. This is the pushbroom pattern of a real
+    /// airborne scanner — points build up along the track as the aircraft advances.
+    func scanLidarSweep(state: PayloadLidarOpticsState) -> (pointCount: Int, coverageSquareMeters: Double, isBufferFull: Bool) {
+        guard state.isAvailable, state.isPowered, state.isScanning else {
+            return (lidarCloud.count, Double(lidarCloud.coverageSquareMeters), lidarCloud.isFull)
+        }
+        ensureLidarRig()
+
+        let origin = lidarPitchNode.simdWorldPosition
+        let boresight = simd_normalize(simd_act(
+            simd_quatf(lidarPitchNode.simdWorldTransform),
+            SIMD3<Float>(0.0, 0.0, -1.0)
+        ))
+        // Horizontal flight axis (the drone's forward), the sweep rotates the boresight about it.
+        var axis = simd_act(simd_quatf(droneNode.simdWorldTransform), SIMD3<Float>(0.0, 0.0, -1.0))
+        axis.y = 0.0
+        let axisLength = simd_length(axis)
+        let flightAxis = axisLength > 0.05 ? axis / axisLength : SIMD3<Float>(0.0, 0.0, 1.0)
+
+        let beamCount = max(2, state.beamCount)
+        let fanRadians = Float(state.fanFieldOfViewDegrees).degreesToRadians
+        let maxRange = max(1.0, Float(state.maxRangeMeters))
+
+        for index in 0..<beamCount {
+            let t = Float(index) / Float(beamCount - 1)
+            let angle = (t - 0.5) * fanRadians
+            let direction = simd_normalize(simd_act(
+                simd_quatf(angle: angle, axis: flightAxis),
+                boresight
+            ))
+
+            var hitPoint: SIMD3<Float>?
+            var hitNormal = SIMD3<Float>(0.0, 1.0, 0.0)
+            if let meshCollision,
+               let hit = meshCollision.raycast(origin: origin, direction: direction, maxDistance: maxRange) {
+                hitPoint = hit.point
+                hitNormal = hit.normal
+            } else if let hit = analyticEnvironmentRayHit(
+                origin: origin,
+                direction: direction,
+                maxDistance: maxRange
+            ) {
+                hitPoint = origin + direction * hit.distance
+            }
+
+            guard let point = hitPoint else { continue }
+            let range = simd_length(point - origin)
+            // Synthetic intensity: head-on returns and short ranges read strong, grazing and far
+            // returns weak — the shape of a real intensity channel.
+            let cosIncidence = abs(simd_dot(direction, simd_normalize(hitNormal)))
+            let rangeFactor = max(0.25, 1.0 - (range / maxRange) * 0.7)
+            let intensity = max(0.05, min(1.0, cosIncidence * rangeFactor))
+
+            if lidarCloud.insert(position: point, intensity: intensity) {
+                lidarPendingPoints.append(point)
+            }
+        }
+
+        // Bake accumulated points into an immutable chunk node at a throttled cadence, so a
+        // million-point survey never rebuilds the whole cloud in a frame.
+        let now = CACurrentMediaTime()
+        if !lidarPendingPoints.isEmpty,
+           lidarPendingPoints.count >= 4_000 || now - lidarLastBakeTime > 0.15 {
+            bakeLidarChunk(lidarPendingPoints)
+            lidarPendingPoints.removeAll(keepingCapacity: true)
+            lidarLastBakeTime = now
+        }
+
+        return (lidarCloud.count, Double(lidarCloud.coverageSquareMeters), lidarCloud.isFull)
+    }
+
+    private func bakeLidarChunk(_ positions: [SIMD3<Float>]) {
+        guard !positions.isEmpty else { return }
+        let range = lidarCloud.elevationRange ?? (positions[0].y, positions[0].y + 1.0)
+
+        var vertices: [SCNVector3] = []
+        vertices.reserveCapacity(positions.count)
+        var colors: [SIMD4<Float>] = []
+        colors.reserveCapacity(positions.count)
+        for position in positions {
+            // Visual lift only — the exported cloud keeps the true hit position.
+            vertices.append(SCNVector3(position.x, position.y + 0.08, position.z))
+            let color = LidarPointCloud.elevationColor(
+                y: position.y,
+                minimum: range.minimum,
+                maximum: range.maximum
+            )
+            colors.append(SIMD4<Float>(
+                Float(color.red) / 255.0,
+                Float(color.green) / 255.0,
+                Float(color.blue) / 255.0,
+                1.0
+            ))
+        }
+
+        let vertexSource = SCNGeometrySource(vertices: vertices)
+        let colorData = colors.withUnsafeBytes { Data($0) }
+        let colorSource = SCNGeometrySource(
+            data: colorData,
+            semantic: .color,
+            vectorCount: colors.count,
+            usesFloatComponents: true,
+            componentsPerVector: 4,
+            bytesPerComponent: MemoryLayout<Float>.size,
+            dataOffset: 0,
+            dataStride: MemoryLayout<SIMD4<Float>>.stride
+        )
+        let element = SCNGeometryElement(
+            indices: Array(0..<Int32(vertices.count)),
+            primitiveType: .point
+        )
+        element.pointSize = 3.2
+        element.minimumPointScreenSpaceRadius = 1.4
+        element.maximumPointScreenSpaceRadius = 4.5
+
+        let geometry = SCNGeometry(sources: [vertexSource, colorSource], elements: [element])
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+        geometry.materials = [material]
+
+        let node = SCNNode(geometry: geometry)
+        node.name = "lidar.chunk"
+        node.castsShadow = false
+        lidarCloudRootNode.addChildNode(node)
+    }
+
+    func clearLidarCloud() {
+        lidarCloud.clear()
+        lidarPendingPoints.removeAll(keepingCapacity: true)
+        lidarCloudRootNode.childNodes.forEach { $0.removeFromParentNode() }
+    }
+
+    /// Writes the accumulated survey to the app's `LidarExports` folder — a geo-referenced CSV
+    /// (WGS84 lat/lon/MSL per point) and a coloured PLY for point-cloud viewers — and returns the
+    /// written files. `origin` is the world's geo anchor; without it only the local PLY is written.
+    func exportLidarCloud(origin: GeoOrigin?) -> [URL]? {
+        guard !lidarCloud.isEmpty else { return nil }
+        let fileManager = FileManager.default
+        guard let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return nil }
+        let directory = documents.appendingPathComponent("LidarExports", isDirectory: true)
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let base = "lidar-\(formatter.string(from: Date()))"
+
+        var written: [URL] = []
+        let plyURL = directory.appendingPathComponent("\(base).ply")
+        if (try? lidarCloud.plyData().write(to: plyURL, options: .atomic)) != nil {
+            written.append(plyURL)
+        }
+        if let origin {
+            let csvURL = directory.appendingPathComponent("\(base).csv")
+            if (try? lidarCloud.geoCSVData(origin: origin).write(to: csvURL, options: .atomic)) != nil {
+                written.append(csvURL)
+            }
+        }
+        return written.isEmpty ? nil : written
     }
 
     // MARK: - Fire hose rig

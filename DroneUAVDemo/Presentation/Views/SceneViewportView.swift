@@ -87,6 +87,20 @@ struct SceneViewportView: View {
                     .ignoresSafeArea()
             }
 
+            // The LiDAR survey is flown like a normal sortie — the cloud builds in the main 3-D
+            // view — so its control panel sits in the corner rather than replacing the viewport.
+            if viewModel.lidarOpticsState.isAvailable {
+                LidarModuleView(
+                    state: viewModel.lidarOpticsState,
+                    onToggleScan: { viewModel.toggleLidarScanning() },
+                    onPitchDelta: { viewModel.adjustLidarGimbal(pitchDeltaDegrees: $0) },
+                    onClear: { viewModel.clearLidarCloud() },
+                    onExport: { viewModel.exportLidarCloud() }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(16)
+            }
+
             // Kept visible in every OTHER camera mode too (not just the bombardier view) — the
             // ground-projected blast-radius reticle (`DroneSceneController.setFireCapsuleTargetReticle`)
             // is real 3D scene geometry, visible from any camera, so ammo/rig status shouldn't be

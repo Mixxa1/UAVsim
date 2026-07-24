@@ -2765,3 +2765,17 @@
 "world.build.stage.osm_surface" = "OSM roads, bridges and vegetation";
 
 "world.build.stage.elevation" = "Ground relief";
+
+"lidar.hud.full" = "BUFFER FULL";
+"lidar.hud.scanning" = "SCANNING";
+"lidar.hud.standby" = "STANDBY";
+"lidar.hud.points" = "Points";
+"lidar.hud.coverage" = "Coverage";
+"lidar.hud.pitch" = "Pitch";
+"lidar.hud.scan" = "SCAN";
+"lidar.hud.stop" = "STOP";
+"lidar.hud.clear" = "CLEAR";
+"lidar.hud.export" = "EXPORT";
+"lidar.hud.saved" = "Saved: %@";
+"lidar.hud.hectares" = "ha";
+"lidar.hud.square_meters" = "m²";

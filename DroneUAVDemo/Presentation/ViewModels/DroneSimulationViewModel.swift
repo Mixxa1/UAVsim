@@ -738,6 +738,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var payloadCameraStatus: PayloadCameraStatus
     @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
     @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
+    @Published private(set) var lidarOpticsState = PayloadLidarOpticsState()
     @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
     @Published private(set) var capsuleState = PayloadFireCapsuleState()
     @Published private(set) var agriculturalSprayerState = PayloadAgriculturalSprayerState()
@@ -1025,7 +1026,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
-        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable || cameraConfiguration.mode == .payloadOptics {
+        if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || lidarOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable || cameraConfiguration.mode == .payloadOptics {
             modes.append(.payloadOptics)
         }
         if payloadCameraController.canActivatePayloadView() || cameraConfiguration.mode == .payload {
@@ -1184,6 +1185,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private let fixedWingAssistController = FixedWingAssistController()
     private let payloadCameraController: PayloadCameraController
     private let rangefinderController: PayloadRangefinderController
+    private let lidarController: PayloadLidarController
     private let hoseController: PayloadFireHoseController
     private let capsuleController: PayloadFireCapsuleController
     private let agriculturalSprayerController: PayloadAgriculturalSprayerController
@@ -1647,6 +1649,7 @@ final class DroneSimulationViewModel: ObservableObject {
         autoNavigationController: AutoNavigationController = AutoNavigationController(),
         payloadCameraController: PayloadCameraController = PayloadCameraController(),
         rangefinderController: PayloadRangefinderController = PayloadRangefinderController(),
+        lidarController: PayloadLidarController = PayloadLidarController(),
         hoseController: PayloadFireHoseController = PayloadFireHoseController(),
         capsuleController: PayloadFireCapsuleController = PayloadFireCapsuleController(),
         agriculturalSprayerController: PayloadAgriculturalSprayerController = PayloadAgriculturalSprayerController(),
@@ -1710,6 +1713,7 @@ final class DroneSimulationViewModel: ObservableObject {
         self.autoNavigationController = autoNavigationController
         self.payloadCameraController = payloadCameraController
         self.rangefinderController = rangefinderController
+        self.lidarController = lidarController
         self.hoseController = hoseController
         self.capsuleController = capsuleController
         self.agriculturalSprayerController = agriculturalSprayerController
@@ -2781,6 +2785,8 @@ final class DroneSimulationViewModel: ObservableObject {
         isDrowned = false
         waterContactSeconds = 0.0
         sceneController.clearFiberTetherVisual()
+        // A LiDAR survey belongs to the run that captured it — a restart starts the cloud empty.
+        clearLidarCloud()
         installedFiberSpoolModule?.deployedLengthMeters = 0.0
         controlLinkFailsafeStage = .none
         controlLinkFailsafeStageElapsed = 0.0
@@ -4001,7 +4007,7 @@ final class DroneSimulationViewModel: ObservableObject {
             _ = payloadCameraController.activatePayloadView(from: oldMode)
             sceneController.setPayloadCameraFocusReleaseID(payloadCameraController.trackedReleaseID)
         } else if mode == .payloadOptics {
-            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable else {
+            guard payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || lidarOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable else {
                 return
             }
         }
@@ -4136,6 +4142,51 @@ final class DroneSimulationViewModel: ObservableObject {
     func resetRangefinderZoom() {
         rangefinderController.setZoom(rangefinderController.opticsState.minZoom)
         refreshRangefinderStatus()
+    }
+
+    // MARK: - LiDAR survey
+
+    func setLidarScanning(_ enabled: Bool) {
+        lidarController.setScanning(enabled)
+        refreshLidarStatus()
+    }
+
+    func toggleLidarScanning() {
+        lidarController.toggleScanning()
+        refreshLidarStatus()
+    }
+
+    func adjustLidarGimbal(yawDeltaDegrees: Double = 0.0, pitchDeltaDegrees: Double = 0.0) {
+        lidarController.adjustGimbal(
+            yawDeltaDegrees: yawDeltaDegrees,
+            pitchDeltaDegrees: pitchDeltaDegrees
+        )
+        refreshLidarStatus()
+    }
+
+    func resetLidarGimbalOrientation() {
+        lidarController.resetGimbalOrientation()
+        refreshLidarStatus()
+    }
+
+    func clearLidarCloud() {
+        sceneController.clearLidarCloud()
+        lidarController.updateStatistics(
+            capturedPointCount: 0,
+            coverageSquareMeters: 0.0,
+            isBufferFull: false
+        )
+        lidarOpticsState = lidarController.opticsState
+    }
+
+    /// Writes the survey to disk, reveals it in Finder, and returns the files (nil when empty).
+    @discardableResult
+    func exportLidarCloud() -> [URL]? {
+        let urls = sceneController.exportLidarCloud(origin: sceneController.installedWorld?.origin)
+        if let urls, !urls.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        }
+        return urls
     }
 
     func toggleRangefinderArmed() {
@@ -7279,6 +7330,12 @@ final class DroneSimulationViewModel: ObservableObject {
                     yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
                     pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
                 )
+            } else if lidarOpticsState.isAvailable {
+                // Arrow keys aim the LiDAR sensor gimbal in its camera view — the scan fan follows.
+                adjustLidarGimbal(
+                    yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
+                    pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
+                )
             } else {
                 adjustHoseGimbal(
                     yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
@@ -9863,6 +9920,16 @@ final class DroneSimulationViewModel: ObservableObject {
         return payloadDraftConfiguration.payloadType == .laserRangefinder
     }
 
+    private var isMountedLidarAvailable: Bool {
+        guard mountedCADPayload == nil else {
+            return false
+        }
+        guard payloadState == .attached, payloadMountState == .occupied else {
+            return false
+        }
+        return payloadDraftConfiguration.payloadType == .lidarModule
+    }
+
     private var isMountedHoseAvailable: Bool {
         guard mountedCADPayload == nil else {
             return false
@@ -10006,6 +10073,7 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
         refreshRangefinderStatus()
+        refreshLidarStatus()
         refreshHoseAimStatus()
         refreshCapsuleLauncherStatus(deltaTime: deltaTime)
         refreshAgriculturalSprayerStatus(deltaTime: deltaTime)
@@ -10099,6 +10167,29 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
         return simd_length(state.position - truckPosition) <= FireCapsuleTuning.rechargeZoneRadiusMeters
+    }
+
+    private func refreshLidarStatus() {
+        lidarController.setAvailability(
+            isAvailable: isMountedLidarAvailable,
+            isPowered: isMountedLidarAvailable
+        )
+        sceneController.updateLidarGimbal(state: lidarController.opticsState)
+        let stats = sceneController.scanLidarSweep(state: lidarController.opticsState)
+        lidarController.updateStatistics(
+            capturedPointCount: stats.pointCount,
+            coverageSquareMeters: stats.coverageSquareMeters,
+            isBufferFull: stats.isBufferFull
+        )
+        lidarOpticsState = lidarController.opticsState
+
+        let lidarSignals = lidarController.consumeMissionSignals()
+        if !lidarSignals.isEmpty {
+            payloadMissionSignals.append(contentsOf: lidarSignals)
+            if payloadMissionSignals.count > 24 {
+                payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
+            }
+        }
     }
 
     private func refreshRangefinderStatus() {
