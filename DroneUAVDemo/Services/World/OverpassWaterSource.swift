@@ -36,7 +36,9 @@ struct OverpassWaterSource: Sendable {
     init(
         endpoints: [URL] = OverpassBuildingSource.defaultEndpoints,
         session: URLSession = .shared,
-        queryTimeoutSeconds: Int = 90
+        // Water is the heaviest extract on a coastal tile — a 3 km box over New York pulls the
+        // harbour multipolygons — so it gets the longest server budget of the four layers.
+        queryTimeoutSeconds: Int = 150
     ) {
         self.endpoints = endpoints
         self.session = session
@@ -267,6 +269,11 @@ struct OverpassWaterSource: Sendable {
                 "application/x-www-form-urlencoded",
                 forHTTPHeaderField: "Content-Type"
             )
+            // Must outlive the server-side [timeout:]. URLSession's default 60 s silently killed
+            // the water fetch for a 3 km tile — the harbour query runs longer than a minute, every
+            // mirror got cut off mid-flight, and the best-effort builder shipped a world with land
+            // where New York Harbor belongs.
+            request.timeoutInterval = TimeInterval(queryTimeoutSeconds + 30)
             request.httpBody = "data=\(query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? query)"
                 .data(using: .utf8)
             do {
