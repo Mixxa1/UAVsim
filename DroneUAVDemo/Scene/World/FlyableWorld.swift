@@ -45,8 +45,13 @@ protocol FlyableWorld: AnyObject {
     /// provenance and returns nil. Used by the LiDAR payload to classify returns from fact rather
     /// than from a plausible-looking guess about their normals.
     func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass?
+
+    /// Tree crowns as porous volumes, for the LiDAR's foliage model only. Read by no part of the
+    /// flight model — the collision proxy stays exactly as the physics and the autopilot expect it.
+    var lidarFoliage: LidarFoliageIndex? { get }
 }
 
 extension FlyableWorld {
     func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass? { nil }
+    var lidarFoliage: LidarFoliageIndex? { nil }
 }

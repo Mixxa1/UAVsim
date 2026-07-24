@@ -22,6 +22,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
     /// with the class this world built that run as. Ordered, so a lookup is a small linear scan
     /// over a handful of spans.
     private var collisionClassSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)] = []
+    private(set) var lidarFoliage: LidarFoliageIndex?
     let water: WaterSurfaceModel?
     let origin: GeoOrigin
     let worldBounds: (minimum: SIMD3<Float>, maximum: SIMD3<Float>)
@@ -338,6 +339,9 @@ final class OpenDataWorldRuntime: FlyableWorld {
             classSpans.append((osmTriangleOffset + span.upperBound / 3, span.surfaceClass))
         }
         self.collisionClassSpans = classSpans
+        self.lidarFoliage = osmAssembly.foliageVolumes.isEmpty
+            ? nil
+            : LidarFoliageIndex(volumes: osmAssembly.foliageVolumes)
 
         corners.append(contentsOf: osmAssembly.collisionCorners)
         self.collision = MeshCollisionIndex(triangleCorners: corners)
@@ -938,6 +942,10 @@ private enum OSMSurfaceGeometryFactory {
         /// triangles, with the surface class the factory built that run as. Lets a sensor recover
         /// what it hit from the triangle index alone.
         let collisionClassSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)]
+        /// Crown volumes for the LiDAR's foliage model. Sensor-only: nothing in the flight model
+        /// reads these, so they can describe the rendered crown rather than the narrow proxy the
+        /// physics deliberately keeps.
+        let foliageVolumes: [LidarFoliageIndex.Volume]
     }
 
     private enum RoadMaterialKey: Hashable {
@@ -1235,6 +1243,7 @@ private enum OSMSurfaceGeometryFactory {
 
         var trunkCorners: [SIMD3<Float>] = []
         var canopyCorners: [SIMD3<Float>] = []
+        var foliageVolumes: [LidarFoliageIndex.Volume] = []
         let treeRoot = SCNNode()
         treeRoot.name = "world.osm.vegetation.trees"
         for candidate in candidates {
@@ -1244,6 +1253,22 @@ private enum OSMSurfaceGeometryFactory {
             let seed = stableHash(candidate.identifier)
             let ground = terrainHeight(candidate.position.x, candidate.position.y)
             let metrics = plantMetrics(kind: candidate.kind, seed: seed)
+
+            // Sensor-side crown: sized to the tree the pilot sees, not to the slim collision cone.
+            let crownTop = ground + metrics.height
+            let crownBottom = ground + metrics.height * (metrics.shrub ? 0.20 : 0.42)
+            if crownTop > crownBottom {
+                foliageVolumes.append(LidarFoliageIndex.Volume(
+                    center: SIMD3<Float>(
+                        candidate.position.x,
+                        (crownBottom + crownTop) * 0.5,
+                        candidate.position.y
+                    ),
+                    radius: metrics.shrub ? 1.2 : max(2.2, metrics.height * 0.26),
+                    halfHeight: (crownTop - crownBottom) * 0.5,
+                    density: metrics.shrub ? 0.55 : 0.38
+                ))
+            }
 
             if let tree = PineTreeAssetLoader.shared.makeTreeNode(
                 targetHeightMeters: metrics.height,
@@ -1311,7 +1336,8 @@ private enum OSMSurfaceGeometryFactory {
         return Assembly(
             root: root,
             collisionCorners: collision,
-            collisionClassSpans: collisionClassSpans
+            collisionClassSpans: collisionClassSpans,
+            foliageVolumes: foliageVolumes
         )
     }
 
