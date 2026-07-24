@@ -1256,11 +1256,9 @@ final class DroneSceneController {
             if let povCradle = handLaunchPOVCradlePoint() {
                 return povCradle
             }
-            let supportY = supportSurfaceHeight(
-                at: asset.position,
-                clearanceRadius: 0.28,
-                maximumHeight: .greatestFiniteMagnitude
-            ) ?? launchGroundFallbackY
+            // Same footprint-probed height the visual pad uses, so the release point stays glued
+            // to the plate the pilot sees even when it rests on a road edge.
+            let supportY = launchPadSupportHeight(at: asset.position)
             let forward = hand.horizontalDirection * LaunchRigMetrics.handHoldForwardOffset
             return SIMD3<Float>(
                 hand.position.x + forward.x,
@@ -1268,17 +1266,37 @@ final class DroneSceneController {
                 hand.position.y + forward.y
             )
         case .catapult(let catapult):
-            let supportY = supportSurfaceHeight(
-                at: asset.position,
-                clearanceRadius: 0.28,
-                maximumHeight: .greatestFiniteMagnitude
-            ) ?? launchGroundFallbackY
+            let supportY = launchPadSupportHeight(at: asset.position)
             return SIMD3<Float>(
                 catapult.position.x,
                 supportY + LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset,
                 catapult.position.y
             )
         }
+    }
+
+    /// Highest support under the launch pad's whole base plate, not just its centre point.
+    ///
+    /// A pad whose centre lands on bare ground right beside a road used to sink its plate edge
+    /// under the road's draped ribbon, which sits ~10 cm above the terrain. Probing the plate's
+    /// corners keeps the plate resting on the highest surface it actually touches.
+    private func launchPadSupportHeight(at position: SIMD2<Float>) -> Float {
+        var best: Float?
+        let probes: [SIMD2<Float>] = [
+            SIMD2<Float>(0, 0),
+            SIMD2<Float>(0.7, 0), SIMD2<Float>(-0.7, 0),
+            SIMD2<Float>(0, 0.7), SIMD2<Float>(0, -0.7)
+        ]
+        for offset in probes {
+            if let height = supportSurfaceHeight(
+                at: position + offset,
+                clearanceRadius: 0.32,
+                maximumHeight: .greatestFiniteMagnitude
+            ) {
+                best = max(best ?? height, height)
+            }
+        }
+        return best ?? launchGroundFallbackY
     }
 
     func setLaunchAsset(_ asset: LaunchAsset?) {
@@ -1292,11 +1310,7 @@ final class DroneSceneController {
 
         launchAssetNode.isHidden = false
 
-        let supportY = supportSurfaceHeight(
-            at: asset.position,
-            clearanceRadius: 0.32,
-            maximumHeight: .greatestFiniteMagnitude
-        ) ?? launchGroundFallbackY
+        let supportY = launchPadSupportHeight(at: asset.position)
         launchAssetNode.simdPosition = SIMD3<Float>(asset.position.x, supportY, asset.position.y)
         launchAssetNode.eulerAngles = SCNVector3(
             0.0,

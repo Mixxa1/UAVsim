@@ -23,6 +23,61 @@ enum TerrainMeshFactory {
         }
     }
 
+    /// Flat-shaded variant for architectural geometry — bridge towers, piers, cables.
+    ///
+    /// `makeNode`'s vertex welding + normal averaging is exactly right for terrain and exactly
+    /// wrong for boxes: a box corner shared by three perpendicular faces receives one diagonal
+    /// averaged normal, and the whole face shades with a soft rounded gradient that reads as a
+    /// strange shadow smeared across flat masonry. Per-face normals keep every face crisp.
+    @MainActor
+    static func makeFlatNode(corners: [SIMD3<Float>]) -> SCNNode? {
+        guard corners.count >= 3, corners.count % 3 == 0 else { return nil }
+        var positions: [SIMD3<Float>] = []
+        var normals: [SIMD3<Float>] = []
+        positions.reserveCapacity(corners.count)
+        normals.reserveCapacity(corners.count)
+        for index in stride(from: 0, to: corners.count, by: 3) {
+            let cross = simd_cross(
+                corners[index + 1] - corners[index],
+                corners[index + 2] - corners[index]
+            )
+            let areaSquared = simd_length_squared(cross)
+            guard areaSquared.isFinite, areaSquared > 0.000_000_01 else { continue }
+            let face = simd_normalize(cross)
+            for vertex in corners[index...(index + 2)] {
+                positions.append(vertex)
+                normals.append(face)
+            }
+        }
+        guard !positions.isEmpty else { return nil }
+
+        let geometry = SCNGeometry(
+            sources: [
+                SCNGeometrySource(vertices: positions.map { SCNVector3($0.x, $0.y, $0.z) }),
+                SCNGeometrySource(normals: normals.map { SCNVector3($0.x, $0.y, $0.z) })
+            ],
+            elements: [
+                SCNGeometryElement(
+                    indices: Array(0..<Int32(positions.count)),
+                    primitiveType: .triangles
+                )
+            ]
+        )
+
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        material.diffuse.contents = NSColor(calibratedRed: 0.28, green: 0.29, blue: 0.26, alpha: 1)
+        material.roughness.contents = 0.95
+        material.metalness.contents = 0.0
+        material.isDoubleSided = true
+        geometry.materials = [material]
+
+        let node = SCNNode(geometry: geometry)
+        node.name = "world.structure.surface"
+        node.castsShadow = false
+        return node
+    }
+
     @MainActor
     static func makeNode(corners: [SIMD3<Float>]) -> SCNNode? {
         guard corners.count >= 3, corners.count % 3 == 0 else { return nil }

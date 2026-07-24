@@ -931,25 +931,57 @@ private enum OSMSurfaceGeometryFactory {
         for (index, building) in buildings.enumerated() {
             guard building.footprint.count >= 3,
                   footprintArea(building.footprint) < 2_600 else { continue }
-            var pierced = false
+            // A support is a structure the bridge runs THROUGH and BEYOND — in the data every real
+            // pylon/anchorage is pierced by 3–8 decks that enter one side and leave the other. A
+            // lone way that merely clips a corner (the FDR grazing 60 Water Street for 4 m) or a
+            // skywalk that *ends* at the building (Trinity Commons, a 135 m office tower, was
+            // turned into a stone portal by the old any-piercing rule) keeps the building a
+            // building. Hence: at least two distinct ways, each continuing ≥8 m on both sides of a
+            // crossing at least 2 m long.
+            var throughWays = 0
             for feature in transport where feature.isBridge {
-                for segment in 0..<(feature.centerline.count - 1) where !pierced {
-                    let start = feature.centerline[segment]
-                    let end = feature.centerline[segment + 1]
-                    let length = simd_length(end - start)
+                let line = feature.centerline
+                guard line.count >= 2 else { continue }
+                var lengths: [Float] = []
+                var total: Float = 0
+                for segment in 0..<(line.count - 1) {
+                    let length = simd_length(line[segment + 1] - line[segment])
+                    lengths.append(length)
+                    total += length
+                }
+                guard total > 18 else { continue }
+                var arc: Float = 0
+                var firstHit: Float?
+                var lastHit: Float = 0
+                for segment in 0..<(line.count - 1) {
+                    let length = lengths[segment]
                     guard length > 0.01 else { continue }
                     let steps = max(1, Int((length / 4).rounded(.up)))
                     for step in 0...steps {
-                        let point = start + (end - start) * (Float(step) / Float(steps))
+                        let t = Float(step) / Float(steps)
+                        let point = line[segment] + (line[segment + 1] - line[segment]) * t
                         if pointInRing(point, ring: building.footprint) {
-                            pierced = true
-                            break
+                            let hitArc = arc + length * t
+                            if firstHit == nil { firstHit = hitArc }
+                            lastHit = hitArc
                         }
                     }
+                    arc += length
                 }
-                if pierced { break }
+                guard let first = firstHit else { continue }
+                // Two kinds of evidence: the way passes through and continues beyond on both
+                // sides, or it runs along the structure for a long stretch even though OSM cuts
+                // the way exactly at the structure's edge (every Brooklyn anchorage way ends ON
+                // the anchorage, with 20–35 m of deck across it). A point-touch (Trinity's
+                // skywalk, chord 0) or a corner graze (60 Water Street, chord 4 with no run)
+                // is neither.
+                let through = first >= 8 && total - lastHit >= 8 && lastHit - first >= 2
+                let longRun = lastHit - first >= 8
+                guard through || longRun else { continue }
+                throughWays += 1
+                if throughWays >= 2 { break }
             }
-            guard pierced else { continue }
+            guard throughWays >= 2 else { continue }
             if building.totalHeightMeters > 20 {
                 portals.insert(index)
             } else {
@@ -1033,7 +1065,8 @@ private enum OSMSurfaceGeometryFactory {
         if let towers = makeNode(
             corners: pylonTowerCorners,
             color: NSColor(calibratedRed: 0.63, green: 0.58, blue: 0.51, alpha: 1),
-            roughness: 0.96
+            roughness: 0.96,
+            flat: true
         ) {
             towers.name = "world.osm.bridge.pylon-towers"
             // Not a lighting taste call: the huge flat faces self-shadow with diagonal shadow-map
@@ -1059,7 +1092,8 @@ private enum OSMSurfaceGeometryFactory {
         if let cables = makeNode(
             corners: cableCorners,
             color: NSColor(calibratedWhite: 0.13, alpha: 1),
-            roughness: 0.7
+            roughness: 0.7,
+            flat: true
         ) {
             cables.name = "world.osm.bridge.cables"
             cables.castsShadow = false
@@ -1101,7 +1135,12 @@ private enum OSMSurfaceGeometryFactory {
             deck.castsShadow = true
             root.addChildNode(deck)
         }
-        if let bridgeSides = makeNode(corners: bridgeSideCorners, color: roadColor(.bridgeSide), roughness: 0.9) {
+        if let bridgeSides = makeNode(
+            corners: bridgeSideCorners,
+            color: roadColor(.bridgeSide),
+            roughness: 0.9,
+            flat: true
+        ) {
             bridgeSides.name = "world.osm.bridge.sides"
             bridgeSides.castsShadow = true
             root.addChildNode(bridgeSides)
@@ -1109,7 +1148,8 @@ private enum OSMSurfaceGeometryFactory {
         if let pillars = makeNode(
             corners: bridgePillarCorners,
             color: NSColor(calibratedWhite: 0.30, alpha: 1),
-            roughness: 0.95
+            roughness: 0.95,
+            flat: true
         ) {
             pillars.name = "world.osm.bridge.pillars"
             pillars.castsShadow = true
@@ -1502,9 +1542,11 @@ private enum OSMSurfaceGeometryFactory {
                 // A joint standing over a real building must clear it, or every span — whose
                 // obstacle lift fades to zero at its anchors — drives the deck into the roof right
                 // at the joint. Every way meeting the node computes the same value, so the chain
-                // still joins seamlessly.
+                // still joins seamlessly. Unclimbable towers are ignored, same as in the spans.
                 var height = ground + network.jointClearance(point)
-                if let top = obstacles.top(at: point) { height = max(height, top + 2) }
+                if let top = obstacles.top(at: point), top + 2 <= ground + 35 {
+                    height = max(height, top + 2)
+                }
                 anchors.append((arcs[index], height, false))
             } else if index == 0 || index == raw.count - 1 {
                 anchors.append((arcs[index], ground + roadPlaneOffset, true))
@@ -1572,13 +1614,14 @@ private enum OSMSurfaceGeometryFactory {
             // span and lift the whole hump over it (roof + 2 m), capped so one skyscraper with bad
             // height data cannot launch the bridge into the sky. Near the abutments the ramp still
             // wins — a deck cannot both clear a building at the ramp's foot and reach the ground.
+            // Unclimbable conflicts — a skyscraper the OSM way clips by data imprecision — are
+            // ignored rather than clamped: a 35 m wall of a hump reads far worse than the deck
+            // shaving the building's corner.
             let obstacleTop = indices
                 .compactMap { obstacles.top(at: samples[$0].position) }
+                .filter { $0 + 2 <= spanGroundLow + 35 }
                 .max()
-            let obstacleCeiling = min(
-                obstacleTop.map { $0 + 2 } ?? -.greatestFiniteMagnitude,
-                spanGroundLow + 35
-            )
+            let obstacleCeiling = obstacleTop.map { $0 + 2 } ?? -.greatestFiniteMagnitude
 
             for sampleIndex in indices {
                 let sample = samples[sampleIndex]
@@ -2475,9 +2518,15 @@ private enum OSMSurfaceGeometryFactory {
     private static func makeNode(
         corners: [SIMD3<Float>],
         color: NSColor,
-        roughness: CGFloat
+        roughness: CGFloat,
+        flat: Bool = false
     ) -> SCNNode? {
-        guard let node = TerrainMeshFactory.makeNode(corners: corners) else { return nil }
+        // Flat shading for architectural structures (towers, piers, cables) — the terrain mesh's
+        // welded/averaged normals round their corners off into smeared gradient "shadows".
+        let made = flat
+            ? TerrainMeshFactory.makeFlatNode(corners: corners)
+            : TerrainMeshFactory.makeNode(corners: corners)
+        guard let node = made else { return nil }
         let material = node.geometry?.firstMaterial
         material?.diffuse.contents = color
         material?.roughness.contents = roughness
