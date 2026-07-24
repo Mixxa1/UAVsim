@@ -244,11 +244,25 @@ final class OpenDataWorldRuntime: FlyableWorld {
             return copy
         }
 
-        let assembly = UAVWorldSceneAssembler.assemble(buildings: seatedBuildings)
+        // Bridge support structures (the Brooklyn Bridge pylons and its masonry anchorage are
+        // mapped in OSM as "buildings") must not be built as windowed offices. They are pulled out
+        // of the regular building set here and rebuilt by the surface factory as proper stonework —
+        // portal towers the deck passes through, plinths the deck rides on.
+        let supports = OSMSurfaceGeometryFactory.bridgeSupportBuildingIndices(
+            buildings: seatedBuildings,
+            transport: osmSurfaceFeatures.transport
+        )
+        let supportIndices = supports.portals.union(supports.plinths)
+        let regularBuildings = seatedBuildings.enumerated()
+            .filter { !supportIndices.contains($0.offset) }
+            .map(\.element)
+        let assembly = UAVWorldSceneAssembler.assemble(buildings: regularBuildings)
         self.rootNode = assembly.root
         let osmAssembly = OSMSurfaceGeometryFactory.assemble(
             features: osmSurfaceFeatures,
             buildings: seatedBuildings,
+            portalPylons: supports.portals,
+            plinthPylons: supports.plinths,
             water: waterModel
         ) { x, z in
             Self.terrainHeight(
@@ -294,7 +308,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
             )
         }
         var corners = collisionGroundCorners
-        for building in seatedBuildings {
+        for building in regularBuildings {
             for triangle in UAVWorldBuildingGeometryFactory.makeCollisionTriangles(for: building) {
                 corners.append(triangle.point0)
                 corners.append(triangle.point1)
@@ -902,9 +916,54 @@ private enum OSMSurfaceGeometryFactory {
         case motorway, arterial, street, service, pedestrian, track, railway, bridgeSide
     }
 
+    /// Buildings that are really bridge support structures: small footprints pierced by a bridge
+    /// centreline, mapped by OSM as buildings. Two shapes exist in the data. **Portals** — tall and
+    /// narrow, the Brooklyn Bridge pylons (80 m, in the river) — carry the deck *through* an arch.
+    /// **Plinths** — low and long, like the bridge's masonry anchorage (12 m tall, eight decks
+    /// crossing it) — carry the deck *on their roof*. Rendering either as a windowed office and
+    /// treating it as an obstacle the deck must dodge is wrong on both counts.
+    static func bridgeSupportBuildingIndices(
+        buildings: [UAVWorldBuilding],
+        transport: [UAVWorldTransportFeature]
+    ) -> (portals: Set<Int>, plinths: Set<Int>) {
+        var portals: Set<Int> = []
+        var plinths: Set<Int> = []
+        for (index, building) in buildings.enumerated() {
+            guard building.footprint.count >= 3,
+                  footprintArea(building.footprint) < 2_600 else { continue }
+            var pierced = false
+            for feature in transport where feature.isBridge {
+                for segment in 0..<(feature.centerline.count - 1) where !pierced {
+                    let start = feature.centerline[segment]
+                    let end = feature.centerline[segment + 1]
+                    let length = simd_length(end - start)
+                    guard length > 0.01 else { continue }
+                    let steps = max(1, Int((length / 4).rounded(.up)))
+                    for step in 0...steps {
+                        let point = start + (end - start) * (Float(step) / Float(steps))
+                        if pointInRing(point, ring: building.footprint) {
+                            pierced = true
+                            break
+                        }
+                    }
+                }
+                if pierced { break }
+            }
+            guard pierced else { continue }
+            if building.totalHeightMeters > 20 {
+                portals.insert(index)
+            } else {
+                plinths.insert(index)
+            }
+        }
+        return (portals, plinths)
+    }
+
     static func assemble(
         features: UAVWorldOSMSurfaceFeatures,
         buildings: [UAVWorldBuilding],
+        portalPylons: Set<Int>,
+        plinthPylons: Set<Int>,
         water: WaterSurfaceModel?,
         terrainHeight: (Float, Float) -> Float
     ) -> Assembly {
@@ -922,7 +981,16 @@ private enum OSMSurfaceGeometryFactory {
         // Built once from every way so a viaduct or interchange split across several bridge ways
         // stays continuously elevated at its shared nodes instead of each way diving to the ground.
         let bridgeNetwork = BridgeNetwork(transport: features.transport)
-        let obstacleIndex = BuildingObstacleIndex(buildings: buildings)
+        // Bridge supports are excluded from the obstacle set (the deck passes through a portal and
+        // rides on a plinth — it climbs neither) and rebuilt below as masonry once the decks —
+        // whose heights define where the portal opening or plinth roof sits — have been generated.
+        let supportBuildings = portalPylons.union(plinthPylons)
+        let obstacleIndex = BuildingObstacleIndex(buildings: buildings, excluding: supportBuildings)
+        let pylons: [(index: Int, ring: [SIMD2<Float>])] = supportBuildings.sorted().compactMap {
+            buildings.indices.contains($0) ? ($0, buildings[$0].footprint) : nil
+        }
+        var pylonCrossings: [Int: (lowestDeck: Float, highestDeck: Float, direction: SIMD2<Float>)] = [:]
+        var suspensionRuns: [SuspensionRun] = []
         // Platform deck levels, precomputed so a way crossing a platform can ride on its slab (and
         // leave the supporting to the platform's own piers) instead of slicing through it.
         let platforms: [(ring: [SIMD2<Float>], level: Float)] = features.bridgeAreas.compactMap {
@@ -937,12 +1005,65 @@ private enum OSMSurfaceGeometryFactory {
                 buildings: buildings,
                 obstacles: obstacleIndex,
                 platforms: platforms,
+                pylons: pylons,
+                portalIndices: portalPylons,
+                pylonCrossings: &pylonCrossings,
+                suspensionRuns: &suspensionRuns,
                 roadCorners: &roadCorners,
                 bridgeDeck: &bridgeDeckCorners,
                 bridgeSides: &bridgeSideCorners,
                 bridgePillars: &bridgePillarCorners,
                 collision: &collision
             )
+        }
+        var pylonTowerCorners: [SIMD3<Float>] = []
+        for pylon in pylons {
+            guard let crossing = pylonCrossings[pylon.index] else { continue }
+            appendPylonTower(
+                building: buildings[pylon.index],
+                style: portalPylons.contains(pylon.index) ? .portal : .plinth,
+                lowestDeck: crossing.lowestDeck,
+                highestDeck: crossing.highestDeck,
+                bridgeDirection: crossing.direction,
+                terrainHeight: terrainHeight,
+                into: &pylonTowerCorners,
+                collision: &collision
+            )
+        }
+        if let towers = makeNode(
+            corners: pylonTowerCorners,
+            color: NSColor(calibratedRed: 0.63, green: 0.58, blue: 0.51, alpha: 1),
+            roughness: 0.96
+        ) {
+            towers.name = "world.osm.bridge.pylon-towers"
+            // Not a lighting taste call: the huge flat faces self-shadow with diagonal shadow-map
+            // acne bands. Keeping the towers out of the shadow pass removes the banding; they still
+            // receive the sun's shading and the shadows of everything else.
+            towers.castsShadow = false
+            root.addChildNode(towers)
+        }
+
+        // Suspension cables: any main deck that runs through portal towers gets its main cables
+        // (sagging between towers, straight to the anchorages) and vertical hangers — the same
+        // automatic data-driven path as every other structure here, no per-bridge tuning.
+        var cableCorners: [SIMD3<Float>] = []
+        for run in suspensionRuns {
+            appendSuspension(
+                run,
+                buildings: buildings,
+                crossings: pylonCrossings,
+                into: &cableCorners,
+                collision: &collision
+            )
+        }
+        if let cables = makeNode(
+            corners: cableCorners,
+            color: NSColor(calibratedWhite: 0.13, alpha: 1),
+            roughness: 0.7
+        ) {
+            cables.name = "world.osm.bridge.cables"
+            cables.castsShadow = false
+            root.addChildNode(cables)
         }
         for area in features.bridgeAreas {
             appendBridgeArea(
@@ -1174,10 +1295,10 @@ private enum OSMSurfaceGeometryFactory {
         private var cells: [Int64: [Int]] = [:]
         private let buildings: [UAVWorldBuilding]
 
-        init(buildings: [UAVWorldBuilding]) {
+        init(buildings: [UAVWorldBuilding], excluding: Set<Int> = []) {
             self.buildings = buildings
             for (index, building) in buildings.enumerated() {
-                guard building.footprint.count >= 3 else { continue }
+                guard building.footprint.count >= 3, !excluding.contains(index) else { continue }
                 let minimum = building.footprint.reduce(
                     SIMD2<Float>(repeating: .greatestFiniteMagnitude),
                     simd_min
@@ -1227,6 +1348,10 @@ private enum OSMSurfaceGeometryFactory {
         buildings: [UAVWorldBuilding],
         obstacles: BuildingObstacleIndex,
         platforms: [(ring: [SIMD2<Float>], level: Float)],
+        pylons: [(index: Int, ring: [SIMD2<Float>])],
+        portalIndices: Set<Int>,
+        pylonCrossings: inout [Int: (lowestDeck: Float, highestDeck: Float, direction: SIMD2<Float>)],
+        suspensionRuns: inout [SuspensionRun],
         roadCorners: inout [RoadMaterialKey: [SIMD3<Float>]],
         bridgeDeck: inout [SIMD3<Float>],
         bridgeSides: inout [SIMD3<Float>],
@@ -1248,6 +1373,10 @@ private enum OSMSurfaceGeometryFactory {
                 buildings: buildings,
                 obstacles: obstacles,
                 platforms: platforms,
+                pylons: pylons,
+                portalIndices: portalIndices,
+                pylonCrossings: &pylonCrossings,
+                suspensionRuns: &suspensionRuns,
                 deck: &bridgeDeck,
                 sides: &bridgeSides,
                 pillars: &bridgePillars,
@@ -1333,6 +1462,10 @@ private enum OSMSurfaceGeometryFactory {
         buildings: [UAVWorldBuilding],
         obstacles: BuildingObstacleIndex,
         platforms: [(ring: [SIMD2<Float>], level: Float)],
+        pylons: [(index: Int, ring: [SIMD2<Float>])],
+        portalIndices: Set<Int>,
+        pylonCrossings: inout [Int: (lowestDeck: Float, highestDeck: Float, direction: SIMD2<Float>)],
+        suspensionRuns: inout [SuspensionRun],
         deck: inout [SIMD3<Float>],
         sides: inout [SIMD3<Float>],
         pillars: inout [SIMD3<Float>],
@@ -1351,6 +1484,11 @@ private enum OSMSurfaceGeometryFactory {
         let clearance = min(max(feature.clearanceMeters, 2.0), 9.0)
             + Float(max(0, feature.layer - 1)) * 3.5
         let thickness: Float = 0.65
+        // A big bridge is several parallel OSM ways — carriageways, cycleway, footway — whose decks
+        // land at exactly the same computed height and shimmer where they overlap. A deterministic
+        // few-centimetre stagger per way separates them; the step is invisible against a 0.65 m
+        // deck but ends the depth fight.
+        let parallelDeckLift = Float(stableHash(feature.sourceIdentifier) % 4) * 0.02
 
         // Height anchors. Ends always anchor (joint stays up, anything else touches the road);
         // interior vertices anchor only where another bridge way genuinely meets this one in the
@@ -1361,7 +1499,13 @@ private enum OSMSurfaceGeometryFactory {
         for (index, point) in raw.enumerated() {
             let ground = terrainHeight(point.x, point.y)
             if network.isInteriorJoint(point) {
-                anchors.append((arcs[index], ground + network.jointClearance(point), false))
+                // A joint standing over a real building must clear it, or every span — whose
+                // obstacle lift fades to zero at its anchors — drives the deck into the roof right
+                // at the joint. Every way meeting the node computes the same value, so the chain
+                // still joins seamlessly.
+                var height = ground + network.jointClearance(point)
+                if let top = obstacles.top(at: point) { height = max(height, top + 2) }
+                anchors.append((arcs[index], height, false))
             } else if index == 0 || index == raw.count - 1 {
                 anchors.append((arcs[index], ground + roadPlaneOffset, true))
             }
@@ -1453,7 +1597,8 @@ private enum OSMSurfaceGeometryFactory {
                 // building must still climb over it.
                 lift = max(lift, max(0, obstacleCeiling - linear))
                 height = max(height, linear + lift * smooth)
-                samples[sampleIndex].height = max(height, sample.ground + roadPlaneOffset) + 0.05
+                samples[sampleIndex].height = max(height, sample.ground + roadPlaneOffset)
+                    + 0.05 + parallelDeckLift
             }
         }
 
@@ -1532,37 +1677,116 @@ private enum OSMSurfaceGeometryFactory {
             }
         }
 
-        for index in 0..<(samples.count - 1) {
-            let start = samples[index]
-            let end = samples[index + 1]
-            let delta = end.position - start.position
-            let length = simd_length(delta)
-            guard length.isFinite, length > 0.02 else { continue }
-            let perpendicular = SIMD2<Float>(-delta.y, delta.x) / length * halfWidth
+        // Remember where this deck pierces a bridge pylon: the portal tower built afterwards puts
+        // its solid base under the LOWEST crossing deck and its opening top above the HIGHEST —
+        // the Brooklyn Bridge walkway really does run a storey above the roadways through the same
+        // portal, and every one of those decks must fit through the arch. The deck's edges are
+        // tested along with its centreline: a wide carriageway whose centreline merely skirts the
+        // footprint still runs over it, and missing that left support tops poking through decks.
+        var portalHits: [(arc: Float, pylon: Int)] = []
+        if !pylons.isEmpty {
+            for index in samples.indices {
+                let sample = samples[index]
+                let previous = samples[max(index - 1, 0)].position
+                let next = samples[min(index + 1, samples.count - 1)].position
+                let direction = next - previous
+                let length = simd_length(direction)
+                guard length > 0.001 else { continue }
+                let unit = direction / length
+                let perpendicular = SIMD2<Float>(-unit.y, unit.x) * halfWidth
+                let probes = [
+                    sample.position,
+                    sample.position + perpendicular,
+                    sample.position - perpendicular
+                ]
+                for pylon in pylons
+                where probes.contains(where: { pointInRing($0, ring: pylon.ring) }) {
+                    if let existing = pylonCrossings[pylon.index] {
+                        pylonCrossings[pylon.index] = (
+                            min(existing.lowestDeck, sample.height),
+                            max(existing.highestDeck, sample.height),
+                            existing.direction
+                        )
+                    } else {
+                        pylonCrossings[pylon.index] = (sample.height, sample.height, unit)
+                    }
+                    if portalIndices.contains(pylon.index) {
+                        portalHits.append((sample.arc, pylon.index))
+                    }
+                }
+            }
+        }
 
-            let a = SIMD3<Float>(start.position.x + perpendicular.x, start.height, start.position.y + perpendicular.y)
-            let b = SIMD3<Float>(start.position.x - perpendicular.x, start.height, start.position.y - perpendicular.y)
-            let c = SIMD3<Float>(end.position.x - perpendicular.x, end.height, end.position.y - perpendicular.y)
-            let d = SIMD3<Float>(end.position.x + perpendicular.x, end.height, end.position.y + perpendicular.y)
+        // A main-carriageway deck that runs through portal towers is a suspension bridge: remember
+        // its profile so the cables and hangers can be strung once every tower height is known.
+        if !portalHits.isEmpty,
+           [.arterial, .motorway, .railway].contains(feature.kind) {
+            suspensionRuns.append(SuspensionRun(
+                samples: samples.map { ($0.position, $0.height, $0.arc) },
+                halfWidth: halfWidth,
+                portalHits: portalHits
+            ))
+        }
+
+        // Mitred ribbon, exactly like ground roads: per-sample averaged direction, so consecutive
+        // quads share their edges instead of overlapping on curves (the overlap was visible as
+        // patchy shimmer all along every curved ramp).
+        var deckLeft: [SIMD3<Float>] = []
+        var deckRight: [SIMD3<Float>] = []
+        var deckBottoms: [Float] = []
+        deckLeft.reserveCapacity(samples.count)
+        deckRight.reserveCapacity(samples.count)
+        deckBottoms.reserveCapacity(samples.count)
+        for index in samples.indices {
+            let previous = samples[max(index - 1, 0)].position
+            let next = samples[min(index + 1, samples.count - 1)].position
+            let direction = next - previous
+            let length = simd_length(direction)
+            guard length > 0.001 else { continue }
+            let perpendicular = SIMD2<Float>(-direction.y, direction.x) / length * halfWidth
+            let sample = samples[index]
+            deckLeft.append(SIMD3<Float>(
+                sample.position.x + perpendicular.x,
+                sample.height,
+                sample.position.y + perpendicular.y
+            ))
+            deckRight.append(SIMD3<Float>(
+                sample.position.x - perpendicular.x,
+                sample.height,
+                sample.position.y - perpendicular.y
+            ))
+            // Solid embankment where the deck hugs the ground (the approaches), hanging skirt where
+            // it flies. The embankment is what makes the ramp read as an earthwork entrance.
+            deckBottoms.append(
+                sample.height - sample.ground < 1.2
+                    ? sample.ground - 0.3
+                    : sample.height - thickness
+            )
+        }
+        guard deckLeft.count >= 2 else { return }
+        for index in 0..<(deckLeft.count - 1) {
+            let a = deckLeft[index]
+            let b = deckRight[index]
+            let c = deckRight[index + 1]
+            let d = deckLeft[index + 1]
             let top = [a, c, b, a, d, c]
             deck.append(contentsOf: top)
             collision.append(contentsOf: top)
 
-            // Solid embankment where the deck hugs the ground (the approaches), hanging skirt where
-            // it flies. Both close the structure visually; the embankment is what makes the ramp
-            // read as an earthwork entrance instead of a floating wedge.
-            let bottom0 = start.height - start.ground < 1.2 ? start.ground - 0.3 : start.height - thickness
-            let bottom1 = end.height - end.ground < 1.2 ? end.ground - 0.3 : end.height - thickness
-            let belowA = SIMD3<Float>(a.x, bottom0, a.z)
-            let belowB = SIMD3<Float>(b.x, bottom0, b.z)
-            let belowC = SIMD3<Float>(c.x, bottom1, c.z)
-            let belowD = SIMD3<Float>(d.x, bottom1, d.z)
-            let side = [
-                a, b, belowB, a, belowB, belowA,
-                d, belowD, belowC, d, belowC, c,
+            let belowA = SIMD3<Float>(a.x, deckBottoms[index], a.z)
+            let belowB = SIMD3<Float>(b.x, deckBottoms[index], b.z)
+            let belowC = SIMD3<Float>(c.x, deckBottoms[index + 1], c.z)
+            let belowD = SIMD3<Float>(d.x, deckBottoms[index + 1], d.z)
+            var side = [
                 a, belowA, belowD, a, belowD, d,
                 b, c, belowC, b, belowC, belowB
             ]
+            if index == 0 {
+                side.append(contentsOf: [a, b, belowB, a, belowB, belowA])
+            }
+            if index == deckLeft.count - 2 {
+                side.append(contentsOf: [d, belowD, belowC, d, belowC, c])
+            }
             sides.append(contentsOf: side)
             collision.append(contentsOf: side)
         }
@@ -1589,6 +1813,305 @@ private enum OSMSurfaceGeometryFactory {
                 collision: &collision
             )
             lastPierArc = sample.arc
+        }
+    }
+
+    /// A masonry portal tower in place of an OSM "building" that is really a bridge pylon.
+    ///
+    /// Shape: a solid base from the ground (riverbed included) up to just under the deck, two legs
+    /// flanking a portal opening the deck passes through, and a beam joining the legs from above
+    /// the opening to the tower top — the Brooklyn Bridge silhouette reduced to boxes. Footprint
+    /// extents and total height come from the OSM building; the opening sits at the recorded deck
+    /// crossing height, oriented along the bridge.
+    /// A main deck's final profile through its portal towers — everything needed to string the
+    /// suspension cables after all tower heights are known.
+    private struct SuspensionRun {
+        let samples: [(position: SIMD2<Float>, deck: Float, arc: Float)]
+        let halfWidth: Float
+        let portalHits: [(arc: Float, pylon: Int)]
+    }
+
+    private enum PylonStyle {
+        /// Tall tower with an arch: solid base, two legs, a beam over the opening.
+        case portal
+        /// Low massif whose roof carries the deck — a masonry anchorage/approach.
+        case plinth
+    }
+
+    private static func appendPylonTower(
+        building: UAVWorldBuilding,
+        style: PylonStyle,
+        lowestDeck: Float,
+        highestDeck: Float,
+        bridgeDirection: SIMD2<Float>,
+        terrainHeight: (Float, Float) -> Float,
+        into corners: inout [SIMD3<Float>],
+        collision: inout [SIMD3<Float>]
+    ) {
+        guard building.footprint.count >= 3 else { return }
+        let centroid = building.centroid
+        let axisU = bridgeDirection
+        let axisV = SIMD2<Float>(-axisU.y, axisU.x)
+        var halfU: Float = 0
+        var halfV: Float = 0
+        for point in building.footprint {
+            let delta = point - centroid
+            halfU = max(halfU, abs(simd_dot(delta, axisU)))
+            halfV = max(halfV, abs(simd_dot(delta, axisV)))
+        }
+        guard halfU > 0.5, halfV > 0.5 else { return }
+
+        let ground = terrainHeight(centroid.x, centroid.y)
+
+        if case .plinth = style {
+            // A "bridge" running at grade has no room for a massif under it — building one produced
+            // a stone block standing in the middle of the street. No structure is better there.
+            guard lowestDeck - ground > 3 else { return }
+            // The deck rides on the roof: one solid stone massif ending just under the lowest deck
+            // (the Brooklyn Bridge anchorage is exactly this — 12 m of vaulted masonry with eight
+            // decks running over the top). Extruded from the building's real OSM outline — the
+            // earlier oriented box, rotated to the bridge direction, made the anchorage look
+            // narrow and skewed against its own decks.
+            let top = lowestDeck - 0.6
+            let bottom = ground - 0.5
+            let ring = building.footprint
+            if let indices = PolygonTriangulator.triangulate(ring) {
+                let vertices = ring.map { SIMD3<Float>($0.x, top, $0.y) }
+                for index in stride(from: 0, to: indices.count, by: 3) {
+                    let triangle = [
+                        vertices[indices[index]],
+                        vertices[indices[index + 2]],
+                        vertices[indices[index + 1]]
+                    ]
+                    corners.append(contentsOf: triangle)
+                    collision.append(contentsOf: triangle)
+                }
+            }
+            for index in ring.indices {
+                let current = ring[index]
+                let next = ring[(index + 1) % ring.count]
+                let a = SIMD3<Float>(current.x, top, current.y)
+                let b = SIMD3<Float>(next.x, top, next.y)
+                let c = SIMD3<Float>(next.x, bottom, next.y)
+                let d = SIMD3<Float>(current.x, bottom, current.y)
+                let faces = [a, b, c, a, c, d]
+                corners.append(contentsOf: faces)
+                collision.append(contentsOf: faces)
+            }
+            return
+        }
+
+        var towerTop = building.baseElevationMeters + building.totalHeightMeters
+        if towerTop < highestDeck + 8 { towerTop = highestDeck + 12 }
+        // The base ends under the lowest deck and the opening clears the highest: the Brooklyn
+        // Bridge walkway runs a storey above the roadways through the same portal.
+        let baseTop = lowestDeck - 0.2
+        // The opening spans 60 % of the transverse extent — wide enough for every parallel deck of
+        // a big bridge — and rises ~11 m over the top roadway before the beam closes the portal.
+        let openingHalf = halfV * 0.6
+        let legHalf = (halfV - openingHalf) * 0.5
+        let legCentreOffset = openingHalf + legHalf
+        let openingTop = min(highestDeck + 11, towerTop - 2.5)
+
+        appendOrientedBox(
+            centre: centroid, axisU: axisU, axisV: axisV,
+            halfU: halfU, halfV: halfV,
+            bottom: ground - 0.5, top: baseTop,
+            into: &corners, collision: &collision
+        )
+        for side: Float in [-1, 1] {
+            appendOrientedBox(
+                centre: centroid + axisV * (side * legCentreOffset), axisU: axisU, axisV: axisV,
+                halfU: halfU, halfV: legHalf,
+                bottom: baseTop, top: towerTop,
+                into: &corners, collision: &collision
+            )
+        }
+        appendOrientedBox(
+            centre: centroid, axisU: axisU, axisV: axisV,
+            halfU: halfU, halfV: openingHalf,
+            bottom: openingTop, top: towerTop,
+            into: &corners, collision: &collision
+        )
+    }
+
+    private static func appendOrientedBox(
+        centre: SIMD2<Float>,
+        axisU: SIMD2<Float>,
+        axisV: SIMD2<Float>,
+        halfU: Float,
+        halfV: Float,
+        bottom: Float,
+        top: Float,
+        into corners: inout [SIMD3<Float>],
+        collision: inout [SIMD3<Float>]
+    ) {
+        guard top > bottom, halfU > 0.01, halfV > 0.01 else { return }
+        let base = [
+            centre - axisU * halfU - axisV * halfV,
+            centre + axisU * halfU - axisV * halfV,
+            centre + axisU * halfU + axisV * halfV,
+            centre - axisU * halfU + axisV * halfV
+        ]
+        var faces: [SIMD3<Float>] = []
+        for index in 0..<4 {
+            let p = base[index]
+            let q = base[(index + 1) % 4]
+            let a = SIMD3<Float>(p.x, top, p.y)
+            let b = SIMD3<Float>(q.x, top, q.y)
+            let c = SIMD3<Float>(q.x, bottom, q.y)
+            let d = SIMD3<Float>(p.x, bottom, p.y)
+            faces.append(contentsOf: [a, b, c, a, c, d])
+        }
+        // Top cap so the tower reads solid from above.
+        let t0 = SIMD3<Float>(base[0].x, top, base[0].y)
+        let t1 = SIMD3<Float>(base[1].x, top, base[1].y)
+        let t2 = SIMD3<Float>(base[2].x, top, base[2].y)
+        let t3 = SIMD3<Float>(base[3].x, top, base[3].y)
+        faces.append(contentsOf: [t0, t2, t1, t0, t3, t2])
+        corners.append(contentsOf: faces)
+        collision.append(contentsOf: faces)
+    }
+
+    /// Main cables and hangers for one suspension deck.
+    ///
+    /// Anchor points: the deck's two ends (cable dives into the anchorage) and every portal tower
+    /// it crosses (cable over the tower top). Between two towers the cable is a parabola sagging to
+    /// ~4 m above the deck at mid-span; tower-to-shore strands are straight backstays. Two cables,
+    /// one along each deck edge, with vertical hangers every other profile sample — the classic
+    /// suspension silhouette, derived entirely from data already in the package.
+    private static func appendSuspension(
+        _ run: SuspensionRun,
+        buildings: [UAVWorldBuilding],
+        crossings: [Int: (lowestDeck: Float, highestDeck: Float, direction: SIMD2<Float>)],
+        into corners: inout [SIMD3<Float>],
+        collision: inout [SIMD3<Float>]
+    ) {
+        guard run.samples.count >= 3,
+              let firstSample = run.samples.first,
+              let lastSample = run.samples.last else { return }
+
+        // One anchor per crossed tower, at the tower's top (matching appendPylonTower's height).
+        var towers: [(arc: Float, height: Float)] = []
+        for (pylonIndex, hits) in Dictionary(grouping: run.portalHits, by: { $0.pylon }) {
+            guard buildings.indices.contains(pylonIndex) else { continue }
+            let building = buildings[pylonIndex]
+            var towerTop = building.baseElevationMeters + building.totalHeightMeters
+            if let crossing = crossings[pylonIndex], towerTop < crossing.highestDeck + 8 {
+                towerTop = crossing.highestDeck + 12
+            }
+            let meanArc = hits.reduce(0) { $0 + $1.arc } / Float(hits.count)
+            towers.append((meanArc, towerTop - 0.6))
+        }
+        guard !towers.isEmpty else { return }
+        towers.sort { $0.arc < $1.arc }
+
+        var anchors: [(arc: Float, height: Float, isTower: Bool)] = []
+        anchors.append((firstSample.arc, firstSample.deck + 0.8, false))
+        for tower in towers where tower.arc > firstSample.arc + 5 && tower.arc < lastSample.arc - 5 {
+            anchors.append((tower.arc, tower.height, true))
+        }
+        anchors.append((lastSample.arc, lastSample.deck + 0.8, false))
+        guard anchors.count >= 3 else { return }
+
+        // Per-section sag: dip main spans to ~4 m over the lowest deck point in the span.
+        var sags: [Float] = []
+        for section in 0..<(anchors.count - 1) {
+            let from = anchors[section]
+            let to = anchors[section + 1]
+            if from.isTower, to.isTower {
+                let midHeight = (from.height + to.height) * 0.5
+                let deckLow = run.samples
+                    .filter { $0.arc >= from.arc && $0.arc <= to.arc }
+                    .map(\.deck)
+                    .min() ?? midHeight
+                sags.append(max(0, midHeight - (deckLow + 4)))
+            } else {
+                sags.append(0)
+            }
+        }
+
+        func cableHeight(at arc: Float) -> Float? {
+            for section in 0..<(anchors.count - 1) {
+                let from = anchors[section]
+                let to = anchors[section + 1]
+                guard arc >= from.arc - 0.01, arc <= to.arc + 0.01,
+                      to.arc - from.arc > 1 else { continue }
+                let t = (arc - from.arc) / (to.arc - from.arc)
+                return from.height + (to.height - from.height) * t
+                    - sags[section] * 4 * t * (1 - t)
+            }
+            return nil
+        }
+
+        let lateral = max(run.halfWidth * 0.9, 0.8)
+        var previousLeft: SIMD3<Float>?
+        var previousRight: SIMD3<Float>?
+        for index in run.samples.indices {
+            let sample = run.samples[index]
+            guard let height = cableHeight(at: sample.arc) else {
+                previousLeft = nil
+                previousRight = nil
+                continue
+            }
+            let previous = run.samples[max(index - 1, 0)].position
+            let next = run.samples[min(index + 1, run.samples.count - 1)].position
+            let direction = next - previous
+            let length = simd_length(direction)
+            guard length > 0.001 else { continue }
+            let perpendicular = SIMD2<Float>(-direction.y, direction.x) / length * lateral
+            let left = SIMD3<Float>(
+                sample.position.x + perpendicular.x,
+                height,
+                sample.position.y + perpendicular.y
+            )
+            let right = SIMD3<Float>(
+                sample.position.x - perpendicular.x,
+                height,
+                sample.position.y - perpendicular.y
+            )
+            if let previousLeft, let previousRight {
+                appendCableSegment(from: previousLeft, to: left, half: 0.16, into: &corners, collision: &collision)
+                appendCableSegment(from: previousRight, to: right, half: 0.16, into: &corners, collision: &collision)
+            }
+            previousLeft = left
+            previousRight = right
+
+            // Hangers every other sample, only where the cable is meaningfully above the deck.
+            if index % 2 == 0, height - sample.deck > 1.5 {
+                let deckLeft = SIMD3<Float>(left.x, sample.deck + 0.1, left.z)
+                let deckRight = SIMD3<Float>(right.x, sample.deck + 0.1, right.z)
+                appendCableSegment(from: deckLeft, to: left, half: 0.07, into: &corners, collision: &collision)
+                appendCableSegment(from: deckRight, to: right, half: 0.07, into: &corners, collision: &collision)
+            }
+        }
+    }
+
+    /// A cable piece as two crossed quads (a "+" cross-section): reads as a solid strand from any
+    /// angle at a fraction of a cylinder's cost. Works for sloped cable runs and vertical hangers.
+    private static func appendCableSegment(
+        from: SIMD3<Float>,
+        to: SIMD3<Float>,
+        half: Float,
+        into corners: inout [SIMD3<Float>],
+        collision: inout [SIMD3<Float>]
+    ) {
+        let planar = SIMD2<Float>(to.x - from.x, to.z - from.z)
+        let planarLength = simd_length(planar)
+        let horizontal: SIMD2<Float> = planarLength > 0.001
+            ? SIMD2<Float>(-planar.y, planar.x) / planarLength * half
+            : SIMD2<Float>(half, 0)
+        let vertical = SIMD3<Float>(0, half, 0)
+        let sideways = SIMD3<Float>(horizontal.x, 0, horizontal.y)
+
+        let quads = [
+            [from + vertical, to + vertical, to - vertical, from - vertical],
+            [from + sideways, to + sideways, to - sideways, from - sideways]
+        ]
+        for quad in quads {
+            let faces = [quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]
+            corners.append(contentsOf: faces)
+            collision.append(contentsOf: faces)
         }
     }
 
@@ -2033,6 +2556,17 @@ private enum OSMSurfaceGeometryFactory {
     private static func contains(_ point: SIMD2<Float>, in area: UAVWorldVegetationArea) -> Bool {
         pointInRing(point, ring: area.outerRing)
             && !area.holes.contains { pointInRing(point, ring: $0) }
+    }
+
+    private static func footprintArea(_ ring: [SIMD2<Float>]) -> Float {
+        guard ring.count >= 3 else { return 0 }
+        var doubled: Float = 0
+        for index in ring.indices {
+            let current = ring[index]
+            let next = ring[(index + 1) % ring.count]
+            doubled += current.x * next.y - next.x * current.y
+        }
+        return abs(doubled) * 0.5
     }
 
     private static func pointInRing(_ point: SIMD2<Float>, ring: [SIMD2<Float>]) -> Bool {
