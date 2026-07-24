@@ -496,6 +496,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             manifest: manifest,
             buildings: buildings,
             waterGeometry: store.readWaterGeometry(at: url),
+            osmSurfaceFeatures: store.readOSMSurfaceFeatures(at: url),
             elevation: store.readElevation(at: url)
         )
     }

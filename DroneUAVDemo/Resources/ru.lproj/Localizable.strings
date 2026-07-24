@@ -2673,6 +2673,7 @@
 "world.preview.status.ready" = "Готово — зданий: %d";
 "world.preview.status.saved" = "Сохранено как %@";
 "world.preview.report.buildings" = "Зданий: %d";
+"world.preview.report.osm_layers" = "OSM: %d водных полигонов, %d дорожных сегментов, %d мостов, %d объектов растительности";
 "world.preview.report.measured" = "Измеренных высот: %d%%";
 "world.preview.report.triangles" = "Треугольников: %d";
 "world.preview.report.tallest" = "Самое высокое: %d м";
@@ -2756,5 +2757,6 @@
 "map.open_data.build" = "Построить новую карту";
 
 "world.build.stage.water" = "Водные объекты";
+"world.build.stage.osm_surface" = "Дороги, мосты и растительность OSM";
 
 "world.build.stage.elevation" = "Рельеф местности";

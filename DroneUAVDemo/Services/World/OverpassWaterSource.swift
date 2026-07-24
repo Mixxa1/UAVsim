@@ -16,11 +16,17 @@ struct OverpassWaterSource: Sendable {
 
     /// Geographic OSM area roles before projection into the simulator's local metre grid.
     struct Geometry: Sendable {
+        struct LinearWaterway: Sendable {
+            let centerline: [GeoCoordinate]
+            let widthMeters: Float
+        }
+
         var outerRings: [[GeoCoordinate]] = []
         var innerRings: [[GeoCoordinate]] = []
         var landRings: [[GeoCoordinate]] = []
         var landInnerRings: [[GeoCoordinate]] = []
         var coastlineSegments: [[GeoCoordinate]] = []
+        var linearWaterways: [LinearWaterway] = []
     }
 
     private let endpoints: [URL]
@@ -55,7 +61,10 @@ struct OverpassWaterSource: Sendable {
         for element in response.elements {
             let tags = element.tags ?? [:]
             let isPier = tags["man_made"] == "pier"
-            let isWater = tags["natural"] == "water" || tags["waterway"] == "riverbank"
+            let isWater = tags["natural"] == "water"
+                || tags["waterway"] == "riverbank"
+                || tags["waterway"] == "dock"
+                || tags["landuse"] == "reservoir"
             let isCoastline = tags["natural"] == "coastline"
 
             if element.type == "way", let points = element.geometry {
@@ -70,6 +79,15 @@ struct OverpassWaterSource: Sendable {
                     } else if isWater {
                         result.outerRings.append(ring)
                     }
+                }
+                if Self.isLinearWaterway(tags: tags),
+                   points.count >= 2,
+                   tags["area"] != "yes",
+                   Self.closedWayRing(from: points) == nil {
+                    result.linearWaterways.append(.init(
+                        centerline: Self.coordinates(from: points),
+                        widthMeters: Self.waterwayWidth(tags: tags)
+                    ))
                 }
             }
 
@@ -121,6 +139,11 @@ struct OverpassWaterSource: Sendable {
           relation["natural"="water"]["type"="multipolygon"](\(box));
           way["waterway"="riverbank"](\(box));
           relation["waterway"="riverbank"]["type"="multipolygon"](\(box));
+          way["waterway"="dock"](\(box));
+          relation["waterway"="dock"]["type"="multipolygon"](\(box));
+          way["landuse"="reservoir"](\(box));
+          relation["landuse"="reservoir"]["type"="multipolygon"](\(box));
+          way["waterway"~"^(river|canal|stream|tidal_channel|drain|ditch)$"](\(box));
           way["natural"="coastline"](\(box));
           way["man_made"="pier"](\(box));
           relation["man_made"="pier"]["type"="multipolygon"](\(box));
@@ -135,7 +158,9 @@ struct OverpassWaterSource: Sendable {
     /// continues the running end (in either direction), and close the loop when it meets its own
     /// start. A tolerance covers the tiny disagreement two projected copies of the same node can
     /// have; in OSM they are literally the same node, so exact matches are the norm.
-    private static func assembleClosedRings(from segments: [[OverpassPoint]]) -> [[GeoCoordinate]] {
+    static func assembleClosedRings(
+        from segments: [[OverpassPoint]]
+    ) -> [[GeoCoordinate]] {
         func near(_ a: OverpassPoint, _ b: OverpassPoint) -> Bool {
             // Relation members share an OSM node and normally match exactly. Five centimetres still
             // tolerates JSON round-off without joining two distinct vertices on a dense waterfront.
@@ -181,7 +206,7 @@ struct OverpassWaterSource: Sendable {
         return rings
     }
 
-    private static func closedWayRing(from points: [OverpassPoint]) -> [GeoCoordinate]? {
+    static func closedWayRing(from points: [OverpassPoint]) -> [GeoCoordinate]? {
         guard points.count >= 4, let first = points.first, let last = points.last,
               first.lat == last.lat, first.lon == last.lon else { return nil }
         return closedRing(from: points)
@@ -191,6 +216,36 @@ struct OverpassWaterSource: Sendable {
         points.map {
             GeoCoordinate(latitudeDegrees: $0.lat, longitudeDegrees: $0.lon, altitudeMetersMSL: 0)
         }
+    }
+
+    private static func isLinearWaterway(tags: [String: String]) -> Bool {
+        guard let waterway = tags["waterway"]?.lowercased() else { return false }
+        return ["river", "canal", "stream", "tidal_channel", "drain", "ditch"].contains(waterway)
+    }
+
+    private static func waterwayWidth(tags: [String: String]) -> Float {
+        if let width = parseMeters(tags["width"]), width >= 0.5 {
+            return min(width, 200)
+        }
+        switch tags["waterway"]?.lowercased() {
+        case "river": return 20
+        case "canal": return 12
+        case "tidal_channel": return 8
+        case "stream": return 3
+        case "drain": return 2
+        default: return 1.5
+        }
+    }
+
+    private static func parseMeters(_ raw: String?) -> Float? {
+        guard var value = raw?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        value = value.replacingOccurrences(of: ",", with: ".")
+        let number = value.prefix { $0.isNumber || $0 == "." || $0 == "-" }
+        guard let parsed = Float(number), parsed.isFinite, parsed > 0 else { return nil }
+        if value.contains("ft") || value.contains("'") { return parsed * 0.3048 }
+        if value.contains("cm") { return parsed * 0.01 }
+        return parsed
     }
 
     private static func closedRing(from points: [OverpassPoint]) -> [GeoCoordinate] {
@@ -227,6 +282,476 @@ struct OverpassWaterSource: Sendable {
             }
         }
         throw lastError ?? UAVWorldImportError.malformedResponse(detail: "overpass water")
+    }
+}
+
+// MARK: - Roads, bridges and vegetation
+
+/// All non-building OSM surface features needed by the generated world.
+///
+/// The transport/bridge and vegetation/tree extracts are intentionally separate. Both still cover
+/// the complete bbox, while an overloaded public Overpass instance can no longer erase every
+/// surface layer merely because one large category timed out.
+struct OverpassSurfaceFeatureSource: Sendable {
+    struct RawTransport: Sendable {
+        let sourceIdentifier: String
+        let centerline: [GeoCoordinate]
+        let kind: UAVWorldTransportKind
+        let widthMeters: Float
+        let surface: String?
+        let isBridge: Bool
+        let layer: Int
+        let clearanceMeters: Float
+    }
+
+    struct RawVegetationArea: Sendable {
+        let sourceIdentifier: String
+        let outerRing: [GeoCoordinate]
+        let holes: [[GeoCoordinate]]
+        let kind: UAVWorldVegetationKind
+    }
+
+    struct RawBridgeArea: Sendable {
+        let sourceIdentifier: String
+        let outerRing: [GeoCoordinate]
+        let holes: [[GeoCoordinate]]
+        let layer: Int
+        let clearanceMeters: Float
+    }
+
+    struct RawTree: Sendable {
+        let sourceIdentifier: String
+        let coordinate: GeoCoordinate
+        let kind: UAVWorldVegetationKind
+    }
+
+    struct Geometry: Sendable {
+        var transport: [RawTransport] = []
+        var bridgeAreas: [RawBridgeArea] = []
+        var vegetationAreas: [RawVegetationArea] = []
+        var trees: [RawTree] = []
+    }
+
+    private let endpoints: [URL]
+    private let session: URLSession
+    private let queryTimeoutSeconds: Int
+
+    init(
+        endpoints: [URL] = OverpassBuildingSource.defaultEndpoints,
+        session: URLSession = .shared,
+        queryTimeoutSeconds: Int = 120
+    ) {
+        self.endpoints = endpoints
+        self.session = session
+        self.queryTimeoutSeconds = queryTimeoutSeconds
+    }
+
+    func fetch(in bounds: GeoBoundingBox) async throws -> Geometry {
+        var elements: [OverpassElement] = []
+        var successfulRequestCount = 0
+        var lastError: Error?
+        for query in Self.queries(bounds: bounds, timeoutSeconds: queryTimeoutSeconds) {
+            do {
+                let data = try await execute(query: query)
+                let response = try JSONDecoder().decode(OverpassResponse.self, from: data)
+                elements.append(contentsOf: response.elements)
+                successfulRequestCount += 1
+            } catch is CancellationError {
+                throw UAVWorldImportError.cancelled
+            } catch UAVWorldImportError.cancelled {
+                throw UAVWorldImportError.cancelled
+            } catch {
+                lastError = error
+            }
+        }
+        guard successfulRequestCount > 0 else {
+            throw lastError ?? UAVWorldImportError.malformedResponse(detail: "overpass surface")
+        }
+
+        let vegetationRelationMembers = Set(
+            elements
+                .filter {
+                    $0.type == "relation"
+                        && $0.tags?["type"] == "multipolygon"
+                        && Self.vegetationKind(tags: $0.tags ?? [:]) != nil
+                }
+                .flatMap { ($0.members ?? []).map(\.ref) }
+        )
+        let bridgeRelationMembers = Set(
+            elements
+                .filter {
+                    $0.type == "relation"
+                        && $0.tags?["type"] == "multipolygon"
+                        && $0.tags?["man_made"] == "bridge"
+                }
+                .flatMap { ($0.members ?? []).map(\.ref) }
+        )
+
+        var result = Geometry()
+        for element in elements {
+            let tags = element.tags ?? [:]
+            let identifier = "\(element.type)/\(element.id)"
+
+            if element.type == "way",
+               let points = element.geometry,
+               points.count >= 2,
+               let kind = Self.transportKind(tags: tags) {
+                result.transport.append(RawTransport(
+                    sourceIdentifier: identifier,
+                    centerline: Self.coordinates(from: points),
+                    kind: kind,
+                    widthMeters: Self.transportWidth(tags: tags, kind: kind),
+                    surface: tags["surface"]?.lowercased(),
+                    isBridge: Self.isBridge(tags: tags),
+                    layer: Self.layer(tags: tags),
+                    clearanceMeters: Self.bridgeClearance(tags: tags)
+                ))
+            }
+
+            if tags["man_made"] == "bridge" {
+                if element.type == "way" {
+                    if !bridgeRelationMembers.contains(element.id),
+                       let points = element.geometry,
+                       let ring = OverpassWaterSource.closedWayRing(from: points) {
+                        result.bridgeAreas.append(RawBridgeArea(
+                            sourceIdentifier: identifier,
+                            outerRing: ring,
+                            holes: [],
+                            layer: Self.layer(tags: tags),
+                            clearanceMeters: Self.bridgeClearance(tags: tags)
+                        ))
+                    }
+                } else if element.type == "relation", tags["type"] == "multipolygon" {
+                    let members = element.members ?? []
+                    let outers = OverpassWaterSource.assembleClosedRings(
+                        from: members
+                            .filter { $0.role == "outer" }
+                            .compactMap(\.geometry)
+                            .filter { $0.count >= 2 }
+                    )
+                    let inners = OverpassWaterSource.assembleClosedRings(
+                        from: members
+                            .filter { $0.role == "inner" }
+                            .compactMap(\.geometry)
+                            .filter { $0.count >= 2 }
+                    )
+                    for (index, outer) in outers.enumerated() {
+                        result.bridgeAreas.append(RawBridgeArea(
+                            sourceIdentifier: "\(identifier)/outer-\(index)",
+                            outerRing: outer,
+                            holes: inners.filter { Self.ring($0, liesInside: outer) },
+                            layer: Self.layer(tags: tags),
+                            clearanceMeters: Self.bridgeClearance(tags: tags)
+                        ))
+                    }
+                }
+            }
+
+            if element.type == "node",
+               tags["natural"] == "tree",
+               let latitude = element.lat,
+               let longitude = element.lon {
+                result.trees.append(RawTree(
+                    sourceIdentifier: identifier,
+                    coordinate: GeoCoordinate(
+                        latitudeDegrees: latitude,
+                        longitudeDegrees: longitude
+                    ),
+                    kind: .forest
+                ))
+            }
+
+            if element.type == "node",
+               tags["natural"] == "shrub",
+               let latitude = element.lat,
+               let longitude = element.lon {
+                result.trees.append(RawTree(
+                    sourceIdentifier: identifier,
+                    coordinate: GeoCoordinate(
+                        latitudeDegrees: latitude,
+                        longitudeDegrees: longitude
+                    ),
+                    kind: .scrub
+                ))
+            }
+
+            if element.type == "way",
+               tags["natural"] == "tree_row",
+               let points = element.geometry,
+               points.count >= 2 {
+                let row = Self.coordinates(from: points)
+                for (index, coordinate) in Self.samplesAlong(row, spacingMeters: 8).enumerated() {
+                    result.trees.append(RawTree(
+                        sourceIdentifier: "\(identifier)/tree-\(index)",
+                        coordinate: coordinate,
+                        kind: .forest
+                    ))
+                }
+            }
+
+            if element.type == "way",
+               tags["barrier"] == "hedge",
+               let points = element.geometry,
+               points.count >= 2 {
+                let row = Self.coordinates(from: points)
+                for (index, coordinate) in Self.samplesAlong(row, spacingMeters: 3).enumerated() {
+                    result.trees.append(RawTree(
+                        sourceIdentifier: "\(identifier)/shrub-\(index)",
+                        coordinate: coordinate,
+                        kind: .scrub
+                    ))
+                }
+            }
+
+            guard let vegetationKind = Self.vegetationKind(tags: tags) else { continue }
+            if element.type == "way" {
+                // A member way and its parent relation describe the same area. Prefer the relation,
+                // because only it carries the complete outer/inner topology.
+                guard !vegetationRelationMembers.contains(element.id),
+                      let points = element.geometry,
+                      let ring = OverpassWaterSource.closedWayRing(from: points) else {
+                    continue
+                }
+                result.vegetationAreas.append(RawVegetationArea(
+                    sourceIdentifier: identifier,
+                    outerRing: ring,
+                    holes: [],
+                    kind: vegetationKind
+                ))
+            } else if element.type == "relation", tags["type"] == "multipolygon" {
+                let members = element.members ?? []
+                let outers = OverpassWaterSource.assembleClosedRings(
+                    from: members
+                        .filter { $0.role == "outer" }
+                        .compactMap(\.geometry)
+                        .filter { $0.count >= 2 }
+                )
+                let inners = OverpassWaterSource.assembleClosedRings(
+                    from: members
+                        .filter { $0.role == "inner" }
+                        .compactMap(\.geometry)
+                        .filter { $0.count >= 2 }
+                )
+                for (index, outer) in outers.enumerated() {
+                    result.vegetationAreas.append(RawVegetationArea(
+                        sourceIdentifier: "\(identifier)/outer-\(index)",
+                        outerRing: outer,
+                        holes: inners.filter { Self.ring($0, liesInside: outer) },
+                        kind: vegetationKind
+                    ))
+                }
+            }
+        }
+        return result
+    }
+
+    static func queries(bounds: GeoBoundingBox, timeoutSeconds: Int) -> [String] {
+        let box = bounds.overpassBoundsString
+        return [
+            """
+            [out:json][timeout:\(timeoutSeconds)];
+            (
+              way["highway"](\(box));
+              way["railway"]["bridge"](\(box));
+              way["man_made"="bridge"](\(box));
+              relation["man_made"="bridge"]["type"="multipolygon"](\(box));
+            );
+            out geom;
+            """,
+            """
+            [out:json][timeout:\(timeoutSeconds)];
+            (
+              way["natural"="tree_row"](\(box));
+              node["natural"="tree"](\(box));
+              node["natural"="shrub"](\(box));
+              way["barrier"="hedge"](\(box));
+              way["landuse"~"^(forest|grass|meadow|orchard|vineyard|plant_nursery|flowerbed|recreation_ground)$"](\(box));
+              relation["landuse"~"^(forest|grass|meadow|orchard|vineyard|plant_nursery|flowerbed|recreation_ground)$"]["type"="multipolygon"](\(box));
+              way["natural"~"^(wood|scrub|grassland|heath|shrubbery)$"](\(box));
+              relation["natural"~"^(wood|scrub|grassland|heath|shrubbery)$"]["type"="multipolygon"](\(box));
+              way["leisure"~"^(park|garden)$"](\(box));
+              relation["leisure"~"^(park|garden)$"]["type"="multipolygon"](\(box));
+            );
+            out geom;
+            """
+        ]
+    }
+
+    private static func transportKind(tags: [String: String]) -> UAVWorldTransportKind? {
+        if let railway = tags["railway"]?.lowercased(),
+           isBridge(tags: tags),
+           !["abandoned", "disused", "razed", "construction", "proposed"].contains(railway) {
+            return .railway
+        }
+        guard let highway = tags["highway"]?.lowercased(),
+              !["construction", "proposed", "abandoned", "razed", "raceway"].contains(highway)
+        else { return nil }
+        switch highway {
+        case "motorway", "motorway_link": return .motorway
+        case "trunk", "trunk_link", "primary", "primary_link", "secondary",
+             "secondary_link", "tertiary", "tertiary_link":
+            return .arterial
+        case "residential", "living_street", "unclassified": return .street
+        case "service", "road": return .service
+        case "track": return .track
+        default: return .pedestrian
+        }
+    }
+
+    private static func vegetationKind(tags: [String: String]) -> UAVWorldVegetationKind? {
+        switch tags["landuse"]?.lowercased() {
+        case "forest": return .forest
+        case "grass", "flowerbed", "recreation_ground": return .grass
+        case "meadow": return .meadow
+        case "orchard", "vineyard", "plant_nursery": return .orchard
+        default: break
+        }
+        switch tags["natural"]?.lowercased() {
+        case "wood": return .forest
+        case "scrub", "heath", "shrubbery": return .scrub
+        case "grassland": return .meadow
+        default: break
+        }
+        switch tags["leisure"]?.lowercased() {
+        case "park", "garden": return .garden
+        default: return nil
+        }
+    }
+
+    private static func isBridge(tags: [String: String]) -> Bool {
+        guard let value = tags["bridge"]?.lowercased() else {
+            return tags["man_made"] == "bridge"
+        }
+        return !["no", "false", "0"].contains(value)
+    }
+
+    private static func layer(tags: [String: String]) -> Int {
+        if let value = tags["layer"], let parsed = Int(value) { return parsed }
+        return isBridge(tags: tags) ? 1 : 0
+    }
+
+    private static func bridgeClearance(tags: [String: String]) -> Float {
+        parseMeters(tags["min_height"]) ?? 4.5
+    }
+
+    private static func transportWidth(
+        tags: [String: String],
+        kind: UAVWorldTransportKind
+    ) -> Float {
+        if let width = parseMeters(tags["width"]), width > 0.4 { return min(width, 40) }
+        if let lanesText = tags["lanes"],
+           let lanes = Float(lanesText.split(separator: ";").first ?? ""),
+           lanes > 0 {
+            return min(40, max(2.5, lanes * 3.2))
+        }
+        switch kind {
+        case .motorway: return 12
+        case .arterial: return 9
+        case .street: return 6.5
+        case .service: return 4.5
+        case .pedestrian: return 2.2
+        case .track: return 3
+        case .railway: return 4
+        }
+    }
+
+    private static func parseMeters(_ text: String?) -> Float? {
+        guard var value = text?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        value = value.replacingOccurrences(of: ",", with: ".")
+        let number = value.prefix { $0.isNumber || $0 == "." || $0 == "-" }
+        guard let parsed = Float(number) else { return nil }
+        if value.contains("ft") || value.contains("'") { return parsed * 0.3048 }
+        if value.contains("cm") { return parsed * 0.01 }
+        return parsed
+    }
+
+    private static func coordinates(from points: [OverpassPoint]) -> [GeoCoordinate] {
+        points.map {
+            GeoCoordinate(latitudeDegrees: $0.lat, longitudeDegrees: $0.lon)
+        }
+    }
+
+    private static func samplesAlong(
+        _ points: [GeoCoordinate],
+        spacingMeters: Double
+    ) -> [GeoCoordinate] {
+        guard points.count >= 2 else { return points }
+        var samples: [GeoCoordinate] = [points[0]]
+        for index in 0..<(points.count - 1) {
+            let a = points[index]
+            let b = points[index + 1]
+            let meanLatitude = (a.latitudeDegrees + b.latitudeDegrees) * 0.5 * .pi / 180
+            let north = (b.latitudeDegrees - a.latitudeDegrees) * 111_320
+            let east = (b.longitudeDegrees - a.longitudeDegrees) * 111_320 * cos(meanLatitude)
+            let distance = hypot(north, east)
+            let count = max(1, Int((distance / spacingMeters).rounded(.up)))
+            for step in 1...count {
+                let t = min(1, Double(step) / Double(count))
+                samples.append(GeoCoordinate(
+                    latitudeDegrees: a.latitudeDegrees
+                        + (b.latitudeDegrees - a.latitudeDegrees) * t,
+                    longitudeDegrees: a.longitudeDegrees
+                        + (b.longitudeDegrees - a.longitudeDegrees) * t
+                ))
+            }
+        }
+        return samples
+    }
+
+    private static func ring(
+        _ candidate: [GeoCoordinate],
+        liesInside outer: [GeoCoordinate]
+    ) -> Bool {
+        guard let point = candidate.first, outer.count >= 3 else { return false }
+        var inside = false
+        var previous = outer.count - 1
+        for index in outer.indices {
+            let a = outer[index]
+            let b = outer[previous]
+            if (a.latitudeDegrees > point.latitudeDegrees)
+                != (b.latitudeDegrees > point.latitudeDegrees) {
+                let longitude = (b.longitudeDegrees - a.longitudeDegrees)
+                    * (point.latitudeDegrees - a.latitudeDegrees)
+                    / (b.latitudeDegrees - a.latitudeDegrees)
+                    + a.longitudeDegrees
+                if point.longitudeDegrees < longitude { inside.toggle() }
+            }
+            previous = index
+        }
+        return inside
+    }
+
+    private func execute(query: String) async throws -> Data {
+        var lastError: Error?
+        for endpoint in endpoints {
+            try Task.checkCancellation()
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue(
+                "application/x-www-form-urlencoded",
+                forHTTPHeaderField: "Content-Type"
+            )
+            request.setValue(
+                "UAVsim/1.0 (flight simulator world importer)",
+                forHTTPHeaderField: "User-Agent"
+            )
+            request.timeoutInterval = TimeInterval(queryTimeoutSeconds + 30)
+            request.httpBody = "data=\(query.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? query)"
+                .data(using: .utf8)
+            do {
+                let (data, response) = try await session.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if status == 200 { return data }
+                lastError = UAVWorldImportError.serviceRejected(statusCode: status, message: nil)
+                if ![429, 503, 504].contains(status) { throw lastError! }
+            } catch is CancellationError {
+                throw UAVWorldImportError.cancelled
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? UAVWorldImportError.malformedResponse(detail: "overpass surface")
     }
 }
 

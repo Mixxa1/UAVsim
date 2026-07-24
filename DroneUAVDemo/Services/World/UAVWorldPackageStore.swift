@@ -44,6 +44,7 @@ struct UAVWorldPackageStore {
     /// builds can still open a newly written package instead of silently losing all water.
     private static let waterGeometryFileName = "water-geometry.json"
     private static let elevationFileName = "elevation.json"
+    private static let osmSurfaceFeaturesFileName = "osm-surface-features.json"
 
     private let fileManager: FileManager
 
@@ -125,6 +126,14 @@ struct UAVWorldPackageStore {
                 try encoder.encode(elevation)
                     .write(to: staging.appendingPathComponent(Self.elevationFileName))
             }
+            if !result.osmSurfaceFeatures.isEmpty {
+                try encoder.encode(result.osmSurfaceFeatures)
+                    .write(
+                        to: staging.appendingPathComponent(
+                            Self.osmSurfaceFeaturesFileName
+                        )
+                    )
+            }
 
             if fileManager.fileExists(atPath: destination.path) {
                 _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
@@ -200,6 +209,13 @@ struct UAVWorldPackageStore {
             landRings: [],
             landInnerRings: []
         )
+    }
+
+    /// Roads, bridges and vegetation, or empty for packages created before these layers existed.
+    func readOSMSurfaceFeatures(at packageURL: URL) -> UAVWorldOSMSurfaceFeatures {
+        let url = packageURL.appendingPathComponent(Self.osmSurfaceFeaturesFileName)
+        guard let data = try? Data(contentsOf: url) else { return .empty }
+        return (try? JSONDecoder().decode(UAVWorldOSMSurfaceFeatures.self, from: data)) ?? .empty
     }
 
     func readBuildings(at packageURL: URL) throws -> [UAVWorldBuilding] {

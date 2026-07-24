@@ -178,6 +178,15 @@ final class UAVWorldPreviewModel: ObservableObject {
         lines.append(L10n.f("world.preview.report.buildings", result.buildings.count))
         lines.append(
             L10n.f(
+                "world.preview.report.osm_layers",
+                result.manifest.statistics.waterPolygonCount,
+                result.manifest.statistics.roadSegmentCount,
+                result.manifest.statistics.bridgeCount,
+                result.manifest.statistics.vegetationCount
+            )
+        )
+        lines.append(
+            L10n.f(
                 "world.preview.report.measured",
                 Int((result.manifest.statistics.measuredHeightFraction * 100).rounded())
             )

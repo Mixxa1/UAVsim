@@ -24,12 +24,13 @@ final class OverpassBuildingSource: UAVWorldBuildingSource {
     private let session: URLSession
     private let queryTimeoutSeconds: Int
 
-    let attribution = UAVWorldAttribution(
+    static let osmAttribution = UAVWorldAttribution(
         datasetIdentifier: "osm",
         displayName: "OpenStreetMap contributors",
         license: "ODbL 1.0",
         sourceURL: "https://www.openstreetmap.org/copyright"
     )
+    let attribution = OverpassBuildingSource.osmAttribution
 
     /// Lowest rank: crowd-sourced outlines with highly variable height coverage.
     let fidelityRank = 10
@@ -57,7 +58,7 @@ final class OverpassBuildingSource: UAVWorldBuildingSource {
             throw UAVWorldImportError.malformedResponse(detail: error.localizedDescription)
         }
 
-        let buildings = response.elements.compactMap(Self.makeRawBuilding)
+        let buildings = response.elements.flatMap(Self.makeRawBuildings)
         guard !buildings.isEmpty else {
             throw UAVWorldImportError.emptyResult
         }
@@ -134,50 +135,52 @@ final class OverpassBuildingSource: UAVWorldBuildingSource {
 
     // MARK: - Element → raw building
 
-    static func makeRawBuilding(from element: OverpassElement) -> UAVWorldRawBuilding? {
-        let rings: [[GeoCoordinate]]
+    static func makeRawBuildings(from element: OverpassElement) -> [UAVWorldRawBuilding] {
+        let footprintGroups: [[[GeoCoordinate]]]
 
         switch element.type {
         case "way":
-            guard let geometry = element.geometry else { return nil }
+            guard let geometry = element.geometry else { return [] }
             let ring = closedRing(from: geometry)
-            guard ring.count >= 3 else { return nil }
-            rings = [ring]
+            guard ring.count >= 3 else { return [] }
+            footprintGroups = [[ring]]
 
         case "relation":
             // Multipolygon buildings: outer rings define the shape, inner rings are courtyards.
-            // Overpass returns each member's geometry separately and a large building may be
-            // split across several outer ways; stitching those into continuous rings is real
-            // work, so for now the largest single outer member is used and the rest ignored.
-            // That under-represents a handful of complex blocks rather than dropping them.
-            guard let members = element.members else { return nil }
-            let outers = members
+            // Members are frequently open ways and a relation may legitimately contain several
+            // disjoint outer rings. Assemble all of them and emit one renderable building part per
+            // outer ring rather than selecting a single convenient member.
+            guard let members = element.members else { return [] }
+            let outers = OverpassWaterSource.assembleClosedRings(
+                from: members
                 .filter { $0.role == "outer" }
-                .compactMap { $0.geometry.map(closedRing) }
-                .filter { $0.count >= 3 }
-            guard let largestOuter = outers.max(by: { approximateRingSpan($0) < approximateRingSpan($1) })
-            else { return nil }
-
-            let inners = members
+                .compactMap(\.geometry)
+                .filter { $0.count >= 2 }
+            )
+            let inners = OverpassWaterSource.assembleClosedRings(
+                from: members
                 .filter { $0.role == "inner" }
-                .compactMap { $0.geometry.map(closedRing) }
-                .filter { $0.count >= 3 }
-            rings = [largestOuter] + inners
+                .compactMap(\.geometry)
+                .filter { $0.count >= 2 }
+            )
+            footprintGroups = outers.map { outer in
+                [outer] + inners.filter { ring($0, liesInside: outer) }
+            }
 
         default:
-            return nil
+            return []
         }
 
         let tags = element.tags ?? [:]
         // `building=no` explicitly marks a footprint that is not a building.
-        guard let buildingTag = tags["building"], buildingTag != "no" else { return nil }
+        guard let buildingTag = tags["building"], buildingTag != "no" else { return [] }
         // Some OSM sculptures carry `building=yes` solely to give renderers a closed 3D outline.
         // Extruding those as occupied masonry produces a conspicuous fake building. The American
         // Merchant Mariners' Memorial is the local example: it is a bronze sinking-vessel
         // composition in the harbour, explicitly tagged `memorial=statue`.
         guard tags["memorial"] != "statue",
               tags["artwork_type"] != "sculpture" else {
-            return nil
+            return []
         }
 
         let record = UAVWorldBuildingSourceRecord(
@@ -193,11 +196,15 @@ final class OverpassBuildingSource: UAVWorldBuildingSource {
             roofShape: tags["roof:shape"]
         )
 
-        return UAVWorldRawBuilding(
-            rings: rings,
-            record: record,
-            featureIdentifier: "\(element.type)/\(element.id)"
-        )
+        return footprintGroups.enumerated().map { index, rings in
+            UAVWorldRawBuilding(
+                rings: rings,
+                record: record,
+                featureIdentifier: footprintGroups.count == 1
+                    ? "\(element.type)/\(element.id)"
+                    : "\(element.type)/\(element.id)/outer-\(index)"
+            )
+        }
     }
 
     /// OSM closed ways repeat the first node as the last; the simulator's rings are implicitly
@@ -214,14 +221,27 @@ final class OverpassBuildingSource: UAVWorldBuildingSource {
         return coordinates
     }
 
-    /// Cheap degree-space extent, used only to compare candidate rings against each other.
-    private static func approximateRingSpan(_ ring: [GeoCoordinate]) -> Double {
-        guard !ring.isEmpty else { return 0.0 }
-        let latitudes = ring.map(\.latitudeDegrees)
-        let longitudes = ring.map(\.longitudeDegrees)
-        let latitudeSpan = (latitudes.max() ?? 0) - (latitudes.min() ?? 0)
-        let longitudeSpan = (longitudes.max() ?? 0) - (longitudes.min() ?? 0)
-        return latitudeSpan * longitudeSpan
+    private static func ring(
+        _ candidate: [GeoCoordinate],
+        liesInside outer: [GeoCoordinate]
+    ) -> Bool {
+        guard let point = candidate.first, outer.count >= 3 else { return false }
+        var inside = false
+        var previous = outer.count - 1
+        for index in outer.indices {
+            let a = outer[index]
+            let b = outer[previous]
+            if (a.latitudeDegrees > point.latitudeDegrees)
+                != (b.latitudeDegrees > point.latitudeDegrees) {
+                let longitude = (b.longitudeDegrees - a.longitudeDegrees)
+                    * (point.latitudeDegrees - a.latitudeDegrees)
+                    / (b.latitudeDegrees - a.latitudeDegrees)
+                    + a.longitudeDegrees
+                if point.longitudeDegrees < longitude { inside.toggle() }
+            }
+            previous = index
+        }
+        return inside
     }
 
     // MARK: - Tag parsing
@@ -381,6 +401,9 @@ struct OverpassResponse: Decodable, Sendable {
 struct OverpassElement: Decodable, Sendable {
     let type: String
     let id: Int64
+    /// Nodes returned by `out geom` carry their coordinate on the element itself.
+    let lat: Double?
+    let lon: Double?
     let tags: [String: String]?
     let geometry: [OverpassPoint]?
     let members: [OverpassMember]?

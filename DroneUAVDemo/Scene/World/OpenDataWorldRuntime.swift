@@ -36,16 +36,15 @@ final class OpenDataWorldRuntime: FlyableWorld {
         manifest: UAVWorldManifest,
         buildings: [UAVWorldBuilding],
         waterGeometry: UAVWorldWaterGeometry = .empty,
+        osmSurfaceFeatures: UAVWorldOSMSurfaceFeatures = .empty,
         elevation: TerrariumElevationSource.Grid? = nil
     ) {
         self.origin = manifest.origin
         self.identifier = manifest.identifier
         self.displayName = manifest.displayName
-        // Compatibility for packages imported before sculpture-like OSM features were excluded
-        // from the building source. The memorial remains real scenery, but rendering its tiny
-        // sinking-vessel outline with brick walls and windows is less truthful than omitting it
-        // until the simulator has a dedicated artwork/monument layer.
-        let renderableBuildings = buildings.compactMap(Self.buildingForRendering)
+        // Feature-specific corrections belong in the tag-driven importer, never in runtime ID
+        // lists. This keeps the same rules valid for every package and every OSM object.
+        let renderableBuildings = buildings
         self.buildingCount = renderableBuildings.count
 
         // Ground has to reach at least as far as the things standing on it.
@@ -57,7 +56,8 @@ final class OpenDataWorldRuntime: FlyableWorld {
         // existence and there was no ground beneath it to prefer.
         let halfSpan = max(
             Self.halfSpanMeters(of: manifest),
-            Self.buildingReachMeters(renderableBuildings)
+            Self.buildingReachMeters(renderableBuildings),
+            Self.surfaceFeatureReachMeters(osmSurfaceFeatures)
         ) + 30.0
 
         // Bare-earth is applied here, at load, not at fetch. The package stores the raw surface
@@ -246,6 +246,23 @@ final class OpenDataWorldRuntime: FlyableWorld {
 
         let assembly = UAVWorldSceneAssembler.assemble(buildings: seatedBuildings)
         self.rootNode = assembly.root
+        let osmAssembly = OSMSurfaceGeometryFactory.assemble(
+            features: osmSurfaceFeatures,
+            buildings: seatedBuildings,
+            water: waterModel
+        ) { x, z in
+            Self.terrainHeight(
+                x: x,
+                z: z,
+                elevation: ground,
+                water: waterModel,
+                mappedLand: pierModel,
+                waterLevel: surfaceLevel
+            )
+        }
+        if !osmAssembly.root.childNodes.isEmpty {
+            rootNode.addChildNode(osmAssembly.root)
+        }
 
         // Collision must be the surface the pilot sees. The old collision terrain was an
         // independent 12 m grid which continued through water and cut diagonally across the exact
@@ -284,6 +301,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
                 corners.append(triangle.point2)
             }
         }
+        corners.append(contentsOf: osmAssembly.collisionCorners)
         self.collision = MeshCollisionIndex(triangleCorners: corners)
         self.worldBounds = (
             minimum: SIMD3<Float>(
@@ -363,42 +381,30 @@ final class OpenDataWorldRuntime: FlyableWorld {
         return reach
     }
 
-    private static func buildingForRendering(_ building: UAVWorldBuilding) -> UAVWorldBuilding? {
-        guard building.provenance.datasetIdentifier == "osm" else { return building }
-        let featureIdentifier = building.provenance.featureIdentifier
-        guard !legacyNonBuildingOSMFeatures.contains(featureIdentifier) else { return nil }
-        guard legacyInferredRoofOSMFeatures.contains(featureIdentifier) else { return building }
-
-        // Older packages stored the classifier's inferred roof form, but did not preserve whether
-        // it came from an explicit OSM `roof:shape`. Correct the known Lower Manhattan feature
-        // whose complex footprint was turned into the giant open canopy reported in flight.
-        // Rebuilt packages no longer need this migration because the classifier does not invent a
-        // raised roof when the source omits its shape.
-        return UAVWorldBuilding(
-            id: building.id,
-            footprint: building.footprint,
-            holes: building.holes,
-            baseElevationMeters: building.baseElevationMeters,
-            heightMeters: building.heightMeters,
-            roofHeightMeters: 0,
-            roofForm: .flat,
-            facadeClass: building.facadeClass,
-            levels: building.levels,
-            yearBuilt: building.yearBuilt,
-            name: building.name,
-            provenance: building.provenance
-        )
+    private static func surfaceFeatureReachMeters(
+        _ features: UAVWorldOSMSurfaceFeatures
+    ) -> Float {
+        var reach: Float = 0
+        for feature in features.transport {
+            for point in feature.centerline {
+                reach = max(reach, max(abs(point.x), abs(point.y)) + feature.widthMeters)
+            }
+        }
+        for area in features.vegetationAreas {
+            for point in area.outerRing {
+                reach = max(reach, max(abs(point.x), abs(point.y)))
+            }
+        }
+        for area in features.bridgeAreas {
+            for point in area.outerRing {
+                reach = max(reach, max(abs(point.x), abs(point.y)))
+            }
+        }
+        for tree in features.trees {
+            reach = max(reach, max(abs(tree.position.x), abs(tree.position.y)) + 3)
+        }
+        return reach
     }
-
-    /// OSM features known to be artwork rather than occupiable building volumes. New imports
-    /// reject these by semantic tags; IDs are retained only to migrate already-saved packages.
-    private static let legacyNonBuildingOSMFeatures: Set<String> = [
-        "way/1015975228" // American Merchant Mariners' Memorial, memorial=statue
-    ]
-
-    private static let legacyInferredRoofOSMFeatures: Set<String> = [
-        "way/278053534" // Shrine of Saint Elizabeth Ann Bayley Seton; no roof:shape in OSM
-    ]
 
     /// Half the world's side length, in scene metres, taken from the manifest's geographic bounds.
     private static func halfSpanMeters(of manifest: UAVWorldManifest) -> Float {
@@ -477,8 +483,9 @@ final class OpenDataWorldRuntime: FlyableWorld {
     /// abyss and leave a spike hanging across the sky.
     private static let maximumDepressionBelowWater: Float = 60.0
 
-    /// Smallest water body kept — a 20 m pond. Below this is fountains and reflecting pools.
-    private static let minimumWaterAreaSquareMeters: Float = 400.0
+    /// Only sub-pixel slivers are rejected. Every mapped pond, fountain and reflecting pool is a
+    /// visible OSM water feature; the old 400 m² cut-off contradicted the package-wide import.
+    private static let minimumWaterAreaSquareMeters: Float = 4.0
 
     /// How far a building's base is sunk below the lowest ground under it, closing the last gap.
     private static let buildingFoundationSkirtMeters: Float = 1.0
@@ -874,5 +881,604 @@ final class OpenDataWorldRuntime: FlyableWorld {
             }
         }
         return corners
+    }
+}
+
+// MARK: - OSM roads, bridges and vegetation
+
+/// Batched SceneKit geometry for every persisted OSM surface feature.
+///
+/// The factory consumes semantic classes, never feature IDs. It therefore behaves identically for
+/// a single village road and for every street in Manhattan, and produces bridge/tree collision from
+/// the same triangles that are visible.
+@MainActor
+private enum OSMSurfaceGeometryFactory {
+    struct Assembly {
+        let root: SCNNode
+        let collisionCorners: [SIMD3<Float>]
+    }
+
+    private enum RoadMaterialKey: Hashable {
+        case motorway, arterial, street, service, pedestrian, track, railway, bridgeSide
+    }
+
+    static func assemble(
+        features: UAVWorldOSMSurfaceFeatures,
+        buildings: [UAVWorldBuilding],
+        water: WaterSurfaceModel?,
+        terrainHeight: (Float, Float) -> Float
+    ) -> Assembly {
+        let root = SCNNode()
+        root.name = "world.osm.surface-features"
+        var collision: [SIMD3<Float>] = []
+
+        var roadCorners: [RoadMaterialKey: [SIMD3<Float>]] = [:]
+        for feature in features.transport where feature.centerline.count >= 2 {
+            appendTransport(
+                feature,
+                terrainHeight: terrainHeight,
+                corners: &roadCorners,
+                collision: &collision
+            )
+        }
+        var bridgeAreaTopCorners: [SIMD3<Float>] = []
+        var bridgeAreaSideCorners: [SIMD3<Float>] = []
+        for area in features.bridgeAreas {
+            appendBridgeArea(
+                area,
+                terrainHeight: terrainHeight,
+                corners: &bridgeAreaTopCorners,
+                sideCorners: &bridgeAreaSideCorners,
+                collision: &collision
+            )
+        }
+        roadCorners[.service, default: []].append(contentsOf: bridgeAreaTopCorners)
+        roadCorners[.bridgeSide, default: []].append(contentsOf: bridgeAreaSideCorners)
+        for (key, corners) in roadCorners {
+            guard let node = makeNode(
+                corners: corners,
+                color: roadColor(key),
+                roughness: key == .railway ? 0.62 : 0.92
+            ) else { continue }
+            node.name = "world.osm.transport.\(key)"
+            node.castsShadow = key == .bridgeSide
+            root.addChildNode(node)
+        }
+
+        var vegetationCorners: [UAVWorldVegetationKind: [SIMD3<Float>]] = [:]
+        for area in features.vegetationAreas {
+            appendVegetationCover(
+                area,
+                terrainHeight: terrainHeight,
+                into: &vegetationCorners[area.kind, default: []]
+            )
+        }
+        for (kind, corners) in vegetationCorners {
+            guard let node = makeNode(
+                corners: corners,
+                color: vegetationColor(kind),
+                roughness: 1
+            ) else { continue }
+            node.name = "world.osm.vegetation.\(kind.rawValue)"
+            node.castsShadow = false
+            root.addChildNode(node)
+        }
+
+        var candidates = features.trees.map {
+            (
+                identifier: $0.sourceIdentifier,
+                position: $0.position,
+                kind: $0.kind
+            )
+        }
+        candidates.append(contentsOf: generatedVegetation(
+            areas: features.vegetationAreas,
+            transport: features.transport,
+            buildings: buildings,
+            water: water
+        ))
+
+        var trunkCorners: [SIMD3<Float>] = []
+        var canopyCorners: [SIMD3<Float>] = []
+        for candidate in candidates {
+            if water?.isWater(x: candidate.position.x, z: candidate.position.y) == true {
+                continue
+            }
+            let seed = stableHash(candidate.identifier)
+            appendPlant(
+                at: candidate.position,
+                kind: candidate.kind,
+                seed: seed,
+                ground: terrainHeight(candidate.position.x, candidate.position.y),
+                trunks: &trunkCorners,
+                canopies: &canopyCorners,
+                collision: &collision
+            )
+        }
+        if let trunks = makeNode(
+            corners: trunkCorners,
+            color: NSColor(calibratedRed: 0.24, green: 0.16, blue: 0.08, alpha: 1),
+            roughness: 1
+        ) {
+            trunks.name = "world.osm.vegetation.trunks"
+            trunks.castsShadow = true
+            root.addChildNode(trunks)
+        }
+        if let canopies = makeNode(
+            corners: canopyCorners,
+            color: NSColor(calibratedRed: 0.13, green: 0.32, blue: 0.13, alpha: 1),
+            roughness: 1
+        ) {
+            canopies.name = "world.osm.vegetation.canopies"
+            canopies.castsShadow = true
+            root.addChildNode(canopies)
+        }
+
+        return Assembly(root: root, collisionCorners: collision)
+    }
+
+    private static func appendTransport(
+        _ feature: UAVWorldTransportFeature,
+        terrainHeight: (Float, Float) -> Float,
+        corners: inout [RoadMaterialKey: [SIMD3<Float>]],
+        collision: inout [SIMD3<Float>]
+    ) {
+        let key = roadKey(feature)
+        let halfWidth = max(0.35, feature.widthMeters * 0.5)
+        let bridgeLift: Float
+        if feature.isBridge {
+            let sampled = feature.centerline.map { terrainHeight($0.x, $0.y) }
+            let approachHeight = max(sampled.first ?? 0, sampled.last ?? 0)
+            let lowestCrossing = sampled.min() ?? approachHeight
+            bridgeLift = max(
+                approachHeight + 0.2,
+                lowestCrossing + feature.clearanceMeters
+                    + Float(max(0, feature.layer - 1)) * 3.5
+            )
+        } else {
+            bridgeLift = 0
+        }
+
+        for index in 0..<(feature.centerline.count - 1) {
+            let start = feature.centerline[index]
+            let end = feature.centerline[index + 1]
+            let delta = end - start
+            let length = simd_length(delta)
+            guard length.isFinite, length > 0.05 else { continue }
+            let perpendicular = SIMD2<Float>(-delta.y, delta.x) / length * halfWidth
+            let y0 = feature.isBridge
+                ? bridgeLift
+                : terrainHeight(start.x, start.y) + 0.09
+            let y1 = feature.isBridge
+                ? bridgeLift
+                : terrainHeight(end.x, end.y) + 0.09
+
+            let a = SIMD3<Float>(start.x + perpendicular.x, y0, start.y + perpendicular.y)
+            let b = SIMD3<Float>(start.x - perpendicular.x, y0, start.y - perpendicular.y)
+            let c = SIMD3<Float>(end.x - perpendicular.x, y1, end.y - perpendicular.y)
+            let d = SIMD3<Float>(end.x + perpendicular.x, y1, end.y + perpendicular.y)
+            let top = [a, c, b, a, d, c]
+            corners[key, default: []].append(contentsOf: top)
+            if index > 0 {
+                let joint = feature.centerline[index]
+                let jointY = feature.isBridge
+                    ? bridgeLift
+                    : terrainHeight(joint.x, joint.y) + 0.09
+                let cap = circularCap(
+                    centre: SIMD3<Float>(joint.x, jointY, joint.y),
+                    radius: halfWidth
+                )
+                corners[key, default: []].append(contentsOf: cap)
+                if feature.isBridge { collision.append(contentsOf: cap) }
+            }
+
+            guard feature.isBridge else { continue }
+            collision.append(contentsOf: top)
+            let thickness: Float = 0.65
+            let belowA = a - SIMD3<Float>(0, thickness, 0)
+            let belowB = b - SIMD3<Float>(0, thickness, 0)
+            let belowC = c - SIMD3<Float>(0, thickness, 0)
+            let belowD = d - SIMD3<Float>(0, thickness, 0)
+            let sides = [
+                a, b, belowB, a, belowB, belowA,
+                d, belowD, belowC, d, belowC, c,
+                a, belowA, belowD, a, belowD, d,
+                b, c, belowC, b, belowC, belowB
+            ]
+            corners[.bridgeSide, default: []].append(contentsOf: sides)
+            collision.append(contentsOf: sides)
+        }
+    }
+
+    private static func appendBridgeArea(
+        _ area: UAVWorldBridgeArea,
+        terrainHeight: (Float, Float) -> Float,
+        corners: inout [SIMD3<Float>],
+        sideCorners: inout [SIMD3<Float>],
+        collision: inout [SIMD3<Float>]
+    ) {
+        guard area.outerRing.count >= 3 else { return }
+        let sampled = area.outerRing.map { terrainHeight($0.x, $0.y) }
+        let deck = max(
+            (sampled.max() ?? 0) + 0.2,
+            (sampled.min() ?? 0) + area.clearanceMeters
+                + Float(max(0, area.layer - 1)) * 3.5
+        )
+        var topCorners: [SIMD3<Float>] = []
+        if area.holes.isEmpty,
+           let indices = PolygonTriangulator.triangulate(area.outerRing) {
+            let vertices = area.outerRing.map { SIMD3<Float>($0.x, deck, $0.y) }
+            for index in stride(from: 0, to: indices.count, by: 3) {
+                topCorners.append(vertices[indices[index]])
+                topCorners.append(vertices[indices[index + 2]])
+                topCorners.append(vertices[indices[index + 1]])
+            }
+        } else {
+            let minimum = area.outerRing.reduce(
+                SIMD2<Float>(repeating: .greatestFiniteMagnitude),
+                simd_min
+            )
+            let maximum = area.outerRing.reduce(
+                SIMD2<Float>(repeating: -.greatestFiniteMagnitude),
+                simd_max
+            )
+            let cell: Float = 2
+            var x = floor(minimum.x / cell) * cell
+            while x < maximum.x {
+                var z = floor(minimum.y / cell) * cell
+                while z < maximum.y {
+                    let centre = SIMD2<Float>(x + 1, z + 1)
+                    if pointInRing(centre, ring: area.outerRing)
+                        && !area.holes.contains(where: { pointInRing(centre, ring: $0) }) {
+                        let a = SIMD3<Float>(x, deck, z)
+                        let b = SIMD3<Float>(x + cell, deck, z)
+                        let c = SIMD3<Float>(x + cell, deck, z + cell)
+                        let d = SIMD3<Float>(x, deck, z + cell)
+                        topCorners.append(contentsOf: [a, c, b, a, d, c])
+                    }
+                    z += cell
+                }
+                x += cell
+            }
+        }
+        corners.append(contentsOf: topCorners)
+        collision.append(contentsOf: topCorners)
+
+        let bottom = deck - 0.75
+        for index in area.outerRing.indices {
+            let current = area.outerRing[index]
+            let next = area.outerRing[(index + 1) % area.outerRing.count]
+            let a = SIMD3<Float>(current.x, deck, current.y)
+            let b = SIMD3<Float>(next.x, deck, next.y)
+            let c = SIMD3<Float>(next.x, bottom, next.y)
+            let d = SIMD3<Float>(current.x, bottom, current.y)
+            let faces = [a, b, c, a, c, d]
+            sideCorners.append(contentsOf: faces)
+            collision.append(contentsOf: faces)
+        }
+    }
+
+    private static func circularCap(
+        centre: SIMD3<Float>,
+        radius: Float
+    ) -> [SIMD3<Float>] {
+        let sides = 10
+        var corners: [SIMD3<Float>] = []
+        corners.reserveCapacity(sides * 3)
+        for index in 0..<sides {
+            let angle0 = Float(index) / Float(sides) * .pi * 2
+            let angle1 = Float(index + 1) / Float(sides) * .pi * 2
+            let a = SIMD3<Float>(
+                centre.x + cos(angle0) * radius,
+                centre.y,
+                centre.z + sin(angle0) * radius
+            )
+            let b = SIMD3<Float>(
+                centre.x + cos(angle1) * radius,
+                centre.y,
+                centre.z + sin(angle1) * radius
+            )
+            corners.append(contentsOf: [centre, b, a])
+        }
+        return corners
+    }
+
+    private static func appendVegetationCover(
+        _ area: UAVWorldVegetationArea,
+        terrainHeight: (Float, Float) -> Float,
+        into corners: inout [SIMD3<Float>]
+    ) {
+        guard area.outerRing.count >= 3 else { return }
+        if area.holes.isEmpty,
+           let indices = PolygonTriangulator.triangulate(area.outerRing) {
+            let vertices = area.outerRing.map {
+                SIMD3<Float>($0.x, terrainHeight($0.x, $0.y) + 0.035, $0.y)
+            }
+            for index in stride(from: 0, to: indices.count, by: 3) {
+                // Ring indices are CCW in XZ, hence reversed for +Y SceneKit faces.
+                corners.append(vertices[indices[index]])
+                corners.append(vertices[indices[index + 2]])
+                corners.append(vertices[indices[index + 1]])
+            }
+            return
+        }
+
+        // Polygons with holes use a deterministic occupancy grid. Every inner ring is respected,
+        // and only the complicated cases pay for the extra triangles.
+        let minimum = area.outerRing.reduce(
+            SIMD2<Float>(repeating: .greatestFiniteMagnitude),
+            simd_min
+        )
+        let maximum = area.outerRing.reduce(
+            SIMD2<Float>(repeating: -.greatestFiniteMagnitude),
+            simd_max
+        )
+        let cell: Float = 6
+        var x = floor(minimum.x / cell) * cell
+        while x < maximum.x {
+            var z = floor(minimum.y / cell) * cell
+            while z < maximum.y {
+                let centre = SIMD2<Float>(x + cell * 0.5, z + cell * 0.5)
+                if contains(centre, in: area) {
+                    let a = SIMD3<Float>(x, terrainHeight(x, z) + 0.035, z)
+                    let b = SIMD3<Float>(x + cell, terrainHeight(x + cell, z) + 0.035, z)
+                    let c = SIMD3<Float>(
+                        x + cell,
+                        terrainHeight(x + cell, z + cell) + 0.035,
+                        z + cell
+                    )
+                    let d = SIMD3<Float>(x, terrainHeight(x, z + cell) + 0.035, z + cell)
+                    corners.append(contentsOf: [a, c, b, a, d, c])
+                }
+                z += cell
+            }
+            x += cell
+        }
+    }
+
+    private static func generatedVegetation(
+        areas: [UAVWorldVegetationArea],
+        transport: [UAVWorldTransportFeature],
+        buildings: [UAVWorldBuilding],
+        water: WaterSurfaceModel?
+    ) -> [(identifier: String, position: SIMD2<Float>, kind: UAVWorldVegetationKind)] {
+        var result: [(String, SIMD2<Float>, UAVWorldVegetationKind)] = []
+        let maximumGeneratedPlants = 4_000
+
+        for area in areas {
+            guard result.count < maximumGeneratedPlants else { break }
+            let spacing: Float
+            switch area.kind {
+            case .forest: spacing = 18
+            case .orchard: spacing = 12
+            case .scrub: spacing = 16
+            case .garden: spacing = 28
+            case .grass, .meadow: continue
+            }
+            let minimum = area.outerRing.reduce(
+                SIMD2<Float>(repeating: .greatestFiniteMagnitude),
+                simd_min
+            )
+            let maximum = area.outerRing.reduce(
+                SIMD2<Float>(repeating: -.greatestFiniteMagnitude),
+                simd_max
+            )
+            let seed = stableHash(area.sourceIdentifier)
+            let offset = SIMD2<Float>(
+                Float(seed & 0xffff) / 65_535 * spacing,
+                Float((seed >> 16) & 0xffff) / 65_535 * spacing
+            )
+            var x = floor(minimum.x / spacing) * spacing + offset.x
+            while x <= maximum.x, result.count < maximumGeneratedPlants {
+                var z = floor(minimum.y / spacing) * spacing + offset.y
+                while z <= maximum.y, result.count < maximumGeneratedPlants {
+                    let point = SIMD2<Float>(x, z)
+                    if contains(point, in: area),
+                       water?.isWater(x: x, z: z) != true,
+                       !insideAnyBuilding(point, buildings: buildings),
+                       !nearTransport(point, transport: transport) {
+                        result.append((
+                            "\(area.sourceIdentifier)/generated-\(result.count)",
+                            point,
+                            area.kind
+                        ))
+                    }
+                    z += spacing
+                }
+                x += spacing
+            }
+        }
+        return result
+    }
+
+    private static func appendPlant(
+        at position: SIMD2<Float>,
+        kind: UAVWorldVegetationKind,
+        seed: UInt64,
+        ground: Float,
+        trunks: inout [SIMD3<Float>],
+        canopies: inout [SIMD3<Float>],
+        collision: inout [SIMD3<Float>]
+    ) {
+        let variation = Float(seed & 0xffff) / 65_535
+        let shrub = kind == .scrub
+        let height: Float = shrub ? 1.8 + variation : 5.5 + variation * 4
+        let trunkHeight = shrub ? height * 0.25 : height * 0.55
+        let trunkRadius: Float = shrub ? 0.12 : 0.20 + variation * 0.08
+        let canopyRadius: Float = shrub ? 1.1 : 1.4 + variation * 0.8
+        let sides = 6
+
+        let trunkBottom = ground + 0.02
+        let trunkTop = trunkBottom + trunkHeight
+        for index in 0..<sides {
+            let next = (index + 1) % sides
+            let angle0 = Float(index) / Float(sides) * .pi * 2
+            let angle1 = Float(next) / Float(sides) * .pi * 2
+            let a = SIMD3<Float>(
+                position.x + cos(angle0) * trunkRadius,
+                trunkBottom,
+                position.y + sin(angle0) * trunkRadius
+            )
+            let b = SIMD3<Float>(
+                position.x + cos(angle1) * trunkRadius,
+                trunkBottom,
+                position.y + sin(angle1) * trunkRadius
+            )
+            let c = SIMD3<Float>(b.x, trunkTop, b.z)
+            let d = SIMD3<Float>(a.x, trunkTop, a.z)
+            let face = [a, c, b, a, d, c]
+            trunks.append(contentsOf: face)
+            collision.append(contentsOf: face)
+        }
+
+        let canopyBottom = trunkTop - (shrub ? 0.25 : 0.8)
+        let canopyTop = ground + height
+        let top = SIMD3<Float>(position.x, canopyTop, position.y)
+        let bottom = SIMD3<Float>(position.x, canopyBottom, position.y)
+        for index in 0..<sides {
+            let next = (index + 1) % sides
+            let angle0 = Float(index) / Float(sides) * .pi * 2
+            let angle1 = Float(next) / Float(sides) * .pi * 2
+            let a = SIMD3<Float>(
+                position.x + cos(angle0) * canopyRadius,
+                canopyBottom,
+                position.y + sin(angle0) * canopyRadius
+            )
+            let b = SIMD3<Float>(
+                position.x + cos(angle1) * canopyRadius,
+                canopyBottom,
+                position.y + sin(angle1) * canopyRadius
+            )
+            let faces = [a, top, b, a, b, bottom]
+            canopies.append(contentsOf: faces)
+            collision.append(contentsOf: faces)
+        }
+    }
+
+    private static func makeNode(
+        corners: [SIMD3<Float>],
+        color: NSColor,
+        roughness: CGFloat
+    ) -> SCNNode? {
+        guard let node = TerrainMeshFactory.makeNode(corners: corners) else { return nil }
+        let material = node.geometry?.firstMaterial
+        material?.diffuse.contents = color
+        material?.roughness.contents = roughness
+        material?.metalness.contents = 0
+        material?.isDoubleSided = true
+        return node
+    }
+
+    private static func roadKey(_ feature: UAVWorldTransportFeature) -> RoadMaterialKey {
+        if let surface = feature.surface?.lowercased(),
+           ["unpaved", "dirt", "earth", "ground", "gravel", "fine_gravel", "sand",
+            "grass", "mud", "woodchips"].contains(surface) {
+            return .track
+        }
+        switch feature.kind {
+        case .motorway: return .motorway
+        case .arterial: return .arterial
+        case .street: return .street
+        case .service: return .service
+        case .pedestrian: return .pedestrian
+        case .track: return .track
+        case .railway: return .railway
+        }
+    }
+
+    private static func roadColor(_ key: RoadMaterialKey) -> NSColor {
+        switch key {
+        case .motorway: return NSColor(calibratedWhite: 0.12, alpha: 1)
+        case .arterial: return NSColor(calibratedWhite: 0.16, alpha: 1)
+        case .street: return NSColor(calibratedWhite: 0.19, alpha: 1)
+        case .service: return NSColor(calibratedWhite: 0.23, alpha: 1)
+        case .pedestrian: return NSColor(calibratedRed: 0.42, green: 0.40, blue: 0.35, alpha: 1)
+        case .track: return NSColor(calibratedRed: 0.31, green: 0.25, blue: 0.17, alpha: 1)
+        case .railway: return NSColor(calibratedWhite: 0.10, alpha: 1)
+        case .bridgeSide: return NSColor(calibratedWhite: 0.13, alpha: 1)
+        }
+    }
+
+    private static func vegetationColor(_ kind: UAVWorldVegetationKind) -> NSColor {
+        switch kind {
+        case .forest: return NSColor(calibratedRed: 0.12, green: 0.25, blue: 0.12, alpha: 1)
+        case .grass: return NSColor(calibratedRed: 0.31, green: 0.43, blue: 0.22, alpha: 1)
+        case .meadow: return NSColor(calibratedRed: 0.38, green: 0.48, blue: 0.24, alpha: 1)
+        case .scrub: return NSColor(calibratedRed: 0.24, green: 0.34, blue: 0.18, alpha: 1)
+        case .orchard: return NSColor(calibratedRed: 0.29, green: 0.40, blue: 0.20, alpha: 1)
+        case .garden: return NSColor(calibratedRed: 0.34, green: 0.46, blue: 0.25, alpha: 1)
+        }
+    }
+
+    private static func contains(_ point: SIMD2<Float>, in area: UAVWorldVegetationArea) -> Bool {
+        pointInRing(point, ring: area.outerRing)
+            && !area.holes.contains { pointInRing(point, ring: $0) }
+    }
+
+    private static func pointInRing(_ point: SIMD2<Float>, ring: [SIMD2<Float>]) -> Bool {
+        guard ring.count >= 3 else { return false }
+        var inside = false
+        var previous = ring.count - 1
+        for index in ring.indices {
+            let a = ring[index]
+            let b = ring[previous]
+            if (a.y > point.y) != (b.y > point.y) {
+                let x = (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+                if point.x < x { inside.toggle() }
+            }
+            previous = index
+        }
+        return inside
+    }
+
+    private static func insideAnyBuilding(
+        _ point: SIMD2<Float>,
+        buildings: [UAVWorldBuilding]
+    ) -> Bool {
+        buildings.contains {
+            pointInRing(point, ring: $0.footprint)
+                && !$0.holes.contains { pointInRing(point, ring: $0) }
+        }
+    }
+
+    private static func nearTransport(
+        _ point: SIMD2<Float>,
+        transport: [UAVWorldTransportFeature]
+    ) -> Bool {
+        for feature in transport {
+            let clearance = feature.widthMeters * 0.5 + 1.5
+            let threshold = clearance * clearance
+            for index in 0..<(feature.centerline.count - 1) {
+                if distanceSquared(
+                    point,
+                    toSegmentFrom: feature.centerline[index],
+                    to: feature.centerline[index + 1]
+                ) <= threshold {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private static func distanceSquared(
+        _ point: SIMD2<Float>,
+        toSegmentFrom a: SIMD2<Float>,
+        to b: SIMD2<Float>
+    ) -> Float {
+        let delta = b - a
+        let denominator = simd_length_squared(delta)
+        guard denominator > 0.000_001 else { return simd_length_squared(point - a) }
+        let t = max(0, min(1, simd_dot(point - a, delta) / denominator))
+        return simd_length_squared(point - (a + delta * t))
+    }
+
+    private static func stableHash(_ text: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return hash
     }
 }

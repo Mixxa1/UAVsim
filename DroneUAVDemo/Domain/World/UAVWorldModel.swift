@@ -78,6 +78,90 @@ enum UAVWorldLayer: String, Codable, Sendable, CaseIterable {
     case orthophoto
 }
 
+// MARK: - OSM surface features
+
+/// Normalised transport classes shared by import, rendering and collision.
+///
+/// OSM's `highway=*` vocabulary is intentionally much richer than the simulator needs. Keeping a
+/// compact semantic class here lets every matching way participate without baking one city's tags
+/// or feature identifiers into the renderer.
+enum UAVWorldTransportKind: String, Codable, Sendable {
+    case motorway
+    case arterial
+    case street
+    case service
+    case pedestrian
+    case track
+    case railway
+}
+
+/// One complete OSM transport way, projected to local metres.
+///
+/// Bridge is an attribute of the way rather than a separate hand-authored object. Consequently
+/// every mapped road/footway/rail bridge follows the same elevation and collision rules.
+struct UAVWorldTransportFeature: Codable, Sendable {
+    let sourceIdentifier: String
+    let centerline: [SIMD2<Float>]
+    let kind: UAVWorldTransportKind
+    let widthMeters: Float
+    let surface: String?
+    let isBridge: Bool
+    let layer: Int
+    let clearanceMeters: Float
+}
+
+/// Mapped `man_made=bridge` outline for large decks carrying one or several transport ways.
+struct UAVWorldBridgeArea: Codable, Sendable {
+    let sourceIdentifier: String
+    let outerRing: [SIMD2<Float>]
+    let holes: [[SIMD2<Float>]]
+    let layer: Int
+    let clearanceMeters: Float
+}
+
+enum UAVWorldVegetationKind: String, Codable, Sendable {
+    case forest
+    case grass
+    case meadow
+    case scrub
+    case orchard
+    case garden
+}
+
+/// An OSM land-cover polygon. Inner rings remain dry/non-vegetated holes.
+struct UAVWorldVegetationArea: Codable, Sendable {
+    let sourceIdentifier: String
+    let outerRing: [SIMD2<Float>]
+    let holes: [[SIMD2<Float>]]
+    let kind: UAVWorldVegetationKind
+}
+
+/// Explicit mapped trees and samples along mapped `natural=tree_row` ways.
+struct UAVWorldTree: Codable, Sendable {
+    let sourceIdentifier: String
+    let position: SIMD2<Float>
+    let kind: UAVWorldVegetationKind
+}
+
+/// Optional OSM layers persisted together so older packages can transparently read an empty value.
+struct UAVWorldOSMSurfaceFeatures: Codable, Sendable {
+    var transport: [UAVWorldTransportFeature]
+    var bridgeAreas: [UAVWorldBridgeArea]
+    var vegetationAreas: [UAVWorldVegetationArea]
+    var trees: [UAVWorldTree]
+
+    static let empty = UAVWorldOSMSurfaceFeatures(
+        transport: [],
+        bridgeAreas: [],
+        vegetationAreas: [],
+        trees: []
+    )
+
+    var isEmpty: Bool {
+        transport.isEmpty && bridgeAreas.isEmpty && vegetationAreas.isEmpty && trees.isEmpty
+    }
+}
+
 struct UAVWorldStatistics: Codable, Sendable {
     var buildingCount: Int = 0
     var waterPolygonCount: Int = 0
@@ -87,6 +171,45 @@ struct UAVWorldStatistics: Codable, Sendable {
     /// Share of buildings whose height came from a survey rather than an estimate — the single
     /// most useful one-number answer to "how real is this map".
     var measuredHeightFraction: Float = 0.0
+
+    init(
+        buildingCount: Int = 0,
+        waterPolygonCount: Int = 0,
+        roadSegmentCount: Int = 0,
+        vegetationCount: Int = 0,
+        bridgeCount: Int = 0,
+        measuredHeightFraction: Float = 0
+    ) {
+        self.buildingCount = buildingCount
+        self.waterPolygonCount = waterPolygonCount
+        self.roadSegmentCount = roadSegmentCount
+        self.vegetationCount = vegetationCount
+        self.bridgeCount = bridgeCount
+        self.measuredHeightFraction = measuredHeightFraction
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case buildingCount
+        case waterPolygonCount
+        case roadSegmentCount
+        case vegetationCount
+        case bridgeCount
+        case measuredHeightFraction
+    }
+
+    /// Additive layer counters must not invalidate manifests written by older importer versions.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        buildingCount = try container.decodeIfPresent(Int.self, forKey: .buildingCount) ?? 0
+        waterPolygonCount = try container.decodeIfPresent(Int.self, forKey: .waterPolygonCount) ?? 0
+        roadSegmentCount = try container.decodeIfPresent(Int.self, forKey: .roadSegmentCount) ?? 0
+        vegetationCount = try container.decodeIfPresent(Int.self, forKey: .vegetationCount) ?? 0
+        bridgeCount = try container.decodeIfPresent(Int.self, forKey: .bridgeCount) ?? 0
+        measuredHeightFraction = try container.decodeIfPresent(
+            Float.self,
+            forKey: .measuredHeightFraction
+        ) ?? 0
+    }
 }
 
 /// Credit line for one source dataset, carried into the package and shown in the UI.

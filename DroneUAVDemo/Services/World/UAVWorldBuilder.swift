@@ -120,6 +120,8 @@ struct UAVWorldBuildResult: Sendable {
     let buildings: [UAVWorldBuilding]
     /// OSM water and the dry areas which cut it, all projected into local metres.
     let waterGeometry: UAVWorldWaterGeometry
+    /// Every accepted OSM road, bridge and vegetation feature in the package bounds.
+    let osmSurfaceFeatures: UAVWorldOSMSurfaceFeatures
     /// Ground relief, or nil when the elevation service could not be reached.
     let elevation: TerrariumElevationSource.Grid?
     let diagnostics: UAVWorldBuildDiagnostics
@@ -151,7 +153,7 @@ final class UAVWorldBuilder {
 
     let importerVersion: String
 
-    init(importerVersion: String = "1.3.0") {
+    init(importerVersion: String = "1.4.0") {
         self.importerVersion = importerVersion
     }
 
@@ -176,6 +178,7 @@ final class UAVWorldBuilder {
         var diagnostics = UAVWorldBuildDiagnostics()
         var accepted: [UAVWorldBuilding] = []
         var waterGeometry = UAVWorldWaterGeometry.empty
+        var osmSurfaceFeatures = UAVWorldOSMSurfaceFeatures.empty
         var elevation: TerrariumElevationSource.Grid?
         var index = BuildingOverlapIndex()
 
@@ -224,10 +227,121 @@ final class UAVWorldBuilder {
                     project(ring: $0, origin: origin)
                 }
             )
+            waterGeometry.outerRings.append(contentsOf: geometry.linearWaterways.compactMap {
+                waterwayCorridor(
+                    centerline: project(ring: $0.centerline, origin: origin),
+                    widthMeters: $0.widthMeters
+                )
+            })
         } catch is CancellationError {
             throw UAVWorldImportError.cancelled
         } catch {
             waterGeometry = .empty
+        }
+
+        // Roads, bridges and vegetation are one optional OSM snapshot. This is deliberately a
+        // feature-wide import rather than a list of landmarks: every matching way/relation/node in
+        // the package bbox is projected, clipped and persisted under the same rules.
+        do {
+            try Task.checkCancellation()
+            progress?(L10n.s("world.build.stage.osm_surface"))
+            let raw = try await OverpassSurfaceFeatureSource().fetch(in: fetchBounds)
+            let extent = fetchBounds.localExtent(relativeTo: origin)
+            let minimum = SIMD2<Float>(Float(extent.minimum.x), Float(extent.minimum.y))
+            let maximum = SIMD2<Float>(Float(extent.maximum.x), Float(extent.maximum.y))
+
+            osmSurfaceFeatures.transport = raw.transport.flatMap { feature in
+                let projected = project(ring: feature.centerline, origin: origin)
+                return clippedPolylines(
+                    projected,
+                    minimum: minimum,
+                    maximum: maximum
+                ).enumerated().map { index, clipped in
+                    UAVWorldTransportFeature(
+                        sourceIdentifier: index == 0
+                            ? feature.sourceIdentifier
+                            : "\(feature.sourceIdentifier)/part-\(index)",
+                        centerline: clipped,
+                        kind: feature.kind,
+                        widthMeters: feature.widthMeters,
+                        surface: feature.surface,
+                        isBridge: feature.isBridge,
+                        layer: feature.layer,
+                        clearanceMeters: feature.clearanceMeters
+                    )
+                }
+            }
+
+            osmSurfaceFeatures.vegetationAreas = raw.vegetationAreas.compactMap { feature in
+                var outer = clippedPolygon(
+                    project(ring: feature.outerRing, origin: origin),
+                    minimum: minimum,
+                    maximum: maximum
+                )
+                outer = conditionedAreaRing(outer, counterClockwise: true)
+                guard outer.count >= 3, abs(signedAreaOf(outer)) >= 2 else { return nil }
+                let holes = feature.holes.compactMap { hole -> [SIMD2<Float>]? in
+                    let clipped = clippedPolygon(
+                        project(ring: hole, origin: origin),
+                        minimum: minimum,
+                        maximum: maximum
+                    )
+                    let ring = conditionedAreaRing(clipped, counterClockwise: false)
+                    return ring.count >= 3 ? ring : nil
+                }
+                return UAVWorldVegetationArea(
+                    sourceIdentifier: feature.sourceIdentifier,
+                    outerRing: outer,
+                    holes: holes,
+                    kind: feature.kind
+                )
+            }
+
+            osmSurfaceFeatures.bridgeAreas = raw.bridgeAreas.compactMap { feature in
+                var outer = clippedPolygon(
+                    project(ring: feature.outerRing, origin: origin),
+                    minimum: minimum,
+                    maximum: maximum
+                )
+                outer = conditionedAreaRing(outer, counterClockwise: true)
+                guard outer.count >= 3, abs(signedAreaOf(outer)) >= 2 else { return nil }
+                let holes = feature.holes.compactMap { hole -> [SIMD2<Float>]? in
+                    let clipped = clippedPolygon(
+                        project(ring: hole, origin: origin),
+                        minimum: minimum,
+                        maximum: maximum
+                    )
+                    let ring = conditionedAreaRing(clipped, counterClockwise: false)
+                    return ring.count >= 3 ? ring : nil
+                }
+                return UAVWorldBridgeArea(
+                    sourceIdentifier: feature.sourceIdentifier,
+                    outerRing: outer,
+                    holes: holes,
+                    layer: feature.layer,
+                    clearanceMeters: feature.clearanceMeters
+                )
+            }
+
+            osmSurfaceFeatures.trees = raw.trees.compactMap { tree in
+                let local = origin.localMeters(of: tree.coordinate)
+                let point = SIMD2<Float>(Float(local.x), Float(local.z))
+                guard point.x >= minimum.x, point.x <= maximum.x,
+                      point.y >= minimum.y, point.y <= maximum.y else {
+                    return nil
+                }
+                return UAVWorldTree(
+                    sourceIdentifier: tree.sourceIdentifier,
+                    position: point,
+                    kind: tree.kind
+                )
+            }
+        } catch is CancellationError {
+            throw UAVWorldImportError.cancelled
+        } catch {
+            // Buildings remain usable when Overpass rejects this larger optional query. The
+            // missing layer is explicit in the manifest rather than represented by fake scenery.
+            osmSurfaceFeatures = .empty
         }
 
         for source in ordered {
@@ -283,8 +397,19 @@ final class UAVWorldBuilder {
         let statistics = UAVWorldStatistics(
             buildingCount: accepted.count,
             waterPolygonCount: waterGeometry.outerRings.count,
+            roadSegmentCount: osmSurfaceFeatures.transport.count,
+            vegetationCount: osmSurfaceFeatures.vegetationAreas.count
+                + osmSurfaceFeatures.trees.count,
+            bridgeCount: osmSurfaceFeatures.transport.filter(\.isBridge).count
+                + osmSurfaceFeatures.bridgeAreas.count,
             measuredHeightFraction: Float(measuredCount) / Float(accepted.count)
         )
+
+        var attributions = ordered.map(\.attribution)
+        if (!waterGeometry.isEmpty || !osmSurfaceFeatures.isEmpty),
+           !attributions.contains(where: { $0.datasetIdentifier == "osm" }) {
+            attributions.append(OverpassBuildingSource.osmAttribution)
+        }
 
         let manifest = UAVWorldManifest(
             identifier: request.identifier,
@@ -296,9 +421,18 @@ final class UAVWorldBuilder {
                 var layers: Set<UAVWorldLayer> = [.buildings]
                 if !waterGeometry.isEmpty { layers.insert(.water) }
                 if elevation != nil { layers.insert(.terrain) }
+                if !osmSurfaceFeatures.transport.isEmpty { layers.insert(.roads) }
+                if osmSurfaceFeatures.transport.contains(where: \.isBridge)
+                    || !osmSurfaceFeatures.bridgeAreas.isEmpty {
+                    layers.insert(.bridges)
+                }
+                if !osmSurfaceFeatures.vegetationAreas.isEmpty
+                    || !osmSurfaceFeatures.trees.isEmpty {
+                    layers.insert(.vegetation)
+                }
                 return layers
             }(),
-            attributions: ordered.map(\.attribution),
+            attributions: attributions,
             importerVersion: importerVersion,
             statistics: statistics
         )
@@ -307,6 +441,7 @@ final class UAVWorldBuilder {
             manifest: manifest,
             buildings: accepted,
             waterGeometry: waterGeometry,
+            osmSurfaceFeatures: osmSurfaceFeatures,
             elevation: elevation,
             diagnostics: diagnostics
         )
@@ -446,6 +581,180 @@ final class UAVWorldBuilder {
             doubleArea += current.x * next.y - next.x * current.y
         }
         return doubleArea * 0.5
+    }
+
+    /// Converts a centre-line OSM waterway into one continuous bank-to-bank polygon.
+    ///
+    /// Interior normals use the chord through the neighbouring vertices, avoiding the gaps that
+    /// independent per-segment rectangles leave at bends. Very sharp reversals fall back to the
+    /// nearest valid segment direction rather than producing an unbounded mitre.
+    private func waterwayCorridor(
+        centerline: [SIMD2<Float>],
+        widthMeters: Float
+    ) -> [SIMD2<Float>]? {
+        guard centerline.count >= 2, widthMeters >= 0.5 else { return nil }
+        let halfWidth = widthMeters * 0.5
+        var left: [SIMD2<Float>] = []
+        var right: [SIMD2<Float>] = []
+        left.reserveCapacity(centerline.count)
+        right.reserveCapacity(centerline.count)
+
+        for index in centerline.indices {
+            let direction: SIMD2<Float>
+            if index == 0 {
+                direction = centerline[1] - centerline[0]
+            } else if index == centerline.count - 1 {
+                direction = centerline[index] - centerline[index - 1]
+            } else {
+                let chord = centerline[index + 1] - centerline[index - 1]
+                direction = simd_length_squared(chord) > 0.000_001
+                    ? chord
+                    : centerline[index] - centerline[index - 1]
+            }
+            let length = simd_length(direction)
+            guard length.isFinite, length > 0.001 else { continue }
+            let normal = SIMD2<Float>(-direction.y, direction.x) / length * halfWidth
+            left.append(centerline[index] + normal)
+            right.append(centerline[index] - normal)
+        }
+        guard left.count >= 2, right.count == left.count else { return nil }
+        return left + right.reversed()
+    }
+
+    private func conditionedAreaRing(
+        _ input: [SIMD2<Float>],
+        counterClockwise: Bool
+    ) -> [SIMD2<Float>] {
+        var ring = collapsingNearDuplicates(input)
+        ring = PolygonTriangulator.removingCollinearVertices(ring)
+        let area = signedAreaOf(ring)
+        if (counterClockwise && area < 0) || (!counterClockwise && area > 0) {
+            ring.reverse()
+        }
+        return ring
+    }
+
+    /// Sutherland–Hodgman clipping keeps very large OSM land-cover relations inside the package.
+    private func clippedPolygon(
+        _ polygon: [SIMD2<Float>],
+        minimum: SIMD2<Float>,
+        maximum: SIMD2<Float>
+    ) -> [SIMD2<Float>] {
+        guard polygon.count >= 3 else { return [] }
+        var result = polygon
+        if result.first == result.last { result.removeLast() }
+
+        typealias Boundary = (
+            inside: (SIMD2<Float>) -> Bool,
+            intersect: (SIMD2<Float>, SIMD2<Float>) -> SIMD2<Float>
+        )
+        let boundaries: [Boundary] = [
+            ({ $0.x >= minimum.x }, { a, b in
+                let t = (minimum.x - a.x) / (b.x - a.x)
+                return SIMD2<Float>(minimum.x, a.y + (b.y - a.y) * t)
+            }),
+            ({ $0.x <= maximum.x }, { a, b in
+                let t = (maximum.x - a.x) / (b.x - a.x)
+                return SIMD2<Float>(maximum.x, a.y + (b.y - a.y) * t)
+            }),
+            ({ $0.y >= minimum.y }, { a, b in
+                let t = (minimum.y - a.y) / (b.y - a.y)
+                return SIMD2<Float>(a.x + (b.x - a.x) * t, minimum.y)
+            }),
+            ({ $0.y <= maximum.y }, { a, b in
+                let t = (maximum.y - a.y) / (b.y - a.y)
+                return SIMD2<Float>(a.x + (b.x - a.x) * t, maximum.y)
+            })
+        ]
+
+        for boundary in boundaries {
+            guard !result.isEmpty else { break }
+            let input = result
+            result = []
+            var previous = input.last!
+            var previousInside = boundary.inside(previous)
+            for current in input {
+                let currentInside = boundary.inside(current)
+                if currentInside != previousInside {
+                    result.append(boundary.intersect(previous, current))
+                }
+                if currentInside { result.append(current) }
+                previous = current
+                previousInside = currentInside
+            }
+        }
+        return result
+    }
+
+    /// Clips every line segment to the package rectangle and preserves all visible pieces.
+    private func clippedPolylines(
+        _ points: [SIMD2<Float>],
+        minimum: SIMD2<Float>,
+        maximum: SIMD2<Float>
+    ) -> [[SIMD2<Float>]] {
+        guard points.count >= 2 else { return [] }
+        var result: [[SIMD2<Float>]] = []
+        var current: [SIMD2<Float>] = []
+        for index in 0..<(points.count - 1) {
+            guard let segment = clippedSegment(
+                points[index],
+                points[index + 1],
+                minimum: minimum,
+                maximum: maximum
+            ) else {
+                if current.count >= 2 {
+                    result.append(collapsingNearDuplicates(current))
+                }
+                current = []
+                continue
+            }
+            if let last = current.last,
+               simd_length_squared(last - segment.0) > 0.01 {
+                if current.count >= 2 {
+                    result.append(collapsingNearDuplicates(current))
+                }
+                current = [segment.0]
+            } else if current.isEmpty {
+                current = [segment.0]
+            }
+            current.append(segment.1)
+        }
+        if current.count >= 2 {
+            result.append(collapsingNearDuplicates(current))
+        }
+        return result.filter { $0.count >= 2 }
+    }
+
+    private func clippedSegment(
+        _ a: SIMD2<Float>,
+        _ b: SIMD2<Float>,
+        minimum: SIMD2<Float>,
+        maximum: SIMD2<Float>
+    ) -> (SIMD2<Float>, SIMD2<Float>)? {
+        let delta = b - a
+        var lower: Float = 0
+        var upper: Float = 1
+        let p = [-delta.x, delta.x, -delta.y, delta.y]
+        let q = [
+            a.x - minimum.x,
+            maximum.x - a.x,
+            a.y - minimum.y,
+            maximum.y - a.y
+        ]
+        for index in 0..<4 {
+            if abs(p[index]) < 0.000_001 {
+                if q[index] < 0 { return nil }
+            } else {
+                let ratio = q[index] / p[index]
+                if p[index] < 0 {
+                    lower = max(lower, ratio)
+                } else {
+                    upper = min(upper, ratio)
+                }
+                if lower > upper { return nil }
+            }
+        }
+        return (a + delta * lower, a + delta * upper)
     }
 }
 

@@ -2678,6 +2678,7 @@
 "world.preview.status.ready" = "Ready — %d buildings";
 "world.preview.status.saved" = "Saved as %@";
 "world.preview.report.buildings" = "Buildings: %d";
+"world.preview.report.osm_layers" = "OSM: %d water polygons, %d road segments, %d bridges, %d vegetation features";
 "world.preview.report.measured" = "Surveyed heights: %d%%";
 "world.preview.report.triangles" = "Triangles: %d";
 "world.preview.report.tallest" = "Tallest: %d m";
@@ -2761,5 +2762,6 @@
 "map.open_data.build" = "Build a new map";
 
 "world.build.stage.water" = "Water bodies";
+"world.build.stage.osm_surface" = "OSM roads, bridges and vegetation";
 
 "world.build.stage.elevation" = "Ground relief";
