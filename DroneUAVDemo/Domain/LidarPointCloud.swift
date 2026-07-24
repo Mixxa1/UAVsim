@@ -1,208 +1,311 @@
 import Foundation
 import simd
 
-/// A geo-referenced LiDAR point cloud accumulated over a flight.
-///
-/// Points are held in the simulator's local ENU metre-space — the frame the scene and the raycaster
-/// already speak — and the cloud carries the world's `GeoOrigin`, so every point maps deterministically
-/// to WGS84 on export. Doing the projection at export rather than per return keeps hundreds of
-/// thousands of points cheap while still producing a genuinely geo-referenced dataset.
-///
-/// Each return keeps the attributes a real scanner records, because a cloud of bare XYZ cannot be
-/// analysed: `intensity` (with surface reflectance and incidence folded in), `range`, a per-beam
-/// `timestamp`, the `ring` (channel index within the sweep), the `scanID` of the sweep, and the
-/// surface `classification`. Sweep trajectories are stored alongside, so the pose that produced any
-/// return can be recovered and motion distortion measured rather than assumed away.
-///
-/// Two accumulation modes:
-/// * **Voxel** — one point per occupied voxel, positioned at the **centroid** of every return that
-///   fell in it, with intensity and range averaged and the contributing count kept. Averaging is what
-///   makes the filter a noise reducer rather than an arbitrary sampler: ranging noise is zero-mean, so
-///   `n` returns in a voxel cut its standard deviation by `√n`.
-/// * **Raw** — no filtering at all. Every return is stored, which is the only mode in which sensor
-///   noise, multi-hit structure and motion distortion survive to be studied.
-struct LidarPointCloud {
+// MARK: - Raw returns
 
-    struct Point {
+/// Every return the scanner produced, unfiltered — the sensor's own record.
+///
+/// Each entry describes one echo of one pulse, so every field is literally true of it: `range` is
+/// the distance that pulse measured, `timestamp` the instant it fired, `scanID`/`ring` the firing
+/// block and channel it came from, `returnNumber`/`numberOfReturns` its place in that pulse's echo
+/// train. This is the only product in which sensor noise, multi-echo structure and motion
+/// distortion survive, and the only one that can be de-skewed against the trajectory.
+struct LidarRawCloud {
+
+    struct Return {
         /// Local ENU metres: +X east, +Y up, +Z north.
         var position: SIMD3<Float>
         /// Return strength in [0, 1] — surface reflectance × incidence × range falloff.
         var intensity: Float
-        /// Sensor-to-surface distance in metres, before any voxel averaging.
+        /// Sensor-to-surface distance in metres, as measured (noise included).
         var range: Float
-        /// Seconds since the cloud's first return. Per beam, not per sweep.
+        /// Seconds since the survey epoch.
         var timestamp: Double
+        /// Firing block this echo belongs to.
         var scanID: UInt32
-        /// Beam index within the sweep — the scanner's channel.
+        /// Channel within the block.
         var ring: UInt16
         var classification: LidarSurfaceClass
-        /// 1-based index of this return within its own laser pulse. A pulse that clips a canopy and
-        /// reaches the ground behind it produces return 1 (foliage) and return 2 (ground).
+        /// 1-based index of this echo within its pulse.
         var returnNumber: UInt8
-        /// How many returns that pulse produced in total.
+        /// Echoes that pulse produced in total.
         var numberOfReturns: UInt8
-        /// Returns merged into this voxel centroid — 1 in raw mode. Deliberately *not* called
-        /// "return count": it is a filter statistic, not the sensor's multi-return structure.
-        var mergeCount: UInt32
     }
 
-    /// Pose of one firing block. A multi-channel scanner fires its whole vertical fan at one
-    /// instant, so a block has a single pose — motion between blocks is what deskewing corrects,
-    /// and this table is what makes that possible without back-computing the sensor from the points.
-    ///
-    /// `returnsInScan` is recorded for **every** block, including those that produced nothing. That
-    /// is what separates a genuinely empty block (fan pointed at open sky) from one dropped under
-    /// load or lost in export: an empty block is present here with zero returns, a lost one is
-    /// absent entirely.
-    struct ScanPose {
-        let scanID: UInt32
-        let timestamp: Double
-        let sensorPosition: SIMD3<Float>
-        let sensorOrientation: simd_quatf
-        let vehiclePosition: SIMD3<Float>
-        let vehicleOrientation: simd_quatf
-        let returnsInScan: Int
-    }
-
-    enum InsertResult {
-        /// A new point was appended at this index — the visual layer should draw it.
-        case inserted(Int)
-        /// Merged into an existing voxel at this index; nothing new to draw.
-        case merged(Int)
-        case rejected
-    }
-
-    /// Running sums behind a voxel centroid. Kept parallel to `points` and only in voxel mode.
-    private struct Accumulator {
-        var positionSum: SIMD3<Double>
-        var intensitySum: Double
-        var rangeSum: Double
-        var count: UInt32
-    }
-
-    private(set) var points: [Point] = []
-    private var accumulators: [Accumulator] = []
-    private var voxelIndex: [Int64: Int] = [:]
-    private var occupiedColumns: Set<Int64> = []
-    private(set) var scanPoses: [ScanPose] = []
-
-    /// Every return ever accepted, including those merged into an existing voxel.
-    private(set) var totalReturns: UInt64 = 0
-
-    private(set) var voxelSizeMeters: Float
-    private(set) var isRawMode: Bool
-    let maximumPoints: Int
+    private(set) var returns: [Return] = []
+    let maximumReturns: Int
 
     private(set) var minBounds = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
     private(set) var maxBounds = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
 
-    init(
-        voxelSizeMeters: Float = LidarVoxelSize.coarse.rawValue,
-        isRawMode: Bool = false,
-        maximumPoints: Int = 1_200_000
-    ) {
-        self.voxelSizeMeters = max(0.02, voxelSizeMeters)
-        self.isRawMode = isRawMode
-        self.maximumPoints = max(1_000, maximumPoints)
+    init(maximumReturns: Int = 1_500_000) {
+        self.maximumReturns = max(1_000, maximumReturns)
     }
 
-    var isEmpty: Bool { points.isEmpty }
-    var count: Int { points.count }
-    var isFull: Bool { points.count >= maximumPoints }
+    var isEmpty: Bool { returns.isEmpty }
+    var count: Int { returns.count }
+    var isFull: Bool { returns.count >= maximumReturns }
 
-    /// Footprint mapped, in square metres — occupied ground columns times cell area.
+    var elevationRange: (minimum: Float, maximum: Float)? {
+        guard !returns.isEmpty else { return nil }
+        return (minBounds.y, maxBounds.y)
+    }
+
+    @discardableResult
+    mutating func append(_ entry: Return) -> Bool {
+        guard returns.count < maximumReturns else { return false }
+        returns.append(entry)
+        minBounds = simd_min(minBounds, entry.position)
+        maxBounds = simd_max(maxBounds, entry.position)
+        return true
+    }
+
+    mutating func clear() {
+        returns.removeAll(keepingCapacity: true)
+        minBounds = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        maxBounds = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+    }
+
+    /// `binary_little_endian` PLY of the raw returns — 40 bytes per vertex, fixed stride.
+    func binaryPLYData(
+        colorMode: LidarColorMode,
+        comment: String,
+        trajectoryFileName: String,
+        epochUTC: String
+    ) -> Data {
+        let minimum = minBounds.y
+        let maximum = maxBounds.y
+
+        var header = ""
+        header += "ply\n"
+        header += "format binary_little_endian 1.0\n"
+        header += "comment Generated by UAVsim LiDAR payload — RAW RETURNS\n"
+        header += "comment \(comment)\n"
+        header += "comment colour_mode \(colorMode.rawValue)\n"
+        header += "comment timestamps are seconds from the survey epoch \(epochUTC)\n"
+        header += "comment sensor trajectory: \(trajectoryFileName) (one row per scan_id, "
+        header += "including scans with zero returns)\n"
+        header += "comment scan_id is one firing block; channels share its instant, ring adds a "
+        header += "fixed inter-channel offset\n"
+        header += "comment classification codes follow ASPRS LAS\n"
+        header += "element vertex \(returns.count)\n"
+        header += "property float x\nproperty float y\nproperty float z\n"
+        header += "property uchar red\nproperty uchar green\nproperty uchar blue\n"
+        header += "property float intensity\n"
+        header += "property float range\n"
+        header += "property double timestamp\n"
+        header += "property uint scan_id\n"
+        header += "property ushort ring\n"
+        header += "property uchar classification\n"
+        header += "property uchar return_number\n"
+        header += "property uchar number_of_returns\n"
+        header += "end_header\n"
+
+        // 12 + 3 + 4 + 4 + 8 + 4 + 2 + 1 + 1 + 1 = 40 bytes per vertex.
+        var data = Data(header.utf8)
+        data.reserveCapacity(header.utf8.count + returns.count * 40)
+        for entry in returns {
+            let color = LidarColorResolver.color(
+                classification: entry.classification,
+                intensity: entry.intensity,
+                height: entry.position.y,
+                mode: colorMode,
+                elevationMinimum: minimum,
+                elevationMaximum: maximum
+            )
+            LidarBinaryWriter.append(&data, entry.position.x)
+            LidarBinaryWriter.append(&data, entry.position.y)
+            LidarBinaryWriter.append(&data, entry.position.z)
+            data.append(color.red)
+            data.append(color.green)
+            data.append(color.blue)
+            LidarBinaryWriter.append(&data, entry.intensity)
+            LidarBinaryWriter.append(&data, entry.range)
+            LidarBinaryWriter.append(&data, entry.timestamp)
+            LidarBinaryWriter.append(&data, entry.scanID)
+            LidarBinaryWriter.append(&data, entry.ring)
+            data.append(entry.classification.rawValue)
+            data.append(entry.returnNumber)
+            data.append(entry.numberOfReturns)
+        }
+        return data
+    }
+
+    func geoCSVData(origin: GeoOrigin) -> Data {
+        var text = ""
+        text.reserveCapacity(returns.count * 96 + 256)
+        text += "latitude_deg,longitude_deg,altitude_msl_m,"
+        text += "local_east_m,local_up_m,local_north_m,"
+        text += "intensity,range_m,timestamp_s,scan_id,ring,classification,class_name,"
+        text += "return_number,number_of_returns\n"
+        for entry in returns {
+            let coordinate = origin.geographic(ofLocalPosition: entry.position)
+            text += String(
+                format: "%.8f,%.8f,%.3f,%.3f,%.3f,%.3f,%.4f,%.3f,%.6f,%u,%u,%u,%@,%u,%u\n",
+                coordinate.latitudeDegrees,
+                coordinate.longitudeDegrees,
+                coordinate.altitudeMetersMSL,
+                Double(entry.position.x), Double(entry.position.y), Double(entry.position.z),
+                Double(entry.intensity), Double(entry.range), entry.timestamp,
+                entry.scanID, UInt32(entry.ring),
+                UInt32(entry.classification.rawValue), entry.classification.label,
+                UInt32(entry.returnNumber), UInt32(entry.numberOfReturns)
+            )
+        }
+        return Data(text.utf8)
+    }
+}
+
+// MARK: - Centroid map
+
+/// The voxel-filtered map product: one point per occupied voxel, at the centroid of the returns
+/// that fell in it.
+///
+/// Its schema is deliberately *not* the raw schema. A centroid aggregates echoes captured from
+/// different poses, at different instants, on different channels — so it carries no `range`,
+/// `scan_id` or `ring`, because inheriting those from one arbitrary contributing return would state
+/// something false about the point. It carries honest aggregates instead: mean intensity, the
+/// number of returns merged, the time span they cover, and the majority surface class. Anyone
+/// needing per-echo truth reads the raw cloud.
+struct LidarVoxelMap {
+
+    struct Cell {
+        /// Centroid of every return merged here.
+        var position: SIMD3<Float>
+        /// Mean return strength.
+        var intensity: Float
+        /// Majority class among the merged returns.
+        var classification: LidarSurfaceClass
+        /// How many returns this centroid averages — a direct measure of the noise reduction
+        /// achieved here (zero-mean ranging noise falls as √n) and of survey overlap.
+        var mergeCount: UInt32
+        /// First and last instant contributing to this voxel — a span, not a single moment.
+        var firstTimestamp: Double
+        var lastTimestamp: Double
+    }
+
+    /// Running state behind a centroid, kept parallel to `cells`.
+    private struct Accumulator {
+        var positionSum: SIMD3<Double>
+        var intensitySum: Double
+        var count: UInt32
+        /// Boyer–Moore majority vote: O(1) per return, exact when a true majority exists.
+        var dominantClass: LidarSurfaceClass
+        var dominantScore: Int32
+    }
+
+    enum InsertResult {
+        case inserted(Int)
+        case merged(Int)
+        case rejected
+    }
+
+    private(set) var cells: [Cell] = []
+    private var accumulators: [Accumulator] = []
+    private var voxelIndex: [Int64: Int] = [:]
+    private var occupiedColumns: Set<Int64> = []
+    private(set) var totalReturns: UInt64 = 0
+
+    private(set) var voxelSizeMeters: Float
+    let maximumCells: Int
+
+    private(set) var minBounds = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+    private(set) var maxBounds = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+
+    init(voxelSizeMeters: Float = LidarVoxelSize.coarse.rawValue, maximumCells: Int = 1_200_000) {
+        self.voxelSizeMeters = max(0.02, voxelSizeMeters)
+        self.maximumCells = max(1_000, maximumCells)
+    }
+
+    var isEmpty: Bool { cells.isEmpty }
+    var count: Int { cells.count }
+    var isFull: Bool { cells.count >= maximumCells }
+
     var coverageSquareMeters: Float {
         let cell = max(voxelSizeMeters, 0.1)
         return Float(occupiedColumns.count) * cell * cell
     }
 
     var elevationRange: (minimum: Float, maximum: Float)? {
-        guard !points.isEmpty else { return nil }
+        guard !cells.isEmpty else { return nil }
         return (minBounds.y, maxBounds.y)
     }
 
-    /// Mean returns per stored point — 1.0 in raw mode, higher where the survey overlapped itself.
-    /// A direct read-out of how much noise averaging the voxel filter actually performed. Kept as a
-    /// running total rather than a reduce: the HUD asks for this every sweep, and walking a
-    /// million-point array sixty times a second would cost more than the scan itself.
-    var meanReturnsPerPoint: Float {
-        guard !points.isEmpty else { return 0 }
-        return Float(Double(totalReturns) / Double(points.count))
+    var meanReturnsPerCell: Float {
+        guard !cells.isEmpty else { return 0 }
+        return Float(Double(totalReturns) / Double(cells.count))
     }
 
-    // MARK: - Configuration
-
-    /// Changing the filter invalidates what is already stored — a coarser cloud cannot be refined
-    /// back, and raw returns discarded by a previous voxel pass cannot be recovered — so the survey
-    /// starts clean. The caller is expected to make that visible in the UI.
-    mutating func reconfigure(voxelSizeMeters: Float, isRawMode: Bool) {
+    mutating func reconfigure(voxelSizeMeters: Float) {
         self.voxelSizeMeters = max(0.02, voxelSizeMeters)
-        self.isRawMode = isRawMode
         clear()
     }
 
-    // MARK: - Accumulation
-
     @discardableResult
-    mutating func insert(_ point: Point) -> InsertResult {
-        guard points.count < maximumPoints else { return .rejected }
-        guard point.position.x.isFinite, point.position.y.isFinite, point.position.z.isFinite else {
-            return .rejected
-        }
+    mutating func insert(
+        position: SIMD3<Float>,
+        intensity: Float,
+        timestamp: Double,
+        classification: LidarSurfaceClass
+    ) -> InsertResult {
+        guard cells.count < maximumCells else { return .rejected }
+        guard position.x.isFinite, position.y.isFinite, position.z.isFinite else { return .rejected }
 
-        if isRawMode {
-            points.append(point)
-            totalReturns &+= 1
-            occupiedColumns.insert(columnKey(point.position))
-            expandBounds(point.position)
-            return .inserted(points.count - 1)
-        }
-
-        let key = voxelKey(point.position)
+        let key = voxelKey(position)
         if let existing = voxelIndex[key] {
-            accumulators[existing].positionSum += SIMD3<Double>(point.position)
-            accumulators[existing].intensitySum += Double(point.intensity)
-            accumulators[existing].rangeSum += Double(point.range)
+            accumulators[existing].positionSum += SIMD3<Double>(position)
+            accumulators[existing].intensitySum += Double(intensity)
             accumulators[existing].count &+= 1
+            if accumulators[existing].dominantClass == classification {
+                accumulators[existing].dominantScore &+= 1
+            } else {
+                accumulators[existing].dominantScore &-= 1
+                if accumulators[existing].dominantScore < 0 {
+                    accumulators[existing].dominantClass = classification
+                    accumulators[existing].dominantScore = 1
+                }
+            }
             totalReturns &+= 1
 
             let accumulator = accumulators[existing]
             let inverse = 1.0 / Double(accumulator.count)
-            let centroid = accumulator.positionSum * inverse
-            points[existing].position = SIMD3<Float>(centroid)
-            points[existing].intensity = Float(accumulator.intensitySum * inverse)
-            points[existing].range = Float(accumulator.rangeSum * inverse)
-            points[existing].mergeCount = accumulator.count
-            expandBounds(points[existing].position)
+            cells[existing].position = SIMD3<Float>(accumulator.positionSum * inverse)
+            cells[existing].intensity = Float(accumulator.intensitySum * inverse)
+            cells[existing].classification = accumulator.dominantClass
+            cells[existing].mergeCount = accumulator.count
+            cells[existing].firstTimestamp = min(cells[existing].firstTimestamp, timestamp)
+            cells[existing].lastTimestamp = max(cells[existing].lastTimestamp, timestamp)
+            expandBounds(cells[existing].position)
             return .merged(existing)
         }
 
-        var stored = point
-        stored.mergeCount = 1
-        points.append(stored)
-        accumulators.append(Accumulator(
-            positionSum: SIMD3<Double>(point.position),
-            intensitySum: Double(point.intensity),
-            rangeSum: Double(point.range),
-            count: 1
+        cells.append(Cell(
+            position: position,
+            intensity: intensity,
+            classification: classification,
+            mergeCount: 1,
+            firstTimestamp: timestamp,
+            lastTimestamp: timestamp
         ))
-        voxelIndex[key] = points.count - 1
+        accumulators.append(Accumulator(
+            positionSum: SIMD3<Double>(position),
+            intensitySum: Double(intensity),
+            count: 1,
+            dominantClass: classification,
+            dominantScore: 1
+        ))
+        voxelIndex[key] = cells.count - 1
+        occupiedColumns.insert(columnKey(position))
         totalReturns &+= 1
-        occupiedColumns.insert(columnKey(point.position))
-        expandBounds(point.position)
-        return .inserted(points.count - 1)
-    }
-
-    mutating func recordScanPose(_ pose: ScanPose) {
-        scanPoses.append(pose)
+        expandBounds(position)
+        return .inserted(cells.count - 1)
     }
 
     mutating func clear() {
-        points.removeAll(keepingCapacity: true)
+        cells.removeAll(keepingCapacity: true)
         accumulators.removeAll(keepingCapacity: true)
         voxelIndex.removeAll(keepingCapacity: true)
         occupiedColumns.removeAll(keepingCapacity: true)
-        scanPoses.removeAll(keepingCapacity: true)
         totalReturns = 0
         minBounds = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         maxBounds = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
@@ -212,8 +315,6 @@ struct LidarPointCloud {
         minBounds = simd_min(minBounds, position)
         maxBounds = simd_max(maxBounds, position)
     }
-
-    // MARK: - Voxel keys
 
     private func quantise(_ value: Float) -> Int32 {
         Int32((value / voxelSizeMeters).rounded(.down))
@@ -232,30 +333,177 @@ struct LidarPointCloud {
         return (x << 32) | z
     }
 
-    // MARK: - Colour
+    /// `binary_little_endian` PLY of the map product. `merge_count` is a **`uint`**: a survey that
+    /// dwells over one façade merges far more than 255 returns into a voxel, and a saturating byte
+    /// would silently understate exactly the overlap statistic this field exists to report.
+    func binaryPLYData(
+        colorMode: LidarColorMode,
+        comment: String,
+        rawFileName: String?,
+        epochUTC: String
+    ) -> Data {
+        let minimum = minBounds.y
+        let maximum = maxBounds.y
 
-    /// RGB for a return under the selected view. Used identically on screen and in the export, so a
-    /// PLY opens looking like what the pilot was shown.
+        var header = ""
+        header += "ply\n"
+        header += "format binary_little_endian 1.0\n"
+        header += "comment Generated by UAVsim LiDAR payload — VOXEL CENTROID MAP\n"
+        header += "comment \(comment)\n"
+        header += "comment colour_mode \(colorMode.rawValue)\n"
+        header += "comment timestamps are seconds from the survey epoch \(epochUTC)\n"
+        header += "comment a centroid aggregates returns from several poses, instants and channels,"
+        header += " so it carries no range/scan_id/ring — see the raw cloud for per-echo values\n"
+        if let rawFileName {
+            header += "comment raw returns: \(rawFileName)\n"
+        }
+        header += "comment classification is the majority class of the merged returns\n"
+        header += "comment classification codes follow ASPRS LAS\n"
+        header += "element vertex \(cells.count)\n"
+        header += "property float x\nproperty float y\nproperty float z\n"
+        header += "property uchar red\nproperty uchar green\nproperty uchar blue\n"
+        header += "property float intensity\n"
+        header += "property uchar classification\n"
+        header += "property uint merge_count\n"
+        header += "property double first_timestamp\n"
+        header += "property double last_timestamp\n"
+        header += "end_header\n"
+
+        // 12 + 3 + 4 + 1 + 4 + 8 + 8 = 40 bytes per vertex.
+        var data = Data(header.utf8)
+        data.reserveCapacity(header.utf8.count + cells.count * 40)
+        for cell in cells {
+            let color = LidarColorResolver.color(
+                classification: cell.classification,
+                intensity: cell.intensity,
+                height: cell.position.y,
+                mode: colorMode,
+                elevationMinimum: minimum,
+                elevationMaximum: maximum
+            )
+            LidarBinaryWriter.append(&data, cell.position.x)
+            LidarBinaryWriter.append(&data, cell.position.y)
+            LidarBinaryWriter.append(&data, cell.position.z)
+            data.append(color.red)
+            data.append(color.green)
+            data.append(color.blue)
+            LidarBinaryWriter.append(&data, cell.intensity)
+            data.append(cell.classification.rawValue)
+            LidarBinaryWriter.append(&data, cell.mergeCount)
+            LidarBinaryWriter.append(&data, cell.firstTimestamp)
+            LidarBinaryWriter.append(&data, cell.lastTimestamp)
+        }
+        return data
+    }
+
+    func geoCSVData(origin: GeoOrigin) -> Data {
+        var text = ""
+        text.reserveCapacity(cells.count * 88 + 256)
+        text += "latitude_deg,longitude_deg,altitude_msl_m,"
+        text += "local_east_m,local_up_m,local_north_m,"
+        text += "mean_intensity,classification,class_name,merge_count,"
+        text += "first_timestamp_s,last_timestamp_s\n"
+        for cell in cells {
+            let coordinate = origin.geographic(ofLocalPosition: cell.position)
+            text += String(
+                format: "%.8f,%.8f,%.3f,%.3f,%.3f,%.3f,%.4f,%u,%@,%u,%.6f,%.6f\n",
+                coordinate.latitudeDegrees,
+                coordinate.longitudeDegrees,
+                coordinate.altitudeMetersMSL,
+                Double(cell.position.x), Double(cell.position.y), Double(cell.position.z),
+                Double(cell.intensity),
+                UInt32(cell.classification.rawValue), cell.classification.label,
+                cell.mergeCount,
+                cell.firstTimestamp, cell.lastTimestamp
+            )
+        }
+        return Data(text.utf8)
+    }
+}
+
+// MARK: - Trajectory
+
+/// Pose of one firing block. A multi-channel head fires its whole vertical fan at one instant, so a
+/// block has a single pose — motion between blocks is what deskewing corrects, and this table is
+/// what makes that possible without back-computing the sensor from the points.
+///
+/// `returnsInScan` is recorded for **every** block, including those that produced nothing: that is
+/// what separates a genuinely empty block from one dropped under load or lost in export.
+struct LidarScanPose {
+    let scanID: UInt32
+    let timestamp: Double
+    let sensorPosition: SIMD3<Float>
+    let sensorOrientation: simd_quatf
+    let vehiclePosition: SIMD3<Float>
+    let vehicleOrientation: simd_quatf
+    let returnsInScan: Int
+}
+
+enum LidarTrajectoryWriter {
+    static func csvData(poses: [LidarScanPose], origin: GeoOrigin?) -> Data {
+        var text = ""
+        text += "scan_id,timestamp_s,"
+        text += "sensor_east_m,sensor_up_m,sensor_north_m,"
+        text += "sensor_qx,sensor_qy,sensor_qz,sensor_qw,"
+        text += "uav_east_m,uav_up_m,uav_north_m,uav_qx,uav_qy,uav_qz,uav_qw,"
+        text += "returns_in_scan,sensor_latitude_deg,sensor_longitude_deg,sensor_altitude_msl_m\n"
+        for pose in poses {
+            var line = String(
+                format: "%u,%.6f,%.3f,%.3f,%.3f,",
+                pose.scanID, pose.timestamp,
+                Double(pose.sensorPosition.x), Double(pose.sensorPosition.y),
+                Double(pose.sensorPosition.z)
+            )
+            line += String(
+                format: "%.6f,%.6f,%.6f,%.6f,",
+                Double(pose.sensorOrientation.imag.x), Double(pose.sensorOrientation.imag.y),
+                Double(pose.sensorOrientation.imag.z), Double(pose.sensorOrientation.real)
+            )
+            line += String(
+                format: "%.3f,%.3f,%.3f,%.6f,%.6f,%.6f,%.6f,%d",
+                Double(pose.vehiclePosition.x), Double(pose.vehiclePosition.y),
+                Double(pose.vehiclePosition.z),
+                Double(pose.vehicleOrientation.imag.x), Double(pose.vehicleOrientation.imag.y),
+                Double(pose.vehicleOrientation.imag.z), Double(pose.vehicleOrientation.real),
+                pose.returnsInScan
+            )
+            if let origin {
+                let coordinate = origin.geographic(ofLocalPosition: pose.sensorPosition)
+                line += String(
+                    format: ",%.8f,%.8f,%.3f",
+                    coordinate.latitudeDegrees, coordinate.longitudeDegrees,
+                    coordinate.altitudeMetersMSL
+                )
+            } else {
+                line += ",,,"
+            }
+            text += line + "\n"
+        }
+        return Data(text.utf8)
+    }
+}
+
+// MARK: - Shared helpers
+
+enum LidarColorResolver {
     static func color(
-        for point: Point,
+        classification: LidarSurfaceClass,
+        intensity: Float,
+        height: Float,
         mode: LidarColorMode,
         elevationMinimum: Float,
         elevationMaximum: Float
     ) -> (red: UInt8, green: UInt8, blue: UInt8) {
         switch mode {
         case .height:
-            return elevationColor(
-                y: point.position.y,
-                minimum: elevationMinimum,
-                maximum: elevationMaximum
-            )
+            return elevationColor(y: height, minimum: elevationMinimum, maximum: elevationMaximum)
         case .intensity:
-            let value = UInt8(max(0, min(255, point.intensity * 255)))
+            let value = UInt8(max(0, min(255, intensity * 255)))
             return (value, value, value)
         case .material:
-            return point.classification.materialColor
+            return classification.materialColor
         case .semantic:
-            return point.classification.semanticColor
+            return classification.semanticColor
         }
     }
 
@@ -283,185 +531,31 @@ struct LidarPointCloud {
         }
         return (channel(a.0, b.0), channel(a.1, b.1), channel(a.2, b.2))
     }
+}
 
-    // MARK: - Export
-
-    /// `binary_little_endian` PLY carrying the full per-return record: position, RGB under the
-    /// selected view, and the physical attributes. Binary rather than ASCII because the same survey
-    /// is roughly a third of the size and opens an order of magnitude faster — 39 bytes per point,
-    /// fixed stride, no parsing.
-    func binaryPLYData(
-        colorMode: LidarColorMode,
-        comment: String,
-        trajectoryFileName: String,
-        epochUTC: String
-    ) -> Data {
-        let minimum = minBounds.y
-        let maximum = maxBounds.y
-
-        var header = ""
-        header += "ply\n"
-        header += "format binary_little_endian 1.0\n"
-        header += "comment Generated by UAVsim LiDAR payload\n"
-        header += "comment \(comment)\n"
-        header += "comment colour_mode \(colorMode.rawValue)\n"
-        header += "comment timestamps are seconds from the survey epoch \(epochUTC)\n"
-        header += "comment sensor trajectory: \(trajectoryFileName) (one row per scan_id, "
-        header += "including scans with zero returns)\n"
-        header += "comment scan_id is one firing block; channels share its instant, ring adds a "
-        header += "fixed inter-channel offset\n"
-        header += "comment classification codes follow ASPRS LAS\n"
-        header += "element vertex \(points.count)\n"
-        header += "property float x\n"
-        header += "property float y\n"
-        header += "property float z\n"
-        header += "property uchar red\n"
-        header += "property uchar green\n"
-        header += "property uchar blue\n"
-        header += "property float intensity\n"
-        header += "property float range\n"
-        header += "property double timestamp\n"
-        header += "property uint scan_id\n"
-        header += "property ushort ring\n"
-        header += "property uchar classification\n"
-        header += "property uchar return_number\n"
-        header += "property uchar number_of_returns\n"
-        header += "property uchar merge_count\n"
-        header += "end_header\n"
-
-        // 3×4 + 3×1 + 4 + 4 + 8 + 4 + 2 + 1 + 1 + 1 + 1 = 41 bytes per vertex.
-        var data = Data(header.utf8)
-        data.reserveCapacity(header.utf8.count + points.count * 41)
-
-        for point in points {
-            let color = Self.color(
-                for: point,
-                mode: colorMode,
-                elevationMinimum: minimum,
-                elevationMaximum: maximum
-            )
-            appendLittleEndian(&data, point.position.x)
-            appendLittleEndian(&data, point.position.y)
-            appendLittleEndian(&data, point.position.z)
-            data.append(color.red)
-            data.append(color.green)
-            data.append(color.blue)
-            appendLittleEndian(&data, point.intensity)
-            appendLittleEndian(&data, point.range)
-            appendLittleEndian(&data, point.timestamp)
-            appendLittleEndian(&data, point.scanID)
-            appendLittleEndian(&data, point.ring)
-            data.append(point.classification.rawValue)
-            data.append(point.returnNumber)
-            data.append(point.numberOfReturns)
-            data.append(UInt8(min(255, point.mergeCount)))
-        }
-        return data
-    }
-
-    /// The geo-referenced table: WGS84 per point plus every physical attribute, for GIS and
-    /// spreadsheet analysis of noise, intensity and channel structure.
-    func geoCSVData(origin: GeoOrigin) -> Data {
-        var text = ""
-        text.reserveCapacity(points.count * 96 + 256)
-        text += "latitude_deg,longitude_deg,altitude_msl_m,"
-        text += "local_east_m,local_up_m,local_north_m,"
-        text += "intensity,range_m,timestamp_s,scan_id,ring,classification,class_name,"
-        text += "return_number,number_of_returns,merge_count\n"
-        for point in points {
-            let coordinate = origin.geographic(ofLocalPosition: point.position)
-            text += String(
-                format: "%.8f,%.8f,%.3f,%.3f,%.3f,%.3f,%.4f,%.3f,%.6f,%u,%u,%u,%@,%u,%u,%u\n",
-                coordinate.latitudeDegrees,
-                coordinate.longitudeDegrees,
-                coordinate.altitudeMetersMSL,
-                Double(point.position.x),
-                Double(point.position.y),
-                Double(point.position.z),
-                Double(point.intensity),
-                Double(point.range),
-                point.timestamp,
-                point.scanID,
-                UInt32(point.ring),
-                UInt32(point.classification.rawValue),
-                point.classification.label,
-                UInt32(point.returnNumber),
-                UInt32(point.numberOfReturns),
-                point.mergeCount
-            )
-        }
-        return Data(text.utf8)
-    }
-
-    /// Sensor trajectory, one row per sweep. Without this a cloud cannot be de-skewed or audited:
-    /// the pose that produced each return would be unknown.
-    func trajectoryCSVData(origin: GeoOrigin?) -> Data {
-        var text = ""
-        text += "scan_id,timestamp_s,"
-        text += "sensor_east_m,sensor_up_m,sensor_north_m,"
-        text += "sensor_qx,sensor_qy,sensor_qz,sensor_qw,"
-        text += "uav_east_m,uav_up_m,uav_north_m,uav_qx,uav_qy,uav_qz,uav_qw,"
-        text += "returns_in_scan,sensor_latitude_deg,sensor_longitude_deg,sensor_altitude_msl_m\n"
-        for pose in scanPoses {
-            var line = String(
-                format: "%u,%.6f,%.3f,%.3f,%.3f,",
-                pose.scanID,
-                pose.timestamp,
-                Double(pose.sensorPosition.x),
-                Double(pose.sensorPosition.y),
-                Double(pose.sensorPosition.z)
-            )
-            line += String(
-                format: "%.6f,%.6f,%.6f,%.6f,",
-                Double(pose.sensorOrientation.imag.x), Double(pose.sensorOrientation.imag.y),
-                Double(pose.sensorOrientation.imag.z), Double(pose.sensorOrientation.real)
-            )
-            line += String(
-                format: "%.3f,%.3f,%.3f,%.6f,%.6f,%.6f,%.6f,%d",
-                Double(pose.vehiclePosition.x), Double(pose.vehiclePosition.y),
-                Double(pose.vehiclePosition.z),
-                Double(pose.vehicleOrientation.imag.x), Double(pose.vehicleOrientation.imag.y),
-                Double(pose.vehicleOrientation.imag.z), Double(pose.vehicleOrientation.real),
-                pose.returnsInScan
-            )
-            if let origin {
-                let coordinate = origin.geographic(ofLocalPosition: pose.sensorPosition)
-                line += String(
-                    format: ",%.8f,%.8f,%.3f",
-                    coordinate.latitudeDegrees,
-                    coordinate.longitudeDegrees,
-                    coordinate.altitudeMetersMSL
-                )
-            } else {
-                line += ",,,"
-            }
-            text += line + "\n"
-        }
-        return Data(text.utf8)
-    }
-
-    private func appendLittleEndian(_ data: inout Data, _ value: Float) {
+enum LidarBinaryWriter {
+    static func append(_ data: inout Data, _ value: Float) {
         withUnsafeBytes(of: value.bitPattern.littleEndian) { data.append(contentsOf: $0) }
     }
 
-    private func appendLittleEndian(_ data: inout Data, _ value: Double) {
+    static func append(_ data: inout Data, _ value: Double) {
         withUnsafeBytes(of: value.bitPattern.littleEndian) { data.append(contentsOf: $0) }
     }
 
-    private func appendLittleEndian(_ data: inout Data, _ value: UInt32) {
+    static func append(_ data: inout Data, _ value: UInt32) {
         withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
     }
 
-    private func appendLittleEndian(_ data: inout Data, _ value: UInt16) {
+    static func append(_ data: inout Data, _ value: UInt16) {
         withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
     }
 }
 
-/// Live survey read-out handed back to the HUD each sweep.
+/// Live survey read-out handed back to the HUD.
 struct LidarScanStatistics {
-    let pointCount: Int
+    let mapPointCount: Int
+    let rawReturnCount: Int
     let coverageSquareMeters: Double
-    /// Mean returns merged per stored point — 1.0 in raw mode, the noise-averaging factor otherwise.
     let meanReturnsPerPoint: Double
     let scanCount: Int
     let isBufferFull: Bool

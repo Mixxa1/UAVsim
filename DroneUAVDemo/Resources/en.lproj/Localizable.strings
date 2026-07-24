@@ -2789,3 +2789,4 @@
 "lidar.color.intensity" = "INT";
 "lidar.color.material" = "MAT";
 "lidar.color.semantic" = "CLASS";
+"lidar.hud.raw_toggle" = "RAW%@";

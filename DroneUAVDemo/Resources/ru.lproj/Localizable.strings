@@ -2784,3 +2784,4 @@
 "lidar.color.intensity" = "ИНТ";
 "lidar.color.material" = "МАТ";
 "lidar.color.semantic" = "КЛАСС";
+"lidar.hud.raw_toggle" = "RAW%@";

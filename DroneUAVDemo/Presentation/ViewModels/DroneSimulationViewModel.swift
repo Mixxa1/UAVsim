@@ -739,6 +739,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var payloadCameraOpticsState: PayloadCameraOpticsState
     @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
     @Published private(set) var lidarOpticsState = PayloadLidarOpticsState()
+    private var lidarStatePublishTime: TimeInterval = 0
     @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
     @Published private(set) var capsuleState = PayloadFireCapsuleState()
     @Published private(set) var agriculturalSprayerState = PayloadAgriculturalSprayerState()
@@ -4148,12 +4149,12 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func setLidarScanning(_ enabled: Bool) {
         lidarController.setScanning(enabled)
-        refreshLidarStatus()
+        refreshLidarStatus(forcePublish: true)
     }
 
     func toggleLidarScanning() {
         lidarController.toggleScanning()
-        refreshLidarStatus()
+        refreshLidarStatus(forcePublish: true)
     }
 
     func adjustLidarGimbal(yawDeltaDegrees: Double = 0.0, pitchDeltaDegrees: Double = 0.0) {
@@ -4161,23 +4162,25 @@ final class DroneSimulationViewModel: ObservableObject {
             yawDeltaDegrees: yawDeltaDegrees,
             pitchDeltaDegrees: pitchDeltaDegrees
         )
-        refreshLidarStatus()
+        refreshLidarStatus(forcePublish: true)
     }
 
     func resetLidarGimbalOrientation() {
         lidarController.resetGimbalOrientation()
-        refreshLidarStatus()
+        refreshLidarStatus(forcePublish: true)
     }
 
     func clearLidarCloud() {
         sceneController.clearLidarCloud()
         lidarController.updateStatistics(
             capturedPointCount: 0,
+            rawReturnCount: 0,
             coverageSquareMeters: 0.0,
             meanReturnsPerPoint: 0.0,
             scanCount: 0,
             isBufferFull: false
         )
+        lidarStatePublishTime = 0
         lidarOpticsState = lidarController.opticsState
     }
 
@@ -4190,23 +4193,25 @@ final class DroneSimulationViewModel: ObservableObject {
 
     /// Raw scan keeps every return, unfiltered: the mode in which sensor noise, multi-hit structure
     /// and motion distortion survive for analysis.
-    func setLidarRawMode(_ enabled: Bool) {
-        guard lidarController.setRawMode(enabled) else { return }
+    func setLidarRetainsRawReturns(_ enabled: Bool) {
+        guard lidarController.setRetainsRawReturns(enabled) else { return }
         applyLidarFilterConfiguration()
     }
 
     private func applyLidarFilterConfiguration() {
         sceneController.configureLidarFilter(
             voxelSizeMeters: lidarController.opticsState.voxelSize.rawValue,
-            isRawMode: lidarController.opticsState.isRawMode
+            retainsRawReturns: lidarController.opticsState.retainsRawReturns
         )
         lidarController.updateStatistics(
             capturedPointCount: 0,
+            rawReturnCount: 0,
             coverageSquareMeters: 0.0,
             meanReturnsPerPoint: 0.0,
             scanCount: 0,
             isBufferFull: false
         )
+        lidarStatePublishTime = 0
         lidarOpticsState = lidarController.opticsState
     }
 
@@ -10210,7 +10215,7 @@ final class DroneSimulationViewModel: ObservableObject {
         return simd_length(state.position - truckPosition) <= FireCapsuleTuning.rechargeZoneRadiusMeters
     }
 
-    private func refreshLidarStatus() {
+    private func refreshLidarStatus(forcePublish: Bool = false) {
         lidarController.setAvailability(
             isAvailable: isMountedLidarAvailable,
             isPowered: isMountedLidarAvailable
@@ -10218,13 +10223,21 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.updateLidarGimbal(state: lidarController.opticsState)
         let stats = sceneController.scanLidarSweep(state: lidarController.opticsState)
         lidarController.updateStatistics(
-            capturedPointCount: stats.pointCount,
+            capturedPointCount: stats.mapPointCount,
+            rawReturnCount: stats.rawReturnCount,
             coverageSquareMeters: stats.coverageSquareMeters,
             meanReturnsPerPoint: stats.meanReturnsPerPoint,
             scanCount: stats.scanCount,
             isBufferFull: stats.isBufferFull
         )
-        lidarOpticsState = lidarController.opticsState
+        // Publishing every tick redrew the whole LiDAR panel at frame rate for a counter the pilot
+        // cannot read that fast. Statistics land at 5 Hz; anything the pilot actually operates
+        // (power, scan enable, gimbal, filter, colour) publishes immediately through its own path.
+        let now = CACurrentMediaTime()
+        if forcePublish || now - lidarStatePublishTime >= 0.2 {
+            lidarStatePublishTime = now
+            lidarOpticsState = lidarController.opticsState
+        }
 
         let lidarSignals = lidarController.consumeMissionSignals()
         if !lidarSignals.isEmpty {

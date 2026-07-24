@@ -133,9 +133,15 @@ final class DroneSceneController {
     /// World-space parent of the accumulated point cloud (baked in fixed chunks so a growing survey
     /// never rebuilds the whole cloud per frame). Lives on the scene root, not the moving drone.
     private let lidarCloudRootNode = SCNNode()
-    private var lidarCloud = LidarPointCloud()
-    /// New points captured since the last visual bake, awaiting a chunk node.
-    private var lidarPendingPoints: [LidarPointCloud.Point] = []
+    /// Two products, kept apart on purpose: the map is the voxel-centroid deliverable, the raw
+    /// cloud is the sensor's own unfiltered record. Conflating them is what made centroid points
+    /// carry a single arbitrary return's range/scan_id/ring.
+    private var lidarMap = LidarVoxelMap()
+    private var lidarRawCloud = LidarRawCloud()
+    private var lidarRetainsRawReturns = false
+    private var lidarScanPoses: [LidarScanPose] = []
+    /// New map cells since the last visual bake, awaiting a chunk node.
+    private var lidarPendingPoints: [LidarVoxelMap.Cell] = []
     private var lidarLastBakeTime: TimeInterval = 0
     private var lidarNextScanID: UInt32 = 0
     /// Delay between successive channels inside one firing block — the fixed sequence a
@@ -5224,37 +5230,45 @@ final class DroneSceneController {
 
                 let cosIncidence = abs(simd_dot(direction, simd_normalize(entry.normal)))
                 let rangeFactor = max(0.15, 1.0 - (measuredRange / maxRange) * 0.7)
-                // A later return runs on the energy the earlier ones did not absorb.
+                // A later echo runs on the energy the earlier ones did not absorb.
                 let attenuation = pow(0.55, Float(offset))
                 let intensity = max(0.01, min(
                     1.0,
                     entry.surface.reflectance * cosIncidence * rangeFactor * attenuation * 1.6
                 ))
 
-                let result = lidarCloud.insert(LidarPointCloud.Point(
+                if lidarRetainsRawReturns {
+                    lidarRawCloud.append(LidarRawCloud.Return(
+                        position: measuredPoint,
+                        intensity: intensity,
+                        range: measuredRange,
+                        timestamp: timestamp,
+                        scanID: scanID,
+                        ring: UInt16(ring),
+                        classification: entry.surface,
+                        returnNumber: UInt8(offset + 1),
+                        numberOfReturns: numberOfReturns
+                    ))
+                }
+
+                let result = lidarMap.insert(
                     position: measuredPoint,
                     intensity: intensity,
-                    range: measuredRange,
                     timestamp: timestamp,
-                    scanID: scanID,
-                    ring: UInt16(ring),
-                    classification: entry.surface,
-                    returnNumber: UInt8(offset + 1),
-                    numberOfReturns: numberOfReturns,
-                    mergeCount: 1
-                ))
+                    classification: entry.surface
+                )
                 returnsInScan += 1
-                // Only a genuinely new point needs drawing; a merge refines a centroid already on
+                // Only a genuinely new cell needs drawing; a merge refines a centroid already on
                 // screen, by at most one voxel edge.
                 if case .inserted(let storedIndex) = result {
-                    lidarPendingPoints.append(lidarCloud.points[storedIndex])
+                    lidarPendingPoints.append(lidarMap.cells[storedIndex])
                 }
             }
         }
 
         // Recorded for every block, including those that returned nothing: that is what lets a
         // consumer tell an empty scan from a dropped one.
-        lidarCloud.recordScanPose(LidarPointCloud.ScanPose(
+        lidarScanPoses.append(LidarScanPose(
             scanID: scanID,
             timestamp: blockTimestamp,
             sensorPosition: sensorPosition,
@@ -5279,11 +5293,12 @@ final class DroneSceneController {
 
     private func lidarStatistics() -> LidarScanStatistics {
         LidarScanStatistics(
-            pointCount: lidarCloud.count,
-            coverageSquareMeters: Double(lidarCloud.coverageSquareMeters),
-            meanReturnsPerPoint: Double(lidarCloud.meanReturnsPerPoint),
-            scanCount: lidarCloud.scanPoses.count,
-            isBufferFull: lidarCloud.isFull
+            mapPointCount: lidarMap.count,
+            rawReturnCount: lidarRawCloud.count,
+            coverageSquareMeters: Double(lidarMap.coverageSquareMeters),
+            meanReturnsPerPoint: Double(lidarMap.meanReturnsPerCell),
+            scanCount: lidarScanPoses.count,
+            isBufferFull: lidarMap.isFull || (lidarRetainsRawReturns && lidarRawCloud.isFull)
         )
     }
 
@@ -5310,9 +5325,9 @@ final class DroneSceneController {
         return gaussian * sigma
     }
 
-    private func bakeLidarChunk(_ points: [LidarPointCloud.Point], colorMode: LidarColorMode) {
+    private func bakeLidarChunk(_ points: [LidarVoxelMap.Cell], colorMode: LidarColorMode) {
         guard !points.isEmpty else { return }
-        let range = lidarCloud.elevationRange
+        let range = lidarMap.elevationRange
             ?? (points[0].position.y, points[0].position.y + 1.0)
 
         var vertices: [SCNVector3] = []
@@ -5326,8 +5341,10 @@ final class DroneSceneController {
                 point.position.y + 0.08,
                 point.position.z
             ))
-            let color = LidarPointCloud.color(
-                for: point,
+            let color = LidarColorResolver.color(
+                classification: point.classification,
+                intensity: point.intensity,
+                height: point.position.y,
                 mode: colorMode,
                 elevationMinimum: range.minimum,
                 elevationMaximum: range.maximum
@@ -5386,12 +5403,12 @@ final class DroneSceneController {
     func rebuildLidarVisual(colorMode: LidarColorMode) {
         lidarCloudRootNode.childNodes.forEach { $0.removeFromParentNode() }
         lidarPendingPoints.removeAll(keepingCapacity: true)
-        guard !lidarCloud.isEmpty else { return }
+        guard !lidarMap.isEmpty else { return }
         let batch = 60_000
         var start = 0
-        while start < lidarCloud.points.count {
-            let end = min(start + batch, lidarCloud.points.count)
-            bakeLidarChunk(Array(lidarCloud.points[start..<end]), colorMode: colorMode)
+        while start < lidarMap.cells.count {
+            let end = min(start + batch, lidarMap.cells.count)
+            bakeLidarChunk(Array(lidarMap.cells[start..<end]), colorMode: colorMode)
             start = end
         }
     }
@@ -5400,18 +5417,25 @@ final class DroneSceneController {
     /// — a coarser cloud cannot be refined back, and raw returns a previous voxel pass threw away
     /// cannot be recovered.
     @discardableResult
-    func configureLidarFilter(voxelSizeMeters: Float, isRawMode: Bool) -> Bool {
-        guard lidarCloud.voxelSizeMeters != voxelSizeMeters || lidarCloud.isRawMode != isRawMode
-        else { return false }
-        let hadPoints = !lidarCloud.isEmpty
-        lidarCloud.reconfigure(voxelSizeMeters: voxelSizeMeters, isRawMode: isRawMode)
+    func configureLidarFilter(voxelSizeMeters: Float, retainsRawReturns: Bool) -> Bool {
+        let voxelChanged = lidarMap.voxelSizeMeters != voxelSizeMeters
+        guard voxelChanged || lidarRetainsRawReturns != retainsRawReturns else { return false }
+        let hadPoints = !lidarMap.isEmpty || !lidarRawCloud.isEmpty
+        lidarRetainsRawReturns = retainsRawReturns
+        // Re-voxelising cannot recover what a coarser pass already merged, and raw retention that
+        // was off cannot be back-filled, so both products restart together and stay consistent.
+        lidarMap.reconfigure(voxelSizeMeters: voxelSizeMeters)
+        lidarRawCloud.clear()
+        lidarScanPoses.removeAll(keepingCapacity: true)
         lidarPendingPoints.removeAll(keepingCapacity: true)
         lidarCloudRootNode.childNodes.forEach { $0.removeFromParentNode() }
         return hadPoints
     }
 
     func clearLidarCloud() {
-        lidarCloud.clear()
+        lidarMap.clear()
+        lidarRawCloud.clear()
+        lidarScanPoses.removeAll(keepingCapacity: true)
         lidarPendingPoints.removeAll(keepingCapacity: true)
         lidarEpoch = nil
         lidarEpochDate = nil
@@ -5423,7 +5447,7 @@ final class DroneSceneController {
     /// PLY (position, RGB and every physical attribute), a geo-referenced CSV in WGS84, and the
     /// sensor trajectory, one row per sweep, without which the cloud could not be de-skewed.
     func exportLidarCloud(origin: GeoOrigin?, colorMode: LidarColorMode) -> [URL]? {
-        guard !lidarCloud.isEmpty else { return nil }
+        guard !lidarMap.isEmpty || !lidarRawCloud.isEmpty else { return nil }
         let fileManager = FileManager.default
         let directory = InternalStorePaths.lidarSurveys(fileManager: fileManager)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -5431,37 +5455,59 @@ final class DroneSceneController {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let base = "lidar-\(formatter.string(from: Date()))"
-        let summary = lidarCloud.isRawMode
-            ? "raw scan, unfiltered returns"
-            : "voxel centroid filter \(lidarCloud.voxelSizeMeters) m"
-
-        var written: [URL] = []
-        let plyURL = directory.appendingPathComponent("\(base).ply")
         let epochFormatter = ISO8601DateFormatter()
         epochFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let epochUTC = lidarEpochDate.map { epochFormatter.string(from: $0) } ?? "unknown"
-        let ply = lidarCloud.binaryPLYData(
-            colorMode: colorMode,
-            comment: summary,
-            trajectoryFileName: "\(base)-trajectory.csv",
-            epochUTC: epochUTC
-        )
-        if (try? ply.write(to: plyURL, options: .atomic)) != nil {
-            written.append(plyURL)
-        }
-        if let origin {
-            let csvURL = directory.appendingPathComponent("\(base).csv")
-            if (try? lidarCloud.geoCSVData(origin: origin).write(to: csvURL, options: .atomic)) != nil {
-                written.append(csvURL)
+        let trajectoryName = "\(base)-trajectory.csv"
+        let rawName = lidarRetainsRawReturns && !lidarRawCloud.isEmpty ? "\(base)-raw.ply" : nil
+
+        var written: [URL] = []
+        func write(_ data: Data, _ name: String) {
+            let url = directory.appendingPathComponent(name)
+            if (try? data.write(to: url, options: .atomic)) != nil {
+                written.append(url)
             }
         }
-        let trajectoryURL = directory.appendingPathComponent("\(base)-trajectory.csv")
-        let trajectory = lidarCloud.trajectoryCSVData(origin: origin)
-        if (try? trajectory.write(to: trajectoryURL, options: .atomic)) != nil {
-            written.append(trajectoryURL)
+
+        // The map product: voxel centroids, aggregate attributes only.
+        if !lidarMap.isEmpty {
+            write(
+                lidarMap.binaryPLYData(
+                    colorMode: colorMode,
+                    comment: "voxel centroid map, \(lidarMap.voxelSizeMeters) m",
+                    rawFileName: rawName,
+                    epochUTC: epochUTC
+                ),
+                "\(base)-map.ply"
+            )
+            if let origin {
+                write(lidarMap.geoCSVData(origin: origin), "\(base)-map.csv")
+            }
         }
+
+        // The raw product: one row per echo, every field literally true of that echo.
+        if let rawName {
+            write(
+                lidarRawCloud.binaryPLYData(
+                    colorMode: colorMode,
+                    comment: "raw returns, unfiltered",
+                    trajectoryFileName: trajectoryName,
+                    epochUTC: epochUTC
+                ),
+                rawName
+            )
+            if let origin {
+                write(lidarRawCloud.geoCSVData(origin: origin), "\(base)-raw.csv")
+            }
+        }
+
+        write(
+            LidarTrajectoryWriter.csvData(poses: lidarScanPoses, origin: origin),
+            trajectoryName
+        )
         return written.isEmpty ? nil : written
     }
+
     // MARK: - Fire hose rig
 
     func ensureHoseRig() {

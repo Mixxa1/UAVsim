@@ -23,13 +23,14 @@ struct PayloadLidarOpticsState: Codable, Equatable {
 
     /// Voxel edge length for the survey filter. Ignored while `isRawMode` is set.
     var voxelSize: LidarVoxelSize
-    /// Store every return unfiltered — the only mode in which noise, multi-hit structure and
-    /// motion distortion survive for analysis.
-    var isRawMode: Bool
+    /// Also retain every individual return, in addition to the centroid map. The raw cloud is the
+    /// only product in which noise, multi-echo structure and motion distortion survive.
+    var retainsRawReturns: Bool
     var colorMode: LidarColorMode
 
     // Live statistics, written by the scene layer.
     var capturedPointCount: Int
+    var rawReturnCount: Int
     var coverageSquareMeters: Double
     var meanReturnsPerPoint: Double
     var scanCount: Int
@@ -47,9 +48,10 @@ struct PayloadLidarOpticsState: Codable, Equatable {
         beamCount: Int = 48,
         maxRangeMeters: Double = 350.0,
         voxelSize: LidarVoxelSize = .coarse,
-        isRawMode: Bool = false,
+        retainsRawReturns: Bool = false,
         colorMode: LidarColorMode = .height,
         capturedPointCount: Int = 0,
+        rawReturnCount: Int = 0,
         coverageSquareMeters: Double = 0.0,
         meanReturnsPerPoint: Double = 0.0,
         scanCount: Int = 0,
@@ -65,9 +67,10 @@ struct PayloadLidarOpticsState: Codable, Equatable {
         self.beamCount = beamCount
         self.maxRangeMeters = maxRangeMeters
         self.voxelSize = voxelSize
-        self.isRawMode = isRawMode
+        self.retainsRawReturns = retainsRawReturns
         self.colorMode = colorMode
         self.capturedPointCount = capturedPointCount
+        self.rawReturnCount = rawReturnCount
         self.coverageSquareMeters = coverageSquareMeters
         self.meanReturnsPerPoint = meanReturnsPerPoint
         self.scanCount = scanCount

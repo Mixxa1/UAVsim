@@ -88,9 +88,9 @@ final class PayloadLidarController {
     }
 
     @discardableResult
-    func setRawMode(_ enabled: Bool) -> Bool {
-        guard opticsState.isRawMode != enabled else { return false }
-        opticsState.isRawMode = enabled
+    func setRetainsRawReturns(_ enabled: Bool) -> Bool {
+        guard opticsState.retainsRawReturns != enabled else { return false }
+        opticsState.retainsRawReturns = enabled
         return true
     }
 
@@ -104,12 +104,14 @@ final class PayloadLidarController {
 
     func updateStatistics(
         capturedPointCount: Int,
+        rawReturnCount: Int = 0,
         coverageSquareMeters: Double,
         meanReturnsPerPoint: Double,
         scanCount: Int,
         isBufferFull: Bool
     ) {
         opticsState.capturedPointCount = capturedPointCount
+        opticsState.rawReturnCount = rawReturnCount
         opticsState.coverageSquareMeters = coverageSquareMeters
         opticsState.meanReturnsPerPoint = meanReturnsPerPoint
         opticsState.scanCount = scanCount

@@ -33,24 +33,24 @@ struct LidarFoliageIndex {
 
     private let volumes: [Volume]
     private var cells: [Int64: [Int32]] = [:]
+    /// Widest crown in the set — how far outside the query box a crown's centre may sit and still
+    /// be crossed by the ray.
+    private let maximumRadius: Float
 
     var isEmpty: Bool { volumes.isEmpty }
     var count: Int { volumes.count }
 
     init(volumes: [Volume]) {
         self.volumes = volumes
+        self.maximumRadius = volumes.reduce(0) { max($0, $1.radius) }
+        // Each crown is registered in exactly one cell — the one holding its centre. Queries widen
+        // their box by `maximumRadius` to compensate, which keeps a crown from ever appearing in
+        // two buckets and so removes the need to de-duplicate hits per ray. That de-duplication was
+        // a set allocation on every beam of every sweep.
         for (index, volume) in volumes.enumerated() {
-            // A crown spans several cells; register it in every cell its horizontal extent covers,
-            // so a ray walking cells cannot slip past a crown it actually crosses.
-            let minimumX = Int32(((volume.center.x - volume.radius) / Self.cellSize).rounded(.down))
-            let maximumX = Int32(((volume.center.x + volume.radius) / Self.cellSize).rounded(.down))
-            let minimumZ = Int32(((volume.center.z - volume.radius) / Self.cellSize).rounded(.down))
-            let maximumZ = Int32(((volume.center.z + volume.radius) / Self.cellSize).rounded(.down))
-            for x in minimumX...maximumX {
-                for z in minimumZ...maximumZ {
-                    cells[Self.key(x, z), default: []].append(Int32(index))
-                }
-            }
+            let x = Int32((volume.center.x / Self.cellSize).rounded(.down))
+            let z = Int32((volume.center.z / Self.cellSize).rounded(.down))
+            cells[Self.key(x, z), default: []].append(Int32(index))
         }
     }
 
@@ -68,19 +68,19 @@ struct LidarFoliageIndex {
     ) {
         guard !volumes.isEmpty else { return }
         let end = origin + direction * maxDistance
-        let minimumX = Int32((min(origin.x, end.x) / Self.cellSize).rounded(.down)) - 1
-        let maximumX = Int32((max(origin.x, end.x) / Self.cellSize).rounded(.down)) + 1
-        let minimumZ = Int32((min(origin.z, end.z) / Self.cellSize).rounded(.down)) - 1
-        let maximumZ = Int32((max(origin.z, end.z) / Self.cellSize).rounded(.down)) + 1
+        let pad = maximumRadius
+        let minimumX = Int32(((min(origin.x, end.x) - pad) / Self.cellSize).rounded(.down))
+        let maximumX = Int32(((max(origin.x, end.x) + pad) / Self.cellSize).rounded(.down))
+        let minimumZ = Int32(((min(origin.z, end.z) - pad) / Self.cellSize).rounded(.down))
+        let maximumZ = Int32(((max(origin.z, end.z) + pad) / Self.cellSize).rounded(.down))
         // A grazing ray at full range would sweep a very wide box; cap the work rather than let one
         // beam walk the whole city.
         guard (maximumX - minimumX) * (maximumZ - minimumZ) <= 4_096 else { return }
 
-        var visited = Set<Int32>()
         for x in minimumX...maximumX {
             for z in minimumZ...maximumZ {
                 guard let bucket = cells[Self.key(x, z)] else { continue }
-                for index in bucket where visited.insert(index).inserted {
+                for index in bucket {
                     body(volumes[Int(index)])
                 }
             }

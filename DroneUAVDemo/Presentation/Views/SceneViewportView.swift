@@ -95,7 +95,7 @@ struct SceneViewportView: View {
                     onToggleScan: { viewModel.toggleLidarScanning() },
                     onPitchDelta: { viewModel.adjustLidarGimbal(pitchDeltaDegrees: $0) },
                     onVoxelSize: { viewModel.setLidarVoxelSize($0) },
-                    onRawMode: { viewModel.setLidarRawMode($0) },
+                    onRetainRaw: { viewModel.setLidarRetainsRawReturns($0) },
                     onColorMode: { viewModel.setLidarColorMode($0) },
                     onClear: { viewModel.clearLidarCloud() },
                     onExport: { viewModel.exportLidarCloud() }

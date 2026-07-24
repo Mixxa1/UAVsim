@@ -9,7 +9,7 @@ struct LidarModuleView: View {
     let onToggleScan: () -> Void
     let onPitchDelta: (Double) -> Void
     let onVoxelSize: (LidarVoxelSize) -> Void
-    let onRawMode: (Bool) -> Void
+    let onRetainRaw: (Bool) -> Void
     let onColorMode: (LidarColorMode) -> Void
     let onClear: () -> Void
     let onExport: () -> [URL]?
@@ -54,16 +54,18 @@ struct LidarModuleView: View {
                 ForEach(LidarVoxelSize.allCases) { size in
                     segmentButton(
                         size.label,
-                        isSelected: !state.isRawMode && state.voxelSize == size,
+                        isSelected: state.voxelSize == size,
                         action: { onVoxelSize(size) }
                     )
                 }
-                segmentButton(
-                    L10n.s("lidar.hud.raw"),
-                    isSelected: state.isRawMode,
-                    action: { onRawMode(!state.isRawMode) }
-                )
             }
+            // Raw retention is independent of the filter: the map is always built, the raw cloud is
+            // an additional product exported beside it.
+            segmentButton(
+                L10n.f("lidar.hud.raw_toggle", rawCountText),
+                isSelected: state.retainsRawReturns,
+                action: { onRetainRaw(!state.retainsRawReturns) }
+            )
 
             Text(L10n.s("lidar.hud.color"))
                 .font(.system(size: 9, weight: .semibold).monospaced())
@@ -138,7 +140,15 @@ struct LidarModuleView: View {
     }
 
     private var returnsText: String {
-        state.isRawMode ? "—" : String(format: "%.1f", state.meanReturnsPerPoint)
+        String(format: "%.1f", state.meanReturnsPerPoint)
+    }
+
+    private var rawCountText: String {
+        guard state.retainsRawReturns else { return "" }
+        let count = state.rawReturnCount
+        if count >= 1_000_000 { return String(format: " %.2fM", Double(count) / 1_000_000.0) }
+        if count >= 1_000 { return String(format: " %.0fk", Double(count) / 1_000.0) }
+        return " \(count)"
     }
 
     private func statRow(_ label: String, value: String) -> some View {
