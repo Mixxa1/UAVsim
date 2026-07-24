@@ -66,6 +66,64 @@ struct LidarRawCloud {
         maxBounds = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
     }
 
+    /// The property block every raw PLY declares — shared with the streaming writer so the two
+    /// producers cannot drift apart.
+    static let propertyHeaderText: String = {
+        var text = ""
+        text += "property float x\nproperty float y\nproperty float z\n"
+        text += "property uchar red\nproperty uchar green\nproperty uchar blue\n"
+        text += "property float intensity\n"
+        text += "property float range\n"
+        text += "property double timestamp\n"
+        text += "property uint scan_id\n"
+        text += "property ushort ring\n"
+        text += "property uchar classification\n"
+        text += "property uchar return_number\n"
+        text += "property uchar number_of_returns\n"
+        return text
+    }()
+
+    /// One vertex record: 12 + 3 + 4 + 4 + 8 + 4 + 2 + 1 + 1 + 1 = 40 bytes.
+    static let recordStride = 40
+
+    static func appendRecord(
+        _ data: inout Data,
+        _ entry: Return,
+        colorMode: LidarColorMode,
+        elevationMinimum: Float,
+        elevationMaximum: Float
+    ) {
+        let color = LidarColorResolver.color(
+            classification: entry.classification,
+            intensity: entry.intensity,
+            height: entry.position.y,
+            mode: colorMode,
+            elevationMinimum: elevationMinimum,
+            elevationMaximum: elevationMaximum
+        )
+        LidarBinaryWriter.append(&data, entry.position.x)
+        LidarBinaryWriter.append(&data, entry.position.y)
+        LidarBinaryWriter.append(&data, entry.position.z)
+        data.append(color.red)
+        data.append(color.green)
+        data.append(color.blue)
+        LidarBinaryWriter.append(&data, entry.intensity)
+        LidarBinaryWriter.append(&data, entry.range)
+        LidarBinaryWriter.append(&data, entry.timestamp)
+        LidarBinaryWriter.append(&data, entry.scanID)
+        LidarBinaryWriter.append(&data, entry.ring)
+        data.append(entry.classification.rawValue)
+        data.append(entry.returnNumber)
+        data.append(entry.numberOfReturns)
+    }
+
+    /// Whether a whole firing block still fits. Scans are stored entire or not at all: a preview
+    /// truncated mid-block would show a scan that never existed, and its trajectory row would
+    /// disagree with its returns.
+    func canAccept(returnCount: Int) -> Bool {
+        returns.count + returnCount <= maximumReturns
+    }
+
     /// `binary_little_endian` PLY of the raw returns — 40 bytes per vertex, fixed stride.
     func binaryPLYData(
         colorMode: LidarColorMode,
@@ -89,44 +147,20 @@ struct LidarRawCloud {
         header += "fixed inter-channel offset\n"
         header += "comment classification codes follow ASPRS LAS\n"
         header += "element vertex \(returns.count)\n"
-        header += "property float x\nproperty float y\nproperty float z\n"
-        header += "property uchar red\nproperty uchar green\nproperty uchar blue\n"
-        header += "property float intensity\n"
-        header += "property float range\n"
-        header += "property double timestamp\n"
-        header += "property uint scan_id\n"
-        header += "property ushort ring\n"
-        header += "property uchar classification\n"
-        header += "property uchar return_number\n"
-        header += "property uchar number_of_returns\n"
+        header += Self.propertyHeaderText
         header += "end_header\n"
 
         // 12 + 3 + 4 + 4 + 8 + 4 + 2 + 1 + 1 + 1 = 40 bytes per vertex.
         var data = Data(header.utf8)
-        data.reserveCapacity(header.utf8.count + returns.count * 40)
+        data.reserveCapacity(header.utf8.count + returns.count * Self.recordStride)
         for entry in returns {
-            let color = LidarColorResolver.color(
-                classification: entry.classification,
-                intensity: entry.intensity,
-                height: entry.position.y,
-                mode: colorMode,
+            Self.appendRecord(
+                &data,
+                entry,
+                colorMode: colorMode,
                 elevationMinimum: minimum,
                 elevationMaximum: maximum
             )
-            LidarBinaryWriter.append(&data, entry.position.x)
-            LidarBinaryWriter.append(&data, entry.position.y)
-            LidarBinaryWriter.append(&data, entry.position.z)
-            data.append(color.red)
-            data.append(color.green)
-            data.append(color.blue)
-            LidarBinaryWriter.append(&data, entry.intensity)
-            LidarBinaryWriter.append(&data, entry.range)
-            LidarBinaryWriter.append(&data, entry.timestamp)
-            LidarBinaryWriter.append(&data, entry.scanID)
-            LidarBinaryWriter.append(&data, entry.ring)
-            data.append(entry.classification.rawValue)
-            data.append(entry.returnNumber)
-            data.append(entry.numberOfReturns)
         }
         return data
     }
@@ -234,6 +268,12 @@ struct LidarVoxelMap {
     var meanReturnsPerCell: Float {
         guard !cells.isEmpty else { return 0 }
         return Float(Double(totalReturns) / Double(cells.count))
+    }
+
+    /// Worst case, every return of a block opens a new cell — so this is what a whole-block
+    /// capacity check must assume.
+    func canAccept(returnCount: Int) -> Bool {
+        cells.count + returnCount <= maximumCells
     }
 
     mutating func reconfigure(voxelSizeMeters: Float) {

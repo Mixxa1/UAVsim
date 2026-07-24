@@ -139,6 +139,11 @@ final class DroneSceneController {
     private var lidarMap = LidarVoxelMap()
     private var lidarRawCloud = LidarRawCloud()
     private var lidarRetainsRawReturns = false
+    /// Unbounded on-disk record of every return. The in-memory raw cloud above is only a preview.
+    private var lidarRawStream: LidarRawStreamWriter?
+    private(set) var lidarStreamedReturnCount = 0
+    /// Blocks the bounded preview could not take whole. The file has them regardless.
+    private var lidarPreviewDroppedScans = 0
     private var lidarScanPoses: [LidarScanPose] = []
     /// New map cells since the last visual bake, awaiting a chunk node.
     private var lidarPendingPoints: [LidarVoxelMap.Cell] = []
@@ -5111,7 +5116,8 @@ final class DroneSceneController {
         let maxRange = max(1.0, Float(state.maxRangeMeters))
         let water = installedWorld?.water
         let foliage = installedWorld?.lidarFoliage
-        var returnsInScan = 0
+        var blockReturns: [LidarRawCloud.Return] = []
+        blockReturns.reserveCapacity(beamCount * Self.lidarMaximumReturnsPerPulse)
 
         for ring in 0..<beamCount {
             let fraction = Float(ring) / Float(beamCount - 1)
@@ -5237,33 +5243,54 @@ final class DroneSceneController {
                     entry.surface.reflectance * cosIncidence * rangeFactor * attenuation * 1.6
                 ))
 
-                if lidarRetainsRawReturns {
-                    lidarRawCloud.append(LidarRawCloud.Return(
-                        position: measuredPoint,
-                        intensity: intensity,
-                        range: measuredRange,
-                        timestamp: timestamp,
-                        scanID: scanID,
-                        ring: UInt16(ring),
-                        classification: entry.surface,
-                        returnNumber: UInt8(offset + 1),
-                        numberOfReturns: numberOfReturns
-                    ))
-                }
-
-                let result = lidarMap.insert(
+                blockReturns.append(LidarRawCloud.Return(
                     position: measuredPoint,
                     intensity: intensity,
+                    range: measuredRange,
                     timestamp: timestamp,
-                    classification: entry.surface
+                    scanID: scanID,
+                    ring: UInt16(ring),
+                    classification: entry.surface,
+                    returnNumber: UInt8(offset + 1),
+                    numberOfReturns: numberOfReturns
+                ))
+            }
+        }
+
+        let returnsInScan = blockReturns.count
+
+        // The file first, and without a capacity question: it is the complete record, limited only
+        // by free space.
+        if lidarRetainsRawReturns, !blockReturns.isEmpty {
+            ensureLidarRawStream(colorMode: state.colorMode)
+            lidarRawStream?.write(blockReturns)
+            lidarStreamedReturnCount = lidarRawStream?.writtenCount ?? lidarStreamedReturnCount
+        }
+
+        // The bounded preview takes a block **whole or not at all**. Truncating one mid-way would
+        // put a scan on screen that never existed and leave its trajectory row disagreeing with its
+        // returns; skipping it keeps every retained block internally consistent.
+        let previewFitsRaw = !lidarRetainsRawReturns || lidarRawCloud.canAccept(returnCount: returnsInScan)
+        let previewFitsMap = lidarMap.canAccept(returnCount: returnsInScan)
+        if previewFitsRaw, previewFitsMap {
+            for entry in blockReturns {
+                if lidarRetainsRawReturns {
+                    lidarRawCloud.append(entry)
+                }
+                let result = lidarMap.insert(
+                    position: entry.position,
+                    intensity: entry.intensity,
+                    timestamp: entry.timestamp,
+                    classification: entry.classification
                 )
-                returnsInScan += 1
                 // Only a genuinely new cell needs drawing; a merge refines a centroid already on
                 // screen, by at most one voxel edge.
                 if case .inserted(let storedIndex) = result {
                     lidarPendingPoints.append(lidarMap.cells[storedIndex])
                 }
             }
+        } else if !blockReturns.isEmpty {
+            lidarPreviewDroppedScans += 1
         }
 
         // Recorded for every block, including those that returned nothing: that is what lets a
@@ -5291,14 +5318,48 @@ final class DroneSceneController {
         return lidarStatistics()
     }
 
+    /// Opens the on-disk record on the first retained block of a run. Main-actor isolated because
+    /// it reads the installed world's extent for the height-ramp reference; its only caller is the
+    /// sweep, which is already there.
+    @MainActor
+    private func ensureLidarRawStream(colorMode: LidarColorMode) {
+        guard lidarRawStream == nil else { return }
+        let fileManager = FileManager.default
+        let directory = InternalStorePaths.lidarSurveys(fileManager: fileManager)
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = formatter.string(from: lidarEpochDate ?? Date())
+        let epochFormatter = ISO8601DateFormatter()
+        epochFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        // A stream cannot colour by the cloud's own vertical span — it is unknown while writing —
+        // so the height ramp is pinned to the world's extent and stated in the header.
+        let bounds = installedWorld?.worldBounds
+        let reference = (
+            minimum: bounds?.minimum.y ?? 0.0,
+            maximum: bounds?.maximum.y ?? 300.0
+        )
+        lidarRawStream = LidarRawStreamWriter(
+            url: directory.appendingPathComponent("lidar-\(stamp)-raw.ply"),
+            colorMode: colorMode,
+            elevationReference: reference,
+            comment: "raw returns, unfiltered, streamed during flight",
+            trajectoryFileName: "lidar-\(stamp)-trajectory.csv",
+            epochUTC: lidarEpochDate.map { epochFormatter.string(from: $0) } ?? "unknown"
+        )
+        lidarStreamedReturnCount = 0
+    }
+
     private func lidarStatistics() -> LidarScanStatistics {
         LidarScanStatistics(
             mapPointCount: lidarMap.count,
-            rawReturnCount: lidarRawCloud.count,
+            rawReturnCount: lidarRetainsRawReturns ? lidarStreamedReturnCount : 0,
             coverageSquareMeters: Double(lidarMap.coverageSquareMeters),
             meanReturnsPerPoint: Double(lidarMap.meanReturnsPerCell),
             scanCount: lidarScanPoses.count,
-            isBufferFull: lidarMap.isFull || (lidarRetainsRawReturns && lidarRawCloud.isFull)
+            // "Full" now means the *preview* stopped taking blocks — the file keeps recording.
+            isBufferFull: lidarPreviewDroppedScans > 0
         )
     }
 
@@ -5422,6 +5483,10 @@ final class DroneSceneController {
         guard voxelChanged || lidarRetainsRawReturns != retainsRawReturns else { return false }
         let hadPoints = !lidarMap.isEmpty || !lidarRawCloud.isEmpty
         lidarRetainsRawReturns = retainsRawReturns
+        lidarRawStream?.discard()
+        lidarRawStream = nil
+        lidarStreamedReturnCount = 0
+        lidarPreviewDroppedScans = 0
         // Re-voxelising cannot recover what a coarser pass already merged, and raw retention that
         // was off cannot be back-filled, so both products restart together and stay consistent.
         lidarMap.reconfigure(voxelSizeMeters: voxelSizeMeters)
@@ -5433,6 +5498,11 @@ final class DroneSceneController {
     }
 
     func clearLidarCloud() {
+        // Clearing is a discard, not an export: the partial recording goes with it.
+        lidarRawStream?.discard()
+        lidarRawStream = nil
+        lidarStreamedReturnCount = 0
+        lidarPreviewDroppedScans = 0
         lidarMap.clear()
         lidarRawCloud.clear()
         lidarScanPoses.removeAll(keepingCapacity: true)
@@ -5447,7 +5517,8 @@ final class DroneSceneController {
     /// PLY (position, RGB and every physical attribute), a geo-referenced CSV in WGS84, and the
     /// sensor trajectory, one row per sweep, without which the cloud could not be de-skewed.
     func exportLidarCloud(origin: GeoOrigin?, colorMode: LidarColorMode) -> [URL]? {
-        guard !lidarMap.isEmpty || !lidarRawCloud.isEmpty else { return nil }
+        guard !lidarMap.isEmpty || !lidarRawCloud.isEmpty || lidarStreamedReturnCount > 0
+        else { return nil }
         let fileManager = FileManager.default
         let directory = InternalStorePaths.lidarSurveys(fileManager: fileManager)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -5459,7 +5530,12 @@ final class DroneSceneController {
         epochFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let epochUTC = lidarEpochDate.map { epochFormatter.string(from: $0) } ?? "unknown"
         let trajectoryName = "\(base)-trajectory.csv"
-        let rawName = lidarRetainsRawReturns && !lidarRawCloud.isEmpty ? "\(base)-raw.ply" : nil
+        // Closing the stream patches its vertex count and hands back the complete on-disk record —
+        // every return of the sortie, not the capped preview. Its own name is used for the header
+        // cross-reference so the map file points at the file that actually exists.
+        let streamedURL = lidarRawStream?.finish()
+        lidarRawStream = nil
+        let rawName = streamedURL?.lastPathComponent
 
         var written: [URL] = []
         func write(_ data: Data, _ name: String) {
@@ -5485,20 +5561,15 @@ final class DroneSceneController {
             }
         }
 
-        // The raw product: one row per echo, every field literally true of that echo.
-        if let rawName {
-            write(
-                lidarRawCloud.binaryPLYData(
-                    colorMode: colorMode,
-                    comment: "raw returns, unfiltered",
-                    trajectoryFileName: trajectoryName,
-                    epochUTC: epochUTC
-                ),
-                rawName
-            )
-            if let origin {
-                write(lidarRawCloud.geoCSVData(origin: origin), "\(base)-raw.csv")
-            }
+        // The raw product: one row per echo, every field literally true of that echo. It was
+        // streamed to disk during the flight, so nothing is written here — only listed.
+        if let streamedURL {
+            written.append(streamedURL)
+        }
+        // The CSV mirror covers the preview only; a full-length CSV of a multi-million-return
+        // sortie would be far larger than the survey itself and is not what the raw product is for.
+        if let origin, !lidarRawCloud.isEmpty {
+            write(lidarRawCloud.geoCSVData(origin: origin), "\(base)-raw-preview.csv")
         }
 
         write(
