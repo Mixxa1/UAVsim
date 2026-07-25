@@ -740,6 +740,7 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var rangefinderOpticsState = PayloadRangefinderOpticsState()
     @Published private(set) var lidarOpticsState = PayloadLidarOpticsState()
     private var lidarStatePublishTime: TimeInterval = 0
+    private var lidarWasScanning = false
     @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
     @Published private(set) var capsuleState = PayloadFireCapsuleState()
     @Published private(set) var agriculturalSprayerState = PayloadAgriculturalSprayerState()
@@ -10216,6 +10217,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshLidarStatus(forcePublish: Bool = false) {
+        let wasScanning = lidarWasScanning
         lidarController.setAvailability(
             isAvailable: isMountedLidarAvailable,
             isPowered: isMountedLidarAvailable
@@ -10230,6 +10232,14 @@ final class DroneSimulationViewModel: ObservableObject {
             scanCount: stats.scanCount,
             isBufferFull: stats.isBufferFull
         )
+        // Stopping the scan — by button, by losing power, by unmounting — finalises what is on
+        // disk: the vertex count is patched in and both files are complete up to that instant,
+        // while remaining open so resuming continues the same recording.
+        if wasScanning, !lidarController.opticsState.isScanning {
+            sceneController.snapshotLidarStreams()
+        }
+        lidarWasScanning = lidarController.opticsState.isScanning
+
         // Publishing every tick redrew the whole LiDAR panel at frame rate for a counter the pilot
         // cannot read that fast. Statistics land at 5 Hz; anything the pilot actually operates
         // (power, scan enable, gimbal, filter, colour) publishes immediately through its own path.

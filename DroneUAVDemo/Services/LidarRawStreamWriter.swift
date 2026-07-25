@@ -107,24 +107,120 @@ final class LidarRawStreamWriter {
         buffer.removeAll(keepingCapacity: true)
     }
 
-    /// Flushes, patches the vertex count into the reserved field and closes. Returns the file, or
-    /// nil if nothing was ever written to it.
+    /// Makes the file valid **without ending the recording**: flushes, patches the vertex count,
+    /// then returns the cursor to the end so the next block appends after it.
+    ///
+    /// This is what lets an export — or a pause — produce a complete, readable file while the same
+    /// continuous stream keeps growing into it. Ending the recording on export was what made the
+    /// exported raw file cover a different span of the sortie than the map beside it.
+    @discardableResult
+    func snapshot() -> URL? {
+        guard !isClosed else { return writtenCount > 0 ? url : nil }
+        flush()
+        patchCount()
+        try? handle.seekToEnd()
+        return writtenCount > 0 ? url : nil
+    }
+
+    /// Snapshots and closes for good.
     @discardableResult
     func finish() -> URL? {
         guard !isClosed else { return writtenCount > 0 ? url : nil }
-        isClosed = true
         flush()
+        patchCount()
+        isClosed = true
+        try? handle.close()
+        return writtenCount > 0 ? url : nil
+    }
 
+    private func patchCount() {
         let digits = String(writtenCount)
         let padded = String(repeating: "0", count: max(0, Self.countFieldWidth - digits.count))
             + digits.suffix(Self.countFieldWidth)
         try? handle.seek(toOffset: countFieldOffset)
         try? handle.write(contentsOf: Data(padded.utf8))
-        try? handle.close()
-        return writtenCount > 0 ? url : nil
     }
 
     /// Closes and removes the file — used when the survey is discarded rather than exported.
+    func discard() {
+        guard !isClosed else { return }
+        isClosed = true
+        buffer.removeAll(keepingCapacity: false)
+        try? handle.close()
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+
+/// Streams the sensor trajectory beside the raw returns, one row per firing block — including
+/// blocks that produced no returns.
+///
+/// It has to be written continuously, for the same reason the returns are: a trajectory assembled
+/// in memory and dumped at export would describe whichever span of the sortie happened to still be
+/// held, while the returns file described another. Written block by block, the two files always
+/// cover exactly the same stretch of flight.
+final class LidarTrajectoryStreamWriter {
+
+    private static let flushThresholdBytes = 64 * 1024
+
+    let url: URL
+    private(set) var rowCount = 0
+
+    private let handle: FileHandle
+    private let origin: GeoOrigin?
+    private var buffer = Data()
+    private var isClosed = false
+
+    init?(url: URL, origin: GeoOrigin?, epochUTC: String) {
+        self.url = url
+        self.origin = origin
+
+        var header = ""
+        header += "# UAVsim LiDAR sensor trajectory\n"
+        header += "# timestamps are seconds from the survey epoch \(epochUTC)\n"
+        header += "# one row per firing block, including blocks with zero returns\n"
+        header += LidarTrajectoryWriter.headerRow
+
+        guard FileManager.default.createFile(atPath: url.path, contents: Data(header.utf8)),
+              let handle = try? FileHandle(forWritingTo: url) else {
+            return nil
+        }
+        self.handle = handle
+        try? handle.seekToEnd()
+    }
+
+    func write(_ pose: LidarScanPose) {
+        guard !isClosed else { return }
+        buffer.append(contentsOf: Data(LidarTrajectoryWriter.row(pose, origin: origin).utf8))
+        rowCount += 1
+        if buffer.count >= Self.flushThresholdBytes {
+            flush()
+        }
+    }
+
+    private func flush() {
+        guard !buffer.isEmpty else { return }
+        try? handle.write(contentsOf: buffer)
+        buffer.removeAll(keepingCapacity: true)
+    }
+
+    /// Flushes without closing, so the file on disk is complete up to this instant.
+    @discardableResult
+    func snapshot() -> URL? {
+        guard !isClosed else { return rowCount > 0 ? url : nil }
+        flush()
+        return rowCount > 0 ? url : nil
+    }
+
+    @discardableResult
+    func finish() -> URL? {
+        guard !isClosed else { return rowCount > 0 ? url : nil }
+        flush()
+        isClosed = true
+        try? handle.close()
+        return rowCount > 0 ? url : nil
+    }
+
     func discard() {
         guard !isClosed else { return }
         isClosed = true

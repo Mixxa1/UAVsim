@@ -480,46 +480,50 @@ struct LidarScanPose {
 }
 
 enum LidarTrajectoryWriter {
-    static func csvData(poses: [LidarScanPose], origin: GeoOrigin?) -> Data {
+
+    /// Column names, shared by the batch writer and the streaming one so a trajectory written
+    /// block-by-block during flight is byte-identical in shape to one dumped at the end.
+    static let headerRow: String = {
         var text = ""
         text += "scan_id,timestamp_s,"
         text += "sensor_east_m,sensor_up_m,sensor_north_m,"
         text += "sensor_qx,sensor_qy,sensor_qz,sensor_qw,"
         text += "uav_east_m,uav_up_m,uav_north_m,uav_qx,uav_qy,uav_qz,uav_qw,"
         text += "returns_in_scan,sensor_latitude_deg,sensor_longitude_deg,sensor_altitude_msl_m\n"
-        for pose in poses {
-            var line = String(
-                format: "%u,%.6f,%.3f,%.3f,%.3f,",
-                pose.scanID, pose.timestamp,
-                Double(pose.sensorPosition.x), Double(pose.sensorPosition.y),
-                Double(pose.sensorPosition.z)
-            )
+        return text
+    }()
+
+    static func row(_ pose: LidarScanPose, origin: GeoOrigin?) -> String {
+        var line = String(
+            format: "%u,%.6f,%.3f,%.3f,%.3f,",
+            pose.scanID, pose.timestamp,
+            Double(pose.sensorPosition.x), Double(pose.sensorPosition.y),
+            Double(pose.sensorPosition.z)
+        )
+        line += String(
+            format: "%.6f,%.6f,%.6f,%.6f,",
+            Double(pose.sensorOrientation.imag.x), Double(pose.sensorOrientation.imag.y),
+            Double(pose.sensorOrientation.imag.z), Double(pose.sensorOrientation.real)
+        )
+        line += String(
+            format: "%.3f,%.3f,%.3f,%.6f,%.6f,%.6f,%.6f,%d",
+            Double(pose.vehiclePosition.x), Double(pose.vehiclePosition.y),
+            Double(pose.vehiclePosition.z),
+            Double(pose.vehicleOrientation.imag.x), Double(pose.vehicleOrientation.imag.y),
+            Double(pose.vehicleOrientation.imag.z), Double(pose.vehicleOrientation.real),
+            pose.returnsInScan
+        )
+        if let origin {
+            let coordinate = origin.geographic(ofLocalPosition: pose.sensorPosition)
             line += String(
-                format: "%.6f,%.6f,%.6f,%.6f,",
-                Double(pose.sensorOrientation.imag.x), Double(pose.sensorOrientation.imag.y),
-                Double(pose.sensorOrientation.imag.z), Double(pose.sensorOrientation.real)
+                format: ",%.8f,%.8f,%.3f",
+                coordinate.latitudeDegrees, coordinate.longitudeDegrees,
+                coordinate.altitudeMetersMSL
             )
-            line += String(
-                format: "%.3f,%.3f,%.3f,%.6f,%.6f,%.6f,%.6f,%d",
-                Double(pose.vehiclePosition.x), Double(pose.vehiclePosition.y),
-                Double(pose.vehiclePosition.z),
-                Double(pose.vehicleOrientation.imag.x), Double(pose.vehicleOrientation.imag.y),
-                Double(pose.vehicleOrientation.imag.z), Double(pose.vehicleOrientation.real),
-                pose.returnsInScan
-            )
-            if let origin {
-                let coordinate = origin.geographic(ofLocalPosition: pose.sensorPosition)
-                line += String(
-                    format: ",%.8f,%.8f,%.3f",
-                    coordinate.latitudeDegrees, coordinate.longitudeDegrees,
-                    coordinate.altitudeMetersMSL
-                )
-            } else {
-                line += ",,,"
-            }
-            text += line + "\n"
+        } else {
+            line += ",,,"
         }
-        return Data(text.utf8)
+        return line + "\n"
     }
 }
 
