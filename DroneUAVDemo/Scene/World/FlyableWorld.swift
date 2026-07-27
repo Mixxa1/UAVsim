@@ -46,6 +46,16 @@ protocol FlyableWorld: AnyObject {
     /// than from a plausible-looking guess about their normals.
     func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass?
 
+    /// The world's contents as discrete objects, for the shared environment registry.
+    ///
+    /// A world knows more than the triangle soup it hands to `collision`: it was assembled from
+    /// buildings with footprints and heights, and from mapped trees. Publishing that lets the map
+    /// overlay, the route planner and the obstacle registry see an imported city as *objects* —
+    /// which, before this existed, they simply could not: those consumers read the procedural
+    /// registry, nothing filled it on an imported world, and the aircraft flew through a city it
+    /// had no representation of.
+    func registryObjects() -> [FlyableWorldObject]
+
     /// Tree crowns as porous volumes, for the LiDAR's foliage model only. Read by no part of the
     /// flight model — the collision proxy stays exactly as the physics and the autopilot expect it.
     var lidarFoliage: LidarFoliageIndex? { get }
@@ -54,4 +64,43 @@ protocol FlyableWorld: AnyObject {
 extension FlyableWorld {
     func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass? { nil }
     var lidarFoliage: LidarFoliageIndex? { nil }
+    func registryObjects() -> [FlyableWorldObject] { [] }
+}
+
+/// One discrete thing in a world, in the terms the shared registry needs.
+struct FlyableWorldObject {
+    let id: UUID
+    let kind: EnvironmentObjectKind
+    /// Base centre: horizontal centre, vertical bottom.
+    let position: SIMD3<Float>
+    /// Footprint in X/Z, height in Y.
+    let size: SIMD3<Float>
+    let yawRadians: Float
+    let source: String
+    /// The object's true outline in world X/Z, when it has one.
+    ///
+    /// A box around a footprint is the right shape for a route search and the wrong one for
+    /// touching: measured over this package's 5863 buildings the minimum-area rectangle covers
+    /// ×1.02 of the real footprint at the median but ×1.29 at the 90th percentile and ×7.4 at
+    /// worst, and 42% of outlines are not even quads. That surplus sits in the street, where the
+    /// operator is trying to fly.
+    let footprint: [SIMD2<Float>]?
+
+    init(
+        id: UUID,
+        kind: EnvironmentObjectKind,
+        position: SIMD3<Float>,
+        size: SIMD3<Float>,
+        yawRadians: Float,
+        source: String,
+        footprint: [SIMD2<Float>]? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.position = position
+        self.size = size
+        self.yawRadians = yawRadians
+        self.source = source
+        self.footprint = footprint
+    }
 }

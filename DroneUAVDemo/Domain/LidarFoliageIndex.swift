@@ -39,6 +39,8 @@ struct LidarFoliageIndex {
 
     var isEmpty: Bool { volumes.isEmpty }
     var count: Int { volumes.count }
+    /// The crowns themselves — the environment registry describes the same trees as objects.
+    var allVolumes: [Volume] { volumes }
 
     init(volumes: [Volume]) {
         self.volumes = volumes

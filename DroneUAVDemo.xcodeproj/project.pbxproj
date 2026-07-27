@@ -403,6 +403,7 @@
 		9A7516BEC87DDFD6D290E075 /* WaterSurfaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */; };
 		709981F4B40D35FF61FB3CB3 /* WorldSpawnFinder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF41D9DC932BE45C95F3A60 /* WorldSpawnFinder.swift */; };
 		4376F08634A863074FBCF187 /* FlyableWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = E93B266087576FFA944498A1 /* FlyableWorld.swift */; };
+		C05413B196E64CDE94A7F063 /* WorldChunkStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 899BD8DD7D5F4983ADEE1D63 /* WorldChunkStreamer.swift */; };
 		B88974BEFD5CBC1CDDFA8F8B /* OpenDataWorldRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2126B8DD08F781136E842D1 /* OpenDataWorldRuntime.swift */; };
 		2D1AAAD4928F4D524FF98AA2 /* OverpassWaterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924EC180BDA1A9B65A5FA4EC /* OverpassWaterSource.swift */; };
 		77619B7964BC1A660E4B0FA6 /* WaterSurfaceGeometryFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */; };
@@ -818,6 +819,7 @@
 		79F35DF051E81DE0C1706CC5 /* WaterSurfaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterSurfaceModel.swift; sourceTree = "<group>"; };
 		EDF41D9DC932BE45C95F3A60 /* WorldSpawnFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldSpawnFinder.swift; sourceTree = "<group>"; };
 		E93B266087576FFA944498A1 /* FlyableWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyableWorld.swift; sourceTree = "<group>"; };
+		899BD8DD7D5F4983ADEE1D63 /* WorldChunkStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldChunkStreamer.swift; sourceTree = "<group>"; };
 		A2126B8DD08F781136E842D1 /* OpenDataWorldRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenDataWorldRuntime.swift; sourceTree = "<group>"; };
 		924EC180BDA1A9B65A5FA4EC /* OverpassWaterSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverpassWaterSource.swift; sourceTree = "<group>"; };
 		48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterSurfaceGeometryFactory.swift; sourceTree = "<group>"; };
@@ -1415,6 +1417,7 @@
 				48A8AE2CB0A240424C1567FD /* WaterSurfaceGeometryFactory.swift */,
 				A2126B8DD08F781136E842D1 /* OpenDataWorldRuntime.swift */,
 				E93B266087576FFA944498A1 /* FlyableWorld.swift */,
+				899BD8DD7D5F4983ADEE1D63 /* WorldChunkStreamer.swift */,
 				5E8C435658E337D7467C4EF6 /* MeshWorldRuntime.swift */,
 				D1FB9EB44C17A55068CD83B4 /* UAVWorldMeshStreamer.swift */,
 				F4FBFF962404005E57CB5BC0 /* ContextCaptureOBJLoader.swift */,
@@ -1554,6 +1557,7 @@
 				2D1AAAD4928F4D524FF98AA2 /* OverpassWaterSource.swift in Sources */,
 				B88974BEFD5CBC1CDDFA8F8B /* OpenDataWorldRuntime.swift in Sources */,
 				4376F08634A863074FBCF187 /* FlyableWorld.swift in Sources */,
+				C05413B196E64CDE94A7F063 /* WorldChunkStreamer.swift in Sources */,
 				709981F4B40D35FF61FB3CB3 /* WorldSpawnFinder.swift in Sources */,
 				9A7516BEC87DDFD6D290E075 /* WaterSurfaceModel.swift in Sources */,
 				F22D4CA058FECBB72465FFE6 /* MapSelectionView.swift in Sources */,

@@ -1368,7 +1368,7 @@ private struct TerrainMapOverlayView: View {
                         format: localized("overlay.terrain_map.heading_alt_objects.format"),
                         headingDegreesText,
                         snapshot.droneAltitude,
-                        snapshot.objects.count
+                        snapshot.registeredObjectCount
                     )
                 )
                 Text(

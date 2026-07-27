@@ -481,6 +481,10 @@ extension DroneSimulationViewModel {
         let payloadImpact: TerrainMapPayloadImpact?
         let trail: [SIMD2<Float>]
         let objects: [TerrainMapObject]
+        /// How many objects the world registry holds, whether or not the map draws them itself —
+        /// on a MapKit-backed world `objects` is empty while the registry is at its fullest, and
+        /// the HUD readout means "what the aircraft knows about", not "what is painted here".
+        let registeredObjectCount: Int
 
         static let empty = TerrainMapSnapshot(
             preset: TerrainConfiguration.default.preset,
@@ -508,7 +512,8 @@ extension DroneSimulationViewModel {
             noFlyZones: [],
             payloadImpact: nil,
             trail: [],
-            objects: []
+            objects: [],
+            registeredObjectCount: 0
         )
     }
 }
@@ -695,6 +700,10 @@ final class DroneSimulationViewModel: ObservableObject {
     /// arming is allowed) — surfaced to the HUD so the block is visible before the player even
     /// tries, not just as a rejected-command flash.
     @Published private(set) var armBlockReason: ArmBlockReason = .none
+    /// Set once the operator positions the launch pad themselves. An imported world otherwise
+    /// re-homes the rig onto the dock on every refresh, which silently undid every attempt to
+    /// move it — the pad simply could not be dragged anywhere in an imported world.
+    private var launchPadPlacedByOperator = false
     /// Explicit opt-in (default off) to let an autonomous mission keep flying unattended after a
     /// fiber break instead of the default `.returnHome` — must be a deliberate setting, not
     /// default behavior.
@@ -1408,6 +1417,15 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fixedWingObstacleSignatureCache: Int = 0
     private var environmentObjectSignatureRevision: UInt64?
     private var environmentObjectSignatureCache: Int = 0
+    private var navigationObstacleCacheIdentity: NavigationObstacleCacheKey?
+    private var navigationObstacleCache: [CollisionObstacle]?
+    /// Latched while the multirotor holds for want of a route, so the hold cannot walk its own
+    /// altitude upward tick by tick. Cleared the moment a route exists again.
+    private var multirotorMarkerHoldAltitude: Float?
+    private var markerApproachGoalCache: MarkerApproachGoalCache?
+    /// Closest the aircraft has come to the current leg's safe goal, and when that last improved.
+    private var markerApproachBestDistance: Float?
+    private var markerApproachStallSinceTick: UInt64 = 0
 
     private enum ActiveRouteTargetSource {
         case none
@@ -3295,6 +3313,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 refreshTacticalMapState()
                 return
             }
+            launchPadPlacedByOperator = true
             let heading = workingTacticalMissionDraft.launchObject?.headingDegrees ??
                 initialLaunchHeadingDegrees(from: planarPosition)
             workingTacticalMissionDraft = missionDraftBuilder.upsertLaunchObject(
@@ -3408,6 +3427,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func clearTacticalLaunchObject() {
+        launchPadPlacedByOperator = false
         guard missionExecutionState.status != .running,
               missionExecutionState.status != .paused else {
             refreshMissionStatus()
@@ -7769,21 +7789,179 @@ final class DroneSimulationViewModel: ObservableObject {
         return plannedTarget
     }
 
+    /// Whether an obstacle actually stands in the aircraft's altitude band.
+    ///
+    /// This replaces the old `source.contains("tree")` test, which was the only thing keeping
+    /// avoidance away from the mesh cells that tile an imported world — including the ground the
+    /// aircraft is flying over. Ground cells top out below the aircraft and drop out here; a
+    /// façade, a bridge pylon or a tree crown at flight level stays in. A deck high overhead also
+    /// drops out, so flying under a bridge is not treated as a blocked route.
+    private func blocksFlightBand(_ obstacle: CollisionObstacle) -> Bool {
+        let margin = max(1.0, selectedDroneProfile.collisionRadius * 1.5)
+        return obstacle.topY > state.position.y - margin
+            && obstacle.baseY < state.position.y + margin
+    }
+
+    /// Horizontal extent only. `radius` is a 3-D bounding sphere, so for a mesh cell holding a tall
+    /// building it is dominated by height and would push sidesteps tens of metres across a street.
+    private func obstaclePlanarRadius(_ obstacle: CollisionObstacle) -> Float {
+        if let extents = obstacle.planarHalfExtents {
+            return simd_length(extents)
+        }
+        return obstacle.radius
+    }
+
+    /// What the sidestep search is allowed to measure itself against.
+    ///
+    /// Deliberately **not** `nearbyEnvironmentObstacles` on an imported world: that includes
+    /// `world.mesh.cell` entries, which are 24 m buckets of the collision index rather than things
+    /// in the world. Measuring free space against them says a city street is solid — the aircraft
+    /// stands inside a bucket by definition — so every candidate sidestep scored as unsafe, the
+    /// search gave up, and the aircraft held position. The world's own buildings and trees are
+    /// published as real footprints and crowns, which is what "how much room is there" needs.
+    private func avoidanceObstacles(
+        near position: SIMD3<Float>? = nil,
+        radius: Float
+    ) -> [CollisionObstacle] {
+        let center = position ?? state.position
+        var result = sceneController.nearbyEnvironmentObstacles(
+            near: center,
+            radius: radius
+        ).filter { !$0.source.hasPrefix("world.mesh.cell") }
+        result.append(contentsOf: sceneController.nearbyWorldNavigationObstacles(
+            near: center,
+            radius: radius
+        ))
+        return result
+    }
+
+    /// The closest point to the marker the aircraft can actually occupy.
+    ///
+    /// A marker dropped on a façade — which is what a click on a building gives you — cannot be
+    /// reached: arrival asks for 0.85 m and the nearest safe hover point is a vehicle radius plus
+    /// clearance off the wall. The aircraft therefore orbited it at two metres, pulled in by
+    /// guidance and pushed out by avoidance, and the leg never completed. The goal is projected out
+    /// of whatever it is buried in, and *that* point is what the route flies to and what arrival is
+    /// measured against: as close as is safe, rather than a place the airframe cannot be.
+    private func safeMarkerApproachGoal(
+        marker: TargetMarkerState,
+        altitude: Float
+    ) -> SIMD3<Float> {
+        // A mission waypoint is flown where the operator put it. Standing off from it would mean
+        // the aircraft silently flies a different route than the one on the map — which is exactly
+        // what it did: the flown track left the planned polyline. The standoff exists for a
+        // hand-placed marker, where "as close as is safe" is the whole intent.
+        guard activeRouteTargetSource != .mission else {
+            return clampToWorldBounds(marker.worldPosition(altitude: altitude))
+        }
+
+        let altitudeBucket = Int((altitude / 4.0).rounded())
+        let revision = sceneController.environmentRevision
+        if let cached = markerApproachGoalCache,
+           cached.markerID == marker.id,
+           cached.altitudeBucket == altitudeBucket,
+           cached.revision == revision,
+           simd_distance(cached.markerPosition, marker.position) < 0.01 {
+            return cached.goal
+        }
+
+        let rawGoal = clampToWorldBounds(marker.worldPosition(altitude: altitude))
+        let droneRadius = selectedDroneProfile.collisionRadius
+        // Sized so the standoff point is quiet for the avoidance layer, not merely survivable:
+        // below `requiredClearance + 0.55` the sidestep search stops preferring "straight ahead",
+        // and the aircraft would dance around the goal instead of settling on it.
+        let safetyMargin = max(1.2, droneRadius * 1.6)
+        let obstacles = avoidanceObstacles(near: rawGoal, radius: 60.0).filter { obstacle in
+            // The band the goal sits in, not the one the aircraft is in: a marker on a low roof is
+            // clear of the tower next to it.
+            obstacle.topY > altitude - 1.0 && obstacle.baseY < altitude + 1.0
+        }
+
+        func clearance(at point: SIMD2<Float>) -> Float {
+            obstacles.reduce(Float.greatestFiniteMagnitude) { partial, obstacle in
+                min(partial, obstacle.planarContact(to: point, droneRadius: droneRadius).clearance)
+            }
+        }
+
+        var planar = marker.position
+        if clearance(at: planar) < safetyMargin {
+            // Search outward for the nearest point that is genuinely clear, rather than pushing the
+            // goal along one obstacle's normal: in a dense block that push lands inside the
+            // neighbour, whose push sends it back, and the point never converges (measured: it left
+            // 610 of 1 200 real façade markers still buried). Rings are exhaustive over direction,
+            // so the answer is the closest clear point that exists, and the aircraft's own side of
+            // the building is preferred so the standoff is not across the block from it.
+            let aircraft = currentPlanarPosition()
+            var bestScore = Float.greatestFiniteMagnitude
+            var best: SIMD2<Float>?
+            var fallbackClearance = -Float.greatestFiniteMagnitude
+            var fallback = planar
+
+            for step in 1...20 {
+                let ringRadius = Float(step) * 2.0
+                for index in 0..<24 {
+                    let angle = Float(index) / 24.0 * 2.0 * .pi
+                    let candidate = marker.position + SIMD2<Float>(cos(angle), sin(angle)) * ringRadius
+                    let candidateClearance = clearance(at: candidate)
+                    if candidateClearance > fallbackClearance {
+                        fallbackClearance = candidateClearance
+                        fallback = candidate
+                    }
+                    guard candidateClearance >= safetyMargin else { continue }
+                    let score = ringRadius + simd_distance(candidate, aircraft) * 0.25
+                    if score < bestScore {
+                        bestScore = score
+                        best = candidate
+                    }
+                }
+                if best != nil { break }
+            }
+            planar = best ?? fallback
+        }
+
+        let goal = clampToWorldBounds(SIMD3<Float>(planar.x, altitude, planar.y))
+        markerApproachGoalCache = MarkerApproachGoalCache(
+            markerID: marker.id,
+            markerPosition: marker.position,
+            altitudeBucket: altitudeBucket,
+            revision: revision,
+            goal: goal
+        )
+        return goal
+    }
+
+    private struct MarkerApproachGoalCache {
+        let markerID: UUID
+        let markerPosition: SIMD2<Float>
+        let altitudeBucket: Int
+        let revision: UInt64
+        let goal: SIMD3<Float>
+    }
+
     private func multirotorCollisionAvoidanceTarget(
         nominalTarget: SIMD3<Float>,
         finalGoal: SIMD3<Float>,
         travelAltitude: Float
     ) -> SIMD3<Float>? {
         guard selectedDroneProfile.airframeClass == .multirotor,
-              collisionAnalysis.riskScore >= 0.30,
-              let obstacleID = collisionAnalysis.nearestObstacleID,
-              let obstacle = sceneController.obstacle(for: obstacleID),
-              obstacle.source.contains("tree") else {
+              collisionAnalysis.riskScore >= 0.30 else {
             multirotorAvoidanceLateralOffset = 0.0
             return nil
         }
 
         let current = SIMD2<Float>(state.position.x, state.position.z)
+        let searchRadius = max(28.0, multirotorMarkerLookaheadDistance() + 26.0)
+        let nearbyObstacles = avoidanceObstacles(radius: searchRadius)
+            .filter { blocksFlightBand($0) }
+
+        // The nearest *object*, not whatever the risk report named — that can be a mesh bucket,
+        // whose 17 m bounding radius would size a sidestep wider than the street it is in.
+        guard let obstacle = nearbyObstacles.min(by: {
+            $0.planarSignedDistance(to: current) < $1.planarSignedDistance(to: current)
+        }) else {
+            multirotorAvoidanceLateralOffset = 0.0
+            return nil
+        }
         let nominal = SIMD2<Float>(nominalTarget.x, nominalTarget.z)
         let finalPlanar = SIMD2<Float>(finalGoal.x, finalGoal.z)
         var routeVector = nominal - current
@@ -12431,6 +12609,7 @@ final class DroneSimulationViewModel: ObservableObject {
         // grid still gets rebuilt correctly whenever terrain/obstacles actually change.
         let planner = autoPathPlanner
         let obstacles = navigationObstacles(including: noFlyZones)
+        let obstacleSignature = navigationObstacleSignature(including: noFlyZones)
         let droneRadius = selectedDroneProfile.collisionRadius
         let altitude = max(2.0, targetAltitude)
         var output: [SIMD2<Float>] = [viewport.clampedToWorld(points[0])]
@@ -13461,7 +13640,8 @@ final class DroneSimulationViewModel: ObservableObject {
         // reach from `middle` can possibly intersect it, so this can only
         // drop obstacles that were guaranteed-irrelevant anyway.
         let corridorBoundingRadius = leadDistance + effectiveRadius + corridorHalfWidth + 20.0
-        let navigationObstacles = navigationObstaclesIncludingNoFlyZones().filter {
+        let allNavigationObstacles = navigationObstaclesIncludingNoFlyZones()
+        let navigationObstacles = allNavigationObstacles.filter {
             simd_distance($0.planarCenter, middle) <= corridorBoundingRadius + $0.radius
         }
         let obstacleInTurnCorridor = navigationObstacles.contains { obstacle in
@@ -13513,11 +13693,17 @@ final class DroneSimulationViewModel: ObservableObject {
             ).riskScore
             collisionRisk = max(collisionRisk, risk)
 
+            // The *unfiltered* set here, unlike the scan above. The planner keeps one navigation
+            // grid, cached on the identity of the obstacle set it was rasterised from: handing it
+            // the corridor subset — which changes with every metre flown — made it throw that grid
+            // away and rebuild the whole map on each waypoint approach, and again on the next call
+            // that passed the full set. The corridor filter still pays for itself on the
+            // per-obstacle scans, which is what it was written for.
             let pathAssessment = autoPathPlanner.assessDirectPath(
                 from: SIMD3<Float>(segment.0.x, probeAltitude, segment.0.y),
                 to: SIMD3<Float>(segment.1.x, probeAltitude, segment.1.y),
                 terrain: terrain,
-                obstacles: navigationObstacles,
+                obstacles: allNavigationObstacles,
                 droneRadius: droneRadius
             )
             blockedPath = blockedPath || pathAssessment.blocked
@@ -15895,7 +16081,8 @@ final class DroneSimulationViewModel: ObservableObject {
             noFlyZones: staticOverlay.noFlyZones,
             payloadImpact: lastPayloadImpact,
             trail: terrainMapTrail,
-            objects: staticOverlay.objects
+            objects: staticOverlay.objects,
+            registeredObjectCount: sceneController.environmentMapDescriptors.count
         )
 
         if nextSnapshot != terrainMapSnapshot {
@@ -15940,7 +16127,17 @@ final class DroneSimulationViewModel: ObservableObject {
         return overlay
     }
 
+    /// Scenery the tactical/mini map draws with its own vector symbols.
+    ///
+    /// Deliberately empty for an imported world. That map is backed by a real MapKit basemap of the
+    /// same place — buildings, roads and parks are already on it, drawn by Apple from survey data —
+    /// so repeating the registry on top buries the basemap under thousands of grey blocks and green
+    /// blobs, and costs a redraw of ~20k shapes several times a second in two canvases. The registry
+    /// itself is unaffected: the flight model, the planner and the obstacle index still see every
+    /// object. It is only that drawing them is not the map's job where MapKit already did it.
     private func terrainMapObjects(extent: Float) -> [TerrainMapObject] {
+        guard sceneController.installedWorld == nil else { return [] }
+
         let revision = sceneController.environmentRevision
         let extentBucket = Int(extent.rounded())
         if terrainMapObjectsCacheRevision == revision,
@@ -16043,18 +16240,33 @@ final class DroneSimulationViewModel: ObservableObject {
         navigationObstacles(including: activeNoFlyZonesForNavigation())
     }
 
+    private func navigationObstacleSignatureIncludingNoFlyZones() -> Int {
+        navigationObstacleSignature(including: activeNoFlyZonesForNavigation())
+    }
+
+    /// Identity of the array `navigationObstacles(including:)` would return, without walking it.
+    ///
+    /// The planner caches its navigation grid on the identity of the obstacle set it rasterised.
+    /// Deriving that identity from what actually decides the set — the environment revision, the
+    /// mesh window and the zones — costs a handful of hashes instead of one per obstacle, and this
+    /// is asked several times a tick against ~20 000 obstacles on an imported city. It must move
+    /// whenever the array does, which is exactly what the cache key already guarantees.
+    private func navigationObstacleSignature(including noFlyZones: [MissionZone]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(currentNavigationObstacleCacheKey())
+        for zone in noFlyZones {
+            hasher.combine(zone.id)
+            hasher.combine(Int((zone.center.x * 10.0).rounded()))
+            hasher.combine(Int((zone.center.y * 10.0).rounded()))
+            hasher.combine(Int((zone.radius * 10.0).rounded()))
+        }
+        hasher.combine(Int((terrain.maxFlightAltitude * 10.0).rounded()))
+        return hasher.finalize()
+    }
+
     private func navigationObstacles(including noFlyZones: [MissionZone]) -> [CollisionObstacle] {
-        // Trees carry two real-time collision parts (a slim trunk + the canopy) so the drone gets
-        // an accurate fly-into-the-trunk response. For *navigation* the trunk is redundant — it
-        // sits entirely inside the canopy's planar footprint, so rasterizing it blocks no extra
-        // grid cells; it only doubles the obstacle count that the per-tick fixed-wing forward-
-        // avoidance probe feeds into ensureGrid()/obstacleHash() on every arc segment. That
-        // doubling (once tree collision became mesh-fitted) is what tipped manual fixed-wing flight
-        // into multi-second grid-rebuild freezes. Dropping trunk parts here restores the nav
-        // obstacle count to one-per-tree (canopy only) — exactly what the autopilot saw before the
-        // mesh-fitted change, which the user already confirmed routes fine. Real-time collision in
-        // tick() still uses the full `environmentObstacles` list, so trunk collision is unaffected.
-        let base = sceneController.environmentObstacles.filter { $0.source != "tree.trunk" }
+        let base = navigationBaseObstacles()
+
         guard !noFlyZones.isEmpty else {
             return base
         }
@@ -16071,6 +16283,133 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
         return base + zoneObstacles
+    }
+
+    /// Everything the planner should route around, minus mission zones — cached.
+    ///
+    /// Several call sites ask for this within one tick (the fixed-wing turn-corridor probe alone
+    /// asks on every waypoint approach, and one site asked only to test `isEmpty`), and on an
+    /// imported city the array is ~20 000 obstacles. Rebuilding it per call copied that array every
+    /// time and handed the planner a fresh one to re-hash. It changes only when the world changes,
+    /// so it is cached on the environment revision — and on the mesh window, for the one case that
+    /// still depends on where the aircraft is.
+    private func navigationBaseObstacles() -> [CollisionObstacle] {
+        let key = currentNavigationObstacleCacheKey()
+        if navigationObstacleCacheIdentity == key, let navigationObstacleCache {
+            return navigationObstacleCache
+        }
+
+        // Trees carry two real-time collision parts (a slim trunk + the canopy) so the drone gets
+        // an accurate fly-into-the-trunk response. For *navigation* the trunk is redundant — it
+        // sits entirely inside the canopy's planar footprint, so rasterizing it blocks no extra
+        // grid cells; it only doubles the obstacle count that the per-tick fixed-wing forward-
+        // avoidance probe feeds into ensureGrid()/obstacleHash() on every arc segment. That
+        // doubling (once tree collision became mesh-fitted) is what tipped manual fixed-wing flight
+        // into multi-second grid-rebuild freezes. Dropping trunk parts here restores the nav
+        // obstacle count to one-per-tree (canopy only) — exactly what the autopilot saw before the
+        // mesh-fitted change, which the user already confirmed routes fine. Real-time collision in
+        // tick() still uses the full `environmentObstacles` list, so trunk collision is unaffected.
+        // Only what actually reaches the flight level.
+        //
+        // The navigation grid is two-dimensional, so without this every building is a wall at every
+        // altitude: at 75 m the aircraft was routing around ten-storey blocks it was flying a
+        // comfortable fifty metres above, which is where the crooked, obviously-not-shortest
+        // detours came from. The band is the leg's own travel altitude (stable for the leg, so the
+        // grid is not rebuilt as the aircraft bobs), less a margin that keeps anything just below
+        // the flight level solid.
+        let bandAltitude = navigationBandAltitude()
+        let bandFloor = bandAltitude - Self.navigationBandClearanceMeters
+        var base = sceneController.environmentObstacles.filter {
+            $0.source != "tree.trunk" && $0.topY > bandFloor
+        }
+
+        // The installed world's own buildings and trees, if it can describe itself as objects.
+        // Reading only the procedural registry — which is all but empty once a real map is
+        // installed — made the planner believe a city was open ground, so it routed straight lines
+        // through façades; and because a multirotor on a marker route delegates collision handling
+        // to the planner (`isMultirotorMarkerRouteCollisionManagedByPlanner`), nothing downstream
+        // caught it either.
+        base.append(contentsOf: sceneController.worldNavigationObstacles.filter { $0.topY > bandFloor })
+
+        // A photogrammetric world has no such objects, only a measured surface. Mesh collision
+        // cells stand in for its buildings — but they follow the aircraft, so this is the one case
+        // where the obstacle set (and therefore the navigation grid) is position-dependent, and it
+        // is deliberately not taken when the world already answered with objects.
+        if usesMeshCellsForPlanning {
+            // Only cells that actually stand in the flight band are added: the mesh tiles the
+            // ground as well, and feeding those in would mark the entire map impassable.
+            let flightLevel = state.position.y
+            let meshBlockers = sceneController.nearbyEnvironmentObstacles(
+                near: state.position,
+                radius: Self.meshNavigationHorizonMeters
+            ).filter { obstacle in
+                obstacle.source.hasPrefix("world.mesh.cell")
+                    && obstacle.topY > flightLevel - 1.5
+            }
+            base.append(contentsOf: meshBlockers)
+        }
+
+        navigationObstacleCacheIdentity = key
+        navigationObstacleCache = base
+        return base
+    }
+
+    /// How far ahead mesh cells are gathered for planning on a photogrammetric world.
+    private static let meshNavigationHorizonMeters: Float = 120.0
+    /// How far below the flight level an obstacle still counts as a wall for planning.
+    private static let navigationBandClearanceMeters: Float = 8.0
+
+    /// The altitude the current leg is planned for: the leg's own travel altitude while one is
+    /// active, otherwise where the aircraft is. Deliberately not the live altitude during a leg —
+    /// that would re-rasterise the grid every time the aircraft moved a few metres vertically.
+    private func navigationBandAltitude() -> Float {
+        if activeRouteTargetSource != .none, let legAltitude = activeRouteTargetAltitude {
+            return legAltitude
+        }
+        return state.position.y
+    }
+
+    /// True only for an imported world that cannot describe itself as objects. The cache key and
+    /// the obstacle build must agree on this, or the set would follow the aircraft while its
+    /// identity did not — a stale grid, which is worse than no grid.
+    private var usesMeshCellsForPlanning: Bool {
+        sceneController.installedWorld != nil && sceneController.worldNavigationObstacles.isEmpty
+    }
+
+    private struct NavigationObstacleCacheKey: Hashable {
+        let revision: UInt64
+        /// Bucketed altitude band the obstacle set was filtered for.
+        let navigationBand: Int
+        /// Only set while mesh cells contribute, since they alone follow the aircraft.
+        let meshCellColumn: Int?
+        let meshCellRow: Int?
+        let flightBand: Int?
+    }
+
+    private func currentNavigationObstacleCacheKey() -> NavigationObstacleCacheKey {
+        let revision = sceneController.environmentRevision
+        // 10 m buckets: fine enough that the set matches the altitude actually flown, coarse enough
+        // that ordinary altitude keeping does not rebuild the grid.
+        let navigationBand = Int((navigationBandAltitude() / 10.0).rounded(.down))
+        guard usesMeshCellsForPlanning else {
+            return NavigationObstacleCacheKey(
+                revision: revision,
+                navigationBand: navigationBand,
+                meshCellColumn: nil,
+                meshCellRow: nil,
+                flightBand: nil
+            )
+        }
+
+        // Quantised to the mesh collision cell so the set — and therefore the navigation grid —
+        // is rebuilt when the aircraft actually enters new geometry, not on every metre flown.
+        return NavigationObstacleCacheKey(
+            revision: revision,
+            navigationBand: navigationBand,
+            meshCellColumn: Int((state.position.x / 24.0).rounded(.down)),
+            meshCellRow: Int((state.position.z / 24.0).rounded(.down)),
+            flightBand: Int((state.position.y / 6.0).rounded(.down))
+        )
     }
 
     private func missionWaypointAcceptanceRadiusMeters() -> Float {
@@ -16350,6 +16689,11 @@ final class DroneSimulationViewModel: ObservableObject {
     /// point is the one the operator drafted on the map and must be respected.
     private func syncLaunchObjectToImportedSpawn() {
         guard sceneController.installedWorld != nil else { return }
+        // Seed the pad, never override it. Homing the rig onto the dock is right for a pad the
+        // operator has not touched — it is created at the map origin, tens of metres from the
+        // real spawn — but this runs on every rig refresh and before every reset, so once the
+        // operator moved the pad it was dragged straight back, every time.
+        guard !launchPadPlacedByOperator else { return }
         let dock = sceneController.currentDockSpawnPoint()
         let planar = SIMD2<Float>(dock.x, dock.z)
         if committedTacticalMissionDraft.launchObject != nil,

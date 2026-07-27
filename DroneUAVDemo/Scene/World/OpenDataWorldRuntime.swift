@@ -4,10 +4,12 @@ import simd
 /// A world built from open vector data, made flyable.
 ///
 /// The counterpart to `MeshWorldRuntime`: same obligations, completely different source. Where the
-/// photogrammetric path streams a measured surface, this one holds a modest amount of generated
-/// geometry all at once — a square kilometre of Lower Manhattan is a few hundred buildings and some
-/// fifteen thousand triangles, which is nothing to a scene graph — so there is no streaming to do
-/// and `updateStreaming` is deliberately empty.
+/// photogrammetric path streams a measured surface from disk, this one generates all of its
+/// geometry at load and then *activates* it by distance: `updateStreaming` drives a
+/// `WorldChunkStreamer` that keeps only the chunks near the camera attached to the scene graph.
+/// That became necessary when tiles grew past a square kilometre — a 3.5 km tile of Lower Manhattan
+/// is 5 863 building nodes and some 15 000 trees, and SceneKit walks and culls every one of them
+/// per frame and again per shadow cascade.
 ///
 /// The important difference is what open vector data does *not* contain: relief. OSM supplies the
 /// building and shoreline geometry; a stored Terrarium grid supplies elevation, and a flat datum is
@@ -23,6 +25,10 @@ final class OpenDataWorldRuntime: FlyableWorld {
     /// over a handful of spans.
     private var collisionClassSpans: [(upperBound: Int, surfaceClass: LidarSurfaceClass)] = []
     private(set) var lidarFoliage: LidarFoliageIndex?
+    private let chunkStreamer = WorldChunkStreamer()
+    private var cachedRegistryObjects: [FlyableWorldObject]?
+    /// Ground-seated buildings, kept so the world can describe itself to the shared registry.
+    private var registryBuildings: [UAVWorldBuilding] = []
     let water: WaterSurfaceModel?
     let origin: GeoOrigin
     let worldBounds: (minimum: SIMD3<Float>, maximum: SIMD3<Float>)
@@ -35,7 +41,106 @@ final class OpenDataWorldRuntime: FlyableWorld {
     /// Cached: the search is not free and several callers need the same answer.
     private(set) lazy var spawnPoint: SIMD3<Float>? = WorldSpawnFinder(collision: collision, water: water).find()
 
-    func updateStreaming(camera: MeshStreamingPolicy.Camera) {}
+    /// The world's whole geometry is built at load, but only the chunks near the camera are kept in
+    /// the scene graph — see `WorldChunkStreamer`. This is called once per tick from the scene
+    /// controller and returns immediately unless the camera has actually moved a chunk's worth.
+    func updateStreaming(camera: MeshStreamingPolicy.Camera) {
+        chunkStreamer.update(cameraPosition: camera.position)
+    }
+
+    /// Buildings and mapped trees as registry objects. Built once at install and cached — the
+    /// consumers ask per map refresh, and a 3 km tile holds thousands of buildings.
+    func registryObjects() -> [FlyableWorldObject] {
+        if let cached = cachedRegistryObjects { return cached }
+
+        var objects: [FlyableWorldObject] = []
+        objects.reserveCapacity(registryBuildings.count + (lidarFoliage?.count ?? 0))
+
+        // The **oriented** minimum-area box, never the axis-aligned one.
+        //
+        // A city is not aligned to the world axes: Manhattan's grid runs about 29° off north, so the
+        // axis-aligned box of a block reaches across the avenues on both sides of it. Measured over
+        // this package: axis-aligned boxes cover 5.33 km² against 2.55 km² of real footprint (×2.09),
+        // oriented ones 3.20 km² (×1.26) — and the difference lands precisely on the streets. Fed to
+        // the route planner, the axis-aligned version walled the aircraft in: rasterised at the
+        // planner's own cell size the free cell nearest the launch pad had a connected region of
+        // exactly ONE cell, so no route existed anywhere, the marker guidance fell through to its
+        // hold branch and the aircraft simply climbed in place. With oriented boxes the same probe
+        // reaches 4.1 km.
+        for building in registryBuildings where building.footprint.count >= 3 {
+            let height = max(2.0, building.totalHeightMeters)
+            let planar: (center: SIMD2<Float>, halfExtents: SIMD2<Float>, yaw: Float)
+            if let bounds = PolygonTriangulator.orientedBounds(of: building.footprint) {
+                planar = (
+                    bounds.center,
+                    SIMD2<Float>(
+                        max(0.5, bounds.longExtent * 0.5),
+                        max(0.5, bounds.shortExtent * 0.5)
+                    ),
+                    // A box's local +X points along (cos yaw, −sin yaw) in the X/Z plane — the same
+                    // convention SceneKit's rotation about +Y uses, which is what every other
+                    // yawed obstacle in the registry was built against.
+                    atan2(-bounds.longAxis.y, bounds.longAxis.x)
+                )
+            } else {
+                let minimum = building.footprint.reduce(
+                    SIMD2<Float>(repeating: .greatestFiniteMagnitude), simd_min
+                )
+                let maximum = building.footprint.reduce(
+                    SIMD2<Float>(repeating: -.greatestFiniteMagnitude), simd_max
+                )
+                planar = (
+                    (minimum + maximum) * 0.5,
+                    simd_max(SIMD2<Float>(repeating: 0.5), (maximum - minimum) * 0.5),
+                    0.0
+                )
+            }
+
+            objects.append(FlyableWorldObject(
+                id: UUID(),
+                kind: .building,
+                position: SIMD3<Float>(
+                    planar.center.x,
+                    building.baseElevationMeters,
+                    planar.center.y
+                ),
+                size: SIMD3<Float>(
+                    planar.halfExtents.x * 2.0,
+                    height,
+                    planar.halfExtents.y * 2.0
+                ),
+                yawRadians: planar.yaw,
+                source: "world.building",
+                footprint: building.footprint
+            ))
+        }
+
+        // Crowns are already enumerated for the sensor model, and they carry exactly the geometry
+        // the registry wants — reuse them rather than walking the OSM features again.
+        if let foliage = lidarFoliage {
+            for volume in foliage.allVolumes {
+                objects.append(FlyableWorldObject(
+                    id: UUID(),
+                    kind: .tree,
+                    position: SIMD3<Float>(
+                        volume.center.x,
+                        volume.center.y - volume.halfHeight,
+                        volume.center.z
+                    ),
+                    size: SIMD3<Float>(
+                        volume.radius * 2.0,
+                        volume.halfHeight * 2.0,
+                        volume.radius * 2.0
+                    ),
+                    yawRadians: 0.0,
+                    source: "world.tree"
+                ))
+            }
+        }
+
+        cachedRegistryObjects = objects
+        return objects
+    }
 
     func surfaceClass(forTriangle index: Int) -> LidarSurfaceClass? {
         guard index >= 0 else { return nil }
@@ -269,6 +374,7 @@ final class OpenDataWorldRuntime: FlyableWorld {
         let regularBuildings = seatedBuildings.enumerated()
             .filter { !supportIndices.contains($0.offset) }
             .map(\.element)
+        self.registryBuildings = seatedBuildings
         let assembly = UAVWorldSceneAssembler.assemble(buildings: regularBuildings)
         self.rootNode = assembly.root
         let osmAssembly = OSMSurfaceGeometryFactory.assemble(
@@ -410,6 +516,30 @@ final class OpenDataWorldRuntime: FlyableWorld {
             surface.simdPosition.y = Self.visibleWaterOffset
             rootNode.insertChildNode(surface, at: 1)
         }
+
+        installChunkStreamer(osmRoot: osmAssembly.root)
+    }
+
+    /// Regroups the two node populations that scale with the size of the map — the buildings and
+    /// the individual trees — into distance-activated chunks.
+    ///
+    /// Everything else in an imported world is a handful of merged meshes (terrain, water, one node
+    /// per road class, the bridges), so chunking them would trade a real cost for none. These two
+    /// are what actually grows: this tile is 5 863 building nodes and some 15 000 tree clones, all
+    /// siblings, all walked and culled individually every frame and again per shadow cascade.
+    private func installChunkStreamer(osmRoot: SCNNode) {
+        for child in rootNode.childNodes where child.name?.hasPrefix("world.class.") == true {
+            chunkStreamer.adopt(container: child, policy: .buildings)
+        }
+        if let trees = osmRoot.childNodes.first(where: { $0.name == "world.osm.vegetation.trees" }) {
+            chunkStreamer.adopt(container: trees, policy: .vegetation)
+        }
+
+        #if DEBUG
+        let statistics = chunkStreamer.statistics
+        print("[WorldChunks] \(statistics.chunkCount) chunks over "
+              + "\(statistics.nodeCount) nodes, cell 256 m")
+        #endif
     }
 
     /// How far the furthest building corner sits from the origin.
