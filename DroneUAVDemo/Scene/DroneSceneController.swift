@@ -411,6 +411,8 @@ final class DroneSceneController {
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
+    /// Outlines of registry objects that have one, keyed by obstacle id.
+    private var worldObjectFootprints: [UUID: [SIMD2<Float>]] = [:]
     /// `worldNavigationObstacles` keyed by id, for the by-id lookups the risk report drives.
     private var worldNavigationObstaclesByID: [UUID: CollisionObstacle] = [:]
     private var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty
@@ -4195,41 +4197,19 @@ final class DroneSceneController {
         var boundsLow = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         var boundsHigh = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
 
-        // Geometry an object already describes is dropped from the cell.
+        // NOTE: cells deliberately keep describing buildings as well.
         //
-        // A cell is a 24 m bucket of undifferentiated triangles: its proxy box spans the whole
-        // bucket and reaches the top of the tallest thing in it, so a street beside a 100 m tower
-        // reads as solid to every consumer that asks "how much room is there" — which is why a
-        // parked aircraft reported `risk=0.54` against `world.mesh.cell` and why a fixed wing
-        // could not find a departure anywhere in Lower Manhattan. The index itself carries no
-        // semantics ("no buildings, no ground, just a surface"), but an open-data world *does*
-        // know its buildings — it built them from footprints — and publishes them as oriented
-        // boxes and crown cylinders, exactly the per-object collision shapes a procedural map
-        // uses. Where such an object exists, it is the better shape, so its triangles leave the
-        // cell and the cell keeps what nothing else claims: terrain, roads, bridge decks.
-        let objectClaims = worldNavigationObstacles.isEmpty
-            ? []
-            : worldNavigationObstacleIndex.query(
-                near: SIMD3<Float>((low.x + high.x) * 0.5, (low.y + high.y) * 0.5, (low.z + high.z) * 0.5),
-                radius: cell * 0.75 + margin
-            )
-
-        func isClaimedByObject(_ point: SIMD3<Float>) -> Bool {
-            for claim in objectClaims {
-                guard point.y <= claim.topY + 0.5, point.y >= claim.baseY - 0.5 else { continue }
-                if claim.planarContact(
-                    to: SIMD2<Float>(point.x, point.z),
-                    droneRadius: 0.0
-                ).clearance <= 0.25 {
-                    return true
-                }
-            }
-            return false
-        }
-
+        // Stripping object-claimed triangles here was correct in principle and unaffordable in
+        // practice: it ran point-in-polygon for every triangle of every newly synthesised cell
+        // against every nearby outline — hundreds of triangles against outlines of up to 146
+        // vertices — and cells are re-synthesised continuously as the aircraft moves. That is the
+        // 0 FPS hang after the first waypoint. Buildings now carry their own exact prisms, so the
+        // tight geometry exists either way; what remains is that a cell's coarse 24 m proxy still
+        // double-describes them, which costs accuracy in the risk estimate, not correctness of
+        // contact. Re-doing this needs the claim resolved once at cell level (or at world build
+        // time), never per triangle per frame.
         for index in stride(from: 0, to: corners.count - 2, by: 3) {
             let a = corners[index], b = corners[index + 1], c = corners[index + 2]
-            if !objectClaims.isEmpty, isClaimedByObject((a + b + c) / 3.0) { continue }
             // A near-horizontal face is landable; a facade is not. The mesh has no semantics, so
             // slope is the only available signal — and it is the right one, since what matters to
             // a settling aircraft is whether the surface can hold it.
@@ -4654,16 +4634,27 @@ final class DroneSceneController {
         // sees. Markers are built around the aircraft and rebuilt only when it has actually left
         // the neighbourhood they were built for.
         let debugAnchor = droneNode.presentation.simdWorldPosition
-        if let previous = collisionDebugAnchor,
-           simd_distance(previous, debugAnchor) > 60.0 {
+        // The anchor moves only when the markers are rebuilt around a new one.
+        //
+        // Updating it every frame made `previous` last frame's position, so the distance compared
+        // here was one frame of travel — a few centimetres — and the 60 m rebuild threshold could
+        // never be reached. The overlay therefore kept whatever it built when debug was switched
+        // on and never followed the aircraft: fly a block away and buildings show no wireframe at
+        // all, which reads exactly like "some buildings have collision and some do not".
+        let needsRebuild = collisionDebugAnchor.map {
+            simd_distance($0, debugAnchor) > 60.0
+        } ?? true
+        if needsRebuild, collisionDebugAnchor != nil {
             obstacleDebugProxyNodes.removeAll(keepingCapacity: false)
             obstacleDebugPlanarRadii.removeAll(keepingCapacity: false)
             collisionDebugNode.childNodes
                 .filter { $0 !== nearestContactNode }
                 .forEach { $0.removeFromParentNode() }
         }
-        collisionDebugAnchor = debugAnchor
-        ensureCollisionDebugMarkers(around: debugAnchor)
+        if needsRebuild {
+            collisionDebugAnchor = debugAnchor
+        }
+        ensureCollisionDebugMarkers(around: collisionDebugAnchor ?? debugAnchor)
         collisionDebugNode.isHidden = false
         setAbandonedCityCollisionDebugVisible(true)
 
@@ -4785,6 +4776,21 @@ final class DroneSceneController {
     /// The planner rasterises to a ~7 m grid, where a footprint box is the right approximation, and
     /// contact stays with the triangles the pilot can see.
     /// The outline of a mapped building, extruded into the surface the aircraft can touch.
+    static func polygonContains(_ polygon: [SIMD2<Float>], _ point: SIMD2<Float>) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var inside = false
+        var j = polygon.count - 1
+        for i in polygon.indices {
+            let a = polygon[i], b = polygon[j]
+            if (a.y > point.y) != (b.y > point.y),
+               point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x {
+                inside.toggle()
+            }
+            j = i
+        }
+        return inside
+    }
+
     @MainActor
     private func buildingContactPrism(for object: FlyableWorldObject) -> [CollisionMeshTriangle]? {
         guard object.kind == .building, var outline = object.footprint, outline.count >= 3 else {
@@ -4836,6 +4842,7 @@ final class DroneSceneController {
             environmentMapDescriptors = []
             worldNavigationObstacles = []
             worldNavigationObstaclesByID = [:]
+            worldObjectFootprints = [:]
             worldNavigationObstacleIndex = .empty
             supportSurfaces = []
             environmentRevision &+= 1
@@ -4848,12 +4855,14 @@ final class DroneSceneController {
             // buildings must go on reading the mesh collision index.
             worldNavigationObstacles = []
             worldNavigationObstaclesByID = [:]
+            worldObjectFootprints = [:]
             worldNavigationObstacleIndex = .empty
             return
         }
 
         var descriptors: [EnvironmentObjectDescriptor] = []
         var obstacles: [CollisionObstacle] = []
+        var footprints: [UUID: [SIMD2<Float>]] = [:]
         descriptors.reserveCapacity(objects.count)
         obstacles.reserveCapacity(objects.count)
 
@@ -4886,6 +4895,9 @@ final class DroneSceneController {
             // triangles over the planar box whenever an obstacle carries them, and the planner
             // goes on reading `planarHalfExtents`, which is what keeps its search cheap.
             let outlinePrism = buildingContactPrism(for: object)
+            if outlinePrism != nil, let outline = object.footprint {
+                footprints[object.id] = outline
+            }
             obstacles.append(CollisionObstacle(
                 id: object.id,
                 center: SIMD3<Float>(
@@ -4899,12 +4911,14 @@ final class DroneSceneController {
                 topY: object.position.y + object.size.y,
                 planarHalfExtents: isCircular ? nil : halfExtents,
                 yawRadians: object.yawRadians,
-                meshTriangles: outlinePrism
+                meshTriangles: outlinePrism,
+                planarFootprint: outlinePrism == nil ? nil : object.footprint
             ))
         }
 
         environmentMapDescriptors = descriptors
         worldNavigationObstacles = obstacles
+        worldObjectFootprints = footprints
         worldNavigationObstaclesByID = Dictionary(
             obstacles.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -4936,12 +4950,46 @@ final class DroneSceneController {
         return environmentObstacles.first(where: { $0.id == id })?.center
     }
 
+    /// Diagnostic only: where an obstacle id resolves and how much exact geometry it carries.
+    ///
+    /// Read by the impact log to settle a question that no observable behaviour distinguishes —
+    /// a façade reported as a high collision risk, drawn in the overlay and scraped for damage
+    /// looks identical whether it is a real footprint prism or the plain box that preceded it.
+    /// Deliberately searches every registry, including the ones `obstacle(for:)` does not.
+    func obstacleDiagnostics(for id: UUID) -> (origin: String, triangleCount: Int)? {
+        if let obstacle = dynamicObstacles[id] {
+            return ("dynamic", obstacle.meshTriangles?.count ?? 0)
+        }
+        if let obstacle = meshObstaclesByID[id] {
+            return ("meshCell", obstacle.meshTriangles?.count ?? 0)
+        }
+        if let obstacle = worldNavigationObstaclesByID[id] {
+            return ("worldRegistry", obstacle.meshTriangles?.count ?? 0)
+        }
+        if let obstacle = environmentObstacles.first(where: { $0.id == id }) {
+            return ("environment", obstacle.meshTriangles?.count ?? 0)
+        }
+        return nil
+    }
+
     func obstacle(for id: UUID) -> CollisionObstacle? {
         if let dynamicObstacle = dynamicObstacles[id] {
             return dynamicObstacle
         }
         if let meshObstacle = meshObstaclesByID[id] {
             return meshObstacle
+        }
+        // Registry objects — where an imported world's buildings live.
+        //
+        // Two things were needed and only one of them was a sign. `resolveObstaclePenetration`
+        // fires on `nearestObstacleDistance <= -0.02`, which an unsigned mesh distance could
+        // never produce, so while the prism was a hollow shell this lookup would have changed
+        // nothing — the function was never even reached. With the outline restoring the interior
+        // the condition is now met, and this is the guard that decides whether anything can act
+        // on it: the one registry it never searched. Measured, not inferred — every
+        // `world.building` impact reports `origin=worldRegistry` with a real triangle count.
+        if let worldObstacle = worldNavigationObstaclesByID[id] {
+            return worldObstacle
         }
         return environmentObstacles.first(where: { $0.id == id })
     }

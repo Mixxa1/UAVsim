@@ -191,7 +191,13 @@ final class AutoPathPlannerService {
         func neighbors(for cell: Cell, allowDiagonal: Bool) -> [Cell] {
             var result: [Cell] = []
             result.reserveCapacity(8)
+            appendNeighbors(for: cell, allowDiagonal: allowDiagonal, into: &result)
+            return result
+        }
 
+        /// The same walk, writing into a caller-owned buffer. A* expands hundreds of thousands of
+        /// cells on a city grid and a fresh array per expansion is pure allocator traffic.
+        func appendNeighbors(for cell: Cell, allowDiagonal: Bool, into result: inout [Cell]) {
             for dz in -1...1 {
                 for dx in -1...1 {
                     if dx == 0, dz == 0 { continue }
@@ -213,8 +219,6 @@ final class AutoPathPlannerService {
                     result.append(candidate)
                 }
             }
-
-            return result
         }
 
         func hasLineOfSight(_ start: Cell, _ end: Cell) -> Bool {
@@ -243,6 +247,22 @@ final class AutoPathPlannerService {
     private var gridSignature: GridSignature?
     private var grid: NavigationGrid?
     private var planSignature: PlanSignature?
+    /// The last search that returned nothing, with the grid it ran against. Repeating it is the
+    /// worst case there is, so it is repeated only once the world, the start cell or the goal moves.
+    private var failedPlan: PlanSignature?
+    private var failedPlanGridSignature: GridSignature?
+    /// Fraction of the navigation grid marked impassable by the current obstacle set.
+    private(set) var lastGridBlockedFraction: Float = 0.0
+    private(set) var lastGridCellSize: Float = 0.0
+    /// When a timed-out search may be attempted again.
+    private var searchRetryAfter: Double = 0.0
+    /// Search scratch, sized to the grid and reused. Validity is per-cell via `searchStamp`, so a
+    /// new search costs nothing to start no matter how large the grid is.
+    private var searchGScore: [Float] = []
+    private var searchCameFrom: [Int32] = []
+    private var searchStamp: [Int32] = []
+    private var searchClosed: [Bool] = []
+    private var searchGeneration: Int32 = 0
 
     private var waypoints: [SIMD3<Float>] = []
     private var currentIndex: Int = 0
@@ -257,6 +277,9 @@ final class AutoPathPlannerService {
 
     func invalidate() {
         planSignature = nil
+        failedPlan = nil
+        failedPlanGridSignature = nil
+        searchRetryAfter = 0.0
         waypoints.removeAll(keepingCapacity: false)
         currentIndex = 0
         pathLengthMeters = 0.0
@@ -273,6 +296,7 @@ final class AutoPathPlannerService {
         goal: SIMD3<Float>,
         terrain: TerrainConfiguration,
         obstacles: [CollisionObstacle],
+        obstacleSignature: Int? = nil,
         droneRadius: Float,
         modeTag: String,
         forceRecompute: Bool = false,
@@ -282,7 +306,12 @@ final class AutoPathPlannerService {
         statusReason = reason
 
         let gridBuildStart = CFAbsoluteTimeGetCurrent()
-        guard ensureGrid(terrain: terrain, obstacles: obstacles, droneRadius: droneRadius) else {
+        guard ensureGrid(
+            terrain: terrain,
+            obstacles: obstacles,
+            obstacleSignature: obstacleSignature,
+            droneRadius: droneRadius
+        ) else {
             status = .blocked
             statusReason = "grid_build_failed"
             waypoints.removeAll(keepingCapacity: false)
@@ -336,10 +365,36 @@ final class AutoPathPlannerService {
             return
         }
 
-        let planStart = CFAbsoluteTimeGetCurrent()
-        guard let cellPath = astar(grid: grid, start: startCell, goal: goalCell) else {
+        // A search that already failed against this exact grid, from this exact cell, to this exact
+        // cell, will fail again — and failing is the expensive case, because A* has to exhaust the
+        // whole reachable region to prove it. `status == .blocked` is itself a replan trigger, so
+        // without this the tick loop re-ran the most expensive possible search every frame and the
+        // simulation stopped moving.
+        if failedPlan == nextPlanSignature, failedPlanGridSignature == gridSignature {
             status = .blocked
-            statusReason = "astar_blocked"
+            statusReason = "astar_blocked_cached"
+            lastPlanDurationMs = 0.0
+            return
+        }
+        // A search that ran out of time says nothing about the world, so it cannot be cached
+        // against it — but it must not be retried on the very next tick either, or the budget is
+        // spent every frame and the stall it exists to prevent happens anyway.
+        if CFAbsoluteTimeGetCurrent() < searchRetryAfter {
+            status = .blocked
+            statusReason = "astar_timeout_backoff"
+            lastPlanDurationMs = 0.0
+            return
+        }
+
+        let planStart = CFAbsoluteTimeGetCurrent()
+        let outcome = astar(grid: grid, start: startCell, goal: goalCell)
+        let cellPath: [NavigationGrid.Cell]
+        switch outcome {
+        case let .path(path):
+            cellPath = path
+        case .unreachable, .timedOut:
+            status = .blocked
+            statusReason = outcome.isTimeout ? "astar_timeout" : "astar_blocked"
             waypoints.removeAll(keepingCapacity: false)
             currentIndex = 0
             pathLengthMeters = 0.0
@@ -347,9 +402,19 @@ final class AutoPathPlannerService {
             goalPoint = goal
             activeWaypointCount = 0
             planSignature = nextPlanSignature
+            if outcome.isTimeout {
+                searchRetryAfter = CFAbsoluteTimeGetCurrent() + Self.searchTimeoutBackoffSeconds
+            } else {
+                failedPlan = nextPlanSignature
+                failedPlanGridSignature = gridSignature
+            }
             lastPlanDurationMs = (CFAbsoluteTimeGetCurrent() - planStart) * 1000.0
             return
         }
+
+        failedPlan = nil
+        failedPlanGridSignature = nil
+        searchRetryAfter = 0.0
 
         let simplifiedCells = simplifyPath(cellPath, grid: grid)
         let altitude = max(2.0, max(start.y, goal.y))
@@ -475,9 +540,15 @@ final class AutoPathPlannerService {
         to goal: SIMD3<Float>,
         terrain: TerrainConfiguration,
         obstacles: [CollisionObstacle],
+        obstacleSignature: Int? = nil,
         droneRadius: Float
     ) -> NavigationDirectPathAssessment {
-        guard ensureGrid(terrain: terrain, obstacles: obstacles, droneRadius: droneRadius),
+        guard ensureGrid(
+                  terrain: terrain,
+                  obstacles: obstacles,
+                  obstacleSignature: obstacleSignature,
+                  droneRadius: droneRadius
+              ),
               let grid,
               let startCell = grid.nearestFreeCell(to: start, preferredToward: goal),
               let goalCell = grid.nearestFreeCell(to: goal, preferredToward: start) else {
@@ -504,9 +575,15 @@ final class AutoPathPlannerService {
         return simd_distance(currentPosition, goal) <= max(0.3, threshold)
     }
 
+    /// `obstacleSignature` lets a caller that already knows when its obstacle set changed say so,
+    /// instead of having this hash the whole array again. On an imported city that array is ~20 000
+    /// obstacles and this runs several times per tick, so the caller's own knowledge is worth
+    /// having; passing nil keeps the self-contained behaviour. The signature must change whenever
+    /// the array does — a stale one means routing against a grid that no longer describes the world.
     private func ensureGrid(
         terrain: TerrainConfiguration,
         obstacles: [CollisionObstacle],
+        obstacleSignature: Int?,
         droneRadius: Float
     ) -> Bool {
         let nextSignature = GridSignature(
@@ -515,7 +592,7 @@ final class AutoPathPlannerService {
             densityBucket: Int((terrain.density.clamped(to: 0.0...1.0) * 100.0).rounded()),
             seed: terrain.seed,
             worldExtentBucket: Int((terrain.worldHalfExtent * 10.0).rounded()),
-            obstacleHash: Self.obstacleHash(obstacles)
+            obstacleHash: obstacleSignature ?? Self.obstacleHash(obstacles)
         )
 
         if nextSignature == gridSignature, grid != nil {
@@ -550,6 +627,13 @@ final class AutoPathPlannerService {
         self.grid = newGrid
         self.gridSignature = nextSignature
         self.planSignature = nil
+        // How much of the world the planner considers impassable. Published because "the autopilot
+        // does nothing" and "the map rasterises as a solid block" look identical from the outside,
+        // and telling them apart otherwise means attaching a debugger.
+        var blockedCells = 0
+        for value in newGrid.blocked where value != 0 { blockedCells += 1 }
+        lastGridBlockedFraction = Float(blockedCells) / Float(max(1, newGrid.blocked.count))
+        lastGridCellSize = newGrid.cellSize
         return true
     }
 
@@ -657,88 +741,207 @@ final class AutoPathPlannerService {
 
         let densityAdjustment: Float = terrain.density > 0.75 ? 0.28 : (terrain.density > 0.55 ? 0.14 : 0.0)
         let worldWidth = terrain.worldHalfExtent * 2.0
+        // 1200 cells across, not 520.
+        //
+        // The old budget was written for procedural maps a few hundred metres wide, where it never
+        // bound. On a 6.4 km imported city it decides everything: it gives 12.31 m cells, and a
+        // 20 m street minus the obstacle inflation leaves barely one free cell centre per
+        // cross-section. Consecutive rows then stagger, so the free space degenerates into a
+        // diagonal chain — and a diagonal step past a blocked side cell is refused (rightly: it
+        // would clip a building corner). Measured on the real Lower Manhattan package, reachable
+        // area from the launch pad: **308 cells / 321 m at 12.31 m**, 580 383 cells / 4559 m at
+        // 8 m, and the same 4.5 km at 6 m and below. The aircraft was sealed into a pocket three
+        // blocks wide, which is why every route failed. 1200 gives 5.33 m here, with margin over
+        // the 8 m cliff, and still never binds on a procedural map.
+        // Deliberately left at the coarser 520 divisor, not the parked 1200.
+        //
+        // This is a *floor* on cell size, so a larger divisor means a finer grid — 2.3x finer
+        // here, which is more cells, more expansions and better routes. It is a routing change,
+        // not a performance one, and it is being restored specifically to stop a 0 FPS stall, so
+        // the grid stays where it is and only the search itself gets faster.
         let gridBudgetCellSize = worldWidth / 520.0
         return max(base + densityAdjustment, gridBudgetCellSize)
+    }
+
+    /// Binary min-heap over cell indices, with lazy deletion.
+    ///
+    /// What stood here was a linear scan of the open list for its lowest score, with a dictionary
+    /// lookup per element. That is O(n) per expansion against an open list that runs to thousands of
+    /// cells on a city-sized grid, and a paused debugger caught the main thread inside exactly that
+    /// loop — top frame `__RawDictionaryStorage.find` — while the simulation sat at zero frames.
+    private struct OpenHeap {
+        private var storage: [(score: Float, index: Int32)] = []
+
+        var isEmpty: Bool { storage.isEmpty }
+
+        mutating func reserveCapacity(_ capacity: Int) {
+            storage.reserveCapacity(capacity)
+        }
+
+        mutating func push(index: Int32, score: Float) {
+            storage.append((score, index))
+            var child = storage.count - 1
+            while child > 0 {
+                let parent = (child - 1) / 2
+                if storage[parent].score <= storage[child].score { break }
+                storage.swapAt(parent, child)
+                child = parent
+            }
+        }
+
+        mutating func popMinimum() -> (score: Float, index: Int32)? {
+            guard let minimum = storage.first else { return nil }
+            let last = storage.removeLast()
+            if !storage.isEmpty {
+                storage[0] = last
+                var parent = 0
+                while true {
+                    let left = parent * 2 + 1
+                    let right = left + 1
+                    var smallest = parent
+                    if left < storage.count, storage[left].score < storage[smallest].score {
+                        smallest = left
+                    }
+                    if right < storage.count, storage[right].score < storage[smallest].score {
+                        smallest = right
+                    }
+                    if smallest == parent { break }
+                    storage.swapAt(parent, smallest)
+                    parent = smallest
+                }
+            }
+            return minimum
+        }
+    }
+
+    /// Wall-clock ceiling for one search. A goal enclosed by geometry makes A* explore its entire
+    /// reachable region before it can answer "no" — a million cells on a city map — and that answer
+    /// is worth at most one dropped frame, never a stalled simulation.
+    private static let searchTimeBudgetSeconds: Double = 0.030
+    /// How long a timed-out search is left alone. Unlike a proven-unreachable goal, a timeout says
+    /// nothing about the world, so it cannot be cached on the grid — but retrying it every tick is
+    /// exactly the stall it was meant to prevent.
+    private static let searchTimeoutBackoffSeconds: Double = 0.75
+
+    private enum SearchOutcome {
+        case path([NavigationGrid.Cell])
+        /// The reachable region was exhausted: this goal genuinely cannot be reached.
+        case unreachable
+        /// The budget ran out first — no conclusion about the world.
+        case timedOut
+
+        var isTimeout: Bool {
+            if case .timedOut = self { return true }
+            return false
+        }
     }
 
     private func astar(
         grid: NavigationGrid,
         start: NavigationGrid.Cell,
         goal: NavigationGrid.Cell
-    ) -> [NavigationGrid.Cell]? {
+    ) -> SearchOutcome {
         if start == goal {
-            return [start]
+            return .path([start])
         }
 
-        var openSet: Set<NavigationGrid.Cell> = [start]
-        var openList: [NavigationGrid.Cell] = [start]
-        var cameFrom: [NavigationGrid.Cell: NavigationGrid.Cell] = [:]
-        var gScore: [NavigationGrid.Cell: Float] = [start: 0.0]
-        var fScore: [NavigationGrid.Cell: Float] = [start: heuristic(from: start, to: goal)]
+        // Flat arrays indexed by cell, not dictionaries keyed by cell. Every lookup in the inner
+        // loop was hashing a struct, and a paused debugger caught the main thread doing exactly
+        // that. They are also kept across searches and validated by a generation stamp, so a
+        // million-cell grid costs no per-call clearing.
+        let cellCount = grid.width * grid.height
+        prepareSearchBuffers(cellCount: cellCount)
+        searchGeneration &+= 1
+        let generation = searchGeneration
 
-        let maxIterations = max(2_000, grid.width * grid.height * 2)
-        var iterations = 0
+        let startIndex = grid.index(start)
+        let goalIndex = grid.index(goal)
+        searchStamp[startIndex] = generation
+        searchGScore[startIndex] = 0.0
+        searchCameFrom[startIndex] = -1
+        searchClosed[startIndex] = false
 
-        while !openList.isEmpty && iterations < maxIterations {
-            iterations += 1
+        var open = OpenHeap()
+        open.reserveCapacity(min(cellCount, 8_192))
+        open.push(index: Int32(startIndex), score: heuristic(from: start, to: goal))
 
-            var bestIndex = 0
-            var bestCell = openList[0]
-            var bestScore = fScore[bestCell] ?? .greatestFiniteMagnitude
-            for index in 1..<openList.count {
-                let cell = openList[index]
-                let score = fScore[cell] ?? .greatestFiniteMagnitude
-                if score < bestScore {
-                    bestIndex = index
-                    bestCell = cell
-                    bestScore = score
-                }
+        let deadline = CFAbsoluteTimeGetCurrent() + Self.searchTimeBudgetSeconds
+        // One expansion per cell at most, so the grid itself is the bound.
+        let maximumExpansions = max(2_000, cellCount)
+        var expansions = 0
+        var neighbors: [NavigationGrid.Cell] = []
+        neighbors.reserveCapacity(8)
+
+        while let entry = open.popMinimum() {
+            let currentIndex = Int(entry.index)
+            // A cell can be pushed several times; the stale copies are dropped here rather than
+            // being hunted down in the heap.
+            if searchClosed[currentIndex] { continue }
+            searchClosed[currentIndex] = true
+
+            if currentIndex == goalIndex {
+                return .path(reconstructPath(goalIndex: goalIndex, grid: grid))
             }
 
-            let current = bestCell
-            openList.remove(at: bestIndex)
-            openSet.remove(current)
-
-            if current == goal {
-                return reconstructPath(cameFrom: cameFrom, current: current)
+            expansions += 1
+            if expansions >= maximumExpansions { return .timedOut }
+            if expansions & 0x3FF == 0, CFAbsoluteTimeGetCurrent() > deadline {
+                return .timedOut
             }
 
-            let neighbors = grid.neighbors(for: current, allowDiagonal: true)
+            let current = NavigationGrid.Cell(
+                x: currentIndex % grid.width,
+                z: currentIndex / grid.width
+            )
+            neighbors.removeAll(keepingCapacity: true)
+            grid.appendNeighbors(for: current, allowDiagonal: true, into: &neighbors)
+
+            let currentG = searchGScore[currentIndex]
             for neighbor in neighbors {
-                let stepDistance = stepCost(from: current, to: neighbor)
-                let softPenalty = grid.penaltyAt(neighbor) * 0.9
-                let tentativeG = (gScore[current] ?? .greatestFiniteMagnitude) + stepDistance * (1.0 + softPenalty)
-                let existing = gScore[neighbor] ?? .greatestFiniteMagnitude
-                if tentativeG >= existing {
-                    continue
-                }
+                let neighborIndex = grid.index(neighbor)
+                let penalty = grid.penaltyAt(neighbor)
+                let tentativeG = currentG + stepCost(from: current, to: neighbor) * (1.0 + penalty * 0.9)
+                let known = searchStamp[neighborIndex] == generation
+                if known, tentativeG >= searchGScore[neighborIndex] { continue }
 
-                cameFrom[neighbor] = current
-                gScore[neighbor] = tentativeG
-                fScore[neighbor] = tentativeG + heuristic(from: neighbor, to: goal) + grid.penaltyAt(neighbor) * 0.6
-
-                if !openSet.contains(neighbor) {
-                    openSet.insert(neighbor)
-                    openList.append(neighbor)
-                }
+                searchStamp[neighborIndex] = generation
+                searchCameFrom[neighborIndex] = entry.index
+                searchGScore[neighborIndex] = tentativeG
+                // The penalty term makes the estimate slightly inconsistent, so a closed cell that
+                // turns out to be cheaper this way is genuinely reopened — the same freedom the
+                // open-list version had.
+                searchClosed[neighborIndex] = false
+                open.push(
+                    index: Int32(neighborIndex),
+                    score: tentativeG + heuristic(from: neighbor, to: goal) + penalty * 0.6
+                )
             }
         }
 
-        return nil
+        return .unreachable
+    }
+
+    private func prepareSearchBuffers(cellCount: Int) {
+        guard searchGScore.count != cellCount else { return }
+        searchGScore = [Float](repeating: .greatestFiniteMagnitude, count: cellCount)
+        searchCameFrom = [Int32](repeating: -1, count: cellCount)
+        searchStamp = [Int32](repeating: 0, count: cellCount)
+        searchClosed = [Bool](repeating: false, count: cellCount)
+        searchGeneration = 0
     }
 
     private func reconstructPath(
-        cameFrom: [NavigationGrid.Cell: NavigationGrid.Cell],
-        current: NavigationGrid.Cell
+        goalIndex: Int,
+        grid: NavigationGrid
     ) -> [NavigationGrid.Cell] {
-        var output: [NavigationGrid.Cell] = [current]
-        var node = current
-
-        while let previous = cameFrom[node] {
-            output.append(previous)
-            node = previous
+        var output: [NavigationGrid.Cell] = []
+        var index = goalIndex
+        while index >= 0 {
+            output.append(NavigationGrid.Cell(x: index % grid.width, z: index / grid.width))
+            let parent = searchCameFrom[index]
+            if parent < 0 { break }
+            index = Int(parent)
         }
-
         return output.reversed()
     }
 
@@ -923,10 +1126,19 @@ final class AutoPathPlannerService {
         return 1.0
     }
 
+    /// Identity of an obstacle set, for deciding whether the navigation grid may be reused.
+    ///
+    /// Order-independent by construction — each obstacle is hashed on its own and the results are
+    /// combined commutatively — rather than by sorting the array first. The sort it replaces
+    /// compared `id.uuidString`, which builds two 36-character strings per comparison: on an
+    /// imported city's ~20 000 obstacles that is roughly 300 000 comparisons and 600 000 string
+    /// allocations, **per call**, on the tick path. It was invisible while this only ever saw a few
+    /// hundred procedural trees, and it is what made a real map unflyable the moment the world
+    /// started publishing its buildings into the registry.
     private static func obstacleHash(_ obstacles: [CollisionObstacle]) -> Int {
-        var hasher = Hasher()
-        hasher.combine(obstacles.count)
-        for obstacle in obstacles.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+        var combined: Int = obstacles.count.hashValue
+        for obstacle in obstacles {
+            var hasher = Hasher()
             hasher.combine(obstacle.id)
             hasher.combine(Int((obstacle.center.x * 10.0).rounded()))
             hasher.combine(Int((obstacle.center.y * 10.0).rounded()))
@@ -940,8 +1152,9 @@ final class AutoPathPlannerService {
                 hasher.combine(Int((obstacle.yawRadians * 100.0).rounded()))
             }
             hasher.combine(obstacle.source)
+            combined ^= hasher.finalize()
         }
-        return hasher.finalize()
+        return combined
     }
 }
 

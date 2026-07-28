@@ -43,6 +43,12 @@ struct CollisionObstacle {
     let planarHalfExtents: SIMD2<Float>?
     let yawRadians: Float
     let meshTriangles: [CollisionMeshTriangle]?
+    /// Outline in world X/Z for obstacles whose mesh encloses a volume.
+    ///
+    /// Triangles alone describe a *surface*, and a surface has no inside. Without this an
+    /// extruded building is a shell: the nearest-triangle distance stays positive everywhere
+    /// within it, so an aircraft that gets past the wall is reported as being in clear air.
+    let planarFootprint: [SIMD2<Float>]?
 
     init(
         id: UUID,
@@ -53,7 +59,8 @@ struct CollisionObstacle {
         topY: Float? = nil,
         planarHalfExtents: SIMD2<Float>? = nil,
         yawRadians: Float = 0.0,
-        meshTriangles: [CollisionMeshTriangle]? = nil
+        meshTriangles: [CollisionMeshTriangle]? = nil,
+        planarFootprint: [SIMD2<Float>]? = nil
     ) {
         self.id = id
         self.center = center
@@ -76,10 +83,30 @@ struct CollisionObstacle {
         self.planarHalfExtents = planarHalfExtents
         self.yawRadians = yawRadians
         self.meshTriangles = meshTriangles
+        self.planarFootprint = planarFootprint
     }
 
     var planarCenter: SIMD2<Float> {
         SIMD2<Float>(center.x, center.z)
+    }
+
+    /// Whether a point lies inside the volume this obstacle's mesh encloses.
+    func containsPoint(_ point: SIMD3<Float>) -> Bool {
+        guard let outline = planarFootprint, outline.count >= 3,
+              point.y >= baseY, point.y <= topY else {
+            return false
+        }
+        var inside = false
+        var j = outline.count - 1
+        for i in outline.indices {
+            let a = outline[i], b = outline[j]
+            if (a.y > point.z) != (b.y > point.z),
+               point.x < (b.x - a.x) * (point.z - a.y) / (b.y - a.y) + a.x {
+                inside.toggle()
+            }
+            j = i
+        }
+        return inside
     }
 
     var hasMeshCollision: Bool {
@@ -918,6 +945,24 @@ final class CollisionAnalysisService {
         }
 
         let distance = sqrt(max(0.0, bestDistanceSq))
+
+        // Inside the enclosed volume the sign flips, and that sign is the whole point.
+        //
+        // The nearest-triangle distance is unsigned, so within an extruded building it stayed
+        // positive — five metres from the nearest wall reads as five metres of clearance, and the
+        // aircraft was told it was in open air while flying through the interior. Only a shell
+        // one drone-radius thick ever registered, which is why propellers scraped the façade
+        // while the airframe passed straight through. A box never had this problem because its
+        // planar distance is signed; extruding the real outline is what lost the interior, so the
+        // outline is what restores it. Depth grows with how far in the aircraft is, and the
+        // normal points at the nearest way out rather than deeper in.
+        if obstacle.containsPoint(sphereCenter) {
+            let outward = distance > 0.0001
+                ? simd_normalize(bestPoint - sphereCenter)
+                : bestNormal
+            return (-(distance + droneRadius), -outward, outward)
+        }
+
         let normal = distance > 0.0001
             ? simd_normalize(sphereCenter - bestPoint)
             : bestNormal

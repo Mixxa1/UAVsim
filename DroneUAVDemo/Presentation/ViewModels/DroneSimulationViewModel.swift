@@ -6010,7 +6010,16 @@ final class DroneSimulationViewModel: ObservableObject {
                 "[Impact] tier=\(report.tier.rawValue) comp=\(report.componentID) " +
                 "src=\(report.obstacleSource ?? "?") E=\(String(format: "%.1f", report.impactEnergyJ))J " +
                 "vN=\(String(format: "%.2f", report.normalClosingSpeed)) " +
-                "j=\(String(format: "%.2f", report.appliedImpulse)) dmg=[\(damageSummary)]"
+                "j=\(String(format: "%.2f", report.appliedImpulse)) " +
+                {
+                    guard let probe = sceneController.obstacleDiagnostics(for: report.obstacleID) else {
+                        // Nothing resolves this id at all — which is itself the answer, and the
+                        // reason the push-out could not act on it.
+                        return "origin=unresolved tris=? "
+                    }
+                    return "origin=\(probe.origin) tris=\(probe.triangleCount) "
+                }() +
+                "dmg=[\(damageSummary)]"
             )
         }
         #endif
@@ -7652,47 +7661,125 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let travelAltitude = targetMarkerTravelAltitude()
+        let approachGoal = safeMarkerApproachGoal(marker: marker, altitude: travelAltitude)
         guard let pathTarget = prepareMultirotorMarkerPath(
             marker: marker,
-            travelAltitude: travelAltitude
+            approachGoal: approachGoal,
+            travelAltitude: travelAltitude,
+            deltaTime: deltaTime
         ) else {
             return false
         }
 
-        if shouldFinishMultirotorMarkerGuidance(marker: marker) {
+        if shouldFinishMultirotorMarkerGuidance(marker: marker, approachGoal: approachGoal) {
             navigationSnapshot = .idle
             finishTargetMarkerAutoNavigation()
             return true
         }
 
         autoNavigationController.cancel()
-        let finalGoal = clampToWorldBounds(marker.worldPosition(altitude: travelAltitude))
+        let finalGoal = approachGoal
+
+        // Close in, do not climb over.
+        //
+        // Once the aircraft is on final approach, the vertical channel is pinned to the altitude it
+        // arrived at (it may still come *down* toward the leg altitude, never up). A point on a
+        // façade is reached by standing off from it, not by gaining height until something lines
+        // up — and gaining height was exactly what the aircraft did, metre after metre, for as long
+        // as the goal stayed out of reach.
+        let planarToGoal = simd_distance(
+            SIMD2<Float>(finalGoal.x, finalGoal.z),
+            currentPlanarPosition()
+        )
+        let commandedAltitude = planarToGoal <= multirotorMarkerFinalApproachDistance()
+            ? min(travelAltitude, state.position.y + 0.3)
+            : travelAltitude
+
         let adjustedTarget = multirotorCollisionAvoidanceTarget(
             nominalTarget: pathTarget,
             finalGoal: finalGoal,
-            travelAltitude: travelAltitude
+            travelAltitude: commandedAltitude
         ) ?? pathTarget
         let isAvoidingObstacle = simd_distance(
             SIMD2<Float>(adjustedTarget.x, adjustedTarget.z),
             SIMD2<Float>(pathTarget.x, pathTarget.z)
         ) > 0.05
         applyAutopilotTrackingControl(
-            target: adjustedTarget,
-            targetAltitude: travelAltitude,
+            target: SIMD3<Float>(adjustedTarget.x, commandedAltitude, adjustedTarget.z),
+            targetAltitude: commandedAltitude,
             speedScale: isAvoidingObstacle
                 ? min(multirotorMarkerSpeedScale(), 0.72)
                 : multirotorMarkerSpeedScale(),
             yawAlignToHome: false,
             deltaTime: deltaTime
         )
+
+        #if DEBUG
+        // Everything the vertical channel and the route depend on, once a second. "It climbs" has
+        // now had three different causes; this prints which one is speaking rather than inviting a
+        // fourth guess.
+        if simulationTickCounter % 60 == 0 {
+            print(String(
+                format: "[Leg] y=%.1f cmdY=%.1f travel=%.1f goal=(%.1f,%.1f) planarToGoal=%.1f "
+                    + "avoid=%@ src=%@ plan=%@/%@ wp=%d",
+                state.position.y,
+                commandedAltitude,
+                travelAltitude,
+                finalGoal.x, finalGoal.z,
+                planarToGoal,
+                isAvoidingObstacle ? "yes" : "no",
+                String(describing: activeRouteTargetSource),
+                String(describing: navigationSnapshot.status),
+                navigationSnapshot.reason,
+                navigationSnapshot.waypoints.count
+            ))
+        }
+        #endif
         return true
+    }
+
+    /// What the aircraft does when the planner has no route to the marker: hold *this* spot.
+    ///
+    /// The previous hold wrote raw control values — `values.throttle = max(values.throttle, hover)`
+    /// and `values.y = max(state.position.y, …)`. Neither is a hold. In `.autoPath` the engine
+    /// closes no altitude loop (`SimpleDronePhysicsEngine` does that only for `.hover` /
+    /// `hoverAssist`), so the floor kept whatever climb throttle the previous tick had commanded,
+    /// and the commanded altitude then followed the aircraft upward — the two ratcheting against
+    /// each other. To the pilot that reads as "the autopilot only ever climbs", with no hint that
+    /// route planning is what failed. Now the aircraft holds the altitude it had when the hold
+    /// began, flown by the same multicopter autopilot as every other leg — which already holds
+    /// position when the target sits under it.
+    private func holdMultirotorMarkerGuidance(travelAltitude: Float, deltaTime: Float) {
+        let ceiling = max(2.0, terrain.maxFlightAltitude - 2.0)
+        let holdAltitude = multirotorMarkerHoldAltitude
+            ?? min(max(state.position.y, min(travelAltitude, ceiling)), ceiling)
+        multirotorMarkerHoldAltitude = holdAltitude
+
+        applyAutopilotTrackingControl(
+            target: SIMD3<Float>(state.position.x, holdAltitude, state.position.z),
+            targetAltitude: holdAltitude,
+            speedScale: 0.0,
+            yawAlignToHome: false,
+            deltaTime: deltaTime
+        )
+
+        #if DEBUG
+        if simulationTickCounter % 120 == 0 {
+            print("[Route] no path to marker — holding at \(String(format: "%.1f", holdAltitude)) m "
+                  + "(planner: \(navigationSnapshot.status)/\(navigationSnapshot.reason), grid "
+                  + "\(String(format: "%.1f", autoPathPlanner.lastGridBlockedFraction * 100))% blocked "
+                  + "at \(String(format: "%.2f", autoPathPlanner.lastGridCellSize)) m)")
+        }
+        #endif
     }
 
     private func prepareMultirotorMarkerPath(
         marker: TargetMarkerState,
-        travelAltitude: Float
+        approachGoal: SIMD3<Float>,
+        travelAltitude: Float,
+        deltaTime: Float
     ) -> SIMD3<Float>? {
-        let finalGoal = clampToWorldBounds(marker.worldPosition(altitude: travelAltitude))
+        let finalGoal = approachGoal
         autoPathPlanner.updateProgress(
             currentPosition: state.position,
             arrivalRadius: 1.35,
@@ -7982,25 +8069,22 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let routeDirection = simd_normalize(routeVector)
         let sideAxis = SIMD2<Float>(-routeDirection.y, routeDirection.x)
-        let forwardWindow = max(10.0, multirotorMarkerLookaheadDistance() + obstacle.radius)
+        let forwardWindow = max(10.0, multirotorMarkerLookaheadDistance() + obstaclePlanarRadius(obstacle))
         let immediateRisk = collisionAnalysis.nearestObstacleDistance < 2.4 ||
             collisionAnalysis.riskScore >= 0.55
-        let nearbyTrees = sceneController.nearbyEnvironmentObstacles(
-            near: state.position,
-            radius: max(28.0, forwardWindow + obstacle.radius + 10.0)
-        ).filter { $0.source.contains("tree") }
 
-        func routeCoordinates(for tree: CollisionObstacle) -> (along: Float, lateral: Float) {
-            let treeVector = tree.planarCenter - current
+        func routeCoordinates(for candidate: CollisionObstacle) -> (along: Float, lateral: Float) {
+            let candidateVector = candidate.planarCenter - current
             return (
-                simd_dot(treeVector, routeDirection),
-                simd_dot(treeVector, sideAxis)
+                simd_dot(candidateVector, routeDirection),
+                simd_dot(candidateVector, sideAxis)
             )
         }
 
-        let routeThreatened = nearbyTrees.contains { tree in
-            let coordinates = routeCoordinates(for: tree)
-            let protectedWidth = tree.radius + selectedDroneProfile.collisionRadius + 2.2
+        let routeThreatened = nearbyObstacles.contains { candidate in
+            let coordinates = routeCoordinates(for: candidate)
+            let protectedWidth = obstaclePlanarRadius(candidate)
+                + selectedDroneProfile.collisionRadius + 2.2
             return coordinates.along > -protectedWidth &&
                 coordinates.along < forwardWindow &&
                 abs(coordinates.lateral) <= protectedWidth
@@ -8015,7 +8099,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let preferredSign: Float = nearestCoordinates.lateral >= 0.0 ? -1.0 : 1.0
         let sideDistance = max(
             6.0,
-            obstacle.radius + selectedDroneProfile.collisionRadius * 2.2 + 3.0
+            obstaclePlanarRadius(obstacle) + selectedDroneProfile.collisionRadius * 2.2 + 3.0
         )
         let remainingDistance = max(2.5, simd_distance(current, finalPlanar))
         let forwardStep = min(
@@ -8038,10 +8122,10 @@ final class DroneSimulationViewModel: ObservableObject {
         let requiredClearance = max(0.35, selectedDroneProfile.collisionRadius * 0.25)
 
         func clearance(at point: SIMD2<Float>) -> Float {
-            nearbyTrees.reduce(Float.greatestFiniteMagnitude) { partial, tree in
+            nearbyObstacles.reduce(Float.greatestFiniteMagnitude) { partial, candidate in
                 min(
                     partial,
-                    tree.planarSignedDistance(to: point) - selectedDroneProfile.collisionRadius
+                    candidate.planarSignedDistance(to: point) - selectedDroneProfile.collisionRadius
                 )
             }
         }
@@ -8105,6 +8189,16 @@ final class DroneSimulationViewModel: ObservableObject {
             return nil
         }
 
+        // Nothing reachable is actually clear — a façade or a whole block across the route, which a
+        // local sidestep cannot get around. Hold position instead of advancing on the least-bad
+        // option: with only trees in scope the least-bad choice was always survivable, but against a
+        // building it is a wall at cruise speed.
+        guard bestCandidate.result.clearance >= requiredClearance else {
+            multirotorAvoidanceLateralOffset = 0.0
+            multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
+            return clampToWorldBounds(SIMD3<Float>(current.x, travelAltitude, current.y))
+        }
+
         multirotorAvoidanceLateralOffset = bestCandidate.offset
         multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
         return clampToWorldBounds(SIMD3<Float>(
@@ -8146,7 +8240,13 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func shouldFinishMultirotorMarkerGuidance(marker: TargetMarkerState) -> Bool {
+    /// `approachGoal` is the point the leg actually flew to — the marker itself when it stands in
+    /// the open, its safe standoff when it does not. Arrival has to be judged against that, or a
+    /// marker on a wall is a leg that can never end.
+    private func shouldFinishMultirotorMarkerGuidance(
+        marker: TargetMarkerState,
+        approachGoal: SIMD3<Float>
+    ) -> Bool {
         guard activeRouteTargetSource != .mission else {
             return false
         }
