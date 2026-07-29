@@ -114,6 +114,16 @@ struct DroneState {
     var aileronDeflection: Float = 0.0
     var rudderDeflection: Float = 0.0
 
+    /// Accumulated elevator trim, -1...1 fraction, held by the attitude loop.
+    ///
+    /// A pure proportional attitude loop always settles *short* of its commanded pitch: the
+    /// airframe's own restoring moment (cmAlpha) grows with the angle, so there is an equilibrium
+    /// where P output balances it. Measured on the eBee-class wing: commanded 11°, achieved 7.9° —
+    /// a 28 % droop, which is the difference between a 1.4 m/s climb and a 0.35 m/s one. Real
+    /// aircraft cancel it with trim; this is that trim, integrated and anti-wound.
+    /// Fixed-wing only.
+    var elevatorTrim: Float = 0.0
+
     // MARK: - hybridVTOL propulsion units
     //
     // Mutable per-unit simulation state (tilt angle, spin rate) seeded from

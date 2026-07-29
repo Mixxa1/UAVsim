@@ -846,9 +846,20 @@ final class FixedWingLaunchController {
         case .transitionToFlight:
             let altitudeReady = altitudeAboveLaunch >= configuration.initialClimbAltitudeMeters * 0.90
             let speedReady = longitudinalAirspeed >= configuration.minSafeAirspeedMps * 0.92
+            // The elapsed-time handoff needs a floor under it.
+            //
+            // This is the transition that actually ends a launch — the view model's own
+            // completion check never runs, because by then the mode is no longer `.takeoff`.
+            // Unqualified, the four-second branch handed the aircraft over at **1.8 m** on a hand
+            // launch and **3.6 m** off the catapult, both times still descending, and both times
+            // the wing was in the field a second later. Timing out is a reasonable way to stop
+            // waiting; it is not a reason to declare an aircraft flying. Height above the launch
+            // point is the cheapest honest test available here, and the global 16 s backstop
+            // below still resolves a launch that never gets there.
+            let safeHandoffAltitude = max(6.0, configuration.initialClimbAltitudeMeters * 0.35)
             if altitudeReady && speedReady {
                 transition(to: .completed, reason: "launch_sequence_completed")
-            } else if phaseElapsed > 4.0 {
+            } else if phaseElapsed > 4.0, altitudeAboveLaunch >= safeHandoffAltitude {
                 transition(to: .completed, reason: "launch_sequence_handoff_timeout")
             }
         }

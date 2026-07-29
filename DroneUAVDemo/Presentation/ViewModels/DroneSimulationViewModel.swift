@@ -1242,6 +1242,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private var telemetrySamplingAccumulator: Float = 0.0
     private var hudPublishAccumulator: Float = 0.0
     private var diagnosticsSamplingAccumulator: Float = 0.0
+    private var wingTelemetryAccumulator: Float = 0.0
+    /// Assist mode the operator selected before the aircraft could accept it.
+    private var pendingFixedWingAssistMode: FixedWingAssistMode?
     private var previousReplayArmedState: Bool = false
     private var previousReplayAutopilotActive: Bool = false
     private var previousReplayWarningMessages: Set<String> = []
@@ -5600,6 +5603,39 @@ final class DroneSimulationViewModel: ObservableObject {
 
         handleAutoCollisionInterventions(deltaTime: dt)
 
+        #if DEBUG
+        // Fixed-wing pitch telemetry, once a second.
+        //
+        // Rebuilt rather than restored: the stashed version reads state that no longer exists in
+        // this tree (climb-out latch, forward-avoidance offset, guidance counters), so it cannot
+        // compile here. These are the fields that actually settle the open question — whether the
+        // autopilot is *commanding* descent or the aircraft is failing to hold the angle it was
+        // given. `pitchCmd` is the command, `pitchActual` the attitude; the same pair for roll.
+        if selectedDroneProfile.airframeClass == .fixedWing {
+            wingTelemetryAccumulator += dt
+            if wingTelemetryAccumulator >= 1.0 {
+                wingTelemetryAccumulator = 0.0
+                print(String(
+                    format: "[WingTick] mode=%@ y=%.1f speed=%.1f pitchCmd=%.1f pitchActual=%.1f "
+                        + "vy=%.2f rollCmd=%.1f roll=%.1f throttle=%.2f risk=%.2f obstacle=%@",
+                    mode.rawValue,
+                    Double(state.position.y),
+                    Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
+                    controlValues.pitch,
+                    Double(state.orientation.y.radiansToDegrees),
+                    Double(state.velocity.y),
+                    controlValues.roll,
+                    Double(state.orientation.x.radiansToDegrees),
+                    controlValues.throttle,
+                    Double(collisionAnalysis.riskScore),
+                    (collisionAnalysis.nearestObstacleID.flatMap {
+                        sceneController.obstacleSourceLabel(for: $0)
+                    } ?? "none") as NSString
+                ))
+            }
+        }
+        #endif
+
         let control = buildControlInput(from: controlValues)
         let context = DroneSimulationContext(
             profile: selectedDroneProfile,
@@ -9630,16 +9666,97 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    /// Engages an assist mode the operator chose before the aircraft could accept it.
+    ///
+    /// Deliberately keyed on *state*, not on a transition. Hooking it to
+    /// `takeoff_completed_fixed_wing` looked right and never fired: a launch ends through the
+    /// launch state machine's own `fixed_wing_launch_completed`, so the request was stored and
+    /// then silently sat there — the operator pressed "intercept selected" in the planner and the
+    /// autopilot simply never came on. Any path that leaves the aircraft armed, airborne and in
+    /// manual now picks it up on the next tick.
+    private func engagePendingFixedWingAssistIfReady() {
+        guard let pending = pendingFixedWingAssistMode,
+              selectedDroneProfile.airframeClass == .fixedWing,
+              isArmed,
+              mode == .manual,
+              physicalState == .airborne,
+              physicalState != .crashed,
+              !launchState.blocksRouteCapture else {
+            return
+        }
+        pendingFixedWingAssistMode = nil
+        activateFixedWingAssist(pending)
+    }
+
     private func handleModeTransitions() {
+        engagePendingFixedWingAssistIfReady()
         if mode == .takeoff {
             if selectedDroneProfile.airframeClass == .fixedWing {
                 if activeLaunchMode() != .standard, launchState.blocksRouteCapture {
                     return
                 }
                 let liftOffSpeed = selectedDroneProfile.fixedWingParameters?.minSustainableSpeedMps ?? 9.0
-                if physicalState == .airborne || state.position.y >= 1.0 || state.forwardAirspeed >= liftOffSpeed * 0.92 {
+                // Hand over a *flying* aircraft, high enough and nose-up.
+                //
+                // The old test was `physicalState == .airborne || position.y >= 1.0 || speed >=
+                // 0.92 * liftOff`. All three are satisfied before the launch achieves anything:
+                // `position.y >= 1.0` is an absolute world altitude written for a world whose
+                // ground is y = 0, and the catapult here sits at 0.79 m, while a cradled aircraft
+                // already reads `.airborne`. Height is therefore measured against the support
+                // surface.
+                //
+                // Six metres, not two, and the nose may not be below level. The flight log shows
+                // why: handover came at 3.9 m with the aircraft at −1.2° while accelerating
+                // 2 → 28.6 m/s, and it sank into the ground before climbing away. It survived —
+                // one 6.4 J wingtip scrape — but a departure should not touch anything.
+                let launchHeight = heightAboveSupportSurface(for: state.position)
+                let noseIsUp = state.orientation.y > -0.02
+                if physicalState == .airborne,
+                   launchHeight >= 6.0,
+                   state.forwardAirspeed >= liftOffSpeed,
+                   state.velocity.y > -0.15,
+                   noseIsUp {
                     setFlightMode(.manual, reason: "takeoff_completed_fixed_wing")
                     setFixedWingGuidanceSource(.none, reason: "fixed_wing_takeoff_completed")
+
+                    // Hand over a *flying* aircraft: attitude and power, wings level.
+                    //
+                    // Measured across two launches: at the handover tick the command collapsed
+                    // from pitch 15.0° / throttle 0.88 to pitch 2.1° / throttle 0.52, at 17 m/s
+                    // and five metres altitude. Nothing commanded a descent — manual was simply
+                    // handed controls that neither hold power nor ask for climb, and the aircraft
+                    // was on the ground within the second (`vy` −1.11 then −3.47). So manual
+                    // inherits what the aircraft already has: the attitude it is holding and at
+                    // least cruise power.
+                    //
+                    // Roll is the one thing that must NOT be inherited. Launch guidance banks to
+                    // pick up its route, and an earlier log caught that bank surviving the
+                    // handover as a *command* — roll settling on exactly −8.9° and staying there
+                    // for the rest of the flight with no autopilot engaged, which reads as "it
+                    // will not fly straight".
+                    let heldPitchDegrees = Double(state.orientation.y.radiansToDegrees)
+                    let cruiseThrottle = Double(
+                        resolvedFlightBaseline(for: .manual).cruiseReferenceThrottle
+                    )
+                    updateControlValues({ values in
+                        // Never inherit a nose-down attitude: it is the one part of the launch
+                        // state that must not survive, for the same reason as the bank.
+                        values.pitch = max(0.0, heldPitchDegrees)
+                        // The altitude target, which was still the launch pad's.
+                        //
+                        // This is what actually drove the nose down. The take-off controller flies
+                        // a clean departure — 12°→14° of pitch, throttle 0.95, a steady +2.4 m/s —
+                        // and the instant control left it the command became **−2.2°** while the
+                        // aircraft was climbing at 3.6 m/s. Nothing had failed: the hold loop was
+                        // still aiming at 0.8 m, the height of the catapult, so from 3.3 m the only
+                        // correct thing it could do was descend. Handing over pitch, power and roll
+                        // while leaving the target where the aircraft started is the same omission
+                        // three times over.
+                        values.y = Double(state.position.y)
+                        values.throttle = max(Double(state.throttle), cruiseThrottle)
+                        values.roll = 0.0
+                    }, markManual: false)
+
                 }
             } else {
                 let targetAltitude = Float(controlValues.y)
@@ -14257,7 +14374,13 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        // Chosen in the planner, applied at launch: the operator picks "intercept selected"
+        // while the aircraft is not armed yet, so this guard used to throw the choice away and
+        // they had to come back and press it again after take-off.
         guard isArmed, physicalState != .crashed, mode != .emergencyStop else {
+            if assistMode != .manual, physicalState != .crashed {
+                pendingFixedWingAssistMode = assistMode
+            }
             return
         }
 

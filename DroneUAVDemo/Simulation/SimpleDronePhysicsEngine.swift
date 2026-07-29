@@ -659,7 +659,43 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 // original bug's instability, since the rate term still damps
                 // the approach.
                 aileronFraction = ((rollErrorNorm * 3.5 - rollRateNorm * 0.4) * authority * max(0.75, wing.bankResponseGain)).clamped(to: -1.0...1.0)
-                elevatorFraction = ((pitchErrorNorm * 3.5 - pitchRateNorm * 0.4) * authority * max(0.75, wing.climbResponseGain)).clamped(to: -1.0...1.0)
+                // Elevator trim: the integral term that removes the droop kP alone cannot.
+                //
+                // Raising kP 2.0 → 3.5 (see above) narrowed the steady-state error but could not
+                // remove it — it is a balance against cmAlpha, so *some* error is always needed to
+                // hold the surface. Measured on the eBee-class wing: 11° commanded, 7.9° achieved,
+                // which is 0.35 m/s of climb instead of 1.4. Integrating the residual gives the
+                // surface a standing deflection the way a real trim tab does, so the commanded
+                // attitude is actually reached. Slow (0.6/s at full error) so it never competes
+                // with the rate term for stability, and frozen while the surface is saturated
+                // (anti-windup).
+                //
+                // The ±0.65 bound is sized from the flight data, not guessed: the elevator holding
+                // 7.9° equals the P output at its 3.1° of error, which identifies the airframe's
+                // restoring stiffness at ~0.04 of full deflection per degree. Holding 11° then
+                // needs 0.44, and 15° — this wing's `maxPitchUpDeg` — needs 0.59. A tighter bound
+                // silently re-imposes the droop it exists to remove; ±0.65 covers the envelope and
+                // still leaves a third of the surface to the P and rate terms.
+                let unsaturatedElevator = (pitchErrorNorm * 3.5 - pitchRateNorm * 0.4)
+                    * authority * max(0.75, wing.climbResponseGain)
+                // The plain integrator, as first written.
+                //
+                // Gates were added later chasing a roll oscillation whose cause turned out to be
+                // elsewhere — manual flight inheriting a commanded bank at the launch handover.
+                // They were never shown to fix anything and measurably cost the correction this
+                // exists for: with them the aircraft settled at 11.5° against a steady 15°
+                // command. Frozen only while the surface saturates, which is ordinary anti-windup.
+                //
+                // The droop is real and measured: in the launch log the command was 15.0° and the
+                // attitude 6.6°, less than half — which is most of why a departure that should
+                // climb was arriving at the ground instead.
+                if abs(unsaturatedElevator) < 0.98 {
+                    next.elevatorTrim = (state.elevatorTrim + pitchErrorNorm * 0.6 * dt)
+                        .clamped(to: -0.65...0.65)
+                } else {
+                    next.elevatorTrim = state.elevatorTrim
+                }
+                elevatorFraction = (unsaturatedElevator + next.elevatorTrim).clamped(to: -1.0...1.0)
                 rudderFraction = desiredFixedWingRudderFraction(
                     control: control,
                     currentYaw: currentEuler.z,
@@ -740,10 +776,36 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             cnYaw * dynamicPressure * aero.wingArea * aero.wingSpan
         )
 
-        // --- Thrust: sized so motorThrottle == baseline.cruiseReferenceThrottle balances drag at cruise.
-        let (_, cdTrim) = aero.liftDrag(alphaRad: 0.0)
+        // --- Thrust: sized so motorThrottle == baseline.cruiseReferenceThrottle balances drag in
+        // *level* flight at cruise — which means the drag at the angle of attack that actually
+        // carries the weight, not the drag at alpha 0.
+        //
+        // Taking `liftDrag(alphaRad: 0)` left out the induced term entirely: at alpha 0 this wing
+        // barely lifts, so the figure was parasite drag alone and full throttle came out only
+        // ~2.2x it. Level flight at cruise needs parasite *plus* induced, so the real margin over
+        // cruise drag was a few per cent and the airframe could not climb — measured, the eBee-class
+        // wing held 17.6 m/s at 11° of pitch and gained 0.3 m/s while its own profile claims
+        // 4.5 m/s of ascent. Solving for the trim alpha restores the margin a real aircraft has,
+        // and it changes no published characteristic: mass, wing area, cd0, the induced-drag
+        // factor and the cruise-throttle baseline are all still exactly what the profile says.
         let cruiseSpeed = max(wing.cruiseSpeedMps, wing.minSustainableSpeedMps, 1.0)
-        let dragAtCruise = 0.5 * airDensity * cruiseSpeed * cruiseSpeed * aero.wingArea * cdTrim
+        let cruiseDynamicPressure = 0.5 * airDensity * cruiseSpeed * cruiseSpeed
+        let weightNewtons = mass * Tuning.gravity
+        // The lift curve is monotonic below stall, so a short bisection is exact enough and cannot
+        // wander into the post-stall branch.
+        var lowAlpha: Float = 0.0
+        var highAlpha: Float = 12.0 * Float.pi / 180.0
+        for _ in 0..<12 {
+            let midAlpha = (lowAlpha + highAlpha) * 0.5
+            let lift = cruiseDynamicPressure * aero.wingArea * aero.liftDrag(alphaRad: midAlpha).cl
+            if lift < weightNewtons {
+                lowAlpha = midAlpha
+            } else {
+                highAlpha = midAlpha
+            }
+        }
+        let (_, cdTrim) = aero.liftDrag(alphaRad: (lowAlpha + highAlpha) * 0.5)
+        let dragAtCruise = cruiseDynamicPressure * aero.wingArea * cdTrim
         let referenceThrottle = max(0.2, baseline.cruiseReferenceThrottle)
         let maxThrust = max(0.5, dragAtCruise / referenceThrottle) * batteryFactor
         let thrustMagnitude = (crashOrDisarmed ? 0.0 : motorThrottle) * maxThrust *
