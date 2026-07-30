@@ -1243,6 +1243,8 @@ final class DroneSimulationViewModel: ObservableObject {
     private var hudPublishAccumulator: Float = 0.0
     private var diagnosticsSamplingAccumulator: Float = 0.0
     private var wingTelemetryAccumulator: Float = 0.0
+    /// Reason string of the most recent flight-mode change, for the fixed-wing telemetry line.
+    private var lastFlightModeReason: String = "-"
     /// Assist mode the operator selected before the aircraft could accept it.
     private var pendingFixedWingAssistMode: FixedWingAssistMode?
     private var previousReplayArmedState: Bool = false
@@ -5617,7 +5619,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 wingTelemetryAccumulator = 0.0
                 print(String(
                     format: "[WingTick] mode=%@ y=%.1f speed=%.1f pitchCmd=%.1f pitchActual=%.1f "
-                        + "vy=%.2f rollCmd=%.1f roll=%.1f throttle=%.2f risk=%.2f obstacle=%@",
+                        + "vy=%.2f rollCmd=%.1f roll=%.1f throttle=%.2f risk=%.2f obstacle=%@ "
+                        + "why=%@ pending=%@",
                     mode.rawValue,
                     Double(state.position.y),
                     Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
@@ -5630,7 +5633,9 @@ final class DroneSimulationViewModel: ObservableObject {
                     Double(collisionAnalysis.riskScore),
                     (collisionAnalysis.nearestObstacleID.flatMap {
                         sceneController.obstacleSourceLabel(for: $0)
-                    } ?? "none") as NSString
+                    } ?? "none") as NSString,
+                    lastFlightModeReason as NSString,
+                    (pendingFixedWingAssistMode.map { "\($0)" } ?? "none") as NSString
                 ))
             }
         }
@@ -12154,6 +12159,10 @@ final class DroneSimulationViewModel: ObservableObject {
         guard mode != nextMode else {
             return
         }
+        // Recorded because guessing which of the six paths into manual actually fires has cost
+        // three misplaced fixes: a handover condition, a launch timeout gate and the pending-assist
+        // hook were each put on a path the aircraft never took.
+        lastFlightModeReason = reason
         mode = nextMode
         state.mode = nextMode
         lastModeTransitionReason = reason
@@ -14363,6 +14372,33 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         ensureSimulationRunning()
+
+        // Engaging the assist must never interrupt a launch.
+        //
+        // This is the third path into manual, and the one that was actually firing. Further down,
+        // engagement does `if mode != .manual { setFlightMode(.manual, "fixed_wing_assist_engaged") }`
+        // — which, mid-launch, *aborts the take-off*. The telemetry caught it exactly:
+        // `mode=takeoff why=takeoff_requested`, then one second later
+        // `mode=manual y=3.8 why=fixed_wing_assist_engaged`, and the wing was in the field two
+        // seconds after that. It also answers the operator's question of why the aircraft flies a
+        // clean departure with the autopilot off and dives with it on: the take-off controller was
+        // climbing steadily through 21 m in the good flight, and switching the assist on cut that
+        // short at whatever height the aircraft happened to have, handing it to an altitude hold
+        // that captured 3.8 m. The request is deferred to the same pending slot the planner uses.
+        // Also before the aircraft is flying at all — that is the case the operator actually hits.
+        //
+        // Pressing "intercept selected" on the pad passed the `isArmed` guard below, so the assist
+        // engaged there and then, on the ground; the launch reset promptly wiped
+        // `fixedWingAssistState` back to manual, and nothing was ever queued — the telemetry shows
+        // `pending=none` for the whole flight. The choice has to be *stored* rather than applied
+        // whenever it cannot survive: mid-launch, and equally on the ground before the launch.
+        // `engagePendingFixedWingAssistIfReady()` then applies it on the first tick where the
+        // aircraft is armed, airborne and in manual — no second trip through the planner.
+        if assistMode != .manual,
+           mode == .takeoff || launchState.blocksRouteCapture || physicalState != .airborne {
+            pendingFixedWingAssistMode = assistMode
+            return
+        }
 
         if assistMode == .manual {
             cancelTargetMarkerAutoNavigation()

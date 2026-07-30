@@ -446,16 +446,21 @@ final class FixedWingAutopilot {
         // every time it banks toward a waypoint.
         let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
         let commandedPitchRad: Float
+        // Same room for the compensation as in FixedWingAssistController: added and then clamped
+        // to the unchanged ceiling, the correction is discarded precisely in the turns that need
+        // it, because the altitude loop has already spent the budget. Raised by exactly the
+        // compensation — the clamp still bounds angle of attack.
+        let compensatedPitchUpRad = maxPitchUpRad + max(0.0, bankLiftLossRad)
         if useHybridVTOLCruiseStabilization {
             // This is a feed-forward correction, not an integral term. The
             // legacy fixed-wing path stores it for compatibility; hybrid VTOL
             // must keep it output-only or even a small sustained bank pumps
             // the saved pitch command to its upper limit in a few frames.
             commandedPitchRad = (state.filteredPitchRad + bankLiftLossRad)
-                .clamped(to: -maxPitchDownRad...maxPitchUpRad)
+                .clamped(to: -maxPitchDownRad...compensatedPitchUpRad)
         } else {
             state.filteredPitchRad = (state.filteredPitchRad + bankLiftLossRad)
-                .clamped(to: -maxPitchDownRad...maxPitchUpRad)
+                .clamped(to: -maxPitchDownRad...compensatedPitchUpRad)
             commandedPitchRad = state.filteredPitchRad
         }
 

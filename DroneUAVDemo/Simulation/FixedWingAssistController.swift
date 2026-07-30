@@ -259,8 +259,20 @@ final class FixedWingAssistController {
         // loss it's meant to cancel).
         let bankLiftLossDeg = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
             * Tuning.turnLiftCompensationGainDeg
+        // The clamp has to make room for the compensation, not eat it.
+        //
+        // Adding the compensation and then clamping to the same ceiling meant the two competed for
+        // one budget, and in a turn the altitude loop had already spent it: the flight log shows
+        // `pitchCmd` pinned at exactly 9.0 — `pitchUpClampDeg` — while the bank sat on its 28°
+        // limit, so all 4.0° that (1/cos 28° − 1) × 30 asks for were discarded at the very moment
+        // they were needed, and the altitude wandered 92 → 47 → 63 m. The ceiling now rises by
+        // exactly the compensation: 9° stays the altitude loop's budget and the cost of the turn
+        // is paid on top. Exactly the compensation and no more — the clamp also bounds angle of
+        // attack, and a nose held higher than the turn requires trades the altitude problem for a
+        // speed one.
+        let compensatedPitchCeiling = Tuning.pitchUpClampDeg + max(0.0, bankLiftLossDeg)
         filteredPitchDeg = (filteredPitchDeg + bankLiftLossDeg)
-            .clamped(to: -Tuning.pitchDownClampDeg...Tuning.pitchUpClampDeg)
+            .clamped(to: -Tuning.pitchDownClampDeg...compensatedPitchCeiling)
 
         let baselineThrottle = max(0.32, baseline.cruiseReferenceThrottle)
         let throttleAssist = altitudeError * Tuning.altitudeThrottleAssist
@@ -270,7 +282,11 @@ final class FixedWingAssistController {
         // Coordinated-turn drag compensation, applied post-filter — see FixedWingAutopilot.swift.
         let turnDragBoost = (1.0 / max(cos(filteredBankDeg.degreesToRadians), 0.5) - 1.0)
             * Tuning.turnThrottleCompensationGain
-        filteredThrottle = (filteredThrottle + turnDragBoost).clamped(to: 0.32...0.95)
+        // Same correction for power: the log had throttle sitting on 0.95 throughout the turn,
+        // so the drag compensation was being clipped off exactly as the pitch was.
+        let compensatedThrottleCeiling = min(1.0, 0.95 + max(0.0, turnDragBoost))
+        filteredThrottle = (filteredThrottle + turnDragBoost)
+            .clamped(to: 0.32...compensatedThrottleCeiling)
 
         // Waypoint intercept — track capture progress for auto-advance.
         nextState.distanceToActiveWaypointMeters = nil
