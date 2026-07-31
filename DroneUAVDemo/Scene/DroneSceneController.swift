@@ -1488,6 +1488,55 @@ final class DroneSceneController {
         applyHandLaunchPOVAngles()
     }
 
+    /// Closest spot to a map-drafted start that an aircraft may actually occupy.
+    ///
+    /// The tactical map is a flat plan: a tap carries no information about what stands at that
+    /// spot, so it can land inside a building or under a road deck. Judged by the same
+    /// `WorldSpawnFinder` criteria the world's own start point is chosen with, except that rooftops
+    /// count — a tap on a building is read as a request to launch *from* it, not beside it. Nil when
+    /// the world is procedural (no imported collision to consult) or nothing legal is near.
+    @MainActor
+    func nearestValidLaunchPoint(near planarPosition: SIMD2<Float>) -> SIMD2<Float>? {
+        guard let world = installedWorld else { return nil }
+        let finder = WorldSpawnFinder(collision: world.collision, water: world.water)
+        // A tap on a building is a request for its roof, and it is asked first: the ordinary snap
+        // judges a roof by street-level clearance rules and would send the operator down to the
+        // pavement beside the building he picked.
+        let roof = finder.rooftopStart(at: planarPosition)
+        guard let point = roof ?? finder.nearestValidPoint(
+            to: planarPosition,
+            allowElevated: true
+        ) else { return nil }
+        return SIMD2<Float>(point.x, point.z)
+    }
+
+    /// Walks the first-person operator over to a newly drafted launch point.
+    ///
+    /// `activateHandLaunchPOV` sets the eye position **on entry only** — afterwards the operator
+    /// walks himself — and re-entry is a no-op while the view is up. So moving the start on the
+    /// tactical map left him standing at the old spot, and with him the airframe: its hold point
+    /// is `handLaunchPOVCradlePoint()`, which rides this camera rather than the drafted position.
+    /// Look angles are deliberately untouched — the operator keeps facing where he was aiming.
+    func relocateHandLaunchPOVOperator(
+        to planarPosition: SIMD2<Float>,
+        releaseHeightMeters: Float
+    ) {
+        guard isHandLaunchPOVActive else {
+            return
+        }
+        let supportY = supportSurfaceHeight(
+            at: planarPosition,
+            clearanceRadius: 0.28,
+            maximumHeight: .greatestFiniteMagnitude
+        ) ?? launchGroundFallbackY
+        handLaunchPOVCameraNode.simdPosition = SIMD3<Float>(
+            planarPosition.x,
+            supportY + releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease,
+            planarPosition.y
+        )
+        applyHandLaunchPOVAngles()
+    }
+
     /// Hold point of the airframe in the operator's hand, in world space —
     /// rides the gaze ray so hand, aircraft and view stay glued together.
     func handLaunchPOVCradlePoint() -> SIMD3<Float>? {
@@ -1534,26 +1583,65 @@ final class DroneSceneController {
         let yaw = handLaunchPOVLookAngles.x
         let forwardDir = SIMD2<Float>(-sin(yaw), -cos(yaw))
         let rightDir = SIMD2<Float>(cos(yaw), -sin(yaw))
-        var planar = SIMD2<Float>(
+        let origin = SIMD2<Float>(
             handLaunchPOVCameraNode.simdPosition.x,
             handLaunchPOVCameraNode.simdPosition.z
         )
-        planar += (forwardDir * clamped.y + rightDir * clamped.x) * speed * deltaTime
+        let eyeAboveFoot = hand.releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease
+        let footY = handLaunchPOVCameraNode.simdPosition.y - eyeAboveFoot
+
+        let step = (forwardDir * clamped.y + rightDir * clamped.x) * speed * deltaTime
+        let stepLength = simd_length(step)
+        guard stepLength > 0.0001 else {
+            return
+        }
+
+        // Walls. The step used to be applied unconditionally, so walking into a facade carried the
+        // operator inside the building — and the airframe with him, since its hold point rides this
+        // camera. Probed at chest height, which is what a wall blocks; a kerb or a bollard below
+        // that is handled by the step-up limit instead.
+        if let meshCollision {
+            let probeOrigin = SIMD3<Float>(origin.x, footY + Self.handLaunchPOVChestHeight, origin.y)
+            let direction = simd_normalize(SIMD3<Float>(step.x, 0.0, step.y))
+            if meshCollision.raycast(
+                origin: probeOrigin,
+                direction: direction,
+                maxDistance: stepLength + Self.handLaunchPOVShoulderMargin
+            ) != nil {
+                return
+            }
+        }
+
+        var planar = origin + step
         let bound = max(4.0, worldHalfExtent - 2.0)
         planar.x = planar.x.clamped(to: -bound...bound)
         planar.y = planar.y.clamped(to: -bound...bound)
 
+        // Ceiling on the support probe. Searching from the sky takes the *highest* surface in the
+        // column, which beside a building is its roof — the operator was lifted to roof height and
+        // left standing in mid-air. Capping the search just above his own feet keeps him on the
+        // surface he is walking on: he may step up a kerb, never up a facade. Descent is left
+        // unbounded so a walk off an edge lands him on the street rather than stranding him.
         let supportY = supportSurfaceHeight(
             at: planar,
             clearanceRadius: 0.28,
-            maximumHeight: .greatestFiniteMagnitude
+            maximumHeight: footY + Self.handLaunchPOVStepUpLimit
         ) ?? launchGroundFallbackY
         handLaunchPOVCameraNode.simdPosition = SIMD3<Float>(
             planar.x,
-            supportY + hand.releaseHeightMeters + LaunchRigMetrics.handEyeAboveRelease,
+            supportY + eyeAboveFoot,
             planar.y
         )
     }
+
+    /// Height the wall probe is cast at — above kerbs and bollards, below a doorway lintel.
+    private static let handLaunchPOVChestHeight: Float = 1.1
+    /// How far ahead of the step a wall still counts, so the operator stops short of the facade
+    /// instead of ending the step with his eyes inside it.
+    private static let handLaunchPOVShoulderMargin: Float = 0.45
+    /// Tallest rise the operator may walk up in one step. A kerb, a ramp or a low plinth passes; a
+    /// wall and a rooftop do not.
+    private static let handLaunchPOVStepUpLimit: Float = 0.9
 
     func deactivateHandLaunchPOV() {
         guard isHandLaunchPOVActive else {
@@ -5022,9 +5110,17 @@ final class DroneSceneController {
         // query starts from `maximumHeight` rather than from the sky so that standing under a
         // bridge or an arcade finds the deck above only when the caller asked to look that high.
         if let meshCollision {
+            // Never cast from higher than the world's own sky. Callers say "look as high as you
+            // like" with `.greatestFiniteMagnitude`, and that is *finite* — so the sky branch below
+            // was never taken and the ray was fired from 3.4e38 metres up. At that magnitude a
+            // Float's own step is ~1e31 m, so the ray had no usable precision left by the time it
+            // reached the city: the probe returned nil and every caller silently fell back to its
+            // default ground height. That is why a launch point snapped onto a 21 m roof put the
+            // operator down at street level.
+            let skyCeiling = meshCollision.bounds.maximum.y + 10.0
             let ceiling = maximumHeight.isFinite
-                ? maximumHeight + 0.08
-                : meshCollision.bounds.maximum.y + 10.0
+                ? min(maximumHeight + 0.08, skyCeiling)
+                : skyCeiling
             if let surface = meshCollision.surfaceHeight(
                 x: planarPosition.x,
                 z: planarPosition.y,

@@ -48,39 +48,10 @@ struct WorldSpawnFinder {
                 let angle = Float(sample) / Float(samples) * 2 * .pi
                 let x = centre.x + cos(angle) * radius
                 let z = centre.z + sin(angle) * radius
-                guard let surface = collision.highestSurface(x: x, z: z) else { continue }
-                guard surface > minimumSurface else { continue }
-
-                // Level: the four neighbours must sit at a similar height.
-                var levelEnough = true
-                for offset in [SIMD2<Float>(clearanceRadius, 0), SIMD2<Float>(-clearanceRadius, 0),
-                               SIMD2<Float>(0, clearanceRadius), SIMD2<Float>(0, -clearanceRadius)] {
-                    guard let neighbour = collision.highestSurface(x: x + offset.x, z: z + offset.y),
-                          abs(neighbour - surface) < 0.6 else {
-                        levelEnough = false
-                        break
-                    }
+                guard let candidate = evaluate(x: x, z: z, clearanceRadius: clearanceRadius) else {
+                    continue
                 }
-                guard levelEnough else { continue }
-
-                // Headroom: nothing directly overhead for a comfortable climb-out.
-                let overhead = collision.raycast(
-                    origin: SIMD3<Float>(x, surface + 1.0, z),
-                    direction: SIMD3<Float>(0, 1, 0),
-                    maxDistance: 45
-                )
-                guard overhead == nil else { continue }
-
-                guard footprintSpread(x: x, z: z, surface: surface) <= Self.maximumFootprintSpread else { continue }
-                let survey = surroundings(x: x, z: z, surface: surface)
-                guard survey.openness >= Self.minimumLateralClearance else { continue }
-                candidates.append(
-                    Candidate(
-                        point: SIMD3<Float>(x, surface, z),
-                        openness: survey.openness,
-                        standsAbove: surface - survey.lowestNeighbour
-                    )
-                )
+                candidates.append(candidate)
                 // Keep looking until there are enough *ground-level* options, not merely enough
                 // options: the first candidates found are near the tile centre, which in a city
                 // centre means rooftops, and stopping there is what parked the launch pad 19 m up.
@@ -90,6 +61,153 @@ struct WorldSpawnFinder {
         }
         return bestCandidate(candidates)
     }
+
+    /// Every criterion a start point must satisfy, applied to one spot.
+    ///
+    /// Factored out of `find()` unchanged so that a point the *operator* picks is judged by exactly
+    /// the same rules as one the search picks — there is no second, laxer standard for manual
+    /// placement, which is how an operator ends up standing inside a building.
+    func evaluate(
+        x: Float,
+        z: Float,
+        clearanceRadius: Float = 3.0,
+        minimumClearance: Float = WorldSpawnFinder.minimumLateralClearance
+    ) -> Candidate? {
+        guard let surface = collision.highestSurface(x: x, z: z) else { return nil }
+        guard surface > minimumSurface else { return nil }
+
+        // Level: the four neighbours must sit at a similar height.
+        for offset in [SIMD2<Float>(clearanceRadius, 0), SIMD2<Float>(-clearanceRadius, 0),
+                       SIMD2<Float>(0, clearanceRadius), SIMD2<Float>(0, -clearanceRadius)] {
+            guard let neighbour = collision.highestSurface(x: x + offset.x, z: z + offset.y),
+                  abs(neighbour - surface) < 0.6 else {
+                return nil
+            }
+        }
+
+        // Headroom: nothing directly overhead for a comfortable climb-out.
+        guard collision.raycast(
+            origin: SIMD3<Float>(x, surface + 1.0, z),
+            direction: SIMD3<Float>(0, 1, 0),
+            maxDistance: 45
+        ) == nil else { return nil }
+
+        guard footprintSpread(x: x, z: z, surface: surface) <= Self.maximumFootprintSpread else {
+            return nil
+        }
+        let survey = surroundings(x: x, z: z, surface: surface)
+        guard survey.openness >= minimumClearance else { return nil }
+
+        return Candidate(
+            point: SIMD3<Float>(x, surface, z),
+            openness: survey.openness,
+            standsAbove: surface - survey.lowestNeighbour
+        )
+    }
+
+    /// Nearest spot to `preferred` that a start may actually occupy, or nil if there is none close by.
+    ///
+    /// The tactical map lets the operator put the start anywhere he can click, including inside a
+    /// building or under a road deck — the map is a flat plan and says nothing about what stands
+    /// there. Rather than refuse the click, it is snapped to the closest legal spot.
+    ///
+    /// `allowElevated` decides what a tap on a building means. The automatic search must stay on the
+    /// ground (a start parked 19 m up on a roof nobody chose is a defect, and the reason
+    /// `isGroundLevel` exists), but an operator who taps a building is *asking* for its roof — and in
+    /// a dense city that is the better answer: Lower Manhattan measured **zero** clear departure
+    /// headings of 24 at street level, its streets being narrower than the aircraft's turn radius,
+    /// while a rooftop starts above most of what blocks them. The roof still has to pass every other
+    /// test — flat, open, with headroom — so a pitched roof, a parapet edge or a light well is
+    /// rejected exactly as before and the search moves on to the next candidate.
+    func nearestValidPoint(
+        to preferred: SIMD2<Float>,
+        clearanceRadius: Float = 3.0,
+        searchRadius: Float = 160.0,
+        ringStep: Float = 6.0,
+        allowElevated: Bool = false
+    ) -> SIMD3<Float>? {
+        var best: (point: SIMD3<Float>, distance: Float)?
+        var radius: Float = 0
+
+        while radius <= searchRadius {
+            // Once anything legal is found, only the rest of this ring can still be nearer.
+            if let best, best.distance < radius - ringStep { return best.point }
+
+            let samples = radius < 0.5 ? 1 : max(8, Int(radius / 6.0) * 8)
+            for sample in 0..<samples {
+                let angle = Float(sample) / Float(samples) * 2 * .pi
+                let x = preferred.x + cos(angle) * radius
+                let z = preferred.y + sin(angle) * radius
+                guard let candidate = evaluate(x: x, z: z, clearanceRadius: clearanceRadius),
+                      allowElevated || candidate.isGroundLevel else { continue }
+                let distance = simd_distance(SIMD2<Float>(x, z), preferred)
+                if best == nil || distance < best!.distance {
+                    best = (candidate.point, distance)
+                }
+            }
+            radius += ringStep
+        }
+        return best?.point
+    }
+
+    /// The roof of the building the operator tapped, or nil if he tapped no building — or if that
+    /// roof cannot hold a start.
+    ///
+    /// Tried *before* the ordinary snap, because the ordinary snap answers a different question. Its
+    /// lateral-clearance floor exists to reject a six-metre light well at street level, and applied
+    /// to a roof it rejects any mid-rise standing among towers — which is most of a financial
+    /// district. The result was the opposite of what the tap asked for: the operator picked a
+    /// building and was set down on the street beside it. On a roof the clearance that matters is
+    /// *overhead*, not lateral: the aircraft leaves above the parapet with nothing but sky in front.
+    /// So openness drops to a figure that only rejects a narrow ledge, while flatness, headroom and
+    /// footprint spread are enforced exactly as on the ground.
+    ///
+    /// Searched over a short radius rather than at the tap alone: a tap near a parapet fails the
+    /// levelness test — its neighbours are the street far below — and the fix is to step inboard,
+    /// not to give up. Candidates are held to the tapped roof's own height so the search cannot
+    /// quietly deliver the pavement below.
+    func rooftopStart(
+        at preferred: SIMD2<Float>,
+        clearanceRadius: Float = 3.0,
+        searchRadius: Float = 45.0,
+        ringStep: Float = 3.0
+    ) -> SIMD3<Float>? {
+        guard let roofLevel = collision.highestSurface(x: preferred.x, z: preferred.y) else {
+            return nil
+        }
+        // Something that stands well above its own surroundings is a building; anything else is
+        // ground, and ground is the ordinary snap's business.
+        let survey = surroundings(x: preferred.x, z: preferred.y, surface: roofLevel)
+        guard roofLevel - survey.lowestNeighbour > Self.groundLevelTolerance else { return nil }
+
+        var radius: Float = 0
+        while radius <= searchRadius {
+            let samples = radius < 0.5 ? 1 : max(8, Int(radius / 3.0) * 8)
+            for sample in 0..<samples {
+                let angle = Float(sample) / Float(samples) * 2 * .pi
+                let x = preferred.x + cos(angle) * radius
+                let z = preferred.y + sin(angle) * radius
+                guard let candidate = evaluate(
+                    x: x,
+                    z: z,
+                    clearanceRadius: clearanceRadius,
+                    minimumClearance: Self.rooftopLateralClearance
+                ) else { continue }
+                // Same roof, not the street below or a neighbour's parapet.
+                guard abs(candidate.point.y - roofLevel) <= Self.rooftopHeightTolerance else { continue }
+                return candidate.point
+            }
+            radius += ringStep
+        }
+        return nil
+    }
+
+    /// Lateral room a rooftop start needs. Far below the ground figure on purpose — see
+    /// `rooftopStart` — and non-zero only so a narrow ledge or a lift overrun's shoulder is refused.
+    static let rooftopLateralClearance: Float = 3.0
+
+    /// How far a rooftop candidate may sit from the height of the roof that was tapped.
+    static let rooftopHeightTolerance: Float = 2.0
 
     /// A start point must have room *around* it, not just above it.
     ///

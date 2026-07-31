@@ -43,6 +43,7 @@ final class MissionAutopilotAdapter {
     func resolvedTravelAltitude(
         for plan: MissionPlan?,
         baselineAltitude: Float,
+        launchAltitude: Float,
         terrainMaxAltitude: Float
     ) -> Float {
         guard let plan else {
@@ -50,6 +51,7 @@ final class MissionAutopilotAdapter {
         }
         return plan.constraints.clampedMissionAltitude(
             baselineAltitude,
+            launchAltitude: launchAltitude,
             terrainMaxAltitude: terrainMaxAltitude
         )
     }

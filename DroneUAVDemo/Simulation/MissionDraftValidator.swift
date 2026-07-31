@@ -92,7 +92,10 @@ final class MissionDraftValidator {
                 terrainMaxAltitude: executionCeiling,
                 airframeClass: viewport.airframeClass
             )
-            let altitudeWindow = draft.constraints.altitude.clamped(to: executionCeiling)
+            let altitudeWindow = draft.constraints.altitude.absolute(
+                launchAltitude: viewport.dockAltitudeMeters,
+                terrainMaxAltitude: executionCeiling
+            )
             if baselineAltitude < altitudeWindow.lowerBound - 0.05 ||
                 baselineAltitude > altitudeWindow.upperBound + 0.05 {
                 issues.append(

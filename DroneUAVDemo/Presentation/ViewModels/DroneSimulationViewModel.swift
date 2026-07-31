@@ -1242,7 +1242,56 @@ final class DroneSimulationViewModel: ObservableObject {
     private var telemetrySamplingAccumulator: Float = 0.0
     private var hudPublishAccumulator: Float = 0.0
     private var diagnosticsSamplingAccumulator: Float = 0.0
+    private var fixedWingAssistCruiseCache: (waypointID: UUID?, altitude: Float)?
+    /// True from arming on the ground until the aircraft first reaches its leg's cruise altitude —
+    /// the window in which the assist flies the departure corridor instead of turning on course.
+    private var fixedWingAssistClimbOutLatched = false
+    /// Altitude the current climb-out began at — the departure segment is measured from there,
+    /// not from the leg's cruise altitude.
+    private var fixedWingClimbOutStartAltitude: Float?
+    /// Whether the assist held waypoint-intercept on the previous tick — the departure phase is
+    /// armed on the transition into it, wherever the aircraft happens to be.
+    private var fixedWingAssistWasIntercepting = false
+    /// Heading offset the wing is currently flying to clear an obstacle, in radians.
+    private var fixedWingAvoidanceHeadingOffset: Float?
+    /// True when the forward corridor is blocked and every flyable candidate arc also intersects
+    /// an obstacle. In that case avoidance must not turn the aircraft onto a merely "least bad"
+    /// collision course.
+    private var fixedWingAvoidanceNoSafeTrajectory = false
+    /// Absolute escape course chosen for the current obstacle. Keeping this in world space is
+    /// intentional: recomputing an offset from the changing nose heading made the "best" side
+    /// alternate left/right on successive ticks.
+    private var fixedWingAvoidanceCourseRadians: Float?
+    /// Side retained through the whole escape. It may be replaced for a later obstacle, but never
+    /// while the current corridor is still being cleared.
+    private var fixedWingAvoidanceTurnSign: Float?
+    /// The clear corridor must remain clear for a few seconds before waypoint guidance is allowed
+    /// to pull the aircraft back toward the obstacle it has just avoided.
+    private var fixedWingAvoidanceClearSinceTime: Float?
+    /// The assist and the collision ladder can both ask for avoidance in one simulation tick.
+    /// Cache that decision so the second caller cannot immediately re-plan it.
+    private var fixedWingAvoidanceEvaluationTick: UInt64?
+    private var fixedWingAvoidanceCachedTarget: SIMD2<Float>?
+    private var fixedWingAvoidancePredictedTurnRadiusMeters: Float?
+    #if DEBUG
+    /// How many times a guidance path actually commanded the airframe in the last second.
+    private var fixedWingGuidanceCallsThisSecond = 0
+    #endif
     private var wingTelemetryAccumulator: Float = 0.0
+    /// Escape course held across ticks so avoidance and guidance cannot alternate on the same axis.
+    private var fixedWingAvoidanceHoldCourse: Float?
+    private var fixedWingAvoidanceHoldRemaining: Float = 0.0
+    /// Which side the current detour commits to; a new solution on the other side is ignored
+    /// until the hold lapses.
+    private var fixedWingAvoidanceHoldSign: Int = 0
+    /// Filtered lateral bias the avoidance lays on top of guidance, in degrees of bank.
+    private var fixedWingAvoidanceBiasDegrees: Float = 0.0
+    /// The bias actually written into `controlValues.roll` last tick, removed before the next one
+    /// is applied so the offset cannot integrate.
+    private var fixedWingAvoidanceAppliedBiasDegrees: Double = 0.0
+    /// Whether the applied escape course was taken fresh this tick or carried over. Six attempts at
+    /// this commitment produced no measurable change; this says which branch actually runs.
+    private var fixedWingAvoidanceHoldWasFresh = true
     /// Reason string of the most recent flight-mode change, for the fixed-wing telemetry line.
     private var lastFlightModeReason: String = "-"
     /// Assist mode the operator selected before the aircraft could accept it.
@@ -3318,11 +3367,17 @@ final class DroneSimulationViewModel: ObservableObject {
                 refreshTacticalMapState()
                 return
             }
+            // A tap on a flat plan says nothing about what stands there, so it lands inside blocks
+            // and under road decks as readily as on a street. Snap it to the nearest spot an
+            // aircraft may actually occupy before anything — rig, operator, airframe — is moved onto
+            // it. An untouched value means the world is procedural or nothing legal is within reach.
+            let launchPosition = sceneController.nearestValidLaunchPoint(near: planarPosition)
+                ?? planarPosition
             launchPadPlacedByOperator = true
             let heading = workingTacticalMissionDraft.launchObject?.headingDegrees ??
-                initialLaunchHeadingDegrees(from: planarPosition)
+                initialLaunchHeadingDegrees(from: launchPosition)
             workingTacticalMissionDraft = missionDraftBuilder.upsertLaunchObject(
-                at: planarPosition,
+                at: launchPosition,
                 headingDegrees: heading,
                 type: launchObjectType,
                 in: workingTacticalMissionDraft,
@@ -3347,6 +3402,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         invalidatePreparedMissionIfNeeded()
+        if tacticalMapMode == .launchObject {
+            applyLaunchObjectPlacement()
+        }
         refreshTacticalMapState()
     }
 
@@ -3366,6 +3424,7 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         tacticalMapMode = launchMode.requiresLaunchObject ? .launchObject : .waypoint
         invalidatePreparedMissionIfNeeded()
+        applyLaunchObjectPlacement()
         refreshTacticalMapState()
     }
 
@@ -3381,6 +3440,7 @@ final class DroneSimulationViewModel: ObservableObject {
             in: workingTacticalMissionDraft
         )
         invalidatePreparedMissionIfNeeded()
+        applyLaunchObjectPlacement()
         refreshTacticalMapState()
     }
 
@@ -3396,6 +3456,7 @@ final class DroneSimulationViewModel: ObservableObject {
             in: workingTacticalMissionDraft
         )
         invalidatePreparedMissionIfNeeded()
+        applyLaunchObjectPlacement()
         refreshTacticalMapState()
     }
 
@@ -3443,7 +3504,62 @@ final class DroneSimulationViewModel: ObservableObject {
             from: workingTacticalMissionDraft
         )
         invalidatePreparedMissionIfNeeded()
+        applyLaunchObjectPlacement()
         refreshTacticalMapState()
+    }
+
+    /// Applies a start-point edit to the world at once: commits it, then moves the aircraft onto it.
+    ///
+    /// Placing the start is a direct manipulation, not a plan edit, but it used to reach the world
+    /// only through the draft's save gate — and that gate is `canSave`, which stays false until a
+    /// route preview exists. A draft holding nothing but a pad therefore could never be saved, so
+    /// the pad moved on the map (`activeLaunchDraft()` reads the *working* draft while the map is
+    /// open) and snapped back the moment the map closed and the *committed* draft took over. Only
+    /// the launch fields cross over; waypoints and zones keep their draft semantics and still need
+    /// an explicit save.
+    ///
+    /// Moving the rig is only half of it — the airframe rides the rig, and leaving it behind is what
+    /// the operator sees as "the pad moved, the aircraft did not". It is re-seated here rather than
+    /// waiting for the launch, which is the first moment `currentSpawnPoint()` was consulted before.
+    /// Must run *after* `invalidatePreparedMissionIfNeeded()`: `activeLaunchObject()` prefers the
+    /// prepared plan's launch object, so seating before the plan is dropped uses the old point.
+    private func applyLaunchObjectPlacement() {
+        committedTacticalMissionDraft.selectedLaunchMode = workingTacticalMissionDraft.selectedLaunchMode
+        committedTacticalMissionDraft.launchObject = workingTacticalMissionDraft.launchObject
+
+        // Only an airframe at rest may be teleported: doing this to one in the air would be a crash
+        // dressed as an edit.
+        guard missionExecutionState.status != .running,
+              missionExecutionState.status != .paused,
+              physicalState != .crashed,
+              launchCradleHoldActive ||
+                physicalState.isGroundRestState ||
+                heightAboveSupportSurface(for: state.position) <= 0.08 else {
+            return
+        }
+
+        // The first-person operator is the anchor for a hand launch — the aircraft hangs off his
+        // camera, not off the drafted point — so he has to walk to the new start before the
+        // airframe is seated, or it would be re-pinned to where he was still standing.
+        if case .handLaunch(let hand)? = activeLaunchAsset() {
+            sceneController.relocateHandLaunchPOVOperator(
+                to: hand.position,
+                releaseHeightMeters: hand.releaseHeightMeters
+            )
+        }
+
+        if seatAircraftInLaunchCradleIfAvailable() {
+            return
+        }
+
+        // No launch equipment (the start was just cleared, or the aircraft launches unaided): fall
+        // back to whatever `currentSpawnPoint()` now resolves to, which is the dock.
+        let spawn = currentSpawnPoint()
+        state.position = spawn
+        state.velocity = .zero
+        state.angularVelocity = .zero
+        homePosition = spawn
+        lastFiniteState = state
     }
 
     func removeLastTacticalWaypoint() {
@@ -5605,6 +5721,99 @@ final class DroneSimulationViewModel: ObservableObject {
 
         handleAutoCollisionInterventions(deltaTime: dt)
 
+        // Evaluate avoidance every tick for a fixed wing, not only when the assist happens to be
+        // steering.
+        //
+        // Hooked inside the assist branch it never ran during `mode == .takeoff` — the whole
+        // departure, which on an open-data city is exactly when it matters. The log shows the cost:
+        // `avoid=clear turnR=-1` (never evaluated) for the entire launch, then `avoid=blocked` on
+        // the first tick of manual flight, and a building at 200 J immediately after. Evaluating
+        // here keeps the reading honest and lets the result be acted on the moment steering is
+        // available. The call caches per tick, so the assist path below reuses this result.
+        if selectedDroneProfile.airframeClass == .fixedWing,
+           let wing = selectedDroneProfile.fixedWingParameters,
+           physicalState == .airborne {
+            // Hold the escape course briefly after it clears.
+            //
+            // Avoidance and guidance were writing the same axis on alternating ticks: whichever
+            // had an opinion that tick won, and the flight log shows the result as `rollCmd`
+            // changing sign almost every second — −2, +12, −10, +2, −28, +24, +28, −24, +40 — with
+            // the bank reaching ±44° until the airspeed bled from 20 to 10.6 m/s and the aircraft
+            // fell out of the sky. `avoid=clear` on many of those very ticks: the aircraft was not
+            // dodging anything, it was being fought over. One controller has to own the axis for
+            // longer than a single tick, so the escape course persists for a second after the
+            // threat reads clear, and guidance resumes only once that has expired.
+            if let avoidanceTarget = fixedWingForwardAvoidanceTarget(wing: wing) {
+                // Commit to a side; do not re-pick it every tick.
+                //
+                // With the hold in place the two controllers stopped fighting, and the log then
+                // showed the remaining half of the problem: the escape *offset itself* alternated
+                // sign every single sample — −30, +20, −31, +28, −31, +27, −27, +18, −20 — because
+                // a fresh solution is computed each tick and the two sides of an obstacle score
+                // almost identically. Refreshing the held target on every solution dutifully
+                // adopted each flip. A detour side, once chosen, is kept until the hold lapses:
+                // an aeroplane that changes its mind about which way to pass a building flies into
+                // it, which is the documented failure mode this commitment exists to prevent.
+                // Hold the escape *course*, not a point in the world.
+                //
+                // Holding a fixed point is self-defeating: the aircraft turns toward it, overshoots
+                // it, and the bearing to that same point reverses — so the bank command flips sign
+                // by construction, which is what the log kept showing (rollCmd −25, +21, −2, −30,
+                // +30, −18 …) even with the side committed. A course does not reverse when the
+                // aircraft reaches it; it simply stops asking for bank.
+                let newCourse = fixedWingCourseRadians(from: avoidanceTarget - currentPlanarPosition())
+                // Sign taken from the returned course, not from `fixedWingAvoidanceHeadingOffset`.
+                // That variable is the probe's own diagnostic reading, not necessarily the side of
+                // the target actually handed back, so committing on it compared the wrong two
+                // things and let the opposite side through.
+                let newSign = shortestAngleRadians(newCourse - state.orientation.z) < 0.0 ? -1 : 1
+                let holdActive = fixedWingAvoidanceHoldRemaining > 0.0
+                    && fixedWingAvoidanceHoldCourse != nil
+                if !holdActive || newSign == fixedWingAvoidanceHoldSign {
+                    fixedWingAvoidanceHoldCourse = newCourse
+                    fixedWingAvoidanceHoldSign = newSign
+                    fixedWingAvoidanceHoldWasFresh = true
+                } else {
+                    fixedWingAvoidanceHoldWasFresh = false
+                }
+                fixedWingAvoidanceHoldRemaining = 1.0
+            } else {
+                fixedWingAvoidanceHoldRemaining = max(0.0, fixedWingAvoidanceHoldRemaining - dt)
+            }
+            if fixedWingAvoidanceHoldRemaining > 0.0, let heldCourse = fixedWingAvoidanceHoldCourse {
+                // Rebuilt from the current position every tick, so the aircraft flies *along* the
+                // committed course instead of chasing a receding point.
+                let heading = SIMD2<Float>(-sin(heldCourse), -cos(heldCourse))
+                applyFixedWingCollisionAvoidance(
+                    target: currentPlanarPosition() + heading * 200.0,
+                    wing: wing,
+                    deltaTime: dt
+                )
+            } else {
+                // Fade the bias out through the same filter instead of dropping it.
+                //
+                // Removing it in one step was a second weave source of my own making: `avoid`
+                // flickers between a solution and `blocked` as the aircraft moves, so the hold
+                // toggled off/fresh/off and each transition slammed up to 22° of bank in or out
+                // on an otherwise straight leg. A first-order fade in *and* out means the axis
+                // never sees a step, whatever the probe does tick to tick.
+                fixedWingAvoidanceHoldCourse = nil
+                if abs(fixedWingAvoidanceAppliedBiasDegrees) > 0.05 {
+                    let alpha = 1.0 - exp(-max(0.0001, dt) / 0.45)
+                    fixedWingAvoidanceBiasDegrees -= fixedWingAvoidanceBiasDegrees * alpha
+                    let previous = fixedWingAvoidanceAppliedBiasDegrees
+                    let faded = Double(fixedWingAvoidanceBiasDegrees)
+                    fixedWingAvoidanceAppliedBiasDegrees = faded
+                    updateControlValues({ $0.roll += faded - previous }, markManual: false)
+                } else if fixedWingAvoidanceAppliedBiasDegrees != 0.0 {
+                    let residual = fixedWingAvoidanceAppliedBiasDegrees
+                    fixedWingAvoidanceAppliedBiasDegrees = 0.0
+                    fixedWingAvoidanceBiasDegrees = 0.0
+                    updateControlValues({ $0.roll -= residual }, markManual: false)
+                }
+            }
+        }
+
         #if DEBUG
         // Fixed-wing pitch telemetry, once a second.
         //
@@ -5620,7 +5829,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 print(String(
                     format: "[WingTick] mode=%@ y=%.1f speed=%.1f pitchCmd=%.1f pitchActual=%.1f "
                         + "vy=%.2f rollCmd=%.1f roll=%.1f throttle=%.2f risk=%.2f obstacle=%@ "
-                        + "why=%@ pending=%@",
+                        + "why=%@ pending=%@ avoid=%@ turnR=%.0f hold=%@ heldCrs=%.0f",
                     mode.rawValue,
                     Double(state.position.y),
                     Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
@@ -5635,7 +5844,15 @@ final class DroneSimulationViewModel: ObservableObject {
                         sceneController.obstacleSourceLabel(for: $0)
                     } ?? "none") as NSString,
                     lastFlightModeReason as NSString,
-                    (pendingFixedWingAssistMode.map { "\($0)" } ?? "none") as NSString
+                    (pendingFixedWingAssistMode.map { "\($0)" } ?? "none") as NSString,
+                    (fixedWingAvoidanceHeadingOffset
+                        .map { String(format: "%+.0f", $0.radiansToDegrees) }
+                        ?? (fixedWingAvoidanceNoSafeTrajectory ? "blocked" : "clear")) as NSString,
+                    Double(fixedWingAvoidancePredictedTurnRadiusMeters ?? -1.0),
+                    (fixedWingAvoidanceHoldCourse == nil
+                        ? "off"
+                        : (fixedWingAvoidanceHoldWasFresh ? "fresh" : "held")) as NSString,
+                    Double((fixedWingAvoidanceHoldCourse ?? 0.0).radiansToDegrees)
                 ))
             }
         }
@@ -7172,6 +7389,15 @@ final class DroneSimulationViewModel: ObservableObject {
                         ? Double(assistOutput.state.targetAltitudeMeters ?? state.position.y)
                         : Double(state.position.y)
 
+                    // Avoidance owns roll while its hold is live.
+                    //
+                    // This write is the one that was undoing it. During take-off the assist does
+                    // not run, avoidance is the only writer, and its command is smooth and
+                    // convergent — +7.9, +5.0, +2.8, +1.9, +1.4. The instant this branch takes
+                    // over, the *same* held course (heldCrs pinned at −153°) produces +21.6,
+                    // +37.2, −40.0: not the avoidance formula at all, but the assist steering to
+                    // its waypoint on top of it. Two writers, last one wins, and the aircraft
+                    // weaves between their opinions.
                     updateControlValues({ values in
                         values.throttle = desiredThrottle.clamped(to: 0.0...1.0)
                         values.roll = desiredRoll.clamped(to: -rollLimit...rollLimit)
@@ -9693,6 +9919,308 @@ final class DroneSimulationViewModel: ObservableObject {
         activateFixedWingAssist(pending)
     }
 
+    /// Bank the avoidance may assume when predicting a turn.
+    ///
+    /// Not the profile's unrestricted maximum: while the altitude controller is holding the real
+    /// aircraft to 15-18°, assuming the full envelope underestimated the turn radius by roughly a
+    /// factor of three, and the aircraft committed to gaps it could not physically make.
+    /// Steers the aeroplane away, rather than swapping the guidance target.
+    ///
+    /// Substituting `interceptTarget` was the wrong integration and the flight log shows exactly
+    /// why: on a tick where no safe course exists the substitution falls back to the waypoint, so
+    /// the command flipped `blocked → −30° → blocked` and `rollCmd` slammed +18 → −0.3 → +24.6 →
+    /// −12.6 → −27.5 until the aircraft was uncontrollable. Avoidance owns roll, course, pitch
+    /// floor and power directly while it is active — an aeroplane escapes a street canyon with all
+    /// four, not with a different waypoint.
+    private func applyFixedWingCollisionAvoidance(
+        target avoidanceTarget: SIMD2<Float>,
+        wing: FixedWingParameters,
+        deltaTime: Float
+    ) {
+        let current = currentPlanarPosition()
+        let avoidanceCourse = fixedWingCourseRadians(from: avoidanceTarget - current)
+        let courseError = shortestAngleRadians(avoidanceCourse - state.orientation.z)
+        let bankLimit = fixedWingAvoidanceBankLimitDegrees(wing: wing)
+
+        // Additive and filtered, not an absolute command on the axis.
+        //
+        // Owning roll outright cannot be made to settle here, and the log shows why: with the
+        // held course pinned at −148° the demand still swung +36, −13, +40, −40, while the
+        // achieved bank ran in near *antiphase* to it (+35.9 commanded against −2.3 actual, then
+        // −12.5 against +22.7). Commanding at that phase pumps the oscillation instead of damping
+        // it — no gain or rate term fixes a loop that is a half-period out. So avoidance goes back
+        // to what the original design did: a bounded lateral bias, single-pole filtered, laid on
+        // top of a guidance loop that already has its own damping. A filtered bias physically
+        // cannot produce a ±40° reversal, whatever the phase.
+        let rawBias = (courseError.radiansToDegrees * 0.55)
+            .clamped(to: -min(22.0, bankLimit)...min(22.0, bankLimit))
+        let alpha = 1.0 - exp(-max(0.0001, deltaTime) / 0.45)
+        fixedWingAvoidanceBiasDegrees += (rawBias - fixedWingAvoidanceBiasDegrees) * alpha
+
+        let climbFloor = heightAboveSupportSurface(for: state.position) < 16.0
+            ? min(wing.maxPitchUpDeg, max(wing.initialClimbPitchDeg, 12.0))
+            : 0.0
+        let bias = Double(fixedWingAvoidanceBiasDegrees)
+
+        // Replace last tick's contribution before adding this one.
+        //
+        // `values.roll + bias` looks like an offset and is actually an integrator: `values.roll`
+        // is persistent control state, so adding the bias every tick accumulates it. In take-off
+        // the launch controller rewrites roll each tick and wipes the accumulation, which is
+        // exactly why the command stayed inside a few degrees there — and why, the moment manual
+        // took over with nothing resetting the axis, it ran to the ±30° clamp and slammed between
+        // the stops whenever the bias changed sign. The operator saw it with no autopilot engaged
+        // at all, on a procedural map: this layer alone was doing it.
+        let previousBias = fixedWingAvoidanceAppliedBiasDegrees
+        fixedWingAvoidanceAppliedBiasDegrees = bias
+
+        updateControlValues({ values in
+            values.roll = (values.roll - previousBias + bias)
+                .clamped(to: -Double(bankLimit)...Double(bankLimit))
+            values.pitch = max(values.pitch, Double(climbFloor))
+            values.throttle = max(
+                values.throttle,
+                Double(max(
+                    resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference,
+                    wing.maxThrottle * 0.92
+                ))
+            )
+        }, markManual: false)
+    }
+
+    private func fixedWingAvoidanceBankLimitDegrees(
+        wing: FixedWingParameters
+    ) -> Float {
+        let altitudeDeficit = max(0.0, Float(controlValues.y) - state.position.y)
+        let bankAuthority = (
+            1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0)
+        ).clamped(to: 0.35...1.0)
+        // Predict on the bank the aircraft *achieves*, not the one the airframe permits.
+        //
+        // Avoidance now steers as a bounded additive bias on top of guidance, so the roll it can
+        // actually produce is far below `maxBankAngleDeg`. The log shows the cost of predicting on
+        // the permitted figure: `turnR` sat at 34–39 m while the achieved bank was about 30°,
+        // which at 17 m/s is a 51 m radius — the probe committed to gaps roughly half again
+        // tighter than the aeroplane can fly, and turned into the building it was avoiding. The
+        // 0.75 factor is measured from that gap, not chosen: under-predicting the bank
+        // over-predicts the radius, and erring that way only refuses gaps, never mis-commits.
+        let permitted = max(wing.maxInitialBankDeg, wing.maxBankAngleDeg * bankAuthority)
+        return permitted * 0.75
+    }
+
+    private func fixedWingForwardAvoidanceTarget(wing: FixedWingParameters) -> SIMD2<Float>? {
+        if fixedWingAvoidanceEvaluationTick == simulationTickCounter {
+            return fixedWingAvoidanceCachedTarget
+        }
+
+        var evaluatedTarget: SIMD2<Float>?
+        defer {
+            fixedWingAvoidanceEvaluationTick = simulationTickCounter
+            fixedWingAvoidanceCachedTarget = evaluatedTarget
+        }
+        fixedWingAvoidanceNoSafeTrajectory = false
+
+        let airspeed = max(6.0, simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)))
+        // Predict with the bank authority available *now*, not with the profile's maximum bank.
+        // In the failed run the altitude target was 95.5 m while the aircraft was at 32 m, so
+        // low-altitude protection allowed about 15° of bank. The old max-bank radius predicted a
+        // ~45 m turn; the aircraft actually needed well over 100 m and its "clear" final ray was
+        // reached only after the intervening arc had gone through the façade.
+        let bankLimitDegrees = fixedWingAvoidanceBankLimitDegrees(wing: wing)
+        let bankRadians = max(5.0, bankLimitDegrees).degreesToRadians
+        let bankLimitedTurnRadius = airspeed * airspeed / max(
+            0.1,
+            9.81 * tan(bankRadians)
+        )
+        let turnRadius = max(
+            wing.waypointAcceptanceRadiusMeters * 1.1,
+            bankLimitedTurnRadius
+        )
+        fixedWingAvoidancePredictedTurnRadiusMeters = turnRadius
+        let lookahead = min(240.0, max(turnRadius * 1.15, airspeed * 4.0))
+        let position = currentPlanarPosition()
+        let heading = state.orientation.z
+        let corridorHalfWidth = max(5.0, selectedDroneProfile.collisionRadius * 8.0)
+
+        let obstacles = avoidanceObstacles(radius: lookahead + 80.0).filter { blocksFlightBand($0) }
+
+        func trajectoryClearance(course desiredCourse: Float) -> Float {
+            guard !obstacles.isEmpty else {
+                return .greatestFiniteMagnitude
+            }
+
+            var worst = Float.greatestFiniteMagnitude
+            var point = position
+            var travelled: Float = 0.0
+            var course = heading
+            let courseChange = shortestAngleRadians(desiredCourse - heading)
+            let turnSign: Float = courseChange >= 0.0 ? 1.0 : -1.0
+            let turnDistance = turnRadius * abs(courseChange)
+
+            func measure(_ sample: SIMD2<Float>) -> Bool {
+                for obstacle in obstacles {
+                    worst = min(worst, obstacle.planarSignedDistance(to: sample))
+                    if worst <= corridorHalfWidth {
+                        return false
+                    }
+                }
+                return true
+            }
+
+            // Follow the coordinated-turn arc the aircraft must physically fly before it can
+            // point down the candidate exit course. Midpoint integration keeps the arc accurate
+            // without constructing circle geometry, and a 4 m chord cannot skip a façade.
+            while travelled < min(turnDistance, lookahead) {
+                // Named `arcStep`, not `step`: as a bare `step` the three-argument `min` went
+                // ambiguous against `Duration` and the vector advance failed to type-check.
+                let arcStep: Float = min(4.0, turnDistance - travelled, lookahead - travelled)
+                guard arcStep > 0.001 else { break }
+                let courseStep = turnSign * arcStep / turnRadius
+                let midpointCourse = course + courseStep * 0.5
+                let direction = SIMD2<Float>(
+                    -sin(midpointCourse),
+                    -cos(midpointCourse)
+                )
+                point += direction * arcStep
+                course = shortestAngleRadians(course + courseStep)
+                travelled += arcStep
+                if !measure(point) {
+                    return worst
+                }
+            }
+
+            // If the horizon extends beyond the turn, check the exit leg as well. A valid
+            // avoidance candidate must clear both the manoeuvre and the corridor it enters.
+            let exitDirection = SIMD2<Float>(
+                -sin(desiredCourse),
+                -cos(desiredCourse)
+            )
+            while travelled < lookahead {
+                let step = min(4.0, lookahead - travelled)
+                guard step > 0.001 else { break }
+                point += exitDirection * step
+                travelled += step
+                if !measure(point) {
+                    return worst
+                }
+            }
+            return worst
+        }
+
+        func target(on course: Float) -> SIMD2<Float> {
+            let direction = SIMD2<Float>(-sin(course), -cos(course))
+            return position + direction * lookahead
+        }
+
+        let forwardBlocked = trajectoryClearance(course: heading) <= corridorHalfWidth
+
+        if let lockedCourse = fixedWingAvoidanceCourseRadians {
+            // Course persistence suppresses left/right hunting, but never outranks collision
+            // safety. Re-check the complete arc on every tick; the aircraft may have moved close
+            // enough that yesterday's safe corridor is no longer flyable.
+            let lockedCourseIsSafe = trajectoryClearance(course: lockedCourse) > corridorHalfWidth
+            if lockedCourseIsSafe {
+                if forwardBlocked {
+                    fixedWingAvoidanceClearSinceTime = nil
+                } else {
+                    if fixedWingAvoidanceClearSinceTime == nil {
+                        fixedWingAvoidanceClearSinceTime = simulationTime
+                    }
+                    let clearDuration = simulationTime - (fixedWingAvoidanceClearSinceTime ?? simulationTime)
+                    if clearDuration >= 3.0 {
+                        // Three seconds of continuously clear flight puts roughly 50 m between
+                        // this airframe and the last façade. Only now may waypoint guidance resume.
+                        fixedWingAvoidanceCourseRadians = nil
+                        fixedWingAvoidanceTurnSign = nil
+                        fixedWingAvoidanceClearSinceTime = nil
+                        fixedWingAvoidanceHeadingOffset = nil
+                        evaluatedTarget = nil
+                        return nil
+                    }
+                }
+
+                // A safe absolute course remains authoritative while the obstacle is being
+                // cleared. The nose may move, but the selected escape does not.
+                if forwardBlocked ||
+                    simulationTime - (fixedWingAvoidanceClearSinceTime ?? simulationTime) < 3.0 {
+                    fixedWingAvoidanceHeadingOffset = shortestAngleRadians(lockedCourse - heading)
+                    evaluatedTarget = target(on: lockedCourse)
+                    return evaluatedTarget
+                }
+            }
+
+            // The locked arc has become unsafe. Release its side as well so an actually clear
+            // escape on the opposite side can be considered immediately.
+            fixedWingAvoidanceCourseRadians = nil
+            fixedWingAvoidanceTurnSign = nil
+            fixedWingAvoidanceClearSinceTime = nil
+            fixedWingAvoidanceHeadingOffset = nil
+        }
+
+        guard forwardBlocked else {
+            fixedWingAvoidanceCourseRadians = nil
+            fixedWingAvoidanceTurnSign = nil
+            fixedWingAvoidanceClearSinceTime = nil
+            fixedWingAvoidanceHeadingOffset = nil
+            evaluatedTarget = nil
+            return nil
+        }
+
+        // Steer for the widest fully flyable gap, not for the first heading that happens to look
+        // clear at its endpoint. A candidate is eligible only when its complete bank-limited arc
+        // and exit corridor retain the aircraft clearance. The failed run had no such candidate;
+        // selecting the "least bad" one deliberately changed a safe-looking street departure into
+        // the logged +14°...+26° turn through a façade.
+        let magnitudes: [Float] = [0.17, 0.35, 0.52, 0.79, 1.05, 1.40]
+        let candidateSigns = fixedWingAvoidanceTurnSign.map { [$0] } ?? [Float(1.0), Float(-1.0)]
+        var bestOffset: Float?
+        var bestScore = -Float.greatestFiniteMagnitude
+        for magnitude in magnitudes {
+            for sign in candidateSigns {
+                let offset = magnitude * sign
+                let clearance = trajectoryClearance(course: heading + offset)
+                guard clearance > corridorHalfWidth else {
+                    continue
+                }
+                // A turn has to earn its course change: half a metre of extra room per 10° is the
+                // threshold, so shallow turns win unless a steeper one is genuinely better.
+                let score = clearance - magnitude * 3.0
+                if score > bestScore {
+                    bestScore = score
+                    bestOffset = offset
+                }
+            }
+        }
+
+        guard let offset = bestOffset else {
+            fixedWingAvoidanceNoSafeTrajectory = true
+            fixedWingAvoidanceCourseRadians = nil
+            fixedWingAvoidanceTurnSign = nil
+            fixedWingAvoidanceClearSinceTime = nil
+            fixedWingAvoidanceHeadingOffset = nil
+            evaluatedTarget = nil
+            return nil
+        }
+
+        let course = shortestAngleRadians(heading + offset)
+        fixedWingAvoidanceCourseRadians = course
+        fixedWingAvoidanceTurnSign = offset >= 0.0 ? 1.0 : -1.0
+        fixedWingAvoidanceClearSinceTime = nil
+        fixedWingAvoidanceHeadingOffset = offset
+        evaluatedTarget = target(on: course)
+        return evaluatedTarget
+    }
+
+    /// Cruise altitude for the fixed-wing assist's waypoint intercept.
+    ///
+    /// The assist latches `targetAltitudeMeters` at the moment it is engaged — and it is normally
+    /// engaged **on the pad**, so the hold altitude was the launch deck's. After a hand launch the
+    /// aircraft therefore pushed its nose down to return to eleven metres and held that, at cruise
+    /// speed, through a city: the flight log shows it arming at y 11.1 and descending 14.4 → 12.5 →
+    /// 11.8 → 10.8 straight into a façade. The hold altitude has to belong to the *route*, not to
+    /// the spot the pilot happened to arm it from. Computed once per intercepted waypoint so it
+    /// cannot walk upward tick by tick, the way three other altitude bugs in this stage did.
+
     private func handleModeTransitions() {
         engagePendingFixedWingAssistIfReady()
         if mode == .takeoff {
@@ -9963,6 +10491,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let resolvedAltitude = missionAutopilotAdapter.resolvedTravelAltitude(
             for: activeMissionAutopilotPlan,
             baselineAltitude: baselineAltitude,
+            launchAltitude: currentSpawnPoint().y,
             terrainMaxAltitude: executionCeiling
         )
         if selectedDroneProfile.airframeClass != .fixedWing,
@@ -17370,7 +17899,10 @@ final class DroneSimulationViewModel: ObservableObject {
             dronePosition: SIMD2<Float>(safePosition.x, safePosition.z),
             dockPosition: SIMD2<Float>(dock.x, dock.z),
             droneAltitudeMeters: max(0.0, safePosition.y),
-            dockAltitudeMeters: max(0.0, dock.y),
+            // The altitude the aircraft actually starts from, which is the pad when the operator
+            // placed one — the world dock is only its default. The mission's altitude window is
+            // measured from here, so on a rooftop start this is the roof.
+            dockAltitudeMeters: max(0.0, currentSpawnPoint().y),
             terrainMaxAltitudeMeters: max(0.0, terrain.maxFlightAltitude),
             airframeClass: selectedDroneProfile.airframeClass,
             profileMaxHorizontalSpeedMps: max(0.0, selectedDroneProfile.maxHorizontalSpeedMps),

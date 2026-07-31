@@ -1576,8 +1576,8 @@
 "mission.panel.section.status" = "СТАТУС МИССИИ";
 "mission.panel.section.constraints" = "ОГРАНИЧЕНИЯ МИССИИ";
 "mission.panel.section.execution" = "ВЫПОЛНЕНИЕ МИССИИ";
-"mission.constraints.altitude.minimum" = "Минимальная высота";
-"mission.constraints.altitude.maximum" = "Максимальная высота";
+"mission.constraints.altitude.minimum" = "Мин. высота над стартом";
+"mission.constraints.altitude.maximum" = "Макс. высота над стартом";
 "mission.constraints.speed.minimum" = "Минимальная скорость";
 "mission.constraints.speed.maximum" = "Максимальная скорость";
 "mission.constraints.unit.meters" = "м";

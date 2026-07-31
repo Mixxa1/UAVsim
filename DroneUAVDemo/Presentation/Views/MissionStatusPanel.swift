@@ -43,10 +43,15 @@ struct MissionStatusPanel: View {
                     Text("mission.status.field.primary_issue")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textSecondary)
-                    Text(localized(explanation.detailKey))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(GroundControlPalette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // Every blocking reason, not just the top one: they are rarely alternatives —
+                    // clearing the one shown and finding the next in its place is how a five-minute
+                    // fix becomes an afternoon.
+                    ForEach(blockingDetailKeys, id: \.self) { key in
+                        Text(localized(key))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(GroundControlPalette.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 9)
@@ -57,6 +62,20 @@ struct MissionStatusPanel: View {
                 )
             }
         }
+    }
+
+    /// Distinct blocking reasons, worst first. Capped so a cascade cannot push the panel off screen.
+    private var blockingDetailKeys: [String] {
+        var seen: Set<String> = []
+        let critical = snapshot.rankedExplanations.filter { $0.severity == .critical }
+        // Drop the mission-level umbrella once a specific reason is present: it restates the same
+        // block in words that name nothing to fix, and reading it under the real cause is worse
+        // than not showing it.
+        let specific = critical.filter { !$0.detailKey.hasPrefix("mission.status.reason.") }
+        return (specific.isEmpty ? critical : specific)
+            .compactMap { seen.insert($0.detailKey).inserted ? $0.detailKey : nil }
+            .prefix(4)
+            .map { $0 }
     }
 
     private var missionStatusText: String {

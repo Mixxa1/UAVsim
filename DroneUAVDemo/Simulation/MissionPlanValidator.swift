@@ -103,7 +103,10 @@ final class MissionPlanValidator {
                 terrainMaxAltitude: executionCeiling,
                 airframeClass: viewport.airframeClass
             )
-            let altitudeWindow = draft.constraints.altitude.clamped(to: executionCeiling)
+            let altitudeWindow = draft.constraints.altitude.absolute(
+                launchAltitude: viewport.dockAltitudeMeters,
+                terrainMaxAltitude: executionCeiling
+            )
             if baselineAltitude < altitudeWindow.lowerBound - 0.05 ||
                 baselineAltitude > altitudeWindow.upperBound + 0.05 {
                 explanations.append(
@@ -113,7 +116,10 @@ final class MissionPlanValidator {
                         detailKey: "mission.status.reason.target_altitude_out_of_range"
                     )
                 )
-            } else if draft.constraints.altitude.hasCustomWindow(terrainMaxAltitude: executionCeiling) {
+            } else if draft.constraints.altitude.hasCustomWindow(
+                launchAltitude: viewport.dockAltitudeMeters,
+                terrainMaxAltitude: executionCeiling
+            ) {
                 explanations.append(
                     MissionStatusExplanation(
                         reason: .altitudeConstraintsApplied,

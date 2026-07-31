@@ -4,15 +4,28 @@ struct MissionAltitudeConstraints: Equatable {
     var minimumMeters: Float
     var maximumMeters: Float
 
-    func clamped(to terrainMaxAltitude: Float) -> ClosedRange<Float> {
-        let lowerBound = max(0.0, minimumMeters)
-        let upperBound = max(lowerBound, min(maximumMeters, max(0.0, terrainMaxAltitude)))
+    /// The operator's window in world coordinates.
+    ///
+    /// **The window is height above the launch point, not above world zero.** That is what every
+    /// ground station means by default — MAVLink's `GLOBAL_RELATIVE_ALT`, QGroundControl's
+    /// "Relative To Launch", Mission Planner's "Relative" — and it is the only reading that
+    /// survives launching from anywhere but the ground: a start on a 427 m roof made an absolute
+    /// 80 m ceiling unsatisfiable before the aircraft had moved, and the mission was refused for
+    /// an altitude the operator never asked for. The world ceiling still caps the result, because
+    /// that limit is about the size of the map rather than about the task.
+    func absolute(launchAltitude: Float, terrainMaxAltitude: Float) -> ClosedRange<Float> {
+        let base = max(0.0, launchAltitude)
+        let ceiling = max(0.0, terrainMaxAltitude)
+        let lowerBound = min(max(0.0, minimumMeters) + base, ceiling)
+        let upperBound = max(lowerBound, min(max(0.0, maximumMeters) + base, ceiling))
         return lowerBound...upperBound
     }
 
-    func hasCustomWindow(terrainMaxAltitude: Float) -> Bool {
-        let terrainCeiling = max(0.0, terrainMaxAltitude)
-        return minimumMeters > 0.05 || maximumMeters < terrainCeiling - 0.05
+    /// Whether the operator narrowed the window himself, rather than inheriting the world's own
+    /// headroom. Measured in the same relative terms the window is written in.
+    func hasCustomWindow(launchAltitude: Float, terrainMaxAltitude: Float) -> Bool {
+        let headroom = max(0.0, max(0.0, terrainMaxAltitude) - max(0.0, launchAltitude))
+        return minimumMeters > 0.05 || maximumMeters < headroom - 0.05
     }
 }
 
@@ -96,9 +109,13 @@ struct MissionConstraints: Equatable {
 
     func clampedMissionAltitude(
         _ altitudeMeters: Float,
+        launchAltitude: Float,
         terrainMaxAltitude: Float
     ) -> Float {
-        let window = altitude.clamped(to: terrainMaxAltitude)
+        let window = altitude.absolute(
+            launchAltitude: launchAltitude,
+            terrainMaxAltitude: terrainMaxAltitude
+        )
         return min(window.upperBound, max(window.lowerBound, altitudeMeters))
     }
 }

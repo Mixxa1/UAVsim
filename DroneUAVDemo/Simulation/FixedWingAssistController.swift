@@ -56,6 +56,8 @@ struct FixedWingAssistGeometryAssessment {
 final class FixedWingAssistController {
     private enum Tuning {
         static let headingBankGain: Float = 0.95
+        /// Rate term on yaw. Without it the heading loop cannot settle — see the bank computation.
+        static let headingRateDampingGain: Float = 0.45
         static let maxBankDeg: Float = 28.0
         static let altitudePitchGain: Float = 0.85
         static let altitudeDampingGain: Float = 1.6
@@ -234,7 +236,18 @@ final class FixedWingAssistController {
         let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
             .clamped(to: 0.35...1.0)
         let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians * altitudeMarginFactor
-        var rawBankRad = (courseError * Tuning.headingBankGain).clamped(to: -maxBankRad...maxBankRad)
+        // Proportional plus rate, for the same reason the avoidance loop needed it.
+        //
+        // `courseError * gain` alone is a heading loop with no damping, and the low-pass below
+        // adds phase lag on top, which costs margin rather than buying stability. Measured in one
+        // flight: while the aircraft was in take-off — where the assist does not write roll and a
+        // rate-damped avoidance loop owns it alone — the bank command stayed inside **±8°**; the
+        // moment this branch took the axis it ran to **±30°** with the same obstacles outside.
+        // The difference between the two loops was the rate term, so this one gets it too.
+        var rawBankRad = (
+            courseError * Tuning.headingBankGain
+                - aircraftState.bodyAngularVelocity.z * Tuning.headingRateDampingGain
+        ).clamped(to: -maxBankRad...maxBankRad)
         if abs(courseError) < 0.04 {
             rawBankRad *= 0.4
         }

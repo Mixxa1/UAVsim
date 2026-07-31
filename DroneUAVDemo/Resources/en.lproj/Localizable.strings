@@ -1581,8 +1581,8 @@
 "mission.panel.section.status" = "MISSION STATUS";
 "mission.panel.section.constraints" = "MISSION CONSTRAINTS";
 "mission.panel.section.execution" = "MISSION EXECUTION";
-"mission.constraints.altitude.minimum" = "Minimum altitude";
-"mission.constraints.altitude.maximum" = "Maximum altitude";
+"mission.constraints.altitude.minimum" = "Min altitude above launch";
+"mission.constraints.altitude.maximum" = "Max altitude above launch";
 "mission.constraints.speed.minimum" = "Minimum speed";
 "mission.constraints.speed.maximum" = "Maximum speed";
 "mission.constraints.unit.meters" = "m";

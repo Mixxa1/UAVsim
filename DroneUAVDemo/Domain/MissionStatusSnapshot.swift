@@ -83,6 +83,19 @@ struct MissionStatusSnapshot: Equatable {
     var explanations: [MissionStatusExplanation]
 
     var primaryExplanation: MissionStatusExplanation? {
+        rankedExplanations.first
+    }
+
+    /// Every reason the mission is held up, worst first.
+    ///
+    /// The ranking's last tie-break used to be alphabetical, which is not a priority at all: a
+    /// mission-level key like `mission.status.reason.route_invalid` sorts ahead of every
+    /// `tactical.map.issue.*`, so the generic sentence — "the route contains invalid or zero
+    /// segments" — permanently masked the specific one that says what to actually fix. Ordering by
+    /// specificity instead keeps the actionable reason on top; the whole list is exposed because a
+    /// blocked mission usually has more than one cause and showing one at a time turns diagnosis
+    /// into a guessing game.
+    var rankedExplanations: [MissionStatusExplanation] {
         explanations.sorted { lhs, rhs in
             if lhs.severity.priority != rhs.severity.priority {
                 return lhs.severity.priority < rhs.severity.priority
@@ -90,8 +103,13 @@ struct MissionStatusSnapshot: Equatable {
             if lhs.isBlocking != rhs.isBlocking {
                 return lhs.isBlocking && !rhs.isBlocking
             }
+            let lhsGeneric = lhs.detailKey.hasPrefix("mission.status.reason.")
+            let rhsGeneric = rhs.detailKey.hasPrefix("mission.status.reason.")
+            if lhsGeneric != rhsGeneric {
+                return !lhsGeneric
+            }
             return lhs.detailKey < rhs.detailKey
-        }.first
+        }
     }
 
     static let empty = MissionStatusSnapshot(
