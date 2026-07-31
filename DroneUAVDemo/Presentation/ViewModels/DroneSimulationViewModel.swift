@@ -1268,6 +1268,26 @@ final class DroneSimulationViewModel: ObservableObject {
     /// The clear corridor must remain clear for a few seconds before waypoint guidance is allowed
     /// to pull the aircraft back toward the obstacle it has just avoided.
     private var fixedWingAvoidanceClearSinceTime: Float?
+    /// When the search first failed to find any flyable candidate. Used only to bound how long the
+    /// escape-side commitment is kept across blocked ticks.
+    private var fixedWingAvoidanceBlockedSinceTime: Float?
+    /// When the locked escape arc first measured unsafe. Debounces its release.
+    private var fixedWingAvoidanceLockedUnsafeSinceTime: Float?
+    /// Bank allowed while no flyable course exists. Not zero — the aircraft still needs to answer
+    /// gusts and hold wings level — but far too little to turn it into anything.
+    private static let fixedWingBlockedBankLimitDegrees: Double = 6.0
+    /// How long the locked escape must measure unsafe before it is abandoned. Sized to outlast the
+    /// tick-to-tick jitter of a clearance measured against building footprints, not to defer a real
+    /// avoidance decision — at 18 m/s this is under twelve metres of travel.
+    private static let fixedWingAvoidanceReleaseDwellSeconds: Float = 0.6
+    /// Clearance below this fraction of the corridor is a collapse rather than a dip, and releases
+    /// the locked escape immediately, without the dwell.
+    private static let fixedWingAvoidanceCollapseFraction: Float = 0.5
+    /// How long avoidance may stay blocked before the committed escape side is released and both
+    /// sides are searched again. Long enough to ride out the tick-to-tick flicker of a street
+    /// canyon, short enough that a genuinely wrong commitment cannot hold the aircraft against a
+    /// wall.
+    private static let fixedWingAvoidanceCommitmentReleaseSeconds: Float = 4.0
     /// The assist and the collision ladder can both ask for avoidance in one simulation tick.
     /// Cache that decision so the second caller cannot immediately re-plan it.
     private var fixedWingAvoidanceEvaluationTick: UInt64?
@@ -5811,6 +5831,36 @@ final class DroneSimulationViewModel: ObservableObject {
                     fixedWingAvoidanceBiasDegrees = 0.0
                     updateControlValues({ $0.roll -= residual }, markManual: false)
                 }
+
+                // No flyable course exists at all — and doing nothing about it is what killed both
+                // logged flights.
+                //
+                // Avoidance correctly refuses to pick a "least bad" collision course here, but it
+                // then handed roll straight back to waypoint guidance, which in a street canyon
+                // banks 25° toward the next waypoint and into the façade: `avoid=blocked` on every
+                // sample from hand-over to impact, with `rollCmd=-24.5` on the last one. A refusal
+                // to choose is not permission for something else to choose worse.
+                //
+                // There is no lateral escape by definition, so stop turning and climb. Over the
+                // rooftops is the one exit a city always offers, and wings-level is the attitude
+                // that climbs best.
+                if fixedWingAvoidanceNoSafeTrajectory, physicalState == .airborne {
+                    let climbFloor = min(wing.maxPitchUpDeg, max(wing.initialClimbPitchDeg, 12.0))
+                    let blockedBank = Self.fixedWingBlockedBankLimitDegrees
+                    updateControlValues({ values in
+                        // Level the wings, do not merely limit them. Clamping to ±6° left the
+                        // aircraft sitting *at* −6° — a shallow bank is still a turn, and the log
+                        // shows it turning at that value all the way into the building. Commanded
+                        // to zero and approached over a few ticks so the axis never sees a step.
+                        let levelled = values.roll * Double(1.0 - min(1.0, dt / 0.35))
+                        values.roll = levelled.clamped(to: -blockedBank...blockedBank)
+                        values.pitch = max(values.pitch, Double(climbFloor))
+                        values.throttle = max(
+                            values.throttle,
+                            Double(resolvedFlightBaseline(for: .manual).cruiseReferenceThrottle)
+                        )
+                    }, markManual: false)
+                }
             }
         }
 
@@ -7398,9 +7448,27 @@ final class DroneSimulationViewModel: ObservableObject {
                     // +37.2, −40.0: not the avoidance formula at all, but the assist steering to
                     // its waypoint on top of it. Two writers, last one wins, and the aircraft
                     // weaves between their opinions.
+                    // The comment above described the defect; this is the gate that answers it.
+                    //
+                    // Avoidance runs earlier in the tick and writes roll; this write then replaced
+                    // it wholesale, so on every tick the assist was running, avoidance had no
+                    // effect on the aircraft at all — not a weak effect, none. Its bias, its
+                    // committed escape course and the wings-level clamp it applies when no course
+                    // is flyable were all computed, logged, and discarded a few microseconds later.
+                    // Which is why the aeroplane turned "for no reason": the reason was the assist's
+                    // own waypoint command, and the layer meant to overrule it never reached the axis.
+                    //
+                    // Roll therefore goes to whichever layer currently has an opinion about
+                    // survival: avoidance while it holds an escape course, and equally while it
+                    // reports no flyable course at all — a refusal is an opinion. Everything else
+                    // — pitch, throttle, yaw, altitude target — stays with the assist.
+                    let avoidanceOwnsRoll = (fixedWingAvoidanceHoldRemaining > 0.0
+                            && fixedWingAvoidanceHoldCourse != nil)
+                        || fixedWingAvoidanceNoSafeTrajectory
                     updateControlValues({ values in
                         values.throttle = desiredThrottle.clamped(to: 0.0...1.0)
-                        values.roll = desiredRoll.clamped(to: -rollLimit...rollLimit)
+                        values.roll = (avoidanceOwnsRoll ? values.roll : desiredRoll)
+                            .clamped(to: -rollLimit...rollLimit)
                         values.pitch = desiredPitch.clamped(to: -pitchLimit...pitchLimit)
                         values.yaw = turnOverrideActive
                             ? Double(state.orientation.z.radiansToDegrees)
@@ -9971,12 +10039,18 @@ final class DroneSimulationViewModel: ObservableObject {
         // took over with nothing resetting the axis, it ran to the ±30° clamp and slammed between
         // the stops whenever the bias changed sign. The operator saw it with no autopilot engaged
         // at all, on a procedural map: this layer alone was doing it.
-        let previousBias = fixedWingAvoidanceAppliedBiasDegrees
         fixedWingAvoidanceAppliedBiasDegrees = bias
 
         updateControlValues({ values in
-            values.roll = (values.roll - previousBias + bias)
-                .clamped(to: -Double(bankLimit)...Double(bankLimit))
+            // Absolute, not an increment.
+            //
+            // The increment form belonged to the arrangement where the assist owned the axis and
+            // avoidance leaned on it. Now that avoidance holds the axis while its escape is live,
+            // the same form contributes almost nothing: the filtered bias barely changes tick to
+            // tick, so `- previousBias + bias` ≈ 0 and the axis keeps whatever bank the assist left
+            // behind at hand-over. The flight log is unambiguous — avoidance asking `+6` while the
+            // aircraft sat at `rollCmd=-6.0` and flew that residual left bank into a façade.
+            values.roll = bias.clamped(to: -Double(bankLimit)...Double(bankLimit))
             values.pitch = max(values.pitch, Double(climbFloor))
             values.throttle = max(
                 values.throttle,
@@ -10118,8 +10192,10 @@ final class DroneSimulationViewModel: ObservableObject {
             // Course persistence suppresses left/right hunting, but never outranks collision
             // safety. Re-check the complete arc on every tick; the aircraft may have moved close
             // enough that yesterday's safe corridor is no longer flyable.
-            let lockedCourseIsSafe = trajectoryClearance(course: lockedCourse) > corridorHalfWidth
+            let lockedClearance = trajectoryClearance(course: lockedCourse)
+            let lockedCourseIsSafe = lockedClearance > corridorHalfWidth
             if lockedCourseIsSafe {
+                fixedWingAvoidanceLockedUnsafeSinceTime = nil
                 if forwardBlocked {
                     fixedWingAvoidanceClearSinceTime = nil
                 } else {
@@ -10149,8 +10225,31 @@ final class DroneSimulationViewModel: ObservableObject {
                 }
             }
 
-            // The locked arc has become unsafe. Release its side as well so an actually clear
-            // escape on the opposite side can be considered immediately.
+            // The locked arc has become unsafe — but a single tick of that is not proof.
+            //
+            // Clearance jitters either side of `corridorHalfWidth` on every tick in a street
+            // canyon, and releasing the escape side the instant it dips let the very next search
+            // pick the opposite one. The flight log shows the result plainly: `avoid=+10` and a
+            // second later `avoid=-29`, with the guidance rolling 30° each way to follow. Release
+            // now waits for the arc to be unsafe *continuously*.
+            //
+            // The wait is skipped when clearance has collapsed rather than merely dipped: at that
+            // point the locked escape is a genuine hazard and holding it for another half second
+            // to be sure would itself be the danger.
+            if lockedClearance > corridorHalfWidth * Self.fixedWingAvoidanceCollapseFraction {
+                if fixedWingAvoidanceLockedUnsafeSinceTime == nil {
+                    fixedWingAvoidanceLockedUnsafeSinceTime = simulationTime
+                }
+                let unsafeDuration = simulationTime
+                    - (fixedWingAvoidanceLockedUnsafeSinceTime ?? simulationTime)
+                if unsafeDuration < Self.fixedWingAvoidanceReleaseDwellSeconds {
+                    fixedWingAvoidanceHeadingOffset = shortestAngleRadians(lockedCourse - heading)
+                    evaluatedTarget = target(on: lockedCourse)
+                    return evaluatedTarget
+                }
+            }
+
+            fixedWingAvoidanceLockedUnsafeSinceTime = nil
             fixedWingAvoidanceCourseRadians = nil
             fixedWingAvoidanceTurnSign = nil
             fixedWingAvoidanceClearSinceTime = nil
@@ -10161,6 +10260,7 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingAvoidanceCourseRadians = nil
             fixedWingAvoidanceTurnSign = nil
             fixedWingAvoidanceClearSinceTime = nil
+            fixedWingAvoidanceBlockedSinceTime = nil
             fixedWingAvoidanceHeadingOffset = nil
             evaluatedTarget = nil
             return nil
@@ -10195,12 +10295,33 @@ final class DroneSimulationViewModel: ObservableObject {
         guard let offset = bestOffset else {
             fixedWingAvoidanceNoSafeTrajectory = true
             fixedWingAvoidanceCourseRadians = nil
-            fixedWingAvoidanceTurnSign = nil
-            fixedWingAvoidanceClearSinceTime = nil
             fixedWingAvoidanceHeadingOffset = nil
             evaluatedTarget = nil
+            // The side commitment deliberately survives a blocked tick.
+            //
+            // Between buildings the search flickers: the corridor demands `corridorHalfWidth` of
+            // room either side, a city street rarely offers it, and candidates pass and fail from
+            // one tick to the next. Clearing the commitment here treated each of those failures as
+            // proof the chosen escape side was wrong, so the next engagement was free to pick the
+            // opposite one — the flight log shows exactly that, +9° then −25° a second later, with
+            // the guidance banking 27° each way to follow. Failing to find a course right now says
+            // nothing about which way out is correct; only a genuinely clear corridor does, and the
+            // `forwardBlocked` branch above already releases the commitment when that happens.
+            //
+            // Bounded so a wrong commitment cannot trap the aircraft: after this long with no
+            // flyable candidate on the committed side, the other side is allowed back in.
+            if let blockedSince = fixedWingAvoidanceBlockedSinceTime {
+                if simulationTime - blockedSince > Self.fixedWingAvoidanceCommitmentReleaseSeconds {
+                    fixedWingAvoidanceTurnSign = nil
+                    fixedWingAvoidanceClearSinceTime = nil
+                    fixedWingAvoidanceBlockedSinceTime = nil
+                }
+            } else {
+                fixedWingAvoidanceBlockedSinceTime = simulationTime
+            }
             return nil
         }
+        fixedWingAvoidanceBlockedSinceTime = nil
 
         let course = shortestAngleRadians(heading + offset)
         fixedWingAvoidanceCourseRadians = course
