@@ -5,10 +5,10 @@ import simd
 ///
 /// Design rationale (replaces the previous multi-controller fly-by stack):
 /// - **Carrot pursuit** for lateral guidance: pick a virtual aim point ahead
-///   on the active inbound leg. Before the active waypoint is captured, the
-///   aim point stays on the inbound leg extended through the waypoint, so the
-///   aircraft is guided through the capture sphere without switching to the
-///   next segment early or turning back toward a fixed point.
+///   on the active path. Intermediate points are fly-by geometry: the follower
+///   commits to a physically attainable constant-radius fillet before the
+///   corner, follows it monotonically, and hands off only after acquiring the
+///   outbound leg. The terminal point still requires an actual swept capture.
 /// - **Decoupled energy management**: pitch tracks altitude error (with
 ///   vertical-velocity damping); throttle tracks speed error. Stall protection
 ///   pitches the nose down whenever airspeed drops below a safe floor.
@@ -37,6 +37,11 @@ struct FixedWingAutopilotPlan {
     /// Smallest waypoint index the controller is allowed to consider "current".
     /// This guarantees forward progress even if the route is rebuilt mid-flight.
     var minimumWaypointIndex: Int
+    /// The obstacle planner validated every non-terminal fillet at the same (or a more
+    /// conservative) speed/bank envelope used below. Multi-point routes fail closed without it.
+    var turnsValidated: Bool
+    var validatedTurnRadiusMeters: Float?
+    var validatedAirspeedMps: Float?
     /// When true, the autopilot loops back to the first waypoint after the
     /// last one is captured. When false, it keeps flying outbound on the
     /// final leg course after route completion.
@@ -44,9 +49,18 @@ struct FixedWingAutopilotPlan {
 }
 
 struct FixedWingAutopilotWaypoint: Equatable {
+    enum CapturePolicy: Equatable {
+        /// Fixed-wing mission transit points are passed on a validated fly-by arc; mission
+        /// progress advances after outbound acquisition, not by pretending the corner was hit.
+        case flyBy
+        /// Terminal points must intersect their swept acceptance circle.
+        case required
+    }
+
     var position: SIMD2<Float>
     var altitude: Float
     var acceptanceRadius: Float
+    var capturePolicy: CapturePolicy
 }
 
 struct FixedWingAutopilotResult: Equatable {
@@ -73,6 +87,8 @@ struct FixedWingAutopilotResult: Equatable {
     var remainingPathLengthMeters: Float
     var stallProtectionActive: Bool
     var hasCompletedRoute: Bool
+    /// True while the lateral target is following a committed turn fillet.
+    var flyByTransitionActive: Bool
     /// True on the tick the aircraft crosses the waypoint's abeam plane
     /// without entering its capture sphere. The route does not advance: the
     /// controller keeps the waypoint active and turns back to reacquire it.
@@ -85,6 +101,9 @@ final class FixedWingAutopilot {
         static let lookaheadAirspeedFactor: Float = 1.85   // L1 ≈ V * factor (seconds)
         static let lookaheadMinMeters: Float = 18.0
         static let lookaheadTurnRadiusFactor: Float = 1.35
+        static let flyByRollInSeconds: Float = 0.90
+        static let flyByBankLimitDeg: Float = 22.0
+        static let flyByMaximumTurnDeg: Float = 150.0
         // Lateral
         static let bankProportionalGain: Float = 1.45      // rad bank per rad heading error
         static let bankFilterTau: Float = 0.32             // low-pass tau (seconds)
@@ -117,6 +136,22 @@ final class FixedWingAutopilot {
         static let approachSpeedScale: Float = 0.94        // gentle slow-down close to terminal point
     }
 
+    private struct CommittedFlyBy: Equatable {
+        var waypointIndex: Int
+        var inboundDirection: SIMD2<Float>
+        var outboundDirection: SIMD2<Float>
+        var entry: SIMD2<Float>
+        var exit: SIMD2<Float>
+        var center: SIMD2<Float>
+        var radius: Float
+        var startAngle: Float
+        var sweepAngle: Float
+        var tangentDistance: Float
+        var triggerDistance: Float
+
+        var arcLength: Float { abs(sweepAngle) * radius }
+    }
+
     private struct InternalState {
         var routeIdentifier: String?
         var activeWaypointIndex: Int = 0
@@ -131,12 +166,18 @@ final class FixedWingAutopilot {
         var missedActiveWaypoint: Bool = false
         var previousAircraftPlanar: SIMD2<Float> = .zero
         var hasPreviousAircraftPlanar: Bool = false
+        var committedFlyBy: CommittedFlyBy?
     }
 
     private var state = InternalState()
+    /// Populated only when returning `nil` for a recoverable guidance failure. The adapter uses
+    /// this to distinguish a stale/missed turn entry (which needs a route re-anchor) from malformed
+    /// input. It is cleared at the beginning of every update.
+    private(set) var lastFailureReason: String?
 
     func reset() {
         state = InternalState()
+        lastFailureReason = nil
     }
 
     /// Stops only the captured-state flag and waypoint pointer, but keeps the
@@ -146,6 +187,7 @@ final class FixedWingAutopilot {
         state.activeWaypointIndex = 0
         state.hasCompletedRoute = false
         state.hasLegAnchor = false
+        state.committedFlyBy = nil
     }
 
     func update(
@@ -158,7 +200,11 @@ final class FixedWingAutopilot {
         useHybridVTOLCruiseStabilization: Bool = false,
         input: FixedWingAutopilotInput
     ) -> FixedWingAutopilotResult? {
+        lastFailureReason = nil
         guard !plan.waypoints.isEmpty else {
+            return nil
+        }
+        guard plan.waypoints.count <= 2 || plan.turnsValidated else {
             return nil
         }
         guard isFiniteVector(input.aircraftPosition),
@@ -176,21 +222,25 @@ final class FixedWingAutopilot {
             state.hasLegAnchor = false
             state.hasCourseSeed = false
             state.hasPreviousAircraftPlanar = false
+            state.committedFlyBy = nil
         }
 
         // Honour minimum index from outside (forward-progress guarantee).
         if state.activeWaypointIndex < plan.minimumWaypointIndex {
             state.activeWaypointIndex = plan.minimumWaypointIndex
             state.hasLegAnchor = false
+            state.committedFlyBy = nil
         }
         if state.activeWaypointIndex >= plan.waypoints.count {
             if plan.loopAfterFinalWaypoint {
                 state.activeWaypointIndex = 0
                 state.hasCompletedRoute = false
                 state.hasLegAnchor = false
+                state.committedFlyBy = nil
             } else {
                 state.activeWaypointIndex = plan.waypoints.count - 1
                 state.hasCompletedRoute = true
+                state.committedFlyBy = nil
             }
         }
 
@@ -206,6 +256,125 @@ final class FixedWingAutopilot {
         let stallSafeSpeed = wing.minSafeAirspeed * Tuning.stallSpeedSafetyFactor
         let currentSpeed = max(0.0, input.aircraftAirspeed.isFinite ? input.aircraftAirspeed : 0.0)
 
+        // Commit the next real turn before capture processing. Otherwise an intermediate route
+        // point can be crossed first and only then start commanding the outbound course — exactly
+        // the late-turn failure that lets a wing enter a facade despite a point-safe A* path.
+        if state.committedFlyBy?.waypointIndex != state.activeWaypointIndex {
+            state.committedFlyBy = nil
+        }
+        if let committed = state.committedFlyBy {
+            let turnWaypoint = plan.waypoints[committed.waypointIndex]
+            let turnTargetAltitude = targetAltitudeOverride ?? turnWaypoint.altitude
+            let effectiveBank = effectiveMaximumBankRadians(
+                wing: wing,
+                targetAltitude: turnTargetAltitude,
+                currentAltitude: input.aircraftPosition.y
+            )
+            let turnSpeed = max(
+                currentSpeed,
+                cruiseAirspeed * 1.12,
+                wing.minSafeAirspeed,
+                plan.validatedAirspeedMps ?? 0.0
+            )
+            let requiredRadius = requiredTurnRadius(
+                wing: wing,
+                airspeed: turnSpeed,
+                effectiveMaxBankRadians: effectiveBank,
+                validatedTurnRadius: plan.validatedTurnRadiusMeters
+            )
+            // Wind/speed and altitude authority can change after arc commitment. Never keep
+            // steering along geometry that has become tighter than the aircraft's current
+            // envelope; hand it back for a route re-anchor while AUTO + reactive avoidance remain
+            // authoritative.
+            if requiredRadius > committed.radius {
+                lastFailureReason = "fly_by_envelope_changed_replan"
+                return nil
+            }
+            if shouldCompleteFlyBy(
+                committed,
+                aircraftPosition: aircraftPlanar,
+                aircraftYaw: input.aircraftYawRadians,
+                acceptanceRadius: turnWaypoint.acceptanceRadius
+            ) {
+                state.activeWaypointIndex = min(
+                    committed.waypointIndex + 1,
+                    plan.waypoints.count - 1
+                )
+                state.hasLegAnchor = false
+                state.committedFlyBy = nil
+            }
+        }
+        if state.committedFlyBy == nil,
+           state.activeWaypointIndex > 0,
+           state.activeWaypointIndex < plan.waypoints.count - 1 {
+            let turnWaypoint = plan.waypoints[state.activeWaypointIndex]
+            let turnTargetAltitude = targetAltitudeOverride ?? turnWaypoint.altitude
+            let effectiveBank = effectiveMaximumBankRadians(
+                wing: wing,
+                targetAltitude: turnTargetAltitude,
+                currentAltitude: input.aircraftPosition.y
+            )
+            let turnSpeed = max(
+                currentSpeed,
+                cruiseAirspeed * 1.12,
+                wing.minSafeAirspeed,
+                plan.validatedAirspeedMps ?? 0.0
+            )
+            if let candidate = flyByGeometry(
+                plan: plan,
+                waypointIndex: state.activeWaypointIndex,
+                wing: wing,
+                airspeed: turnSpeed,
+                effectiveMaxBankRadians: effectiveBank,
+                validatedTurnRadius: plan.validatedTurnRadiusMeters
+            ) {
+                let remainingInbound = simd_dot(
+                    turnWaypoint.position - aircraftPlanar,
+                    candidate.inboundDirection
+                )
+                let inboundNormal = SIMD2<Float>(
+                    -candidate.inboundDirection.y,
+                    candidate.inboundDirection.x
+                )
+                let inboundCrossTrack = abs(simd_dot(
+                    aircraftPlanar - turnWaypoint.position,
+                    inboundNormal
+                ))
+                let commitCorridor = max(
+                    turnWaypoint.acceptanceRadius * 2.0,
+                    candidate.triggerDistance * 0.45
+                )
+                let previousRemainingInbound = simd_dot(
+                    turnWaypoint.position - state.previousAircraftPlanar,
+                    candidate.inboundDirection
+                )
+                let crossedRollInGate = previousRemainingInbound > candidate.triggerDistance
+                    && remainingInbound <= candidate.triggerDistance
+                // Commit only on the tick that crosses the early trigger with the complete roll-in
+                // distance still available. A route that appears after the aircraft is already
+                // inside that gate, or a cross-track miss at the gate, must be re-anchored; waiting
+                // until the tangent point silently spends the 0.9 s reserve.
+                if crossedRollInGate,
+                   remainingInbound >= candidate.tangentDistance,
+                   inboundCrossTrack <= commitCorridor {
+                    state.committedFlyBy = candidate
+                } else if remainingInbound <= candidate.triggerDistance {
+                    lastFailureReason = "fly_by_entry_missed_replan"
+                    return nil
+                }
+            } else if requiresPhysicalFlyBy(
+                plan: plan,
+                waypointIndex: state.activeWaypointIndex
+            ) {
+                // A validated multi-point plan is allowed to reach capture processing only when
+                // its real turn fits the live speed/bank envelope. Otherwise the capture sphere
+                // would advance to the outbound leg and command the exact late corner this path
+                // follower is designed to prevent.
+                lastFailureReason = "fly_by_geometry_invalid_replan"
+                return nil
+            }
+        }
+
         // Advance through any waypoints we have already crossed.
         //
         // `active.acceptanceRadius` is the same capture volume rendered on the
@@ -217,6 +386,12 @@ final class FixedWingAutopilot {
         var advanceGuard = 0
         while advanceGuard < plan.waypoints.count {
             let active = plan.waypoints[state.activeWaypointIndex]
+            // A committed fly-by deliberately misses the mathematical corner. Do not let its
+            // capture sphere tear down the checked arc halfway through roll-in; the monotonic arc
+            // handoff above owns progress until the outbound leg is established.
+            if state.committedFlyBy?.waypointIndex == state.activeWaypointIndex {
+                break
+            }
             let captureRadius = max(active.acceptanceRadius, 4.0)
             let distanceToWaypoint = simd_length(aircraftPlanar - active.position)
             let crossedCaptureVolume = motionSegmentIntersectsCircle(
@@ -265,6 +440,7 @@ final class FixedWingAutopilot {
                         state.activeWaypointIndex = 0
                         state.hasLegAnchor = false
                         state.hasCompletedRoute = false
+                        state.committedFlyBy = nil
                     } else {
                         state.hasCompletedRoute = true
                     }
@@ -272,6 +448,7 @@ final class FixedWingAutopilot {
                 } else {
                     state.activeWaypointIndex += 1
                     state.hasLegAnchor = false
+                    state.committedFlyBy = nil
                 }
                 advanceGuard += 1
                 continue
@@ -325,12 +502,24 @@ final class FixedWingAutopilot {
         )
 
         let holdsFinalCourse = state.hasCompletedRoute && !plan.loopAfterFinalWaypoint
+        let activeFlyBy = state.committedFlyBy.flatMap {
+            $0.waypointIndex == activeIndex ? $0 : nil
+        }
+        let activeFlyByProgress = activeFlyBy.map {
+            flyByProgress(aircraftPosition: aircraftPlanar, geometry: $0)
+        }
         let aimPointPlanar: SIMD2<Float>
         if holdsFinalCourse {
             aimPointPlanar = aircraftPlanar + legDirection * max(
                 lookaheadDistance,
                 cruiseAirspeed * 4.0,
                 activeWaypoint.acceptanceRadius * 3.0
+            )
+        } else if let activeFlyBy, let activeFlyByProgress {
+            aimPointPlanar = flyByAimPoint(
+                geometry: activeFlyBy,
+                progress: activeFlyByProgress,
+                lookaheadDistance: lookaheadDistance
             )
         } else {
             aimPointPlanar = computeCaptureAimPoint(
@@ -385,10 +574,11 @@ final class FixedWingAutopilot {
         // while genuinely below profile (e.g. mid climb-out), and lifts as
         // soon as the aircraft reaches the altitude it's already trying to
         // hold.
-        let altitudeDeficit = max(0.0, earlyTargetAltitude - input.aircraftPosition.y)
-        let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
-            .clamped(to: 0.35...1.0)
-        let maxBankRad = max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95 * altitudeMarginFactor
+        let maxBankRad = effectiveMaximumBankRadians(
+            wing: wing,
+            targetAltitude: earlyTargetAltitude,
+            currentAltitude: input.aircraftPosition.y
+        )
         var rawBankRad = (courseError * Tuning.bankProportionalGain).clamped(to: -maxBankRad...maxBankRad)
         // Anti-windup: bleed the bank command toward zero when the heading
         // error is small. This prevents endless small corrections that look
@@ -445,24 +635,15 @@ final class FixedWingAutopilot {
         // never charged for this, so without this term the aircraft sinks
         // every time it banks toward a waypoint.
         let bankLiftLossRad = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnLiftCompensationGain
-        let commandedPitchRad: Float
         // Same room for the compensation as in FixedWingAssistController: added and then clamped
         // to the unchanged ceiling, the correction is discarded precisely in the turns that need
         // it, because the altitude loop has already spent the budget. Raised by exactly the
-        // compensation — the clamp still bounds angle of attack.
+        // compensation — the clamp still bounds angle of attack. This is feed-forward for every
+        // fixed-wing family; integrating it into `filteredPitchRad` winds the altitude loop up in a
+        // sustained turn and leaves a climb/overspeed transient after rollout.
         let compensatedPitchUpRad = maxPitchUpRad + max(0.0, bankLiftLossRad)
-        if useHybridVTOLCruiseStabilization {
-            // This is a feed-forward correction, not an integral term. The
-            // legacy fixed-wing path stores it for compatibility; hybrid VTOL
-            // must keep it output-only or even a small sustained bank pumps
-            // the saved pitch command to its upper limit in a few frames.
-            commandedPitchRad = (state.filteredPitchRad + bankLiftLossRad)
-                .clamped(to: -maxPitchDownRad...compensatedPitchUpRad)
-        } else {
-            state.filteredPitchRad = (state.filteredPitchRad + bankLiftLossRad)
-                .clamped(to: -maxPitchDownRad...compensatedPitchUpRad)
-            commandedPitchRad = state.filteredPitchRad
-        }
+        let commandedPitchRad = (state.filteredPitchRad + bankLiftLossRad)
+            .clamped(to: -maxPitchDownRad...compensatedPitchUpRad)
 
         // Throttle: cruise + speed error + altitude assist when climbing.
         let approachScale: Float = {
@@ -502,23 +683,16 @@ final class FixedWingAutopilot {
         // square of that, so without extra throttle airspeed bleeds through
         // the turn, costing even more lift on top of the bank's cosine loss.
         let turnDragBoost = (1.0 / max(cos(state.filteredBankRad), 0.5) - 1.0) * Tuning.turnThrottleCompensationGain
-        let commandedThrottle: Float
-        if useHybridVTOLCruiseStabilization {
-            // Same feed-forward rule as pitch: do not integrate the bank drag
-            // correction into persistent throttle state on every update.
-            commandedThrottle = (state.filteredThrottle + turnDragBoost)
-                .clamped(to: Tuning.throttleHoverSpan)
-        } else {
-            state.filteredThrottle = (state.filteredThrottle + turnDragBoost)
-                .clamped(to: Tuning.throttleHoverSpan)
-            commandedThrottle = state.filteredThrottle
-        }
+        // Feed-forward only. Keeping drag compensation in the filter memory pinned power at the
+        // ceiling after a turn, invalidating the speed/radius envelope used by route planning.
+        let commandedThrottle = (state.filteredThrottle + turnDragBoost)
+            .clamped(to: Tuning.throttleHoverSpan)
 
         let bankDeg = state.filteredBankRad.radiansToDegrees
         let pitchDeg = commandedPitchRad.radiansToDegrees
         let yawDeg = wrapAngle(desiredCourse).radiansToDegrees
         let aimWorld = SIMD3<Float>(aimPointPlanar.x, targetAltitude, aimPointPlanar.y)
-        let positionTarget = holdsFinalCourse
+        let positionTarget = holdsFinalCourse || activeFlyBy != nil
             ? aimWorld
             : SIMD3<Float>(activeWaypoint.position.x, targetAltitude, activeWaypoint.position.y)
 
@@ -531,10 +705,23 @@ final class FixedWingAutopilot {
             )
         let legStartWorld = holdsFinalCourse
             ? SIMD3<Float>(aircraftPlanar.x, targetAltitude, aircraftPlanar.y)
-            : SIMD3<Float>(legStartPlanar.x, targetAltitude, legStartPlanar.y)
+            : activeFlyBy.map { SIMD3<Float>($0.entry.x, targetAltitude, $0.entry.y) }
+                ?? SIMD3<Float>(legStartPlanar.x, targetAltitude, legStartPlanar.y)
         let legEndWorld = holdsFinalCourse
             ? aimWorld
-            : SIMD3<Float>(legEndPlanar.x, targetAltitude, legEndPlanar.y)
+            : activeFlyBy.map { SIMD3<Float>($0.exit.x, targetAltitude, $0.exit.y) }
+                ?? SIMD3<Float>(legEndPlanar.x, targetAltitude, legEndPlanar.y)
+
+        let guidanceCrossTrack = activeFlyBy.map {
+            simd_length(aircraftPlanar - $0.center) - $0.radius
+        } ?? crossTrack
+        let guidanceAlongTrackProgress = {
+            guard let activeFlyBy, let activeFlyByProgress,
+                  activeFlyBy.arcLength > 0.01 else {
+                return alongTrackProgress
+            }
+            return (activeFlyByProgress / activeFlyBy.arcLength).clamped(to: 0.0...1.0)
+        }()
 
         state.previousAircraftPlanar = aircraftPlanar
         state.hasPreviousAircraftPlanar = true
@@ -547,7 +734,7 @@ final class FixedWingAutopilot {
             positionTarget: positionTarget,
             activeWaypointIndex: activeIndex,
             distanceToActiveWaypointMeters: simd_length(activeWaypoint.position - aircraftPlanar),
-            crossTrackErrorMeters: crossTrack,
+            crossTrackErrorMeters: guidanceCrossTrack,
             courseErrorDegrees: courseError.radiansToDegrees,
             desiredCourseDegrees: yawDeg,
             headingDegrees: input.aircraftYawRadians.radiansToDegrees,
@@ -559,10 +746,11 @@ final class FixedWingAutopilot {
             aimPointWorld: aimWorld,
             legStartWorld: legStartWorld,
             legEndWorld: legEndWorld,
-            alongTrackProgress: alongTrackProgress,
+            alongTrackProgress: guidanceAlongTrackProgress,
             remainingPathLengthMeters: remainingDistance,
             stallProtectionActive: stallProtectionActive,
             hasCompletedRoute: state.hasCompletedRoute,
+            flyByTransitionActive: activeFlyBy != nil,
             missedActiveWaypoint: state.missedActiveWaypoint
         )
     }
@@ -571,6 +759,234 @@ final class FixedWingAutopilot {
     var hasCompletedRoute: Bool { state.hasCompletedRoute }
 
     // MARK: - Internals
+
+    private func effectiveMaximumBankRadians(
+        wing: FixedWingParameters,
+        targetAltitude: Float,
+        currentAltitude: Float
+    ) -> Float {
+        let altitudeDeficit = max(0.0, targetAltitude - currentAltitude)
+        let altitudeMarginFactor = (
+            1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0)
+        ).clamped(to: 0.35...1.0)
+        return max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95 * altitudeMarginFactor
+    }
+
+    /// Returns a full-radius fillet or `nil`; the radius is never reduced to make a short leg
+    /// appear feasible. Route construction is responsible for replanning a corner that cannot fit.
+    private func flyByGeometry(
+        plan: FixedWingAutopilotPlan,
+        waypointIndex: Int,
+        wing: FixedWingParameters,
+        airspeed: Float,
+        effectiveMaxBankRadians: Float,
+        validatedTurnRadius: Float?
+    ) -> CommittedFlyBy? {
+        guard waypointIndex > 0,
+              waypointIndex < plan.waypoints.count - 1,
+              plan.waypoints[waypointIndex].capturePolicy == .flyBy else {
+            return nil
+        }
+
+        let previous = plan.waypoints[waypointIndex - 1].position
+        let current = plan.waypoints[waypointIndex].position
+        let next = plan.waypoints[waypointIndex + 1].position
+        let inbound = current - previous
+        let outbound = next - current
+        let inboundLength = simd_length(inbound)
+        let outboundLength = simd_length(outbound)
+        guard inboundLength > 0.05, outboundLength > 0.05 else { return nil }
+
+        let inboundDirection = inbound / inboundLength
+        let outboundDirection = outbound / outboundLength
+        let dot = simd_dot(inboundDirection, outboundDirection).clamped(to: -1.0...1.0)
+        let turnAngle = acos(dot)
+        guard turnAngle > Float(4.0).degreesToRadians,
+              turnAngle < Tuning.flyByMaximumTurnDeg.degreesToRadians else {
+            return nil
+        }
+
+        let turnSign = inboundDirection.x * outboundDirection.y
+            - inboundDirection.y * outboundDirection.x
+        guard abs(turnSign) > 0.001 else { return nil }
+
+        let speed = max(airspeed, wing.minSafeAirspeed)
+        let radius = requiredTurnRadius(
+            wing: wing,
+            airspeed: speed,
+            effectiveMaxBankRadians: effectiveMaxBankRadians,
+            validatedTurnRadius: validatedTurnRadius
+        )
+        let tangentDistance = radius * tan(turnAngle * 0.5)
+        let triggerDistance = tangentDistance + speed * Tuning.flyByRollInSeconds
+        let geometryMargin = max(1.0, plan.waypoints[waypointIndex].acceptanceRadius * 0.25)
+        guard tangentDistance.isFinite,
+              triggerDistance + geometryMargin <= inboundLength,
+              tangentDistance + geometryMargin <= outboundLength else {
+            return nil
+        }
+
+        let entry = current - inboundDirection * tangentDistance
+        let exit = current + outboundDirection * tangentDistance
+        let leftNormal = SIMD2<Float>(-inboundDirection.y, inboundDirection.x)
+        let center = turnSign > 0.0
+            ? entry + leftNormal * radius
+            : entry - leftNormal * radius
+        let startAngle = atan2(entry.y - center.y, entry.x - center.x)
+        let endAngle = atan2(exit.y - center.y, exit.x - center.x)
+        var sweepAngle = endAngle - startAngle
+        if turnSign > 0.0 {
+            while sweepAngle < 0.0 { sweepAngle += .pi * 2.0 }
+            while sweepAngle > .pi * 2.0 { sweepAngle -= .pi * 2.0 }
+        } else {
+            while sweepAngle > 0.0 { sweepAngle -= .pi * 2.0 }
+            while sweepAngle < -.pi * 2.0 { sweepAngle += .pi * 2.0 }
+        }
+
+        guard entry.x.isFinite, entry.y.isFinite,
+              exit.x.isFinite, exit.y.isFinite,
+              center.x.isFinite, center.y.isFinite,
+              startAngle.isFinite, sweepAngle.isFinite,
+              abs(sweepAngle) > 0.01 else {
+            return nil
+        }
+
+        return CommittedFlyBy(
+            waypointIndex: waypointIndex,
+            inboundDirection: inboundDirection,
+            outboundDirection: outboundDirection,
+            entry: entry,
+            exit: exit,
+            center: center,
+            radius: radius,
+            startAngle: startAngle,
+            sweepAngle: sweepAngle,
+            tangentDistance: tangentDistance,
+            triggerDistance: triggerDistance
+        )
+    }
+
+    private func requiredTurnRadius(
+        wing: FixedWingParameters,
+        airspeed: Float,
+        effectiveMaxBankRadians: Float,
+        validatedTurnRadius: Float?
+    ) -> Float {
+        let permittedBank = min(
+            max(Float(5.0).degreesToRadians, effectiveMaxBankRadians),
+            Tuning.flyByBankLimitDeg.degreesToRadians
+        )
+        let speed = max(airspeed, wing.minSafeAirspeed)
+        let bankLimitedRadius = speed * speed / max(0.1, 9.81 * tan(permittedBank))
+        return max(
+            wing.waypointAcceptanceRadiusMeters * 1.05,
+            wing.minimumTurnRadius(airspeed: speed),
+            bankLimitedRadius,
+            validatedTurnRadius ?? 0.0
+        )
+    }
+
+    private func requiresPhysicalFlyBy(
+        plan: FixedWingAutopilotPlan,
+        waypointIndex: Int
+    ) -> Bool {
+        guard waypointIndex > 0,
+              waypointIndex < plan.waypoints.count - 1,
+              plan.waypoints[waypointIndex].capturePolicy == .flyBy else {
+            return false
+        }
+        let inbound = plan.waypoints[waypointIndex].position
+            - plan.waypoints[waypointIndex - 1].position
+        let outbound = plan.waypoints[waypointIndex + 1].position
+            - plan.waypoints[waypointIndex].position
+        let inboundLength = simd_length(inbound)
+        let outboundLength = simd_length(outbound)
+        guard inboundLength > 0.05, outboundLength > 0.05 else {
+            return true
+        }
+        let dot = simd_dot(
+            inbound / inboundLength,
+            outbound / outboundLength
+        ).clamped(to: -1.0...1.0)
+        return acos(dot) > Float(4.0).degreesToRadians
+    }
+
+    private func flyByProgress(
+        aircraftPosition: SIMD2<Float>,
+        geometry: CommittedFlyBy
+    ) -> Float {
+        if simd_dot(aircraftPosition - geometry.entry, geometry.inboundDirection) < 0.0 {
+            return 0.0
+        }
+        if simd_dot(aircraftPosition - geometry.exit, geometry.outboundDirection) > 0.0 {
+            return geometry.arcLength
+        }
+
+        let currentAngle = atan2(
+            aircraftPosition.y - geometry.center.y,
+            aircraftPosition.x - geometry.center.x
+        )
+        var angularProgress = currentAngle - geometry.startAngle
+        if geometry.sweepAngle > 0.0 {
+            while angularProgress < 0.0 { angularProgress += .pi * 2.0 }
+            while angularProgress > .pi * 2.0 { angularProgress -= .pi * 2.0 }
+            angularProgress = min(angularProgress, geometry.sweepAngle)
+        } else {
+            while angularProgress > 0.0 { angularProgress -= .pi * 2.0 }
+            while angularProgress < -.pi * 2.0 { angularProgress += .pi * 2.0 }
+            angularProgress = max(angularProgress, geometry.sweepAngle)
+        }
+        return abs(angularProgress) * geometry.radius
+    }
+
+    private func flyByAimPoint(
+        geometry: CommittedFlyBy,
+        progress: Float,
+        lookaheadDistance: Float
+    ) -> SIMD2<Float> {
+        let desiredDistance = max(0.0, progress) + max(1.0, lookaheadDistance)
+        if desiredDistance <= geometry.arcLength {
+            let fraction = (desiredDistance / max(0.001, geometry.arcLength))
+                .clamped(to: 0.0...1.0)
+            let angle = geometry.startAngle + geometry.sweepAngle * fraction
+            return SIMD2<Float>(
+                geometry.center.x + cos(angle) * geometry.radius,
+                geometry.center.y + sin(angle) * geometry.radius
+            )
+        }
+        return geometry.exit
+            + geometry.outboundDirection * (desiredDistance - geometry.arcLength)
+    }
+
+    private func shouldCompleteFlyBy(
+        _ geometry: CommittedFlyBy,
+        aircraftPosition: SIMD2<Float>,
+        aircraftYaw: Float,
+        acceptanceRadius: Float
+    ) -> Bool {
+        let progress = flyByProgress(
+            aircraftPosition: aircraftPosition,
+            geometry: geometry
+        )
+        let outboundLocal = aircraftPosition - geometry.exit
+        let outboundAlong = simd_dot(outboundLocal, geometry.outboundDirection)
+        let outboundNormal = SIMD2<Float>(
+            -geometry.outboundDirection.y,
+            geometry.outboundDirection.x
+        )
+        let outboundCrossTrack = abs(simd_dot(outboundLocal, outboundNormal))
+        let outboundCourse = courseRadians(direction: geometry.outboundDirection)
+        let headingError = abs(shortestAngle(outboundCourse - aircraftYaw))
+        let handoffCorridor = max(
+            max(4.0, acceptanceRadius) * 1.6,
+            geometry.radius * 0.22
+        )
+        let arcNearlyComplete = progress >= geometry.arcLength * 0.82
+        let outboundAcquired = outboundAlong >= -max(4.0, acceptanceRadius)
+            && outboundCrossTrack <= handoffCorridor
+            && headingError <= Float(18.0).degreesToRadians
+        return arcNearlyComplete && outboundAcquired
+    }
 
     private func computeCaptureAimPoint(
         activeWaypoint: FixedWingAutopilotWaypoint,

@@ -246,7 +246,14 @@ struct CollisionObstacleSpatialIndex {
         var nextCells: [CellKey: [CollisionObstacle]] = [:]
         nextCells.reserveCapacity(max(16, obstacles.count))
         for obstacle in obstacles {
-            let radius = max(0.0, obstacle.radius)
+            // `radius` is a 3-D broad-phase sphere and can be dominated by a tower's height. This
+            // index is planar: using that sphere inserts one 24 m mesh bucket into dozens of city
+            // blocks. The explicit planar box (when available) supplies the tight conservative
+            // X/Z radius instead.
+            let radius = max(
+                0.0,
+                obstacle.planarHalfExtents.map(simd_length) ?? obstacle.radius
+            )
             let minCell = Self.cellKey(
                 x: obstacle.center.x - radius,
                 z: obstacle.center.z - radius,

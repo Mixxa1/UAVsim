@@ -64,6 +64,7 @@ final class FixedWingAssistController {
         static let turnLiftCompensationGainDeg: Float = 30.0 // extra deg pitch per unit (1/cos(bank) - 1)
         static let turnThrottleCompensationGain: Float = 0.3 // throttle per unit (1/cos(bank) - 1)
         static let altitudeThrottleAssist: Float = 0.014
+        static let throttleSpeedGain: Float = 0.055
         static let pitchUpClampDeg: Float = 9.0
         static let pitchDownClampDeg: Float = 7.0
         static let courseFilterTau: Float = 0.22
@@ -284,12 +285,20 @@ final class FixedWingAssistController {
         // attack, and a nose held higher than the turn requires trades the altitude problem for a
         // speed one.
         let compensatedPitchCeiling = Tuning.pitchUpClampDeg + max(0.0, bankLiftLossDeg)
-        filteredPitchDeg = (filteredPitchDeg + bankLiftLossDeg)
+        let commandedPitchDeg = (filteredPitchDeg + bankLiftLossDeg)
             .clamped(to: -Tuning.pitchDownClampDeg...compensatedPitchCeiling)
 
         let baselineThrottle = max(0.32, baseline.cruiseReferenceThrottle)
         let throttleAssist = altitudeError * Tuning.altitudeThrottleAssist
-        let rawThrottle = (baselineThrottle + throttleAssist).clamped(to: 0.32...0.95)
+        let airspeed = max(0.0, aircraftState.forwardAirspeed)
+        let speedError = wing.cruiseAirspeed - airspeed
+        let stallBoost: Float = airspeed < wing.minSafeAirspeed ? 0.16 : 0.0
+        let rawThrottle = (
+            baselineThrottle
+                + throttleAssist
+                + speedError * Tuning.throttleSpeedGain
+                + stallBoost
+        ).clamped(to: 0.25...0.95)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: dt)
         filteredThrottle = filteredThrottle + (rawThrottle - filteredThrottle) * throttleAlpha
         // Coordinated-turn drag compensation, applied post-filter — see FixedWingAutopilot.swift.
@@ -298,8 +307,8 @@ final class FixedWingAssistController {
         // Same correction for power: the log had throttle sitting on 0.95 throughout the turn,
         // so the drag compensation was being clipped off exactly as the pitch was.
         let compensatedThrottleCeiling = min(1.0, 0.95 + max(0.0, turnDragBoost))
-        filteredThrottle = (filteredThrottle + turnDragBoost)
-            .clamped(to: 0.32...compensatedThrottleCeiling)
+        let commandedThrottle = (filteredThrottle + turnDragBoost)
+            .clamped(to: 0.25...compensatedThrottleCeiling)
 
         // Waypoint intercept — track capture progress for auto-advance.
         nextState.distanceToActiveWaypointMeters = nil
@@ -373,9 +382,9 @@ final class FixedWingAssistController {
         return FixedWingAssistOutput(
             state: nextState,
             rollDegrees: filteredBankDeg.clamped(to: -Tuning.maxBankDeg...Tuning.maxBankDeg),
-            pitchDegrees: filteredPitchDeg.clamped(to: -Tuning.pitchDownClampDeg...Tuning.pitchUpClampDeg),
+            pitchDegrees: commandedPitchDeg.clamped(to: -wing.maxPitchDownDeg...wing.maxPitchUpDeg),
             yawDegrees: wrapAngle(filteredCourseRad).radiansToDegrees,
-            throttle: filteredThrottle,
+            throttle: commandedThrottle,
             transitionReason: transitionReason
         )
     }

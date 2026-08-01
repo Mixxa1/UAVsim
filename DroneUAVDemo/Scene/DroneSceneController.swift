@@ -391,10 +391,13 @@ final class DroneSceneController {
     /// Slack on the analytic ray's spatial query. The index already buckets each obstacle across
     /// the cells its radius reaches, so this only covers cell-boundary rounding.
     private static let analyticRayQueryMargin: Float = 4.0
-    private static let meshCollisionCellCacheLimit = 900
-    /// 21×21 cells of 24 m — a 250 m window, which covers every planning and avoidance query that
-    /// exists today while still refusing "give me the whole city".
-    private static let meshObstacleQueryCellLimit = 441
+    // Larger than one worst-case supported fixed-wing mesh horizon so a one-cell movement does not
+    // evict and rebuild the entire working set on every tick.
+    private static let meshCollisionCellCacheLimit = 5_000
+    // Up to 64×64 cells. The caller derives its horizon from the live turn radius and caps it at a
+    // size this mesh cache can answer completely; exceeding the old 33×33 ceiling returned `[]`
+    // and made photogrammetry avoidance silently blind.
+    private static let meshObstacleQueryCellLimit = 4_096
 
     private struct MeshCollisionCellKey: Hashable {
         let column: Int
@@ -4185,12 +4188,17 @@ final class DroneSceneController {
 
     func nearbyEnvironmentObstacles(
         near position: SIMD3<Float>,
-        radius: Float
+        radius: Float,
+        includeMesh: Bool = true
     ) -> [CollisionObstacle] {
         var obstacles = environmentObstacleIndex.query(near: position, radius: radius)
         obstacles.append(contentsOf: worldNavigationObstacleIndex.query(near: position, radius: radius))
-        obstacles.append(contentsOf: meshObstacles(inBox: position - SIMD3<Float>(repeating: radius),
-                                                  maximum: position + SIMD3<Float>(repeating: radius)))
+        if includeMesh {
+            obstacles.append(contentsOf: meshObstacles(
+                inBox: position - SIMD3<Float>(repeating: radius),
+                maximum: position + SIMD3<Float>(repeating: radius)
+            ))
+        }
         return obstacles
     }
 
@@ -4232,11 +4240,8 @@ final class DroneSceneController {
         // A query spanning an implausible number of cells means something asked for the whole
         // city at once; answering it would allocate megabytes on the tick path.
         //
-        // The old ceiling of 64 cells (8×8 = 192 m of a 24 m grid) was below what the planning
-        // paths legitimately ask for: a 120 m radius spans 11×11 = 121 cells, so the mesh-blocker
-        // query fell off this guard and silently returned nothing at all — the planner went on
-        // believing a photogrammetric city was empty. Cells are cached, so the real cost of a wider
-        // window is the array of already-built obstacles, not extraction.
+        // A query limit below the fixed-wing prediction horizon silently returns no mesh blockers
+        // at all. Cells are cached, so subsequent ticks reuse the extracted obstacle buckets.
         let spanned = (columnEnd - columnStart + 1) * (rowEnd - rowStart + 1)
         guard spanned > 0, spanned <= Self.meshObstacleQueryCellLimit else { return [] }
 

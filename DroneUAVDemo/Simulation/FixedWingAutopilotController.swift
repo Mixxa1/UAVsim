@@ -36,9 +36,14 @@ struct FixedWingRouteTrackingContext: Equatable {
     var minimumWaypointIndex: Int?
     var preferredLoiterCenter: SIMD3<Float>?
     var preferredLoiterRadius: Float?
-    /// Legacy field — the new autopilot does not require pre-baked geometry,
-    /// it derives smooth turns from raw waypoints via carrot pursuit. The
-    /// field is retained so existing call sites compile unchanged.
+    /// Set only after route construction checked every intermediate turn using the full vehicle
+    /// envelope and the live fixed-wing manoeuvre radius.
+    var turnsValidated: Bool
+    var validatedTurnRadiusMeters: Float?
+    var validatedAirspeedMps: Float?
+    /// Legacy preview geometry. Runtime guidance builds a full-radius fillet
+    /// from the same validated waypoints and current bank authority so stale
+    /// pre-baked radii cannot make a corner look flyable.
     var flyableRoute: FixedWingFlyableRoute?
 
     init(
@@ -47,6 +52,9 @@ struct FixedWingRouteTrackingContext: Equatable {
         minimumWaypointIndex: Int? = nil,
         preferredLoiterCenter: SIMD3<Float>? = nil,
         preferredLoiterRadius: Float? = nil,
+        turnsValidated: Bool = false,
+        validatedTurnRadiusMeters: Float? = nil,
+        validatedAirspeedMps: Float? = nil,
         flyableRoute: FixedWingFlyableRoute? = nil
     ) {
         self.routeIdentifier = routeIdentifier
@@ -54,6 +62,9 @@ struct FixedWingRouteTrackingContext: Equatable {
         self.minimumWaypointIndex = minimumWaypointIndex
         self.preferredLoiterCenter = preferredLoiterCenter
         self.preferredLoiterRadius = preferredLoiterRadius
+        self.turnsValidated = turnsValidated
+        self.validatedTurnRadiusMeters = validatedTurnRadiusMeters
+        self.validatedAirspeedMps = validatedAirspeedMps
         self.flyableRoute = flyableRoute
     }
 }
@@ -244,7 +255,11 @@ final class FixedWingAutopilotController {
             useHybridVTOLCruiseStabilization: useHybridVTOLCruiseStabilization,
             input: input
         ) else {
-            setPhase(.failed, reason: "autopilot_returned_nil")
+            let reason = autopilot.lastFailureReason ?? "autopilot_returned_nil"
+            setPhase(.failed, reason: reason)
+            // `setPhase` intentionally suppresses duplicate phase transitions, but the reason can
+            // change while already failed (for example timeout -> missed turn entry).
+            lastTransitionReason = reason
             return failureOutput(for: context, wing: wing, tracking: tracking)
         }
 
@@ -253,6 +268,8 @@ final class FixedWingAutopilotController {
             setPhase(.completingMission, reason: "route_completed")
         } else if isLaunchProtected {
             setPhase(.launchClimb, reason: "launch_climbout_active")
+        } else if result.flyByTransitionActive {
+            setPhase(.approachingWaypoint, reason: "fly_by_turn")
         } else if result.distanceToActiveWaypointMeters < max(
             wing.waypointAcceptanceRadiusMeters * 1.6,
             simd_length(SIMD2<Float>(result.legEndWorld.x - result.legStartWorld.x,
@@ -305,7 +322,9 @@ final class FixedWingAutopilotController {
 
         let updatedDebug = FixedWingAutopilotDebugState(
             routeIdentifier: tracking.routeIdentifier,
-            missionState: missionState(forPhase: phase, hasCompleted: result.hasCompletedRoute),
+            missionState: result.flyByTransitionActive
+                ? .flyByTurn
+                : missionState(forPhase: phase, hasCompleted: result.hasCompletedRoute),
             activeSegmentIndex: result.activeWaypointIndex,
             currentWaypointIndex: missionWaypointIndex,
             legStart: result.legStartWorld,
@@ -423,14 +442,24 @@ final class FixedWingAutopilotController {
                         routeWaypoints: routeWaypoints,
                         baseRadius: baseCaptureRadius,
                         wing: wing
-                    )
+                    ),
+                    // Conventional fixed-wing mission points are fly-by anchors. The final point
+                    // alone is a terminal capture; payload/mission progress is reported only after
+                    // the validated arc has acquired its outbound leg.
+                    capturePolicy: index == routeWaypoints.count - 1 ? .required : .flyBy
                 )
             }
         let minimumIndex = max(0, tracking.minimumWaypointIndex ?? 0)
         return FixedWingAutopilotPlan(
+            // The safety envelope is data, not route identity. Changing its radius must not reset
+            // active waypoint progress to the latched runtime start; the follower separately
+            // rejects a committed arc if the live envelope worsens.
             routeIdentifier: tracking.routeIdentifier,
             waypoints: waypoints,
             minimumWaypointIndex: min(max(0, minimumIndex - 1), max(0, waypoints.count - 1)),
+            turnsValidated: tracking.turnsValidated,
+            validatedTurnRadiusMeters: tracking.validatedTurnRadiusMeters,
+            validatedAirspeedMps: tracking.validatedAirspeedMps,
             loopAfterFinalWaypoint: false
         )
     }
@@ -507,6 +536,7 @@ final class FixedWingAutopilotController {
             minimumWaypointIndex: 1,
             preferredLoiterCenter: target,
             preferredLoiterRadius: nil,
+            turnsValidated: true,
             flyableRoute: nil
         )
     }
@@ -516,29 +546,39 @@ final class FixedWingAutopilotController {
         wing: FixedWingParameters,
         tracking: FixedWingRouteTrackingContext
     ) -> FixedWingAutopilotOutput {
+        let safeAltitude = max(
+            context.targetAltitude,
+            context.state.position.y + min(10.0, wing.initialClimbTargetAltitude * 0.35)
+        )
         let positionTarget = SIMD3<Float>(
             context.state.position.x,
-            max(context.targetAltitude, context.state.position.y),
+            safeAltitude,
             context.state.position.z
         )
+        let safePitch = min(wing.maxPitchUpDeg, max(6.0, wing.initialClimbPitchDeg))
+        let safeThrottle = max(
+            context.flightBaseline.takeoffThrottleReference,
+            context.flightBaseline.cruiseReferenceThrottle,
+            wing.maxThrottle * 0.82
+        ).clamped(to: wing.minThrottle...wing.maxThrottle)
         let command = AutopilotControlCommand(
             positionTarget: positionTarget,
             rollDegrees: 0.0,
-            pitchDegrees: 0.0,
+            pitchDegrees: safePitch,
             yawDegrees: context.state.orientation.z.radiansToDegrees,
-            throttle: 0.5
+            throttle: safeThrottle
         )
         let guidance = FixedWingGuidanceOutput(
-            desiredThrottle: 0.5,
+            desiredThrottle: safeThrottle,
             desiredRoll: 0.0,
-            desiredPitchBias: 0.0,
+            desiredPitchBias: safePitch.degreesToRadians,
             desiredHeading: context.state.orientation.z,
             desiredCourse: context.state.orientation.z,
             headingError: 0.0,
             crossTrackError: 0.0,
             alongTrackProgress: 0.0,
             targetAirspeed: wing.cruiseAirspeed,
-            targetAltitude: context.targetAltitude
+            targetAltitude: safeAltitude
         )
         var fallbackDebug = FixedWingAutopilotDebugState.idle
         fallbackDebug.routeIdentifier = tracking.routeIdentifier

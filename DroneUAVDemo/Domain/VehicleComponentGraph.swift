@@ -141,8 +141,7 @@ struct VehicleContactSphere: Hashable {
 
 /// The aircraft's physical contact profile: the sphere set replacing the
 /// single legacy `collisionRadius` sphere for narrow-phase contact (ground
-/// and obstacles). Broad-phase, avoidance and path planning keep using the
-/// legacy bounding sphere.
+/// and obstacles). `boundingRadius` also gives navigation a conservative full-airframe envelope.
 struct VehicleContactProfile: Hashable {
     let spheres: [VehicleContactSphere]
     /// Radius of the sphere (centered at the state origin) that encloses all

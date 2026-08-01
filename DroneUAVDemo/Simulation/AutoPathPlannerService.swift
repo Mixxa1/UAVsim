@@ -50,6 +50,9 @@ final class AutoPathPlannerService {
         let seed: UInt64
         let worldExtentBucket: Int
         let obstacleHash: Int
+        let droneRadiusBucket: Int
+        let minimumObstacleRadiusFactorBucket: Int
+        let additionalHardClearanceBucket: Int
     }
 
     private struct PlanSignature: Equatable {
@@ -298,6 +301,8 @@ final class AutoPathPlannerService {
         obstacles: [CollisionObstacle],
         obstacleSignature: Int? = nil,
         droneRadius: Float,
+        minimumObstacleRadiusFactor: Float = 0.0,
+        additionalHardClearance: Float = 0.0,
         modeTag: String,
         forceRecompute: Bool = false,
         reason: String = "periodic"
@@ -310,7 +315,9 @@ final class AutoPathPlannerService {
             terrain: terrain,
             obstacles: obstacles,
             obstacleSignature: obstacleSignature,
-            droneRadius: droneRadius
+            droneRadius: droneRadius,
+            minimumObstacleRadiusFactor: minimumObstacleRadiusFactor,
+            additionalHardClearance: additionalHardClearance
         ) else {
             status = .blocked
             statusReason = "grid_build_failed"
@@ -423,7 +430,9 @@ final class AutoPathPlannerService {
             grid: grid,
             start: start,
             goal: goal,
-            travelAltitude: altitude
+            travelAltitude: altitude,
+            preserveExactStart: grid.cell(forWorld: start).map { !grid.isBlocked($0) } ?? false,
+            preserveExactGoal: grid.cell(forWorld: goal).map { !grid.isBlocked($0) } ?? false
         )
         let smoothed = smoothPath(route, maxStep: max(1.0, grid.cellSize * 0.9))
 
@@ -541,17 +550,23 @@ final class AutoPathPlannerService {
         terrain: TerrainConfiguration,
         obstacles: [CollisionObstacle],
         obstacleSignature: Int? = nil,
-        droneRadius: Float
+        droneRadius: Float,
+        minimumObstacleRadiusFactor: Float = 0.0,
+        additionalHardClearance: Float = 0.0
     ) -> NavigationDirectPathAssessment {
         guard ensureGrid(
                   terrain: terrain,
                   obstacles: obstacles,
                   obstacleSignature: obstacleSignature,
-                  droneRadius: droneRadius
+                  droneRadius: droneRadius,
+                  minimumObstacleRadiusFactor: minimumObstacleRadiusFactor,
+                  additionalHardClearance: additionalHardClearance
               ),
               let grid,
-              let startCell = grid.nearestFreeCell(to: start, preferredToward: goal),
-              let goalCell = grid.nearestFreeCell(to: goal, preferredToward: start) else {
+              let startCell = grid.cell(forWorld: start),
+              let goalCell = grid.cell(forWorld: goal),
+              !grid.isBlocked(startCell),
+              !grid.isBlocked(goalCell) else {
             return .unavailable
         }
 
@@ -584,7 +599,9 @@ final class AutoPathPlannerService {
         terrain: TerrainConfiguration,
         obstacles: [CollisionObstacle],
         obstacleSignature: Int?,
-        droneRadius: Float
+        droneRadius: Float,
+        minimumObstacleRadiusFactor: Float,
+        additionalHardClearance: Float
     ) -> Bool {
         let nextSignature = GridSignature(
             terrain: terrain.preset,
@@ -592,7 +609,16 @@ final class AutoPathPlannerService {
             densityBucket: Int((terrain.density.clamped(to: 0.0...1.0) * 100.0).rounded()),
             seed: terrain.seed,
             worldExtentBucket: Int((terrain.worldHalfExtent * 10.0).rounded()),
-            obstacleHash: obstacleSignature ?? Self.obstacleHash(obstacles)
+            obstacleHash: obstacleSignature ?? Self.obstacleHash(obstacles),
+            // These values define hard collision geometry. Exact bit patterns avoid reusing a grid
+            // rasterised with a slightly smaller radius from the same rounded bucket.
+            droneRadiusBucket: Int(max(0.0, droneRadius).bitPattern),
+            minimumObstacleRadiusFactorBucket: Int(
+                minimumObstacleRadiusFactor.clamped(to: 0.0...1.0).bitPattern
+            ),
+            additionalHardClearanceBucket: Int(
+                max(0.0, additionalHardClearance).bitPattern
+            )
         )
 
         if nextSignature == gridSignature, grid != nil {
@@ -620,9 +646,14 @@ final class AutoPathPlannerService {
             rasterizeObstacle(
                 obstacle,
                 droneRadius: droneRadius,
+                minimumObstacleRadiusFactor: minimumObstacleRadiusFactor,
                 grid: &newGrid
             )
         }
+        dilateBlockedCells(
+            additionalClearance: additionalHardClearance,
+            grid: &newGrid
+        )
 
         self.grid = newGrid
         self.gridSignature = nextSignature
@@ -637,18 +668,93 @@ final class AutoPathPlannerService {
         return true
     }
 
+    /// Adds fixed-wing manoeuvre clearance after ordinary obstacle rasterisation.
+    ///
+    /// Passing a 100 m turn radius as `droneRadius` makes every one of ~20k OSM objects scan a
+    /// 200 m box. A two-pass 8-neighbour distance transform costs O(grid cells), independent of
+    /// object count. The 1.083 threshold covers the maximum octile-vs-Euclidean error, so the
+    /// result is conservative without turning every circle into a much wider square.
+    private func dilateBlockedCells(
+        additionalClearance: Float,
+        grid: inout NavigationGrid
+    ) {
+        let radiusInCells = max(0.0, additionalClearance) / grid.cellSize
+        guard radiusInCells > 0.0, !grid.blocked.isEmpty else { return }
+
+        let width = grid.width
+        let height = grid.height
+        let infinity = Int32(1_000_000_000)
+        let axisCost = Int32(1_000)
+        let diagonalCost = Int32(1_414)
+        var distance = grid.blocked.map { $0 == 0 ? infinity : 0 }
+
+        for z in 0..<height {
+            for x in 0..<width {
+                let index = z * width + x
+                guard distance[index] != 0 else { continue }
+                var best = distance[index]
+                if x > 0 { best = min(best, distance[index - 1] + axisCost) }
+                if z > 0 {
+                    best = min(best, distance[index - width] + axisCost)
+                    if x > 0 {
+                        best = min(best, distance[index - width - 1] + diagonalCost)
+                    }
+                    if x + 1 < width {
+                        best = min(best, distance[index - width + 1] + diagonalCost)
+                    }
+                }
+                distance[index] = best
+            }
+        }
+
+        for z in stride(from: height - 1, through: 0, by: -1) {
+            for x in stride(from: width - 1, through: 0, by: -1) {
+                let index = z * width + x
+                guard distance[index] != 0 else { continue }
+                var best = distance[index]
+                if x + 1 < width { best = min(best, distance[index + 1] + axisCost) }
+                if z + 1 < height {
+                    best = min(best, distance[index + width] + axisCost)
+                    if x > 0 {
+                        best = min(best, distance[index + width - 1] + diagonalCost)
+                    }
+                    if x + 1 < width {
+                        best = min(best, distance[index + width + 1] + diagonalCost)
+                    }
+                }
+                distance[index] = best
+            }
+        }
+
+        let conservativeThreshold = Int32(ceil(radiusInCells * 1_083.0))
+        for index in distance.indices where distance[index] <= conservativeThreshold {
+            grid.blocked[index] = 1
+            grid.penalty[index] = 1.0
+        }
+    }
+
     private func rasterizeObstacle(
         _ obstacle: CollisionObstacle,
         droneRadius: Float,
+        minimumObstacleRadiusFactor: Float,
         grid: inout NavigationGrid
     ) {
         if obstacle.source == "container.floor" || obstacle.source == "container.roof" {
             return
         }
-        let inflation = obstacleInflation(for: obstacle.source, droneRadius: droneRadius)
+        let inflation = obstacleInflation(
+            for: obstacle.source,
+            droneRadius: droneRadius,
+            minimumRadiusFactor: minimumObstacleRadiusFactor
+        )
         let blockedMargin = max(0.12, inflation)
-        let penaltyMargin = blockedMargin + max(1.2, blockedMargin * 1.6)
-        let queryRadius = obstacle.radius + penaltyMargin
+        // Large fixed-wing turn envelopes are hard clearance, not a reason to add another 160%
+        // soft halo. Cap only the penalty *extension* so city grids stay tractable while blocked
+        // cells retain the complete manoeuvre reserve.
+        let penaltyExtension = min(12.0, max(1.2, blockedMargin * 0.25))
+        let penaltyMargin = blockedMargin + penaltyExtension
+        let planarRadius = obstacle.planarHalfExtents.map(simd_length) ?? obstacle.radius
+        let queryRadius = planarRadius + penaltyMargin
 
         let center = SIMD2<Float>(obstacle.center.x, obstacle.center.z)
         let minXFloat = (center.x - queryRadius - grid.originX) / grid.cellSize
@@ -696,7 +802,11 @@ final class AutoPathPlannerService {
         }
     }
 
-    private func obstacleInflation(for source: String, droneRadius: Float) -> Float {
+    private func obstacleInflation(
+        for source: String,
+        droneRadius: Float,
+        minimumRadiusFactor: Float
+    ) -> Float {
         let base: Float
         switch source {
         case let value where value.contains("no_fly"):
@@ -716,7 +826,14 @@ final class AutoPathPlannerService {
         default:
             base = 1.0
         }
-        let radiusFactor: Float = source.contains("container") ? 0.45 : 0.6
+        // The caller supplies the vehicle's complete navigation footprint. Shrinking it here let
+        // wings extend outside the blocked corridor even though route planning had been given the
+        // correct radius. Containers retain their deliberately tighter handling for close work.
+        let sourceRadiusFactor: Float = source.contains("container") ? 0.45 : 1.0
+        let radiusFactor = max(
+            sourceRadiusFactor,
+            minimumRadiusFactor.clamped(to: 0.0...1.0)
+        )
         return base + droneRadius * radiusFactor
     }
 
@@ -753,13 +870,7 @@ final class AutoPathPlannerService {
         // 8 m, and the same 4.5 km at 6 m and below. The aircraft was sealed into a pocket three
         // blocks wide, which is why every route failed. 1200 gives 5.33 m here, with margin over
         // the 8 m cliff, and still never binds on a procedural map.
-        // Deliberately left at the coarser 520 divisor, not the parked 1200.
-        //
-        // This is a *floor* on cell size, so a larger divisor means a finer grid — 2.3x finer
-        // here, which is more cells, more expansions and better routes. It is a routing change,
-        // not a performance one, and it is being restored specifically to stop a 0 FPS stall, so
-        // the grid stays where it is and only the search itself gets faster.
-        let gridBudgetCellSize = worldWidth / 520.0
+        let gridBudgetCellSize = worldWidth / 1200.0
         return max(base + densityAdjustment, gridBudgetCellSize)
     }
 
@@ -975,7 +1086,9 @@ final class AutoPathPlannerService {
         grid: NavigationGrid,
         start: SIMD3<Float>,
         goal: SIMD3<Float>,
-        travelAltitude: Float
+        travelAltitude: Float,
+        preserveExactStart: Bool,
+        preserveExactGoal: Bool
     ) -> [SIMD3<Float>] {
         guard !cells.isEmpty else {
             return []
@@ -986,8 +1099,10 @@ final class AutoPathPlannerService {
             return SIMD3<Float>(pointXZ.x, travelAltitude, pointXZ.y)
         }
 
-        if !points.isEmpty {
+        if !points.isEmpty, preserveExactStart {
             points[0] = SIMD3<Float>(start.x, travelAltitude, start.z)
+        }
+        if !points.isEmpty, preserveExactGoal {
             points[points.count - 1] = SIMD3<Float>(goal.x, travelAltitude, goal.z)
         }
 
