@@ -1,14 +1,23 @@
 import Foundation
 import simd
 
+/// Lateral-loop constants shared with the collision predictor. Route safety is invalid if the
+/// proof assumes a slower/differently filtered turn than the controller that executes it.
+enum FixedWingAutopilotLateralTuning {
+    static let bankProportionalGain: Float = 1.45
+    static let bankFilterTau: Float = 0.32
+    static let courseFilterTau: Float = 0.18
+    static let maximumBankScale: Float = 0.95
+}
+
 /// Stable, "behaves-like-a-real-airplane" waypoint follower.
 ///
 /// Design rationale (replaces the previous multi-controller fly-by stack):
 /// - **Carrot pursuit** for lateral guidance: pick a virtual aim point ahead
-///   on the active path. Intermediate points are fly-by geometry: the follower
-///   commits to a physically attainable constant-radius fillet before the
-///   corner, follows it monotonically, and hands off only after acquiring the
-///   outbound leg. The terminal point still requires an actual swept capture.
+///   on the active path. Planner-generated intermediate corners are fly-by geometry: the follower
+///   commits to a physically attainable constant-radius fillet before the corner, follows it
+///   monotonically, and hands off only after acquiring the outbound leg. Operator mission points
+///   require an actual swept capture and a measured-pose route handoff.
 /// - **Decoupled energy management**: pitch tracks altitude error (with
 ///   vertical-velocity damping); throttle tracks speed error. Stall protection
 ///   pitches the nose down whenever airspeed drops below a safe floor.
@@ -53,7 +62,8 @@ struct FixedWingAutopilotWaypoint: Equatable {
         /// Fixed-wing mission transit points are passed on a validated fly-by arc; mission
         /// progress advances after outbound acquisition, not by pretending the corner was hit.
         case flyBy
-        /// Terminal points must intersect their swept acceptance circle.
+        /// Operator-authored mission points must intersect their swept acceptance circle. An
+        /// intermediate capture holds course until a measured-pose route is published.
         case required
     }
 
@@ -93,6 +103,10 @@ struct FixedWingAutopilotResult: Equatable {
     /// without entering its capture sphere. The route does not advance: the
     /// controller keeps the waypoint active and turns back to reacquire it.
     var missedActiveWaypoint: Bool
+    /// Route-array index of an intermediate required point that was physically captured. It
+    /// remains present during the measured-course hold so mission progress can acknowledge the
+    /// exact event before publishing the next route.
+    var capturedRequiredWaypointIndexAwaitingReplan: Int?
 }
 
 final class FixedWingAutopilot {
@@ -105,9 +119,9 @@ final class FixedWingAutopilot {
         static let flyByBankLimitDeg: Float = 22.0
         static let flyByMaximumTurnDeg: Float = 150.0
         // Lateral
-        static let bankProportionalGain: Float = 1.45      // rad bank per rad heading error
-        static let bankFilterTau: Float = 0.32             // low-pass tau (seconds)
-        static let courseFilterTau: Float = 0.18
+        static let bankProportionalGain = FixedWingAutopilotLateralTuning.bankProportionalGain
+        static let bankFilterTau = FixedWingAutopilotLateralTuning.bankFilterTau
+        static let courseFilterTau = FixedWingAutopilotLateralTuning.courseFilterTau
         // Vertical (pitch from altitude)
         static let altitudePitchGain: Float = 0.075        // rad pitch per meter of altitude error
         static let verticalDampingGain: Float = 0.18       // rad pitch per (m/s) vertical velocity
@@ -167,6 +181,11 @@ final class FixedWingAutopilot {
         var previousAircraftPlanar: SIMD2<Float> = .zero
         var hasPreviousAircraftPlanar: Bool = false
         var committedFlyBy: CommittedFlyBy?
+        /// A required intermediate mission point has been physically captured, but the route that
+        /// approached it certified a pre-capture fillet rather than the late outbound turn. Hold
+        /// the measured course until the owner publishes a newly planned route from this pose.
+        var requiredCaptureHoldCourseRad: Float?
+        var requiredCaptureWaypointIndex: Int?
     }
 
     private var state = InternalState()
@@ -188,6 +207,8 @@ final class FixedWingAutopilot {
         state.hasCompletedRoute = false
         state.hasLegAnchor = false
         state.committedFlyBy = nil
+        state.requiredCaptureHoldCourseRad = nil
+        state.requiredCaptureWaypointIndex = nil
     }
 
     func update(
@@ -223,6 +244,8 @@ final class FixedWingAutopilot {
             state.hasCourseSeed = false
             state.hasPreviousAircraftPlanar = false
             state.committedFlyBy = nil
+            state.requiredCaptureHoldCourseRad = nil
+            state.requiredCaptureWaypointIndex = nil
         }
 
         // Honour minimum index from outside (forward-progress guarantee).
@@ -237,6 +260,8 @@ final class FixedWingAutopilot {
                 state.hasCompletedRoute = false
                 state.hasLegAnchor = false
                 state.committedFlyBy = nil
+                state.requiredCaptureHoldCourseRad = nil
+                state.requiredCaptureWaypointIndex = nil
             } else {
                 state.activeWaypointIndex = plan.waypoints.count - 1
                 state.hasCompletedRoute = true
@@ -305,6 +330,7 @@ final class FixedWingAutopilot {
             }
         }
         if state.committedFlyBy == nil,
+           state.requiredCaptureHoldCourseRad == nil,
            state.activeWaypointIndex > 0,
            state.activeWaypointIndex < plan.waypoints.count - 1 {
             let turnWaypoint = plan.waypoints[state.activeWaypointIndex]
@@ -385,6 +411,9 @@ final class FixedWingAutopilot {
         state.missedActiveWaypoint = false
         var advanceGuard = 0
         while advanceGuard < plan.waypoints.count {
+            guard state.requiredCaptureHoldCourseRad == nil else {
+                break
+            }
             let active = plan.waypoints[state.activeWaypointIndex]
             // A committed fly-by deliberately misses the mathematical corner. Do not let its
             // capture sphere tear down the checked arc halfway through roll-in; the monotonic arc
@@ -446,9 +475,19 @@ final class FixedWingAutopilot {
                     }
                     break
                 } else {
+                    let requiresMeasuredPoseReplan = active.capturePolicy == .required
                     state.activeWaypointIndex += 1
                     state.hasLegAnchor = false
                     state.committedFlyBy = nil
+                    if requiresMeasuredPoseReplan {
+                        // Do not command the outbound leg from the stale inbound-route
+                        // certificate. Mission progress observes this physical capture later in
+                        // the same simulation tick; its next route identifier is built from the
+                        // measured pose and clears this hold on the following update.
+                        state.requiredCaptureHoldCourseRad = input.aircraftYawRadians
+                        state.requiredCaptureWaypointIndex = state.activeWaypointIndex - 1
+                        break
+                    }
                 }
                 advanceGuard += 1
                 continue
@@ -502,6 +541,8 @@ final class FixedWingAutopilot {
         )
 
         let holdsFinalCourse = state.hasCompletedRoute && !plan.loopAfterFinalWaypoint
+        let requiredCaptureHoldCourse = state.requiredCaptureHoldCourseRad
+        let holdsRequiredCaptureCourse = requiredCaptureHoldCourse != nil
         let activeFlyBy = state.committedFlyBy.flatMap {
             $0.waypointIndex == activeIndex ? $0 : nil
         }
@@ -509,7 +550,15 @@ final class FixedWingAutopilot {
             flyByProgress(aircraftPosition: aircraftPlanar, geometry: $0)
         }
         let aimPointPlanar: SIMD2<Float>
-        if holdsFinalCourse {
+        if holdsRequiredCaptureCourse, let requiredCaptureHoldCourse {
+            aimPointPlanar = aircraftPlanar + forwardDirection(
+                yaw: requiredCaptureHoldCourse
+            ) * max(
+                lookaheadDistance,
+                cruiseAirspeed * 4.0,
+                activeWaypoint.acceptanceRadius * 3.0
+            )
+        } else if holdsFinalCourse {
             aimPointPlanar = aircraftPlanar + legDirection * max(
                 lookaheadDistance,
                 cruiseAirspeed * 4.0,
@@ -692,7 +741,8 @@ final class FixedWingAutopilot {
         let pitchDeg = commandedPitchRad.radiansToDegrees
         let yawDeg = wrapAngle(desiredCourse).radiansToDegrees
         let aimWorld = SIMD3<Float>(aimPointPlanar.x, targetAltitude, aimPointPlanar.y)
-        let positionTarget = holdsFinalCourse || activeFlyBy != nil
+        let holdsMeasuredCourse = holdsFinalCourse || holdsRequiredCaptureCourse
+        let positionTarget = holdsMeasuredCourse || activeFlyBy != nil
             ? aimWorld
             : SIMD3<Float>(activeWaypoint.position.x, targetAltitude, activeWaypoint.position.y)
 
@@ -703,19 +753,22 @@ final class FixedWingAutopilot {
                 startIndex: activeIndex,
                 aircraft: aircraftPlanar
             )
-        let legStartWorld = holdsFinalCourse
+        let legStartWorld = holdsMeasuredCourse
             ? SIMD3<Float>(aircraftPlanar.x, targetAltitude, aircraftPlanar.y)
             : activeFlyBy.map { SIMD3<Float>($0.entry.x, targetAltitude, $0.entry.y) }
                 ?? SIMD3<Float>(legStartPlanar.x, targetAltitude, legStartPlanar.y)
-        let legEndWorld = holdsFinalCourse
+        let legEndWorld = holdsMeasuredCourse
             ? aimWorld
             : activeFlyBy.map { SIMD3<Float>($0.exit.x, targetAltitude, $0.exit.y) }
                 ?? SIMD3<Float>(legEndPlanar.x, targetAltitude, legEndPlanar.y)
 
-        let guidanceCrossTrack = activeFlyBy.map {
+        let guidanceCrossTrack = holdsRequiredCaptureCourse ? 0.0 : activeFlyBy.map {
             simd_length(aircraftPlanar - $0.center) - $0.radius
         } ?? crossTrack
         let guidanceAlongTrackProgress = {
+            if holdsRequiredCaptureCourse {
+                return Float(0.0)
+            }
             guard let activeFlyBy, let activeFlyByProgress,
                   activeFlyBy.arcLength > 0.01 else {
                 return alongTrackProgress
@@ -751,7 +804,9 @@ final class FixedWingAutopilot {
             stallProtectionActive: stallProtectionActive,
             hasCompletedRoute: state.hasCompletedRoute,
             flyByTransitionActive: activeFlyBy != nil,
-            missedActiveWaypoint: state.missedActiveWaypoint
+            missedActiveWaypoint: state.missedActiveWaypoint,
+            capturedRequiredWaypointIndexAwaitingReplan:
+                state.requiredCaptureWaypointIndex
         )
     }
 
@@ -769,7 +824,9 @@ final class FixedWingAutopilot {
         let altitudeMarginFactor = (
             1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0)
         ).clamped(to: 0.35...1.0)
-        return max(0.05, wing.maxBankAngleDeg.degreesToRadians) * 0.95 * altitudeMarginFactor
+        return max(0.05, wing.maxBankAngleDeg.degreesToRadians)
+            * FixedWingAutopilotLateralTuning.maximumBankScale
+            * altitudeMarginFactor
     }
 
     /// Returns a full-radius fillet or `nil`; the radius is never reduced to make a short leg

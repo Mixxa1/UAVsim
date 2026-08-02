@@ -61,6 +61,14 @@ struct MissionWaypointCaptureZoneVisual: Equatable {
     let isCompleted: Bool
 }
 
+/// Result of a swept-corridor environment query. `isComplete == false` is a hard safety signal:
+/// callers must treat the unexplored remainder as blocked instead of interpreting an empty array
+/// as clear air.
+struct EnvironmentObstacleCorridorQueryResult {
+    let obstacles: [CollisionObstacle]
+    let isComplete: Bool
+}
+
 private struct CityGenerationKey: Equatable {
     let mapPreset: TerrainPreset
     let mapScale: MapScale
@@ -391,13 +399,16 @@ final class DroneSceneController {
     /// Slack on the analytic ray's spatial query. The index already buckets each obstacle across
     /// the cells its radius reaches, so this only covers cell-boundary rounding.
     private static let analyticRayQueryMargin: Float = 4.0
-    // Larger than one worst-case supported fixed-wing mesh horizon so a one-cell movement does not
-    // evict and rebuild the entire working set on every tick.
-    private static let meshCollisionCellCacheLimit = 5_000
+    // One complete 4096-cell fan plus moving headroom. Triangle-rich cells are expensive; keeping
+    // three full fans could retain hundreds of MB in addition to the source collision index.
+    private static let meshCollisionCellCacheLimit = 6_144
     // Up to 64×64 cells. The caller derives its horizon from the live turn radius and caps it at a
     // size this mesh cache can answer completely; exceeding the old 33×33 ceiling returned `[]`
     // and made photogrammetry avoidance silently blind.
     private static let meshObstacleQueryCellLimit = 4_096
+    /// A single trajectory query must remain well below total cache capacity. Wide fans that exceed
+    /// this are retried per course by the avoidance layer instead of flushing the shared cache.
+    private static let meshCorridorQueryCellLimit = 4_096
 
     private struct MeshCollisionCellKey: Hashable {
         let column: Int
@@ -411,6 +422,8 @@ final class DroneSceneController {
     }
 
     private var meshCollisionCellCache: [MeshCollisionCellKey: MeshCollisionCell] = [:]
+    private var meshCollisionCellLastAccess: [MeshCollisionCellKey: UInt64] = [:]
+    private var meshCollisionCellAccessCounter: UInt64 = 0
 
     private var obstacleMap: [UUID: SCNNode] = [:]
     private(set) var environmentObstacles: [CollisionObstacle] = []
@@ -4161,6 +4174,9 @@ final class DroneSceneController {
         // Synthesised cells belong to the world that produced them; keeping them across a swap
         // would leave the previous city's walls standing invisibly in the new one.
         meshCollisionCellCache.removeAll(keepingCapacity: false)
+        meshCollisionCellLastAccess.removeAll(keepingCapacity: false)
+        meshObstaclesByID.removeAll(keepingCapacity: false)
+        meshCollisionCellAccessCounter = 0
         environmentRevision &+= 1
         #if DEBUG
         if let index {
@@ -4215,6 +4231,63 @@ final class DroneSceneController {
         return obstacles
     }
 
+    /// Queries a narrow swept tube around one or more predicted trajectories.
+    ///
+    /// A square radius query scales with horizon² and therefore had to be truncated at 700 m.
+    /// Heavy fixed-wing aircraft can need more than two kilometres to roll in and turn, so that
+    /// cap made the reactive predictor blind. Rasterising the tube scales with path length instead;
+    /// every touched mesh cell is enumerated explicitly and incompleteness is reported, never
+    /// converted to an empty (apparently clear) obstacle set.
+    func nearbyEnvironmentObstacles(
+        along paths: [[SIMD3<Float>]],
+        margin: Float,
+        includeMesh: Bool = true
+    ) -> EnvironmentObstacleCorridorQueryResult {
+        let safeMargin = max(0.0, margin)
+        var byID: [UUID: CollisionObstacle] = [:]
+
+        for path in paths where !path.isEmpty {
+            if path.count == 1, let point = path.first {
+                for obstacle in environmentObstacleIndex.query(near: point, radius: safeMargin) {
+                    byID[obstacle.id] = obstacle
+                }
+                for obstacle in worldNavigationObstacleIndex.query(near: point, radius: safeMargin) {
+                    byID[obstacle.id] = obstacle
+                }
+                continue
+            }
+            for segment in zip(path, path.dropFirst()) {
+                for obstacle in environmentObstacleIndex.query(
+                    from: segment.0,
+                    to: segment.1,
+                    margin: safeMargin
+                ) {
+                    byID[obstacle.id] = obstacle
+                }
+                for obstacle in worldNavigationObstacleIndex.query(
+                    from: segment.0,
+                    to: segment.1,
+                    margin: safeMargin
+                ) {
+                    byID[obstacle.id] = obstacle
+                }
+            }
+        }
+
+        var complete = true
+        if includeMesh {
+            let meshResult = meshObstacles(along: paths, margin: safeMargin)
+            complete = meshResult.isComplete
+            for obstacle in meshResult.obstacles {
+                byID[obstacle.id] = obstacle
+            }
+        }
+        return EnvironmentObstacleCorridorQueryResult(
+            obstacles: Array(byID.values),
+            isComplete: complete
+        )
+    }
+
     /// Mesh-world geometry presented to the flight model as ordinary obstacles.
     ///
     /// `CollisionObstacle` already carries triangle soup and `CollisionAnalysisService` already
@@ -4257,9 +4330,121 @@ final class DroneSceneController {
         return result
     }
 
+    private func meshObstacles(
+        along paths: [[SIMD3<Float>]],
+        margin: Float
+    ) -> EnvironmentObstacleCorridorQueryResult {
+        guard let meshCollision else {
+            // This overload is called only when mesh coverage was explicitly requested. An
+            // installed photogrammetry world whose collision index is absent/not ready is unknown
+            // space, never an empty clear sky.
+            return EnvironmentObstacleCorridorQueryResult(obstacles: [], isComplete: false)
+        }
+        guard margin.isFinite,
+              !paths.isEmpty,
+              paths.allSatisfy({ path in
+                  !path.isEmpty && path.allSatisfy { point in
+                      point.x.isFinite && point.y.isFinite && point.z.isFinite
+                  }
+              }) else {
+            return EnvironmentObstacleCorridorQueryResult(obstacles: [], isComplete: false)
+        }
+
+        let cell = Self.meshCollisionCellSize
+        let neighbourRadius = max(1, Int(ceil(max(0.0, margin) / cell)) + 1)
+        // Large enough for several multi-kilometre turn tubes, bounded so a corrupt trajectory
+        // cannot allocate the whole world on the simulation tick.
+        let maximumKeys = Self.meshCorridorQueryCellLimit
+        let coverageMinimum = meshCollision.bounds.minimum
+        let coverageMaximum = meshCollision.bounds.maximum
+        var keys = Set<MeshCollisionCellKey>()
+        keys.reserveCapacity(min(maximumKeys, 4_096))
+        var complete = true
+
+        func insertTubeSample(_ point: SIMD3<Float>) {
+            guard complete else { return }
+            guard point.x.isFinite, point.y.isFinite, point.z.isFinite else {
+                complete = false
+                return
+            }
+            // `MeshCollisionIndex.bounds` is the only authoritative coverage boundary. Cells
+            // outside it contain unknown world, not confirmed empty air. Require the complete
+            // requested tube (not just its centre line) to remain inside the X/Z coverage before
+            // extracting any cells, so an edge rollout cannot turn an out-of-bounds `[]` into a
+            // successful safety proof.
+            guard point.x - margin >= coverageMinimum.x,
+                  point.x + margin <= coverageMaximum.x,
+                  point.z - margin >= coverageMinimum.z,
+                  point.z + margin <= coverageMaximum.z else {
+                complete = false
+                return
+            }
+            let centerColumn = Int(floor(point.x / cell))
+            let centerRow = Int(floor(point.z / cell))
+            for row in (centerRow - neighbourRadius)...(centerRow + neighbourRadius) {
+                for column in (centerColumn - neighbourRadius)...(centerColumn + neighbourRadius) {
+                    // The extra neighbour ring is broad-phase padding and may straddle the mesh
+                    // boundary even though the requested tube itself is fully covered. Skip cells
+                    // wholly outside the index instead of caching their empty extraction result.
+                    let cellMinimumX = Float(column) * cell
+                    let cellMaximumX = Float(column + 1) * cell
+                    let cellMinimumZ = Float(row) * cell
+                    let cellMaximumZ = Float(row + 1) * cell
+                    guard cellMaximumX >= coverageMinimum.x,
+                          cellMinimumX <= coverageMaximum.x,
+                          cellMaximumZ >= coverageMinimum.z,
+                          cellMinimumZ <= coverageMaximum.z else {
+                        continue
+                    }
+                    keys.insert(MeshCollisionCellKey(column: column, row: row))
+                    if keys.count > maximumKeys {
+                        complete = false
+                        return
+                    }
+                }
+                if !complete { return }
+            }
+        }
+
+        for path in paths where complete && !path.isEmpty {
+            if path.count == 1, let point = path.first {
+                insertTubeSample(point)
+                continue
+            }
+            for segment in zip(path, path.dropFirst()) where complete {
+                let delta = segment.1 - segment.0
+                let planarLength = simd_length(SIMD2<Float>(delta.x, delta.z))
+                let steps = max(1, Int(ceil(planarLength / max(1.0, cell * 0.45))))
+                for index in 0...steps {
+                    let fraction = Float(index) / Float(steps)
+                    insertTubeSample(segment.0 + delta * fraction)
+                    if !complete { break }
+                }
+            }
+        }
+
+        guard complete else {
+            return EnvironmentObstacleCorridorQueryResult(obstacles: [], isComplete: false)
+        }
+
+        var obstacles: [CollisionObstacle] = []
+        obstacles.reserveCapacity(keys.count)
+        for key in keys {
+            if let obstacle = meshObstacle(column: key.column, row: key.row) {
+                obstacles.append(obstacle)
+            }
+        }
+        return EnvironmentObstacleCorridorQueryResult(
+            obstacles: obstacles,
+            isComplete: true
+        )
+    }
+
     private func meshObstacle(column: Int, row: Int) -> CollisionObstacle? {
         let key = MeshCollisionCellKey(column: column, row: row)
         if let cached = meshCollisionCellCache[key] {
+            meshCollisionCellAccessCounter &+= 1
+            meshCollisionCellLastAccess[key] = meshCollisionCellAccessCounter
             return cached.obstacle
         }
         guard let meshCollision else { return nil }
@@ -4281,7 +4466,7 @@ final class DroneSceneController {
 
         let corners = meshCollision.triangleCorners(inBox: low, maximum: high)
         guard corners.count >= 3 else {
-            meshCollisionCellCache[key] = MeshCollisionCell(obstacle: nil)
+            storeMeshCollisionCell(MeshCollisionCell(obstacle: nil), for: key)
             return nil
         }
 
@@ -4321,7 +4506,7 @@ final class DroneSceneController {
         }
 
         guard !triangles.isEmpty else {
-            meshCollisionCellCache[key] = MeshCollisionCell(obstacle: nil)
+            storeMeshCollisionCell(MeshCollisionCell(obstacle: nil), for: key)
             return nil
         }
 
@@ -4349,15 +4534,39 @@ final class DroneSceneController {
 
         // Bound the cache: a long flight would otherwise accumulate the whole tile in synthesised
         // form alongside the index it came from.
-        if meshCollisionCellCache.count > Self.meshCollisionCellCacheLimit {
-            meshCollisionCellCache.removeAll(keepingCapacity: true)
-            meshObstaclesByID.removeAll(keepingCapacity: true)
-        }
-        meshCollisionCellCache[key] = MeshCollisionCell(obstacle: obstacle)
+        storeMeshCollisionCell(MeshCollisionCell(obstacle: obstacle), for: key)
         // Synthesised cells live only in this cache, so a risk report naming one could not be
         // resolved back to its obstacle — which silently disabled avoidance on every imported world.
         meshObstaclesByID[obstacle.id] = obstacle
         return obstacle
+    }
+
+    private func storeMeshCollisionCell(
+        _ cell: MeshCollisionCell,
+        for key: MeshCollisionCellKey
+    ) {
+        // Empty cells count too. The corridor query visits open ground as well as buildings, and
+        // the old early-return branches cached those misses without ever applying the bound.
+        if meshCollisionCellCache[key] == nil,
+           meshCollisionCellCache.count >= Self.meshCollisionCellCacheLimit {
+            // Evict one generation, not the complete cache. A full clear made a long fixed-wing
+            // fan re-extract thousands of triangle buckets again on the very next tick.
+            let evictionCount = max(1, Self.meshCollisionCellCacheLimit / 4)
+            let evictionKeys = meshCollisionCellCache.keys.sorted {
+                (meshCollisionCellLastAccess[$0] ?? 0) <
+                    (meshCollisionCellLastAccess[$1] ?? 0)
+            }.prefix(evictionCount)
+            for evictionKey in evictionKeys {
+                if let obstacleID = meshCollisionCellCache[evictionKey]?.obstacle?.id {
+                    meshObstaclesByID.removeValue(forKey: obstacleID)
+                }
+                meshCollisionCellCache.removeValue(forKey: evictionKey)
+                meshCollisionCellLastAccess.removeValue(forKey: evictionKey)
+            }
+        }
+        meshCollisionCellCache[key] = cell
+        meshCollisionCellAccessCounter &+= 1
+        meshCollisionCellLastAccess[key] = meshCollisionCellAccessCounter
     }
 
     func applyWeatherVisual(_ weather: WeatherModel) {

@@ -116,6 +116,9 @@ struct FixedWingAutopilotDebugState: Equatable {
     var targetAltitude: Float
     var desiredCourseDeg: Float
     var speedRecoveryActive: Bool
+    /// Exact operator waypoint captured while the controller holds its measured outbound course
+    /// pending a route rebuilt from the physical pose.
+    var capturedMissionWaypointIndexAwaitingReplan: Int?
 
     static let idle = FixedWingAutopilotDebugState(
         routeIdentifier: nil,
@@ -137,7 +140,8 @@ struct FixedWingAutopilotDebugState: Equatable {
         targetAirspeed: 0.0,
         targetAltitude: 0.0,
         desiredCourseDeg: 0.0,
-        speedRecoveryActive: false
+        speedRecoveryActive: false,
+        capturedMissionWaypointIndexAwaitingReplan: nil
     )
 }
 
@@ -312,6 +316,13 @@ final class FixedWingAutopilotController {
             tracking: tracking,
             autopilotIndex: result.activeWaypointIndex
         )
+        let capturedMissionWaypointIndex = result
+            .capturedRequiredWaypointIndexAwaitingReplan
+            .flatMap { routeIndex in
+                tracking.waypoints.indices.contains(routeIndex)
+                    ? tracking.waypoints[routeIndex].missionWaypointIndex
+                    : nil
+            }
 
         let legDirection = SIMD2<Float>(
             result.legEndWorld.x - result.legStartWorld.x,
@@ -345,7 +356,9 @@ final class FixedWingAutopilotController {
             targetAirspeed: result.targetAirspeedMpsActive,
             targetAltitude: result.targetAltitudeMeters,
             desiredCourseDeg: result.desiredCourseDegrees,
-            speedRecoveryActive: result.stallProtectionActive
+            speedRecoveryActive: result.stallProtectionActive,
+            capturedMissionWaypointIndexAwaitingReplan:
+                capturedMissionWaypointIndex
         )
         debugState = updatedDebug
 
@@ -426,8 +439,12 @@ final class FixedWingAutopilotController {
         defaultAltitude: Float,
         wing: FixedWingParameters
     ) -> FixedWingAutopilotPlan {
-        let routeWaypoints = tracking.waypoints
-            .filter { isFinite($0.position) }
+        // Never remove an invalid point from the middle of a live route: doing so shifts every
+        // later route index away from its mission waypoint identity. Reject the whole plan
+        // fail-closed instead, so progress cannot be credited to a different operator point.
+        let routeWaypoints = tracking.waypoints.allSatisfy { isFinite($0.position) }
+            ? tracking.waypoints
+            : []
         let baseCaptureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)
         let waypoints: [FixedWingAutopilotWaypoint] = routeWaypoints
             .enumerated()
@@ -443,10 +460,13 @@ final class FixedWingAutopilotController {
                         baseRadius: baseCaptureRadius,
                         wing: wing
                     ),
-                    // Conventional fixed-wing mission points are fly-by anchors. The final point
-                    // alone is a terminal capture; payload/mission progress is reported only after
-                    // the validated arc has acquired its outbound leg.
-                    capturePolicy: index == routeWaypoints.count - 1 ? .required : .flyBy
+                    // Only planner-generated corner nodes may be flown by. Every operator mission
+                    // point, including the first one, must be physically captured before progress
+                    // can advance; otherwise a safe detour could silently skip the requested point.
+                    capturePolicy: wp.missionWaypointIndex == nil
+                        && index < routeWaypoints.count - 1
+                        ? .flyBy
+                        : .required
                 )
             }
         let minimumIndex = max(0, tracking.minimumWaypointIndex ?? 0)

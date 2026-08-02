@@ -36,6 +36,11 @@ struct DroneSimulationContext {
     let windVector: SIMD3<Float>
     let vehicleMassModel: VehicleMassModel
     let fixedWingLaunchDynamics: FixedWingLaunchDynamics?
+    /// Optional hard ceiling for conventional fixed-wing propulsion. Safety governors use this
+    /// when the aircraft must decelerate; applying it in the physics layer prevents the ordinary
+    /// airborne throttle floor from silently raising the command again. `nil` preserves the
+    /// normal flight-mode floor and all existing callers' behaviour.
+    let fixedWingThrottleCeiling: Float?
     /// Component-graph-derived rigid-body summary (CoM offset, inertia) for
     /// contact impulses and the uncontrolled-tumble integrator.
     let vehicleMassProperties: VehicleMassProperties
@@ -79,6 +84,7 @@ struct DroneSimulationContext {
         windVector: SIMD3<Float>,
         vehicleMassModel: VehicleMassModel,
         fixedWingLaunchDynamics: FixedWingLaunchDynamics? = nil,
+        fixedWingThrottleCeiling: Float? = nil,
         vehicleMassProperties: VehicleMassProperties = .fallback,
         contactProfile: VehicleContactProfile = .empty,
         rotorModel: VehicleRotorModel = .empty,
@@ -97,6 +103,7 @@ struct DroneSimulationContext {
         self.windVector = windVector
         self.vehicleMassModel = vehicleMassModel
         self.fixedWingLaunchDynamics = fixedWingLaunchDynamics
+        self.fixedWingThrottleCeiling = fixedWingThrottleCeiling
         self.vehicleMassProperties = vehicleMassProperties
         self.contactProfile = contactProfile
         self.rotorModel = rotorModel

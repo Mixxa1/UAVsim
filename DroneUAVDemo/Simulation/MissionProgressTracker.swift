@@ -117,6 +117,13 @@ final class MissionProgressTracker {
 
             if isFixedWingRouteActive,
                let fixedWingDebugState {
+                if fixedWingDebugState.capturedMissionWaypointIndexAwaitingReplan
+                    == activeTarget.index {
+                    // This event comes only from the autopilot's swept physical capture. It is
+                    // independent of the looser UI/progress arrival radius and lets the mission
+                    // publish the next measured-pose route while the aircraft holds course.
+                    return true
+                }
                 let controllerWaypointIndex = fixedWingDebugState.currentWaypointIndex
                 let routeArrivalRadius = routeArrivalRadius(
                     for: airframeClass,

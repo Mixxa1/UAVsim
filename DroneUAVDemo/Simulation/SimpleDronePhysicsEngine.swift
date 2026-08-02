@@ -562,6 +562,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 throttleFloor = state.position.y > 0.15 ? baseline.cruiseReferenceThrottle : 0.0
             }
             throttleCommand = max(throttleCommand, throttleFloor)
+            if let fixedWingThrottleCeiling = context.fixedWingThrottleCeiling {
+                // This ceiling is a hard safety command, not another baseline preference. Apply
+                // it after the normal airborne floor so a mesh-horizon speed governor can
+                // actually reduce propulsion while the aircraft is overspeed.
+                throttleCommand = min(
+                    throttleCommand,
+                    fixedWingThrottleCeiling.clamped(to: 0.0...1.0)
+                )
+            }
         }
 
         let motorThrottle = approach(

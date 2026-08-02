@@ -596,7 +596,8 @@ final class CollisionAnalysisService {
         from start: SIMD3<Float>,
         to end: SIMD3<Float>,
         droneRadius: Float,
-        obstacles: [CollisionObstacle]
+        obstacles: [CollisionObstacle],
+        ignoringInitialSupportThroughFraction: Float? = nil
     ) -> CollisionSweepResult? {
         let movement = end - start
         guard simd_length_squared(movement) > 0.000001 else {
@@ -611,7 +612,9 @@ final class CollisionAnalysisService {
                     from: start,
                     to: end,
                     radius: droneRadius,
-                    obstacle: obstacle
+                    obstacle: obstacle,
+                    ignoringInitialSupportThroughFraction:
+                        ignoringInitialSupportThroughFraction
                 )
             } else if let halfExtents = obstacle.planarHalfExtents {
                 hit = sweepSphereAgainstBox(
@@ -622,13 +625,85 @@ final class CollisionAnalysisService {
                     halfExtents: halfExtents
                 )
             } else {
-                hit = nil
+                hit = sweepCenterAgainstCylinder(
+                    centerStart: start,
+                    centerEnd: end,
+                    radius: droneRadius,
+                    obstacle: obstacle
+                ).map { cylinderHit in
+                    let centerAtHit = start + movement * cylinderHit.fraction
+                    return CollisionSweepResult(
+                        obstacle: obstacle,
+                        contactPoint: centerAtHit - cylinderHit.normal * droneRadius,
+                        contactNormal: cylinderHit.normal,
+                        hitFraction: cylinderHit.fraction,
+                        isSupportSurfaceContact: cylinderHit.isSupport
+                    )
+                }
             }
             guard let hit,
                   best == nil || hit.hitFraction < (best?.hitFraction ?? 1.0) else {
                 continue
             }
             best = hit
+        }
+        return best
+    }
+
+    /// Sweeps a sphere whose inputs are already its world-space center. The legacy
+    /// `firstSweptCollision` treats `start`/`end` as the vehicle's ground-reference origin and
+    /// lifts mesh spheres by their radius; navigation envelopes are instead centered directly on
+    /// `DroneState.position`, so using that legacy convention leaves the wing plane unprotected.
+    func firstSweptCenterCollision(
+        from centerStart: SIMD3<Float>,
+        to centerEnd: SIMD3<Float>,
+        radius: Float,
+        obstacles: [CollisionObstacle]
+    ) -> CollisionSweepResult? {
+        let movement = centerEnd - centerStart
+        guard simd_length_squared(movement) > 0.000001 else {
+            return nil
+        }
+
+        var best: CollisionSweepResult?
+        for obstacle in obstacles {
+            let hit: (fraction: Float, normal: SIMD3<Float>, isSupport: Bool)?
+            if obstacle.hasMeshCollision {
+                hit = sweepCenterAgainstMesh(
+                    centerStart: centerStart,
+                    centerEnd: centerEnd,
+                    radius: radius,
+                    obstacle: obstacle
+                )
+            } else if let halfExtents = obstacle.planarHalfExtents {
+                hit = sweepCenterAgainstBox(
+                    centerStart: centerStart,
+                    centerEnd: centerEnd,
+                    radius: radius,
+                    obstacle: obstacle,
+                    halfExtents: halfExtents
+                )
+            } else {
+                hit = sweepCenterAgainstCylinder(
+                    centerStart: centerStart,
+                    centerEnd: centerEnd,
+                    radius: radius,
+                    obstacle: obstacle
+                )
+            }
+
+            guard let hit,
+                  best == nil || hit.fraction < (best?.hitFraction ?? 1.0) else {
+                continue
+            }
+            let centerAtHit = centerStart + movement * hit.fraction
+            best = CollisionSweepResult(
+                obstacle: obstacle,
+                contactPoint: centerAtHit - hit.normal * radius,
+                contactNormal: hit.normal,
+                hitFraction: hit.fraction,
+                isSupportSurfaceContact: hit.isSupport
+            )
         }
         return best
     }
@@ -873,7 +948,9 @@ final class CollisionAnalysisService {
         }
 
         if abs(dy) > 0.000001 {
-            let capRadiusSq = obstacle.radius * obstacle.radius
+            // Cap contact uses the same Minkowski-expanded footprint as the side wall. Using only
+            // the obstacle radius here let an offset wing sphere pass through a tree crown ring.
+            let capRadiusSq = combinedRadius * combinedRadius
             let tTop = (yMax - yStart) / dy
             if dy < 0.0, tTop >= 0.0, tTop <= 1.0 {
                 let planar = p0 + d * tTop
@@ -984,7 +1061,8 @@ final class CollisionAnalysisService {
         from start: SIMD3<Float>,
         to end: SIMD3<Float>,
         radius: Float,
-        obstacle: CollisionObstacle
+        obstacle: CollisionObstacle,
+        ignoringInitialSupportThroughFraction: Float? = nil
     ) -> CollisionSweepResult? {
         guard let triangles = obstacle.meshTriangles,
               !triangles.isEmpty else {
@@ -1011,7 +1089,9 @@ final class CollisionAnalysisService {
                 movement: movement,
                 radius: radius,
                 triangle: triangle
-            ), best == nil || planeHit.fraction < (best?.hitFraction ?? 1.0) {
+            ), !(planeHit.isSupportSurfaceContact &&
+                    planeHit.fraction <= (ignoringInitialSupportThroughFraction ?? -1.0)),
+               best == nil || planeHit.fraction < (best?.hitFraction ?? 1.0) {
                 best = CollisionSweepResult(
                     obstacle: obstacle,
                     contactPoint: start + (end - start) * planeHit.fraction,
@@ -1026,7 +1106,15 @@ final class CollisionAnalysisService {
                 to: centerEnd,
                 radius: radius,
                 triangle: triangle
-            ), best == nil || edgeHit.fraction < (best?.hitFraction ?? 1.0) {
+            ), !(triangle.supportsLandingSurface &&
+                    edgeHit.fraction <= (ignoringInitialSupportThroughFraction ?? -1.0) &&
+                    isPassiveTopSupportEdgeSweep(
+                        triangle: triangle,
+                        start: centerStart,
+                        end: centerEnd,
+                        sphereRadius: radius
+                    )),
+               best == nil || edgeHit.fraction < (best?.hitFraction ?? 1.0) {
                 best = CollisionSweepResult(
                     obstacle: obstacle,
                     contactPoint: start + (end - start) * edgeHit.fraction,

@@ -39,6 +39,16 @@ struct FixedWingAssistGeometryAssessment {
     let commandedTurnDirection: FixedWingAssistTurnDirection
 }
 
+/// Lateral-loop constants shared with the safety rollout. A collision proof must model the same
+/// course gain, filters and bank ceiling that will execute when avoidance returns `clear`.
+enum FixedWingAssistLateralTuning {
+    static let headingBankGain: Float = 0.95
+    static let headingRateDampingGain: Float = 0.45
+    static let maxBankDeg: Float = 28.0
+    static let courseFilterTau: Float = 0.22
+    static let bankFilterTau: Float = 0.30
+}
+
 /// Drastically simplified assist controller.
 ///
 /// The new design has three concrete behaviours, all built on the same
@@ -55,10 +65,10 @@ struct FixedWingAssistGeometryAssessment {
 /// unflyable bank or pitch.
 final class FixedWingAssistController {
     private enum Tuning {
-        static let headingBankGain: Float = 0.95
+        static let headingBankGain = FixedWingAssistLateralTuning.headingBankGain
         /// Rate term on yaw. Without it the heading loop cannot settle — see the bank computation.
-        static let headingRateDampingGain: Float = 0.45
-        static let maxBankDeg: Float = 28.0
+        static let headingRateDampingGain = FixedWingAssistLateralTuning.headingRateDampingGain
+        static let maxBankDeg = FixedWingAssistLateralTuning.maxBankDeg
         static let altitudePitchGain: Float = 0.85
         static let altitudeDampingGain: Float = 1.6
         static let turnLiftCompensationGainDeg: Float = 30.0 // extra deg pitch per unit (1/cos(bank) - 1)
@@ -67,8 +77,8 @@ final class FixedWingAssistController {
         static let throttleSpeedGain: Float = 0.055
         static let pitchUpClampDeg: Float = 9.0
         static let pitchDownClampDeg: Float = 7.0
-        static let courseFilterTau: Float = 0.22
-        static let bankFilterTau: Float = 0.30
+        static let courseFilterTau = FixedWingAssistLateralTuning.courseFilterTau
+        static let bankFilterTau = FixedWingAssistLateralTuning.bankFilterTau
         static let pitchFilterTau: Float = 0.45
         static let throttleFilterTau: Float = 0.60
     }
@@ -182,8 +192,11 @@ final class FixedWingAssistController {
         let targetHeadingRad: Float = {
             switch assistState.mode {
             case .waypointIntercept:
-                if assistState.interceptCompleted,
-                   assistState.interceptState == .routeComplete {
+                if assistState.interceptCompleted {
+                    // A captured non-final waypoint may be waiting for a safe outbound route or
+                    // for explicit operator selection. In both cases it must continue through the
+                    // capture volume on the latched course, not reacquire the old point and orbit
+                    // back toward it.
                     return assistState.targetHeadingRadians ?? aircraftState.orientation.z
                 }
                 if let interceptTarget {
