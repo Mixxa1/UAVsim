@@ -35,6 +35,9 @@ struct FixedWingAutopilotInput {
     var aircraftRollRadians: Float
     var aircraftAirspeed: Float
     var deltaTime: Float
+    /// Height above the surface below the aircraft. Drives low-altitude bank protection, which is
+    /// about proximity to the ground and not about how far below its cruise level the route is.
+    var heightAboveSurfaceMeters: Float = .greatestFiniteMagnitude
 }
 
 struct FixedWingAutopilotPlan {
@@ -293,7 +296,8 @@ final class FixedWingAutopilot {
             let effectiveBank = effectiveMaximumBankRadians(
                 wing: wing,
                 targetAltitude: turnTargetAltitude,
-                currentAltitude: input.aircraftPosition.y
+                currentAltitude: input.aircraftPosition.y,
+                heightAboveSurface: input.heightAboveSurfaceMeters
             )
             let turnSpeed = max(
                 currentSpeed,
@@ -338,7 +342,8 @@ final class FixedWingAutopilot {
             let effectiveBank = effectiveMaximumBankRadians(
                 wing: wing,
                 targetAltitude: turnTargetAltitude,
-                currentAltitude: input.aircraftPosition.y
+                currentAltitude: input.aircraftPosition.y,
+                heightAboveSurface: input.heightAboveSurfaceMeters
             )
             let turnSpeed = max(
                 currentSpeed,
@@ -626,7 +631,8 @@ final class FixedWingAutopilot {
         let maxBankRad = effectiveMaximumBankRadians(
             wing: wing,
             targetAltitude: earlyTargetAltitude,
-            currentAltitude: input.aircraftPosition.y
+            currentAltitude: input.aircraftPosition.y,
+            heightAboveSurface: input.heightAboveSurfaceMeters
         )
         var rawBankRad = (courseError * Tuning.bankProportionalGain).clamped(to: -maxBankRad...maxBankRad)
         // Anti-windup: bleed the bank command toward zero when the heading
@@ -815,14 +821,16 @@ final class FixedWingAutopilot {
 
     // MARK: - Internals
 
+    /// Keyed on height above the surface — see the note in DroneSimulationViewModel.
     private func effectiveMaximumBankRadians(
         wing: FixedWingParameters,
         targetAltitude: Float,
-        currentAltitude: Float
+        currentAltitude: Float,
+        heightAboveSurface: Float
     ) -> Float {
-        let altitudeDeficit = max(0.0, targetAltitude - currentAltitude)
+        _ = (targetAltitude, currentAltitude)
         let altitudeMarginFactor = (
-            1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0)
+            max(0.0, heightAboveSurface) / max(wing.initialClimbTargetAltitude, 1.0)
         ).clamped(to: 0.35...1.0)
         return max(0.05, wing.maxBankAngleDeg.degreesToRadians)
             * FixedWingAutopilotLateralTuning.maximumBankScale

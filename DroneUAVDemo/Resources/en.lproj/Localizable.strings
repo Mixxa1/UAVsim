@@ -1060,6 +1060,15 @@
 "launch.reason.corridor_obstructed" = "A solid obstacle blocks the post-release corridor.";
 "launch.reason.runtime_failure" = "Launch was interrupted by arming, battery, or airframe state.";
 "launch.reason.acceleration_timeout" = "The aircraft did not reach the rail end within the launcher safety timeout.";
+"launch.reason.coverage_unverified" = "The departure corridor leaves mapped terrain, so it cannot be verified as clear.";
+"module.flight_ops.launch_unverified" = "Launched without full verification";
+"launch.reason.ingress_obstructed" = "The straight climb-out corridor is blocked before guidance can take over.";
+"launch.reason.route_obstructed" = "The planned route to the first waypoint passes through an obstacle.";
+"launch.reason.route_unavailable" = "No flyable route to the first waypoint could be planned from this launch point.";
+"launch.reason.route_out_of_bounds" = "The first waypoint lies outside the flyable world.";
+"launch.reason.route_altitude_invalid" = "The route's cruise altitude is not reachable from this launch point.";
+"launch.reason.route_heading_invalid" = "The launch heading does not allow entry onto the first route leg.";
+"launch.reason.waypoint_missing" = "The selected waypoint no longer exists in the mission.";
 "launch.reason.generic" = "Launch controller rejected or aborted the sequence.";
 "module.flight_ops.fixed_wing_assist" = "Fixed-Wing Autopilot";
 "module.flight_ops.fixed_wing_assist.subtitle" = "Smooth waypoint following with carrot-pursuit guidance, plus manual heading and altitude holds";

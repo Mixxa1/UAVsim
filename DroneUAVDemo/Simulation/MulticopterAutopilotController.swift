@@ -11,6 +11,9 @@ struct AutopilotTrackingContext {
     let yawOverrideRadians: Float?
     let deltaTime: Float
     let flightBaseline: ResolvedFlightBaseline
+    /// Height above the surface beneath the aircraft. Only the fixed-wing path reads it, for
+    /// low-altitude bank protection; the default keeps every other caller unchanged.
+    var heightAboveSurfaceMeters: Float = .greatestFiniteMagnitude
 }
 
 struct AutopilotControlCommand: Equatable {

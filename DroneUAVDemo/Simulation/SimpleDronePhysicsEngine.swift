@@ -816,8 +816,39 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let (_, cdTrim) = aero.liftDrag(alphaRad: (lowAlpha + highAlpha) * 0.5)
         let dragAtCruise = cruiseDynamicPressure * aero.wingArea * cdTrim
         let referenceThrottle = max(0.2, baseline.cruiseReferenceThrottle)
-        let maxThrust = max(0.5, dragAtCruise / referenceThrottle) * batteryFactor
-        let thrustMagnitude = (crashOrDisarmed ? 0.0 : motorThrottle) * maxThrust *
+        // Size full-throttle thrust for the climb the profile actually claims.
+        //
+        // Deriving it solely from `dragAtCruise / cruiseReferenceThrottle` made climb performance
+        // an accident of the cruise-throttle baseline, and `nominalClimbRateMps` — declared on
+        // every catalogue entry — reached the flight model nowhere. Measured by
+        // `Tools/ClimbProbe` before this change: every fixed wing delivered about a third of its
+        // declared rate, and the MQ-9B and Hermes 900 could not climb at all. A 6% gradient needs
+        // 800 m of travel to gain 50 m, so in a city the aircraft simply never gets above the
+        // rooftops — which is the real reason obstacle avoidance had nothing workable to do.
+        //
+        // The map is piecewise so *both* anchors hold: cruise throttle still balances cruise drag
+        // exactly (so every controller baseline tuned against it is unchanged), and full throttle
+        // delivers the declared climb. A single linear scale cannot do that — raising `maxThrust`
+        // alone multiplies thrust at every setting and silently moves cruise speed, which then
+        // moves turn radius by its square.
+        let nominalClimbRate = max(0.0, wing.nominalClimbRateMps)
+        let climbSizedThrust = dragAtCruise + weightNewtons * nominalClimbRate / cruiseSpeed
+        let fullThrottleThrust = max(
+            0.5,
+            dragAtCruise / referenceThrottle,
+            climbSizedThrust
+        )
+        let commandedThrottle = crashOrDisarmed ? 0.0 : motorThrottle
+        let thrustFraction: Float
+        if commandedThrottle <= referenceThrottle {
+            thrustFraction = dragAtCruise * (commandedThrottle / referenceThrottle)
+        } else {
+            let span = max(0.001, 1.0 - referenceThrottle)
+            thrustFraction = dragAtCruise
+                + (fullThrottleThrust - dragAtCruise)
+                    * ((commandedThrottle - referenceThrottle) / span)
+        }
+        let thrustMagnitude = max(0.0, thrustFraction) * batteryFactor *
             context.rotorModel.cruiseThrustFactor
         let thrustForceBody = SIMD3<Float>(0, 0, -1) * thrustMagnitude
 

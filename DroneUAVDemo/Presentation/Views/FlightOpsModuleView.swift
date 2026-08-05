@@ -120,6 +120,17 @@ struct FlightOpsModuleView: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(GroundControlPalette.danger)
                                 .fixedSize(horizontal: false, vertical: true)
+                        } else if let warningKey = viewModel.fixedWingLaunchWarningDetailKey {
+                            // The launch is running; this says which part of it went unproven.
+                            // Warning colour, not danger — nothing has failed.
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("module.flight_ops.launch_unverified")
+                                    .font(.caption2.weight(.semibold))
+                                Text(LocalizedStringKey(warningKey))
+                                    .font(.caption2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .foregroundStyle(GroundControlPalette.warning)
                         }
                     }
                 }

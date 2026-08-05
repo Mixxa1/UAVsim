@@ -246,7 +246,8 @@ final class FixedWingAutopilotController {
             aircraftPitchRadians: context.state.orientation.y,
             aircraftRollRadians: context.state.orientation.x,
             aircraftAirspeed: airspeed,
-            deltaTime: max(0.001, context.deltaTime)
+            deltaTime: max(0.001, context.deltaTime),
+            heightAboveSurfaceMeters: context.heightAboveSurfaceMeters
         )
 
         guard let result = autopilot.update(

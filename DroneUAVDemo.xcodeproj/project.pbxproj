@@ -217,6 +217,7 @@
 		1000000000000000000002BB /* FixedWingAssistController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002B9 /* FixedWingAssistController.swift */; };
 		1000000000000000000002BD /* MissionGuidanceTargetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */; };
 		1000000000000000000002BF /* FixedWingFlyablePath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002BE /* FixedWingFlyablePath.swift */; };
+		10000000000000000000FA11 /* FixedWingRouteRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FA10 /* FixedWingRouteRepair.swift */; };
 		1000000000000000000002C1 /* FixedWingAutopilot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C0 /* FixedWingAutopilot.swift */; };
 		1000000000000000000002C9 /* CodableVector3D.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C2 /* CodableVector3D.swift */; };
 		1000000000000000000002CA /* MissionReplayFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002C3 /* MissionReplayFrame.swift */; };
@@ -632,6 +633,7 @@
 		1000000000000000000002B9 /* FixedWingAssistController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAssistController.swift; sourceTree = "<group>"; };
 		1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionGuidanceTargetResolver.swift; sourceTree = "<group>"; };
 		1000000000000000000002BE /* FixedWingFlyablePath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingFlyablePath.swift; sourceTree = "<group>"; };
+		10000000000000000000FA10 /* FixedWingRouteRepair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingRouteRepair.swift; sourceTree = "<group>"; };
 		1000000000000000000002C0 /* FixedWingAutopilot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAutopilot.swift; sourceTree = "<group>"; };
 		1000000000000000000002C2 /* CodableVector3D.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodableVector3D.swift; sourceTree = "<group>"; };
 		1000000000000000000002C3 /* MissionReplayFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayFrame.swift; sourceTree = "<group>"; };
@@ -1029,6 +1031,7 @@
 				100000000000000000000119 /* DroneSimulationContext.swift */,
 				1000000000000000000002B9 /* FixedWingAssistController.swift */,
 				1000000000000000000002C0 /* FixedWingAutopilot.swift */,
+				10000000000000000000FA10 /* FixedWingRouteRepair.swift */,
 				1000000000000000000002AB /* FixedWingAutopilotController.swift */,
 				1000000000000000000002A9 /* FixedWingRouteBuilder.swift */,
 				100000000000000000000149 /* FlightBaselineResolver.swift */,
@@ -1813,6 +1816,7 @@
 				100000000000000000000273 /* MissionPlanValidator.swift in Sources */,
 				1000000000000000000002BB /* FixedWingAssistController.swift in Sources */,
 				1000000000000000000002C1 /* FixedWingAutopilot.swift in Sources */,
+				10000000000000000000FA11 /* FixedWingRouteRepair.swift in Sources */,
 				1000000000000000000002B4 /* FixedWingAutopilotController.swift in Sources */,
 				1000000000000000000002B2 /* FixedWingRouteBuilder.swift in Sources */,
 				10000000000000000000028B /* MissionPersistenceAdapter.swift in Sources */,

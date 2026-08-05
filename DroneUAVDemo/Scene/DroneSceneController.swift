@@ -231,6 +231,9 @@ final class DroneSceneController {
     private let missionWaypointCaptureNode = SCNNode()
     private var renderedMissionWaypointCaptureZones: [MissionWaypointCaptureZoneVisual] = []
     private var renderedMissionWaypointCaptureGroundY: Float?
+    /// Marker height above ground currently applied by `setMissionWaypointCaptureAltitude`, kept
+    /// separate from the zone list so altitude changes never trigger a geometry rebuild.
+    private var renderedMissionWaypointCaptureHeight: Float?
     private let launchAssetNode = SCNNode()
     private let onlineTrialPlaceholderRootNode = SCNNode()
     // Mission scenarios (SAR etc.): root for spawned scenario entities + the active target.
@@ -1870,27 +1873,76 @@ final class DroneSceneController {
             root.addChildNode(sphereNode)
 
             let centerMarker = SCNNode(geometry: SCNSphere(radius: CGFloat(max(0.16, min(0.34, radius * 0.04)))))
+            centerMarker.name = "mission_capture_marker"
             centerMarker.geometry?.firstMaterial?.diffuse.contents = color.withAlphaComponent(0.95)
             centerMarker.geometry?.firstMaterial?.emission.contents = color.withAlphaComponent(0.38)
             centerMarker.geometry?.firstMaterial?.lightingModel = .constant
             centerMarker.simdPosition = sphereNode.simdPosition
             root.addChildNode(centerMarker)
 
+            // Always built, even when currently too short to show: the altitude now follows the
+            // aircraft (see `setMissionWaypointCaptureAltitude`), so a stem that only existed for
+            // tall zones would be missing exactly when the aircraft climbed and needed it.
             let stemHeight = max(0.0, altitude - groundY)
-            if stemHeight > 0.35 {
-                let stem = SCNCylinder(radius: CGFloat(max(0.018, min(0.055, radius * 0.006))), height: CGFloat(stemHeight))
-                let stemMaterial = SCNMaterial()
-                stemMaterial.diffuse.contents = color.withAlphaComponent(zone.isActive ? 0.62 : 0.34)
-                stemMaterial.emission.contents = color.withAlphaComponent(zone.isActive ? 0.22 : 0.10)
-                stemMaterial.lightingModel = .constant
-                stem.materials = [stemMaterial]
+            let stem = SCNCylinder(
+                radius: CGFloat(max(0.018, min(0.055, radius * 0.006))),
+                height: CGFloat(max(0.001, stemHeight))
+            )
+            let stemMaterial = SCNMaterial()
+            stemMaterial.diffuse.contents = color.withAlphaComponent(zone.isActive ? 0.62 : 0.34)
+            stemMaterial.emission.contents = color.withAlphaComponent(zone.isActive ? 0.22 : 0.10)
+            stemMaterial.lightingModel = .constant
+            stem.materials = [stemMaterial]
 
-                let stemNode = SCNNode(geometry: stem)
-                stemNode.simdPosition = SIMD3<Float>(0.0, stemHeight * 0.5, 0.0)
-                root.addChildNode(stemNode)
-            }
+            let stemNode = SCNNode(geometry: stem)
+            stemNode.name = "mission_capture_stem"
+            stemNode.simdPosition = SIMD3<Float>(0.0, stemHeight * 0.5, 0.0)
+            stemNode.isHidden = stemHeight <= 0.35
+            root.addChildNode(stemNode)
 
             missionWaypointCaptureNode.addChildNode(root)
+        }
+
+        renderedMissionWaypointCaptureHeight = max(
+            0.0,
+            (zones.first.map { max(groundY + 0.35, $0.center.y) } ?? groundY) - groundY
+        )
+    }
+
+    /// Moves the capture markers to a new working altitude without rebuilding any geometry.
+    ///
+    /// The zone *list* changes only on mission edits, but its height should follow the aircraft
+    /// every tick. Sharing one path meant the whole marker set — torus, wireframe sphere, stem,
+    /// per-zone materials — was torn down and rebuilt on every altitude change, so in practice the
+    /// height was refreshed only when the tactical map happened to be open. That is what made the
+    /// spheres appear to jump the moment the planner was opened.
+    func setMissionWaypointCaptureAltitude(_ altitude: Float) {
+        guard !missionWaypointCaptureNode.isHidden,
+              !renderedMissionWaypointCaptureZones.isEmpty else {
+            return
+        }
+        let groundY = renderedMissionWaypointCaptureGroundY ?? 0.0
+        let height = max(0.0, altitude - groundY)
+        if let rendered = renderedMissionWaypointCaptureHeight,
+           abs(rendered - height) <= 0.05 {
+            return
+        }
+        renderedMissionWaypointCaptureHeight = height
+
+        let markerPosition = SIMD3<Float>(0.0, height, 0.0)
+        for root in missionWaypointCaptureNode.childNodes {
+            for child in root.childNodes {
+                switch child.name {
+                case "mission_capture_sphere", "mission_capture_marker":
+                    child.simdPosition = markerPosition
+                case "mission_capture_stem":
+                    (child.geometry as? SCNCylinder)?.height = CGFloat(max(0.001, height))
+                    child.simdPosition = SIMD3<Float>(0.0, height * 0.5, 0.0)
+                    child.isHidden = height <= 0.35
+                default:
+                    break
+                }
+            }
         }
     }
 

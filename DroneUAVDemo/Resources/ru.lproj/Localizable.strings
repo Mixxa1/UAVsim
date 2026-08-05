@@ -1055,6 +1055,15 @@
 "launch.reason.corridor_obstructed" = "После отделения стартовый коридор перекрыт твёрдым препятствием.";
 "launch.reason.runtime_failure" = "Запуск прерван из-за состояния вооружения, аккумулятора или аппарата.";
 "launch.reason.acceleration_timeout" = "Аппарат не дошёл до конца направляющей за безопасное время разгона.";
+"launch.reason.coverage_unverified" = "Стартовый коридор выходит за пределы карты — проверить его на свободность невозможно.";
+"module.flight_ops.launch_unverified" = "Запуск без полной проверки";
+"launch.reason.ingress_obstructed" = "Прямой коридор набора высоты перекрыт до того, как управление перейдёт к автопилоту.";
+"launch.reason.route_obstructed" = "Спланированный маршрут до первой точки проходит через препятствие.";
+"launch.reason.route_unavailable" = "Из этой точки запуска не удалось построить проходимый маршрут до первой точки.";
+"launch.reason.route_out_of_bounds" = "Первая точка маршрута лежит за пределами доступного мира.";
+"launch.reason.route_altitude_invalid" = "Крейсерская высота маршрута недостижима из этой точки запуска.";
+"launch.reason.route_heading_invalid" = "Курс запуска не позволяет выйти на первую ногу маршрута.";
+"launch.reason.waypoint_missing" = "Выбранной точки больше нет в миссии.";
 "launch.reason.generic" = "Контроллер запуска отклонил или прервал последовательность.";
 "module.flight_ops.fixed_wing_assist" = "Автопилот самолёта";
 "module.flight_ops.fixed_wing_assist.subtitle" = "Плавный пролёт по точкам по схеме carrot-pursuit, плюс ручные удержания курса и высоты";

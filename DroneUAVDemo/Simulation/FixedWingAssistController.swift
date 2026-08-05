@@ -160,7 +160,8 @@ final class FixedWingAssistController {
         captureTarget: SIMD2<Float>?,
         interceptDebugContext: FixedWingAssistInterceptDebugContext,
         turnOverrideActive: Bool,
-        altitudeOverrideActive: Bool
+        altitudeOverrideActive: Bool,
+        heightAboveSurfaceMeters: Float
     ) -> FixedWingAssistOutput? {
         guard assistState.mode != .manual else {
             reset()
@@ -246,9 +247,12 @@ final class FixedWingAssistController {
         // not a fixed absolute height, so a mission that deliberately
         // cruises low still gets full bank authority once it's actually at
         // its own intended altitude.
-        let altitudeDeficit = max(0.0, targetAltitudeMeters - aircraftState.position.y)
-        let altitudeMarginFactor = (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
-            .clamped(to: 0.35...1.0)
+        // Height above the surface, not distance below the route's cruise level — see the
+        // matching note in DroneSimulationViewModel. Keyed on the deficit this held bank at 35% of
+        // maximum for an entire climb, which is a ~200 m turn radius and no ability to steer.
+        let altitudeMarginFactor = (
+            max(0.0, heightAboveSurfaceMeters) / max(wing.initialClimbTargetAltitude, 1.0)
+        ).clamped(to: 0.35...1.0)
         let maxBankRad = min(Tuning.maxBankDeg, wing.maxBankAngleDeg).degreesToRadians * altitudeMarginFactor
         // Proportional plus rate, for the same reason the avoidance loop needed it.
         //

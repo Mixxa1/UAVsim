@@ -659,6 +659,18 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var fixedWingAutopilotDebugState: FixedWingAutopilotDebugState
     @Published private(set) var fixedWingBatteryWarningLevel: FixedWingMissionBatteryLevel
     @Published private(set) var fixedWingAssistState: FixedWingAssistState
+    /// When the aircraft first entered a capture hold because the outbound turn could not be
+    /// proven, and when that proof was last retried. The proof reads the *live* pose, so it can
+    /// start succeeding as the aircraft climbs or the obstacle set changes — without these the
+    /// hold was permanent.
+    private var fixedWingCaptureHoldStartedAt: TimeInterval?
+    private var fixedWingCaptureHoldLastRetryAt: TimeInterval = 0.0
+    /// The proof sweeps a full trajectory rollout, so it is too costly to run every tick.
+    private static let fixedWingCaptureHoldRetryInterval: TimeInterval = 0.75
+    /// After this long in an unbroken hold, take the next waypoint anyway. Holding the capture
+    /// course indefinitely abandons the mission and flies to the world edge, which is a worse
+    /// outcome than handing the leg to reactive avoidance — that layer exists for exactly this.
+    private static let fixedWingCaptureHoldForceAdvanceSeconds: TimeInterval = 6.0
     @Published var collisionDebugEnabled: Bool
     @Published var showBatteryDepletedDialog: Bool
     @Published var diagnosticMode: DiagnosticOverlayMode
@@ -883,11 +895,25 @@ final class DroneSimulationViewModel: ObservableObject {
         launchRuntimeSnapshot.longitudinalAirspeedMps
     }
 
+    /// Localized detail for a launch that was permitted but not fully proven. Shown alongside the
+    /// running sequence rather than instead of it.
+    var fixedWingLaunchWarningDetailKey: String? {
+        guard launchState != .aborted,
+              let reason = fixedWingLaunchPreflightWarningReason else {
+            return nil
+        }
+        return Self.fixedWingLaunchDetailKey(for: reason) ?? "launch.reason.generic"
+    }
+
     var fixedWingLaunchFailureDetailKey: String? {
         guard launchState == .aborted else {
             return nil
         }
-        switch fixedWingLastTransitionReason {
+        return Self.fixedWingLaunchDetailKey(for: fixedWingLastTransitionReason)
+    }
+
+    private static func fixedWingLaunchDetailKey(for reason: String?) -> String? {
+        switch reason {
         case "launch_preflight_configuration_failed":
             return "launch.reason.configuration_failed"
         case "launch_preflight_corridor_invalid":
@@ -904,6 +930,31 @@ final class DroneSimulationViewModel: ObservableObject {
             return "launch.reason.corridor_obstructed"
         case "launch_preflight_runtime_failure":
             return "launch.reason.runtime_failure"
+        // The route-aware preflight added its own refusals. Without these they all collapsed into
+        // `generic`, and the panel could only say that *something* rejected the launch — which is
+        // the least useful thing to tell an operator standing on the pad.
+        case "launch_preflight_corridor_unverified",
+             "launch_preflight_route_unverified",
+             "launch_preflight_waypoint_route_unverified":
+            return "launch.reason.coverage_unverified"
+        // Two different things. `route_obstructed` is the straight launch ingress the aircraft
+        // flies before guidance can take over; `waypoint_route_obstructed` is the planned route.
+        // Reporting both as "the planned route" hides which one an operator has to act on.
+        case "launch_preflight_route_obstructed":
+            return "launch.reason.ingress_obstructed"
+        case "launch_preflight_waypoint_route_obstructed":
+            return "launch.reason.route_obstructed"
+        case "launch_preflight_waypoint_route_unavailable",
+             "launch_preflight_waypoint_route_invalid":
+            return "launch.reason.route_unavailable"
+        case "launch_preflight_route_out_of_bounds":
+            return "launch.reason.route_out_of_bounds"
+        case "launch_preflight_route_altitude_invalid":
+            return "launch.reason.route_altitude_invalid"
+        case "launch_preflight_route_heading_invalid":
+            return "launch.reason.route_heading_invalid"
+        case "launch_preflight_waypoint_missing":
+            return "launch.reason.waypoint_missing"
         case "catapult_acceleration_timeout", "launch_global_timeout":
             return "launch.reason.acceleration_timeout"
         case .some(_):
@@ -1278,6 +1329,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// One-shot result of the synchronous launch preflight performed by `takeoff()`. The launch
     /// state machine consumes it in the same call stack instead of repeating mesh/A* work.
     private var fixedWingLaunchPreflightPrepared = false
+    /// What the launch preflight could not prove, when it could not prove something. The launch
+    /// proceeds anyway; this is surfaced so the operator knows which part is unverified.
+    @Published private(set) var fixedWingLaunchPreflightWarningReason: String?
     /// Heading offset the wing is currently flying to clear an obstacle, in radians.
     private var fixedWingAvoidanceHeadingOffset: Float?
     /// True when the forward corridor is blocked and no constant-course candidate remains clear
@@ -1324,6 +1378,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Controller-side bank cap used by the reactive avoidance loop. The predictor must use the
     /// same cap; assuming the profile maximum made a 79 m predicted turn out of a 112+ m command.
     private static let fixedWingAvoidanceCommandBankLimitDegrees: Float = 22.0
+    /// Course error at which an escape is already asking for all the bank it is allowed. Below it
+    /// the demand tapers so the aircraft settles onto the escape course instead of crossing it.
+    private static let fixedWingAvoidanceEscapeTaperRadians: Float = 0.21
     /// The filtered bank command is not the achieved bank. This deliberately conservative response
     /// constant covers command filtering, aileron response and roll inertia during prediction.
     private static let fixedWingAvoidancePredictedRollResponseSeconds: Float = 0.80
@@ -1356,6 +1413,17 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fixedWingAvoidanceReleaseCourseRadians: Float?
     private var fixedWingAvoidanceReleaseRemaining: Float = 0.0
     private var fixedWingAvoidanceLateralCommandWasActive = false
+    /// Last escape-course error (target course minus heading) and the raw, pre-filter bank request
+    /// derived from it. Diagnostics only: they isolate whether a sign disagreement between the
+    /// avoidance offset and the written roll originates in target selection, in the course-error
+    /// computation, or in the clamp/filter that follows.
+    /// Tick on which avoidance last wrote the roll axis. `fixedWingAvoidanceLateralCommandWasActive`
+    /// is a latch consumed by the release logic, so printing it answered "did avoidance ever take
+    /// the axis", not "is it holding it now" — and it read `yes` for whole flights in which
+    /// `applyFixedWingCollisionAvoidance` was never called. This is the per-tick answer.
+    private var fixedWingAvoidanceLastCommandTick: UInt64?
+    private var fixedWingAvoidanceDiagCourseErrorDegrees: Float?
+    private var fixedWingAvoidanceDiagRawBankDegrees: Float?
     private static let fixedWingAvoidanceReleaseDuration: Float = 0.80
     /// The assist controller continues advancing its private filters while avoidance owns the live
     /// axes. Cache that hidden output so both the safety rollout and release hand-off start from the
@@ -3000,6 +3068,7 @@ final class DroneSimulationViewModel: ObservableObject {
         pendingFixedWingAssistWaypoint = nil
         fixedWingPendingLaunchAssistRoute = nil
         fixedWingLaunchPreflightPrepared = false
+        fixedWingLaunchPreflightWarningReason = nil
         resetFixedWingAvoidanceState()
         setFlightMode(.manual, reason: "reset")
         flightControlMode = .stabilized
@@ -3194,18 +3263,20 @@ final class DroneSimulationViewModel: ObservableObject {
            activeLaunchMode() == .handLaunch || activeLaunchMode() == .catapult,
            let launchAsset = activeLaunchAsset() {
             fixedWingLaunchPreflightPrepared = false
-            if let failureReason = fixedWingLaunchPreflightFailure(
+            // Advisory, not a veto.
+            //
+            // Refusing the launch outright made the preflight the only thing an operator could
+            // observe: an aircraft that never leaves the pad demonstrates nothing about whether
+            // the autopilot can route around what stopped it. The check keeps its full rigour and
+            // still names exactly what it could not prove — the decision to fly is the operator's.
+            fixedWingLaunchPreflightWarningReason = fixedWingLaunchPreflightFailure(
                 mode: activeLaunchMode(),
                 asset: launchAsset,
                 spawnPoint: currentSpawnPoint(),
                 parameters: activeFixedWingParameters()
-            ) {
-                // Fail before cancelling/rewriting assist state or entering takeoff. The launch
-                // button is not permission to fly an unverified ingress toward a facade.
-                abortFixedWingLaunch(reason: failureReason)
-                return
-            }
-            fixedWingLaunchPreflightPrepared = true
+            )
+            // Only a clean proof may be consumed downstream; a warned launch re-plans in flight.
+            fixedWingLaunchPreflightPrepared = fixedWingLaunchPreflightWarningReason == nil
         }
         cancelTargetMarkerAutoNavigation()
         deactivateFixedWingAssist(reason: "fixed_wing_assist_takeoff")
@@ -5934,7 +6005,21 @@ final class DroneSimulationViewModel: ObservableObject {
                 fixedWingAvoidanceHoldRemaining = 0.0
                 fixedWingAvoidanceHoldSign = 0
                 fixedWingAvoidanceHoldWasFresh = false
-            } else if let avoidanceTarget {
+            } else if let avoidanceTarget, fixedWingAvoidanceHeadingOffset != nil {
+                // Re-arm only while the avoidance layer is actually asking for a course change.
+                //
+                // The `avoidanceTarget != nil` test alone was not that question. A target survives
+                // in `fixedWingAvoidanceCachedTarget` and keeps being handed back while the layer's
+                // own verdict — the offset printed as `avoid=` — reads clear, so the hold was
+                // refreshed to a full second on every tick and never lapsed. Because the hold owns
+                // the lateral axis (`applyFixedWingCollisionAvoidance` writes roll absolutely), the
+                // assist's guidance could not reach the aircraft no matter what it was pointed at.
+                //
+                // The flight log is unambiguous: `hold=held heldCrs=-164` unchanged for forty
+                // seconds with `avoid=clear risk=0.00 obstacle=none`, `rollCmd` flat at 0.0,
+                // `activeWaypointIndex` stuck at 0 and the aircraft leaving the map on that
+                // committed course. Nothing was being avoided; the axis was simply never returned.
+                //
                 // Commit to a side; do not re-pick it every tick.
                 //
                 // With the hold in place the two controllers stopped fighting, and the log then
@@ -5971,7 +6056,24 @@ final class DroneSimulationViewModel: ObservableObject {
             } else {
                 fixedWingAvoidanceHoldRemaining = max(0.0, fixedWingAvoidanceHoldRemaining - dt)
             }
-            if fixedWingAvoidanceNoSafeTrajectory,
+            if fixedWingLaunchClimbProtectionActive {
+                // The launch controller owns the departure — see
+                // `fixedWingLaunchClimbProtectionActive`. A *proven clear* escape below may still
+                // steer, because that is a real solution rather than a least-bad prefix; the
+                // blocked branches are skipped entirely so they cannot cut launch power, cap
+                // launch pitch, or take both lateral axes away from an aircraft that has no
+                // energy to spend on either.
+                if fixedWingAvoidanceHoldRemaining > 0.0,
+                   !fixedWingAvoidanceNoSafeTrajectory,
+                   let heldCourse = fixedWingAvoidanceHoldCourse {
+                    let heading = SIMD2<Float>(-sin(heldCourse), -cos(heldCourse))
+                    applyFixedWingCollisionAvoidance(
+                        target: currentPlanarPosition() + heading * 200.0,
+                        wing: wing,
+                        deltaTime: dt
+                    )
+                }
+            } else if fixedWingAvoidanceNoSafeTrajectory,
                let avoidanceTarget {
                 // `blocked` means that no single constant-course rollout stays clear for the full
                 // horizon. It must never mean wings-level flight into the obstruction already
@@ -6085,7 +6187,11 @@ final class DroneSimulationViewModel: ObservableObject {
                 }
 
             }
-            if let governedSpeed = fixedWingMeshSpeedGovernorTargetMps {
+            // The mesh-horizon governor trades speed for manoeuvre room. That trade is wrong during
+            // the launch climb-out, where the aircraft has no speed to give and the corridor is
+            // already committed.
+            if let governedSpeed = fixedWingMeshSpeedGovernorTargetMps,
+               !fixedWingLaunchClimbProtectionActive {
                 let trueAirspeed = max(0.0, state.forwardAirspeed)
                 if trueAirspeed > governedSpeed + 0.25 {
                     let overspeedFraction = (
@@ -6128,7 +6234,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 print(String(
                     format: "[WingTick] mode=%@ y=%.1f speed=%.1f pitchCmd=%.1f pitchActual=%.1f "
                         + "vy=%.2f rollCmd=%.1f roll=%.1f throttle=%.2f risk=%.2f obstacle=%@ "
-                        + "why=%@ pending=%@ avoid=%@ turnR=%.0f hold=%@ heldCrs=%.0f",
+                        + "why=%@ pending=%@ avoid=%@ turnR=%.0f hold=%@ heldCrs=%.0f "
+                        + "band=%.0f-%.0f nav=%d state=%@ sup=%@ "
+                        + "asstRoll=%@ avOwns=%@ holdRem=%.2f avCrsErr=%@ avRawBank=%@",
                     mode.rawValue,
                     Double(state.position.y),
                     Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
@@ -6155,7 +6263,33 @@ final class DroneSimulationViewModel: ObservableObject {
                     (fixedWingAvoidanceHoldCourse == nil
                         ? "off"
                         : (fixedWingAvoidanceHoldWasFresh ? "fresh" : "held")) as NSString,
-                    Double((fixedWingAvoidanceHoldCourse ?? 0.0).radiansToDegrees)
+                    Double((fixedWingAvoidanceHoldCourse ?? 0.0).radiansToDegrees),
+                    // The band the planner filters obstacles by, how many survived, and why
+                    // auto-advance is parked. Between them these say whether a "препятствие"
+                    // hold is a real obstruction or a planner looking at the wrong altitude.
+                    Double(fixedWingProtectedAltitudeRange().lowerBound),
+                    Double(fixedWingProtectedAltitudeRange().upperBound),
+                    navigationBaseObstacles().count,
+                    "\(fixedWingAssistState.interceptState)" as NSString,
+                    (fixedWingAssistState.autoAdvanceSuppressedReason ?? "-") as NSString,
+                    // Who actually wrote the roll axis this tick. `hold=` above answers only
+                    // whether a held *course value* exists, not whether the hold is live or who
+                    // owns the stick — reading it as ownership cost a wrong diagnosis. `asstRoll`
+                    // is what the assist asked for, `avOwns` whether avoidance took the axis,
+                    // `holdRem` the hold's remaining seconds.
+                    (fixedWingLatestAssistRollCommandDegrees.map {
+                        String(format: "%.1f", $0)
+                    } ?? "nil") as NSString,
+                    (fixedWingAvoidanceLastCommandTick == simulationTickCounter
+                        ? "yes"
+                        : "no") as NSString,
+                    Double(fixedWingAvoidanceHoldRemaining),
+                    (fixedWingAvoidanceDiagCourseErrorDegrees.map {
+                        String(format: "%+.1f", $0)
+                    } ?? "-") as NSString,
+                    (fixedWingAvoidanceDiagRawBankDegrees.map {
+                        String(format: "%+.1f", $0)
+                    } ?? "-") as NSString
                 ))
             }
         }
@@ -6173,7 +6307,7 @@ final class DroneSimulationViewModel: ObservableObject {
             vehicleMassModel: vehicleMassModel,
             fixedWingLaunchDynamics: activeFixedWingLaunchDynamics,
             fixedWingThrottleCeiling: selectedDroneProfile.airframeClass == .fixedWing
-                ? fixedWingPhysicsThrottleCeiling
+                ? fixedWingAirspeedLimitedThrottleCeiling()
                 : nil,
             vehicleMassProperties: vehicleMassProperties,
             contactProfile: vehicleContactProfile,
@@ -6510,6 +6644,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let shouldPersistTelemetry = telemetrySamplingAccumulator + dt >= 0.2
         if shouldPublishHUD || shouldPersistTelemetry {
             refreshFixedWingAssistRuntimeDebugState()
+            refreshSceneMissionWaypointCaptureAltitude()
             refreshTerrainMapSnapshotIfVisible(recordTrail: true)
             let latestWarnings = buildWarnings()
             let latestTelemetry = buildTelemetrySnapshot()
@@ -7651,7 +7786,8 @@ final class DroneSimulationViewModel: ObservableObject {
                         currentLegEnd: assistDebugLeg.end
                     ),
                     turnOverrideActive: turnOverrideActive,
-                    altitudeOverrideActive: altitudeOverrideActive
+                    altitudeOverrideActive: altitudeOverrideActive,
+                    heightAboveSurfaceMeters: heightAboveSupportSurface(for: state.position)
                 ) {
                     let previousAssistState = fixedWingAssistState
                     let captureTransitionOccurred = !previousAssistState.interceptCompleted && assistOutput.state.interceptCompleted
@@ -7667,8 +7803,12 @@ final class DroneSimulationViewModel: ObservableObject {
                     }
                     var waypointChanged = false
                     if captureTransitionOccurred {
+                        fixedWingCaptureHoldStartedAt = nil
                         waypointChanged = handleFixedWingAssistCaptureCompletion()
+                    } else if fixedWingAssistIsHoldingForOutboundProof {
+                        waypointChanged = retryFixedWingCaptureHoldIfDue()
                     } else if fixedWingAssistState.interceptCompleted {
+                        fixedWingCaptureHoldStartedAt = nil
                         waypointChanged = updatePendingFixedWingAutoAdvanceIfNeeded()
                     }
                     if !waypointChanged {
@@ -8561,7 +8701,30 @@ final class DroneSimulationViewModel: ObservableObject {
         if let altitude = additionalTargetAltitude, altitude.isFinite {
             targets.append(max(0.0, altitude))
         }
-        return (targets.min() ?? current)...(targets.max() ?? current)
+        let ceiling = max(current, targets.max() ?? current)
+
+        // The ceiling may span every altitude figure in play — over-including obstacles *above* the
+        // aircraft is free, they simply never intersect its path. The floor may not: it decides
+        // which obstacles the planner treats as solid, and taking the minimum across route-level
+        // figures planned an entire cruise as though it were being flown at the lowest altitude
+        // anyone had mentioned. At 199 m over Manhattan that reinstated every tower above the
+        // mission's route altitude as a wall, the grid had no free corridor left, the protected
+        // reroute could not be built, and auto-advance parked on "obstacle ahead" with open sky in
+        // front of the aircraft — the hold the operator had to break by hand, repeatedly.
+        //
+        // The aircraft can only be where it is or where it is being *commanded* to go, so those are
+        // the floor. A descent is not lost: the band is bucketed to 10 m, so the set is rebuilt and
+        // the lower obstacles become solid as the commanded altitude walks down towards them, with
+        // `navigationBandClearanceMeters()` as the margin.
+        var floorCandidates: [Float] = [current]
+        if let altitude = fixedWingAutopilotAltitudeCommand, altitude.isFinite {
+            floorCandidates.append(max(0.0, altitude))
+        }
+        if let altitude = additionalTargetAltitude, altitude.isFinite {
+            floorCandidates.append(max(0.0, altitude))
+        }
+        let floor = min(floorCandidates.min() ?? current, ceiling)
+        return floor...ceiling
     }
 
     /// Horizontal extent only. `radius` is a 3-D bounding sphere, so for a mesh cell holding a tall
@@ -9539,7 +9702,8 @@ final class DroneSimulationViewModel: ObservableObject {
             yawAlignToHome: yawAlignToHome,
             yawOverrideRadians: yawOverrideRadians,
             deltaTime: deltaTime,
-            flightBaseline: flightBaseline
+            flightBaseline: flightBaseline,
+            heightAboveSurfaceMeters: heightAboveSupportSurface(for: state.position)
         )
 
         switch selectedDroneProfile.airframeClass {
@@ -10384,8 +10548,14 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         if pending == .waypointIntercept {
-            let requiresPreparedLaunchRoute = activeLaunchMode() == .handLaunch ||
-                activeLaunchMode() == .catapult
+            // A pre-proven launch route is required only when the preflight actually produced one.
+            // When it warned instead, the operator accepted an unproven departure — and refusing
+            // to engage the intercept there would silently leave the aircraft in heading hold: the
+            // launch would be permitted and the route still not flown, which is the worst of both.
+            // The in-flight planner then owns the route, exactly as on the standard launch path.
+            let requiresPreparedLaunchRoute = (activeLaunchMode() == .handLaunch ||
+                activeLaunchMode() == .catapult)
+                && fixedWingLaunchPreflightWarningReason == nil
             guard let queuedWaypoint = pendingFixedWingAssistWaypoint,
                   let liveIndex = fixedWingAssistWaypointOptions.firstIndex(where: {
                       $0.id == queuedWaypoint.id &&
@@ -10453,20 +10623,46 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingAvoidanceReleaseRemaining = 0.0
         fixedWingAvoidanceReleaseCourseRadians = nil
         fixedWingAvoidanceLateralCommandWasActive = true
+        fixedWingAvoidanceLastCommandTick = simulationTickCounter
 
         // Avoidance owns the roll axis while an escape course is active. Filter the bounded course
         // command so ownership changes cannot recreate the old left/right bank reversals.
         let commandBankLimit = min(Self.fixedWingAvoidanceCommandBankLimitDegrees, bankLimit)
-        var rawBiasRadians = (
-            courseError * 0.55 - state.bodyAngularVelocity.z * 0.45
-        ).clamped(
-            to: -commandBankLimit.degreesToRadians...commandBankLimit.degreesToRadians
+        let commandBankLimitRadians = commandBankLimit.degreesToRadians
+        let yawDamping = state.bodyAngularVelocity.z * 0.45
+        var rawBiasRadians = (courseError * 0.55 - yawDamping).clamped(
+            to: -commandBankLimitRadians...commandBankLimitRadians
         )
+
+        if fixedWingAvoidanceNoSafeTrajectory {
+            // A `blocked` reading is an escape, not a course correction, and the proportional law
+            // is far too soft to serve as one. The committed candidate is picked only ~10 deg off
+            // the present course — it is the least-bad prefix, not a scenic detour — and 0.55 of
+            // that is 5.5 deg of bank: a 2.2 deg/s turn needing over 100 m of travel to deliver
+            // 10 deg of heading. The flight log is exactly that number, `rollCmd=4.6` held for
+            // three consecutive samples into a facade with the obstacle already inside 100 m.
+            //
+            // Demand the full authority the limit allows and taper only as the escape course is
+            // actually reached, so the turn is delivered in the distance that remains instead of
+            // asymptotically. The clamp, not the gain, is what bounds this.
+            let escapeDemand = (courseError / Self.fixedWingAvoidanceEscapeTaperRadians)
+                .clamped(to: -1.0...1.0) * commandBankLimitRadians
+            rawBiasRadians = (escapeDemand - yawDamping).clamped(
+                to: -commandBankLimitRadians...commandBankLimitRadians
+            )
+        }
+
         if abs(courseError) < 0.04 {
             rawBiasRadians *= 0.4
         }
+        fixedWingAvoidanceDiagCourseErrorDegrees = courseError.radiansToDegrees
+        fixedWingAvoidanceDiagRawBankDegrees = rawBiasRadians.radiansToDegrees
         let rawBias = rawBiasRadians.radiansToDegrees
-        let alpha = 1.0 - exp(-max(0.0001, deltaTime) / 0.45)
+        // The command filter is a comfort setting in cruise and a delay budget in an escape: at
+        // 0.45 s the bias reaches only 63% of demand after nearly half a second of the little
+        // distance that is left. Roll in far faster once the trajectory is blocked.
+        let responseSeconds: Float = fixedWingAvoidanceNoSafeTrajectory ? 0.18 : 0.45
+        let alpha = 1.0 - exp(-max(0.0001, deltaTime) / responseSeconds)
         fixedWingAvoidanceBiasDegrees += (rawBias - fixedWingAvoidanceBiasDegrees) * alpha
 
         let climbFloor = fixedWingAvoidanceClimbFloorDegrees(
@@ -10484,7 +10680,15 @@ final class DroneSimulationViewModel: ObservableObject {
                 fixedWingAvoidanceCoverageUnknown ? 0.72 : 1.0
             )
         )
-        if fixedWingAvoidanceNoSafeTrajectory {
+        // Shedding energy is the right answer in cruise and the wrong one on departure: the launch
+        // floor exists precisely because the aircraft needs every watt to reach flying speed.
+        // Shedding energy is a cruise manoeuvre. Below cruise altitude or cruise speed the
+        // aircraft has none to give, and taking it is how a detectable obstacle became an
+        // unrecoverable mush in the flight log.
+        let mayShedEnergyForSafety = fixedWingAvoidanceNoSafeTrajectory
+            && !fixedWingLaunchClimbProtectionActive
+            && fixedWingHasEnergyMarginForAvoidance
+        if mayShedEnergyForSafety {
             fixedWingPhysicsThrottleCeiling = min(
                 fixedWingPhysicsThrottleCeiling ?? noSafeThrottleCap,
                 noSafeThrottleCap
@@ -10509,7 +10713,7 @@ final class DroneSimulationViewModel: ObservableObject {
             // overwrite yaw while avoidance owned roll produced the reported yaw weave and a
             // wing-first contact even though the commanded bank was nearly level.
             values.yaw = Double(avoidanceCourse.radiansToDegrees)
-            if fixedWingAvoidanceNoSafeTrajectory, climbFloor <= 0.0 {
+            if mayShedEnergyForSafety, climbFloor <= 0.0 {
                 // Cancel an assist/launch climb request when there is no airspeed reserve. Below
                 // the safe floor, use a small unloading command so speed recovery outranks height.
                 let recoveryPitchCeiling = state.forwardAirspeed < wing.minSafeAirspeed
@@ -10519,7 +10723,7 @@ final class DroneSimulationViewModel: ObservableObject {
             } else {
                 values.pitch = max(values.pitch, Double(climbFloor))
             }
-            if fixedWingAvoidanceNoSafeTrajectory {
+            if mayShedEnergyForSafety {
                 // No complete escape exists: shed energy toward cruise/minimum sustainable power
                 // while using the longest proven prefix. Full takeoff power shortens the remaining
                 // reaction time and enlarges the turn radius.
@@ -10557,17 +10761,111 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    /// Fraction of full bank authority the low-altitude protection permits, from height above the
+    /// surface. Quantised to 5 m so a continuously changing height cannot churn the planner's grid
+    /// and route-validation cache keys.
+    private func fixedWingLowAltitudeBankAuthority(wing: FixedWingParameters) -> Float {
+        let height = max(0.0, heightAboveSupportSurface(for: state.position))
+        let quantized = (height / 5.0).rounded(.down) * 5.0
+        return (quantized / max(wing.initialClimbTargetAltitude, 1.0)).clamped(to: 0.35...1.0)
+    }
+
     private func fixedWingAvoidanceBankLimitDegrees(
         wing: FixedWingParameters
     ) -> Float {
-        let altitudeDeficit = max(0.0, Float(controlValues.y) - state.position.y)
-        let bankAuthority = (
-            1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0)
-        ).clamped(to: 0.35...1.0)
+        // Height above the surface, not distance below the route's cruise level.
+        //
+        // Keyed on the deficit this pinned at its 0.35 floor for an entire climb to a high cruise
+        // altitude, and that one number drove every downstream failure: 0.35 authority is ~10 deg
+        // of bank, which predicts a 213 m turn radius at 20 m/s, which makes the escape horizon
+        // longer than any city street, which makes `blocked` permanent, which hands both lateral
+        // axes to a layer that then cannot turn — `rollCmd` frozen at -1.7 for twelve consecutive
+        // samples, straight into a facade. The hazard being guarded against is a banked turn close
+        // to the ground; an aircraft 38 m over a city is not in it merely because its cruise level
+        // is another 57 m up.
+        let bankAuthority = fixedWingLowAltitudeBankAuthority(wing: wing)
         // This is a command limit, not a promise of instantaneous achieved bank. The trajectory
         // rollout below starts at actual roll and applies both command and airframe response lag.
         let permitted = max(wing.maxInitialBankDeg, wing.maxBankAngleDeg * bankAuthority)
         return min(Self.fixedWingAvoidanceCommandBankLimitDegrees, permitted * 0.75)
+    }
+
+    /// True while the launch controller owns the departure: from release until it hands over.
+    ///
+    /// Reactive avoidance is a cruise safety layer. During a hand launch or catapult throw the
+    /// aircraft is at its lowest energy and inside a corridor the launch preflight (or the
+    /// operator) already chose, and its horizon requirement cannot be met from ground level in a
+    /// city — so it reports `blocked` from the first airborne tick and then acts on that. The
+    /// flight log shows what acting on it costs: throttle capped at 0.45 against a takeoff floor
+    /// of ~0.65, speed decaying 16.9 -> 16.4 m/s at 15 degrees of pitch, and a -10 degree escape
+    /// command on both lateral axes that the pilot could not override. That is a worse departure
+    /// than the one it was protecting against.
+    /// Final throttle ceiling handed to the physics: the existing safety ceiling, further limited
+    /// so the aircraft cannot run away from its own airspeed envelope.
+    ///
+    /// Sizing thrust for the declared climb rate is what finally let a fixed wing get above a
+    /// city, but the climb reserve is only useful while it buys height. At the 0.92 throttle the
+    /// launch and climb logic commands, that reserve instead accelerated the aircraft to 30.6 m/s
+    /// against a 19.5 m/s cruise — and turn radius goes as the square of speed, so the predicted
+    /// radius went past 280 m and the aeroplane could no longer turn at all. It flew level into a
+    /// building at 465 J with `avoid` reporting blocked the whole way.
+    ///
+    /// A real autopilot answers this with an airspeed limiter, not by giving the climb back.
+    private func fixedWingAirspeedLimitedThrottleCeiling() -> Float? {
+        guard let wing = selectedDroneProfile.fixedWingParameters else {
+            return fixedWingPhysicsThrottleCeiling
+        }
+        let limit = max(wing.climbAirspeed, wing.cruiseAirspeed)
+            * Self.fixedWingAirspeedLimitFactor
+        let airspeed = max(0.0, state.forwardAirspeed)
+        guard airspeed > limit else { return fixedWingPhysicsThrottleCeiling }
+        // Proportional bleed rather than a step: a throttle cliff at the limit is its own
+        // oscillation, and the aircraft still needs power to hold height while it slows.
+        let overspeed = (airspeed - limit) / max(1.0, limit)
+        let baseline = resolvedFlightBaseline(for: .autoPath)
+        let ceiling = max(
+            max(wing.minThrottle, baseline.effectiveMinimumSafeFlightThrottle),
+            baseline.cruiseReferenceThrottle * (1.0 - overspeed * 2.0)
+        )
+        guard let existing = fixedWingPhysicsThrottleCeiling else { return ceiling }
+        return min(existing, ceiling)
+    }
+
+    /// How far above its own climb/cruise airspeed a fixed wing may run before power is bled.
+    ///
+    /// Deliberately generous. At 1.12 the limit landed on 21.8 m/s, which is exactly the speed the
+    /// aircraft naturally settles at in a full-power climb — so the limiter fought the climb it was
+    /// supposed to protect and the rate fell back to ~1.2 m/s. The runaway this exists to catch was
+    /// 30.6 m/s, not 22. At 1.25 the limit is 24.4 m/s: normal climb is untouched, the runaway is
+    /// still caught, and the turn radius at the limit stays near 150 m rather than 280.
+    private static let fixedWingAirspeedLimitFactor: Float = 1.25
+
+    private var fixedWingLaunchClimbProtectionActive: Bool {
+        guard selectedDroneProfile.airframeClass == .fixedWing else { return false }
+        if mode == .takeoff || launchState.blocksRouteCapture { return true }
+        // The launch state machine hands over at roughly 25 m, not at cruise. Ending the
+        // protection there put the aircraft straight back under the blocked-branch throttle cap
+        // with no energy to absorb it: the flight log shows throttle collapsing 0.92 -> 0.45 on
+        // the very tick `fixed_wing_launch_completed` fires, airspeed then decaying 18.5 -> 16.7
+        // and the climb dying to 0.14 m/s at 28 m — a mush straight into a building. The aircraft
+        // is still establishing until it has both its cruise level and its cruise speed.
+        return !fixedWingHasEnergyMarginForAvoidance
+    }
+
+    /// Whether the aircraft has energy it can afford to spend on an avoidance manoeuvre.
+    ///
+    /// Below cruise altitude or below cruise speed it does not: every joule is committed to
+    /// getting established, and a safety layer that takes some is making the situation worse than
+    /// the one it is responding to.
+    private var fixedWingHasEnergyMarginForAvoidance: Bool {
+        guard let wing = selectedDroneProfile.fixedWingParameters else { return true }
+        let cruiseTarget = fixedWingAssistState.targetAltitudeMeters
+            ?? fixedWingAutopilotAltitudeCommand
+            ?? activeRouteTargetAltitude
+        if let cruiseTarget, state.position.y < cruiseTarget - 8.0 {
+            return false
+        }
+        return state.forwardAirspeed >= wing.cruiseAirspeed * 0.97
     }
 
     private func resetFixedWingAvoidanceState() {
@@ -10830,9 +11128,12 @@ final class DroneSimulationViewModel: ObservableObject {
                     ? predictedFilteredCourse
                     : desiredCourse
                 let courseError = shortestAngleRadians(controllerCourse - course)
+                // Mirrors the controllers' own low-altitude protection, which is keyed on height
+                // above the surface. The rollout climbs with the aircraft, so track that height.
                 let assistAltitudeFactor = (
-                    1.0 - max(0.0, rolloutTargetAltitude - altitude) /
-                        max(wing.initialClimbTargetAltitude, 1.0)
+                    max(0.0, heightAboveSupportSurface(for: state.position)
+                        + (altitude - state.position.y))
+                        / max(wing.initialClimbTargetAltitude, 1.0)
                 ).clamped(to: 0.35...1.0)
                 let commandBankLimit: Float = {
                     if useAssistController {
@@ -11322,8 +11623,9 @@ final class DroneSimulationViewModel: ObservableObject {
                     : desiredCourse
                 let courseError = shortestAngleRadians(controllerCourse - course)
                 let assistAltitudeFactor = (
-                    1.0 - max(0.0, rolloutTargetAltitude - altitude) /
-                        max(wing.initialClimbTargetAltitude, 1.0)
+                    max(0.0, heightAboveSupportSurface(for: state.position)
+                        + (altitude - state.position.y))
+                        / max(wing.initialClimbTargetAltitude, 1.0)
                 ).clamped(to: 0.35...1.0)
                 let commandBankLimit: Float = {
                     if useAssistController {
@@ -11490,14 +11792,37 @@ final class DroneSimulationViewModel: ObservableObject {
         let takeoverAssessment = guidanceUsesNominalLateralLoop
             ? trajectoryAssessment(course: commandedGuidanceCourse)
             : forwardAssessment
-        let forwardBlocked = !forwardAssessment.isClear || !takeoverAssessment.isClear
+        // "Blocked" must mean a contact the aircraft can no longer turn away from, not "the
+        // several-hundred-metre horizon is not provably empty".
+        //
+        // Requiring the full horizon made blocked the resting state of urban flight: the logs show
+        // it asserted continuously from the first airborne tick, and everything it then does —
+        // seizing both lateral axes, capping power, commanding a degraded escape — is applied
+        // permanently rather than in an emergency. What actually has to fit is the lateral
+        // displacement needed to miss what is ahead: on a constant-radius turn an offset `y` costs
+        // an along-track run of sqrt(2*R*y), which at a 150 m radius and one corridor width is
+        // about 55 m, not 240 m. Beyond that distance an obstacle is route guidance's problem.
+        let escapeDistance = (
+            airspeed * Self.fixedWingTurnRollInSeconds
+                + (2.0 * max(1.0, turnRadius) * max(1.0, corridorHalfWidth * 2.0)).squareRoot()
+        ) * 1.25
+        func reachesEscapeDistance(
+            _ assessment: FixedWingAvoidanceTrajectoryAssessment
+        ) -> Bool {
+            assessment.isClear || (
+                assessment.hasKnownCoverage
+                    && assessment.firstContactDistanceMeters >= escapeDistance
+            )
+        }
+        let forwardBlocked = !reachesEscapeDistance(forwardAssessment)
+            || !reachesEscapeDistance(takeoverAssessment)
 
         if let lockedCourse = fixedWingAvoidanceCourseRadians {
             // Course persistence suppresses left/right hunting, but never outranks collision
             // safety. Re-check the complete arc on every tick; the aircraft may have moved close
             // enough that yesterday's safe corridor is no longer flyable.
             let lockedAssessment = trajectoryAssessment(course: lockedCourse)
-            let lockedCourseIsSafe = lockedAssessment.isClear
+            let lockedCourseIsSafe = reachesEscapeDistance(lockedAssessment)
             if lockedCourseIsSafe {
                 if forwardBlocked {
                     fixedWingAvoidanceClearSinceTime = nil
@@ -11566,7 +11891,7 @@ final class DroneSimulationViewModel: ObservableObject {
             for sign in candidateSigns {
                 let offset = magnitude * sign
                 let assessment = trajectoryAssessment(course: heading + offset)
-                guard assessment.isClear else {
+                guard reachesEscapeDistance(assessment) else {
                     guard assessment.hasKnownCoverage else { continue }
                     let contactDistance = assessment.firstContactDistanceMeters
                     let isBetterPrefix = contactDistance > bestEmergencyContactDistance + 0.5
@@ -11600,7 +11925,7 @@ final class DroneSimulationViewModel: ObservableObject {
             for magnitude in candidateMagnitudes {
                 let offset = -committedSign * magnitude
                 let assessment = trajectoryAssessment(course: heading + offset)
-                guard assessment.isClear else { continue }
+                guard reachesEscapeDistance(assessment) else { continue }
                 let score = assessment.minimumClearanceMeters - magnitude * 3.0
                 if score > oppositeScore {
                     oppositeScore = score
@@ -15084,10 +15409,12 @@ final class DroneSimulationViewModel: ObservableObject {
         // A point-safe A* polyline can still demand an instantaneous corner. Reserve one attainable
         // turn radius plus roll-in distance around every obstacle, so its shortest returned route
         // is also flyable by this aircraft instead of merely clear for its centre point.
-        let manoeuvreReserve = fixedWingConservativeRouteTurnRadius(
+        let routeTurnRadius = fixedWingConservativeRouteTurnRadius(
             wing: wing,
             airspeed: planningSpeed
-        ) + planningSpeed * Self.fixedWingTurnRollInSeconds
+        )
+        let manoeuvreReserve = routeTurnRadius
+            + planningSpeed * Self.fixedWingTurnRollInSeconds
         let droneRadius = fixedWingNavigationEnvelopeRadius
         let altitude = max(2.0, targetAltitude)
         let clampedStart = viewport.clampedToWorld(points[0])
@@ -15154,7 +15481,30 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
-        let compactedOutput = compactedPlanarPath(output)
+        // Repair the corners before judging them.
+        //
+        // A* returns a route that is safe for a *point*. The aircraft rounds every corner with a
+        // fillet of its live radius, and that fillet cuts toward the inside of the turn — at a
+        // 202 m radius a right-angle corner is cut by 84 m, straight through the building the
+        // route was hugging. Rejecting such a route sends the planner back for another one with
+        // the same property; moving the corner outward until the fillet clears actually fixes it.
+        // Measured by `Tools/AvoidanceProbe`: on a 260 m block grid this turns a collision into a
+        // clean 52 s transit, while the whole-turn-radius obstacle inflation that used to be the
+        // answer leaves no free cell at all.
+        //
+        // `routeTurnRadius` is the radius handed to the follower as `validatedTurnRadiusMeters`,
+        // so the repair is validated against exactly the fillet that will be flown. Validating at
+        // any other radius — larger or smaller — is the failure this codebase keeps rediscovering.
+        let repair = FixedWingRouteRepair.repair(
+            route: compactedPlanarPath(output),
+            turnRadius: routeTurnRadius,
+            clearanceRadius: droneRadius,
+            altitude: altitude,
+            obstacles: obstacles,
+            collisionService: collisionService,
+            maximumOutwardShiftMeters: routeTurnRadius
+        )
+        let compactedOutput = repair.points
         if fixedWingValidatedRouteNeedsReroute(
                 compactedOutput,
                 noFlyZones: noFlyZones,
@@ -15738,8 +16088,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let turnRadius = fixedWingGuidanceTurnRadius(
             wing: wing,
             airspeed: airspeed,
-            respectLiveBankAuthority: true,
-            targetAltitudeOverride: targetAltitude
+            respectLiveBankAuthority: true
         )
         return (airspeed, turnRadius)
     }
@@ -15801,29 +16150,35 @@ final class DroneSimulationViewModel: ObservableObject {
     private func fixedWingGuidanceTurnRadius(
         wing: FixedWingParameters,
         airspeed: Float,
-        respectLiveBankAuthority: Bool = false,
-        targetAltitudeOverride: Float? = nil
+        respectLiveBankAuthority: Bool = false
     ) -> Float {
         let cruiseBankLimit = min(
             Self.fixedWingAvoidanceCommandBankLimitDegrees,
             wing.maxBankAngleDeg
         )
         var bankDegrees = cruiseBankLimit
-        if respectLiveBankAuthority,
-           let targetAltitude = targetAltitudeOverride
-                ?? fixedWingAssistState.targetAltitudeMeters {
-            let altitudeDeficit = max(0.0, targetAltitude - state.position.y)
-            // Keep the worst controller authority for the bulk of the climb so the grid does not
-            // rebuild every half metre. In the final metre use the controller's exact continuous
-            // factor: jumping straight to 1.0 here would validate a slightly tighter arc than the
-            // aircraft can actually fly while it is still just below the target altitude.
-            let altitudeMarginFactor: Float = altitudeDeficit > 1.0
-                ? 0.35
-                : (1.0 - altitudeDeficit / max(wing.initialClimbTargetAltitude, 1.0))
-                    .clamped(to: 0.35...1.0)
+        if respectLiveBankAuthority {
+            // Was keyed on the deficit below the *target* altitude, with a hard 0.35 floor for any
+            // deficit over a single metre — no gradient, a cliff. That is the same defect already
+            // removed from the assist controller, the autopilot, `fixedWingAvoidanceBankLimitDegrees`
+            // and the guidance predictor; this fifth site was missed, and it is the one every fly-by
+            // and capture validator sizes itself from.
+            //
+            // The flight log gives the exact cost. Cruising at 199 m over Manhattan — 190 m above
+            // the rooftops — but 7.6 m under a 207 m commanded altitude, authority sat on 0.35:
+            // 12.6 deg of bank, R = 206 m. In the very same ticks the aircraft was banking 33 deg
+            // and flying R = 115 m. Every check sized off the pessimistic radius then refused the
+            // turn it was perfectly able to make: `[CaptureOutbound] refused: leg 93 m < turn
+            // 413 m (R=206)`, and `segmentTooShort` demanding 154 m of leg on a 98 m route — which
+            // is why auto-advance sat on `turn_transition_segment_too_short` for the whole flight
+            // and the operator had to drive it point by point.
+            //
+            // The hazard being guarded against is a banked turn close to the ground, so key it on
+            // height above the surface, quantised to 5 m so grid and route-validation cache keys
+            // stay stable.
             bankDegrees = min(
                 cruiseBankLimit,
-                wing.maxBankAngleDeg * 0.95 * altitudeMarginFactor
+                wing.maxBankAngleDeg * 0.95 * fixedWingLowAltitudeBankAuthority(wing: wing)
             )
             if fixedWingAssistClimbOutLatched || launchState.blocksRouteCapture {
                 bankDegrees = min(
@@ -15905,8 +16260,7 @@ final class DroneSimulationViewModel: ObservableObject {
         return fixedWingGuidanceTurnRadius(
             wing: wing,
             airspeed: planningSpeed,
-            respectLiveBankAuthority: true,
-            targetAltitudeOverride: targetAltitude
+            respectLiveBankAuthority: true
         ) + planningSpeed * Self.fixedWingTurnRollInSeconds
     }
 
@@ -16685,24 +17039,31 @@ final class DroneSimulationViewModel: ObservableObject {
         currentPosition: SIMD2<Float>,
         obstacles: [CollisionObstacle]
     ) -> FixedWingAssistFlyByGuidanceSnapshot {
-        let fallbackDirection: SIMD2<Float> = {
-            if let nearestObstacle = obstacles.min(by: {
-                simd_distance(currentPosition, $0.planarCenter) < simd_distance(currentPosition, $1.planarCenter)
-            }) {
-                let away = currentPosition - nearestObstacle.planarCenter
-                let awayLength = simd_length(away)
-                if awayLength > 0.001 {
-                    return away / awayLength
-                }
-            }
-
-            return SIMD2<Float>(
-                -sin(state.orientation.z),
-                -cos(state.orientation.z)
-            )
-        }()
-        let holdDistance = max(plan.lookaheadDistance, plan.estimatedTurnRadius * 0.6, 8.0)
-        let guidanceTarget = currentPosition + fallbackDirection * holdDistance
+        // Steer at the waypoint, not away from the nearest building.
+        //
+        // This used to aim `currentPosition - nearestObstacle.planarCenter` — directly away from
+        // whatever was closest — and suppress lateral guidance on top of it. In a city that is a
+        // standing order to leave: the flight log shows the aircraft never capturing W1 at all
+        // (`activeWaypointIndex` stayed 0), `distanceToActiveWaypoint` growing 1780 → 2115 m,
+        // `rollCmd` flat at 0.0, and the aircraft crossing the perimeter into signal loss with
+        // `sup=protected_route_blocked` on every tick. "The planner cannot draw me a corridor" is
+        // not a reason to abandon the mission and fly out of the world.
+        //
+        // Blocked here means only that the *protected* route could not be built — the grid could
+        // not reach the operator's point, usually because the goal cell is occupied at this
+        // altitude band. The direct intercept is still the right intent, and the reactive
+        // avoidance layer is what owns obstacles on the way. That is exactly what happens when the
+        // operator presses "Перехватить выбранную", which has worked in every flight.
+        let toWaypoint = plan.selectedWaypoint.position - currentPosition
+        let toWaypointLength = simd_length(toWaypoint)
+        let fallbackDirection: SIMD2<Float> = toWaypointLength > 0.001
+            ? toWaypoint / toWaypointLength
+            : SIMD2<Float>(-sin(state.orientation.z), -cos(state.orientation.z))
+        let holdDistance = min(
+            toWaypointLength,
+            max(plan.lookaheadDistance, plan.estimatedTurnRadius * 0.6, 8.0)
+        )
+        let guidanceTarget = currentPosition + fallbackDirection * max(8.0, holdDistance)
         let inboundCourse = fixedWingCourseRadians(from: fallbackDirection).radiansToDegrees
 
         return FixedWingAssistFlyByGuidanceSnapshot(
@@ -16725,7 +17086,11 @@ final class DroneSimulationViewModel: ObservableObject {
             collisionRiskToNextWaypoint: max(plan.collisionRiskToNextWaypoint ?? 0.0, 0.72),
             obstacleInTurnCorridor: true,
             blockedPathToNextWaypoint: true,
-            lateralGuidanceSuppressedForPoorGeometry: true,
+            // The flags above stay set — the operator should see that the corridor is unplannable
+            // and reactive avoidance should stay alert. But suppressing the lateral axis as well
+            // left the aircraft with a target it was forbidden to steer towards, which is how
+            // `rollCmd` sat at 0.0 for an entire flight.
+            lateralGuidanceSuppressedForPoorGeometry: false,
             shouldPauseForPoorGeometry: false,
             shouldPauseForObstacle: true,
             suppressedReason: "protected_route_blocked"
@@ -16860,6 +17225,31 @@ final class DroneSimulationViewModel: ObservableObject {
         let navigationObstacles = allNavigationObstacles.filter {
             simd_distance($0.planarCenter, middle) <= corridorBoundingRadius + obstaclePlanarRadius($0)
         }
+        // The planner's navigation grid is planar: `assessDirectPath` maps world points to cells
+        // through `grid.cell(forWorld:)`, which discards Y entirely, so a building blocks its own
+        // footprint at *every* altitude. Flying a mission at cruise height over a city therefore
+        // reported a blocked turn corridor forever — auto-advance parked on "obstacle ahead" while
+        // the swept 3D avoidance layer, looking at the same air, correctly reported it clear.
+        //
+        // Consult the grid only when something in this corridor is actually at the aircraft's
+        // level, decided with the same vertical test the obstacle scan below uses so the two can
+        // never disagree. It also skips the per-segment path assessment — the expensive part of
+        // this function — on every tick spent above the rooftops.
+        let corridorHasObstaclesAtFlightLevel = navigationObstacles.contains { obstacle in
+            obstacle.verticalGap(
+                toDroneCenterY: state.position.y,
+                droneRadius: droneRadius
+            ) <= verticalTolerance
+        }
+        guard corridorHasObstaclesAtFlightLevel else {
+            return FixedWingTurnCorridorAssessment(
+                obstacleInTurnCorridor: false,
+                blockedPath: false,
+                collisionRisk: 0.0,
+                suppressedReason: nil
+            )
+        }
+
         let obstacleInTurnCorridor = navigationObstacles.contains { obstacle in
             let minimumDistance = zip(arcPoints, arcPoints.dropFirst()).reduce(Float.greatestFiniteMagnitude) { currentMinimum, segment in
                 min(
@@ -17142,6 +17532,42 @@ final class DroneSimulationViewModel: ObservableObject {
         assistState.usingObsoleteFixedWingMode = false
     }
 
+    /// Parks auto-advance on the capture course until the outbound proof can be re-run.
+    ///
+    /// Deliberately does *not* ratchet the held altitude to the current one: `max(existing, y)` is
+    /// a one-way valve, and re-applying it every tick while the aircraft was still climbing walked
+    /// the hold altitude from 199 m to 262 m in one flight — well past the mission's own ceiling.
+    /// The altitude to hold is the one the aircraft had when the hold began.
+    @discardableResult
+    private func holdFixedWingAutoAdvanceForCaptureAuthorization() -> Bool {
+        fixedWingAssistState.autoAdvanceSuppressed = true
+        fixedWingAssistState.autoAdvanceSuppressedReason =
+            "outbound_capture_turn_authorization_required"
+        fixedWingAssistState.interceptState = .autoAdvancePausedObstacle
+        // Latch the held heading **once**, at the start of the hold — never re-take it.
+        //
+        // `targetHeadingRadians = state.orientation.z` re-evaluated every tick is a
+        // self-referential latch: after capture the assist reads its course from this field and
+        // ignores `interceptTarget` entirely (see `FixedWingAssistController.update`), so writing
+        // the *current* heading into it each tick means "the course to fly is the course you are
+        // already flying". `courseError` is then identically zero and the aircraft flies dead
+        // straight for as long as the hold lasts. Measured, not inferred:
+        // `asstRoll=0.0 avOwns=no holdRem=0.00` — nobody was overriding the axis, the assist itself
+        // was asking for zero bank while the waypoint sat a kilometre off the nose.
+        //
+        // This is the twin of the altitude ratchet removed just below, in this same function, and
+        // it is the same rule: a value that is latched and re-evaluated must not depend on the
+        // quantity it controls.
+        if fixedWingCaptureHoldStartedAt == nil {
+            fixedWingCaptureHoldStartedAt = CACurrentMediaTime()
+            fixedWingAssistState.targetHeadingRadians = state.orientation.z
+        }
+        if fixedWingAssistState.targetAltitudeMeters == nil {
+            fixedWingAssistState.targetAltitudeMeters = max(0.0, state.position.y)
+        }
+        return false
+    }
+
     @discardableResult
     private func updatePendingFixedWingAutoAdvanceIfNeeded(
         captureTurnAuthorized: Bool = false
@@ -17161,27 +17587,45 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
 
-        guard captureTurnAuthorized else {
-            // Completion persists across ticks, but the measured-pose outbound proof belongs only
-            // to the capture handler. An older pre-capture fly-by snapshot must not clear its
-            // rejection on the following tick and silently advance anyway.
-            fixedWingAssistState.autoAdvanceSuppressed = true
-            fixedWingAssistState.autoAdvanceSuppressedReason =
-                "outbound_capture_turn_authorization_required"
-            fixedWingAssistState.interceptState = .autoAdvancePausedObstacle
-            fixedWingAssistState.targetHeadingRadians = state.orientation.z
-            fixedWingAssistState.targetAltitudeMeters = max(
-                fixedWingAssistState.targetAltitudeMeters ?? 0.0,
-                state.position.y
-            )
-            return false
-        }
-
         guard options.indices.contains(nextWaypointIndex) else {
             return false
         }
 
         let nextWaypoint = options[nextWaypointIndex]
+
+        if !captureTurnAuthorized {
+            // This branch used to refuse unconditionally, on the grounds that the measured-pose
+            // outbound proof "belongs only to the capture handler" and an older pre-capture fly-by
+            // snapshot must not clear its rejection. The first half is what broke it: the handler
+            // runs on the capture *edge* only, so nothing ever produced authorization again, and
+            // this branch is reached on every subsequent tick.
+            //
+            // What that produced is a two-writer oscillation inside a single tick.
+            // `applyFixedWingAssistFlyBySnapshot` runs earlier and, on a clear snapshot, sets
+            // `interceptState = .outboundLegTrack` and clears the suppression — which lets this
+            // guard past its own `!autoAdvanceSuppressed` check — and then this branch re-applies
+            // the pause at the bottom. Both writes repeat forever. The flight log shows exactly
+            // that pair, `state=outboundLegTrack sup=outbound_capture_turn_authorization_required`,
+            // held through twenty seconds of open air with no `[CaptureOutbound] refused` line to
+            // account for it, because the proof was never run.
+            //
+            // `fixedWingCaptureOutboundRouteIsSafe` reads the live pose, so running it here is not
+            // the stale-snapshot path the guard was written to block — it is the only thing that
+            // can lift the hold without the operator pressing the button. Throttled, because it
+            // sweeps a full trajectory rollout.
+            let now = CACurrentMediaTime()
+            guard now - fixedWingCaptureHoldLastRetryAt
+                    >= Self.fixedWingCaptureHoldRetryInterval else {
+                return holdFixedWingAutoAdvanceForCaptureAuthorization()
+            }
+            fixedWingCaptureHoldLastRetryAt = now
+            guard fixedWingCaptureOutboundRouteIsSafe(
+                nextWaypoint: nextWaypoint,
+                wing: activeFixedWingParameters()
+            ) else {
+                return holdFixedWingAutoAdvanceForCaptureAuthorization()
+            }
+        }
         resetFixedWingRuntimeRouteStart()
         fixedWingAssistPinnedWaypoint = nextWaypoint
         fixedWingAssistState.selectedWaypointID = nextWaypoint.id
@@ -17253,14 +17697,23 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
 
+        // A measured-pose certificate must use the radius this aircraft will fly *from this pose*,
+        // not the launch-preflight worst case.
+        //
+        // `fixedWingConservativeRouteTurnRadius` assumes climb-out bank authority (13 deg) and the
+        // 1.45x planning speed envelope, which at cruise gives a 353 m radius. The first-leg test
+        // below then demands `R * courseError` plus the next corner's trigger distance — roughly
+        // 580 m for a 60 deg turn — so auto-advance was refused on every ordinary mission leg and
+        // the operator had to select each waypoint by hand. At 200 m over the city the aircraft
+        // actually has full cruise bank authority and flies at ~21 m/s: a 117 m radius.
         let planningSpeed = max(
             state.forwardAirspeed,
-            fixedWingPlanningSpeedEnvelope(wing: wing),
             wing.minSustainableSpeedMps
         )
-        let turnRadius = fixedWingConservativeRouteTurnRadius(
+        let turnRadius = fixedWingGuidanceTurnRadius(
             wing: wing,
-            airspeed: planningSpeed
+            airspeed: planningSpeed,
+            respectLiveBankAuthority: true
         )
         let route3D = route.map { SIMD3<Float>($0.x, targetAltitude, $0.y) }
         let manoeuvreMargin = turnRadius
@@ -17313,25 +17766,47 @@ final class DroneSimulationViewModel: ObservableObject {
         let initialCourseError = abs(shortestAngleRadians(
             fixedWingCourseRadians(from: firstLegDirection) - course
         ))
-        let minimumTurnDistance = turnRadius * initialCourseError
+        // How much of the leg the turn actually consumes — not the arc length it travels.
+        //
+        // `turnRadius * initialCourseError` is an arc length, and it was being compared against a
+        // straight leg length. Turning through θ at radius R advances `R·sin θ` *along* the new leg
+        // while displacing `R·(1 − cos θ)` across it; the arc `R·θ` is strictly longer than either
+        // and is not a distance measured along the leg at all. The flight log caught it by 12 m:
+        // `refused: leg 122 m < turn 134 m (R=115)` for a ~50 deg capture turn, where the honest
+        // along-track figure is 115·sin 50° ≈ 91 m.
+        //
+        // Past a quarter turn the aircraft stops advancing along the leg and the cross-track reach
+        // dominates, so take whichever is larger. The two are equal at 90 deg, so the requirement is
+        // continuous, and a full reversal still asks for the 2R it genuinely needs.
+        let alongTrackTurnDistance = turnRadius * max(
+            sin(initialCourseError),
+            1.0 - cos(initialCourseError)
+        )
+        let minimumTurnDistance = alongTrackTurnDistance
             + trueAirspeed * Self.fixedWingTurnRollInSeconds
             + fixedWingNavigationEnvelopeRadius
-        var nextCornerReserve: Float = 0.0
-        if route.indices.contains(2) {
-            let nextLead = fixedWingAssistTurnLead(
-                start: route[0],
-                middle: route[1],
-                end: route[2],
-                wing: wing,
-                airspeed: planningSpeed,
-                turnRadius: turnRadius
-            )
-            nextCornerReserve = nextLead.triggerDistance + fixedWingNavigationEnvelopeRadius
-        }
-        // The first leg must first settle the post-capture turn and still leave the full trigger
-        // distance for the following protected-route corner. Reusing the same metres for both
-        // manoeuvres made a mathematically valid route physically impossible.
-        guard firstLegLength >= minimumTurnDistance + nextCornerReserve else { return false }
+        // The analytic first-leg gate that used to stand here has been removed, and this is the
+        // reasoning, kept because the temptation to re-add it is obvious.
+        //
+        // It compared `firstLegLength` — the distance from the *aircraft* to the first corner of
+        // the planned route — against the distance the capture turn consumes. That is only a
+        // meaningful question at the instant of capture. Evaluated repeatedly from a moving
+        // aircraft it destroys itself: closing on the corner shortens the leg while the bearing to
+        // it swings wider, so the demand grows as the budget shrinks. The flight log caught the
+        // runaway in one breath — seven consecutive refusals, leg 71 → 60 → 52 → 47 → 41 → 39 m
+        // against turn 83 → 94 → 105 → 115 → 128 → 135 → 169 m, at a fixed R=115. No aircraft can
+        // win that race, and auto-advance stayed parked until the operator pressed the button.
+        //
+        // Three flights running, this one quantity produced three different false refusals — an
+        // arc length compared to a straight distance, then an off-by-12-metre margin, now this.
+        // Patching a term each time and finding a new failure is the signal that the quantity
+        // itself is wrong, not its coefficients.
+        //
+        // What replaces it is the swept trajectory rollout immediately below, which was always the
+        // stronger test: it starts from the measured pose, applies the real command filter and roll
+        // response lag, follows the first safe-route leg, and sweeps the result against the actual
+        // obstacles. A turn too tight to settle shows up there as the aircraft going wide — and if
+        // nothing is in the way when it does, the turn was flyable and refusing it was wrong.
 
         let groundSpeedBound = max(
             6.0,
@@ -17363,7 +17838,6 @@ final class DroneSimulationViewModel: ObservableObject {
         var predictedVerticalVelocity = min(state.velocity.y, 0.0)
         var elapsed: Float = 0.0
         var travelled: Float = 0.0
-        var settled = false
         var rollout = [SIMD3<Float>(point.x, altitude, point.y)]
         var rolloutCourses = [course]
         var rolloutBanks = [achievedBankDegrees]
@@ -17469,18 +17943,18 @@ final class DroneSimulationViewModel: ObservableObject {
                 to: firstLegEnd,
                 position: point
             )
-            let finalCourseError = abs(shortestAngleRadians(
-                fixedWingCourseRadians(from: firstLegDirection) - course
-            ))
-            settled = travelled >= minimumTurnDistance
-                && finalCourseError <= Float(8.0).degreesToRadians
-                && abs(updatedProjection.crossTrackError) <= fixedWingNavigationEnvelopeRadius
             if updatedProjection.alongTrackDistance >= firstLegLength
-                - fixedWingNavigationEnvelopeRadius, !settled {
-                return false
+                - fixedWingNavigationEnvelopeRadius {
+                // Reaching the end of the first leg is where this rollout stops having a leg to
+                // measure against — it is not a failure. Requiring `settled` here re-imposed, one
+                // layer down, exactly the premise just removed above: "align with the first leg
+                // before running out of it", on a leg that starts at the aircraft and therefore
+                // shrinks as the aircraft closes on the corner. Short first legs are ordinary —
+                // the aircraft simply carries the turn into the next one.
+                break
             }
         }
-        guard settled, rollout.count >= 2,
+        guard rollout.count >= 2,
               !planarPathIntersectsNoFly(
                   rollout.map { SIMD2<Float>($0.x, $0.z) },
                   zones: protectedNoFlyZones
@@ -17516,12 +17990,19 @@ final class DroneSimulationViewModel: ObservableObject {
         for index in 1..<rollout.count {
             let from = rollout[index - 1]
             let to = rollout[index]
-            if collisionService.firstSweptCollision(
+            if let hit = collisionService.firstSweptCollision(
                 from: from,
                 to: to,
                 droneRadius: fixedWingNavigationEnvelopeRadius,
                 obstacles: shapedObstacles
-            ) != nil {
+            ) {
+                #if DEBUG
+                print(String(
+                    format: "[CaptureOutbound] refused: rollout hits %@ at leg %.0f m (R=%.0f)",
+                    hit.obstacle.source as NSString,
+                    firstLegLength, turnRadius
+                ))
+                #endif
                 return false
             }
             let meshCollision: Bool
@@ -17548,7 +18029,15 @@ final class DroneSimulationViewModel: ObservableObject {
                     obstacles: meshObstacles
                 ) != nil
             }
-            if meshCollision { return false }
+            if meshCollision {
+                #if DEBUG
+                print(String(
+                    format: "[CaptureOutbound] refused: rollout hits mesh at leg %.0f m (R=%.0f)",
+                    firstLegLength, turnRadius
+                ))
+                #endif
+                return false
+            }
         }
 
         if route.count >= 3 {
@@ -17579,6 +18068,69 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
         return true
+    }
+
+    /// True while auto-advance is parked specifically because the post-capture outbound turn could
+    /// not be proven — as opposed to the route being finished or auto-advance being switched off.
+    /// True whenever a *captured* waypoint is being prevented from advancing, whatever the reason.
+    ///
+    /// This used to key on `interceptState == .autoAdvancePausedObstacle` and on two specific
+    /// suppression reasons. Both tests kept missing the real flights: `applyFixedWingAssistFlyBySnapshot`
+    /// rewrites `interceptState` earlier in the same tick (so it commonly reads `outboundLegTrack`
+    /// while suppression is set), and the reason that actually dominates is
+    /// `protected_route_blocked`, which was on the excluded list. The consequence was a closed
+    /// loop: the waypoint is captured, the protected route is planned *to that same captured
+    /// point*, it cannot be built, auto-advance is held — and the hold is what stops the active
+    /// point from moving on. Nothing in that circle can break it, so the aircraft flew the latched
+    /// heading until it left the map.
+    ///
+    /// Capture is the fact that matters. Once a point is captured the mission has moved past it,
+    /// and no planning failure about that point is a reason to sit on it.
+    private var fixedWingAssistIsHoldingForOutboundProof: Bool {
+        fixedWingAssistState.autoAdvanceEnabled
+            && fixedWingAssistState.interceptCompleted
+            && fixedWingAssistState.mode == .waypointIntercept
+            && fixedWingAssistState.autoAdvanceSuppressed
+    }
+
+    /// Re-runs the measured-pose outbound proof that parked auto-advance, and forces the advance
+    /// once the hold has lasted long enough that continuing it would abandon the route.
+    ///
+    /// The proof was never the stale part — it reads the current pose every time it runs. What was
+    /// stale is the *decision*: it was taken once, on the capture tick, and nothing ever re-took
+    /// it. A single refusal therefore held the aircraft on its capture course until it left the
+    /// map, even after the geometry became flyable again.
+    @discardableResult
+    private func retryFixedWingCaptureHoldIfDue() -> Bool {
+        let now = CACurrentMediaTime()
+        let heldSince = fixedWingCaptureHoldStartedAt ?? now
+        fixedWingCaptureHoldStartedAt = heldSince
+
+        if now - heldSince >= Self.fixedWingCaptureHoldForceAdvanceSeconds {
+            fixedWingCaptureHoldStartedAt = nil
+            fixedWingCaptureHoldLastRetryAt = now
+            clearFixedWingAssistAutoAdvanceDiagnostics(
+                &fixedWingAssistState,
+                preserveCaptureCompletedReason: false
+            )
+            let advanced = updatePendingFixedWingAutoAdvanceIfNeeded(captureTurnAuthorized: true)
+            if advanced {
+                fixedWingAssistState.stateTransitionReason =
+                    "fixed_wing_assist_outbound_capture_turn_forced_after_hold"
+                fixedWingLastTransitionReason = fixedWingAssistState.stateTransitionReason
+            }
+            return advanced
+        }
+
+        guard now - fixedWingCaptureHoldLastRetryAt >= Self.fixedWingCaptureHoldRetryInterval else {
+            return false
+        }
+        fixedWingCaptureHoldLastRetryAt = now
+        let advanced = handleFixedWingAssistCaptureCompletion()
+        if advanced {
+            fixedWingCaptureHoldStartedAt = nil
+        }
+        return advanced
     }
 
     @discardableResult
@@ -17649,11 +18201,17 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingAssistState.autoAdvanceSuppressed = true
             fixedWingAssistState.autoAdvanceSuppressedReason =
                 "outbound_capture_turn_unverified"
-            fixedWingAssistState.targetHeadingRadians = state.orientation.z
-            fixedWingAssistState.targetAltitudeMeters = max(
-                fixedWingAssistState.targetAltitudeMeters ?? 0.0,
-                state.position.y
-            )
+            // Latch once, like the sibling hold — this path is re-entered by the 0.75 s retry, and
+            // re-taking the current heading each time is the same "fly the course you are already
+            // flying" identity, just at a slower cadence.
+            if fixedWingCaptureHoldStartedAt == nil {
+                fixedWingCaptureHoldStartedAt = CACurrentMediaTime()
+                fixedWingAssistState.targetHeadingRadians = state.orientation.z
+                fixedWingAssistState.targetAltitudeMeters = max(
+                    fixedWingAssistState.targetAltitudeMeters ?? 0.0,
+                    state.position.y
+                )
+            }
             fixedWingAssistState.interceptState = .autoAdvancePausedObstacle
             fixedWingAssistState.activeGuidanceTargetType = "captureHold"
             fixedWingAssistState.activeGuidanceMode = "captureHold"
@@ -17687,6 +18245,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         resetFixedWingRuntimeRouteStart()
+        fixedWingCaptureHoldStartedAt = nil
         fixedWingPendingLaunchAssistRoute = nil
         fixedWingAssistPinnedWaypoint = options[nextIndex]
         if pendingFixedWingAssistMode == .waypointIntercept {
@@ -19252,15 +19811,13 @@ final class DroneSimulationViewModel: ObservableObject {
             // main actor before the first frame can render.
             fixedWingLaunchPreflightPrepared = false
         } else {
-            if let failureReason = fixedWingLaunchPreflightFailure(
+            // Same advisory contract as `takeoff()` — see the comment there.
+            fixedWingLaunchPreflightWarningReason = fixedWingLaunchPreflightFailure(
                 mode: launchMode,
                 asset: launchAsset,
                 spawnPoint: spawnPoint,
                 parameters: wing
-            ) {
-                abortFixedWingLaunch(reason: failureReason)
-                return
-            }
+            )
         }
         let spawnYaw = launchAsset.worldYawRadians
         let spawnPitch = launchAsset.railAngleDegrees.degreesToRadians
@@ -19328,6 +19885,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func abortFixedWingLaunch(reason: String) {
         fixedWingLaunchPreflightPrepared = false
+        fixedWingLaunchPreflightWarningReason = nil
         fixedWingPendingLaunchAssistRoute = nil
         fixedWingLaunchController.reset()
         activeFixedWingLaunchDynamics = nil
@@ -19639,9 +20197,27 @@ final class DroneSimulationViewModel: ObservableObject {
             simd_dot(SIMD2<Float>(weather.windVector.x, weather.windVector.z), launchDirection)
         )
         let manoeuvreReserve = turnRadius + planningSpeed * Self.fixedWingTurnRollInSeconds
+        // Prove the straight run the launch actually flies, not its failsafe backstop.
+        //
+        // This was `(planningSpeed + tailwind) * 16.0 + manoeuvreReserve`, and both terms were
+        // wrong. 16 s is the launch controller's *global abort* backstop for a launch that never
+        // establishes; the protected climb hands over on altitude and speed well before that
+        // (`.initialClimb` <= 7 s, `.transitionToFlight` <= 4 s). And `manoeuvreReserve` is the
+        // room needed to *turn* after the ingress, which is not part of a straight ray at all —
+        // the route tube queried below already carries it. Together they demanded 1066 m of dead
+        // straight, level airspace at 12 m over Manhattan before any launch was permitted, which
+        // no city street can offer and which says nothing about whether the autopilot can route.
+        //
+        // The protected climb holds the launch heading, so that part genuinely must be clear.
+        let protectedClimbSeconds: Float = 11.0
+        let protectedClimbSpeed = max(
+            nominalReleaseSpeed,
+            wing.climbAirspeed,
+            wing.minSafeAirspeed
+        )
         let ingressDistance = max(
             corridorLength,
-            (planningSpeed + tailwind) * 16.0 + manoeuvreReserve
+            (protectedClimbSpeed + tailwind) * protectedClimbSeconds
         )
         let spawnPlanar = SIMD2<Float>(spawnPoint.x, spawnPoint.z)
         let ingressPlanar = spawnPlanar + launchDirection * ingressDistance
@@ -20420,15 +20996,10 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         let wing = activeFixedWingParameters()
         let airspeed = fixedWingPlanningSpeedEnvelope(wing: wing)
-        let targetAltitude = fixedWingAssistState.targetAltitudeMeters
-            ?? activeRouteTargetAltitude
-            ?? fixedWingAutopilotAltitudeCommand
-            ?? state.position.y
         let turnRadius = fixedWingGuidanceTurnRadius(
             wing: wing,
             airspeed: airspeed,
-            respectLiveBankAuthority: true,
-            targetAltitudeOverride: targetAltitude
+            respectLiveBankAuthority: true
         )
         return min(
             Self.fixedWingMaximumMeshQueryRadiusMeters,
@@ -20541,6 +21112,33 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// Height the waypoint capture markers are drawn at.
+    ///
+    /// The multirotor marker always tracked the live aircraft altitude; the fixed-wing one was
+    /// pinned to `targetMarkerTravelAltitude()`, a planned figure that moves whenever the plan is
+    /// recomputed — so the spheres jumped to a new height the moment the planner was opened.
+    /// Fixed-wing capture is a planar test (`FixedWingAssistWaypointOption.position` carries no
+    /// altitude at all), so this height is a readability aid, and the readable choice is the
+    /// height the aircraft is actually working at. The planned figure remains the pre-flight
+    /// answer, which is what the operator wants to see while still setting the mission up.
+    private func missionWaypointCaptureAltitude() -> Float {
+        guard state.physicalState == .airborne else {
+            return max(
+                1.0,
+                selectedDroneProfile.airframeClass == .fixedWing
+                    ? targetMarkerTravelAltitude()
+                    : 1.2
+            )
+        }
+        return max(1.0, state.position.y)
+    }
+
+    /// Per-tick follow-up for the marker height. Cheap by construction: the scene controller only
+    /// repositions existing nodes, and ignores changes below 5 cm.
+    private func refreshSceneMissionWaypointCaptureAltitude() {
+        sceneController.setMissionWaypointCaptureAltitude(missionWaypointCaptureAltitude())
+    }
+
     private func refreshSceneMissionWaypointCaptureZones(
         waypoints: [TerrainMapMissionWaypoint]? = nil
     ) {
@@ -20558,12 +21156,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let captureAltitude = max(
-            1.0,
-            selectedDroneProfile.airframeClass == .fixedWing
-                ? targetMarkerTravelAltitude()
-                : max(state.position.y, 1.2)
-        )
+        let captureAltitude = missionWaypointCaptureAltitude()
         let visuals = overlayWaypoints.map { waypoint in
             MissionWaypointCaptureZoneVisual(
                 id: waypoint.id,
