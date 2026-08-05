@@ -670,7 +670,13 @@ final class DroneSimulationViewModel: ObservableObject {
     /// After this long in an unbroken hold, take the next waypoint anyway. Holding the capture
     /// course indefinitely abandons the mission and flies to the world edge, which is a worse
     /// outcome than handing the leg to reactive avoidance — that layer exists for exactly this.
-    private static let fixedWingCaptureHoldForceAdvanceSeconds: TimeInterval = 6.0
+    ///
+    /// Sized in metres rather than taste: the hold flies straight at ~24 m/s, so this is the
+    /// overshoot past the captured point *before* the turn even begins. At 6 s that was 145 m,
+    /// larger than the ~115 m turn radius and therefore the dominant term in how far off-route the
+    /// aircraft ends up. 2.5 s ≈ 60 m keeps the geometry of the turn itself in charge, and still
+    /// allows three attempts at the 0.75 s proof cadence.
+    private static let fixedWingCaptureHoldForceAdvanceSeconds: TimeInterval = 2.5
     @Published var collisionDebugEnabled: Bool
     @Published var showBatteryDepletedDialog: Bool
     @Published var diagnosticMode: DiagnosticOverlayMode
@@ -7808,7 +7814,10 @@ final class DroneSimulationViewModel: ObservableObject {
                     } else if fixedWingAssistIsHoldingForOutboundProof {
                         waypointChanged = retryFixedWingCaptureHoldIfDue()
                     } else if fixedWingAssistState.interceptCompleted {
-                        fixedWingCaptureHoldStartedAt = nil
+                        // Deliberately does *not* clear `fixedWingCaptureHoldStartedAt`. Clearing
+                        // it here reset the hold's own clock on every tick — see
+                        // `fixedWingAssistIsHoldingForOutboundProof` for why this branch is the
+                        // one that runs while the hold is live.
                         waypointChanged = updatePendingFixedWingAutoAdvanceIfNeeded()
                     }
                     if !waypointChanged {
@@ -7903,11 +7912,29 @@ final class DroneSimulationViewModel: ObservableObject {
                     // reports no flyable course at all — a refusal is an opinion. Everything else
                     // — pitch, throttle and altitude target — stays with the assist. Yaw belongs
                     // to the same owner as roll so rudder cannot fight an escape bank.
-                    let avoidanceOwnsLateral = (fixedWingAvoidanceHoldRemaining > 0.0
-                            && fixedWingAvoidanceHoldCourse != nil)
-                        || fixedWingAvoidanceNoSafeTrajectory
-                        || (fixedWingAvoidanceLateralCommandWasActive
-                            && fixedWingAvoidanceReleaseCourseRadians != nil)
+                    //
+                    // Ownership must match the branch the avoidance pass will actually take, not
+                    // the flag that names the situation. Under launch-climb protection the pass
+                    // calls `applyFixedWingCollisionAvoidance` in exactly one case — a *proven
+                    // clear* held escape — and deliberately writes nothing in the blocked ones.
+                    // Claiming the axis there on the strength of `noSafeTrajectory` left both
+                    // layers declining it in the same tick, and `values.roll = values.roll` then
+                    // froze the last value written by anybody. Measured in the crash flight:
+                    // `rollCmd` pinned at −4.2° for five consecutive samples with `avOwns=no`
+                    // and `asstRoll` climbing 4.3 → 10.2 unheard, a left bank held into a
+                    // building while the assist and the avoidance probe both asked for right.
+                    let avoidanceOwnsLateral: Bool = {
+                        if fixedWingLaunchClimbProtectionActive {
+                            return fixedWingAvoidanceHoldRemaining > 0.0
+                                && !fixedWingAvoidanceNoSafeTrajectory
+                                && fixedWingAvoidanceHoldCourse != nil
+                        }
+                        return (fixedWingAvoidanceHoldRemaining > 0.0
+                                && fixedWingAvoidanceHoldCourse != nil)
+                            || fixedWingAvoidanceNoSafeTrajectory
+                            || (fixedWingAvoidanceLateralCommandWasActive
+                                && fixedWingAvoidanceReleaseCourseRadians != nil)
+                    }()
                     updateControlValues({ values in
                         values.throttle = desiredThrottle.clamped(to: 0.0...1.0)
                         values.roll = (avoidanceOwnsLateral ? values.roll : desiredRoll)
@@ -17681,20 +17708,29 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         let noFlyZones = activeNoFlyZonesForNavigation()
         let protectedNoFlyZones = fixedWingProtectedNoFlyZones(noFlyZones)
+        // Every refusal below says so. The hold these produce is indistinguishable in the flight
+        // log from the hold produced by the rollout, and a log that shows a 60-second hold with no
+        // stated cause cost several flights of guessing which test was firing.
+        func refuse(_ reason: @autoclosure () -> String) -> Bool {
+            #if DEBUG
+            print("[CaptureOutbound] refused: \(reason())")
+            #endif
+            return false
+        }
         guard let safeRoute = safeFixedWingRoute(
             from: [start, nextWaypoint.position],
             zones: noFlyZones,
             viewport: currentTacticalMapViewport(),
             targetAltitude: targetAltitude
         ) else {
-            return false
+            return refuse("planner found no safe route to next waypoint (alt \(Int(targetAltitude)) m)")
         }
         let route = fixedWingCornerPath(compactedPlanarPath(safeRoute.points))
         guard route.count >= 2,
               simd_distance(route[0], start) <= 1.0,
               route.last.map({ simd_distance($0, nextWaypoint.position) <= 0.5 }) == true,
               !planarPathIntersectsNoFly(route, zones: protectedNoFlyZones) else {
-            return false
+            return refuse("planned route failed sanity check (points=\(route.count))")
         }
 
         // A measured-pose certificate must use the radius this aircraft will fly *from this pose*,
@@ -17724,7 +17760,9 @@ final class DroneSimulationViewModel: ObservableObject {
             margin: manoeuvreMargin,
             includeMesh: usesMeshCellsForPlanning
         )
-        guard fullRouteQuery.isComplete else { return false }
+        guard fullRouteQuery.isComplete else {
+            return refuse("obstacle query incomplete over route (margin \(Int(manoeuvreMargin)) m)")
+        }
         fixedWingTurnValidationCache.removeAll(keepingCapacity: true)
         fixedWingFullRouteValidationCache.removeAll(keepingCapacity: true)
         guard !fixedWingValidatedRouteNeedsReroute(
@@ -17733,16 +17771,16 @@ final class DroneSimulationViewModel: ObservableObject {
             obstacles: fullRouteQuery.obstacles,
             targetAltitude: targetAltitude
         ) else {
-            return false
+            return refuse("route validator demands a reroute")
         }
         for segment in zip(route3D, route3D.dropFirst()) {
-            if collisionService.firstSweptCollision(
+            if let hit = collisionService.firstSweptCollision(
                 from: segment.0,
                 to: segment.1,
                 droneRadius: fixedWingNavigationEnvelopeRadius,
                 obstacles: fullRouteQuery.obstacles
-            ) != nil {
-                return false
+            ) {
+                return refuse("planned route segment hits \(hit.obstacle.source)")
             }
         }
 
@@ -17750,7 +17788,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let firstLeg = firstLegEnd - start
         let firstLegLength = simd_length(firstLeg)
         guard firstLegLength > fixedWingNavigationEnvelopeRadius * 3.0 else {
-            return false
+            return refuse("first leg \(Int(firstLegLength)) m shorter than three envelope radii")
         }
         let firstLegDirection = firstLeg / firstLegLength
         let windXZ = SIMD2<Float>(weather.windVector.x, weather.windVector.z)
@@ -18086,11 +18124,25 @@ final class DroneSimulationViewModel: ObservableObject {
     ///
     /// Capture is the fact that matters. Once a point is captured the mission has moved past it,
     /// and no planning failure about that point is a reason to sit on it.
+    ///
+    /// `autoAdvanceSuppressed` alone still could not see the hold, because
+    /// `applyFixedWingAssistFlyBySnapshot` runs earlier in the same tick and, on a clear snapshot,
+    /// clears the flag before this is read. The hold therefore fell through to the
+    /// `interceptCompleted` branch, which cleared `fixedWingCaptureHoldStartedAt` — and that single
+    /// assignment disabled both mechanisms built on it: the 6 s force-advance restarted its clock
+    /// every tick and never expired, and `holdFixedWingAutoAdvanceForCaptureAuthorization` re-took
+    /// its "latch once" heading every tick, which is the self-referential latch (fly the course you
+    /// are already flying) that the aircraft cannot leave. Measured: 60 s and ~1.4 km of dead
+    /// straight flight past a captured waypoint, ending only when the climb finally cleared the
+    /// buildings and the proof passed on its own.
+    ///
+    /// So the hold is what owns its start time — while that exists, this is a hold.
     private var fixedWingAssistIsHoldingForOutboundProof: Bool {
         fixedWingAssistState.autoAdvanceEnabled
             && fixedWingAssistState.interceptCompleted
             && fixedWingAssistState.mode == .waypointIntercept
-            && fixedWingAssistState.autoAdvanceSuppressed
+            && (fixedWingAssistState.autoAdvanceSuppressed
+                || fixedWingCaptureHoldStartedAt != nil)
     }
 
     /// Re-runs the measured-pose outbound proof that parked auto-advance, and forces the advance
