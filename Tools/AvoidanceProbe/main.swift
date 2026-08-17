@@ -79,6 +79,371 @@ let turnRadius = planningSpeed * planningSpeed
     / (9.81 * tan(planningBankDegrees * .pi / 180.0))
 let manoeuvreReserve = turnRadius + planningSpeed * 0.9
 
+/// Regression for the mission planner's two different safety responsibilities:
+///
+/// * A* reserves only the physical airframe envelope. A full turn-radius dilation must not erase
+///   an otherwise usable VTOL launch pad merely because a facade is nearby.
+/// * Geometry that is genuinely sealed remains blocked with the physical envelope alone.
+///
+/// Corner flyability stays a separate contract below: `FixedWingRouteRepair` receives the complete
+/// conservative radius and its result still has to preserve both exact mission endpoints.
+func runWingtraPlannerClearanceRegression() -> Bool {
+    guard let wingtraProfile = repository.allProfiles.first(where: { $0.id == "wingtraone-gen-ii" }),
+          let wingtraWing = wingtraProfile.fixedWingParameters else {
+        print("planner regression FAIL: WingtraOne profile unavailable")
+        return false
+    }
+
+    let wingtraPlanningSpeed: Float = 22.0
+    let conservativeBankDegrees: Float = 12.0
+    let wingtraTurnRadius = max(
+        wingtraWing.waypointAcceptanceRadiusMeters * 1.05,
+        wingtraWing.minimumTurnRadius(airspeed: wingtraPlanningSpeed),
+        wingtraPlanningSpeed * wingtraPlanningSpeed
+            / (9.81 * tan(conservativeBankDegrees * .pi / 180.0))
+    )
+    let legacyWholeTurnReserve = wingtraTurnRadius + wingtraPlanningSpeed * 0.9
+    // WingtraOne is 1.25 m tip-to-tip. Keep a small modelling margin around the physical body;
+    // this is intentionally nowhere near the 232 m kinematic turn radius.
+    let physicalEnvelopeRadius = max(0.70, wingtraProfile.collisionRadius)
+    let launchTerrain = TerrainConfiguration(
+        preset: .field,
+        mapScale: .x64,
+        density: 0.0,
+        seed: 91,
+        safeSpawnRadius: 40.0
+    )
+    let launch = SIMD3<Float>(0.0, altitude, 0.0)
+    let launchGoal = SIMD3<Float>(450.0, altitude, 0.0)
+    let nearbyFacade = CollisionObstacle(
+        id: UUID(),
+        center: SIMD3<Float>(0.0, 60.0, 30.0),
+        radius: simd_length(SIMD2<Float>(repeating: 10.0)),
+        source: "world.building",
+        baseY: 0.0,
+        topY: 120.0,
+        planarHalfExtents: SIMD2<Float>(repeating: 10.0)
+    )
+
+    func snapshot(
+        start: SIMD3<Float>,
+        goal: SIMD3<Float>,
+        terrain: TerrainConfiguration,
+        obstacles: [CollisionObstacle],
+        hardClearance: Float,
+        tag: String
+    ) -> NavigationPathSnapshot {
+        let planner = AutoPathPlannerService()
+        planner.planIfNeeded(
+            start: start,
+            goal: goal,
+            terrain: terrain,
+            obstacles: obstacles,
+            droneRadius: physicalEnvelopeRadius,
+            minimumObstacleRadiusFactor: 1.0,
+            additionalHardClearance: hardClearance,
+            modeTag: tag,
+            forceRecompute: true,
+            reason: "planner_clearance_regression"
+        )
+        return planner.snapshot(currentPosition: start)
+    }
+
+    let legacy = snapshot(
+        start: launch,
+        goal: launchGoal,
+        terrain: launchTerrain,
+        obstacles: [nearbyFacade],
+        hardClearance: legacyWholeTurnReserve,
+        tag: "wingtra_legacy_whole_turn_dilation"
+    )
+    let physical = snapshot(
+        start: launch,
+        goal: launchGoal,
+        terrain: launchTerrain,
+        obstacles: [nearbyFacade],
+        hardClearance: 0.0,
+        tag: "wingtra_physical_envelope_only"
+    )
+    let legacyFailureReproduced = legacy.status == .blocked
+        && legacy.reason == "no_free_start_or_goal"
+    let physicalRouteReady = physical.status == .valid
+        && physical.waypoints.count >= 2
+        && physical.waypoints.first.map { simd_distance($0, launch) <= 0.5 } == true
+        && physical.waypoints.last.map { simd_distance($0, launchGoal) <= 0.5 } == true
+
+    let repair = FixedWingRouteRepair.repair(
+        route: physical.waypoints.map { SIMD2<Float>($0.x, $0.z) },
+        turnRadius: wingtraTurnRadius,
+        clearanceRadius: physicalEnvelopeRadius,
+        altitude: altitude,
+        obstacles: [nearbyFacade],
+        collisionService: CollisionAnalysisService(),
+        maximumOutwardShiftMeters: wingtraTurnRadius
+    )
+    let repairedRoutePreservesContract = repair.unrepairableCorners == 0
+        && repair.points.first.map { simd_distance($0, SIMD2<Float>(launch.x, launch.z)) <= 0.5 } == true
+        && repair.points.last.map { simd_distance($0, SIMD2<Float>(launchGoal.x, launchGoal.z)) <= 0.5 } == true
+        && zip(repair.points, repair.points.dropFirst()).allSatisfy { pair in
+            CollisionAnalysisService().firstSweptCenterCollision(
+                from: SIMD3<Float>(pair.0.x, altitude, pair.0.y),
+                to: SIMD3<Float>(pair.1.x, altitude, pair.1.y),
+                radius: physicalEnvelopeRadius,
+                obstacles: [nearbyFacade]
+            ) == nil
+        }
+
+    // Four overlapping walls form a closed courtyard. Both endpoints are free, so this exercises
+    // a real A* reachability failure rather than the endpoint-projection guard above.
+    let sealedTerrain = TerrainConfiguration(
+        preset: .field,
+        mapScale: .x4,
+        density: 0.0,
+        seed: 92,
+        safeSpawnRadius: 20.0
+    )
+    let wallSpecs: [(SIMD2<Float>, SIMD2<Float>)] = [
+        (SIMD2<Float>(0.0, 30.0), SIMD2<Float>(35.0, 4.0)),
+        (SIMD2<Float>(0.0, -30.0), SIMD2<Float>(35.0, 4.0)),
+        (SIMD2<Float>(30.0, 0.0), SIMD2<Float>(4.0, 35.0)),
+        (SIMD2<Float>(-30.0, 0.0), SIMD2<Float>(4.0, 35.0))
+    ]
+    let sealedObstacles = wallSpecs.map { center, halfExtents in
+        CollisionObstacle(
+            id: UUID(),
+            center: SIMD3<Float>(center.x, 60.0, center.y),
+            radius: simd_length(halfExtents),
+            source: "world.building",
+            baseY: 0.0,
+            topY: 120.0,
+            planarHalfExtents: halfExtents
+        )
+    }
+    let sealedStart = SIMD3<Float>(0.0, altitude, 0.0)
+    let sealedGoal = SIMD3<Float>(120.0, altitude, 0.0)
+    let sealed = snapshot(
+        start: sealedStart,
+        goal: sealedGoal,
+        terrain: sealedTerrain,
+        obstacles: sealedObstacles,
+        hardClearance: 0.0,
+        tag: "physically_sealed_courtyard"
+    )
+    let physicallyBlockedStillFails = sealed.status == .blocked
+        && sealed.reason == "astar_blocked"
+
+    print("")
+    print("--- Wingtra mission-grid clearance regression")
+    print(String(
+        format: "   facade gap %.0f m; turn radius %.1f m; legacy reserve %.1f m",
+        20.0, wingtraTurnRadius, legacyWholeTurnReserve
+    ))
+    print("   legacy dilation: \(legacy.status.rawValue) (reason: \(legacy.reason))")
+    print("   physical envelope: \(physical.status.rawValue) (reason: \(physical.reason))")
+    print(String(
+        format: "   full-radius repair: %d repaired, %d unrepairable, endpoints %@",
+        repair.repairedCorners,
+        repair.unrepairableCorners,
+        repairedRoutePreservesContract ? "preserved" : "FAILED"
+    ))
+    print("   sealed courtyard: \(sealed.status.rawValue) (reason: \(sealed.reason))")
+
+    let passed = legacyFailureReproduced
+        && physicalRouteReady
+        && repairedRoutePreservesContract
+        && physicallyBlockedStillFails
+    print("   contract: \(passed ? "PASS" : "FAIL")")
+    return passed
+}
+
+/// The full production fallback contract on a Manhattan-like block grid: physical-envelope A*
+/// remains authoritative when a continuous full-radius turn cannot fit, and the hybrid cursor can
+/// advance that route only as stop-and-pivot hover legs.
+func runStopAndPivotManhattanRegression() -> Bool {
+    guard let wingcopter = repository.allProfiles.first(where: { $0.id == "wingcopter-198" }),
+          let wingcopterWing = wingcopter.fixedWingParameters else {
+        print("stop-and-pivot regression FAIL: Wingcopter profile unavailable")
+        return false
+    }
+
+    let physicalEnvelope = max(1.25, wingcopter.collisionRadius)
+    let planner = AutoPathPlannerService()
+    planner.planIfNeeded(
+        start: start,
+        goal: goal,
+        terrain: terrain,
+        obstacles: obstacles,
+        droneRadius: physicalEnvelope,
+        minimumObstacleRadiusFactor: 1.0,
+        additionalHardClearance: 0.0,
+        modeTag: "wingcopter_stop_and_pivot_manhattan",
+        forceRecompute: true,
+        reason: "stop_and_pivot_regression"
+    )
+    let snapshot = planner.snapshot(currentPosition: start)
+    guard snapshot.status == .valid, snapshot.waypoints.count >= 2 else {
+        print("stop-and-pivot regression FAIL: A* \(snapshot.reason)")
+        return false
+    }
+
+    let conservativeSpeed = min(
+        wingcopterWing.maxAirspeed,
+        wingcopterWing.cruiseAirspeed * 1.45
+    )
+    let conservativeBank: Float = 12.0
+    let conservativeRadius = max(
+        wingcopterWing.minimumTurnRadius(airspeed: conservativeSpeed),
+        conservativeSpeed * conservativeSpeed
+            / (9.81 * tan(conservativeBank * .pi / 180.0))
+    )
+    let planarRoute = snapshot.waypoints.map { SIMD2<Float>($0.x, $0.z) }
+    let fullRadiusRepair = FixedWingRouteRepair.repair(
+        route: planarRoute,
+        turnRadius: conservativeRadius,
+        clearanceRadius: physicalEnvelope,
+        altitude: altitude,
+        obstacles: obstacles,
+        collisionService: CollisionAnalysisService(),
+        maximumOutwardShiftMeters: conservativeRadius
+    )
+    let continuousRouteRejected = fullRadiusRepair.unrepairableCorners > 0
+    let rawStraightLegsRemainClear = zip(snapshot.waypoints, snapshot.waypoints.dropFirst())
+        .allSatisfy { pair in
+            CollisionAnalysisService().firstSweptCenterCollision(
+                from: pair.0,
+                to: pair.1,
+                radius: physicalEnvelope,
+                obstacles: obstacles
+            ) == nil
+        }
+
+    let route = FixedWingRouteTrackingContext(
+        routeIdentifier: "wingcopter-stop-and-pivot-manhattan",
+        waypoints: snapshot.waypoints.enumerated().map { index, position in
+            FixedWingRouteWaypoint(
+                position: position,
+                missionWaypointIndex: index == snapshot.waypoints.count - 1 ? 0 : nil,
+                waypointIdentifier: index == snapshot.waypoints.count - 1 ? "goal" : nil
+            )
+        },
+        minimumWaypointIndex: 1,
+        preferredLoiterCenter: goal,
+        preferredLoiterRadius: nil,
+        traversalMode: .stopAndPivotVTOL,
+        turnsValidated: false,
+        validatedTurnRadiusMeters: nil,
+        validatedAirspeedMps: nil,
+        flyableRoute: nil
+    )
+    var cursor = HybridVTOLRouteCursor()
+    var guidance = cursor.update(
+        route: route,
+        expectedFinalTarget: goal,
+        position: start,
+        controllerDebug: nil,
+        intermediateRadius: 3.0,
+        corridorRadius: 6.0,
+        planarSpeed: 0.0
+    )
+    let becameReady = guidance.isReady
+        && guidance.traversalMode == .stopAndPivotVTOL
+        && guidance.activeRouteIndex == 1
+
+    if snapshot.waypoints.count > 2 {
+        for position in snapshot.waypoints.dropFirst().dropLast() {
+            guidance = cursor.update(
+                route: route,
+                expectedFinalTarget: goal,
+                position: position,
+                controllerDebug: nil,
+                intermediateRadius: 3.0,
+                corridorRadius: 6.0,
+                planarSpeed: 0.0
+            )
+        }
+    }
+    let advancedToFinalLeg = guidance.isReady
+        && guidance.activeRouteIndex == snapshot.waypoints.count - 1
+        && guidance.guidanceTarget == goal
+        && guidance.isFinalSegment
+
+    // Executable fail-closed proof: a two-node stop-and-pivot context must not slip through the
+    // fixed-wing core's historical `count <= 2` exception for unvalidated turns.
+    let twoNodeStopRoute = FixedWingRouteTrackingContext(
+        routeIdentifier: "wingcopter-stop-and-pivot-two-node-rejection",
+        waypoints: [route.waypoints[0], route.waypoints[route.waypoints.count - 1]],
+        minimumWaypointIndex: 1,
+        preferredLoiterCenter: goal,
+        preferredLoiterRadius: nil,
+        traversalMode: .stopAndPivotVTOL,
+        turnsValidated: false,
+        validatedTurnRadiusMeters: nil,
+        validatedAirspeedMps: nil,
+        flyableRoute: nil
+    )
+    let wingcopterMass = VehicleMassModel.baseline(for: wingcopter, uavProfile: nil)
+    let wingcopterBaseline = FlightBaselineResolver.resolve(
+        runtimeProfile: wingcopter,
+        activeUAVProfile: nil,
+        vehicleMassModel: wingcopterMass,
+        flightMode: .autoPath
+    )
+    var rejectionState = DroneState(
+        position: start,
+        velocity: SIMD3<Float>(0.0, 0.0, -wingcopterWing.cruiseAirspeed),
+        orientation: .zero,
+        angularVelocity: .zero,
+        throttle: wingcopterBaseline.cruiseReferenceThrottle,
+        motorThrottle: wingcopterBaseline.cruiseReferenceThrottle,
+        rotorAngularSpeed: .zero,
+        forwardAirspeed: wingcopterWing.cruiseAirspeed,
+        physicalState: .airborne,
+        mode: .autoPath
+    )
+    rejectionState.armState = .armed
+    let fixedWingOutput = FixedWingAutopilotController().trackingCommand(
+        for: AutopilotTrackingContext(
+            state: rejectionState,
+            physicalState: .airborne,
+            target: goal,
+            targetAltitude: altitude,
+            speedScale: 1.0,
+            yawAlignToHome: false,
+            yawOverrideRadians: nil,
+            deltaTime: 1.0 / 60.0,
+            flightBaseline: wingcopterBaseline
+        ),
+        parameters: wingcopterWing,
+        launchMode: .standard,
+        launchAsset: nil,
+        routeTracking: twoNodeStopRoute
+    )
+    let fixedWingFollowerRejected = fixedWingOutput.phase == .failed
+        && fixedWingOutput.transitionReason == "empty_route"
+        && fixedWingOutput.debugState.missionState == .failed
+        && !fixedWingOutput.hasCompletedRoute
+
+    print("")
+    print("--- Wingcopter Manhattan stop-and-pivot fallback")
+    print(String(
+        format: "   A* valid (%d nodes); full-radius R %.0f m: %d unrepairable corner(s)",
+        snapshot.waypoints.count,
+        conservativeRadius,
+        fullRadiusRepair.unrepairableCorners
+    ))
+    print("   raw straight legs collision-clear: \(rawStraightLegsRemainClear ? "yes" : "NO")")
+    print("   cursor ready/advanced to final leg: \(becameReady && advancedToFinalLeg ? "yes" : "NO")")
+    print("   fixed-wing follower rejects stop mode: \(fixedWingFollowerRejected ? "yes" : "NO")")
+
+    let passed = continuousRouteRejected
+        && rawStraightLegsRemainClear
+        && becameReady
+        && advancedToFinalLeg
+        && fixedWingFollowerRejected
+    print("   contract: \(passed ? "PASS" : "FAIL")")
+    return passed
+}
+
 print("profile: \(profile.displayName)")
 print(String(
     format: "envelope %.1f m   altitude %.0f m   planning speed %.1f m/s   turn radius %.0f m",
@@ -86,6 +451,9 @@ print(String(
 ))
 print("city: \(obstacles.count) buildings 170x170 m, 120 m tall, \(Int(blockPitch)) m pitch (90 m streets)")
 print(String(format: "start (%.0f, %.0f) -> goal (%.0f, %.0f)", start.x, start.z, goal.x, goal.z))
+
+let plannerClearanceRegressionPassed = runWingtraPlannerClearanceRegression()
+let stopAndPivotRegressionPassed = runStopAndPivotManhattanRegression()
 
 enum Outcome {
     case noRoute(String)
@@ -341,11 +709,13 @@ let widenedSafe = report(
 )
 
 print("")
-if pointSafe || manoeuvreSafe || repairedSafe || achievableSafe || widenedSafe {
-    print("RESULT: PASS - at least one configuration flies the detour cleanly")
+if plannerClearanceRegressionPassed
+    && stopAndPivotRegressionPassed
+    && (pointSafe || manoeuvreSafe || repairedSafe || achievableSafe || widenedSafe) {
+    print("RESULT: PASS - clearance contracts pass and at least one configuration flies the detour cleanly")
     exit(0)
 }
-print("RESULT: FAIL - neither configuration gets a fixed wing through this street network")
+print("RESULT: FAIL - planner clearance contract failed or no configuration flies the detour")
 print("  A route that is only point-safe cannot be held at this turn radius, and a reserve")
 print("  large enough to guarantee it blocks every cell. That squeeze is the finding.")
 exit(1)

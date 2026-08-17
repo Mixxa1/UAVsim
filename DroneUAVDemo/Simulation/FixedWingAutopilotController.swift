@@ -30,17 +30,36 @@ struct FixedWingRouteWaypoint: Equatable {
     var waypointIdentifier: String?
 }
 
+/// How a protected polyline is allowed to be traversed.
+///
+/// `.continuousWingborne` is certified against the aircraft's complete turn radius. A
+/// `.stopAndPivotVTOL` route is certified only as a sequence of physically clear straight hover
+/// legs and must never be handed to the fixed-wing follower.
+enum ProtectedRouteTraversalMode: String, Equatable {
+    case continuousWingborne
+    case stopAndPivotVTOL
+}
+
 struct FixedWingRouteTrackingContext: Equatable {
     var routeIdentifier: String
     var waypoints: [FixedWingRouteWaypoint]
     var minimumWaypointIndex: Int?
     var preferredLoiterCenter: SIMD3<Float>?
     var preferredLoiterRadius: Float?
+    var traversalMode: ProtectedRouteTraversalMode
     /// Set only after route construction checked every intermediate turn using the full vehicle
     /// envelope and the live fixed-wing manoeuvre radius.
     var turnsValidated: Bool
     var validatedTurnRadiusMeters: Float?
     var validatedAirspeedMps: Float?
+    /// Why this context carries no waypoints, when it carries none.
+    ///
+    /// An empty context is the route builder's only way to say "there is no route", and every
+    /// consumer downstream can then report exactly one thing: that guidance is unavailable. Which
+    /// of the construction stages refused — world bounds, the grid search, an endpoint the search
+    /// had to project off the aircraft, the final validator — was previously unrecoverable from a
+    /// flight log, and the same failure had to be re-derived by reading code every time.
+    var blockReason: String?
     /// Legacy preview geometry. Runtime guidance builds a full-radius fillet
     /// from the same validated waypoints and current bank authority so stale
     /// pre-baked radii cannot make a corner look flyable.
@@ -52,9 +71,11 @@ struct FixedWingRouteTrackingContext: Equatable {
         minimumWaypointIndex: Int? = nil,
         preferredLoiterCenter: SIMD3<Float>? = nil,
         preferredLoiterRadius: Float? = nil,
+        traversalMode: ProtectedRouteTraversalMode = .continuousWingborne,
         turnsValidated: Bool = false,
         validatedTurnRadiusMeters: Float? = nil,
         validatedAirspeedMps: Float? = nil,
+        blockReason: String? = nil,
         flyableRoute: FixedWingFlyableRoute? = nil
     ) {
         self.routeIdentifier = routeIdentifier
@@ -62,9 +83,11 @@ struct FixedWingRouteTrackingContext: Equatable {
         self.minimumWaypointIndex = minimumWaypointIndex
         self.preferredLoiterCenter = preferredLoiterCenter
         self.preferredLoiterRadius = preferredLoiterRadius
+        self.traversalMode = traversalMode
         self.turnsValidated = turnsValidated
         self.validatedTurnRadiusMeters = validatedTurnRadiusMeters
         self.validatedAirspeedMps = validatedAirspeedMps
+        self.blockReason = blockReason
         self.flyableRoute = flyableRoute
     }
 }
@@ -443,7 +466,11 @@ final class FixedWingAutopilotController {
         // Never remove an invalid point from the middle of a live route: doing so shifts every
         // later route index away from its mission waypoint identity. Reject the whole plan
         // fail-closed instead, so progress cannot be credited to a different operator point.
-        let routeWaypoints = tracking.waypoints.allSatisfy { isFinite($0.position) }
+        // A stop-and-pivot route proves straight hover legs, not banked arcs. Reject it here even
+        // when it happens to contain only two nodes (the core follower otherwise permits an
+        // unvalidated two-point plan). Only the hybrid rotor-borne controller may execute it.
+        let routeWaypoints = tracking.traversalMode == .continuousWingborne
+            && tracking.waypoints.allSatisfy { isFinite($0.position) }
             ? tracking.waypoints
             : []
         let baseCaptureRadius = wing.waypointCaptureRadius(airspeed: wing.cruiseAirspeed)

@@ -1030,12 +1030,26 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// A local aircraft that is armed is being flown, whatever window happens to hold key focus.
+    ///
+    /// `backgroundIdle` was written for an observer watching a *remote* UAV from a second window —
+    /// its own comment says "local physics at 15 Hz is fine for an idle UAV". A pilot who clicks
+    /// the tactical map is not that: the main window loses key, the 0.8 s debounce elapses, and the
+    /// simulation halves its tick rate and its render FPS mid-flight. Flight logs show the pair
+    /// `[PERF] activity: bgIdle (vis=inactive)` / `interacting (vis=active)` alternating every few
+    /// seconds throughout a mission — the app throttling itself because another of its own windows
+    /// was in front. Minimized/hidden are untouched: there the window really is not on screen.
+    private var localVehicleIsBeingFlown: Bool {
+        isArmed && !isSpectatorMode
+    }
+
     private func refreshActivityPolicy(now: TimeInterval) {
         let activity: RuntimeActivityState
         switch currentVisibilityState {
         case .minimized:       activity = .minimized
         case .hidden:          activity = .hidden
-        case .inactiveVisible: activity = .backgroundIdle
+        case .inactiveVisible:
+            activity = localVehicleIsBeingFlown ? .interacting : .backgroundIdle
         case .activeVisible:
             activity = (now - lastUserInteractionAt < 1.0) ? .interacting : .activeIdle
         }
@@ -1402,6 +1416,46 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fixedWingGuidanceCallsThisSecond = 0
     #endif
     private var wingTelemetryAccumulator: Float = 0.0
+    private var tailsitterTelemetryAccumulator: Float = 0.0
+    #if DEBUG
+    /// Per-phase tick profiler. `frameTimeMs` in the diagnostics overlay says the whole tick is
+    /// slow but never which part of it is, and "the city is heavy" is not a measurement — this
+    /// splits one tick into the six phases that can each independently be the cost, accumulates
+    /// them, and reports ms/tick once a second. Names match `[Phase]` in the log.
+    private enum TickPhase: Int, CaseIterable {
+        case input, guidance, collisionPre, fixedWing
+        case avoidanceProbe, avoidanceApply, wingLog
+        case physics, collisionPost, systems
+        case sceneDiagnostics, hudPublish, persistence
+        var label: String {
+            switch self {
+            case .input: return "input"
+            case .guidance: return "guid"
+            case .collisionPre: return "colPre"
+            case .fixedWing: return "wing"
+            case .avoidanceProbe: return "avProbe"
+            case .avoidanceApply: return "avApply"
+            case .wingLog: return "wingLog"
+            case .physics: return "phys"
+            case .collisionPost: return "colPost"
+            case .systems: return "sys"
+            case .sceneDiagnostics: return "diag"
+            case .hudPublish: return "hud"
+            case .persistence: return "persist"
+            }
+        }
+    }
+    private var phaseClock: Double = 0.0
+    private var phaseTotals = [Double](repeating: 0.0, count: TickPhase.allCases.count)
+    private var phaseTickCount: Int = 0
+    private var phaseTelemetryAccumulator: Float = 0.0
+    @inline(__always)
+    private func markTickPhase(_ phase: TickPhase) {
+        let now = CACurrentMediaTime()
+        phaseTotals[phase.rawValue] += now - phaseClock
+        phaseClock = now
+    }
+    #endif
     /// Escape course held across ticks so avoidance and guidance cannot alternate on the same axis.
     private var fixedWingAvoidanceHoldCourse: Float?
     private var fixedWingAvoidanceHoldRemaining: Float = 0.0
@@ -1574,7 +1628,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var isTerrainDensitySliderEditing: Bool = false
     private var terrainMapTrail: [SIMD2<Float>] = []
     /// `obstacle.source` -> classified base radius, so the string-matching
-    /// switch in `fixedWingProtectedObstacleRadius` runs once per distinct
+    /// switch in `fixedWingProtectedObstacleClearance` runs once per distinct
     /// source string instead of on every call. `fixedWingPathNeedsObstacleReroute`
     /// calls it once per obstacle per route-rebuild, and that rebuild happens
     /// every simulation tick — with a couple hundred environment obstacles
@@ -1596,6 +1650,95 @@ final class DroneSimulationViewModel: ObservableObject {
     private var multirotorMarkerLastPlanTick: UInt64?
     private var multirotorAvoidanceLateralOffset: Float = 0.0
     private var multirotorAvoidanceHoldUntilTick: UInt64 = 0
+    /// Which leg the regime decision below belongs to, and what it was.
+    ///
+    /// The choice between "fly this leg as a multirotor" and "transition to cruise" is a property
+    /// of the *leg*, not of how much of it is left. Re-deriving it every tick from the shrinking
+    /// remaining distance made the phase machine sit on its own threshold: on a 222 m three-point
+    /// mission the log reads `hover → transitionToForward → transitionToHover → hover` with
+    /// `prog` 0.01 → 0.18 → 0.05 → 0.19 → 0.90 → 1.00 → 0.90, waypoint 1 barely reached and
+    /// waypoint 3 never. Each leg was spent on transitions instead of being flown.
+    private var vtolActiveLegTargetPlanar: SIMD2<Float>?
+    private var vtolActiveLegUsesCruise = false
+    /// Rotor-borne and transition phases must follow the same protected route as the fixed-wing
+    /// controller. The cursor advances only planner-generated intermediate points; the real
+    /// mission/marker endpoint remains owned by mission progress and its capture sphere.
+    private var hybridVTOLRouteCursor = HybridVTOLRouteCursor()
+    private var hybridVTOLStopAndPivotGate = HybridVTOLStopAndPivotGate()
+    /// Last protected-route cursor verdict, sampled by the existing once-per-second tailsitter log.
+    private var hybridVTOLRouteGuidanceDiagnostic: String?
+    private var hybridVTOLRouteNodeDiagnostic: String?
+    /// The altitude the navigation obstacle band is built around for a hybrid VTOL: the active
+    /// leg's route altitude, and deliberately *not* whatever this tick's guidance branch commanded.
+    ///
+    /// `fixedWingAutopilotAltitudeCommand` is rewritten every tick with the chosen branch's target,
+    /// which for a VTOL is the route altitude when the route is available and the latched hold
+    /// altitude when it is not. Feeding that into the band closed a loop through the obstacle cache:
+    /// branch → altitude command → band → obstacle set → route validity → branch. Measured in
+    /// flight, the band alternated between 20-89 m and 78-94 m about once a second, the obstacle
+    /// set with it (190 ↔ 18 784), and every flip re-filtered the world and re-rasterised the A*
+    /// grid — guidance went from 0.13 ms to 3.5-6 ms a tick and the simulation from 60 to 20 Hz,
+    /// while the aircraft alternately descended toward the route altitude and climbed back to the
+    /// hold, porpoising 92 → 65 → 92 m instead of flying the leg.
+    private var hybridVTOLNavigationBandAltitude: Float?
+    /// Whether the tailsitter's one-time departure rotation has been completed on this route.
+    ///
+    /// The align-before-transition gate is a *departure* gate, and it is entered on transition
+    /// progress below 0.08 — a condition the aircraft re-satisfies every time the transition dips,
+    /// hundreds of metres later and hundreds of metres up. Re-entering it there commanded the
+    /// departure altitude again: measured mid-mission at 90 m with the route at 89 m, the gate
+    /// asked for 20 m on alternate ticks, so the aircraft rocked between starting the transition
+    /// and dropping back to hover, and flew the first two legs as a half-copter. Alignment onto a
+    /// later leg belongs to the wing controller; this gate runs once.
+    private var hybridVTOLDepartureAlignmentComplete = false
+    /// Whether this leg has committed to completing the wing transition.
+    ///
+    /// Entering the wing is a decision about the leg, not a per-tick opinion about the current
+    /// lift ratio. Re-deciding every tick from instantaneous lift and airspeed, against a tilt
+    /// actuator that needs ~2 s for full travel, is an oscillator: measured over fifteen
+    /// consecutive ticks of one flight, `prog` went 0.29, 0.60, 0.16, 0.41, 0.05, 0.38, 0.25,
+    /// 0.11, 0.26, 0.23, 0.34, 0.20, 0.38, 0.05, 0.22 with `why` alternating
+    /// `vtol_transition_to_cruise` / `_delayed_lift_or_speed` / `_abort_liftReserveLost` and `vy`
+    /// swinging +3.2 to -3.1 m/s. The aircraft never reached the wing and struck a building
+    /// mid-oscillation, still rotor-borne.
+    ///
+    /// Once the aircraft has demonstrated the lift and speed the transition asks for, hold the
+    /// lever until something genuinely disqualifies the transition — sink beyond the limit, an
+    /// obstacle, or the physics step reporting the tilt blocked. Those are the aborts already
+    /// evaluated ahead of the latch, and each of them clears it.
+    private var hybridVTOLTransitionCommitted = false
+    /// Metres added to this leg's route altitude because no route existed at the lower one.
+    ///
+    /// A mission waypoint carries no altitude — `MissionTarget.position` is planar and the
+    /// autopilot supplies `routeAltitude` — so a waypoint "inside a building" is really a planar
+    /// column that intersects geometry *at one altitude*. And the planner's obstacle set is
+    /// altitude-banded: anything whose roof is below the band is not in its world at all. Climbing
+    /// is therefore not a workaround for a blocked route, it is the mechanism the system already
+    /// uses, and refusing to fly instead was a planning failure dressed up as a safety property.
+    /// A multirotor on the same map never refuses — its marker route goes straight to
+    /// `AutoPathPlannerService`, which projects occupied endpoints and flies.
+    private var hybridVTOLRouteAltitudeLift: Float = 0.0
+    private var hybridVTOLRouteBlockedSeconds: Float = 0.0
+    /// Long enough that a single blocked tick from a transient planner timeout does not move the
+    /// aircraft, short enough that an operator does not watch it hover while it decides.
+    private static let hybridVTOLRouteLiftDelaySeconds: Float = 2.0
+    /// One storey at a time. A large step would clear most city geometry in one go but would also
+    /// abandon a corridor that was passable ten metres up, which is the altitude the mission asked
+    /// for in the first place.
+    private static let hybridVTOLRouteLiftStepMeters: Float = 12.0
+    /// First measured pose of the current protected-route blocked episode.
+    ///
+    /// Replacing this with `state.position` every tick moves the position-controller target along
+    /// with the drifting aircraft, so the supposed hold can never build a restoring error.
+    private var hybridVTOLProtectedRouteHoldPosition: SIMD3<Float>?
+    /// First pose of a reactive "no safe trajectory" episode. This is separate from planner
+    /// blockage because a validated route may remain cached while the live corridor closes.
+    private var hybridVTOLEmergencyHoldPosition: SIMD3<Float>?
+    /// Whether a hybrid VTOL is currently flying like an aeroplane, for the purpose of choosing
+    /// which obstacle-avoidance layer owns it. Commanded transition progress is required to engage
+    /// and returning physically to hover releases it, so transient wing lift during a tumble cannot
+    /// hand bank control to the fixed-wing layer.
+    private var vtolWingborneAvoidanceLatched = false
     private var missionObservation = MissionObservationAccumulator()
     private var externalControllerOverlayActive: Bool = false
     private var activeFixedWingGuidanceSource: FixedWingGuidanceSource = .none
@@ -1615,6 +1758,13 @@ final class DroneSimulationViewModel: ObservableObject {
     private var fixedWingSafeRouteCacheKey: FixedWingSafeRouteCacheKey?
     private var fixedWingSafeRouteCacheRoute: FixedWingSafeRoute?
     private var fixedWingSafeRouteCacheStoresNil: Bool = false
+    /// Which construction stage refused, for the route currently cached as unavailable.
+    ///
+    /// Cached alongside the nil rather than recomputed: a cache hit returns without re-running any
+    /// stage, so without this the reason would go stale the instant the failure became permanent —
+    /// which is exactly the state a stuck aircraft sits in.
+    private var fixedWingSafeRouteCacheFailureReason: String?
+    private var fixedWingSafeRouteFailureReason: String?
     /// A timeout is planner availability, not proof that the route is impossible. Such nils are
     /// retried after the planner's own backoff and are never promoted to a permanent route cache.
     private var fixedWingSafeRouteLastFailureWasTransient = false
@@ -1773,6 +1923,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private struct FixedWingSafeRoute {
         let points: [SIMD2<Float>]
         let wasRerouted: Bool
+        let traversalMode: ProtectedRouteTraversalMode
     }
 
     private struct FixedWingSafeRouteCacheKey: Equatable {
@@ -5805,6 +5956,15 @@ final class DroneSimulationViewModel: ObservableObject {
            now - lastUserInteractionAt >= 1.0 {
             refreshActivityPolicy(now: now)
         }
+        // Arming happens while the window may already be non-key (the operator arms from the
+        // tactical map). Nothing else re-evaluates the policy in that case — `noteUserInteraction`
+        // is gated on `.activeVisible` — so the flight would run at half rate until the main window
+        // was clicked. See `localVehicleIsBeingFlown`.
+        if currentVisibilityState == .inactiveVisible,
+           performancePolicy.activityState == .backgroundIdle,
+           localVehicleIsBeingFlown {
+            refreshActivityPolicy(now: now)
+        }
 
         // v1.4.3+: when throttled, run only 1 in N full ticks. Online work is split:
         //   • stopRendering=false (inactive): scene interpolation runs on skip ticks too so
@@ -5896,6 +6056,10 @@ final class DroneSimulationViewModel: ObservableObject {
         processInputActions(using: interactionAwareInput)
         applyContinuousCameraLook(deltaTime: dt, controlState: interactionAwareInput)
         applyContinuousCameraZoom(deltaTime: dt)
+        #if DEBUG
+        phaseClock = frameStart
+        markTickPhase(.input)
+        #endif
 
         // Physics must not run before the ground exists.
         //
@@ -5951,6 +6115,9 @@ final class DroneSimulationViewModel: ObservableObject {
         updateMissionReplayLifecycle()
         activeFixedWingLaunchDynamics = nil
         updateAutopilotTargets(deltaTime: dt)
+        #if DEBUG
+        markTickPhase(.guidance)
+        #endif
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
 
         _ = updateFleetStatus(deltaTime: dt)
@@ -5964,7 +6131,7 @@ final class DroneSimulationViewModel: ObservableObject {
             input: CollisionAnalysisInput(
                 dronePosition: state.position,
                 droneVelocity: state.velocity,
-                droneRadius: selectedDroneProfile.airframeClass == .fixedWing
+                droneRadius: activeAirframeUsesWingNavigation
                     ? fixedWingNavigationEnvelopeRadius
                     : selectedDroneProfile.collisionRadius,
                 // Fleet spacing is handled separately; feeding wingmen back into leader
@@ -5974,6 +6141,9 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         )
         collisionAnalysis = prePhysicsCollisionAnalysis
+        #if DEBUG
+        markTickPhase(.collisionPre)
+        #endif
 
         handleAutoCollisionInterventions(deltaTime: dt)
 
@@ -5989,9 +6159,9 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingPhysicsThrottleCeiling = (
             launchState == .aborted || launchCradleHoldActive
         ) ? 0.0 : nil
-        if selectedDroneProfile.airframeClass == .fixedWing,
-           let wing = selectedDroneProfile.fixedWingParameters,
-           physicalState == .airborne {
+        refreshVTOLWingborneAvoidanceLatch()
+        if forwardAvoidanceCoversActiveAirframe,
+           let wing = selectedDroneProfile.fixedWingParameters {
             // Hold the escape course briefly after it clears.
             //
             // Avoidance and guidance were writing the same axis on alternating ticks: whichever
@@ -6002,7 +6172,13 @@ final class DroneSimulationViewModel: ObservableObject {
             // dodging anything, it was being fought over. One controller has to own the axis for
             // longer than a single tick, so the escape course persists for a second after the
             // threat reads clear, and guidance resumes only once that has expired.
+            #if DEBUG
+            markTickPhase(.fixedWing)
+            #endif
             let avoidanceTarget = fixedWingForwardAvoidanceTarget(wing: wing)
+            #if DEBUG
+            markTickPhase(.avoidanceProbe)
+            #endif
             if fixedWingAvoidanceNoSafeTrajectory {
                 // A stale one-second hold must never outrank a newly blocked trajectory. The crash
                 // log ended in exactly `avoid=blocked hold=fresh`: the old course was applied for
@@ -6095,7 +6271,7 @@ final class DroneSimulationViewModel: ObservableObject {
                     wing: wing,
                     requireLowAltitude: false
                 )
-                if climbFloor > 0.0 {
+                if climbFloor > 0.0, !operatorHasFullManualAuthority {
                     updateControlValues({ values in
                         values.pitch = max(values.pitch, Double(climbFloor))
                     }, markManual: false)
@@ -6197,7 +6373,8 @@ final class DroneSimulationViewModel: ObservableObject {
             // the launch climb-out, where the aircraft has no speed to give and the corridor is
             // already committed.
             if let governedSpeed = fixedWingMeshSpeedGovernorTargetMps,
-               !fixedWingLaunchClimbProtectionActive {
+               !fixedWingLaunchClimbProtectionActive,
+               !operatorHasFullManualAuthority {
                 let trueAirspeed = max(0.0, state.forwardAirspeed)
                 if trueAirspeed > governedSpeed + 0.25 {
                     let overspeedFraction = (
@@ -6223,6 +6400,9 @@ final class DroneSimulationViewModel: ObservableObject {
                     }, markManual: false)
                 }
             }
+            #if DEBUG
+            markTickPhase(.avoidanceApply)
+            #endif
         }
 
         #if DEBUG
@@ -6299,6 +6479,109 @@ final class DroneSimulationViewModel: ObservableObject {
                 ))
             }
         }
+
+        // Tailsitter ground geometry, once a second.
+        //
+        // A tailsitter is the one airframe whose contact geometry at rest is nowhere near its
+        // origin: it stands on its tail, ~0.4 m below the point physics measures from, and three
+        // separate layers each carry their own idea of where "the ground" is — the physics clamp
+        // (rest-normalized), the impact detector (raw lowest sphere) and the renderer (a hand-typed
+        // lift constant). `raw` vs `clr` below is exactly that disagreement in metres; `lift` is
+        // what the renderer is adding. If the model sits in the terrain, one of these three
+        // disagrees with the other two, and this line says which.
+        if selectedDroneProfile.airframeStyle == .tailsitterVTOL {
+            tailsitterTelemetryAccumulator += dt
+            if tailsitterTelemetryAccumulator >= 1.0 {
+                tailsitterTelemetryAccumulator = 0.0
+                let attitude = attitudeQuaternion(of: state)
+                let restAttitude = VehicleContactProfile.restOrientation(
+                    for: selectedDroneProfile.airframeStyle
+                )
+                let supportY = supportSurfaceY(for: state.position)
+                let lowest = vehicleContactProfile.lowestContact(
+                    position: state.position,
+                    orientation: attitude
+                )
+                let restOffset = vehicleContactProfile.lowestPointOffset(orientation: restAttitude)
+                let liveOffset = vehicleContactProfile.lowestPointOffset(orientation: attitude)
+                let rawHeight = (lowest?.point.y ?? state.position.y) - supportY
+                print(String(
+                    format: "[TailTick] mode=%@ phys=%@ vtol=%@ prog=%.2f y=%.2f supY=%.2f "
+                        + "agl=%.2f raw=%.2f clr=%.2f L=%.2f Lrest=%.2f lift=%.2f "
+                        + "pitch=%.1f roll=%.1f vy=%.2f thr=%.2f armed=%@ "
+                        // Measurement 1 — what the planner was looking at on this leg: the
+                        // altitude band it filters obstacles by, and how many survived. A leg
+                        // planned through a 60 m building shows up here as a band that excludes it.
+                        // Measurement 2 — which layer owned the leg. `fwdCov` is
+                        // `forwardAvoidanceCoversActiveAirframe`, which for a hybridVTOL requires
+                        // BOTH an auto-controlled mode AND `vtolWingborneAvoidanceLatched` (set at
+                        // wingborne >= 0.65, cleared below 0.45). `avCmd` is per-tick, not a latch.
+                        + "band=%.0f-%.0f nav=%d fwdCov=%@ auto=%@ vtolWhy=%@ wbLatch=%@ wb=%.2f avCmd=%@ "
+                        // What the avoidance layer actually asked for, so a bank held toward a
+                        // building can be attributed instead of guessed. `avOff` is its own verdict
+                        // (the `avoid=` field of `[WingTick]`), `avCrsErr` the course error it is
+                        // steering out and `avRawBank` the bank it demanded before filtering;
+                        // `rollCmd` is what reached the aircraft. Frozen `avCrsErr`/`avRawBank`
+                        // mean the layer did not run this tick, whatever `avCmd` says.
+                        + "avOff=%@ avCrsErr=%@ avRawBank=%@ rollCmd=%.1f "
+                        // Which guidance branch actually ran, and the altitude it asked for against
+                        // the leg's own route altitude. `vtolWhy` says whether a route exists;
+                        // these say what was done about it. A `why`/`dAlt` pair that alternates
+                        // between the route altitude and the aircraft's own height is the blocked
+                        // hold fighting the leg — the porpoise, not a climb command.
+                        + "why=%@ rAlt=%.1f dAlt=%.1f lift=%.0f node=%@",
+                    mode.rawValue as NSString,
+                    "\(physicalState)" as NSString,
+                    "\(state.vtolPhase)" as NSString,
+                    Double(state.vtolTransitionProgress),
+                    Double(state.position.y),
+                    Double(supportY),
+                    Double(state.position.y - supportY),
+                    Double(rawHeight),
+                    Double(rawHeight + restOffset),
+                    Double(liveOffset),
+                    Double(restOffset),
+                    Double(vehicleGroundRestOffset),
+                    Double(state.orientation.y.radiansToDegrees),
+                    Double(state.orientation.x.radiansToDegrees),
+                    Double(state.velocity.y),
+                    controlValues.throttle,
+                    (isArmed ? "yes" : "no") as NSString,
+                    Double(fixedWingProtectedAltitudeRange().lowerBound),
+                    Double(fixedWingProtectedAltitudeRange().upperBound),
+                    navigationBaseObstacles().count,
+                    (forwardAvoidanceCoversActiveAirframe ? "yes" : "no") as NSString,
+                    (mode.isAutoControlled ? "yes" : "no") as NSString,
+                    (mode.isAutoControlled
+                        ? hybridVTOLRouteGuidanceDiagnostic ?? "-"
+                        : "-") as NSString,
+                    (vtolWingborneAvoidanceLatched ? "yes" : "no") as NSString,
+                    Double(state.vtolWingborneBlend),
+                    (fixedWingAvoidanceLastCommandTick == simulationTickCounter
+                        ? "yes"
+                        : "no") as NSString,
+                    (fixedWingAvoidanceNoSafeTrajectory
+                        ? fixedWingAvoidanceHeadingOffset.map {
+                            String(format: "blocked(%+.0f)", $0.radiansToDegrees)
+                        } ?? "blocked"
+                        : fixedWingAvoidanceHeadingOffset.map {
+                            String(format: "%+.0f", $0.radiansToDegrees)
+                        } ?? "clear") as NSString,
+                    (fixedWingAvoidanceDiagCourseErrorDegrees.map {
+                        String(format: "%+.1f", $0)
+                    } ?? "-") as NSString,
+                    (fixedWingAvoidanceDiagRawBankDegrees.map {
+                        String(format: "%+.1f", $0)
+                    } ?? "-") as NSString,
+                    controlValues.roll,
+                    (fixedWingLastTransitionReason ?? "-") as NSString,
+                    Double(hybridVTOLNavigationBandAltitude ?? -1.0),
+                    Double(fixedWingAutopilotAltitudeCommand ?? -1.0),
+                    Double(hybridVTOLRouteAltitudeLift),
+                    (hybridVTOLRouteNodeDiagnostic ?? "-") as NSString
+                ))
+            }
+        }
         #endif
 
         let control = buildControlInput(from: controlValues)
@@ -6327,6 +6610,9 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let previousState = state
         let physicsStart = CACurrentMediaTime()
+        #if DEBUG
+        markTickPhase(.wingLog)
+        #endif
         state = physicsEngine.step(
             state: state,
             control: control,
@@ -6337,6 +6623,9 @@ final class DroneSimulationViewModel: ObservableObject {
         applySupportSurfaceConstraint(previousState: previousState)
         applyWaterImmersionIfNeeded(deltaTime: dt)
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
+        #if DEBUG
+        markTickPhase(.physics)
+        #endif
         let structuralLoadState = state
         let physicsTimeMs = (CACurrentMediaTime() - physicsStart) * 1000.0
 
@@ -6347,10 +6636,13 @@ final class DroneSimulationViewModel: ObservableObject {
             margin: max(selectedDroneProfile.collisionRadius, vehicleContactProfile.boundingRadius) + 1.0
         )
         var impactReport: ImpactReport?
+        // Lifted by `vehicleGroundRestOffset` — see that property. Zero for every airframe that
+        // rests on its belly or gear, so this changes nothing for them.
+        let contactLift = vehicleBodyOriginWorldOffset
         if let vehicleContact = collisionService.firstSweptVehicleCollision(
             contactSpheres: vehicleContactProfile.spheres,
-            fromPosition: previousState.position,
-            toPosition: state.position,
+            fromPosition: previousState.position + contactLift,
+            toPosition: state.position + contactLift,
             fromOrientation: attitudeQuaternion(of: previousState),
             toOrientation: attitudeQuaternion(of: state),
             obstacles: sweptCollisionObstacles
@@ -6390,6 +6682,7 @@ final class DroneSimulationViewModel: ObservableObject {
                     graph: &componentGraph,
                     massProperties: vehicleMassProperties,
                     airframeClass: selectedDroneProfile.airframeClass,
+                    bodyOriginWorldOffset: contactLift,
                     rotorsSpinning: state.throttle > 0.05 && isArmed,
                     deltaTime: dt,
                     applyDamage: collisionCooldown <= 0.0,
@@ -6415,7 +6708,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 input: CollisionAnalysisInput(
                     dronePosition: state.position,
                     droneVelocity: state.velocity,
-                    droneRadius: selectedDroneProfile.airframeClass == .fixedWing
+                    droneRadius: activeAirframeUsesWingNavigation
                         ? fixedWingNavigationEnvelopeRadius
                         : selectedDroneProfile.collisionRadius,
                     obstacles: postPhysicsCollisionObstacles,
@@ -6446,6 +6739,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         collisionAnalysis = postPhysicsCollisionAnalysis
+        #if DEBUG
+        markTickPhase(.collisionPost)
+        #endif
         var needsCollisionAnalysisRefresh = false
         if let report = impactReport {
             applyImpactConsequences(report)
@@ -6484,7 +6780,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 input: CollisionAnalysisInput(
                     dronePosition: state.position,
                     droneVelocity: state.velocity,
-                    droneRadius: selectedDroneProfile.airframeClass == .fixedWing
+                    droneRadius: activeAirframeUsesWingNavigation
                         ? fixedWingNavigationEnvelopeRadius
                         : selectedDroneProfile.collisionRadius,
                     obstacles: refreshedCollisionObstacles,
@@ -6609,6 +6905,10 @@ final class DroneSimulationViewModel: ObservableObject {
         publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
 
+        #if DEBUG
+        markTickPhase(.systems)
+        #endif
+
         collisionDebugAccumulator += dt
         let collisionDebugStateChanged = (lastCollisionDebugEnabled != collisionDebugEnabled)
         if !performancePolicy.stopRendering,
@@ -6645,6 +6945,10 @@ final class DroneSimulationViewModel: ObservableObject {
             diagnosticsSamplingAccumulator = 0.0
         }
 
+        #if DEBUG
+        markTickPhase(.sceneDiagnostics)
+        #endif
+
         hudPublishAccumulator += dt
         let shouldPublishHUD = hudPublishAccumulator >= 0.15 || telemetry.timestampISO8601.isEmpty
         let shouldPersistTelemetry = telemetrySamplingAccumulator + dt >= 0.2
@@ -6671,6 +6975,10 @@ final class DroneSimulationViewModel: ObservableObject {
 
         telemetrySamplingAccumulator += dt
 
+        #if DEBUG
+        markTickPhase(.hudPublish)
+        #endif
+
         if !hasUnsavedChanges,
            simd_length(state.velocity) > 0.03 || abs(state.throttle) > 0.02 || mode != .manual {
             hasUnsavedChanges = true
@@ -6686,6 +6994,34 @@ final class DroneSimulationViewModel: ObservableObject {
             performAutosaveIfNeeded()
             autosaveAccumulator = 0.0
         }
+
+        #if DEBUG
+        markTickPhase(.persistence)
+        phaseTickCount += 1
+        phaseTelemetryAccumulator += dt
+        if phaseTelemetryAccumulator >= 1.0, phaseTickCount > 0 {
+            let ticks = Double(phaseTickCount)
+            let perTick = phaseTotals.map { $0 * 1000.0 / ticks }
+            let total = perTick.reduce(0.0, +)
+            let breakdown = TickPhase.allCases
+                .map { String(format: "%@=%.2f", $0.label, perTick[$0.rawValue]) }
+                .joined(separator: " ")
+            print(String(
+                format: "[Phase] hz=%.0f tick=%.2fms %@ | objs=%d bodies=%d parts=%d nav=%d env=%d",
+                ticks / Double(phaseTelemetryAccumulator),
+                total,
+                breakdown as NSString,
+                cachedDiagnostics.activeObjectCount,
+                cachedDiagnostics.activePhysicsBodyCount,
+                cachedDiagnostics.activeParticleCount,
+                navigationBaseObstacles().count,
+                sceneController.environmentObstacles.count
+            ))
+            phaseTotals = [Double](repeating: 0.0, count: TickPhase.allCases.count)
+            phaseTickCount = 0
+            phaseTelemetryAccumulator = 0.0
+        }
+        #endif
     }
 
     /// HUD/state consequences of an impulse-resolved impact. The physical
@@ -6885,7 +7221,7 @@ final class DroneSimulationViewModel: ObservableObject {
             ? previousState.angularVelocity
             : previousState.bodyAngularVelocity
         let omegaWorld = simd_act(orientation, SIMD3<Float>(rates.y, rates.z, rates.x))
-        let previousCoM = previousState.position + simd_act(
+        let previousCoM = previousState.position + vehicleBodyOriginWorldOffset + simd_act(
             orientation,
             vehicleMassProperties.centerOfMassOffset
         )
@@ -6908,6 +7244,7 @@ final class DroneSimulationViewModel: ObservableObject {
             graph: &componentGraph,
             massProperties: vehicleMassProperties,
             airframeClass: selectedDroneProfile.airframeClass,
+            bodyOriginWorldOffset: vehicleBodyOriginWorldOffset,
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: deltaTime,
             applyDamage: true,
@@ -6948,9 +7285,19 @@ final class DroneSimulationViewModel: ObservableObject {
             orientation: previousOrientation
         ) ?? (sphere: fallbackSphere, point: previousState.position)
 
-        let currentHeight = currentLowest.point.y - supportY
+        // Rest-normalized, exactly as the physics ground clamp is.
+        //
+        // The clamp holds `origin.y >= supportY + max(0, L(attitude) - L(rest))`, so at the rest
+        // attitude the origin sits *on* the surface and every contact sphere below the origin is
+        // below it too. For a tailsitter that is the whole tail — it stands on it, ~0.4 m under
+        // the origin — and comparing the raw lowest sphere against `supportY` therefore reports a
+        // 0.4 m ground penetration that is the aircraft simply standing where it belongs. Adding
+        // L(rest) back makes "touching the ground" mean the same quantity here as in the clamp.
+        // Every other airframe rests belly-down with L(rest) ~ 0 and is unaffected.
+        let restGroundOffset = vehicleGroundRestOffset
+        let currentHeight = currentLowest.point.y - supportY + restGroundOffset
         let previousSupportY = supportSurfaceY(for: previousState.position)
-        let previousHeight = previousLowest.point.y - previousSupportY
+        let previousHeight = previousLowest.point.y - previousSupportY + restGroundOffset
         guard currentHeight <= 0.035, previousHeight > 0.018 else { return nil }
 
         let rates = selectedDroneProfile.airframeClass == .multirotor
@@ -6958,13 +7305,13 @@ final class DroneSimulationViewModel: ObservableObject {
             : previousState.bodyAngularVelocity
         let omegaBodyAxes = SIMD3<Float>(rates.y, rates.z, rates.x)
         let omegaWorld = simd_act(previousOrientation, omegaBodyAxes)
-        let previousCoM = previousState.position + simd_act(
+        let previousCoM = previousState.position + vehicleBodyOriginWorldOffset + simd_act(
             previousOrientation,
             vehicleMassProperties.centerOfMassOffset
         )
         let incomingContactVelocity = previousState.velocity + simd_cross(
             omegaWorld,
-            previousLowest.point - previousCoM
+            previousLowest.point + vehicleBodyOriginWorldOffset - previousCoM
         )
         let closingSpeed = -simd_dot(incomingContactVelocity, normal)
         guard closingSpeed > 0.35 else { return nil }
@@ -7009,6 +7356,7 @@ final class DroneSimulationViewModel: ObservableObject {
             graph: &componentGraph,
             massProperties: vehicleMassProperties,
             airframeClass: selectedDroneProfile.airframeClass,
+            bodyOriginWorldOffset: vehicleBodyOriginWorldOffset,
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: deltaTime,
             applyDamage: true,
@@ -7141,7 +7489,7 @@ final class DroneSimulationViewModel: ObservableObject {
             sceneController.spawnDetachedVehiclePart(
                 part,
                 retainedLegacyComponents: retainedLegacyComponents,
-                vehicleWorldPosition: state.position,
+                vehicleWorldPosition: state.position + vehicleBodyOriginWorldOffset,
                 vehicleOrientation: orientation,
                 inheritedVelocity: state.velocity,
                 inheritedAngularVelocity: omegaBodyAxes,
@@ -7413,14 +7761,15 @@ final class DroneSimulationViewModel: ObservableObject {
             offset: .zero,
             radius: max(0.05, selectedDroneProfile.collisionRadius)
         )
+        let bodyOriginPosition = state.position + vehicleBodyOriginWorldOffset
         let sphere = (vehicleContactProfile.spheres.isEmpty ? [fallback] : vehicleContactProfile.spheres)
             .min { lhs, rhs in
-                let lhsCenter = lhs.worldCenter(position: state.position, orientation: orientation)
-                let rhsCenter = rhs.worldCenter(position: state.position, orientation: orientation)
+                let lhsCenter = lhs.worldCenter(position: bodyOriginPosition, orientation: orientation)
+                let rhsCenter = rhs.worldCenter(position: bodyOriginPosition, orientation: orientation)
                 return simd_distance_squared(lhsCenter, obstacle.center) <
                     simd_distance_squared(rhsCenter, obstacle.center)
             } ?? fallback
-        let center = sphere.worldCenter(position: state.position, orientation: orientation)
+        let center = sphere.worldCenter(position: bodyOriginPosition, orientation: orientation)
         let contactPoint = center - normal * sphere.radius
         let report = impactResolutionService.resolvePenetration(
             penetrationDepth: penetration,
@@ -7433,6 +7782,7 @@ final class DroneSimulationViewModel: ObservableObject {
             graph: &componentGraph,
             massProperties: vehicleMassProperties,
             airframeClass: selectedDroneProfile.airframeClass,
+            bodyOriginWorldOffset: vehicleBodyOriginWorldOffset,
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: 1.0 / 60.0,
             applyDamage: collisionCooldown <= 0.0,
@@ -7924,6 +8274,9 @@ final class DroneSimulationViewModel: ObservableObject {
                     // and `asstRoll` climbing 4.3 → 10.2 unheard, a left bank held into a
                     // building while the assist and the avoidance probe both asked for right.
                     let avoidanceOwnsLateral: Bool = {
+                        // A hand-flown aircraft answers to its pilot. See
+                        // `operatorHasFullManualAuthority`.
+                        if operatorHasFullManualAuthority { return false }
                         if fixedWingLaunchClimbProtectionActive {
                             return fixedWingAvoidanceHoldRemaining > 0.0
                                 && !fixedWingAvoidanceNoSafeTrajectory
@@ -8685,9 +9038,17 @@ final class DroneSimulationViewModel: ObservableObject {
         return plannedTarget
     }
 
-    /// Radius of a sphere enclosing every physical contact on the aircraft. Fixed-wing navigation
-    /// must protect this envelope rather than the legacy fuselage proxy, otherwise a centerline can
-    /// be clear while a wingtip intersects a tree or facade.
+    /// Both conventional wings and hybrid VTOLs execute turn-radius-limited wing-borne legs. Their
+    /// route, obstacle cache and collision broad phase must therefore share the full-body envelope
+    /// from takeoff through hover handoff; changing geometry policy mid-leg invalidates the route.
+    private var activeAirframeUsesWingNavigation: Bool {
+        selectedDroneProfile.airframeClass == .fixedWing ||
+            selectedDroneProfile.airframeClass == .hybridVTOL
+    }
+
+    /// Radius of a sphere enclosing every physical contact on the aircraft. Wing-capable
+    /// navigation must protect this envelope rather than the legacy fuselage proxy, otherwise a
+    /// centerline can be clear while a wingtip or lift rotor intersects a tree or facade.
     private var fixedWingNavigationEnvelopeRadius: Float {
         max(selectedDroneProfile.collisionRadius, vehicleContactProfile.boundingRadius)
     }
@@ -8743,15 +9104,33 @@ final class DroneSimulationViewModel: ObservableObject {
         // the floor. A descent is not lost: the band is bucketed to 10 m, so the set is rebuilt and
         // the lower obstacles become solid as the commanded altitude walks down towards them, with
         // `navigationBandClearanceMeters()` as the margin.
+        //
+        // "Commanded" has to mean the leg's own intent, not the last value written to the command.
+        // For a hybrid VTOL those differ: every branch of its guidance writes
+        // `fixedWingAutopilotAltitudeCommand`, so a blocked tick writes the hold altitude and a
+        // ready tick writes the route altitude, and reading that here fed the branch's own output
+        // back into the obstacle set the next branch is decided from. See
+        // `hybridVTOLNavigationBandAltitude`, which is the stable per-leg figure.
         var floorCandidates: [Float] = [current]
-        if let altitude = fixedWingAutopilotAltitudeCommand, altitude.isFinite {
+        let commandedFloor = selectedDroneProfile.airframeClass == .hybridVTOL
+            ? hybridVTOLNavigationBandAltitude
+            : fixedWingAutopilotAltitudeCommand
+        if let altitude = commandedFloor, altitude.isFinite {
             floorCandidates.append(max(0.0, altitude))
         }
         if let altitude = additionalTargetAltitude, altitude.isFinite {
             floorCandidates.append(max(0.0, altitude))
         }
         let floor = min(floorCandidates.min() ?? current, ceiling)
-        return floor...ceiling
+        // The band must never be thinner than the vehicle needs to see.
+        //
+        // Floor and ceiling both converge on the aircraft once it is established at its cruise
+        // altitude — the flight that ended in a building logged `band=70-73` with the aircraft at
+        // 70.2 m, a three-metre slab, and `nav` collapsed 18677 → 250 on that one tick. A roof a
+        // metre under the aircraft is then simply not in the planner's world. Widening downward is
+        // the cheap direction: obstacles below can be flown over, but only if they are known.
+        let minimumHalfWidth = navigationBandClearanceMeters()
+        return min(floor, current - minimumHalfWidth)...max(ceiling, current + minimumHalfWidth)
     }
 
     /// Horizontal extent only. `radius` is a 3-D bounding sphere, so for a mesh cell holding a tall
@@ -8897,7 +9276,13 @@ final class DroneSimulationViewModel: ObservableObject {
         finalGoal: SIMD3<Float>,
         travelAltitude: Float
     ) -> SIMD3<Float>? {
-        guard selectedDroneProfile.airframeClass == .multirotor,
+        // A hovering hybrid VTOL is a multirotor for this purpose — same rotor-borne translation,
+        // same need to slide around a façade rather than stop in front of it. It reaches here only
+        // through `applyHybridVTOLAutopilotTracking`'s hover phases, so the wingborne regime still
+        // belongs to the forward-avoidance layer (see `forwardAvoidanceCoversActiveAirframe`).
+        let airframeIsRotorBorne = selectedDroneProfile.airframeClass == .multirotor
+            || (selectedDroneProfile.airframeClass == .hybridVTOL && !vtolWingborneAvoidanceLatched)
+        guard airframeIsRotorBorne,
               collisionAnalysis.riskScore >= 0.30 else {
             multirotorAvoidanceLateralOffset = 0.0
             return nil
@@ -9211,11 +9596,16 @@ final class DroneSimulationViewModel: ObservableObject {
                 obstacleSignature: navigationObstacleSignatureIncludingNoFlyZones(),
                 droneRadius: fixedWingNavigationEnvelopeRadius,
                 minimumObstacleRadiusFactor: 1.0,
-                additionalHardClearance: fixedWingPlannerAdditionalHardClearance(
-                    to: markerWorld,
-                    targetAltitude: targetAltitude,
-                    wing: wing
-                ),
+                additionalHardClearance: HybridVTOLFlightPolicy
+                    .genericPlannerUsesWholeTurnHardClearance(
+                        airframeClass: selectedDroneProfile.airframeClass
+                    )
+                    ? fixedWingPlannerAdditionalHardClearance(
+                        to: markerWorld,
+                        targetAltitude: targetAltitude,
+                        wing: wing
+                    )
+                    : 0.0,
                 modeTag: "fixed_wing_marker",
                 forceRecompute: forceReplan,
                 reason: recomputeReason
@@ -9280,11 +9670,14 @@ final class DroneSimulationViewModel: ObservableObject {
             terrain: terrain,
             obstacles: navigationObstaclesIncludingNoFlyZones(),
             obstacleSignature: navigationObstacleSignatureIncludingNoFlyZones(),
-            droneRadius: selectedDroneProfile.airframeClass == .fixedWing
+            droneRadius: activeAirframeUsesWingNavigation
                 ? fixedWingNavigationEnvelopeRadius
                 : selectedDroneProfile.collisionRadius,
-            minimumObstacleRadiusFactor: selectedDroneProfile.airframeClass == .fixedWing ? 1.0 : 0.0,
-            additionalHardClearance: selectedDroneProfile.airframeClass == .fixedWing
+            minimumObstacleRadiusFactor: activeAirframeUsesWingNavigation ? 1.0 : 0.0,
+            additionalHardClearance: HybridVTOLFlightPolicy
+                .genericPlannerUsesWholeTurnHardClearance(
+                    airframeClass: selectedDroneProfile.airframeClass
+                )
                 ? fixedWingPlannerAdditionalHardClearance(
                     to: plannedGoal,
                     targetAltitude: travelAltitude,
@@ -9438,11 +9831,14 @@ final class DroneSimulationViewModel: ObservableObject {
                 terrain: terrain,
                 obstacles: navigationObstaclesIncludingNoFlyZones(),
                 obstacleSignature: navigationObstacleSignatureIncludingNoFlyZones(),
-                droneRadius: selectedDroneProfile.airframeClass == .fixedWing
+                droneRadius: activeAirframeUsesWingNavigation
                     ? fixedWingNavigationEnvelopeRadius
                     : selectedDroneProfile.collisionRadius,
-                minimumObstacleRadiusFactor: selectedDroneProfile.airframeClass == .fixedWing ? 1.0 : 0.0,
-                additionalHardClearance: selectedDroneProfile.airframeClass == .fixedWing
+                minimumObstacleRadiusFactor: activeAirframeUsesWingNavigation ? 1.0 : 0.0,
+                additionalHardClearance: HybridVTOLFlightPolicy
+                    .genericPlannerUsesWholeTurnHardClearance(
+                        airframeClass: selectedDroneProfile.airframeClass
+                    )
                     ? fixedWingPlannerAdditionalHardClearance(
                         to: goal,
                         targetAltitude: safeTravelAltitude,
@@ -9759,12 +10155,14 @@ final class DroneSimulationViewModel: ObservableObject {
         context: AutopilotTrackingContext,
         target: SIMD3<Float>,
         deltaTime: Float,
-        vtolTransitionLever: Double? = nil
+        vtolTransitionLever: Double? = nil,
+        routeTrackingOverride: FixedWingRouteTrackingContext? = nil
     ) -> FixedWingAutopilotOutput? {
         let fixedWingGuidanceSource = fixedWingGuidanceSourceForCurrentRoute()
         setFixedWingGuidanceSource(fixedWingGuidanceSource, reason: "fixed_wing_autopilot_tracking")
 
-        let routeTracking = currentFixedWingRouteTrackingContext(fallbackTarget: target)
+        let routeTracking = routeTrackingOverride ??
+            currentFixedWingRouteTrackingContext(fallbackTarget: target)
         let missionSpeedConstraints = fixedWingGuidanceSource == .mission ? currentMissionPlan?.constraints.speed : nil
         let output = fixedWingAutopilotController.trackingCommand(
             for: context,
@@ -9852,13 +10250,130 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float
     ) -> FixedWingAutopilotOutput? {
         let wing = activeFixedWingParameters()
-        let routeAltitude = hybridVTOLRouteAltitude(defaultAltitude: context.targetAltitude)
-        let decision = hybridVTOLAutopilotDecision(
+        let baseRouteAltitude = hybridVTOLRouteAltitude(defaultAltitude: context.targetAltitude)
+        let routeAltitudeCeiling = max(6.0, terrain.maxFlightAltitude - 2.0)
+        let routeAltitude = min(
+            routeAltitudeCeiling,
+            baseRouteAltitude + hybridVTOLRouteAltitudeLift
+        )
+        // Anchor the navigation band before any branch runs, so the obstacle set this tick plans
+        // against cannot depend on the branch that tick's plan produces.
+        hybridVTOLNavigationBandAltitude = routeAltitude
+        let finalTarget = hybridVTOLActiveLegTarget(
             context: context,
-            wing: wing,
             routeAltitude: routeAltitude
         )
+        let protectedRoute = currentFixedWingRouteTrackingContext(
+            fallbackTarget: finalTarget
+        )
+        let routeGuidance = hybridVTOLRouteCursor.update(
+            route: protectedRoute,
+            expectedFinalTarget: finalTarget,
+            position: state.position,
+            controllerDebug: fixedWingAutopilotDebugState,
+            intermediateRadius: max(
+                2.0,
+                min(5.0, fixedWingNavigationEnvelopeRadius + 1.0)
+            ),
+            corridorRadius: max(
+                6.0,
+                fixedWingNavigationEnvelopeRadius + 3.0
+            ),
+            planarSpeed: simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        )
+        switch routeGuidance.status {
+        case .ready:
+            hybridVTOLRouteGuidanceDiagnostic = "ready"
+        case .blocked(let reason):
+            hybridVTOLRouteGuidanceDiagnostic = reason
+        }
+        #if DEBUG
+        // Which node the cursor is on, which route it belongs to, and how far the aircraft is from
+        // it. A stop-and-pivot aircraft that stops making progress does so for one of exactly two
+        // reasons, and only these three fields separate them: the node index standing still while
+        // `nodeDist` refuses to fall below the capture radius (the aircraft cannot hold position
+        // tightly enough to be credited with reaching the node), or the index resetting because the
+        // route identifier changed underneath it (the plan is being rebuilt, not followed).
+        hybridVTOLRouteNodeDiagnostic = String(
+            format: "%@/%d@%.1f",
+            (routeGuidance.routeIdentifier.map {
+                String(format: "%04x", UInt16(truncatingIfNeeded: $0.hashValue))
+            } ?? "----") as NSString,
+            routeGuidance.activeRouteIndex ?? -1,
+            Double(
+                routeGuidance.guidanceTarget.map {
+                    simd_distance(
+                        SIMD2<Float>(state.position.x, state.position.z),
+                        SIMD2<Float>($0.x, $0.z)
+                    )
+                } ?? -1.0
+            )
+        )
+        #endif
+        if routeGuidance.isReady {
+            hybridVTOLProtectedRouteHoldPosition = nil
+            hybridVTOLRouteBlockedSeconds = 0.0
+        } else {
+            hybridVTOLStopAndPivotGate.reset()
+            // No route means no leg to commit to; the next one decides for itself.
+            hybridVTOLTransitionCommitted = false
+            // No route at this altitude: climb and let the planner look again from higher up.
+            //
+            // The lift is held, not released the moment a route appears, so the aircraft does not
+            // sink straight back into the altitude that had none and start the cycle over. It is
+            // released with the rest of the leg state when the route is reset.
+            hybridVTOLRouteBlockedSeconds += deltaTime
+            if hybridVTOLRouteBlockedSeconds >= Self.hybridVTOLRouteLiftDelaySeconds,
+               routeAltitude < routeAltitudeCeiling - 0.5,
+               // A climb is only an escape while the way up is open. Anything overhead is a
+               // reason to keep waiting rather than to press into it.
+               collisionAnalysis.riskScore < 0.55 {
+                hybridVTOLRouteAltitudeLift = min(
+                    hybridVTOLRouteAltitudeLift + Self.hybridVTOLRouteLiftStepMeters,
+                    max(0.0, routeAltitudeCeiling - baseRouteAltitude)
+                )
+                hybridVTOLRouteBlockedSeconds = 0.0
+            }
+        }
+        var decision = hybridVTOLAutopilotDecision(
+            context: context,
+            wing: wing,
+            routeAltitude: routeAltitude,
+            finalTarget: finalTarget,
+            routeGuidance: routeGuidance
+        )
         vtolAutopilotPhase = decision.phase
+
+        // Rotor-borne translation gets the same lateral sidestep a multirotor gets.
+        //
+        // Until now a hybrid VTOL had no avoidance layer of its own in either regime: the
+        // predictive corridor proof was gated on `airframeClass == .fixedWing` and this sidestep on
+        // `== .multirotor`, so the only thing standing between a translating Wingcopter and a
+        // façade was `handleAutoCollisionInterventions` — a risk >= 0.65 emergency that stops or
+        // backs off 4 m, not something that flies around anything.
+        //
+        // Applied to the decision's target rather than inside the hover command so the phase
+        // machine, the speed scale and the vertical channel all keep their own logic; only where it
+        // is heading changes.
+        switch decision.phase {
+        case .hoverHold, .precisionHover, .transitionToHover, .emergencyHover:
+            // Stop-and-pivot holds are route geometry, not generic nominal targets. The sidestep
+            // helper falls back to the final waypoint when nominal == current pose; applying it
+            // while aligning would move 4–8 m across the certified A* corner.
+            if HybridVTOLFlightPolicy.allowsReactiveHoverSidestep(
+                decisionReason: decision.reason
+            ),
+               let adjusted = multirotorCollisionAvoidanceTarget(
+                nominalTarget: decision.target,
+                finalGoal: finalTarget,
+                travelAltitude: decision.targetAltitude
+            ) {
+                decision.target = adjusted
+            }
+        case .idleGrounded, .verticalTakeoff, .verticalLanding, .forcedLanding,
+             .transitionAbort, .transitionToCruise, .wingborneCruise:
+            break
+        }
 
         switch decision.phase {
         case .idleGrounded, .hoverHold, .precisionHover:
@@ -9891,7 +10406,11 @@ final class DroneSimulationViewModel: ObservableObject {
             let throttleFloor: Float?
             switch decision.phase {
             case .emergencyHover:
-                throttleFloor = resolvedFlightBaseline(for: .hover).hoverLockThrottle
+                // The altitude controller must be able to command below
+                // hover thrust to arrest an existing climb. Its neutral
+                // command already is hoverLockThrottle, so an extra floor
+                // adds no lift safety and turns "hold" into a one-way climb.
+                throttleFloor = nil
             case .forcedLanding, .verticalLanding:
                 throttleFloor = resolvedFlightBaseline(for: .landing).landingThrottleReference
             default:
@@ -9919,10 +10438,23 @@ final class DroneSimulationViewModel: ObservableObject {
             )
             return nil
         case .wingborneCruise:
+            var cruiseRoute = protectedRoute
+            if let activeRouteIndex = routeGuidance.activeRouteIndex,
+               var synchronizedRoute = cruiseRoute {
+                // `FixedWingAutopilotController` converts this external route index to its
+                // internal target index by subtracting one. Advancing the minimum by one keeps the
+                // wing controller on the cursor's current detour node instead of sending a newly
+                // transitioned VTOL back to an already-crossed corner.
+                synchronizedRoute.minimumWaypointIndex = max(
+                    synchronizedRoute.minimumWaypointIndex ?? 0,
+                    activeRouteIndex + 1
+                )
+                cruiseRoute = synchronizedRoute
+            }
             let cruiseContext = AutopilotTrackingContext(
                 state: state,
                 physicalState: physicalState,
-                target: decision.target,
+                target: finalTarget,
                 targetAltitude: routeAltitude,
                 speedScale: context.speedScale,
                 yawAlignToHome: context.yawAlignToHome,
@@ -9932,9 +10464,10 @@ final class DroneSimulationViewModel: ObservableObject {
             )
             return applyFixedWingAutopilotTracking(
                 context: cruiseContext,
-                target: decision.target,
+                target: finalTarget,
                 deltaTime: deltaTime,
-                vtolTransitionLever: 1.0
+                vtolTransitionLever: 1.0,
+                routeTrackingOverride: cruiseRoute
             )
         }
     }
@@ -9942,27 +10475,88 @@ final class DroneSimulationViewModel: ObservableObject {
     private func hybridVTOLAutopilotDecision(
         context: AutopilotTrackingContext,
         wing: FixedWingParameters,
-        routeAltitude: Float
+        routeAltitude: Float,
+        finalTarget: SIMD3<Float>,
+        routeGuidance: HybridVTOLRouteGuidance
     ) -> VTOLAutopilotDecision {
-        let target = hybridVTOLActiveLegTarget(context: context, routeAltitude: routeAltitude)
+        let target = routeGuidance.guidanceTarget ?? finalTarget
         let currentPlanar = SIMD2<Float>(state.position.x, state.position.z)
+        let finalTargetPlanar = SIMD2<Float>(finalTarget.x, finalTarget.z)
         let targetPlanar = SIMD2<Float>(target.x, target.z)
         let routeVector = targetPlanar - currentPlanar
         let planarDistance = simd_length(routeVector)
+        let finalPlanarDistance = simd_distance(currentPlanar, finalTargetPlanar)
         let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
         let airspeed = max(state.forwardAirspeed, planarSpeed)
         let liftRatio = max(state.vtolWingLiftRatio, state.vtolWingborneBlend)
         let routeYaw: Float? = planarDistance > 0.5
             ? fixedWingCourseRadians(from: routeVector)
             : context.yawOverrideRadians
+        let stopAndPivotHoverHeading = selectedDroneProfile.airframeStyle == .tailsitterVTOL
+            ? tailsitterHoverHeadingRadians()
+            : state.orientation.z
+        let stopAndPivotYawRate = HybridVTOLFlightPolicy.stopAndPivotYawRate(
+            isTailsitter: selectedDroneProfile.airframeStyle == .tailsitterVTOL,
+            tailsitterBodyXRate: state.bodyAngularVelocity.x,
+            conventionalYawRate: state.angularVelocity.z
+        )
+        let stopAndPivotGuidance = hybridVTOLStopAndPivotGate.update(
+            traversalMode: routeGuidance.traversalMode,
+            routeIdentifier: routeGuidance.routeIdentifier,
+            routeIndex: routeGuidance.activeRouteIndex,
+            position: state.position,
+            planarSpeed: planarSpeed,
+            headingErrorRadians: routeYaw.map {
+                shortestAngleRadians($0 - stopAndPivotHoverHeading)
+            } ?? 0.0,
+            yawRateRadiansPerSecond: stopAndPivotYawRate
+        )
         let precisionRadius = hybridVTOLPrecisionEntryRadius(wing: wing)
         let cruiseEntryDistance = hybridVTOLCruiseEntryDistance(wing: wing, precisionRadius: precisionRadius)
         let cruiseExitDistance = hybridVTOLCruiseExitDistance(wing: wing, precisionRadius: precisionRadius)
         let cruiseWasEstablished = vtolAutopilotPhase == .wingborneCruise
-        let wasCruisePath = vtolAutopilotPhase == .transitionToCruise ||
-            cruiseWasEstablished
-        let wantsCruise = planarDistance > cruiseEntryDistance ||
-            (wasCruisePath && planarDistance > cruiseExitDistance)
+        // Decide the regime once per leg, from the whole leg.
+        //
+        // A VTOL pays for cruise twice — one transition out of hover and one back into it — so the
+        // question is whether the leg is long enough to earn that, and the answer cannot change
+        // while the aircraft is flying it. `cruiseEntryDistance` is roughly a cruise turn radius,
+        // and legs of a city mission are frequently the same order; evaluated against the
+        // *remaining* distance it therefore flips from true to false partway along every leg. This
+        // reads it at the moment the leg becomes active and holds it. See
+        // `vtolActiveLegTargetPlanar`.
+        if routeGuidance.isReady {
+            let legChanged = vtolActiveLegTargetPlanar.map {
+                simd_distance($0, finalTargetPlanar) > 1.0
+            } ?? true
+            if legChanged {
+                vtolActiveLegTargetPlanar = finalTargetPlanar
+                vtolActiveLegUsesCruise = routeGuidance.remainingPathMeters > cruiseEntryDistance
+            }
+        } else {
+            // `.infinity` is the blocked sentinel, not a real leg length. Leave the regime choice
+            // unlatched so it is evaluated from the validated path when planning succeeds.
+            vtolActiveLegTargetPlanar = nil
+            vtolActiveLegUsesCruise = false
+        }
+        // The exit distance still hands the leg back to hover for the capture itself, and an
+        // already-established cruise is never yanked out of the air mid-leg.
+        // A tailsitter has no independently tilting lift rotors: at progress
+        // zero its two fixed propellers point vertically and it cannot chase
+        // a horizontal waypoint in "hover".  Any validated leg outside the
+        // precision envelope must therefore enter the wing transition even
+        // when it is shorter than the generic VTOL cruise-economy threshold.
+        let tailsitterNeedsWingTranslation = HybridVTOLFlightPolicy
+            .tailsitterValidatedLegRequiresWingTransition(
+                isTailsitter: selectedDroneProfile.airframeStyle == .tailsitterVTOL,
+                routeIsValidated: routeGuidance.isReady,
+                isFinalSegment: routeGuidance.isFinalSegment,
+                finalPlanarDistance: finalPlanarDistance,
+                precisionRadius: precisionRadius
+            )
+        let wantsCruise = tailsitterNeedsWingTranslation || (
+            (vtolActiveLegUsesCruise || cruiseWasEstablished)
+                && (!routeGuidance.isFinalSegment || finalPlanarDistance > cruiseExitDistance)
+        )
         let airborne = !physicalState.isGroundRestState && state.position.y > 0.45
         let maxSinkRate = max(1.4, min(3.2, wing.nominalSinkRateMps * 1.35))
 
@@ -10011,17 +10605,39 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
-        if airborne && collisionAnalysis.riskScore >= 0.82 {
-            return decision(
+        // "No flyable course" means stop, for an aircraft that can.
+        //
+        // `fixedWingAvoidanceNoSafeTrajectory` is the avoidance layer reporting that *every*
+        // candidate course ends in geometry. A fixed wing must then fly the least-bad one — it
+        // cannot stop. A VTOL can, and inheriting the aeroplane's escape law made it bank into the
+        // best of several buildings instead. Measured on the flight this comment comes from:
+        // `avOff=blocked(+10) avCrsErr=+9.0 avRawBank=+12.9 rollCmd=13.6`, a steady 14° bank held
+        // for three seconds straight into a façade, with `avRawBank` and `rollCmd` matching sign
+        // and magnitude — the layer was flying it there deliberately, having judged +10° the least
+        // bad of a fan of blocked options.
+        //
+        // The risk score alone was too late a trigger: it is a proximity measure and only crosses
+        // 0.82 once the obstacle is already close, whereas the rollout knows several seconds ahead.
+        if airborne && (collisionAnalysis.riskScore >= 0.82 || fixedWingAvoidanceNoSafeTrajectory) {
+            if hybridVTOLEmergencyHoldPosition == nil {
+                hybridVTOLEmergencyHoldPosition = state.position
+            }
+            let holdPosition = hybridVTOLEmergencyHoldPosition ?? state.position
+            var emergencyDecision = decision(
                 .emergencyHover,
-                target: SIMD3<Float>(state.position.x, max(routeAltitude, state.position.y), state.position.z),
-                altitude: max(routeAltitude, state.position.y),
+                target: holdPosition,
+                altitude: holdPosition.y,
                 lever: -1.0,
                 speedScale: 0.25,
                 safety: .emergencyHover("corridorBlocked"),
                 reason: "vtol_emergency_hover_corridor_blocked"
             )
+            emergencyDecision.targetHeading = selectedDroneProfile.airframeStyle == .tailsitterVTOL
+                ? tailsitterHoverHeadingRadians()
+                : state.orientation.z
+            return emergencyDecision
         }
+        hybridVTOLEmergencyHoldPosition = nil
 
         if airborne && (batteryState.chargePercent <= 4.0 || hasFlightCriticalGraphDamage) {
             return decision(
@@ -10035,18 +10651,73 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
-        if state.position.y < routeAltitude - 0.85 && state.vtolTransitionProgress < 0.20 {
-            return decision(
+        // Climb vertically only until the departure is clear, then climb *and* translate.
+        //
+        // This used to hold the aircraft in a pure vertical climb until it reached the full route
+        // altitude, and `hybridVTOLRouteAltitude` reaches for `terrain.maxFlightAltitude`. Measured
+        // on a 222 m three-waypoint mission: 65 → 215 m at a constant 5.8 m/s with `pitch=89`
+        // (still hovering nose-up), `prog=0.01` and zero progress toward W1 — 150 m of vertical
+        // spent going nowhere, then a 13.8 m/s dive and another climb. The altitude channel already
+        // carries `routeAltitude` into every later phase, so the climb continues on its own; what
+        // this gate must decide is only when it is safe to *start moving*, which is a departure
+        // question, not a cruise-altitude one.
+        let verticalDepartureAltitude = min(
+            routeAltitude,
+            supportSurfaceY(for: state.position) + max(12.0, wing.initialClimbTargetAltitude)
+        )
+        if state.position.y < verticalDepartureAltitude - 0.85 && state.vtolTransitionProgress < 0.20 {
+            var takeoffDecision = decision(
                 .verticalTakeoff,
                 target: SIMD3<Float>(state.position.x, routeAltitude, state.position.z),
                 altitude: routeAltitude,
                 lever: 0.0,
                 speedScale: min(context.speedScale, 0.55),
-                reason: "vtol_vertical_takeoff_to_route_altitude"
+                reason: "vtol_vertical_takeoff_to_departure_altitude"
             )
+            // Do not rotate toward an unproven/distant route while still in
+            // the near-ground vertical departure.  Tailsitters align at the
+            // departure altitude in the explicit phase below.
+            takeoffDecision.targetHeading = selectedDroneProfile.airframeStyle == .tailsitterVTOL
+                ? tailsitterHoverHeadingRadians()
+                : state.orientation.z
+            return takeoffDecision
         }
 
-        if planarDistance <= precisionRadius {
+        // Route construction is authoritative for every horizontal phase. If a mesh/OSM route is
+        // unavailable or fails validation, a hover-capable aircraft can wait safely for the next
+        // planner retry; it must never silently fall back to the raw waypoint through geometry.
+        if case .blocked = routeGuidance.status {
+            let needsTransitionToHover = state.vtolTransitionProgress > 0.08 ||
+                vtolAutopilotPhase == .wingborneCruise
+            // Blocked is a *lateral* hold: the aircraft stops where it is horizontally and waits
+            // for a route. Vertically it follows `routeAltitude`, which the escalation above walks
+            // upward precisely because no route existed lower down — freezing the altitude here
+            // instead is what turned "no route" into a permanent hover with nothing to change it.
+            // Never a descent, though: the way down is the geometry it has already ruled out.
+            if hybridVTOLProtectedRouteHoldPosition == nil {
+                hybridVTOLProtectedRouteHoldPosition = state.position
+            }
+            var holdPosition = hybridVTOLProtectedRouteHoldPosition ?? state.position
+            let holdAltitude = max(holdPosition.y, routeAltitude)
+            holdPosition.y = holdAltitude
+            var blockedDecision = decision(
+                needsTransitionToHover ? .emergencyHover : .hoverHold,
+                target: holdPosition,
+                altitude: holdAltitude,
+                lever: needsTransitionToHover ? -1.0 : 0.0,
+                speedScale: needsTransitionToHover ? 0.25 : 0.20,
+                safety: needsTransitionToHover
+                    ? .emergencyHover("protectedRouteBlocked")
+                    : .nominal,
+                reason: "vtol_protected_route_blocked"
+            )
+            blockedDecision.targetHeading = selectedDroneProfile.airframeStyle == .tailsitterVTOL
+                ? tailsitterHoverHeadingRadians()
+                : state.orientation.z
+            return blockedDecision
+        }
+
+        if routeGuidance.isFinalSegment && finalPlanarDistance <= precisionRadius {
             let needsHoverCapture = state.vtolTransitionProgress > 0.08 ||
                 planarSpeed > max(4.5, wing.minSafeAirspeed * 0.28)
             if needsHoverCapture {
@@ -10065,6 +10736,41 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
+        if routeGuidance.traversalMode == .stopAndPivotVTOL {
+            // This polyline is certified as collision-free straight hover legs, not as a
+            // continuous fixed-wing turn. Return fully to the rotor-borne regime, stop on every
+            // cursor node, yaw onto the next leg, and only then translate. The fixed-wing latch
+            // cannot engage because this mode never commands a cruise transition.
+            let needsRotorborneHandoff = state.vtolTransitionProgress > 0.08
+            if needsRotorborneHandoff {
+                let hold = stopAndPivotGuidance.holdPosition ?? state.position
+                return decision(
+                    .transitionToHover,
+                    target: hold,
+                    altitude: routeAltitude,
+                    lever: -1.0,
+                    speedScale: min(context.speedScale, 0.30),
+                    reason: "vtol_stop_and_pivot_return_to_hover"
+                )
+            }
+            if stopAndPivotGuidance.shouldHold {
+                return decision(
+                    .hoverHold,
+                    target: stopAndPivotGuidance.holdPosition ?? state.position,
+                    altitude: routeAltitude,
+                    lever: 0.0,
+                    speedScale: min(context.speedScale, 0.28),
+                    reason: "vtol_stop_and_pivot_align"
+                )
+            }
+            return decision(
+                .hoverHold,
+                lever: 0.0,
+                speedScale: min(context.speedScale, 0.52),
+                reason: "vtol_stop_and_pivot_track"
+            )
+        }
+
         if !wantsCruise {
             let hoverLever = state.vtolTransitionProgress > 0.08 ? -1.0 : 0.0
             return decision(
@@ -10073,6 +10779,60 @@ final class DroneSimulationViewModel: ObservableObject {
                 speedScale: min(context.speedScale, 0.62),
                 reason: hoverLever < 0.0 ? "vtol_transition_to_hover_short_leg" : "vtol_hover_hold_short_leg"
             )
+        }
+
+        // A tailsitter chooses its cruise direction by rotating around the
+        // vertical thrust axis first, then pitching the whole airframe down.
+        // Starting both motions at once is unsafe for a large initial course
+        // change: the pitch axis is still pointing across the requested
+        // route, and the ordinary forward-vector Euler yaw is singular here.
+        // Align on the quaternion-derived hover heading and let both angular
+        // and vertical rates settle before handing the pitch axis to the
+        // transition. Departure reaches its altitude at the +5.8 m/s climb
+        // governor; pitching the fixed propellers forward at that instant
+        // converts an uncontrolled ballistic overshoot into the first leg.
+        if selectedDroneProfile.airframeStyle == .tailsitterVTOL,
+           !hybridVTOLDepartureAlignmentComplete,
+           state.vtolTransitionProgress < 0.08,
+           let routeYaw {
+            let headingError = shortestAngleRadians(
+                routeYaw - tailsitterHoverHeadingRadians()
+            )
+            let headingRate = abs(state.bodyAngularVelocity.x)
+            // One-sided on purpose. This gate asks "has the vertical departure finished?", and
+            // being *above* the departure altitude is the answer being yes with margin to spare —
+            // it is not a reason to refuse the transition.
+            //
+            // The symmetric ±2.25 m window it replaces was a deadlock by construction: departure
+            // climbs at the +5.8 m/s governor and, on this mission, only had 8 m to climb
+            // (pad 9.2 m, departure altitude 17.3 m). Arresting 5.8 m/s takes longer than 2.25 m,
+            // so the aircraft always came to rest above the window — measured settling at 20.18 m
+            // against a 17.3 m departure, 2.88 m out, `vy=-0.00`, and holding
+            // `vtol_tailsitter_align_before_transition` indefinitely with the route ready and the
+            // heading aligned. What still has to hold is that the aircraft is not *short* of the
+            // departure altitude and that its vertical rate has actually settled.
+            let verticalDepartureSettled =
+                state.position.y >= verticalDepartureAltitude - 2.25 &&
+                abs(state.velocity.y) <= 0.45
+            if abs(headingError) > Float(6.0).degreesToRadians ||
+                headingRate > 0.16 ||
+                !verticalDepartureSettled {
+                return decision(
+                    .hoverHold,
+                    target: SIMD3<Float>(
+                        state.position.x,
+                        verticalDepartureAltitude,
+                        state.position.z
+                    ),
+                    altitude: verticalDepartureAltitude,
+                    lever: 0.0,
+                    speedScale: min(context.speedScale, 0.42),
+                    reason: "vtol_tailsitter_align_before_transition"
+                )
+            }
+            // Settled, aligned, and at the departure altitude: the one-time rotation is done and
+            // this gate closes for the rest of the route.
+            hybridVTOLDepartureAlignmentComplete = true
         }
 
         let transitionSafety = hybridVTOLTransitionSafetyState(
@@ -10199,14 +10959,20 @@ final class DroneSimulationViewModel: ObservableObject {
             direction = SIMD2<Float>(-sin(yaw), -cos(yaw))
         }
         let lookaheadUpperBound = max(24.0, wing.cruiseAirspeed * 1.6)
-        let transitionLookahead = min(max(planarDistance * 0.45, 12.0), lookaheadUpperBound)
+        // A close protected-route corner is a hard bound. The previous 12 m minimum projected the
+        // transition command past short detour nodes and cut the very obstacle the A* route had
+        // gone around.
+        let transitionLookahead = min(
+            planarDistance,
+            min(max(planarDistance * 0.45, 12.0), lookaheadUpperBound)
+        )
         let transitionTarget = SIMD3<Float>(
             state.position.x + direction.x * transitionLookahead,
             routeAltitude,
             state.position.z + direction.y * transitionLookahead
         )
         let transitionBaseline = resolvedFlightBaseline(for: mode)
-        let transitionContext = AutopilotTrackingContext(
+        var transitionContext = AutopilotTrackingContext(
             state: state,
             physicalState: physicalState,
             target: transitionTarget,
@@ -10217,18 +10983,37 @@ final class DroneSimulationViewModel: ObservableObject {
             deltaTime: context.deltaTime,
             flightBaseline: transitionBaseline
         )
+        transitionContext.verticalVelocityDampingGain = 0.075
         var command = multicopterAutopilotController.command(for: transitionContext)
         let attitudeScale = (1.0 - state.vtolTransitionProgress * 0.65).clamped(to: 0.25...1.0)
         command.rollDegrees *= attitudeScale
         command.pitchDegrees *= attitudeScale
-        command.throttle = max(
-            command.throttle,
-            transitionBaseline.hoverLockThrottle,
-            transitionBaseline.cruiseReferenceThrottle
-        )
+        // The transition floor is anti-sink. Above the route altitude it is a climb order.
+        //
+        // `MulticopterAutopilotController` already *starts* from `hoverLockThrottle` and subtracts
+        // an altitude/vertical-rate term from it, so below the route altitude this floor adds
+        // nothing the controller would not ask for anyway — while above it, it discards the whole
+        // correction. For a hybrid VTOL `hoverLockThrottle` is `max(hover, transition)`, i.e. the
+        // *transition* figure: measured on this airframe at 0.60 against a hover equilibrium near
+        // 0.45, which is the +5.8 m/s ascent governor held flat.
+        //
+        // Measured across one mission, every leg overshot its own route altitude and the next leg
+        // then took its baseline from wherever the overshoot had left the aircraft
+        // (`targetMarkerTravelAltitude` reads `state.position.y + 3.4`): 20 → 107 m at `rAlt=17.3`,
+        // 118 → 211 m at `rAlt=89.3`, 164 → 243 m at `rAlt=161.3`. `thr=0.60 vy=5.80` on every
+        // transition tick, while the controller's own command had long since clamped to 0.18 asking
+        // for the descent this `max` threw away. The ratchet then parked the aircraft over rooftops
+        // for the next leg, where a start or goal cell inside the stale low band read as occupied
+        // (`start_projected_seg0`) and the altitude escalation spent another 72 m escaping it.
+        //
+        // `SimpleDronePhysicsEngine` already drops its own throttle floor to zero for exactly this
+        // case (`rotorBorneAltitudeControl`); this floor is what left that opening unusable. Same
+        // reasoning as the `.emergencyHover` branch, which carries no floor for the same reason.
         if state.position.y < routeAltitude - 0.30 {
             command.throttle = max(
                 command.throttle,
+                transitionBaseline.hoverLockThrottle,
+                transitionBaseline.cruiseReferenceThrottle,
                 resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference
             )
         }
@@ -10256,6 +11041,17 @@ final class DroneSimulationViewModel: ObservableObject {
                 routeAltitude,
                 activeTarget.position.y
             )
+        }
+        if mode == .returnHome {
+            return SIMD3<Float>(homePosition.x, routeAltitude, homePosition.z)
+        }
+        if activeRouteTargetSource == .manualMarker,
+           let marker = targetMarkerState {
+            return marker.worldPosition(altitude: routeAltitude)
+        }
+        if mode == .autoPath,
+           let autoFlightGoal {
+            return SIMD3<Float>(autoFlightGoal.x, routeAltitude, autoFlightGoal.z)
         }
         return SIMD3<Float>(context.target.x, routeAltitude, context.target.z)
     }
@@ -10354,14 +11150,20 @@ final class DroneSimulationViewModel: ObservableObject {
         liftRatio: Float,
         transitionProgress: Float
     ) -> Double {
+        // The three aborts below are the only things that may un-commit a transition, and they are
+        // evaluated before the latch precisely so that a committed transition still stops for a
+        // real failure.
         guard collisionAnalysis.riskScore < 0.70 else {
+            hybridVTOLTransitionCommitted = false
             return 0.0
         }
         let sinkLimit = max(1.2, wing.nominalSinkRateMps * 1.15)
         guard state.velocity.y >= -sinkLimit else {
+            hybridVTOLTransitionCommitted = false
             return 0.0
         }
         guard !state.vtolTransitionBlocked else {
+            hybridVTOLTransitionCommitted = false
             return 0.0
         }
         if transitionProgress < 0.18 {
@@ -10374,11 +11176,36 @@ final class DroneSimulationViewModel: ObservableObject {
             wing.minSustainableSpeedMps * (0.38 + progress * 0.42)
         )
         if liftRatio >= requiredLiftRatio && airspeed >= requiredAirspeed {
+            // Demonstrated once: this leg is going to the wing.
+            hybridVTOLTransitionCommitted = true
+            return 1.0
+        }
+        // Committed, and none of the aborts above fired. Momentary dips in lift ratio as the wing
+        // swings through its own stall angle are what the transition *is*; they are not a reason to
+        // reverse the tilt and start over.
+        if hybridVTOLTransitionCommitted {
             return 1.0
         }
         let degradedLiftOK = liftRatio >= requiredLiftRatio * 0.78
         let degradedSpeedOK = airspeed >= requiredAirspeed * 0.92
-        return degradedLiftOK && degradedSpeedOK ? 0.45 : 0.0
+        if degradedLiftOK && degradedSpeedOK {
+            return 0.45
+        }
+        // Not yet flying, but a zero lever is not the answer: in the physics step
+        // `lever == 0` means "hold this tilt", not "go back". Combined with the unconditional
+        // push above ending at exactly the same 0.18 the requirement starts at, that made a
+        // deadlock at the boundary — measured over twenty consecutive ticks of one flight,
+        // `prog` pinned at 0.18 and `pitch` at 63.6 deg while the aircraft crossed 240 m of
+        // ground at 9 m/s, never reaching the wing. It cannot escape on its own: at 63 deg the
+        // thrust vector is still mostly vertical, so there is no horizontal acceleration, the
+        // wing sits past its stall angle, `wb` stays at 0.12 against the 0.182 the degraded
+        // gate needs, and nothing in the loop can raise either term.
+        //
+        // A tailsitter accelerates *by* tilting — the tilt is what points thrust forward — so
+        // keep tilting slowly instead of freezing. The genuine aborts are already handled above
+        // and still fire every tick: excessive sink, `vtolTransitionBlocked`, and obstacle risk
+        // all return zero before this point, so a transition that really is failing still stops.
+        return 0.18
     }
 
     private func applyHybridVTOLHoverAutopilotCommand(
@@ -10393,7 +11220,7 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float
     ) {
         let hoverBaseline = resolvedFlightBaseline(for: .hover)
-        let hoverContext = AutopilotTrackingContext(
+        var hoverContext = AutopilotTrackingContext(
             state: state,
             physicalState: physicalState,
             target: target,
@@ -10404,6 +11231,10 @@ final class DroneSimulationViewModel: ObservableObject {
             deltaTime: context.deltaTime,
             flightBaseline: hoverBaseline
         )
+        if selectedDroneProfile.airframeClass == .hybridVTOL,
+           state.vtolTransitionProgress < 0.25 {
+            hoverContext.verticalVelocityDampingGain = 0.075
+        }
         var command = multicopterAutopilotController.command(for: hoverContext)
         if state.vtolTransitionProgress > 0.12 {
             let attitudeScale = (1.0 - state.vtolTransitionProgress * 0.55).clamped(to: 0.35...1.0)
@@ -10442,6 +11273,21 @@ final class DroneSimulationViewModel: ObservableObject {
         return state.vtolTransitionProgress >= 0.86 &&
             liftRatio >= 0.74 &&
             airspeed >= wing.minSustainableSpeedMps * 0.82
+    }
+
+    /// Course a nose-up tailsitter will take when it pitches toward cruise.
+    /// Body forward is vertical (and therefore has no X/Z heading) in hover;
+    /// body -Y remains horizontal and is the non-singular physical reference.
+    private func tailsitterHoverHeadingRadians() -> Float {
+        let transitionDirection = -simd_act(
+            state.fixedWingOrientationQuat,
+            SIMD3<Float>(0, 1, 0)
+        )
+        let planar = SIMD2<Float>(transitionDirection.x, transitionDirection.z)
+        guard simd_length_squared(planar) > 1e-8 else {
+            return state.orientation.z
+        }
+        return atan2(-planar.x, -planar.y)
     }
 
     private func hybridVTOLReadyForPrecisionHover() -> Bool {
@@ -10638,11 +11484,30 @@ final class DroneSimulationViewModel: ObservableObject {
     /// −12.6 → −27.5 until the aircraft was uncontrollable. Avoidance owns roll, course, pitch
     /// floor and power directly while it is active — an aeroplane escapes a street canyon with all
     /// four, not with a different waypoint.
+    /// The operator is flying by hand with nothing engaged — no flight-mode autopilot, no assist,
+    /// no assist pending.
+    ///
+    /// Forward avoidance is evaluated for any airborne fixed wing regardless of mode, deliberately
+    /// (it has to be live through the launch, where it matters most). But *evaluating* and *taking
+    /// the stick* are different things, and it was doing both: while it owned the lateral axis the
+    /// assist branch wrote `values.roll = values.roll`, so a hand-flown aircraft had roll, yaw,
+    /// pitch floor and throttle cap driven by a layer the pilot never switched on.
+    ///
+    /// Here the layers keep watching and keep reporting — `avoid=`, the risk score and the HUD
+    /// warnings are unchanged — but they do not command. In every engaged mode (assist, autopilot,
+    /// take-off, return-home, any VTOL auto phase) nothing changes.
+    var operatorHasFullManualAuthority: Bool {
+        mode == .manual
+            && fixedWingAssistState.mode == .manual
+            && pendingFixedWingAssistMode == nil
+    }
+
     private func applyFixedWingCollisionAvoidance(
         target avoidanceTarget: SIMD2<Float>,
         wing: FixedWingParameters,
         deltaTime: Float
     ) {
+        guard !operatorHasFullManualAuthority else { return }
         let current = currentPlanarPosition()
         let avoidanceCourse = fixedWingCourseRadians(from: avoidanceTarget - current)
         let courseError = shortestAngleRadians(avoidanceCourse - state.orientation.z)
@@ -10945,6 +11810,76 @@ final class DroneSimulationViewModel: ObservableObject {
         resetFixedWingRuntimeRouteStart()
     }
 
+    /// Which airframes the predictive forward-avoidance layer owns.
+    ///
+    /// It was `airframeClass == .fixedWing`, which left every hybrid VTOL with no predictive
+    /// avoidance at all — not because the physics did not suit them, but because of the class
+    /// label. A tilt-rotor or tailsitter in wingborne cruise *is* a banking, turn-radius-limited
+    /// aeroplane and needs the same ~800 m corridor proof; in hover it is a multirotor and needs
+    /// the lateral sidestep instead (see `multirotorCollisionAvoidanceTarget`). The regime, not the
+    /// catalogue entry, decides.
+    ///
+    /// VTOLs additionally require an automatic mode: unlike the fixed wing, whose avoidance is
+    /// deliberately always live, a hand-flown VTOL is left to its pilot.
+    /// The operator is flying the VTOL by hand — manual mode with nothing routing it.
+    ///
+    /// In manual the pilot answers for the aircraft and the layers only warn, so coverage is
+    /// withheld here. A running or paused mission, or a live route altitude, means the autopilot
+    /// has the aircraft even if `mode` briefly reads `.hover` or `.manual` while a leg hands over.
+    private var operatorIsHandFlyingVTOL: Bool {
+        mode == .manual
+            && missionExecutionState.status != .running
+            && missionExecutionState.status != .paused
+            && activeRouteTargetAltitude == nil
+    }
+
+    private var forwardAvoidanceCoversActiveAirframe: Bool {
+        guard physicalState == .airborne else { return false }
+        switch selectedDroneProfile.airframeClass {
+        case .fixedWing:
+            return true
+        case .hybridVTOL:
+            // Cover the situation, not the mode label.
+            //
+            // `mode.isAutoControlled` dropped coverage one tick before an impact while the wing was
+            // still carrying 88% of the weight at cruise speed beside a building: measured
+            // `fwdCov=no auto=no wbLatch=yes wb=0.88`, and the label had gone `autoPath → hover →
+            // manual` under a *running* mission. The physical question is whether this thing is
+            // currently flying like an aeroplane — that is `vtolWingborneAvoidanceLatched` — and
+            // the only reason to withhold the layer is that the operator has taken the aircraft,
+            // which a transient mode label during an autopilot leg is not.
+            return vtolWingborneAvoidanceLatched && !operatorIsHandFlyingVTOL
+        case .multirotor:
+            return false
+        }
+    }
+
+    /// Updates which avoidance controller owns the hybrid from physical transition state.
+    private func refreshVTOLWingborneAvoidanceLatch() {
+        guard selectedDroneProfile.airframeClass == .hybridVTOL else {
+            vtolWingborneAvoidanceLatched = false
+            return
+        }
+        // The protected route and multirotor sidestep own rotor-borne flight;
+        // the bank/roll avoidance law must engage only after the airframe has
+        // physically started its wing transition.  Ground speed is not a
+        // valid regime signal: the reported Wingtra fall reached the old
+        // threshold at `progress=0, wingborne=0`, latched fixed-wing bank
+        // commands during a tumble, and made recovery worse.  Transition
+        // progress gives early coverage before lift jumps to 1.0, while the
+        // lower release thresholds keep the hand-back to hover hysteretic.
+        let wasLatched = vtolWingborneAvoidanceLatched
+        vtolWingborneAvoidanceLatched = HybridVTOLFlightPolicy
+            .nextFixedWingAvoidanceLatchState(
+                isLatched: wasLatched,
+                transitionProgress: state.vtolTransitionProgress,
+                wingborneBlend: state.vtolWingborneBlend
+            )
+        if wasLatched && !vtolWingborneAvoidanceLatched {
+            resetFixedWingAvoidanceState()
+        }
+    }
+
     private func fixedWingForwardAvoidanceTarget(wing: FixedWingParameters) -> SIMD2<Float>? {
         if fixedWingAvoidanceEvaluationTick == simulationTickCounter {
             return fixedWingAvoidanceCachedTarget
@@ -11090,6 +12025,17 @@ final class DroneSimulationViewModel: ObservableObject {
         let verticalRate = min(0.0, boundedRequestedVerticalRate)
         let upperVerticalRate = max(0.0, boundedRequestedVerticalRate)
 
+        // Broad-phase sampling: one point per ~24 m of track rather than one per integration step.
+        // The chord that replaces each kept arc deviates from it by at most c²/(8R), so the query
+        // margin below absorbs exactly that and the returned obstacle set stays a superset.
+        let queryPointSpacingMeters: Float = 24.0
+        let rolloutStepDistance = max(0.5, rolloutStepTime * rolloutGroundSpeedBound)
+        let queryEmitStride = max(1, Int((queryPointSpacingMeters / rolloutStepDistance).rounded(.down)))
+        let queryChordMeters = rolloutStepDistance * Float(queryEmitStride)
+        let queryChordSagittaMeters = queryChordMeters * queryChordMeters
+            / (8.0 * max(20.0, turnRadius))
+        let queryMargin = corridorHalfWidth + 24.0 + queryChordSagittaMeters
+
         let candidateMagnitudes: [Float] = [0.17, 0.35, 0.52, 0.79, 1.05, 1.40]
 
         // Build the same lagged, coordinated-turn trajectories once for the world query. A tube
@@ -11133,6 +12079,7 @@ final class DroneSimulationViewModel: ObservableObject {
             var elapsed: Float = 0.0
             let timeStep = rolloutStepTime
             var path = [SIMD3<Float>(point.x, altitude, point.y)]
+            var emittedStepIndex = 0
 
             while elapsed < predictionDuration {
                 let stepTime = min(timeStep, predictionDuration - elapsed)
@@ -11234,9 +12181,23 @@ final class DroneSimulationViewModel: ObservableObject {
                 altitude += predictedVerticalVelocity * stepTime
                 course = shortestAngleRadians(course + courseStep)
                 elapsed += stepTime
-                // Keep lower/upper samples time-aligned. The bridge path below uses paired chord
-                // midpoints to cover the complete reachable volume between lateral envelopes.
-                path.append(SIMD3<Float>(point.x, altitude, point.y))
+                emittedStepIndex += 1
+                // Integrate finely, emit coarsely.
+                //
+                // These polylines exist only to ask the world "what is near this tube" — the
+                // narrow phase rebuilds its own trajectories. Emitting every integration step
+                // sampled the tube ~7x finer than its own 24 m+ margin can distinguish, and both
+                // the broad-phase query and the envelope pass are linear in point count. Measured:
+                // this probe was 40-55 ms of a 42-57 ms tick, i.e. essentially the entire frame,
+                // with ~15 courses x 3 envelope paths x ~244 points at 44 m/s.
+                //
+                // The integration itself is untouched, so the geometry is identical; only the
+                // chords between kept samples are longer, and `queryChordSagittaMeters` below pays
+                // for exactly that by widening the query margin. Lower/upper stay index-aligned
+                // because they share the stride, so the bridge path still pairs correctly.
+                if emittedStepIndex % queryEmitStride == 0 || elapsed >= predictionDuration {
+                    path.append(SIMD3<Float>(point.x, altitude, point.y))
+                }
             }
             return path
         }
@@ -11334,7 +12295,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         let obstacleQuery = sceneController.nearbyEnvironmentObstacles(
             along: queryPaths,
-            margin: corridorHalfWidth + 24.0,
+            margin: queryMargin,
             includeMesh: usesMeshCellsForPlanning
         )
         let obstacleCoverageComplete = obstacleQuery.isComplete
@@ -11386,7 +12347,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
                 let singleCourseQuery = sceneController.nearbyEnvironmentObstacles(
                     along: singleCoursePaths,
-                    margin: corridorHalfWidth + 24.0,
+                    margin: queryMargin,
                     includeMesh: usesMeshCellsForPlanning
                 )
                 if singleCourseQuery.isComplete {
@@ -11409,7 +12370,7 @@ final class DroneSimulationViewModel: ObservableObject {
                     )
                     let localQuery = sceneController.nearbyEnvironmentObstacles(
                         along: localPaths,
-                        margin: corridorHalfWidth + 24.0,
+                        margin: queryMargin,
                         includeMesh: usesMeshCellsForPlanning
                     )
                     guard localQuery.isComplete else {
@@ -12384,6 +13345,18 @@ final class DroneSimulationViewModel: ObservableObject {
         multirotorMarkerLastPlanTick = nil
         multirotorAvoidanceLateralOffset = 0.0
         multirotorAvoidanceHoldUntilTick = 0
+        // A leg's regime decision belongs to that leg and to that flight.
+        vtolActiveLegTargetPlanar = nil
+        vtolActiveLegUsesCruise = false
+        hybridVTOLRouteCursor.reset()
+        hybridVTOLStopAndPivotGate.reset()
+        hybridVTOLProtectedRouteHoldPosition = nil
+        hybridVTOLEmergencyHoldPosition = nil
+        hybridVTOLNavigationBandAltitude = nil
+        hybridVTOLDepartureAlignmentComplete = false
+        hybridVTOLTransitionCommitted = false
+        hybridVTOLRouteAltitudeLift = 0.0
+        hybridVTOLRouteBlockedSeconds = 0.0
         multicopterAutopilotController.reset()
     }
 
@@ -13750,6 +14723,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         componentGraph = graph
         pristineVehicleContactProfile = output.contactProfile
+        sceneController.setVehicleGroundRestLift(vehicleGroundRestOffset)
         let detachedIDs = Set(graph.components.filter { !$0.isAttached }.map(\.id))
         vehicleContactProfile = pristineVehicleContactProfile
             .applyingDeformations(from: graph)
@@ -15081,10 +16055,12 @@ final class DroneSimulationViewModel: ObservableObject {
             targetAltitude: targetAltitude
         )
         if fixedWingSafeRouteCacheKey == cacheKey {
+            fixedWingSafeRouteFailureReason = fixedWingSafeRouteCacheFailureReason
             return fixedWingSafeRouteCacheStoresNil ? nil : fixedWingSafeRouteCacheRoute
         }
 
         fixedWingSafeRouteLastFailureWasTransient = false
+        fixedWingSafeRouteFailureReason = nil
         let route = buildSafeFixedWingRoute(
             from: routePoints,
             zones: zones,
@@ -15095,6 +16071,9 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingSafeRouteCacheKey = cacheKey
             fixedWingSafeRouteCacheRoute = route
             fixedWingSafeRouteCacheStoresNil = route == nil
+            fixedWingSafeRouteCacheFailureReason = route == nil
+                ? (fixedWingSafeRouteFailureReason ?? "safe_route_unavailable")
+                : nil
         }
         return route
     }
@@ -15107,6 +16086,7 @@ final class DroneSimulationViewModel: ObservableObject {
     ) -> FixedWingSafeRoute? {
         let compactedOriginal = compactedPlanarPath(routePoints)
         guard compactedOriginal.count >= 2 else {
+            fixedWingSafeRouteFailureReason = "degenerate_input_route"
             return nil
         }
 
@@ -15123,7 +16103,11 @@ final class DroneSimulationViewModel: ObservableObject {
             targetAltitude: targetAltitude
         )
         guard routeNeedsReroute else {
-            return FixedWingSafeRoute(points: candidateRoute, wasRerouted: wasRerouted)
+            return FixedWingSafeRoute(
+                points: candidateRoute,
+                wasRerouted: wasRerouted,
+                traversalMode: .continuousWingborne
+            )
         }
 
         if let gridReroute = gridSafeFixedWingRoute(
@@ -15132,7 +16116,7 @@ final class DroneSimulationViewModel: ObservableObject {
             viewport: viewport,
             targetAltitude: targetAltitude
         ) {
-            return FixedWingSafeRoute(points: gridReroute, wasRerouted: true)
+            return gridReroute
         }
 
         return nil
@@ -15277,7 +16261,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return false
         }
 
-        let evaluatedAltitudeBand = selectedDroneProfile.airframeClass == .fixedWing
+        let evaluatedAltitudeBand = activeAirframeUsesWingNavigation
             ? fixedWingProtectedAltitudeRange(additionalTargetAltitude: targetAltitude)
             : targetAltitude...targetAltitude
         for obstacle in obstacles {
@@ -15286,18 +16270,16 @@ final class DroneSimulationViewModel: ObservableObject {
                 obstacle.baseY > evaluatedAltitudeBand.upperBound + verticalEnvelope {
                 continue
             }
-            let protectedRadius = fixedWingProtectedObstacleRadius(obstacle)
-            for point in points where simd_distance(point, obstacle.planarCenter) <= protectedRadius {
-                return true
-            }
-
+            // Measured against the obstacle's real footprint, exactly as the navigation grid
+            // rasterises it. The previous circular form used the footprint's *circumradius* from
+            // its centre, so an OSM block demanded stand-off along its short face as if that face
+            // were as far out as its diagonal. In a street grid every candidate route is inside
+            // some building's circumradius, so this predicate was true for every route the planner
+            // could ever produce — including the raw point-safe polyline A* had just certified
+            // against the same obstacles. The aircraft was told there was no route and held.
+            let clearance = fixedWingProtectedObstacleClearance(obstacle)
             for pair in zip(points, points.dropFirst()) {
-                let segmentDistance = planarDistanceToSegment(
-                    point: obstacle.planarCenter,
-                    segmentStart: pair.0,
-                    segmentEnd: pair.1
-                )
-                if segmentDistance <= protectedRadius {
+                if obstacle.planarSignedDistance(fromSegment: pair.0, to: pair.1) <= clearance {
                     return true
                 }
             }
@@ -15386,7 +16368,12 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
-    private func fixedWingProtectedObstacleRadius(_ obstacle: CollisionObstacle) -> Float {
+    /// Stand-off required from an obstacle's *surface*, not from its centre.
+    ///
+    /// The classification pad plus the vehicle envelope — the same two terms
+    /// `AutoPathPlannerService.obstacleInflation` adds before it blocks a cell, so the validator
+    /// and the grid now demand the identical clearance from the identical geometry.
+    private func fixedWingProtectedObstacleClearance(_ obstacle: CollisionObstacle) -> Float {
         let base: Float
         if let cached = fixedWingObstacleBaseRadiusCache[obstacle.source] {
             base = cached
@@ -15413,7 +16400,87 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingObstacleBaseRadiusCache[obstacle.source] = classified
             base = classified
         }
-        return obstaclePlanarRadius(obstacle) + base + fixedWingNavigationEnvelopeRadius
+        return base + fixedWingNavigationEnvelopeRadius
+    }
+
+    /// Whether a hover-capable aircraft may fly the short leg bridging an A* endpoint the grid
+    /// holds as occupied to the real point the operator asked for.
+    ///
+    /// The grid rasterises every obstacle with the airframe envelope plus a protective pad, so
+    /// both ends of a city route routinely sit in a blocked cell while being physically clear:
+    /// the aircraft hovering in a narrow street or standing on its pad between two façades, and a
+    /// waypoint the operator deliberately placed against a building. A* must then start from — and
+    /// finish at — the nearest free cell, and on a 5.3 m grid that projection is always further
+    /// than the 0.5 m endpoint tolerance. Rejecting the route for it meant such an aircraft could
+    /// never build one at all: it held position, reported the route unavailable, and the safe-route
+    /// cache made the refusal permanent because a stationary aircraft never changes the cache key.
+    /// Measured on a three-waypoint mission whose first point touched a façade: not one leg flown.
+    ///
+    /// What has to be proven is only that the short bridging leg is flyable, and that is checked
+    /// here against the *hard* collision envelope rather than the planner's protective inflation —
+    /// the pad is what put the endpoint in a blocked cell to begin with, so testing against it
+    /// would refuse every such leg. The leg may also never reduce the clearance either endpoint
+    /// already has, which keeps it a bridge rather than a licence to graze a façade on the way.
+    ///
+    /// Mission semantics are untouched: the operator's waypoint stays the route's final point and
+    /// `MissionProgressTracker` still owns its physical capture, so nothing is relabelled.
+    private func hoverBridgeLegIsClear(
+        from start: SIMD2<Float>,
+        to projected: SIMD2<Float>,
+        obstacles: [CollisionObstacle],
+        noFlyZones: [MissionZone],
+        altitude: Float
+    ) -> Bool {
+        // A conventional fixed wing cannot stop, pivot and sidestep out of a pocket, so it keeps
+        // the strict refusal. Only an airframe certified for stop-and-pivot hover legs qualifies.
+        guard HybridVTOLFlightPolicy.supportsStopAndPivotVTOL(
+            airframeClass: selectedDroneProfile.airframeClass
+        ) else {
+            return false
+        }
+        // And only while it is actually rotor-borne. A bridging leg turns the whole route into
+        // stop-and-pivot, so offering one to an established cruise would drop it out of the air
+        // mid-leg — over a rooftop, where the grid cell is blocked and the aircraft is a
+        // comfortable distance above it, that is a manoeuvre nothing asked for.
+        guard vtolAutopilotPhase != .wingborneCruise,
+              state.vtolTransitionProgress <=
+                HybridVTOLFlightPolicy.fixedWingAvoidanceMinimumEntryProgress else {
+            return false
+        }
+
+        let legLength = simd_distance(start, projected)
+        let maximumBridge = max(14.0, fixedWingNavigationEnvelopeRadius * 4.0)
+        guard legLength.isFinite, legLength > 0.0, legLength <= maximumBridge else {
+            return false
+        }
+        guard !planarPathIntersectsNoFly([start, projected], zones: noFlyZones) else {
+            return false
+        }
+
+        let verticalEnvelope = fixedWingNavigationEnvelopeRadius + 1.0
+        let hardRadius = fixedWingNavigationEnvelopeRadius
+        for obstacle in obstacles {
+            if obstacle.topY < altitude - verticalEnvelope ||
+                obstacle.baseY > altitude + verticalEnvelope {
+                continue
+            }
+            // Whichever end is already the more constrained sets the floor: for an extraction that
+            // is the aircraft's own position, for an approach the operator's waypoint.
+            let endpointClearance = min(
+                obstacle.planarSignedDistance(to: start),
+                obstacle.planarSignedDistance(to: projected)
+            )
+            let legClearance = obstacle.planarSignedDistance(
+                fromSegment: start,
+                to: projected
+            )
+            // Clear of the hard envelope, or — when an endpoint is already inside it — at least
+            // never closer than that endpoint already is.
+            guard legClearance >= min(hardRadius, endpointClearance) - 0.001 else {
+                return false
+            }
+        }
+        return true
     }
 
     private func gridSafeFixedWingRoute(
@@ -15421,35 +16488,38 @@ final class DroneSimulationViewModel: ObservableObject {
         protectedNoFlyZones noFlyZones: [MissionZone],
         viewport: MapViewportState,
         targetAltitude: Float
-    ) -> [SIMD2<Float>]? {
+    ) -> FixedWingSafeRoute? {
         guard points.count >= 2 else {
             return nil
         }
 
-        // Keep this dedicated planner across calls so its turn-radius-inflated grid is cached and
-        // cannot thrash the smaller multicopter/direct-corridor grid.
+        // Keep this dedicated planner across calls so its mission grid is cached and cannot
+        // thrash the smaller multicopter/direct-corridor grid.
         let planner = fixedWingRoutePlanner
         let obstacles = navigationObstacles(including: noFlyZones)
         let wing = activeFixedWingParameters()
         // Stable cache input with margin for the normal cruise overshoot seen in telemetry.
         let planningSpeed = fixedWingPlanningSpeedEnvelope(wing: wing)
-        // A point-safe A* polyline can still demand an instantaneous corner. Reserve one attainable
-        // turn radius plus roll-in distance around every obstacle, so its shortest returned route
-        // is also flyable by this aircraft instead of merely clear for its centre point.
+        // A point-safe A* polyline can still demand an instantaneous corner, but dilating every
+        // obstacle by a complete turn radius also marks valid VTOL launch pads as occupied (the
+        // Wingtra reserve is ~252 m while an urban pad may be only ~20 m from a facade). A* owns
+        // only the physical airframe envelope here. `FixedWingRouteRepair` below moves real
+        // corners for this full radius, and the final route validator certifies the flown arcs.
         let routeTurnRadius = fixedWingConservativeRouteTurnRadius(
             wing: wing,
             airspeed: planningSpeed
         )
-        let manoeuvreReserve = routeTurnRadius
-            + planningSpeed * Self.fixedWingTurnRollInSeconds
         let droneRadius = fixedWingNavigationEnvelopeRadius
         let altitude = max(2.0, targetAltitude)
         let clampedStart = viewport.clampedToWorld(points[0])
         guard simd_distance(clampedStart, points[0]) <= 0.05 else {
+            fixedWingSafeRouteFailureReason = "start_outside_world"
             return nil
         }
         var output: [SIMD2<Float>] = [clampedStart]
         output.reserveCapacity(points.count + noFlyZones.count * 4)
+        var usedExtractionLeg = false
+        var usedApproachLeg = false
 
         for (segmentIndex, point) in points.dropFirst().enumerated() {
             let startPlanar = output[output.count - 1]
@@ -15457,6 +16527,7 @@ final class DroneSimulationViewModel: ObservableObject {
             // A required waypoint outside the flyable world must be rejected, not silently moved
             // onto the boundary by the viewport clamp.
             guard simd_distance(goalPlanar, point) <= 0.05 else {
+                fixedWingSafeRouteFailureReason = "goal_outside_world"
                 return nil
             }
             let start = SIMD3<Float>(startPlanar.x, altitude, startPlanar.y)
@@ -15470,7 +16541,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 obstacleSignature: navigationObstacleSignature(including: noFlyZones),
                 droneRadius: droneRadius,
                 minimumObstacleRadiusFactor: 1.0,
-                additionalHardClearance: manoeuvreReserve,
+                additionalHardClearance: 0.0,
                 modeTag: "fixed_wing_mission_obstacle_segment_\(segmentIndex)",
                 forceRecompute: true,
                 reason: "mission_obstacle_reroute"
@@ -15482,6 +16553,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 if snapshot.reason.contains("timeout") {
                     fixedWingSafeRouteLastFailureWasTransient = true
                 }
+                fixedWingSafeRouteFailureReason = "planner_\(snapshot.reason)_seg\(segmentIndex)"
                 return nil
             }
 
@@ -15492,19 +16564,58 @@ final class DroneSimulationViewModel: ObservableObject {
                 viewport.clampedToWorld(SIMD2<Float>($0.x, $0.z))
             })
             guard let plannedStart = segmentCorners.first,
-                  let plannedEnd = segmentCorners.last,
-                  simd_distance(plannedStart, startPlanar) <= 0.5,
-                  simd_distance(plannedEnd, goalPlanar) <= 0.5 else {
-                // Generic A* is allowed to project occupied endpoints to a free cell. Mission
-                // flight is not: that would relabel a nearby point as the user's waypoint.
+                  let plannedEnd = segmentCorners.last else {
+                fixedWingSafeRouteFailureReason = "planner_path_empty_seg\(segmentIndex)"
                 return nil
             }
-            segmentCorners[0] = startPlanar
-            segmentCorners[segmentCorners.count - 1] = goalPlanar
+            // Generic A* is allowed to project an occupied endpoint onto a free cell. Neither end
+            // may silently *become* the route's endpoint, but both may be reached across a proven
+            // bridging leg, with the true point kept as the node the aircraft actually flies to.
+            if simd_distance(plannedStart, startPlanar) <= 0.5 {
+                segmentCorners[0] = startPlanar
+            } else if segmentIndex == 0,
+                      hoverBridgeLegIsClear(
+                          from: startPlanar,
+                          to: plannedStart,
+                          obstacles: obstacles,
+                          noFlyZones: noFlyZones,
+                          altitude: altitude
+                      ) {
+                // The projected free cell becomes a real first route node, so the aircraft flies
+                // the proven extraction leg instead of a straight line to the corner beyond it.
+                output.append(plannedStart)
+                usedExtractionLeg = true
+            } else {
+                fixedWingSafeRouteFailureReason = "start_projected_seg\(segmentIndex)"
+                return nil
+            }
+
+            let goalWasProjected = simd_distance(plannedEnd, goalPlanar) > 0.5
+            if goalWasProjected {
+                guard hoverBridgeLegIsClear(
+                    from: plannedEnd,
+                    to: goalPlanar,
+                    obstacles: obstacles,
+                    noFlyZones: noFlyZones,
+                    altitude: altitude
+                ) else {
+                    fixedWingSafeRouteFailureReason = "goal_projected_seg\(segmentIndex)"
+                    return nil
+                }
+                usedApproachLeg = true
+            } else {
+                segmentCorners[segmentCorners.count - 1] = goalPlanar
+            }
             for segmentPoint in segmentCorners.dropFirst() {
                 if simd_distance(segmentPoint, output[output.count - 1]) > 0.05 {
                     output.append(segmentPoint)
                 }
+            }
+            if goalWasProjected,
+               simd_distance(goalPlanar, output[output.count - 1]) > 0.05 {
+                // The operator's waypoint stays the point flown to; the projected free cell in
+                // front of it is now an ordinary route node reached first.
+                output.append(goalPlanar)
             }
         }
 
@@ -15522,8 +16633,26 @@ final class DroneSimulationViewModel: ObservableObject {
         // `routeTurnRadius` is the radius handed to the follower as `validatedTurnRadiusMeters`,
         // so the repair is validated against exactly the fillet that will be flown. Validating at
         // any other radius — larger or smaller — is the failure this codebase keeps rediscovering.
+        // The extraction leg is excluded from the validators below, and only from them.
+        //
+        // It already carries its own certificate — `hoverExtractionPoint` proved it against the
+        // hard collision envelope. The validators here work against the protective pad, and the
+        // aircraft standing inside that pad is the entire reason the leg exists, so including it
+        // would refuse every route the leg was added to make possible. Everything from the
+        // projected free cell onward keeps the full protective certificate unchanged.
+        let plannedRoute = compactedPlanarPath(output)
+        var certifiedRoute = plannedRoute
+        var extractionPrefix: [SIMD2<Float>] = []
+        var approachSuffix: [SIMD2<Float>] = []
+        if usedExtractionLeg, certifiedRoute.count > 2 {
+            extractionPrefix = [certifiedRoute.removeFirst()]
+        }
+        if usedApproachLeg, certifiedRoute.count > 2 {
+            approachSuffix = [certifiedRoute.removeLast()]
+        }
+
         let repair = FixedWingRouteRepair.repair(
-            route: compactedPlanarPath(output),
+            route: certifiedRoute,
             turnRadius: routeTurnRadius,
             clearanceRadius: droneRadius,
             altitude: altitude,
@@ -15532,15 +16661,55 @@ final class DroneSimulationViewModel: ObservableObject {
             maximumOutwardShiftMeters: routeTurnRadius
         )
         let compactedOutput = repair.points
+        // A bridging leg does not decide the traversal mode of the route it is attached to.
+        //
+        // It used to: any bridge forced the whole polyline into stop-and-pivot, on the reasoning
+        // that a sidestep out of an occupied cell is a rotor-borne manoeuvre. The reasoning holds
+        // for the fourteen metres of the bridge and nowhere else, and the cost of extending it to
+        // the rest was the aircraft never reaching cruise again — measured on a three-waypoint
+        // mission, leg one flew wing-borne at `prog=1.00 wb=0.98`, then a waypoint at a building
+        // put an approach bridge on leg two and everything after it crawled between nodes as
+        // `vtol_stop_and_pivot_align`, yawing on the spot at each one.
+        //
+        // Neither bridge is ever flown wing-borne anyway: the extraction one runs while the
+        // aircraft is still rotor-borne on departure, and the approach one lies inside the
+        // precision-hover radius, where the decision tree has already handed the leg back to
+        // hover for waypoint capture. So the middle of the route is judged on its own merits,
+        // exactly as it is for a route with no bridges at all.
         if fixedWingValidatedRouteNeedsReroute(
                 compactedOutput,
                 noFlyZones: noFlyZones,
                 obstacles: obstacles,
                 targetAltitude: targetAltitude
             ) {
-            return nil
+            // A hybrid VTOL can safely execute the raw point-safe A* polyline by stopping at every
+            // corner and yawing in place. This includes tailsitters now that their rotor-borne
+            // quaternion controller has an independently validated horizontal translation mode.
+            // It is not a weaker fixed-wing certificate: the mode is explicit, full-radius
+            // repair/validation has already failed, and conventional fixed wings remain closed.
+            guard HybridVTOLFlightPolicy.supportsStopAndPivotVTOL(
+                      airframeClass: selectedDroneProfile.airframeClass
+                  ),
+                  !planarPathIntersectsNoFly(certifiedRoute, zones: noFlyZones),
+                  !fixedWingPathNeedsObstacleReroute(
+                      certifiedRoute,
+                      obstacles: obstacles,
+                      targetAltitude: targetAltitude
+                  ) else {
+                fixedWingSafeRouteFailureReason = "point_safe_route_rejected"
+                return nil
+            }
+            return FixedWingSafeRoute(
+                points: extractionPrefix + certifiedRoute + approachSuffix,
+                wasRerouted: true,
+                traversalMode: .stopAndPivotVTOL
+            )
         }
-        return compactedOutput
+        return FixedWingSafeRoute(
+            points: extractionPrefix + compactedOutput + approachSuffix,
+            wasRerouted: true,
+            traversalMode: .continuousWingborne
+        )
     }
 
     /// Validates the trajectory the airplane actually flies between polyline legs, not just the
@@ -18025,9 +19194,10 @@ final class DroneSimulationViewModel: ObservableObject {
             let roll = simd_quatf(angle: bank.degreesToRadians, axis: SIMD3<Float>(0.0, 0.0, 1.0))
             return yaw * pitch * roll
         }
+        let bodyOriginOffset = vehicleBodyOriginWorldOffset
         for index in 1..<rollout.count {
-            let from = rollout[index - 1]
-            let to = rollout[index]
+            let from = rollout[index - 1] + bodyOriginOffset
+            let to = rollout[index] + bodyOriginOffset
             if let hit = collisionService.firstSweptCollision(
                 from: from,
                 to: to,
@@ -18815,6 +19985,12 @@ final class DroneSimulationViewModel: ObservableObject {
     private func resetFixedWingRuntimeRouteStart() {
         fixedWingRuntimeRouteStartKey = nil
         fixedWingRuntimeRouteStartPosition = nil
+        hybridVTOLRouteCursor.reset()
+        hybridVTOLStopAndPivotGate.reset()
+        hybridVTOLProtectedRouteHoldPosition = nil
+        hybridVTOLEmergencyHoldPosition = nil
+        hybridVTOLRouteAltitudeLift = 0.0
+        hybridVTOLRouteBlockedSeconds = 0.0
         fixedWingGuidanceDeferredThroughTick = simulationTickCounter
         // A waypoint handoff changes only the runtime join anchor. The static
         // mission route, safe route and obstacle-grid caches remain valid.
@@ -18992,6 +20168,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let startPlanar = SIMD2<Float>(routeStart.x, routeStart.z)
         let targetPlanar = SIMD2<Float>(target.x, target.z)
         let routePoints: [SIMD2<Float>]
+        let traversalMode: ProtectedRouteTraversalMode
 
         if let safeRoute = safeFixedWingRoute(
             from: [startPlanar, targetPlanar],
@@ -19000,6 +20177,7 @@ final class DroneSimulationViewModel: ObservableObject {
             targetAltitude: targetAltitude
         ) {
             routePoints = safeRoute.points
+            traversalMode = safeRoute.traversalMode
         } else if !navigationObstacles(including: activeNoFlyZones).isEmpty {
             return FixedWingRouteTrackingContext(
                 routeIdentifier: "\(routeSeed):blocked",
@@ -19007,10 +20185,12 @@ final class DroneSimulationViewModel: ObservableObject {
                 minimumWaypointIndex: nil,
                 preferredLoiterCenter: nil,
                 preferredLoiterRadius: nil,
+                blockReason: fixedWingSafeRouteFailureReason ?? "safe_route_unavailable",
                 flyableRoute: nil
             )
         } else {
             routePoints = compactedPlanarPath([startPlanar, targetPlanar])
+            traversalMode = .continuousWingborne
         }
 
         let compactedRoutePoints = compactedPlanarPath(routePoints)
@@ -19021,6 +20201,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 minimumWaypointIndex: nil,
                 preferredLoiterCenter: nil,
                 preferredLoiterRadius: nil,
+                blockReason: "compacted_route_degenerate",
                 flyableRoute: nil
             )
         }
@@ -19034,14 +20215,16 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
         let routeIdentifier = fixedWingRouteIdentifier(
-            prefix: routeSeed,
+            prefix: "\(routeSeed):traversal:\(traversalMode.rawValue)",
             waypoints: Array(routeWaypoints.dropFirst()).map(\.position)
         )
-        let flyableRoute = buildFixedWingFlyableRoute(
-            fromRuntimeWaypoints: routeWaypoints,
-            routeIdentifier: routeIdentifier,
-            wing: wing
-        )
+        let flyableRoute = traversalMode == .continuousWingborne
+            ? buildFixedWingFlyableRoute(
+                fromRuntimeWaypoints: routeWaypoints,
+                routeIdentifier: routeIdentifier,
+                wing: wing
+            )
+            : nil
         let validationEnvelope = fixedWingRouteValidationEnvelope(
             wing: wing,
             targetAltitude: targetAltitude
@@ -19053,9 +20236,14 @@ final class DroneSimulationViewModel: ObservableObject {
             minimumWaypointIndex: 1,
             preferredLoiterCenter: target,
             preferredLoiterRadius: wing.loiterRadiusMeters,
-            turnsValidated: true,
-            validatedTurnRadiusMeters: validationEnvelope.turnRadius,
-            validatedAirspeedMps: validationEnvelope.airspeed,
+            traversalMode: traversalMode,
+            turnsValidated: traversalMode == .continuousWingborne,
+            validatedTurnRadiusMeters: traversalMode == .continuousWingborne
+                ? validationEnvelope.turnRadius
+                : nil,
+            validatedAirspeedMps: traversalMode == .continuousWingborne
+                ? validationEnvelope.airspeed
+                : nil,
             flyableRoute: flyableRoute
         )
     }
@@ -19135,6 +20323,7 @@ final class DroneSimulationViewModel: ObservableObject {
                         preferredLoiterCenter: nil,
                         preferredLoiterRadius: nil,
                         turnsValidated: false,
+                        blockReason: "mission_join_blocked_no_active_target",
                         flyableRoute: nil
                     )
                 }
@@ -19166,6 +20355,7 @@ final class DroneSimulationViewModel: ObservableObject {
                     minimumWaypointIndex: nil,
                     preferredLoiterCenter: nil,
                     preferredLoiterRadius: nil,
+                    blockReason: "mission_route_too_short_with_no_fly_zones",
                     flyableRoute: nil
                 )
             }
@@ -19185,6 +20375,7 @@ final class DroneSimulationViewModel: ObservableObject {
                     minimumWaypointIndex: nil,
                     preferredLoiterCenter: nil,
                     preferredLoiterRadius: nil,
+                    blockReason: "direct_mission_route_needs_reroute",
                     flyableRoute: nil
                 )
             }
@@ -19197,7 +20388,10 @@ final class DroneSimulationViewModel: ObservableObject {
             )
             let plannedWaypoints = fixedWingPathPoints.enumerated().map { index, point in
                 FixedWingRouteWaypoint(
-                    position: point,
+                    position: HybridVTOLRouteBridge.normalizedPlannerPosition(
+                        point,
+                        targetAltitude: targetAltitude
+                    ),
                     missionWaypointIndex: index == fixedWingPathPoints.count - 1 ? 0 : nil,
                     waypointIdentifier: index == fixedWingPathPoints.count - 1 ? targetMarkerState?.id.uuidString : nil
                 )
@@ -21043,7 +22237,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// same speed/radius contract as execution; a fixed 320 m window was shorter than the required
     /// roll-in + turn horizon for the logged 26 m/s climb.
     private func meshNavigationQueryRadiusMeters() -> Float {
-        guard selectedDroneProfile.airframeClass == .fixedWing else {
+        guard activeAirframeUsesWingNavigation else {
             return min(320.0, Self.fixedWingMaximumMeshQueryRadiusMeters)
         }
         let wing = activeFixedWingParameters()
@@ -21066,7 +22260,12 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func navigationBandClearanceMeters() -> Float {
-        guard selectedDroneProfile.airframeClass == .fixedWing else {
+        // A VTOL route must be certified for the wing-borne regime before the transition starts.
+        //
+        // Switching this margin at the hover/cruise threshold made the obstacle cache change under
+        // an active leg and left the transition itself protected by the smaller fuselage proxy.
+        // Fixed-wing and hybrid routes now use one invariant envelope for their whole lifetime.
+        guard activeAirframeUsesWingNavigation else {
             return Self.navigationBandClearanceMeters
         }
         return max(
@@ -21084,7 +22283,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return min(assistAltitude, max(0.0, state.position.y))
         }
         if activeRouteTargetSource != .none, let legAltitude = activeRouteTargetAltitude {
-            if selectedDroneProfile.airframeClass == .fixedWing {
+            if activeAirframeUsesWingNavigation {
                 return min(legAltitude, max(0.0, state.position.y))
             }
             return legAltitude
@@ -21101,6 +22300,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private struct NavigationObstacleCacheKey: Hashable {
         let revision: UInt64
+        /// Fixed-wing and hybrid routes use a full body envelope and a longer mesh horizon.
+        let usesWingNavigation: Bool
         /// Lowest/highest bucket of the full climb/descent corridor used to filter obstacles.
         let navigationBand: Int
         let navigationCeilingBand: Int
@@ -21117,19 +22318,20 @@ final class DroneSimulationViewModel: ObservableObject {
         let revision = sceneController.environmentRevision
         // 10 m buckets: fine enough that the set matches the complete altitude corridor actually
         // flown, coarse enough that ordinary altitude keeping does not rebuild the grid.
-        let altitudeBand: ClosedRange<Float> = selectedDroneProfile.airframeClass == .fixedWing
+        let altitudeBand: ClosedRange<Float> = activeAirframeUsesWingNavigation
             ? fixedWingProtectedAltitudeRange()
             : navigationBandAltitude()...navigationBandAltitude()
         let navigationBand = Int((altitudeBand.lowerBound / 10.0).rounded(.down))
         let navigationCeilingBand = Int((altitudeBand.upperBound / 10.0).rounded(.down))
         let navigationRadiusBucket = Int((
-            selectedDroneProfile.airframeClass == .fixedWing
+            activeAirframeUsesWingNavigation
                 ? fixedWingNavigationEnvelopeRadius
                 : selectedDroneProfile.collisionRadius
         ) * 4.0)
         guard usesMeshCellsForPlanning else {
             return NavigationObstacleCacheKey(
                 revision: revision,
+                usesWingNavigation: activeAirframeUsesWingNavigation,
                 navigationBand: navigationBand,
                 navigationCeilingBand: navigationCeilingBand,
                 navigationRadiusBucket: navigationRadiusBucket,
@@ -21144,6 +22346,7 @@ final class DroneSimulationViewModel: ObservableObject {
         // is rebuilt when the aircraft actually enters new geometry, not on every metre flown.
         return NavigationObstacleCacheKey(
             revision: revision,
+            usesWingNavigation: activeAirframeUsesWingNavigation,
             navigationBand: navigationBand,
             navigationCeilingBand: navigationCeilingBand,
             navigationRadiusBucket: navigationRadiusBucket,
@@ -23750,6 +24953,56 @@ final class DroneSimulationViewModel: ObservableObject {
         lastFiniteState = state
     }
 
+    /// How far the airframe's own geometry reaches below `state.position` when it is resting
+    /// correctly on the ground — 0 for anything that sits on its belly or gear, ~0.40 m for a
+    /// WingtraOne standing on its tail.
+    ///
+    /// This is the one number three separate layers each used to answer differently, and the
+    /// disagreement is what destroyed the tailsitter on arm. The physics ground clamp is
+    /// rest-normalized (`origin.y == supportY` at rest, see `contactGroundClearance`), which by
+    /// construction leaves everything below the origin *inside* the terrain. The environment
+    /// collision pass did not know that, so it read a permanent 0.40 m penetration: the log shows
+    /// `[Impact] tier=scrape comp=propeller.FL src=world.mesh.cell.-1.2 E=0.0J` repeating from the
+    /// first frame, grinding the propeller from 0.96 to 0.47, and the penetration resolver throwing
+    /// the aircraft off the pad ("мгновенно отпружинил на пару метров"). The renderer meanwhile
+    /// applied its own hand-typed `0.39 * |sin(pitch)|`.
+    ///
+    /// Now all three use this: the clamp implicitly (it *is* this offset), collision by lifting the
+    /// swept spheres, the renderer by lifting the mesh. Taken from the pristine profile so battle
+    /// damage cannot move the ground, and attitude-independent because a rigid body's origin does
+    /// not migrate — the lift says where the origin sits in the airframe, not how it is posed.
+    var vehicleGroundRestOffset: Float {
+        pristineVehicleContactProfile.lowestPointOffset(
+            orientation: VehicleContactProfile.restOrientation(
+                for: selectedDroneProfile.airframeStyle
+            )
+        )
+    }
+
+    /// World-space translation from the legacy ground-reference position to the rigid body's
+    /// visual/contact origin. Keeping this as one shared value prevents render, collision and
+    /// fracture math from assigning a tailsitter three different poses.
+    var vehicleBodyOriginWorldOffset: SIMD3<Float> {
+        SIMD3<Float>(0.0, vehicleGroundRestOffset, 0.0)
+    }
+
+    /// How far this airframe's attitude has departed from the one it rests on the ground in,
+    /// in radians: 0 sitting correctly, ~π/2 on its side, π inverted.
+    ///
+    /// Built from the direction that points at the sky *at rest* — level-up for a belly-lander,
+    /// the nose for a tailsitter — carried into world space by the current attitude and compared
+    /// with world up. Deliberately not an Euler angle: roll and pitch stop being separable near
+    /// ±90° of pitch, which is precisely where a tailsitter lives, and reading them there reports
+    /// a stationary aircraft as lying on its wing. Yaw cannot affect this, so heading is free.
+    private func groundRestAttitudeDeviation(of aircraft: DroneState) -> Float {
+        let restAttitude = VehicleContactProfile.restOrientation(
+            for: selectedDroneProfile.airframeStyle
+        )
+        let restUpBody = simd_act(restAttitude.inverse, SIMD3<Float>(0.0, 1.0, 0.0))
+        let up = simd_act(attitudeQuaternion(of: aircraft), restUpBody)
+        return acos(up.y.clamped(to: -1.0...1.0))
+    }
+
     private func spawnOrientation(for profile: DroneModelProfile) -> SIMD3<Float> {
         // A tailsitter rests nose-up on its tail (pitch = +90°), not flat —
         // matching the hover transition controller's rest target
@@ -23944,18 +25197,16 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if previousState.position.y > previousSupportY + groundClearance + 0.06,
            state.position.y <= supportY + groundClearance + 0.02 {
-            // Same tailsitter carve-out as severeAttitudeOnGround below: a
-            // correct nose-up touchdown (pitch ~ +90°) shouldn't itself
-            // count as impact severity — measure deviation from the
-            // expected rest pitch instead of raw magnitude.
-            let pitchSeverityTerm: Float = selectedDroneProfile.airframeStyle == .tailsitterVTOL
-                ? abs(abs(previousState.orientation.y) - .pi / 2)
-                : abs(previousState.orientation.y)
+            // Attitude severity is deviation from *this airframe's* rest attitude — a correct
+            // nose-up touchdown is not a violent one. Same measure as `severeAttitudeOnGround`
+            // below, for the same reason: the Euler roll/pitch pair it used to read is degenerate
+            // at a tailsitter's rest attitude.
+            let attitudeSeverityTerm = groundRestAttitudeDeviation(of: previousState)
             let touchdownSeverity =
                 abs(previousState.velocity.y) * 1.45 +
                 simd_length(SIMD2<Float>(previousState.velocity.x, previousState.velocity.z)) * 0.72 +
                 simd_length(previousState.angularVelocity) * 0.42 +
-                (abs(previousState.orientation.x) + pitchSeverityTerm) * 0.45
+                attitudeSeverityTerm * 0.45
             impactSeverityAccumulator = max(impactSeverityAccumulator, touchdownSeverity)
         }
 
@@ -23968,12 +25219,25 @@ final class DroneSimulationViewModel: ObservableObject {
         // the user reported — each arm attempt produced a thrust pulse
         // before being killed). Roll is unambiguous either way — tipping
         // onto a wingtip is never correct — so only that still counts.
-        let severeAttitudeOnGround: Bool
-        if selectedDroneProfile.airframeStyle == .tailsitterVTOL {
-            severeAttitudeOnGround = nearGround && abs(state.orientation.x) > 1.22
-        } else {
-            severeAttitudeOnGround = nearGround && (abs(state.orientation.x) > 1.22 || abs(state.orientation.y) > 1.22)
-        }
+        //
+        // The carve-out above was still not enough, because the surviving *roll* term reads an
+        // Euler angle that is ill-conditioned at exactly the tailsitter's rest attitude.
+        // `eulerFromFixedWingQuaternion` falls back to the previous yaw only while the nose is
+        // within ~4.6° of vertical (`horizontalForward < 0.08`); the moment the standing aircraft
+        // settles to 85° the fallback disengages, the heading moves into the yaw term and roll
+        // absorbs the rest. Measured on the user's arm: a stationary WingtraOne, velocity
+        // (-0.005, -0.016, -0.009) m/s, reported `ori = (roll 70.2°, pitch 85.3°, yaw 70.1°)` and
+        // was destroyed by a 69.9° roll threshold — `impactSev=0.0 damageCritical=false`, the
+        // attitude test was the only thing that fired.
+        //
+        // So measure the physical thing instead of the parameterisation: the angle between where
+        // the sky is and where this airframe's own rest attitude says the sky should be. That is
+        // zero for a belly-lander sitting level and zero for a tailsitter standing on its tail,
+        // 90° for either one on its side, 180° inverted, and it has no singularity anywhere. It
+        // replaces both the roll and the pitch test, and needs no per-airframe branch at all. On
+        // the crash sample above it reads 4.7°.
+        let severeAttitudeOnGround = nearGround
+            && groundRestAttitudeDeviation(of: state) > 1.22
         let hasCrashCondition =
             physicalState == .crashed ||
             (severeAttitudeOnGround && groundContactAccumulator > 0.12)

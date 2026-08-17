@@ -164,6 +164,102 @@ struct CollisionObstacle {
         return outsideDistance + insideDistance
     }
 
+    /// Planar signed distance from a *segment* to this obstacle's real footprint.
+    ///
+    /// The point form above is what the navigation grid rasterises with, so anything that judges a
+    /// planned route has to use the same footprint or the two disagree about the same world.
+    /// Measuring a segment against the obstacle's bounding circle instead demands `hypot(a, b)` of
+    /// stand-off from the *centre* of an a×b building — 45 m from a 40×80 m block whose long face
+    /// is only 20 m out — which no street in a real city can satisfy. On an imported OSM map that
+    /// made every route the planner found unacceptable to the validator that judged it.
+    func planarSignedDistance(fromSegment start: SIMD2<Float>, to end: SIMD2<Float>) -> Float {
+        guard let halfExtents = planarHalfExtents else {
+            return Self.distanceToSegment(planarCenter, start, end) - radius
+        }
+
+        let localStart = rotate(start - planarCenter, radians: -yawRadians)
+        let localEnd = rotate(end - planarCenter, radians: -yawRadians)
+
+        // Overlap has to be tested separately: a segment driven straight through the box has both
+        // endpoints outside it and all four corners off to the side, so a nearest-feature search
+        // alone would report it as comfortably clear.
+        if Self.segmentIntersectsBox(localStart, localEnd, halfExtents: halfExtents) {
+            // The segment pierces the footprint. Every caller compares this against a clearance
+            // threshold, so what is wanted is a guaranteed lower bound on the true minimum — and
+            // the deepest the box distance field reaches anywhere is `-min(halfExtents)`, at its
+            // centre. Returning a nearest-feature value here instead reports a comfortable zero
+            // for a segment driven straight through the middle of a building, because both
+            // endpoints are outside it and all four corners are off to the side.
+            return min(
+                planarSignedDistance(to: start),
+                planarSignedDistance(to: end),
+                -min(halfExtents.x, halfExtents.y)
+            )
+        }
+
+        // Disjoint convex sets: the closest pair always involves a vertex of one and a feature of
+        // the other, so the two endpoints and the four corners exhaust the candidates.
+        var minimum = min(planarSignedDistance(to: start), planarSignedDistance(to: end))
+        let corners = [
+            SIMD2<Float>(halfExtents.x, halfExtents.y),
+            SIMD2<Float>(halfExtents.x, -halfExtents.y),
+            SIMD2<Float>(-halfExtents.x, halfExtents.y),
+            SIMD2<Float>(-halfExtents.x, -halfExtents.y)
+        ]
+        for corner in corners {
+            minimum = min(minimum, Self.distanceToSegment(corner, localStart, localEnd))
+        }
+        return minimum
+    }
+
+    private static func distanceToSegment(
+        _ point: SIMD2<Float>,
+        _ start: SIMD2<Float>,
+        _ end: SIMD2<Float>
+    ) -> Float {
+        let delta = end - start
+        let lengthSquared = simd_length_squared(delta)
+        guard lengthSquared > 0.00000001 else {
+            return simd_distance(point, start)
+        }
+        let projection = simd_dot(point - start, delta) / lengthSquared
+        let clamped = min(max(projection, 0.0), 1.0)
+        return simd_distance(point, start + delta * clamped)
+    }
+
+    private static func segmentIntersectsBox(
+        _ start: SIMD2<Float>,
+        _ end: SIMD2<Float>,
+        halfExtents: SIMD2<Float>
+    ) -> Bool {
+        var entry: Float = 0.0
+        var exit: Float = 1.0
+        let delta = end - start
+        for axis in 0..<2 {
+            let origin = start[axis]
+            let direction = delta[axis]
+            let lower = -halfExtents[axis]
+            let upper = halfExtents[axis]
+            if abs(direction) < 0.000001 {
+                if origin < lower || origin > upper {
+                    return false
+                }
+                continue
+            }
+            var near = (lower - origin) / direction
+            var far = (upper - origin) / direction
+            if near > far {
+                swap(&near, &far)
+            }
+            entry = max(entry, near)
+            exit = min(exit, far)
+            if entry > exit {
+                return false
+            }
+        }
+        return true
+    }
+
     func planarContact(
         to point: SIMD2<Float>,
         droneRadius: Float

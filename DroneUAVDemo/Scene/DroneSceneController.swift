@@ -538,6 +538,7 @@ final class DroneSceneController {
 
     private var orbitAngle: Float = 0.0
     private var activeProfile: DroneModelProfile
+    private var vehicleGroundRestLift: Float = 0.0
     private var currentWeather: WeatherModel = .normal
     private var payloadOpticsShadowQualityActive = false
     private var lastPayloadOpticsShadowWeatherPreset: WeatherPreset?
@@ -3885,6 +3886,12 @@ final class DroneSceneController {
         spectatorCameraNode.simdPosition += (desiredMotion / length) * max(0.0, speed) * deltaTime
     }
 
+    /// See `DroneSimulationViewModel.vehicleGroundRestOffset` — how far the airframe reaches below
+    /// `state.position` when resting correctly. 0 for everything that sits on its belly or gear.
+    func setVehicleGroundRestLift(_ lift: Float) {
+        vehicleGroundRestLift = lift.isFinite ? max(0.0, lift) : 0.0
+    }
+
     func setDroneProfile(_ profile: DroneModelProfile) {
         activeProfile = profile
 
@@ -4902,20 +4909,24 @@ final class DroneSceneController {
         diagnosticMode: DiagnosticOverlayMode,
         deltaTime: Float
     ) {
-        // Tailsitters rest nose-up on their tail, well below the airframe
-        // origin physics measures from — but position.y == 0 at rest is a
-        // load-bearing contract for arm/takeoff ground checks and throttle
-        // floors elsewhere (see the reverted physics-side attempt at this
-        // same offset: it silently made the aircraft read as already
-        // airborne at rest and self-throttle on arm). Applying the same
-        // half-fuselage-length lift purely to the *rendered* position avoids
-        // that: physics keeps its simple y=0 ground contract, only the
-        // visible mesh moves up so the tail doesn't clip into the terrain.
-        // Matches buildWingtraOneGenII's actual fuselage capsule length.
-        let tailsitterVisualLift: Float = activeProfile.airframeStyle == .tailsitterVTOL
-            ? 0.39 * abs(sin(state.orientation.y))
-            : 0.0
-        droneNode.position = SCNVector3(state.position.x, state.position.y + tailsitterVisualLift, state.position.z)
+        // Tailsitters rest nose-up on their tail, well below the airframe origin physics measures
+        // from — but position.y == supportY at rest is a load-bearing contract for arm/takeoff
+        // ground checks and throttle floors elsewhere (see the reverted physics-side attempt at
+        // this same offset: it silently made the aircraft read as already airborne at rest and
+        // self-throttle on arm). So the offset lives outside physics, and the *same* offset now
+        // serves the renderer and the environment-collision sweep:
+        // `DroneSimulationViewModel.vehicleGroundRestOffset`, measured from the contact profile
+        // rather than typed in by hand against a particular fuselage capsule.
+        //
+        // Deliberately not scaled by `|sin(pitch)|` any more. A rigid body's origin does not
+        // migrate as it pitches; the old attitude-scaled version agreed with the collision geometry
+        // only at rest and drifted from it everywhere else, which is exactly the disagreement that
+        // ground the tailsitter's propeller into the terrain on arm.
+        droneNode.position = SCNVector3(
+            state.position.x,
+            state.position.y + vehicleGroundRestLift,
+            state.position.z
+        )
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
 

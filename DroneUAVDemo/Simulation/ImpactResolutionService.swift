@@ -154,6 +154,7 @@ final class ImpactResolutionService {
         graph: inout VehicleComponentGraph,
         massProperties: VehicleMassProperties,
         airframeClass: AirframeClass,
+        bodyOriginWorldOffset: SIMD3<Float> = .zero,
         rotorsSpinning: Bool,
         deltaTime: Float,
         applyDamage: Bool = true,
@@ -181,10 +182,11 @@ final class ImpactResolutionService {
         let normal = simd_normalize(contact.contactNormal)
         let mass = max(0.2, massProperties.totalMassKg)
         let travel: SIMD3<Float> = state.position - previousPosition
-        let poseAtHit: SIMD3<Float> = previousPosition + travel * contact.hitFraction
+        let statePositionAtHit: SIMD3<Float> = previousPosition + travel * contact.hitFraction
+        let bodyOriginAtHit = statePositionAtHit + bodyOriginWorldOffset
         let contactBodyAtHit = simd_act(
             orientation.conjugate,
-            contact.contactPoint - poseAtHit
+            contact.contactPoint - bodyOriginAtHit
         )
         let resolvedComponentID = nearestComponentID(
             to: contactBodyAtHit,
@@ -196,7 +198,7 @@ final class ImpactResolutionService {
         // resting/tangential contact (a parked aircraft brushing a wall, a
         // gear sphere kissing a container roof at zero approach speed) does
         // NOT get shoved around every tick.
-        let worldCoM = poseAtHit + simd_act(orientation, massProperties.centerOfMassOffset)
+        let worldCoM = bodyOriginAtHit + simd_act(orientation, massProperties.centerOfMassOffset)
         let leverArm = contact.contactPoint - worldCoM
         let omegaWorld = worldAngularVelocity(state: state, orientation: orientation, airframeClass: airframeClass)
         let incomingLinearVelocity = state.velocity
@@ -236,7 +238,7 @@ final class ImpactResolutionService {
         // (its own path — not a jump to some other point), with a small
         // normal separation so the next tick doesn't immediately re-collide.
         let separation = max(0.005, contact.sphereRadius * 0.04)
-        state.position = poseAtHit + normal * separation
+        state.position = statePositionAtHit + normal * separation
 
         // Effective mass along the contact normal: 1/K with the standard
         // K = 1/m + n·((I⁻¹(r×n))×r). Glancing hits far from the CoM see a
@@ -377,12 +379,12 @@ final class ImpactResolutionService {
                 tangent * (fractureFrictionImpulse * clampedTransmissionFraction)
 
             let jointBodyPoint = (parentComponent.localPosition + rootComponent.localPosition) * 0.5
-            let jointWorldPoint = poseAtHit + simd_act(orientation, jointBodyPoint)
+            let jointWorldPoint = bodyOriginAtHit + simd_act(orientation, jointBodyPoint)
             let retainedProperties = graph.massProperties(
                 excludingComponentIDs: part.componentIDs
             )
             let retainedMass = max(0.2, retainedProperties.totalMassKg)
-            let retainedCoMWorld = poseAtHit + simd_act(
+            let retainedCoMWorld = bodyOriginAtHit + simd_act(
                 orientation,
                 retainedProperties.centerOfMassOffset
             )
@@ -406,7 +408,7 @@ final class ImpactResolutionService {
             )
 
             let partMass = max(0.005, part.massProperties.totalMassKg)
-            let partCoMWorld = poseAtHit + simd_act(
+            let partCoMWorld = bodyOriginAtHit + simd_act(
                 orientation,
                 part.massProperties.centerOfMassOffset
             )
@@ -487,6 +489,7 @@ final class ImpactResolutionService {
         graph: inout VehicleComponentGraph,
         massProperties: VehicleMassProperties,
         airframeClass: AirframeClass,
+        bodyOriginWorldOffset: SIMD3<Float> = .zero,
         rotorsSpinning: Bool,
         deltaTime: Float,
         applyDamage: Bool = true,
@@ -512,6 +515,7 @@ final class ImpactResolutionService {
             graph: &graph,
             massProperties: massProperties,
             airframeClass: airframeClass,
+            bodyOriginWorldOffset: bodyOriginWorldOffset,
             rotorsSpinning: rotorsSpinning,
             deltaTime: deltaTime,
             applyDamage: applyDamage,

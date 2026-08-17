@@ -1418,6 +1418,26 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         if crashOrDisarmed || context.batteryState.isDepleted || control.mode == .emergencyStop {
             throttleCommand = 0.0
         } else {
+            // A rotor-borne hover holds an altitude, not a throttle setting.
+            //
+            // `hover()` locks the stick at `hoverLockThrottle`, and for a hybrid VTOL that constant
+            // is `max(hover, transition)` — the transition figure, measured on the Wingtra at 0.60
+            // against a hover equilibrium near 0.45. With nothing closing the loop the aircraft
+            // simply left: `mode=hover thr=0.61 vy=5.80` held flat from 227 m past 338 m and still
+            // climbing when the recording ended, and the same lock added ~19 m every time a mission
+            // handed a waypoint through hover. Opening the floor below is not enough — the floor
+            // cannot lower a command that is already above it. The multirotor step has always
+            // closed this loop; the VTOL step never did.
+            let holdsAltitudeInHover = (control.mode == .hover || control.controlMode == .hoverAssist) &&
+                state.vtolTransitionProgress < 0.25 &&
+                wingborneBlend < 0.25 &&
+                control.targetPosition.y.isFinite
+            if holdsAltitudeInHover {
+                let altitudeError = control.targetPosition.y - state.position.y
+                let correction = (altitudeError * 0.05 - state.velocity.y * 0.03) *
+                    baseline.effectiveVerticalResponseFactor
+                throttleCommand = (throttleCommand + correction).clamped(to: 0.0...1.0)
+            }
             let hoverPhaseFloor: Float
             switch control.mode {
             case .takeoff:
@@ -1434,8 +1454,28 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let cruiseFloor = max(baseline.cruiseReferenceThrottle, baseline.effectiveMinimumSafeFlightThrottle)
             let allowGroundTakeoffFloor = profile.airframeStyle == .tailsitterVTOL && control.mode == .takeoff
             let manualTailsitterThrottle = profile.airframeStyle == .tailsitterVTOL && control.mode == .manual
+            // An autopilot altitude hold must be allowed to command *below*
+            // the nominal hover floor while arresting an upward climb.  The
+            // old hard floor erased the controller's `-verticalVelocity`
+            // term: a blocked Wingtra held progress=0 but stayed pinned at
+            // its +5.8 m/s ascent governor indefinitely. Keep the ordinary
+            // floor for a requested climb, but let a rotor-borne altitude
+            // controller command both sides of hover thrust while holding or
+            // descending; otherwise it cannot brake or settle at the target.
+            let targetAltitude = control.targetPosition.y
+            let hasFiniteAltitudeTarget = targetAltitude.isFinite
+            let holdOrDescentRequested = hasFiniteAltitudeTarget &&
+                targetAltitude <= state.position.y + 0.35
+            let aboveAltitudeTarget = hasFiniteAltitudeTarget &&
+                state.position.y > targetAltitude + 0.15
+            let rotorBorneAltitudeControl = control.mode != .manual &&
+                state.vtolTransitionProgress < 0.25 &&
+                wingborneBlend < 0.25 &&
+                (holdOrDescentRequested || aboveAltitudeTarget)
             let throttleFloor: Float
             if manualTailsitterThrottle {
+                throttleFloor = 0.0
+            } else if rotorBorneAltitudeControl {
                 throttleFloor = 0.0
             } else if state.position.y > 0.15 || allowGroundTakeoffFloor {
                 throttleFloor = hoverPhaseFloor * (1.0 - wingborneBlend) + cruiseFloor * wingborneBlend
@@ -1842,7 +1882,19 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let targetPitchRad = (1.0 - s.vtolTransitionProgress) * (Float.pi / 2) +
             s.vtolTransitionProgress * cruisePitchTarget
-        let pitchRateTarget = ((targetPitchRad - currentPitch) * 2.2).clamped(to: -1.6...1.6)
+        // `asin(forward.y)` cannot tell 89 degrees from 91 degrees: both
+        // report +89.  Using that folded Euler pitch in the feedback loop
+        // made a tiny nose-up overshoot look like a nose-down error, so the
+        // controller accelerated the Wingtra through the vertical and into a
+        // full tumble.  Project the shortest forward-vector correction onto
+        // the *actual body pitch axis* instead.  Its sign remains correct on
+        // both sides of vertical and through an arbitrary hover heading.
+        let pitchAttitudeError = signedTailsitterPitchError(
+            orientation: state.fixedWingOrientationQuat,
+            targetPitch: targetPitchRad,
+            targetHeading: control.targetOrientation.z
+        )
+        let pitchRateTarget = (pitchAttitudeError * 2.2).clamped(to: -1.6...1.6)
         // Roll/yaw's stick-tracking rate commands (desiredRates.x/z) come from
         // angleTrackingRates, which diffs against state.orientation.x/z — the
         // roll/yaw Euler angles extracted via atan2(-forward.x, -forward.z).
@@ -1869,12 +1921,75 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // horizontal axis and creates the left-right resonance seen in flight.
         // Blend that command back to the normal body-yaw channel as the
         // tailsitter pitches toward cruise.
-        let yawRateCommand = desiredRates.z * 0.45
-        let hoverDesiredRates = SIMD3<Float>(
-            desiredRates.x * rollCommandBlend + yawRateCommand * hoverYawBlend,
-            pitchRateTarget,
-            yawRateCommand * (1.0 - hoverYawBlend)
+        // At nose-up hover the normal forward-vector yaw is undefined.  The
+        // horizontal projection of body -Y is not: it is the direction the
+        // nose will move when the aircraft pitches toward cruise.  Close the
+        // heading loop on that physical vector instead of the frozen Euler
+        // fallback used by `desiredMultirotorRates`.
+        let hoverHeading = tailsitterHoverHeading(
+            orientation: state.fixedWingOrientationQuat,
+            fallback: state.orientation.z
         )
+        let manualYawIntent = control.yawIntent.clamped(to: -1.6...1.6)
+        let hoverWorldYawRate: Float
+        if abs(manualYawIntent) > 0.001 {
+            hoverWorldYawRate = manualYawIntent * 1.65 * s.authority
+        } else {
+            hoverWorldYawRate = wrap(control.targetOrientation.z - hoverHeading) * 2.2
+        }
+        let hoverYawRateCommand = (hoverWorldYawRate * 0.45).clamped(to: -0.85...0.85)
+        // Convert the desired world-up rotation into true body rates.  This
+        // derives the nose-up sign from the quaternion (`body +Z` points
+        // down there) and continues smoothly as the body pitches to cruise,
+        // instead of relying on a hand-written axis/sign special case.
+        let hoverYawBodyOmega = simd_act(
+            state.fixedWingOrientationQuat.conjugate,
+            SIMD3<Float>(0, hoverYawRateCommand, 0)
+        )
+        let hoverYawRateChannels = SIMD3<Float>(
+            hoverYawBodyOmega.z,
+            hoverYawBodyOmega.x,
+            hoverYawBodyOmega.y
+        )
+        let cruiseYawRateCommand = (desiredRates.z * 0.45).clamped(to: -0.85...0.85)
+        let legacyHoverDesiredRates = SIMD3<Float>(
+            desiredRates.x * rollCommandBlend + hoverYawRateChannels.x * hoverYawBlend,
+            pitchRateTarget + hoverYawRateChannels.y * hoverYawBlend,
+            cruiseYawRateCommand * (1.0 - hoverYawBlend) + hoverYawRateChannels.z * hoverYawBlend
+        )
+        // At progress ~= 0 the two generic lateral commands above disappear:
+        // `rollCommandBlend` is zero at the Euler singularity and the pitch
+        // channel is reserved for the 90-degree transition target. That made
+        // a route-following Wingtra hold altitude and heading correctly but
+        // physically unable to translate toward a nearby hover waypoint.
+        //
+        // Treat the command as the equivalent multirotor attitude while the
+        // vehicle is rotor-borne. Multiplying the ordinary multicopter target
+        // (yaw * pitch * roll) by the tailsitter's +90-degree rest rotation
+        // maps its body -Z thrust onto the same world vector as multicopter
+        // body +Y thrust. Feedback is a shortest-arc quaternion error, so it
+        // stays well-defined at vertical and through heading wrap.
+        let rotorBorneFraction = control.mode != .manual && control.controlMode != .acro
+            ? (1.0 - s.vtolTransitionProgress / 0.12).clamped(to: 0.0...1.0)
+            : 0.0
+        let rotorBorneAttitudeBlend = rotorBorneFraction * rotorBorneFraction * (3.0 - 2.0 * rotorBorneFraction)
+        var rotorBorneDesiredRates = s.crashOrDisarmed
+            ? SIMD3<Float>(repeating: 0.0)
+            : tailsitterRotorBorneAttitudeRates(
+                orientation: state.fixedWingOrientationQuat,
+                // Keep the tilt correction in the aircraft's current heading
+                // plane. Heading itself is applied below as a true world-up
+                // rotation; combining both into one geodesic quaternion error
+                // briefly separated body-forward course from the physical
+                // hover heading and created a telemetry gauge jump as the
+                // forward projection crossed the near-vertical threshold.
+                targetHeading: hoverHeading,
+                commandRoll: control.targetOrientation.x,
+                commandPitch: control.targetOrientation.y
+            )
+        rotorBorneDesiredRates += hoverYawRateChannels
+        let hoverDesiredRates = legacyHoverDesiredRates * (1.0 - rotorBorneAttitudeBlend) +
+            rotorBorneDesiredRates * rotorBorneAttitudeBlend
         let hoverRateGain = SIMD3<Float>(4.2 * s.authority, 6.4 * s.authority, 3.2 * s.authority)
         let hoverAngularDamping = SIMD3<Float>(5.2, 3.2, 4.8)
         let hoverAngularAccel = (hoverDesiredRates - state.bodyAngularVelocity) * hoverRateGain - state.bodyAngularVelocity * hoverAngularDamping
@@ -1927,6 +2042,33 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             dt: dt
         )
 
+        // Preserve a meaningful yaw/roll decomposition while the nose is
+        // vertical. The quaternion remains authoritative; this only chooses
+        // the non-singular tailsitter heading as the Euler gauge consumed by
+        // telemetry and the remaining guidance call sites. Blend that gauge
+        // into forward-course yaw before the 0.08 extraction boundary. A hard
+        // hover-heading -> forward-heading switch made a perfectly smooth
+        // quaternion transition appear as a several-degree telemetry jump.
+        let nextForward = simd_act(next.fixedWingOrientationQuat, SIMD3<Float>(0, 0, -1))
+        let nextHorizontalForward = simd_length(SIMD2<Float>(nextForward.x, nextForward.z))
+        if nextHorizontalForward < 0.08 {
+            let hoverGauge = tailsitterHoverHeading(
+                orientation: next.fixedWingOrientationQuat,
+                fallback: state.orientation.z
+            )
+            let forwardGauge = nextHorizontalForward > 1e-5
+                ? atan2(-nextForward.x, -nextForward.z)
+                : hoverGauge
+            let rawGaugeBlend = ((nextHorizontalForward - 0.02) / 0.055).clamped(to: 0.0...1.0)
+            let gaugeBlend = rawGaugeBlend * rawGaugeBlend * (3.0 - 2.0 * rawGaugeBlend)
+            let preferredYaw = wrap(hoverGauge + wrap(forwardGauge - hoverGauge) * gaugeBlend)
+            next.orientation = eulerFromFixedWingQuaternion(
+                next.fixedWingOrientationQuat,
+                fallback: next.orientation,
+                preferredYaw: preferredYaw
+            )
+        }
+
         // --- 11. VTOL phase telemetry label (display-only, see VTOLFlightPhase).
         if next.vtolTransitionProgress <= 0.02 {
             switch control.mode {
@@ -1953,16 +2095,27 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// formula, so it matches this codebase's specific composition order
     /// (`yaw * pitch * roll`, roll about Z) and its existing yaw convention
     /// (`atan2(-dx, -dz)`, also used by `FixedWingAutopilotInput`). Gimbal-locks
-    /// at pitch = ±90° like any Euler representation — display-only, never fed
-    /// back into the physics integration.
-    private func eulerFromFixedWingQuaternion(_ q: simd_quatf, fallback: SIMD3<Float>? = nil) -> SIMD3<Float> {
+    /// at pitch = ±90° like any Euler representation. The quaternion remains
+    /// authoritative for integration, but this value is also consumed by a
+    /// few legacy guidance/rate call sites, so the tailsitter step supplies a
+    /// physical hover-heading fallback near vertical.
+    private func eulerFromFixedWingQuaternion(
+        _ q: simd_quatf,
+        fallback: SIMD3<Float>? = nil,
+        preferredYaw: Float? = nil
+    ) -> SIMD3<Float> {
         let forward = simd_act(q, SIMD3<Float>(0, 0, -1))
         let pitch = asin(forward.y.clamped(to: -1.0...1.0))
         let horizontalForward = simd_length(SIMD2<Float>(forward.x, forward.z))
         let fallbackYaw = fallback?.z ?? 0.0
-        let yaw = horizontalForward < 0.08 && fallbackYaw.isFinite
-            ? fallbackYaw
-            : atan2(-forward.x, -forward.z)
+        let yaw: Float
+        if let preferredYaw, preferredYaw.isFinite {
+            yaw = wrap(preferredYaw)
+        } else if horizontalForward < 0.08 && fallbackYaw.isFinite {
+            yaw = fallbackYaw
+        } else {
+            yaw = atan2(-forward.x, -forward.z)
+        }
 
         let upWorld = simd_act(q, SIMD3<Float>(0, 1, 0))
         let invYaw = simd_quatf(angle: -yaw, axis: SIMD3<Float>(0, 1, 0))
@@ -1971,6 +2124,108 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let roll = atan2(-unrolled.x, unrolled.y)
 
         return SIMD3<Float>(roll, pitch, yaw)
+    }
+
+    /// Physical heading of a nose-up tailsitter.  Body -Y is horizontal at
+    /// hover and points in the direction produced by a pitch-down transition;
+    /// unlike body forward it does not collapse to a zero-length X/Z vector.
+    private func tailsitterHoverHeading(
+        orientation: simd_quatf,
+        fallback: Float
+    ) -> Float {
+        let transitionDirection = -simd_act(orientation, SIMD3<Float>(0, 1, 0))
+        let planarLength = simd_length(SIMD2<Float>(transitionDirection.x, transitionDirection.z))
+        guard planarLength > 1e-5 else {
+            return fallback.isFinite ? wrap(fallback) : 0.0
+        }
+        return atan2(-transitionDirection.x, -transitionDirection.z)
+    }
+
+    /// Quaternion-stable hover attitude target for tailsitter translation.
+    /// `commandRoll`/`commandPitch` use the existing multicopter convention;
+    /// their resultant tilt is capped so diagonal route commands cannot spend
+    /// too much of the available thrust on horizontal acceleration.
+    private func tailsitterRotorBorneAttitudeRates(
+        orientation: simd_quatf,
+        targetHeading: Float,
+        commandRoll: Float,
+        commandPitch: Float
+    ) -> SIMD3<Float> {
+        let safeRoll = commandRoll.isFinite ? commandRoll : 0.0
+        let safePitch = commandPitch.isFinite ? commandPitch : 0.0
+        var lateralAttitude = SIMD2<Float>(safeRoll, safePitch)
+        let maximumTilt = Float(16.0).degreesToRadians
+        let requestedTilt = simd_length(lateralAttitude)
+        if requestedTilt > maximumTilt {
+            lateralAttitude *= maximumTilt / requestedTilt
+        }
+
+        let heading = targetHeading.isFinite ? wrap(targetHeading) : 0.0
+        let yawQ = simd_quatf(angle: heading, axis: SIMD3<Float>(0, 1, 0))
+        let pitchQ = simd_quatf(angle: lateralAttitude.y, axis: SIMD3<Float>(1, 0, 0))
+        let rollQ = simd_quatf(angle: lateralAttitude.x, axis: SIMD3<Float>(0, 0, 1))
+        let restQ = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
+        let targetQ = yawQ * pitchQ * rollQ * restQ
+
+        let orientationLength = simd_length(orientation.vector)
+        guard orientationLength.isFinite, orientationLength > 1e-6 else {
+            return .zero
+        }
+        let currentQ = simd_quatf(vector: orientation.vector / orientationLength)
+        var errorVector = (currentQ.conjugate * targetQ).vector
+        let errorLength = simd_length(errorVector)
+        guard errorLength.isFinite, errorLength > 1e-6 else {
+            return .zero
+        }
+        errorVector /= errorLength
+        if errorVector.w < 0.0 {
+            errorVector = -errorVector
+        }
+
+        let imaginary = SIMD3<Float>(errorVector.x, errorVector.y, errorVector.z)
+        let imaginaryLength = simd_length(imaginary)
+        guard imaginaryLength.isFinite, imaginaryLength > 1e-6 else {
+            return .zero
+        }
+        let errorAngle = 2.0 * atan2(imaginaryLength, max(0.0, errorVector.w))
+        let bodyError = imaginary * (errorAngle / imaginaryLength)
+
+        // Engine rate order is (roll about body Z, pitch about body X, yaw
+        // about body Y), not quaternion imaginary XYZ order.
+        return SIMD3<Float>(
+            (bodyError.z * 0.99).clamped(to: -0.85...0.85),
+            (bodyError.x * 2.2).clamped(to: -1.6...1.6),
+            (bodyError.y * 2.2).clamped(to: -1.6...1.6)
+        )
+    }
+
+    /// Signed pitch error about the current body-X axis.  This is deliberately
+    /// vector/quaternion based: scalar Euler pitch folds after +/-90 degrees
+    /// and cannot be used as a stable tailsitter feedback signal.
+    private func signedTailsitterPitchError(
+        orientation: simd_quatf,
+        targetPitch: Float,
+        targetHeading: Float
+    ) -> Float {
+        let currentForward = simd_act(orientation, SIMD3<Float>(0, 0, -1))
+        let bodyPitchAxis = simd_act(orientation, SIMD3<Float>(1, 0, 0))
+        let heading = wrap(targetHeading)
+        let horizontalForward = SIMD3<Float>(-sin(heading), 0, -cos(heading))
+        let unconstrainedTargetForward = simd_normalize(
+            horizontalForward * cos(targetPitch) + SIMD3<Float>(0, 1, 0) * sin(targetPitch)
+        )
+        // Heading and pitch may both be changing during transition.  A body-X
+        // rate can only rotate within the plane perpendicular to body X, so
+        // compare against the reachable projection rather than letting a
+        // simultaneous heading error bias the pitch magnitude or sign.
+        let projectedTarget = unconstrainedTargetForward -
+            bodyPitchAxis * simd_dot(unconstrainedTargetForward, bodyPitchAxis)
+        let projectedLength = simd_length(projectedTarget)
+        guard projectedLength > 1e-5 else { return 0.0 }
+        let targetForward = projectedTarget / projectedLength
+        let sine = simd_dot(simd_cross(currentForward, targetForward), bodyPitchAxis)
+        let cosine = simd_dot(currentForward, targetForward).clamped(to: -1.0...1.0)
+        return atan2(sine, cosine)
     }
 
     /// Integrates the fixed-wing attitude quaternion from true body-frame

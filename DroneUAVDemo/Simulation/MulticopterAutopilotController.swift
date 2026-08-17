@@ -14,6 +14,10 @@ struct AutopilotTrackingContext {
     /// Height above the surface beneath the aircraft. Only the fixed-wing path reads it, for
     /// low-altitude bank protection; the default keeps every other caller unchanged.
     var heightAboveSurfaceMeters: Float = .greatestFiniteMagnitude
+    /// Derivative gain for the vertical hold loop. Hybrid VTOLs need more
+    /// damping while rotor-borne because their transition-sized propulsion
+    /// has substantially more thrust authority than an ordinary multirotor.
+    var verticalVelocityDampingGain: Float = 0.03
 }
 
 struct AutopilotControlCommand: Equatable {
@@ -89,7 +93,7 @@ final class MulticopterAutopilotController {
             fallback: 0.0
         )
         let verticalComp =
-            (altitudeError * 0.06 - safeState.velocity.y * 0.03) *
+            (altitudeError * 0.06 - safeState.velocity.y * clampFloat(context.verticalVelocityDampingGain, to: 0.02...0.10)) *
             context.flightBaseline.effectiveVerticalResponseFactor
         let commandedThrottle = clampFloat(
             context.flightBaseline.hoverLockThrottle + verticalComp,
@@ -115,12 +119,26 @@ final class MulticopterAutopilotController {
                 alignmentScale = 1.0
             }
 
-            let worldIntent = headingVector * alignmentScale -
+            // `speedScale` throttles how fast we are willing to *go*. It must not throttle the
+            // brake: scaling the velocity-damping term by it means the more firmly guidance asks
+            // the aircraft to hold still, the less authority it has to stop.
+            //
+            // Measured on the hybrid-VTOL stop-and-pivot hold, which runs at `speedScale` 0.28.
+            // Entering the node at 4 m/s produced a 2.7 deg command — 0.46 m/s^2 — and the
+            // aircraft was still above 0.55 m/s after 15 s, having coasted 14.2 m past its own
+            // latched hold; at 8 m/s it coasted 26.7 m. A city street is narrower than that.
+            // `HybridVTOLStopAndPivotGate` releases the node only below 0.55 m/s, so the pivot
+            // never completed: the aircraft kept translating and yawing in
+            // `vtol_stop_and_pivot_align` until it hit a facade, never having reached the wing
+            // transition that mode hands off to.
+            //
+            // Position error keeps the scale, so a cautious approach still approaches cautiously.
+            let worldIntent = headingVector * alignmentScale * controlScale -
                 planarVelocity * MulticopterRouteTuning.lateralVelocityDamping
-            let bodyAxes = bodyPlanarAxes(forYaw: safeState.orientation.z)
+            let bodyAxes = planarBodyAxes(safeState)
             let localForwardIntent = simd_dot(worldIntent, bodyAxes.forward)
             let localRightIntent = simd_dot(worldIntent, bodyAxes.right)
-            let lateralGain = MulticopterRouteTuning.lateralPositionGain * controlScale
+            let lateralGain = MulticopterRouteTuning.lateralPositionGain
             lateralRoll = clampFloat(-localRightIntent * lateralGain, to: -16.0...16.0)
             lateralPitch = clampFloat(-localForwardIntent * lateralGain, to: -16.0...16.0)
         } else {
@@ -257,6 +275,44 @@ final class MulticopterAutopilotController {
         // Match the physics convention: yaw 0 points body-forward along -Z.
         let yaw = atan2(-direction.x, -direction.y)
         return yaw.isFinite ? yaw : 0.0
+    }
+
+    /// Planar body frame the lateral command is projected into.
+    ///
+    /// Euler yaw is extracted with `atan2` on the forward vector's X/Z components, which is
+    /// singular at pitch = ±90 deg — exactly the attitude a tailsitter holds for all of hover, and
+    /// visibly so: a flight log of a hovering Wingtra shows the extracted roll/yaw walking
+    /// monotonically (+40 -> +125 deg) with the airframe barely moving. Projecting into a frame
+    /// built from that number sends the braking vector somewhere other than along travel; measured
+    /// on a 4 m/s stop-and-pivot entry, the aircraft shed no speed at all, drifted 15 m
+    /// cross-track and accelerated to 13 m/s.
+    ///
+    /// Body -Y stays horizontal at the nose-up attitude and is the gauge both the engine's
+    /// tailsitter step and the view model already use for heading. Blend towards it as the nose
+    /// approaches vertical so an ordinary multirotor (pitch ~ 0) is bit-for-bit unchanged and no
+    /// airframe sees the frame jump at a threshold.
+    private func planarBodyAxes(
+        _ state: DroneState
+    ) -> (forward: SIMD2<Float>, right: SIMD2<Float>) {
+        let eulerAxes = bodyPlanarAxes(forYaw: state.orientation.z)
+        let gimbalMargin = abs(cos(state.orientation.y))
+        guard gimbalMargin.isFinite, gimbalMargin < 0.5 else {
+            return eulerAxes
+        }
+        let direction = -simd_act(state.fixedWingOrientationQuat, SIMD3<Float>(0, 1, 0))
+        let planar = SIMD2<Float>(direction.x, direction.z)
+        guard planar.x.isFinite, planar.y.isFinite,
+              simd_length_squared(planar) > 1e-8 else {
+            return eulerAxes
+        }
+        let hoverAxes = bodyPlanarAxes(forYaw: atan2(-planar.x, -planar.y))
+        let blend = clampFloat((0.5 - gimbalMargin) / 0.5, to: 0.0...1.0)
+        let forward = eulerAxes.forward * (1.0 - blend) + hoverAxes.forward * blend
+        let right = eulerAxes.right * (1.0 - blend) + hoverAxes.right * blend
+        guard simd_length_squared(forward) > 1e-6, simd_length_squared(right) > 1e-6 else {
+            return eulerAxes
+        }
+        return (forward: simd_normalize(forward), right: simd_normalize(right))
     }
 
     private func bodyPlanarAxes(forYaw yaw: Float) -> (forward: SIMD2<Float>, right: SIMD2<Float>) {

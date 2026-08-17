@@ -210,6 +210,7 @@
 		1000000000000000000002B2 /* FixedWingRouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A9 /* FixedWingRouteBuilder.swift */; };
 		1000000000000000000002B3 /* MulticopterAutopilotController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AA /* MulticopterAutopilotController.swift */; };
 		1000000000000000000002B4 /* FixedWingAutopilotController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AB /* FixedWingAutopilotController.swift */; };
+		10000000000000000000FB21 /* HybridVTOLRouteCursor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FB20 /* HybridVTOLRouteCursor.swift */; };
 		1000000000000000000002B5 /* InputBindingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AC /* InputBindingsStore.swift */; };
 		1000000000000000000002B6 /* InputCaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AD /* InputCaptureCoordinator.swift */; };
 		1000000000000000000002B7 /* BindingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002AE /* BindingsViewModel.swift */; };
@@ -626,6 +627,7 @@
 		1000000000000000000002A9 /* FixedWingRouteBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingRouteBuilder.swift; sourceTree = "<group>"; };
 		1000000000000000000002AA /* MulticopterAutopilotController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MulticopterAutopilotController.swift; sourceTree = "<group>"; };
 		1000000000000000000002AB /* FixedWingAutopilotController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedWingAutopilotController.swift; sourceTree = "<group>"; };
+		10000000000000000000FB20 /* HybridVTOLRouteCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HybridVTOLRouteCursor.swift; sourceTree = "<group>"; };
 		1000000000000000000002AC /* InputBindingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBindingsStore.swift; sourceTree = "<group>"; };
 		1000000000000000000002AD /* InputCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputCaptureCoordinator.swift; sourceTree = "<group>"; };
 		1000000000000000000002AE /* BindingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BindingsViewModel.swift; sourceTree = "<group>"; };
@@ -1033,6 +1035,7 @@
 				1000000000000000000002C0 /* FixedWingAutopilot.swift */,
 				10000000000000000000FA10 /* FixedWingRouteRepair.swift */,
 				1000000000000000000002AB /* FixedWingAutopilotController.swift */,
+				10000000000000000000FB20 /* HybridVTOLRouteCursor.swift */,
 				1000000000000000000002A9 /* FixedWingRouteBuilder.swift */,
 				100000000000000000000149 /* FlightBaselineResolver.swift */,
 				10000000000000000000016B /* MissionDraftBuilder.swift */,
@@ -1818,6 +1821,7 @@
 				1000000000000000000002C1 /* FixedWingAutopilot.swift in Sources */,
 				10000000000000000000FA11 /* FixedWingRouteRepair.swift in Sources */,
 				1000000000000000000002B4 /* FixedWingAutopilotController.swift in Sources */,
+				10000000000000000000FB21 /* HybridVTOLRouteCursor.swift in Sources */,
 				1000000000000000000002B2 /* FixedWingRouteBuilder.swift in Sources */,
 				10000000000000000000028B /* MissionPersistenceAdapter.swift in Sources */,
 				100000000000000000000275 /* MissionProgressTracker.swift in Sources */,
