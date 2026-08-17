@@ -108,13 +108,27 @@ final class MulticopterAutopilotController {
             // Soft slowdown when the nose is far from the heading: the more
             // the drone needs to turn, the less translational thrust we ask
             // for. This avoids the "drift sideways while turning" feel.
+            let bodyAxes = planarBodyAxes(safeState)
             let alignmentScale: Float
-            if targetHasBearing {
-                let yawErrorRadians = computeYawError(
-                    fromYaw: safeState.orientation.z,
-                    desiredYawRadians: yawRadiansForDirection(headingVector)
-                )
-                alignmentScale = forwardScaleFromYawError(yawErrorRadians)
+            if targetHasBearing, headingDistance > 1e-4 {
+                // Measure the nose-to-target angle in the same frame the command is applied in.
+                //
+                // This used to read Euler yaw, which is singular at the nose-up hover attitude and
+                // therefore noise for the whole of a tailsitter's hover: a stationary aircraft
+                // logged its extracted roll/yaw wandering -13, +34, +22, 0, -10 deg on consecutive
+                // ticks. `forwardScaleFromYawError` turned that noise into a translation command
+                // that alternated between full and near-zero, and the aircraft limit-cycled with a
+                // 0.2-1.7 m amplitude around its route node — never simultaneously inside the
+                // 0.70 m capture radius and below the 0.55 m/s capture speed, so the cursor never
+                // advanced and the mission stalled on a node it was already sitting on.
+                //
+                // `planarBodyAxes` is the non-singular frame (body -Y projected to the ground) and
+                // is what the roll/pitch command below is resolved into, so the alignment term and
+                // the command it scales now agree by construction.
+                let direction = headingVector / headingDistance
+                let alongNose = simd_dot(direction, bodyAxes.forward)
+                let acrossNose = simd_dot(direction, bodyAxes.right)
+                alignmentScale = forwardScaleFromYawError(atan2(acrossNose, alongNose))
             } else {
                 alignmentScale = 1.0
             }
@@ -135,7 +149,6 @@ final class MulticopterAutopilotController {
             // Position error keeps the scale, so a cautious approach still approaches cautiously.
             let worldIntent = headingVector * alignmentScale * controlScale -
                 planarVelocity * MulticopterRouteTuning.lateralVelocityDamping
-            let bodyAxes = planarBodyAxes(safeState)
             let localForwardIntent = simd_dot(worldIntent, bodyAxes.forward)
             let localRightIntent = simd_dot(worldIntent, bodyAxes.right)
             let lateralGain = MulticopterRouteTuning.lateralPositionGain

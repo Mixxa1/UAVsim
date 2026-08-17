@@ -143,6 +143,11 @@ struct HybridVTOLStopAndPivotGate: Equatable {
     static let maximumPlanarSpeedMps: Float = 0.55
     static let maximumHeadingErrorRadians: Float = 6.0 * .pi / 180.0
     static let maximumYawRateRadiansPerSecond: Float = 0.18
+    /// How far a still-moving aircraft may coast past its latched hold before the hold follows it.
+    /// Wider than the position loop's settled error (0.44 m measured) so an aircraft that has
+    /// actually stopped keeps a fixed anchor, narrower than any braking distance so a coasting one
+    /// is never told to fly back.
+    static let maximumHoldDriftMeters: Float = 1.5
 
     struct Guidance: Equatable {
         var shouldHold: Bool
@@ -189,6 +194,31 @@ struct HybridVTOLStopAndPivotGate: Equatable {
 
         guard pivotPending else {
             return .translate
+        }
+
+        // "Stop" means come to rest, not fly back to where the stop was ordered.
+        //
+        // The hold is latched the instant the cursor reaches a node, while the aircraft still
+        // carries its leg speed. Rotor-borne braking is bounded by the tilt envelope — measured at
+        // a 16 deg command, 12 deg achieved — so it coasts well past the latch: 11.3 m from 8 m/s,
+        // 18.5 m from 14 m/s. Holding the original point then commands a return flight over that
+        // distance, during which the aircraft is moving again and never satisfies the release
+        // speed, so the pivot never completes. In the air it reads as the aircraft sailing past its
+        // waypoint and coming back for it, across geometry the protected route never approved.
+        //
+        // While the aircraft is still travelling, let the hold follow it, so the command is "shed
+        // speed" rather than "shed speed and then return". Once it is at or below the release
+        // speed the hold stops moving and becomes a real anchor for the pivot.
+        if let latched = holdPosition,
+           planarSpeed.isFinite,
+           planarSpeed > Self.maximumPlanarSpeedMps {
+            let drift = simd_distance(
+                SIMD2<Float>(position.x, position.z),
+                SIMD2<Float>(latched.x, latched.z)
+            )
+            if drift > Self.maximumHoldDriftMeters {
+                holdPosition = position
+            }
         }
 
         let isSettled = planarSpeed.isFinite

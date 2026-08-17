@@ -247,8 +247,108 @@ final class AutoPathPlannerService {
         }
     }
 
+    /// The obstacle geometry the last grid was built from, bucketed for local queries.
+    ///
+    /// The navigation grid decides passability by measuring the obstacle distance **at the cell
+    /// centre**. The point the aircraft actually flies through can be half a cell diagonal away
+    /// from that centre — `cellSize * 0.707`, which is 3.77 m on the 5.33 m grid a 6.4 km imported
+    /// world produces — while a building's entire blocked margin is 1.4 m + the airframe radius,
+    /// 3.0 m for this vehicle. The margin is *smaller than the sampling error*, so a free cell
+    /// guarantees nothing at all about a route drawn across it: measured on rotated OSM-like
+    /// footprints, planned routes passed 1.32 m from a wall against a 1.6 m airframe radius.
+    ///
+    /// Shrinking the cell is not the fix — that budget is what keeps a 6.4 km city reachable at all
+    /// (see `preferredCellSize`), and inflating the margin by the sampling error seals 20 m streets.
+    /// So rasterisation stays coarse and keeps its own job, deciding *which streets*; the route it
+    /// produces is then measured against the real footprints and corrected.
+    private struct ObstacleClearanceField {
+        struct Entry {
+            let obstacle: CollisionObstacle
+            /// What rasterisation intended to keep clear: airframe radius plus the source's buffer.
+            let softClearance: Float
+            /// Below this the airframe overlaps the geometry. Never above `softClearance`, so the
+            /// deliberately tight container handling keeps its own reduced envelope.
+            let hardClearance: Float
+        }
+
+        private let entries: [Entry]
+        private let bucketSize: Float
+        private var buckets: [Int64: [Int32]] = [:]
+        /// Entries whose envelope spans too many buckets to be worth indexing.
+        private var oversized: [Int32] = []
+
+        var isEmpty: Bool { entries.isEmpty }
+
+        init(entries: [Entry], bucketSize: Float) {
+            self.entries = entries
+            self.bucketSize = max(8.0, bucketSize)
+
+            for (offset, entry) in entries.enumerated() {
+                let reach = (entry.obstacle.planarHalfExtents.map(simd_length) ?? entry.obstacle.radius)
+                    + entry.softClearance
+                let center = entry.obstacle.planarCenter
+                guard center.x.isFinite, center.y.isFinite, reach.isFinite else { continue }
+
+                let minX = Int(floor((center.x - reach) / self.bucketSize))
+                let maxX = Int(floor((center.x + reach) / self.bucketSize))
+                let minZ = Int(floor((center.y - reach) / self.bucketSize))
+                let maxZ = Int(floor((center.y + reach) / self.bucketSize))
+                let span = (maxX - minX + 1) * (maxZ - minZ + 1)
+                if span > 256 {
+                    oversized.append(Int32(offset))
+                    continue
+                }
+
+                for z in minZ...maxZ {
+                    for x in minX...maxX {
+                        buckets[Self.key(x, z), default: []].append(Int32(offset))
+                    }
+                }
+            }
+        }
+
+        private static func key(_ x: Int, _ z: Int) -> Int64 {
+            (Int64(Int32(truncatingIfNeeded: x)) << 32) | Int64(UInt32(bitPattern: Int32(truncatingIfNeeded: z)))
+        }
+
+        /// Every entry whose envelope can reach the given planar box.
+        func forEachNear(
+            minimum: SIMD2<Float>,
+            maximum: SIMD2<Float>,
+            _ body: (Entry) -> Void
+        ) {
+            guard !entries.isEmpty else { return }
+
+            for offset in oversized {
+                body(entries[Int(offset)])
+            }
+
+            let minX = Int(floor(minimum.x / bucketSize))
+            let maxX = Int(floor(maximum.x / bucketSize))
+            let minZ = Int(floor(minimum.y / bucketSize))
+            let maxZ = Int(floor(maximum.y / bucketSize))
+            guard minX <= maxX, minZ <= maxZ else { return }
+
+            // A route segment spans a bucket or two, so the duplicate suppression is a short list
+            // rather than a set.
+            var visited: [Int32] = []
+            visited.reserveCapacity(16)
+            for z in minZ...maxZ {
+                for x in minX...maxX {
+                    guard let bucket = buckets[Self.key(x, z)] else { continue }
+                    for offset in bucket {
+                        if visited.contains(offset) { continue }
+                        visited.append(offset)
+                        body(entries[Int(offset)])
+                    }
+                }
+            }
+        }
+    }
+
     private var gridSignature: GridSignature?
     private var grid: NavigationGrid?
+    private var clearanceField: ObstacleClearanceField?
     private var planSignature: PlanSignature?
     /// The last search that returned nothing, with the grid it ran against. Repeating it is the
     /// worst case there is, so it is repeated only once the world, the start cell or the goal moves.
@@ -435,12 +535,33 @@ final class AutoPathPlannerService {
             preserveExactGoal: grid.cell(forWorld: goal).map { !grid.isBlocked($0) } ?? false
         )
         let smoothed = smoothPath(route, maxStep: max(1.0, grid.cellSize * 0.9))
+        let repaired = repairRouteClearance(smoothed)
 
-        waypoints = smoothed
-        currentIndex = smoothed.count > 1 ? 1 : 0
-        pathLengthMeters = pathLength(of: smoothed)
-        startPoint = smoothed.first ?? start
-        goalPoint = smoothed.last ?? goal
+        // A route the airframe cannot fit through is not a route. Reporting it as one is how a
+        // corridor that looked free on a coarse grid becomes a building strike; upstream already
+        // answers a missing route by climbing, which is the correct response to a street this tight.
+        guard repaired.worstPenetration <= Self.routeClearanceFailureToleranceMeters else {
+            status = .blocked
+            statusReason = String(format: "route_clearance_short_%.2fm", repaired.worstPenetration)
+            waypoints.removeAll(keepingCapacity: false)
+            currentIndex = 0
+            pathLengthMeters = 0.0
+            startPoint = start
+            goalPoint = goal
+            activeWaypointCount = 0
+            planSignature = nextPlanSignature
+            failedPlan = nextPlanSignature
+            failedPlanGridSignature = gridSignature
+            lastPlanDurationMs = (CFAbsoluteTimeGetCurrent() - planStart) * 1000.0
+            return
+        }
+
+        let finalRoute = repaired.route
+        waypoints = finalRoute
+        currentIndex = finalRoute.count > 1 ? 1 : 0
+        pathLengthMeters = pathLength(of: finalRoute)
+        startPoint = finalRoute.first ?? start
+        goalPoint = finalRoute.last ?? goal
         status = .valid
         statusReason = reason
         activeWaypointCount = waypoints.count
@@ -642,6 +763,8 @@ final class AutoPathPlannerService {
             }
         }
 
+        var clearanceEntries: [ObstacleClearanceField.Entry] = []
+        clearanceEntries.reserveCapacity(obstacles.count)
         for obstacle in obstacles {
             rasterizeObstacle(
                 obstacle,
@@ -649,7 +772,28 @@ final class AutoPathPlannerService {
                 minimumObstacleRadiusFactor: minimumObstacleRadiusFactor,
                 grid: &newGrid
             )
+            // Same exclusion the rasteriser makes: container floors and roofs are surfaces to land
+            // on, not walls to route around.
+            if obstacle.source == "container.floor" || obstacle.source == "container.roof" {
+                continue
+            }
+            let soft = max(0.12, obstacleInflation(
+                for: obstacle.source,
+                droneRadius: droneRadius,
+                minimumRadiusFactor: minimumObstacleRadiusFactor
+            ))
+            clearanceEntries.append(
+                ObstacleClearanceField.Entry(
+                    obstacle: obstacle,
+                    softClearance: soft,
+                    hardClearance: min(soft, max(0.0, droneRadius))
+                )
+            )
         }
+        clearanceField = ObstacleClearanceField(
+            entries: clearanceEntries,
+            bucketSize: max(24.0, newGrid.cellSize * 4.0)
+        )
         dilateBlockedCells(
             additionalClearance: additionalHardClearance,
             grid: &newGrid
@@ -1136,6 +1280,239 @@ final class AutoPathPlannerService {
 
         output.append(path[path.count - 1])
         return output
+    }
+
+    /// How far a route point may be nudged in one relaxation step.
+    private static let routeClearanceMaximumShiftMeters: Float = 1.25
+    private static let routeClearanceRelaxationIterations = 10
+    private static let routeClearanceSubdivisionPasses = 4
+    /// A segment shorter than this is not worth splitting further.
+    private static let routeClearanceMinimumSegmentMeters: Float = 0.75
+    /// How much clearance a segment may lose to its own endpoints before it is split.
+    private static let routeClearanceCornerCutMeters: Float = 0.20
+    /// Residual overlap treated as measurement noise rather than a refusal to fly.
+    private static let routeClearanceFailureToleranceMeters: Float = 0.05
+
+    private struct RouteClearanceRepair {
+        var route: [SIMD3<Float>]
+        /// How deep the worst point of the finished route still sits inside an airframe envelope.
+        var worstPenetration: Float
+    }
+
+    /// Pushes a grid-derived route out to the clearance its rasterisation was meant to give it.
+    ///
+    /// See `ObstacleClearanceField` for why the grid cannot deliver this on its own. Points are
+    /// moved by the summed outward push of every footprint whose envelope they violate, so a gap
+    /// too narrow to satisfy both sides settles in the middle of it instead of oscillating, and
+    /// segments that still cut a corner between two now-clear vertices are subdivided until they
+    /// do not.
+    private func repairRouteClearance(_ route: [SIMD3<Float>]) -> RouteClearanceRepair {
+        guard route.count > 2,
+              let field = clearanceField,
+              !field.isEmpty else {
+            return RouteClearanceRepair(route: route, worstPenetration: 0.0)
+        }
+
+        var points = route
+        for _ in 0..<Self.routeClearanceSubdivisionPasses {
+            relaxRouteClearance(&points, field: field)
+            straightenRouteClearance(&points, field: field)
+
+            var subdivided: [SIMD3<Float>] = [points[0]]
+            subdivided.reserveCapacity(points.count + 16)
+            var insertedAny = false
+            for index in 1..<points.count {
+                let a = points[index - 1]
+                let b = points[index]
+                if simd_distance(a, b) > Self.routeClearanceMinimumSegmentMeters,
+                   segmentPenetration(a, b, field: field) > 0.0 ||
+                    cornerCutDepth(a, b, field: field) > Self.routeClearanceCornerCutMeters {
+                    subdivided.append((a + b) * 0.5)
+                    insertedAny = true
+                }
+                subdivided.append(b)
+            }
+            points = subdivided
+            if !insertedAny { break }
+        }
+
+        // The first and last segments are anchored to positions this service does not own — the
+        // aircraft's current position and the requested goal. When one of those already sits inside
+        // an envelope, refusing to plan strands the aircraft exactly where it most needs a route.
+        var worst: Float = 0.0
+        if points.count > 3 {
+            for index in 2..<(points.count - 1) {
+                worst = max(worst, segmentPenetration(points[index - 1], points[index], field: field))
+            }
+        }
+        return RouteClearanceRepair(route: points, worstPenetration: worst)
+    }
+
+    private func relaxRouteClearance(
+        _ points: inout [SIMD3<Float>],
+        field: ObstacleClearanceField
+    ) {
+        guard points.count > 2 else { return }
+
+        for _ in 0..<Self.routeClearanceRelaxationIterations {
+            var maximumShift: Float = 0.0
+            for index in 1..<(points.count - 1) {
+                let planar = SIMD2<Float>(points[index].x, points[index].z)
+                var push = SIMD2<Float>(repeating: 0.0)
+                field.forEachNear(minimum: planar, maximum: planar) { entry in
+                    let distance = entry.obstacle.planarSignedDistance(to: planar)
+                    guard distance.isFinite, distance < entry.softClearance else { return }
+                    guard let direction = outwardDirection(from: entry.obstacle, at: planar) else { return }
+                    push += direction * (entry.softClearance - distance)
+                }
+
+                let magnitude = simd_length(push)
+                guard magnitude.isFinite, magnitude > 0.001 else { continue }
+                let step = min(magnitude, Self.routeClearanceMaximumShiftMeters)
+                let delta = push / magnitude * step
+                points[index].x += delta.x
+                points[index].z += delta.y
+                maximumShift = max(maximumShift, step)
+            }
+            if maximumShift < 0.02 { break }
+        }
+    }
+
+    /// Takes the kinks back out of what relaxation just bent, without giving up clearance.
+    ///
+    /// Pushing each point independently leaves a saw edge along a wall, and a saw edge is what the
+    /// heading loop turns into yaw hunting. A vertex is pulled back toward the line joining its
+    /// neighbours only where that costs no clearance at all — straightening that spends the stand-off
+    /// relaxation just won would hand the route straight back to the wall it was pushed off.
+    private func straightenRouteClearance(
+        _ points: inout [SIMD3<Float>],
+        field: ObstacleClearanceField
+    ) {
+        guard points.count > 2 else { return }
+
+        for index in 1..<(points.count - 1) {
+            let current = points[index]
+            let midpoint = (points[index - 1] + points[index + 1]) * 0.5
+            var candidate = current
+            candidate.x += (midpoint.x - current.x) * 0.35
+            candidate.z += (midpoint.z - current.z) * 0.35
+
+            if pointPenetration(candidate, field: field) > 0.0 { continue }
+            if softShortfall(candidate, field: field) > softShortfall(current, field: field) + 0.01 {
+                continue
+            }
+            if segmentPenetration(points[index - 1], candidate, field: field) > 0.0 { continue }
+            if segmentPenetration(candidate, points[index + 1], field: field) > 0.0 { continue }
+            points[index] = candidate
+        }
+    }
+
+    /// How much clearance the straight line between two points loses compared to the points
+    /// themselves — that is, how deep into a corner it cuts.
+    ///
+    /// Relaxation can only move vertices. A segment joining two vertices that both stand well clear
+    /// still bends toward a corner between them, because distance to a convex footprint dips below
+    /// both endpoints along a chord. Measured on rotated blocks, that dip alone left routes 1.67 m
+    /// from a wall with the next building 42 m away — nowhere near tight, just cut short. Splitting
+    /// the segment gives relaxation a vertex where the dip is, and the next pass pushes it out.
+    private func cornerCutDepth(
+        _ start: SIMD3<Float>,
+        _ end: SIMD3<Float>,
+        field: ObstacleClearanceField
+    ) -> Float {
+        let segment = segmentSoftShortfall(start, end, field: field)
+        let endpoints = max(softShortfall(start, field: field), softShortfall(end, field: field))
+        return segment - endpoints
+    }
+
+    private func segmentSoftShortfall(
+        _ start: SIMD3<Float>,
+        _ end: SIMD3<Float>,
+        field: ObstacleClearanceField
+    ) -> Float {
+        let a = SIMD2<Float>(start.x, start.z)
+        let b = SIMD2<Float>(end.x, end.z)
+        var worst: Float = 0.0
+        field.forEachNear(minimum: simd_min(a, b), maximum: simd_max(a, b)) { entry in
+            let distance = entry.obstacle.planarSignedDistance(fromSegment: a, to: b)
+            guard distance.isFinite else { return }
+            worst = max(worst, entry.softClearance - distance)
+        }
+        return worst
+    }
+
+    /// How far a point falls short of the stand-off rasterisation intended for it.
+    private func softShortfall(
+        _ point: SIMD3<Float>,
+        field: ObstacleClearanceField
+    ) -> Float {
+        let planar = SIMD2<Float>(point.x, point.z)
+        var worst: Float = 0.0
+        field.forEachNear(minimum: planar, maximum: planar) { entry in
+            let distance = entry.obstacle.planarSignedDistance(to: planar)
+            guard distance.isFinite else { return }
+            worst = max(worst, entry.softClearance - distance)
+        }
+        return worst
+    }
+
+    /// Outward unit direction of a footprint's distance field, by central difference.
+    ///
+    /// The box field is piecewise linear, so this is exact away from the diagonal ridges and only
+    /// needs the radial fallback on them.
+    private func outwardDirection(
+        from obstacle: CollisionObstacle,
+        at point: SIMD2<Float>
+    ) -> SIMD2<Float>? {
+        let h: Float = 0.05
+        let gradient = SIMD2<Float>(
+            obstacle.planarSignedDistance(to: point + SIMD2<Float>(h, 0.0)) -
+                obstacle.planarSignedDistance(to: point - SIMD2<Float>(h, 0.0)),
+            obstacle.planarSignedDistance(to: point + SIMD2<Float>(0.0, h)) -
+                obstacle.planarSignedDistance(to: point - SIMD2<Float>(0.0, h))
+        )
+
+        if gradient.x.isFinite, gradient.y.isFinite, simd_length_squared(gradient) > 1e-8 {
+            return simd_normalize(gradient)
+        }
+
+        let radial = point - obstacle.planarCenter
+        guard radial.x.isFinite, radial.y.isFinite, simd_length_squared(radial) > 1e-8 else {
+            return nil
+        }
+        return simd_normalize(radial)
+    }
+
+    private func pointPenetration(
+        _ point: SIMD3<Float>,
+        field: ObstacleClearanceField
+    ) -> Float {
+        let planar = SIMD2<Float>(point.x, point.z)
+        var worst: Float = 0.0
+        field.forEachNear(minimum: planar, maximum: planar) { entry in
+            let distance = entry.obstacle.planarSignedDistance(to: planar)
+            guard distance.isFinite else { return }
+            worst = max(worst, entry.hardClearance - distance)
+        }
+        return worst
+    }
+
+    /// Worst overlap along a whole segment, measured analytically against the real footprints —
+    /// the same measure `CollisionObstacle` gives a route validator, not a resampling of the grid.
+    private func segmentPenetration(
+        _ start: SIMD3<Float>,
+        _ end: SIMD3<Float>,
+        field: ObstacleClearanceField
+    ) -> Float {
+        let a = SIMD2<Float>(start.x, start.z)
+        let b = SIMD2<Float>(end.x, end.z)
+        var worst: Float = 0.0
+        field.forEachNear(minimum: simd_min(a, b), maximum: simd_max(a, b)) { entry in
+            let distance = entry.obstacle.planarSignedDistance(fromSegment: a, to: b)
+            guard distance.isFinite else { return }
+            worst = max(worst, entry.hardClearance - distance)
+        }
+        return worst
     }
 
     private func pathLength(of path: [SIMD3<Float>]) -> Float {

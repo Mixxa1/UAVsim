@@ -51,6 +51,12 @@ private func isFinite(_ value: simd_quatf) -> Bool {
         value.vector.z.isFinite && value.vector.w.isFinite
 }
 
+/// Angle between the airframe's thrust axis and vertical — how far the aircraft can lean to brake.
+private func thrustTilt(_ orientation: simd_quatf) -> Float {
+    let thrust = simd_normalize(simd_act(orientation, SIMD3<Float>(0, 0, -1)))
+    return acos(min(1.0, max(-1.0, simd_dot(thrust, SIMD3<Float>(0, 1, 0)))))
+}
+
 private func hoverOrientation(yaw: Float) -> simd_quatf {
     simd_quatf(angle: yaw, axis: SIMD3<Float>(0, 1, 0)) *
         simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
@@ -486,6 +492,10 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
     var gateReleasedSeconds: Float?
     var stoppingDistance: Float = 0.0
     var maximumSpeed = entrySpeed
+    var peakCommandedTilt: Float = 0.0
+    var peakAchievedTilt: Float = 0.0
+    var peakWingborne: Float = 0.0
+    var peakProgress: Float = 0.0
     var remainedFinite = true
     var hold = state.position
     var haveHold = false
@@ -511,7 +521,9 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
             headingErrorRadians: error,
             yawRateRadiansPerSecond: yawRate
         )
-        if let latched = guidance.holdPosition, !haveHold {
+        // Follow the gate's hold every tick. Latching it once here would test a hold the production
+        // gate does not command — it re-anchors a still-moving aircraft rather than flying it back.
+        if let latched = guidance.holdPosition {
             hold = latched
             haveHold = true
         }
@@ -534,6 +546,13 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
             flightBaseline: baseline,
             verticalVelocityDampingGain: 0.075
         ))
+        // What actually bounds the deceleration: the commanded tilt, the tilt the airframe reaches,
+        // and whether the wing has started carrying (which takes the aircraft out of the
+        // rotor-borne regime this braking law assumes).
+        peakCommandedTilt = max(peakCommandedTilt, max(abs(command.rollDegrees), abs(command.pitchDegrees)))
+        peakAchievedTilt = max(peakAchievedTilt, degrees(thrustTilt(state.fixedWingOrientationQuat)))
+        peakWingborne = max(peakWingborne, state.vtolWingborneBlend)
+        peakProgress = max(peakProgress, state.vtolTransitionProgress)
         state = engine.step(
             state: state,
             control: control(from: command),
@@ -557,6 +576,10 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
         stoppingDistance,
         maximumCrossTrack,
         maximumSpeed
+    ))
+    print(String(
+        format: "                  tilt cmd %.1f deg, achieved %.1f deg, wingborne %.2f, progress %.2f",
+        peakCommandedTilt, peakAchievedTilt, peakWingborne, peakProgress
     ))
     // Braking must shed speed along the direction of travel. A large cross-track means the
     // body-axis projection disagrees with the direction the airframe actually accelerates.
@@ -590,6 +613,117 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
         String(format: "pivot entered at %.1f m/s accelerated to %.1f m/s instead of arresting", entrySpeed, maximumSpeed)
     )
     check(remainedFinite, String(format: "pivot entered at %.1f m/s produced a non-finite state", entrySpeed))
+}
+
+// MARK: H. Closing on a node — the capture must actually happen
+//
+// Reaching a node is not the same as capturing it. `HybridVTOLRouteCursor` advances only when the
+// aircraft is simultaneously inside `stopAndPivotCaptureRadiusMeters` (0.70 m) and at or below
+// `HybridVTOLStopAndPivotGate.maximumPlanarSpeedMps`. A position loop that limit-cycles around the
+// node satisfies each condition alternately and neither together: measured on a stalled flight,
+// the node distance oscillated 0.2, 1.6, 1.4, 0.6, 1.2, 1.7, 0.3 m with the aircraft otherwise
+// stationary, and the mission stopped on a node it was already sitting on.
+//
+// These thresholds are the safety contract — a hover leg may not begin a metre inside a corner —
+// so this group asserts the aircraft can meet them as written, rather than relaxing them.
+
+print("--- H. node capture, not just node arrival ---")
+for approach in [Float(3.0), 12.0, 45.0] {
+    let engine = SimpleDronePhysicsEngine()
+    let autopilot = MulticopterAutopilotController()
+    let altitude: Float = 32.4
+    let heading = radians(-64.0)
+    var state = initialState(altitude: altitude, heading: heading)
+    let origin = state.position
+    let forward = SIMD2<Float>(-sin(heading), -cos(heading))
+    let node = SIMD3<Float>(
+        origin.x + forward.x * approach,
+        altitude,
+        origin.z + forward.y * approach
+    )
+    let nodePlanar = SIMD2<Float>(node.x, node.z)
+
+    var captureSeconds: Float?
+    var settledDistance: Float = .infinity
+    // Residual oscillation is a property of the *settled* state, so it is measured over the last
+    // five seconds only — including the approach would just report how far away the aircraft
+    // started.
+    let totalSteps = 60 * 45
+    let settlingWindowStart = totalSteps - 60 * 5
+    var minimumSettled: Float = .infinity
+    var maximumSettled: Float = 0.0
+    var remainedFinite = true
+
+    for step in 0..<totalSteps {
+        let elapsed = Float(step) * dt
+        let planar = SIMD2<Float>(state.position.x, state.position.z)
+        let toNode = nodePlanar - planar
+        let distance = simd_length(toNode)
+        let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        let bearing = distance > 0.5 ? atan2(-toNode.x, -toNode.y) : heading
+
+        if step >= settlingWindowStart {
+            minimumSettled = min(minimumSettled, distance)
+            maximumSettled = max(maximumSettled, distance)
+            settledDistance = distance
+        }
+        // The production capture test, verbatim.
+        if distance <= HybridVTOLRouteCursor.stopAndPivotCaptureRadiusMeters,
+           planarSpeed <= HybridVTOLStopAndPivotGate.maximumPlanarSpeedMps,
+           captureSeconds == nil {
+            captureSeconds = elapsed
+        }
+
+        let command = autopilot.command(for: AutopilotTrackingContext(
+            state: state,
+            physicalState: .airborne,
+            target: node,
+            targetAltitude: altitude,
+            speedScale: 0.52,
+            yawAlignToHome: false,
+            yawOverrideRadians: bearing,
+            deltaTime: dt,
+            flightBaseline: baseline,
+            verticalVelocityDampingGain: 0.075
+        ))
+        state = engine.step(
+            state: state,
+            control: control(from: command),
+            context: context,
+            deltaTime: dt
+        )
+        remainedFinite = remainedFinite && isFinite(state.position) &&
+            isFinite(state.velocity) && isFinite(state.fixedWingOrientationQuat)
+    }
+
+    let amplitude = maximumSettled - minimumSettled
+    print(String(
+        format: "H approach %5.1f m: capture %@ s, settled %.2f m, last-5s band %.2f...%.2f m (amplitude %.2f)",
+        approach,
+        captureSeconds.map { String(format: "%.2f", $0) } as NSString? ?? "never",
+        settledDistance,
+        minimumSettled,
+        maximumSettled,
+        amplitude
+    ))
+    check(
+        captureSeconds != nil,
+        String(format: "node %.1f m away was never captured: needs <= %.2f m and <= %.2f m/s at the same instant",
+               approach,
+               HybridVTOLRouteCursor.stopAndPivotCaptureRadiusMeters,
+               HybridVTOLStopAndPivotGate.maximumPlanarSpeedMps)
+    )
+    check(
+        settledDistance <= HybridVTOLRouteCursor.stopAndPivotCaptureRadiusMeters,
+        String(format: "aircraft settled %.2f m from a node %.1f m away instead of on it", settledDistance, approach)
+    )
+    // A limit cycle wider than the capture radius is the failure mode itself: each condition is
+    // met on alternate ticks and the cursor never advances.
+    check(
+        amplitude <= HybridVTOLRouteCursor.stopAndPivotCaptureRadiusMeters,
+        String(format: "approach of %.1f m left a %.2f m limit cycle around the node", approach, amplitude)
+    )
+    check(remainedFinite, String(format: "approach of %.1f m produced a non-finite state", approach))
 }
 
 // MARK: F. Full stop-and-pivot leg — pivot, then translate to the node
