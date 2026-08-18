@@ -1692,6 +1692,10 @@ final class DroneSimulationViewModel: ObservableObject {
     /// later leg belongs to the wing controller; this gate runs once.
     private var hybridVTOLDepartureAlignmentComplete = false
     /// Last transition-lever value actually issued, and when its push/no-push class last changed.
+    /// When the transition first became "low and still sinking", or nil while it is not.
+    private var hybridVTOLAltitudeAbortSince: Float?
+    /// How long that has to hold before it counts as the transition failing rather than sagging.
+    private static let hybridVTOLAltitudeAbortDwellSeconds: Float = 1.0
     private var hybridVTOLTransitionLeverLatched: Double?
     private var hybridVTOLTransitionLeverLatchedSince: Float?
     /// How long a transition-lever class is held before the opposite one may be issued. Sized to
@@ -11135,7 +11139,23 @@ final class DroneSimulationViewModel: ObservableObject {
         // `SimpleDronePhysicsEngine` already drops its own throttle floor to zero for exactly this
         // case (`rotorBorneAltitudeControl`); this floor is what left that opening unusable. Same
         // reasoning as the `.emergencyHover` branch, which carries no floor for the same reason.
-        if state.position.y < routeAltitude - 0.30 {
+        // Anti-sink was only half of what this floor is for. The other half is acceleration.
+        //
+        // Making it conditional on being *below* the route altitude fixed the ratchet and created a
+        // deadlock, because a transition normally runs at the route altitude: no floor, so the
+        // throttle fell to whatever the altitude controller wanted — enough to hover, not enough to
+        // accelerate. Measured over a whole leg with `[Regime]` at full rate, the same cycle dozens
+        // of times: `prog` climbs 0.05 → 0.20, `tiltAdvanceIsSafe` refuses to advance (`blocked=yes`,
+        // `lift=0.26`), the tilt falls back to 0.05, and round again — with airspeed pinned at
+        // 8-10 m/s and `thr` between 0.36 and 0.61 throughout. This airframe needs roughly twice
+        // that speed before the wing carries. The handful of transitions that *did* complete all
+        // show `thr=0.92` alongside.
+        //
+        // A transition is an acceleration and needs the thrust to perform one. So the floor holds
+        // until the wing is actually carrying; past that the altitude governor gets its authority
+        // back and the ratchet reasoning above applies unchanged.
+        let wingIsCarrying = state.vtolWingborneBlend >= 0.85
+        if !wingIsCarrying || state.position.y < routeAltitude - 0.30 {
             command.throttle = max(
                 command.throttle,
                 transitionBaseline.hoverLockThrottle,
@@ -11262,10 +11282,32 @@ final class DroneSimulationViewModel: ObservableObject {
            state.velocity.y < -0.6 {
             return .transitionAborting("liftReserveLost")
         }
+        // An abort means the manoeuvre is *losing* altitude, not that the aircraft is momentarily
+        // below a target the climb controller is already reaching for.
+        //
+        // Being 1.6 m low was enough on its own, and a tailsitter transition contains that sag by
+        // construction: rotor thrust tilts away before the wing carries. Measured over one leg with
+        // `rAlt=75.4`, the aircraft sat 3-9 m low while `prog` oscillated 0.34 ↔ 0.37 — squarely
+        // across the 0.35 gate below — so the abort fired, the tilt fell back, the gate released,
+        // the lever pushed again, and round it went. Half of those aborts fired while the aircraft
+        // was *climbing*: `vy` +0.60, +0.59, +0.18. The loop cost 22 m of altitude, 72 → 50 m,
+        // which is the opposite of what the abort exists to prevent. It also bypasses every piece of
+        // hysteresis in this controller, because an abort returns before any of it.
+        //
+        // Sustained sink is what genuinely says "this transition is not working", and it already has
+        // its own check above. What is left for this one is the slower version of the same thing: low
+        // *and* still going down *and* staying that way.
         if !latchedTailsitterCruise,
            state.position.y < routeAltitude - 1.6,
-           state.vtolTransitionProgress > 0.35 {
-            return .transitionAborting("altitudeNotHeld")
+           state.vtolTransitionProgress > 0.35,
+           state.velocity.y < -0.15 {
+            let since = hybridVTOLAltitudeAbortSince ?? simulationTime
+            hybridVTOLAltitudeAbortSince = since
+            if simulationTime - since >= Self.hybridVTOLAltitudeAbortDwellSeconds {
+                return .transitionAborting("altitudeNotHeld")
+            }
+        } else {
+            hybridVTOLAltitudeAbortSince = nil
         }
         return .nominal
     }
@@ -13518,6 +13560,7 @@ final class DroneSimulationViewModel: ObservableObject {
         hybridVTOLTransitionCommitted = false
         hybridVTOLTransitionLeverLatched = nil
         hybridVTOLTransitionLeverLatchedSince = nil
+        hybridVTOLAltitudeAbortSince = nil
         hybridVTOLRouteAltitudeLift = 0.0
         hybridVTOLRouteBlockedSeconds = 0.0
         multicopterAutopilotController.reset()
