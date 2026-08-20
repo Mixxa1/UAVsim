@@ -138,6 +138,36 @@ private struct VTOLAutopilotDecision: Equatable {
     var reason: String
 }
 
+private extension DroneWarningBuilder {
+    /// One key per condition the VTOL safety resolver can actually report. Collapsing them into a
+    /// single "transition blocked" would tell the operator no more than the stall warning already
+    /// does; the whole value of this state is that it names the cause.
+    static func hybridVTOLSafetyWarningKey(_ safetyState: VTOLAutopilotSafetyState) -> String? {
+        switch safetyState {
+        case .nominal:
+            return nil
+        case .transitionBlocked(let reason):
+            switch reason {
+            case "insufficientAltitude": return "warning.vtol_transition_blocked_altitude"
+            case "lowBattery": return "warning.vtol_transition_blocked_battery"
+            case "damageCritical": return "warning.vtol_transition_blocked_damage"
+            default: return "warning.vtol_transition_blocked"
+            }
+        case .transitionAborting(let reason):
+            switch reason {
+            case "sinkRateExceeded": return "warning.vtol_transition_aborted_sink"
+            case "insufficientAirspeed": return "warning.vtol_transition_aborted_airspeed"
+            case "liftReserveLost": return "warning.vtol_transition_aborted_lift"
+            default: return "warning.vtol_transition_aborted"
+            }
+        case .emergencyHover:
+            return "warning.vtol_corridor_blocked"
+        case .forcedLanding:
+            return "warning.vtol_forced_landing"
+        }
+    }
+}
+
 private struct DroneWarningBuilder {
     let isArmed: Bool
     let physicalState: DronePhysicalState
@@ -153,6 +183,7 @@ private struct DroneWarningBuilder {
     let state: DroneState
     let fleetStatus: FleetStatus
     let mode: DroneFlightMode
+    let hybridVTOLSafetyState: VTOLAutopilotSafetyState
 
     func build() -> [String] {
         var output: [String] = []
@@ -191,6 +222,9 @@ private struct DroneWarningBuilder {
            activelyFlying,
            state.forwardAirspeed < wing.minSustainableSpeedMps * 0.9 {
             output.append("warning.fixedwing_low_speed")
+        }
+        if activelyFlying, let key = Self.hybridVTOLSafetyWarningKey(hybridVTOLSafetyState) {
+            output.append(key)
         }
         if activelyFlying, fleetStatus.enabled, fleetStatus.interDroneRisk >= 0.5 { output.append("warning.fleet_risk") }
         if fleetStatus.enabled,
@@ -1515,6 +1549,29 @@ final class DroneSimulationViewModel: ObservableObject {
     private var signalLossCause: SignalLossCause?
     private var collisionCooldown: Float = 0.0
     private var groundImpactCooldown: Float = 0.0
+    /// Auto mode suspended by a collision-intervention hover hold, and how long the hold has run.
+    ///
+    /// The hold parks the aircraft in `.hover`, which `DroneFlightMode.isAutoControlled` reports
+    /// as *not* auto-controlled. Without an owner the hold is a one-way door: nothing else in the
+    /// stack returns an auto mission to `.autoPath`, and the risk score that armed the hold is
+    /// computed from clearance and closing speed — both frozen the moment the aircraft stops — so
+    /// a static building keeps the same hold armed for ever.
+    private var collisionInterventionSuspendedMode: DroneFlightMode?
+    private var collisionInterventionHoldSeconds: Float = 0.0
+    /// How long the hold is allowed to be a pure stop before it has to increase clearance itself.
+    /// Long enough to arrest the translation that armed it, short enough that a hold which cannot
+    /// clear is recognised as such rather than flown as a hover.
+    private static let collisionInterventionEscapeDelaySeconds: Float = 1.2
+    /// Hard ceiling on the hold. Past it the mission gets the aircraft back even with the risk
+    /// band unchanged: the route layer answers a blocked route by replanning and lifting the route
+    /// altitude, and it can do neither while the aircraft is parked outside auto control.
+    private static let collisionInterventionMaximumHoldSeconds: Float = 6.0
+    private static let collisionInterventionHoverReason = "collision_intervention_hover"
+    private static let collisionInterventionResumeReasons: Set<String> = [
+        "collision_intervention_hover",
+        "collision_intervention_cleared",
+        "collision_intervention_hold_expired"
+    ]
     private var recentDamageEvents: [UAVDamageEvent] = []
     private var recordedPhysicalImpactCount: UInt64 = 0
     private var replayStopPendingAfterDisarm = false
@@ -1660,6 +1717,13 @@ final class DroneSimulationViewModel: ObservableObject {
     /// waypoint 3 never. Each leg was spent on transitions instead of being flown.
     private var vtolActiveLegTargetPlanar: SIMD2<Float>?
     private var vtolActiveLegUsesCruise = false
+    /// Latest safety verdict from the VTOL decision, kept so the operator can be told why the
+    /// aircraft is holding instead of only that it stopped making progress.
+    private var hybridVTOLSafetyState: VTOLAutopilotSafetyState = .nominal
+    /// This leg ends in a turn no wing can fly, so it ends in a stop-and-pivot rather than a
+    /// fly-through. It does not make the leg rotor-borne — it makes the exit from the wing start
+    /// far enough out that the aircraft is stopped when it reaches the waypoint.
+    private var vtolActiveLegEndsInStop = false
     /// Rotor-borne and transition phases must follow the same protected route as the fixed-wing
     /// controller. The cursor advances only planner-generated intermediate points; the real
     /// mission/marker endpoint remains owned by mission progress and its capture sphere.
@@ -1728,6 +1792,24 @@ final class DroneSimulationViewModel: ObservableObject {
     /// can fly, and the ~6 s each node costs). Past this the leg is a transit and belongs above the
     /// roofline, not between the façades.
     static let stopAndPivotMaximumRouteLengthMeters: Float = 90.0
+    /// Share of the shorter of the two legs meeting at a corner that the cruise turn may consume
+    /// on one side of it. Half is the geometric ceiling — the corner at the leg's far end has an
+    /// equal claim on the same straight — so this sits just under half.
+    ///
+    /// Judgement, not measurement. What is measured is the geometry it is applied to: a 68 m
+    /// cruise turn radius needs 68 m of run-out for a right-angle corner, on legs a city mission
+    /// makes about 140 m long.
+    private static let hybridVTOLCornerCruiseLegFraction: Float = 0.45
+    /// Below this the polyline is straight enough that no turn is being flown at all (~6 deg).
+    private static let hybridVTOLNegligibleCornerRadians: Float = 0.10
+    /// Half-angle cap that keeps `tan` finite at a course reversal (~83 deg).
+    private static let hybridVTOLMaximumCornerHalfAngleRadians: Float = 1.45
+    /// Seconds of travel, at entry speed, that the tilt actuator needs to answer a transition back
+    /// out of the wing. Measured: the servo needs about two seconds for full travel.
+    private static let hybridVTOLTransitionOutSeconds: Float = 2.0
+    /// Rotor-borne braking distance per metre-per-second of entry speed. Measured by
+    /// `StopAndPivotYawProbe`: 11.3 m from 8 m/s, 18.5 m from 14 m/s.
+    private static let hybridVTOLBrakingSecondsPerMps: Float = 1.35
     /// Metres added to this leg's route altitude because no route existed at the lower one.
     ///
     /// A mission waypoint carries no altitude — `MissionTarget.position` is planar and the
@@ -6514,7 +6596,16 @@ final class DroneSimulationViewModel: ObservableObject {
         // lift constant). `raw` vs `clr` below is exactly that disagreement in metres; `lift` is
         // what the renderer is adding. If the model sits in the terrain, one of these three
         // disagrees with the other two, and this line says which.
-        if selectedDroneProfile.airframeStyle == .tailsitterVTOL {
+        // Widened from tailsitters to every hybrid VTOL.
+        //
+        // The ground-geometry fields below are only interesting on a tailsitter, but everything
+        // after them — the navigation band, which guidance branch ran, the route's own altitude
+        // against the commanded one, whether the avoidance layer was even covering the airframe —
+        // is what any VTOL flight has to be read from. Gating the whole line on the tailsitter
+        // left the tilt-rotors with no per-tick record at all: two recorded flights flew into the
+        // same building and the log could not say what altitude their route was validated at, nor
+        // whether avoidance was running when they did it.
+        if selectedDroneProfile.airframeClass == .hybridVTOL {
             tailsitterTelemetryAccumulator += dt
             if tailsitterTelemetryAccumulator >= 1.0 {
                 tailsitterTelemetryAccumulator = 0.0
@@ -6531,7 +6622,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 let liveOffset = vehicleContactProfile.lowestPointOffset(orientation: attitude)
                 let rawHeight = (lowest?.point.y ?? state.position.y) - supportY
                 print(String(
-                    format: "[TailTick] mode=%@ phys=%@ vtol=%@ prog=%.2f y=%.2f supY=%.2f "
+                    format: "[VtolTick] mode=%@ phys=%@ vtol=%@ prog=%.2f y=%.2f supY=%.2f "
                         + "agl=%.2f raw=%.2f clr=%.2f L=%.2f Lrest=%.2f lift=%.2f "
                         + "pitch=%.1f roll=%.1f vy=%.2f thr=%.2f armed=%@ "
                         // Measurement 1 — what the planner was looking at on this leg: the
@@ -7214,7 +7305,15 @@ final class DroneSimulationViewModel: ObservableObject {
             break
         case .scrape:
             collisionAftermathState = .impactRecovery
-            if mode.isAutoControlled {
+            // Handing a wing aircraft to `.manual` is not handing it to the operator.
+            //
+            // A multirotor that drops out of auto stays roughly where it is and waits. A fixed
+            // wing or a hybrid VTOL in cruise keeps flying, and with no stick input it flies
+            // wherever it was last trimmed. One recorded flight brushed a façade with a wing tip,
+            // lost the autopilot to this line, and collected two more contacts and a shed wing
+            // panel on the way out. A scrape is a reason to warn, not a reason to stop flying the
+            // aircraft; heavy and critical hits below still take control away.
+            if mode.isAutoControlled, selectedDroneProfile.airframeClass == .multirotor {
                 setFlightMode(.manual, reason: "auto_mode_cancelled_minor_collision")
             }
             evaluateImpactInternalFailures(report)
@@ -7532,6 +7631,17 @@ final class DroneSimulationViewModel: ObservableObject {
             detachedComponentIDs: detachedParts.flatMap { Array($0.componentIDs) },
             massPropertiesRevision: componentGraph.massPropertiesRevision
         )
+        #if DEBUG
+        // Losing a part without an impact reads in the log as an object count that silently went
+        // up. Say which part left and why, so an airframe that sheds a wing in level flight is
+        // distinguishable from one that hit something.
+        print(
+            "[Detach] reason=\(reason) parts=[\(detachedParts.map(\.rootComponentID).joined(separator: ","))] " +
+            "spd=\(String(format: "%.1f", state.forwardAirspeed)) " +
+            "alt=\(String(format: "%.1f", state.position.y)) " +
+            "wb=\(String(format: "%.2f", state.vtolWingborneBlend))"
+        )
+        #endif
     }
 
     private func recordDetachedVehiclePartImpactEvents() {
@@ -7878,7 +7988,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func handleAutoCollisionInterventions(deltaTime: Float) {
-        guard mode.isAutoControlled else {
+        // A latched hold keeps this method running even though `.hover` is not auto-controlled —
+        // it is the only thing that can end the hold, so it has to outlive the mode it installs.
+        guard mode.isAutoControlled || collisionInterventionSuspendedMode != nil else {
             return
         }
 
@@ -7886,11 +7998,55 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        switch collisionAnalysis.emergencyAction {
+        var action = collisionAnalysis.emergencyAction
+
+        if let suspendedMode = collisionInterventionSuspendedMode {
+            guard mode == .hover else {
+                // The operator, a failsafe or a landing took the aircraft while it was held.
+                // Whoever owns it now owns it outright.
+                clearCollisionInterventionHold()
+                return
+            }
+
+            collisionInterventionHoldSeconds += deltaTime
+
+            switch action {
+            case .none, .slowDown:
+                resumeAfterCollisionInterventionHold(
+                    suspendedMode,
+                    reason: "collision_intervention_cleared"
+                )
+                return
+            case .hover:
+                // A hover buys the stop and nothing more. The obstacle that armed the hold does
+                // not move, so past the escape delay the hold must open the gap itself instead of
+                // re-arming on the clearance it is not changing.
+                if collisionInterventionHoldSeconds >= Self.collisionInterventionEscapeDelaySeconds {
+                    action = .avoid
+                }
+            case .avoid, .emergencyStop:
+                break
+            }
+
+            if action != .emergencyStop,
+               collisionInterventionHoldSeconds >= Self.collisionInterventionMaximumHoldSeconds {
+                resumeAfterCollisionInterventionHold(
+                    suspendedMode,
+                    reason: "collision_intervention_hold_expired"
+                )
+                return
+            }
+        }
+
+        switch action {
         case .none, .slowDown:
             return
         case .hover:
-            setFlightMode(.hover, reason: "collision_intervention_hover")
+            if collisionInterventionSuspendedMode == nil {
+                collisionInterventionSuspendedMode = mode
+                collisionInterventionHoldSeconds = 0.0
+            }
+            setFlightMode(.hover, reason: Self.collisionInterventionHoverReason)
             lockControlsToCurrentState(
                 overrideThrottle: Double(max(resolvedFlightBaseline(for: .hover).hoverLockThrottle, state.throttle))
             )
@@ -7957,8 +8113,26 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
             }, markManual: false)
         case .emergencyStop:
+            clearCollisionInterventionHold()
             activateEmergencyStop()
         }
+    }
+
+    /// Hands the mission back the aircraft the hold borrowed.
+    private func resumeAfterCollisionInterventionHold(
+        _ suspendedMode: DroneFlightMode,
+        reason: String
+    ) {
+        setFlightMode(suspendedMode, reason: reason)
+        clearCollisionInterventionHold()
+        // The hold pinned the transition lever to hover; leaving it there would make the aircraft
+        // crawl the rest of the leg rotor-borne.
+        prepareHybridVTOLAutopilotForForwardRoute()
+    }
+
+    private func clearCollisionInterventionHold() {
+        collisionInterventionSuspendedMode = nil
+        collisionInterventionHoldSeconds = 0.0
     }
 
     private var isMultirotorMarkerRouteCollisionManagedByPlanner: Bool {
@@ -10396,6 +10570,17 @@ final class DroneSimulationViewModel: ObservableObject {
             routeGuidance: routeGuidance
         )
         vtolAutopilotPhase = decision.phase
+        // The safety verdict stops here otherwise. It is the only thing that knows *why* the
+        // aircraft is holding — low battery, insufficient altitude, damage, a blocked corridor —
+        // and none of that reached the operator, who saw a VTOL sit in a hover with no explanation
+        // until the mission monitor eventually reported a stall, which is the symptom rather than
+        // the cause. `DroneWarningBuilder` turns it into a warning.
+        hybridVTOLSafetyState = decision.safetyState
+        decision.targetAltitude = hybridVTOLSinkLimitedAltitude(
+            decision.targetAltitude,
+            phase: decision.phase,
+            maxSinkRate: decision.maxSinkRate
+        )
 
         // Rotor-borne translation gets the same lateral sidestep a multirotor gets.
         //
@@ -10489,6 +10674,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 routeAltitude: routeAltitude,
                 deltaTime: deltaTime
             )
+            // The transition has no speed loop of its own — the fixed-wing controller does not own
+            // throttle until cruise — so this is the only thing standing between a VTOL and an
+            // unbounded acceleration once its rotors point forward.
+            applyHybridVTOLAirspeedLimit(decision.targetAirspeed, wing: wing)
             return nil
         case .wingborneCruise:
             var cruiseRoute = protectedRoute
@@ -10515,14 +10704,95 @@ final class DroneSimulationViewModel: ObservableObject {
                 deltaTime: context.deltaTime,
                 flightBaseline: context.flightBaseline
             )
-            return applyFixedWingAutopilotTracking(
+            let cruiseTracking = applyFixedWingAutopilotTracking(
                 context: cruiseContext,
                 target: finalTarget,
                 deltaTime: deltaTime,
                 vtolTransitionLever: 1.0,
                 routeTrackingOverride: cruiseRoute
             )
+            // Backs up the wing controller's own speed loop rather than competing with it: it can
+            // only lower throttle, and only above the requested speed, so where that loop is
+            // already slowing down this changes nothing.
+            applyHybridVTOLAirspeedLimit(decision.targetAirspeed, wing: wing)
+            return cruiseTracking
         }
+    }
+
+    /// Bounds a commanded descent to the sink rate the decision asked for.
+    ///
+    /// `VTOLAutopilotDecision.maxSinkRate` — the airframe's nominal sink rate plus a third — was
+    /// computed on every tick and read by nobody, so guidance had no descent limit at all. The
+    /// physics step has one, but it is the airframe's *absolute* limit (`maxDescentSpeedMps`, up
+    /// to 20 m/s), which is an airframe survival bound, not a thing an autopilot should ever fly
+    /// at. An unbounded descent is also how height became speed on this airframe: at these
+    /// lift-to-drag ratios a couple of degrees nose-down contributes an along-path weight
+    /// component about the size of the whole engine's thrust.
+    ///
+    /// Deliberately a rate guard rather than a shaped descent profile, and deliberately with no
+    /// tuning constant of its own: while the aircraft is already sinking faster than allowed it
+    /// simply stops asking to go lower than where it is, and the altitude controller arrests. Once
+    /// back inside the limit the descent resumes. Climbs are never touched, and neither is a
+    /// landing — descending to the ground is the entire point of those phases.
+    private func hybridVTOLSinkLimitedAltitude(
+        _ targetAltitude: Float,
+        phase: VTOLAutopilotPhase,
+        maxSinkRate: Float
+    ) -> Float {
+        switch phase {
+        case .verticalLanding, .forcedLanding:
+            return targetAltitude
+        case .idleGrounded, .hoverHold, .precisionHover, .verticalTakeoff, .transitionToHover,
+             .transitionAbort, .emergencyHover, .transitionToCruise, .wingborneCruise:
+            break
+        }
+        guard maxSinkRate.isFinite, maxSinkRate > 0.05,
+              targetAltitude < state.position.y,
+              state.velocity.y < -maxSinkRate else {
+            return targetAltitude
+        }
+        return max(targetAltitude, state.position.y)
+    }
+
+    /// Holds a wing-borne VTOL to the airspeed its own decision asked for.
+    ///
+    /// `VTOLAutopilotDecision.targetAirspeed` was computed on every cruise and transition tick and
+    /// then read by nobody — so there was no airspeed hold anywhere in VTOL guidance. Recorded
+    /// flights cruised at 40-44 m/s against 17-22 m/s published figures, and since turn radius goes
+    /// as the square of speed, every route margin derived from the profile's cruise figure was out
+    /// by four to seven times. That is why aircraft flew into buildings they had detected: they
+    /// could not turn in anything like the radius the planner had assumed.
+    ///
+    /// This is envelope protection, not a second controller. It only ever *lowers* throttle, and
+    /// only above the requested speed, so it cannot fight the fixed-wing speed loop that owns
+    /// throttle during cruise — it agrees with it and backs it up where that loop does not run at
+    /// all (the transition). Both anchors are published numbers rather than invented ones: at the
+    /// target speed the ceiling is exactly `cruiseReferenceThrottle`, which the thrust map defines
+    /// as level flight at cruise, and it reaches idle at the airframe's own `maxAirspeed`.
+    ///
+    /// It needs the throttle floor to have been fixed to be worth anything: while the wing-borne
+    /// floor sat at `cruiseReferenceThrottle`, the physics step clamped any lower command straight
+    /// back up and no ceiling below cruise power could take effect.
+    private func applyHybridVTOLAirspeedLimit(
+        _ targetAirspeed: Float?,
+        wing: FixedWingParameters
+    ) {
+        guard let targetAirspeed, targetAirspeed.isFinite, targetAirspeed > 0.5 else {
+            return
+        }
+        let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        let airspeed = max(state.forwardAirspeed, planarSpeed)
+        guard airspeed.isFinite, airspeed > targetAirspeed else {
+            return
+        }
+        let ceilingSpeed = max(targetAirspeed + 1.0, wing.maxAirspeed)
+        let overspeed = ((airspeed - targetAirspeed) / (ceilingSpeed - targetAirspeed))
+            .clamped(to: 0.0...1.0)
+        let cruiseReference = resolvedFlightBaseline().cruiseReferenceThrottle
+        let throttleCeiling = Double(max(0.0, cruiseReference * (1.0 - overspeed)))
+        updateControlValues({ values in
+            values.throttle = min(values.throttle, throttleCeiling)
+        }, markManual: false)
     }
 
     private func hybridVTOLAutopilotDecision(
@@ -10583,32 +10853,82 @@ final class DroneSimulationViewModel: ObservableObject {
             } ?? true
             if legChanged {
                 vtolActiveLegTargetPlanar = finalTargetPlanar
-                vtolActiveLegUsesCruise = routeGuidance.remainingPathMeters > cruiseEntryDistance
+                // Does the turn at the end of this leg fit the radius the aircraft will actually
+                // fly it at? If not, the leg ends in a stop-and-pivot instead of a fly-through —
+                // which is the whole point of having rotors. What it must *not* do is fly the
+                // corner wide: a 140 m leg ending in a 90 deg corner needs the turn's run-out on
+                // both sides, the aircraft cannot make it, and it sails past the waypoint and
+                // orbits back for it.
+                let cornerFits = hybridVTOLLegCornerAllowsCruise(
+                    legLengthMeters: routeGuidance.remainingPathMeters,
+                    finalTargetPlanar: finalTargetPlanar,
+                    wing: wing,
+                    airspeed: airspeed
+                )
+                vtolActiveLegEndsInStop = !cornerFits
+                // Cruise has to earn itself twice over on a leg that ends in a stop: the run-up
+                // into the wing *and* the distance it takes to get back out of it.
+                let cruiseBudget = cruiseEntryDistance
+                    + (cornerFits ? 0.0 : hybridVTOLStopDistance(airspeed: airspeed, wing: wing))
+                vtolActiveLegUsesCruise = routeGuidance.remainingPathMeters > cruiseBudget
+                #if DEBUG
+                print(String(
+                    format: "[Regime] leg len=%.0f budget=%.0f spd=%.1f R=%.0f cornerFits=%@ cruise=%@",
+                    Double(routeGuidance.remainingPathMeters),
+                    Double(cruiseBudget),
+                    Double(airspeed),
+                    Double(wing.minimumTurnRadius(airspeed: max(wing.cruiseAirspeed, airspeed))),
+                    (cornerFits ? "yes" : "no") as NSString,
+                    (vtolActiveLegUsesCruise ? "yes" : "no") as NSString
+                ))
+                #endif
             }
         } else {
             // `.infinity` is the blocked sentinel, not a real leg length. Leave the regime choice
             // unlatched so it is evaluated from the validated path when planning succeeds.
             vtolActiveLegTargetPlanar = nil
             vtolActiveLegUsesCruise = false
+            vtolActiveLegEndsInStop = false
         }
+        // How far out the wing has to be given up so the aircraft is stopped *at* the waypoint.
+        //
+        // The nominal exit distance sizes a fly-through, not a stop, and it is derived from the
+        // profile's cruise speed rather than the speed being flown. Both were wrong in the same
+        // direction: a leg ending in a corner no wing can fly still handed the aircraft back to the
+        // rotors a waypoint-radius out, which is nowhere near enough to arrest cruise speed, so it
+        // arrived fast and either overshot or was still translating when it met the next façade.
+        let exitDistance = vtolActiveLegEndsInStop
+            ? max(cruiseExitDistance, hybridVTOLStopDistance(airspeed: airspeed, wing: wing))
+            : cruiseExitDistance
         // The exit distance still hands the leg back to hover for the capture itself, and an
-        // already-established cruise is never yanked out of the air mid-leg.
+        // already-established cruise is never yanked out of the air mid-leg: that rule exists so a
+        // *length* threshold re-evaluated against the shrinking remaining distance cannot drop the
+        // aircraft out of the wing halfway along.
+        let sustainedCruise = cruiseWasEstablished
         // A tailsitter has no independently tilting lift rotors: at progress
         // zero its two fixed propellers point vertically and it cannot chase
         // a horizontal waypoint in "hover".  Any validated leg outside the
         // precision envelope must therefore enter the wing transition even
         // when it is shorter than the generic VTOL cruise-economy threshold.
+        // It gets the same stop distance as everything else, though — standing on its tail does
+        // not make it stop any sooner.
         let tailsitterNeedsWingTranslation = HybridVTOLFlightPolicy
             .tailsitterValidatedLegRequiresWingTransition(
                 isTailsitter: selectedDroneProfile.airframeStyle == .tailsitterVTOL,
                 routeIsValidated: routeGuidance.isReady,
                 isFinalSegment: routeGuidance.isFinalSegment,
                 finalPlanarDistance: finalPlanarDistance,
-                precisionRadius: precisionRadius
+                precisionRadius: max(precisionRadius, exitDistance)
             )
+        // A leg that ends in a stop is judged on the distance to the waypoint itself, not on which
+        // segment of the protected route the cursor happens to be on. The braking distance can be
+        // longer than the last segment, and "we are not on the final segment yet" is no reason to
+        // still be carrying cruise speed into a corner that has to be flown at zero.
+        let withinStopExit = vtolActiveLegEndsInStop
+            ? finalPlanarDistance <= exitDistance
+            : routeGuidance.isFinalSegment && finalPlanarDistance <= exitDistance
         let wantsCruise = tailsitterNeedsWingTranslation || (
-            (vtolActiveLegUsesCruise || cruiseWasEstablished)
-                && (!routeGuidance.isFinalSegment || finalPlanarDistance > cruiseExitDistance)
+            (vtolActiveLegUsesCruise || sustainedCruise) && !withinStopExit
         )
         let airborne = !physicalState.isGroundRestState && state.position.y > 0.45
         let maxSinkRate = max(1.4, min(3.2, wing.nominalSinkRateMps * 1.35))
@@ -11231,6 +11551,83 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    /// Whether the turn this leg ends in fits the cruise turn radius, given the leg it turns onto.
+    ///
+    /// A corner of `theta` flown at radius `R` consumes `R · tan(theta/2)` of straight line on
+    /// each side of the waypoint. Both of those legs are shared with the corner at their far end,
+    /// so no more than half of either may be spent here; the fraction below keeps a margin under
+    /// that half. Fail the test and the leg is flown rotor-borne, which is precisely the capability
+    /// a VTOL has and a fixed wing does not.
+    /// Distance a wing-borne VTOL needs to arrive stopped: the transition back out of the wing,
+    /// flown at speed, plus rotor-borne braking.
+    ///
+    /// Both terms are measured, not guessed. `StopAndPivotYawProbe` puts rotor-borne braking at
+    /// 11.3 m from 8 m/s and 18.5 m from 14 m/s — about 1.35 m per m/s — and the tilt actuator
+    /// needs roughly two seconds of travel to answer at all, during which the aircraft is still
+    /// doing its entry speed.
+    ///
+    /// It is deliberately keyed on the airspeed actually being flown rather than the profile's
+    /// cruise figure. Recorded flights cruise well above the datasheet — a Quantum Trinity with a
+    /// 17 m/s cruise was measured at 44 m/s, a Wingcopter 198 with a 22 m/s cruise at 40 m/s — and
+    /// stopping distance grows with the speed that exists, not the one in the profile.
+    private func hybridVTOLStopDistance(airspeed: Float, wing: FixedWingParameters) -> Float {
+        let speed = max(wing.cruiseAirspeed, airspeed.isFinite ? airspeed : 0.0)
+        return speed * (Self.hybridVTOLTransitionOutSeconds + Self.hybridVTOLBrakingSecondsPerMps)
+    }
+
+    private func hybridVTOLLegCornerAllowsCruise(
+        legLengthMeters: Float,
+        finalTargetPlanar: SIMD2<Float>,
+        wing: FixedWingParameters,
+        airspeed: Float
+    ) -> Bool {
+        guard legLengthMeters.isFinite,
+              let nextTargetPlanar = nextMissionTargetPlanar(after: finalTargetPlanar) else {
+            return true
+        }
+
+        let incoming = finalTargetPlanar - SIMD2<Float>(state.position.x, state.position.z)
+        let outgoing = nextTargetPlanar - finalTargetPlanar
+        let incomingLength = simd_length(incoming)
+        let outgoingLength = simd_length(outgoing)
+        guard incomingLength > 0.5, outgoingLength > 0.5 else {
+            return true
+        }
+
+        let cosine = simd_dot(incoming / incomingLength, outgoing / outgoingLength)
+        let turnAngle = acos(max(Float(-1.0), min(Float(1.0), cosine)))
+        guard turnAngle > Self.hybridVTOLNegligibleCornerRadians else {
+            return true
+        }
+
+        // The radius the aircraft will really turn at, not the one its datasheet implies. Radius
+        // goes as the square of speed, so a Quantum measured at 44 m/s against a 17 m/s cruise
+        // needs 257 m where the profile says 38 m — and every corner the planner judged flyable
+        // on the profile figure was nothing of the sort.
+        let turnRadius = wing.minimumTurnRadius(
+            airspeed: max(wing.cruiseAirspeed, airspeed.isFinite ? airspeed : 0.0)
+        )
+        // Cap the half-angle short of 90 deg: a reversal sends `tan` to infinity, and the capped
+        // value already fails the comparison by a wide margin.
+        let halfAngle = min(turnAngle * 0.5, Self.hybridVTOLMaximumCornerHalfAngleRadians)
+        let runOut = turnRadius * tan(halfAngle)
+        let available = min(legLengthMeters, outgoingLength)
+        return runOut <= Self.hybridVTOLCornerCruiseLegFraction * available
+    }
+
+    /// The mission waypoint after the one currently being flown, when the leg in progress really
+    /// is that mission leg. A manual marker or a return-home leg has no next corner to plan for.
+    private func nextMissionTargetPlanar(after finalTargetPlanar: SIMD2<Float>) -> SIMD2<Float>? {
+        guard let plan = currentMissionPlan,
+              let activeTarget = missionExecutionState.activeTarget,
+              simd_distance(activeTarget.position, finalTargetPlanar) <= 3.0,
+              let activeIndex = plan.executionTargets.firstIndex(where: { $0.id == activeTarget.id }),
+              plan.executionTargets.indices.contains(activeIndex + 1) else {
+            return nil
+        }
+        return plan.executionTargets[activeIndex + 1].position
+    }
+
     private func hybridVTOLCruiseExitDistance(
         wing: FixedWingParameters,
         precisionRadius: Float
@@ -11788,6 +12185,23 @@ final class DroneSimulationViewModel: ObservableObject {
                 // while using the longest proven prefix. Full takeoff power shortens the remaining
                 // reaction time and enlarges the turn radius.
                 values.throttle = min(values.throttle, Double(noSafeThrottleCap))
+            } else if selectedDroneProfile.airframeClass == .hybridVTOL {
+                // A VTOL does not climb over an obstacle on wing power, so the takeoff-throttle
+                // floor buys it nothing — and the branch above already names what it costs:
+                // "full takeoff power shortens the remaining reaction time and enlarges the turn
+                // radius". On a hybrid VTOL that cost is far larger than on a fixed wing, because
+                // in cruise the throttle drives every tilted rotor: thrust is sized as
+                // `throttle · dragAtCruise / cruiseReferenceThrottle`, so 0.92 against a ~0.3
+                // reference is about three times the drag-balancing thrust, and speed settles
+                // near its square root above cruise. The recorded flights show exactly that —
+                // every `avCmd=yes` tick carries `thr=0.92`, and the aircraft that were avoiding
+                // obstacles were doing it at 40-44 m/s against 17-22 m/s published cruise, which
+                // is a four-to-seven-fold turn radius and is why they could not turn away from
+                // the building they had detected.
+                //
+                // Leave the throttle to the speed loop. Avoidance owns roll, yaw and the climb
+                // floor here; it has no business adding energy to an airframe whose escape is a
+                // turn, not a zoom.
             } else {
                 values.throttle = max(
                     values.throttle,
@@ -13551,6 +13965,12 @@ final class DroneSimulationViewModel: ObservableObject {
         // A leg's regime decision belongs to that leg and to that flight.
         vtolActiveLegTargetPlanar = nil
         vtolActiveLegUsesCruise = false
+        vtolActiveLegEndsInStop = false
+        // The safety verdict belonged to the leg that just ended; a stale one would keep warning
+        // the operator about a condition the aircraft is no longer in.
+        hybridVTOLSafetyState = .nominal
+        // Same for a hold taken on that leg: the obstacle it stopped for is no longer on the way.
+        clearCollisionInterventionHold()
         hybridVTOLRouteCursor.reset()
         hybridVTOLStopAndPivotGate.reset()
         hybridVTOLProtectedRouteHoldPosition = nil
@@ -14385,7 +14805,8 @@ final class DroneSimulationViewModel: ObservableObject {
             selectedDroneProfile: selectedDroneProfile,
             state: state,
             fleetStatus: fleetWarningStatus,
-            mode: mode
+            mode: mode,
+            hybridVTOLSafetyState: hybridVTOLSafetyState
         ).build()
         if let mountedCADPayload {
             output.append(contentsOf: mountedCADPayload.runtimeWarningKeys(
@@ -15807,6 +16228,11 @@ final class DroneSimulationViewModel: ObservableObject {
     ) {
         guard mode != nextMode else {
             return
+        }
+        // Any mode change that is not the collision hold's own installs a new owner for the
+        // aircraft, so the hold stops being responsible for handing anything back.
+        if !Self.collisionInterventionResumeReasons.contains(reason) {
+            clearCollisionInterventionHold()
         }
         // Recorded because guessing which of the six paths into manual actually fires has cost
         // three misplaced fixes: a handover condition, a launch timeout gate and the pending-assist

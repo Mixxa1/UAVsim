@@ -340,6 +340,16 @@
 "warning.integrity_low" = "Structural integrity low";
 "warning.fixedwing_low_speed" = "Fixed-wing low-speed / stall risk";
 "warning.fleet_risk" = "Fleet separation risk";
+"warning.vtol_transition_blocked" = "VTOL transition held";
+"warning.vtol_transition_blocked_altitude" = "VTOL transition held: too low";
+"warning.vtol_transition_blocked_battery" = "VTOL transition held: battery too low";
+"warning.vtol_transition_blocked_damage" = "VTOL transition held: airframe damage";
+"warning.vtol_transition_aborted" = "VTOL transition aborted";
+"warning.vtol_transition_aborted_sink" = "VTOL transition aborted: sink rate";
+"warning.vtol_transition_aborted_airspeed" = "VTOL transition aborted: airspeed too low";
+"warning.vtol_transition_aborted_lift" = "VTOL transition aborted: lift reserve lost";
+"warning.vtol_corridor_blocked" = "VTOL holding: corridor blocked";
+"warning.vtol_forced_landing" = "VTOL forced landing";
 "warning.interdrone_critical" = "Critical inter-drone proximity";
 "warning.payload_self_interference" = "Payload released too close to carrier";
 "warning.emergency" = "Emergency mode active";

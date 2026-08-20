@@ -372,6 +372,77 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         return motorThrottle * maxThrust
     }
 
+    /// Propulsive thrust available in wing-borne flight at a commanded throttle, in newtons.
+    ///
+    /// Two anchors, and both of them have to hold:
+    ///
+    /// * `cruiseReferenceThrottle` balances the drag of **level flight at cruise** — the drag at
+    ///   the angle of attack that actually carries the weight, solved for here, not the drag at
+    ///   alpha 0. At alpha 0 these wings barely lift, so that figure is parasite drag alone and
+    ///   leaves the induced term out entirely.
+    /// * Full throttle delivers the climb rate the profile declares, so `nominalClimbRateMps`
+    ///   reaches the flight model instead of being an accident of the cruise-throttle baseline.
+    ///
+    /// The map between them is piecewise because a single linear scale cannot hold both: raising
+    /// the full-throttle figure alone multiplies thrust at every setting and silently moves cruise
+    /// speed, which then moves turn radius by its square.
+    ///
+    /// This was fixed once, for `stepFixedWingAerodynamic`, and the VTOL steppers were left on the
+    /// old alpha-0 formula — with the variable still named `cdTrim`, which is what let it sit there
+    /// unnoticed. Two code paths modelling the same physics is how they diverged; one function is
+    /// how they stop. The consequence of the divergence was not subtle: because a wing-borne VTOL's
+    /// throttle floor *is* `cruiseReferenceThrottle`, a reference throttle that produced more than
+    /// cruise drag pinned the aircraft above its published cruise speed with no way down —
+    /// measured at 24.2 m/s against a 17 m/s book figure on a Quantum Trinity.
+    ///
+    /// Battery, damage and per-unit factors belong to the caller: a fixed wing scales one pusher,
+    /// a VTOL divides this among tilting units that each carry their own damage state.
+    private func wingborneThrustMagnitude(
+        commandedThrottle: Float,
+        aero: FixedWingAerodynamics,
+        wing: FixedWingParameters,
+        cruiseReferenceThrottle: Float,
+        mass: Float,
+        airDensity: Float
+    ) -> Float {
+        let cruiseSpeed = max(wing.cruiseSpeedMps, wing.minSustainableSpeedMps, 1.0)
+        let cruiseDynamicPressure = 0.5 * airDensity * cruiseSpeed * cruiseSpeed
+        let weightNewtons = mass * Tuning.gravity
+        // The lift curve is monotonic below stall, so a short bisection is exact enough and cannot
+        // wander into the post-stall branch.
+        var lowAlpha: Float = 0.0
+        var highAlpha: Float = 12.0 * Float.pi / 180.0
+        for _ in 0..<12 {
+            let midAlpha = (lowAlpha + highAlpha) * 0.5
+            let lift = cruiseDynamicPressure * aero.wingArea * aero.liftDrag(alphaRad: midAlpha).cl
+            if lift < weightNewtons {
+                lowAlpha = midAlpha
+            } else {
+                highAlpha = midAlpha
+            }
+        }
+        let (_, cdTrim) = aero.liftDrag(alphaRad: (lowAlpha + highAlpha) * 0.5)
+        let dragAtCruise = cruiseDynamicPressure * aero.wingArea * cdTrim
+        let referenceThrottle = max(0.2, cruiseReferenceThrottle)
+        let nominalClimbRate = max(0.0, wing.nominalClimbRateMps)
+        let climbSizedThrust = dragAtCruise + weightNewtons * nominalClimbRate / cruiseSpeed
+        let fullThrottleThrust = max(
+            0.5,
+            dragAtCruise / referenceThrottle,
+            climbSizedThrust
+        )
+        if commandedThrottle <= referenceThrottle {
+            return max(0.0, dragAtCruise * (commandedThrottle / referenceThrottle))
+        }
+        let span = max(0.001, 1.0 - referenceThrottle)
+        return max(
+            0.0,
+            dragAtCruise
+                + (fullThrottleThrust - dragAtCruise)
+                    * ((commandedThrottle - referenceThrottle) / span)
+        )
+    }
+
     private func multirotorHorizontalDragDamping(
         profile: DroneModelProfile,
         controlMode: FlightControlMode,
@@ -797,59 +868,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // 4.5 m/s of ascent. Solving for the trim alpha restores the margin a real aircraft has,
         // and it changes no published characteristic: mass, wing area, cd0, the induced-drag
         // factor and the cruise-throttle baseline are all still exactly what the profile says.
-        let cruiseSpeed = max(wing.cruiseSpeedMps, wing.minSustainableSpeedMps, 1.0)
-        let cruiseDynamicPressure = 0.5 * airDensity * cruiseSpeed * cruiseSpeed
-        let weightNewtons = mass * Tuning.gravity
-        // The lift curve is monotonic below stall, so a short bisection is exact enough and cannot
-        // wander into the post-stall branch.
-        var lowAlpha: Float = 0.0
-        var highAlpha: Float = 12.0 * Float.pi / 180.0
-        for _ in 0..<12 {
-            let midAlpha = (lowAlpha + highAlpha) * 0.5
-            let lift = cruiseDynamicPressure * aero.wingArea * aero.liftDrag(alphaRad: midAlpha).cl
-            if lift < weightNewtons {
-                lowAlpha = midAlpha
-            } else {
-                highAlpha = midAlpha
-            }
-        }
-        let (_, cdTrim) = aero.liftDrag(alphaRad: (lowAlpha + highAlpha) * 0.5)
-        let dragAtCruise = cruiseDynamicPressure * aero.wingArea * cdTrim
-        let referenceThrottle = max(0.2, baseline.cruiseReferenceThrottle)
-        // Size full-throttle thrust for the climb the profile actually claims.
-        //
-        // Deriving it solely from `dragAtCruise / cruiseReferenceThrottle` made climb performance
-        // an accident of the cruise-throttle baseline, and `nominalClimbRateMps` — declared on
-        // every catalogue entry — reached the flight model nowhere. Measured by
-        // `Tools/ClimbProbe` before this change: every fixed wing delivered about a third of its
-        // declared rate, and the MQ-9B and Hermes 900 could not climb at all. A 6% gradient needs
-        // 800 m of travel to gain 50 m, so in a city the aircraft simply never gets above the
-        // rooftops — which is the real reason obstacle avoidance had nothing workable to do.
-        //
-        // The map is piecewise so *both* anchors hold: cruise throttle still balances cruise drag
-        // exactly (so every controller baseline tuned against it is unchanged), and full throttle
-        // delivers the declared climb. A single linear scale cannot do that — raising `maxThrust`
-        // alone multiplies thrust at every setting and silently moves cruise speed, which then
-        // moves turn radius by its square.
-        let nominalClimbRate = max(0.0, wing.nominalClimbRateMps)
-        let climbSizedThrust = dragAtCruise + weightNewtons * nominalClimbRate / cruiseSpeed
-        let fullThrottleThrust = max(
-            0.5,
-            dragAtCruise / referenceThrottle,
-            climbSizedThrust
-        )
+        // Sizing lives in `wingborneThrustMagnitude`, shared with the VTOL steppers so the two
+        // cannot drift apart again. Climb performance is part of that sizing: deriving full-throttle
+        // thrust solely from `dragAtCruise / cruiseReferenceThrottle` made it an accident of the
+        // cruise baseline, and `nominalClimbRateMps` — declared on every catalogue entry — reached
+        // the flight model nowhere. Measured by `Tools/ClimbProbe` before that change: every fixed
+        // wing delivered about a third of its declared rate, and the MQ-9B and Hermes 900 could not
+        // climb at all.
         let commandedThrottle = crashOrDisarmed ? 0.0 : motorThrottle
-        let thrustFraction: Float
-        if commandedThrottle <= referenceThrottle {
-            thrustFraction = dragAtCruise * (commandedThrottle / referenceThrottle)
-        } else {
-            let span = max(0.001, 1.0 - referenceThrottle)
-            thrustFraction = dragAtCruise
-                + (fullThrottleThrust - dragAtCruise)
-                    * ((commandedThrottle - referenceThrottle) / span)
-        }
-        let thrustMagnitude = max(0.0, thrustFraction) * batteryFactor *
-            context.rotorModel.cruiseThrustFactor
+        let thrustMagnitude = wingborneThrustMagnitude(
+            commandedThrottle: commandedThrottle,
+            aero: aero,
+            wing: wing,
+            cruiseReferenceThrottle: baseline.cruiseReferenceThrottle,
+            mass: mass,
+            airDensity: airDensity
+        ) * batteryFactor * context.rotorModel.cruiseThrustFactor
         let thrustForceBody = SIMD3<Float>(0, 0, -1) * thrustMagnitude
 
         // --- Propulsion-airframe coupling: prop wash on the tail, torque
@@ -1451,7 +1485,26 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             case .manual, .autoPath, .returnHome, .emergencyStop:
                 hoverPhaseFloor = baseline.hoverLockThrottle
             }
-            let cruiseFloor = max(baseline.cruiseReferenceThrottle, baseline.effectiveMinimumSafeFlightThrottle)
+            // The wing-borne floor is stall protection, and stall protection only.
+            //
+            // Anchoring it at `cruiseReferenceThrottle` made it a speed setting instead: that
+            // throttle is, by construction of `wingborneThrustMagnitude`, exactly the power that
+            // sustains level flight *at* cruise — so a floor there means cruise speed is the
+            // slowest the aircraft may ever fly level, not its nominal speed. Nothing could then
+            // slow it down: not the fixed-wing autopilot's speed loop, which commands throttle and
+            // was clamped straight back up, and not the stop-at-waypoint braking that a VTOL needs
+            // in order to arrive at a corner rather than orbit it.
+            //
+            // Below the airframe's minimum sustainable speed the floor still holds at full value.
+            // It fades out linearly and is gone by cruise speed, where there is no stall left to
+            // protect against and the only thing a floor can do is forbid deceleration.
+            let cruiseSpeedReference = max(
+                wing.minSustainableSpeedMps + 1.0,
+                wing.cruiseSpeedMps
+            )
+            let flyingSpeedMargin = ((airspeed - wing.minSustainableSpeedMps)
+                / (cruiseSpeedReference - wing.minSustainableSpeedMps)).clamped(to: 0.0...1.0)
+            let cruiseFloor = baseline.effectiveMinimumSafeFlightThrottle * (1.0 - flyingSpeedMargin)
             let allowGroundTakeoffFloor = profile.airframeStyle == .tailsitterVTOL && control.mode == .takeoff
             let manualTailsitterThrottle = profile.airframeStyle == .tailsitterVTOL && control.mode == .manual
             // An autopilot altitude hold must be allowed to command *below*
@@ -1692,11 +1745,19 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let cruiseUnits = units.filter { $0.role == .cruiseProp }
 
         let airDensity: Float = 1.225
-        let (_, cdTrim) = s.aero.liftDrag(alphaRad: 0.0)
-        let cruiseSpeed = max(s.wing.cruiseSpeedMps, s.wing.minSustainableSpeedMps, 1.0)
-        let dragAtCruise = 0.5 * airDensity * cruiseSpeed * cruiseSpeed * s.aero.wingArea * cdTrim
-        let referenceThrottle = max(0.2, s.baseline.cruiseReferenceThrottle)
-        let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : s.motorThrottle * max(0.5, dragAtCruise / referenceThrottle) * s.batteryFactor
+        // Same sizing as the fixed wing, from the same function: cruise-reference throttle balances
+        // level-flight drag at cruise. This used to be an inline copy that took drag at alpha 0 —
+        // parasite only, no induced term — which made reference throttle over-thrust, and since a
+        // wing-borne VTOL's throttle floor *is* the cruise reference, the aircraft was pinned above
+        // its published cruise speed for the whole leg.
+        let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : wingborneThrustMagnitude(
+            commandedThrottle: s.motorThrottle,
+            aero: s.aero,
+            wing: s.wing,
+            cruiseReferenceThrottle: s.baseline.cruiseReferenceThrottle,
+            mass: s.mass,
+            airDensity: airDensity
+        ) * s.batteryFactor
 
         let hoverSizedThrustMagnitude = liftCapableUnits.isEmpty ? 0.0 : rotorBorneThrustMagnitude(
             motorThrottle: s.crashOrDisarmed ? 0.0 : s.motorThrottle,
@@ -1827,11 +1888,19 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // which is ~0 at hover airspeed — the aircraft would simply fall.
         var units = s.units
         let airDensity: Float = 1.225
-        let (_, cdTrim) = s.aero.liftDrag(alphaRad: 0.0)
-        let cruiseSpeed = max(s.wing.cruiseSpeedMps, s.wing.minSustainableSpeedMps, 1.0)
-        let dragAtCruise = 0.5 * airDensity * cruiseSpeed * cruiseSpeed * s.aero.wingArea * cdTrim
-        let referenceThrottle = max(0.2, s.baseline.cruiseReferenceThrottle)
-        let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : s.motorThrottle * max(0.5, dragAtCruise / referenceThrottle) * s.batteryFactor
+        // Same sizing as the fixed wing, from the same function: cruise-reference throttle balances
+        // level-flight drag at cruise. This used to be an inline copy that took drag at alpha 0 —
+        // parasite only, no induced term — which made reference throttle over-thrust, and since a
+        // wing-borne VTOL's throttle floor *is* the cruise reference, the aircraft was pinned above
+        // its published cruise speed for the whole leg.
+        let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : wingborneThrustMagnitude(
+            commandedThrottle: s.motorThrottle,
+            aero: s.aero,
+            wing: s.wing,
+            cruiseReferenceThrottle: s.baseline.cruiseReferenceThrottle,
+            mass: s.mass,
+            airDensity: airDensity
+        ) * s.batteryFactor
         let hoverSizedThrustMagnitude = units.isEmpty ? 0.0 : rotorBorneThrustMagnitude(
             motorThrottle: s.crashOrDisarmed ? 0.0 : s.motorThrottle,
             baseline: s.baseline,

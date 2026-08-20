@@ -340,6 +340,16 @@
 "warning.integrity_low" = "Низкая структурная целостность";
 "warning.fixedwing_low_speed" = "Низкая скорость самолётного БПЛА / риск сваливания";
 "warning.fleet_risk" = "Риск в построении группы";
+"warning.vtol_transition_blocked" = "Переход VTOL задержан";
+"warning.vtol_transition_blocked_altitude" = "Переход VTOL задержан: мала высота";
+"warning.vtol_transition_blocked_battery" = "Переход VTOL задержан: низкий заряд";
+"warning.vtol_transition_blocked_damage" = "Переход VTOL задержан: повреждения планера";
+"warning.vtol_transition_aborted" = "Переход VTOL прерван";
+"warning.vtol_transition_aborted_sink" = "Переход VTOL прерван: скорость снижения";
+"warning.vtol_transition_aborted_airspeed" = "Переход VTOL прерван: мала скорость";
+"warning.vtol_transition_aborted_lift" = "Переход VTOL прерван: потерян запас подъёмной силы";
+"warning.vtol_corridor_blocked" = "VTOL удерживается: коридор перекрыт";
+"warning.vtol_forced_landing" = "Вынужденная посадка VTOL";
 "warning.interdrone_critical" = "Критическое сближение дронов";
 "warning.payload_self_interference" = "Сброс выполнен слишком близко к носителю";
 "warning.emergency" = "Активирован аварийный режим";

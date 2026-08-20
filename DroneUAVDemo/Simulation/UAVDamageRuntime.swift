@@ -133,6 +133,35 @@ struct UAVStructuralLoadSolver {
         let componentSnapshot = graph.attachedComponents
         let componentByID = Dictionary(uniqueKeysWithValues: componentSnapshot.map { ($0.id, $0) })
 
+        // What the airframe's lifting surfaces are actually carrying right now, and how much
+        // surface there is to carry it.
+        //
+        // The load a wing root sees in flight is the lift that wing is producing — the load factor
+        // times its share of the aircraft's weight — not `q · S · CLmax`. Charging every surface
+        // its maximum lift coefficient at all times makes the load grow with V² with nothing to
+        // stop it, so an aircraft that simply accelerated in level cruise tore its own wings off:
+        // on a 5.5 kg VTOL at 37 m/s that formula demands about 520 N per wing panel against a
+        // ~500 N joint, while the lift the wing is really making is around 27 N. One recorded
+        // flight lost both wings mid-air with no impact logged at all, then flew into a building.
+        //
+        // `q · S · CLmax` stays — as the *ceiling* it physically is. A surface cannot produce more
+        // than that, so at low speed it is the binding limit; at cruise the airframe's own lift
+        // budget is far lower and binds instead.
+        let wingborneFraction: Float = {
+            switch airframeClass {
+            case .fixedWing:
+                return 1.0
+            case .hybridVTOL:
+                return min(1.0, max(0.0, state.vtolWingborneBlend))
+            case .multirotor:
+                return 0.0
+            }
+        }()
+        let airframeAerodynamicLift = totalMass * specificForce * wingborneFraction
+        let totalLiftingArea = componentSnapshot.reduce(Float(0.0)) { total, member in
+            total + (Self.liftingSurface(for: member)?.area ?? 0.0)
+        }
+
         func belongsToSubtree(_ component: VehicleComponent, rootID: String) -> Bool {
             var cursor: VehicleComponent? = component
             var depth = 0
@@ -171,21 +200,14 @@ struct UAVStructuralLoadSolver {
                 switch member.kind {
                 case .motor(let slot), .propeller(let slot):
                     rotorSlots.insert(slot)
-                case .wingSection:
-                    let area = max(0.005, member.boundingHalfExtents.x * member.boundingHalfExtents.z * 4.0)
-                    aerodynamicForce += dynamicPressure * area * 1.15
-                case .horizontalTail:
-                    let area = max(0.003, member.boundingHalfExtents.x * member.boundingHalfExtents.z * 4.0)
-                    aerodynamicForce += dynamicPressure * area * 0.72
-                case .verticalTail:
-                    let area = max(0.003, member.boundingHalfExtents.y * member.boundingHalfExtents.z * 4.0)
-                    aerodynamicForce += dynamicPressure * area * 0.72
-                case .elevator:
-                    let area = max(0.002, member.boundingHalfExtents.x * member.boundingHalfExtents.z * 4.0)
-                    aerodynamicForce += dynamicPressure * area * 0.48
-                case .rudder:
-                    let area = max(0.002, member.boundingHalfExtents.y * member.boundingHalfExtents.z * 4.0)
-                    aerodynamicForce += dynamicPressure * area * 0.48
+                case .wingSection, .horizontalTail, .verticalTail, .elevator, .rudder:
+                    guard let surface = Self.liftingSurface(for: member) else { break }
+                    aerodynamicForce += aerodynamicLoad(
+                        on: surface,
+                        dynamicPressure: dynamicPressure,
+                        airframeLift: airframeAerodynamicLift,
+                        totalLiftingArea: totalLiftingArea
+                    )
                 case .frame, .fuselage, .arm, .tailSection, .battery, .flightController, .esc,
                      .radio, .cameraGimbal, .payloadMount, .landingGear:
                     break
@@ -229,5 +251,48 @@ struct UAVStructuralLoadSolver {
             connectionDamage: changes,
             failedConnectionRootIDs: graph.failedConnectionRootIDs.sorted()
         )
+    }
+
+    /// A lifting surface's reference area and the largest force coefficient it can reach before
+    /// it stalls. The coefficients are the ones this solver has always used; they are now the
+    /// ceiling rather than the working value.
+    private struct LiftingSurface {
+        var area: Float
+        var maximumCoefficient: Float
+    }
+
+    private static func liftingSurface(for component: VehicleComponent) -> LiftingSurface? {
+        let half = component.boundingHalfExtents
+        switch component.kind {
+        case .wingSection:
+            return LiftingSurface(area: max(0.005, half.x * half.z * 4.0), maximumCoefficient: 1.15)
+        case .horizontalTail:
+            return LiftingSurface(area: max(0.003, half.x * half.z * 4.0), maximumCoefficient: 0.72)
+        case .verticalTail:
+            return LiftingSurface(area: max(0.003, half.y * half.z * 4.0), maximumCoefficient: 0.72)
+        case .elevator:
+            return LiftingSurface(area: max(0.002, half.x * half.z * 4.0), maximumCoefficient: 0.48)
+        case .rudder:
+            return LiftingSurface(area: max(0.002, half.y * half.z * 4.0), maximumCoefficient: 0.48)
+        case .motor, .propeller, .frame, .fuselage, .arm, .tailSection, .battery,
+             .flightController, .esc, .radio, .cameraGimbal, .payloadMount, .landingGear:
+            return nil
+        }
+    }
+
+    /// The aerodynamic force on one surface: its area share of the lift the airframe is currently
+    /// producing, never more than the surface can physically make, never less than the parasite
+    /// load that dynamic pressure alone puts on it. The floor is what still breaks an airframe in
+    /// a dive — where there is no load factor to speak of but the air pressure is real.
+    private func aerodynamicLoad(
+        on surface: LiftingSurface,
+        dynamicPressure: Float,
+        airframeLift: Float,
+        totalLiftingArea: Float
+    ) -> Float {
+        let areaShare = totalLiftingArea > 0.0001 ? surface.area / totalLiftingArea : 1.0
+        let stallCeiling = dynamicPressure * surface.area * surface.maximumCoefficient
+        let parasiteFloor = dynamicPressure * surface.area * 0.08
+        return max(parasiteFloor, min(stallCeiling, airframeLift * areaShare))
     }
 }
