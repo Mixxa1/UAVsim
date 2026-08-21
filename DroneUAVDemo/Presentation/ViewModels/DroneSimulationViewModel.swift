@@ -1560,9 +1560,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private var collisionInterventionHoldSeconds: Float = 0.0
     /// When the operator last actually moved a control.
     ///
-    /// Recorded only where `updateControlValues(markManual: true)` changed something, so a failsafe
-    /// that leaves the sticks frozen never registers as a pilot. Used to decide whether the
-    /// collision net should stay out of the way.
+    /// Written from two places, and it needs both. `updateControlValues(markManual: true)` covers
+    /// the UI setter API; `applyResolvedFlightControls` covers the sticks, which is how anyone
+    /// actually flies and which used to record nothing at all. A failsafe that leaves the controls
+    /// frozen still registers as no pilot: it produces neither a setter call nor a live deflection.
+    /// Used to decide whether the collision net should stay out of the way.
     private var lastOperatorInputAt: Date?
     /// How long after a control movement the aircraft is still considered hand-flown. Long enough
     /// to span the gaps between stick movements, short enough that an unattended aircraft is
@@ -8085,7 +8087,17 @@ final class DroneSimulationViewModel: ObservableObject {
             clearCollisionInterventionHold()
             return
         }
-        if collisionInterventionSuspendedMode == nil, operatorIsOnTheControls {
+        if operatorIsOnTheControls {
+            // Taking the aircraft back has to work while the net is holding it, not only before.
+            // The old form only declined to *arm* for a pilot; once armed, the sticks were ignored
+            // until the risk band cleared or the six-second ceiling expired, so an operator who
+            // flew up to a tree deliberately got the aircraft wrestled away and could not answer.
+            if let suspendedMode = collisionInterventionSuspendedMode {
+                resumeAfterCollisionInterventionHold(
+                    suspendedMode,
+                    reason: "collision_intervention_cleared"
+                )
+            }
             return
         }
 
@@ -8319,6 +8331,26 @@ final class DroneSimulationViewModel: ObservableObject {
             abs(effectiveAxis.vertical) > 0.001 ||
             hasEffectiveYawInput
         let hasVTOLTransitionInput = abs(controlValues.vtolTransitionLever) > 0.05
+        // A hand on the sticks is what "the operator is flying" means — and nothing on this path
+        // ever said so.
+        //
+        // `lastOperatorInputAt` was written in exactly one place: `updateControlValues(markManual:
+        // true)`, reached only from the UI setter API (`setX`, `setRoll`, `setThrottle`, …). Live
+        // flying does not go through those; it arrives here, as resolved axis input, every tick. So
+        // `operatorIsOnTheControls` stayed false for the entire duration of a manual flight, and the
+        // proximity net's one exemption — "while the operator is actually on the controls the
+        // aircraft is theirs and the net stays out of the way" — never fired for an actual pilot.
+        // A DJI Matrice flown by hand near trees was taken into `collision_intervention_hover`
+        // again and again while the operator was holding the stick.
+        //
+        // The test is the same `> 0.001` deflection the line above already uses to decide the
+        // operator is commanding something; no new threshold, and the 1.5 s grace is unchanged.
+        // Authority is deliberately *not* part of it: a stick that moves is a human regardless of
+        // what the router currently thinks is steering, and that is precisely the case where the
+        // aircraft has to be handed back.
+        if hasEffectiveInput || hasVTOLTransitionInput {
+            lastOperatorInputAt = Date()
+        }
         let shouldExitHoverForManualAuthority = selectedDroneProfile.airframeStyle == .tailsitterVTOL
             ? (hasEffectiveInput || hasVTOLTransitionInput)
             : true
@@ -9754,6 +9786,41 @@ final class DroneSimulationViewModel: ObservableObject {
     /// own right — the report drives the gate, the measurement drives the geometry.
     ///
     /// Printed only when something is actually near, so a clean cruise leg stays silent.
+    #if DEBUG
+    /// Last categorical verdict printed per channel, and when.
+    private var diagnosticThrottleState: [String: (key: String, tick: UInt64)] = [:]
+
+    /// Print a trace line when it says something new, and only occasionally when it does not.
+    ///
+    /// These traces are not decoration — they located five defects that were invisible without
+    /// them, including three of my own regressions, so thinning them is a volume problem and not a
+    /// value one. Repetition is where the volume lives: `[Sidestep]` alone produced roughly two
+    /// thousand lines of a 2 789-line flight, nearly all of them the same verdict re-stated sixty
+    /// times a second.
+    ///
+    /// So the *categorical* part — which exit the layer took, whether the route certified — is the
+    /// throttle key, and any change to it prints immediately. Everything continuous (clearance,
+    /// distance, altitude) still gets sampled on the tick cadence, which is enough to read a trend:
+    /// the decay that mattered most in this saga, `clr` falling 2.4 → 1.2 m, spanned dozens of
+    /// ticks and survives one-in-ten sampling intact.
+    ///
+    /// The line is an autoclosure so a suppressed sample costs no `String(format:)` at all.
+    private func printThrottled(
+        channel: String,
+        key: String,
+        everyTicks: UInt64 = 10,
+        _ line: @autoclosure () -> String
+    ) {
+        if let previous = diagnosticThrottleState[channel],
+           previous.key == key,
+           simulationTickCounter < previous.tick &+ everyTicks {
+            return
+        }
+        diagnosticThrottleState[channel] = (key, simulationTickCounter)
+        print(line())
+    }
+    #endif
+
     private func noteRotorBorneSidestep(
         _ outcome: String,
         inBand: Int = -1,
@@ -9769,7 +9836,7 @@ final class DroneSimulationViewModel: ObservableObject {
         guard collisionAnalysis.nearestObstacleDistance < 40.0 ||
               collisionAnalysis.riskScore >= 0.20 else { return }
         let band = fixedWingProtectedAltitudeRange()
-        print(String(
+        printThrottled(channel: "Sidestep", key: outcome, String(
             // `mtri` is how many mesh triangles stood in the flight band for the clearance test.
             // Zero next to a low `clr` means a semantic building did it; a large number next to a
             // permanent `hold_nothing_clear` means the mesh geometry is the thing pinning the
@@ -17501,7 +17568,7 @@ final class DroneSimulationViewModel: ObservableObject {
                             nearestBase = obstacle.baseY
                         }
                     }
-                    print(String(
+                    printThrottled(channel: "Route", key: "certified", everyTicks: 20, String(
                         format: "[Route] direct_certified len=%.0f alt=%.1f band=%.0f-%.0f "
                             + "obstacles=%d inBand=%d required=%.1f nearest=%.1f src=%@ y=%.0f..%.0f",
                         certifiedLength,
@@ -17523,7 +17590,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
             }
             #if DEBUG
-            print(String(
+            printThrottled(channel: "Route", key: "rejected", everyTicks: 20, String(
                 format: "[Route] direct_certification_rejected pts=%d penetration=%.2fm obstacles=%d alt=%.1f",
                 candidateRoute.count,
                 penetration,
