@@ -1783,6 +1783,10 @@ final class DroneSimulationViewModel: ObservableObject {
     private var hybridVTOLAltitudeAbortSince: Float?
     /// How long that has to hold before it counts as the transition failing rather than sagging.
     private static let hybridVTOLAltitudeAbortDwellSeconds: Float = 1.0
+    /// Past this transition progress the altitude abort is no longer an economy: giving the wing
+    /// back costs the same actuator travel as finishing, so there is nothing left to save by
+    /// stopping. Real sink is still caught by the sink-rate abort at any progress.
+    private static let hybridVTOLAltitudeAbortMaximumProgress: Float = 0.80
     private var hybridVTOLTransitionLeverLatched: Double?
     private var hybridVTOLTransitionLeverLatchedSince: Float?
     /// How long a transition-lever class is held before the opposite one may be issued. Sized to
@@ -1885,6 +1889,12 @@ final class DroneSimulationViewModel: ObservableObject {
     /// 12 sits below every profile's `minSustainableSpeedMps` (the lowest is 10), so it is
     /// unambiguously rotor territory and can never fight the wing for a leg the wing should have.
     private static let hybridVTOLRotorBorneTranslationCeilingMps: Float = 12.0
+    /// Sideways acceleration a rotor-borne aircraft can actually produce.
+    ///
+    /// The hover law clamps lean at ±16°, and `g·tan(16°)` is 2.81 m/s². Anything that plans a
+    /// lateral displacement has to be measured against this or it is planning a move the aircraft
+    /// cannot make.
+    private static let rotorBorneLateralAccelerationMps2: Float = 2.8
     /// First measured pose of the current protected-route blocked episode.
     ///
     /// Replacing this with `state.position` every tick moves the position-controller target along
@@ -9496,6 +9506,28 @@ final class DroneSimulationViewModel: ObservableObject {
         return obstacle.radius
     }
 
+    /// How far the obstacle actually reaches along one planar axis.
+    ///
+    /// `obstaclePlanarRadius` returns `simd_length(halfExtents)` — the box's *diagonal*, which is
+    /// the correct answer only for a circle. This file has already paid for that mistake once: the
+    /// segment form of `planarSignedDistance` carries a comment about a 40×80 m block demanding
+    /// 45 m of stand-off from its centre when its long face is only 20 m out, "which no street in a
+    /// real city can satisfy". The sidestep was still sizing its offset that way, and on a measured
+    /// Manhattan leg it asked for **33.3 m** of lateral displacement — then, seven ticks later,
+    /// for 33.3 m in the opposite direction. Neither is reachable in that street, so the scoring
+    /// was choosing between two impossible options and the tie broke on noise.
+    private func obstacleSupport(_ obstacle: CollisionObstacle, along axis: SIMD2<Float>) -> Float {
+        guard let extents = obstacle.planarHalfExtents else { return obstacle.radius }
+        let cosYaw = cos(obstacle.yawRadians)
+        let sinYaw = sin(obstacle.yawRadians)
+        // Same world→local convention as `planarSignedDistance`, so the two cannot drift apart.
+        let localAxis = SIMD2<Float>(
+            axis.x * cosYaw - axis.y * sinYaw,
+            axis.x * sinYaw + axis.y * cosYaw
+        )
+        return abs(localAxis.x) * extents.x + abs(localAxis.y) * extents.y
+    }
+
     /// What the sidestep search is allowed to measure itself against.
     ///
     /// OSM worlds provide semantic building/tree shapes; photogrammetric worlds provide only mesh
@@ -9520,6 +9552,30 @@ final class DroneSimulationViewModel: ObservableObject {
         return usesMeshCellsForPlanning
             ? result
             : result.filter { !$0.source.hasPrefix("world.mesh.cell") }
+    }
+
+    /// Everything the *physics* can hit, for the clearance test alone.
+    ///
+    /// `avoidanceObstacles` drops `world.mesh.cell` on an object-aware OSM world, on the premise
+    /// that the semantic registry already covers the same geometry. Three flights in a row falsify
+    /// that premise in one place: `[Impact] src=world.mesh.cell.25.24 origin=meshCell` while the
+    /// sidestep was steering around a `world.building` and reporting `inBand=1`. The layer was
+    /// avoiding the thing it could see and being struck by the thing it could not.
+    ///
+    /// The filter itself is not wrong. A 24 m bucket is far too coarse to *steer* by: let it into
+    /// the nearest-obstacle pick and sidesteps get sized off a bucket radius; let it into the
+    /// threat test and half of Manhattan is a threat. So the cells come back for exactly one job —
+    /// deciding whether a candidate path is clear. Coarseness there errs toward holding, which is
+    /// the survivable direction, and steering still happens on semantic footprints.
+    ///
+    /// Costs a second registry query per tick on the path that already runs one; `colPre`/`guid`
+    /// have the room, and a query that is skipped is how the last three wings came off.
+    private func contactAwareClearanceObstacles(radius: Float) -> [CollisionObstacle] {
+        sceneController.nearbyEnvironmentObstacles(
+            near: state.position,
+            radius: radius,
+            includeMesh: true
+        )
     }
 
     /// The closest point to the marker the aircraft can actually occupy.
@@ -9625,6 +9681,53 @@ final class DroneSimulationViewModel: ObservableObject {
         let goal: SIMD3<Float>
     }
 
+    /// One line per tick, from whichever exit the rotor-borne sidestep actually took.
+    ///
+    /// A Quantum Trinity Pro clipped a façade with its right wing tip at 4.35 m/s while this layer
+    /// reported `avCmd=no avOff=clear` for the whole approach, with 106 obstacles inside the flight
+    /// band. `avCmd` only says the *wing* corridor issued nothing; it says nothing at all about the
+    /// rotor sidestep, which has seven distinct ways to return `nil` and no way to tell them apart
+    /// from outside. Rather than guess which one fired, name it.
+    ///
+    /// `rep` is what `CollisionAnalysisService` believes the nearest obstacle is; `nearest` is what
+    /// this layer measured for itself after the band filter. The two disagreeing is a finding in its
+    /// own right — the report drives the gate, the measurement drives the geometry.
+    ///
+    /// Printed only when something is actually near, so a clean cruise leg stays silent.
+    private func noteRotorBorneSidestep(
+        _ outcome: String,
+        inBand: Int = -1,
+        nearest: Float = -1.0,
+        source: String = "-",
+        immediate: Bool = false,
+        threatened: Bool = false,
+        clearance: Float = -1.0,
+        offset: Float = 0.0
+    ) {
+        #if DEBUG
+        guard collisionAnalysis.nearestObstacleDistance < 40.0 ||
+              collisionAnalysis.riskScore >= 0.20 else { return }
+        let band = fixedWingProtectedAltitudeRange()
+        print(String(
+            format: "[Sidestep] %@ risk=%.2f spd=%.1f rep=%.1f band=%.0f-%.0f inBand=%d "
+                + "nearest=%.1f src=%@ imm=%@ thr=%@ clr=%.1f off=%+.1f",
+            outcome as NSString,
+            Double(collisionAnalysis.riskScore),
+            Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
+            Double(collisionAnalysis.nearestObstacleDistance),
+            Double(band.lowerBound),
+            Double(band.upperBound),
+            inBand,
+            Double(nearest),
+            source as NSString,
+            (immediate ? "y" : "n") as NSString,
+            (threatened ? "y" : "n") as NSString,
+            Double(clearance),
+            Double(offset)
+        ))
+        #endif
+    }
+
     private func multirotorCollisionAvoidanceTarget(
         nominalTarget: SIMD3<Float>,
         finalGoal: SIMD3<Float>,
@@ -9634,8 +9737,24 @@ final class DroneSimulationViewModel: ObservableObject {
         // same need to slide around a façade rather than stop in front of it. It reaches here only
         // through `applyHybridVTOLAutopilotTracking`'s hover phases, so the wingborne regime still
         // belongs to the forward-avoidance layer (see `forwardAvoidanceCoversActiveAirframe`).
+        //
+        // Ownership is "the corridor layer is steering", not "the corridor layer holds the latch".
+        // Those came apart in a measured `transitionToHover`: `wbLatch=yes` with `avCmd=no
+        // avOff=clear` for a long run of ticks while the nearest obstacle closed 12.4 → 9.0 m at
+        // 19.8 m/s. The corridor layer was not clearing the path, it was declining to look; this
+        // gate then refused the sidestep as "not a rotorcraft". Nine metres at 19.8 m/s is 0.45 s
+        // and neither layer was watching — the same silence that put a wing tip into a façade.
+        //
+        // While the corridor layer is actually commanding it keeps the aircraft, because two layers
+        // steering one target is a deadlock this file has already paid for. The eight-tick grace is
+        // the same figure the candidate hold below uses, and for the same reason: an ownership that
+        // flips every frame is worse than either owner. Read one tick stale by construction —
+        // guidance runs before the avoidance probe within a tick — which is the intended question:
+        // did the corridor layer steer on the last completed tick.
+        let corridorLayerIsSteering = vtolWingborneAvoidanceLatched &&
+            (fixedWingAvoidanceLastCommandTick.map { $0 + 8 >= simulationTickCounter } ?? false)
         let airframeIsRotorBorne = selectedDroneProfile.airframeClass == .multirotor
-            || (selectedDroneProfile.airframeClass == .hybridVTOL && !vtolWingborneAvoidanceLatched)
+            || (selectedDroneProfile.airframeClass == .hybridVTOL && !corridorLayerIsSteering)
         // The risk score cannot be the only way in, because it is blind past ten metres.
         //
         // `CollisionAnalysisService` builds its distance term as `1 - clearance / 10`, so beyond
@@ -9647,9 +9766,24 @@ final class DroneSimulationViewModel: ObservableObject {
         // twice. Past the speed where ten metres stops being a second of warning, geometry decides
         // instead — the `immediateRisk || routeThreatened` guard below already does that job, it
         // was simply never reached.
+        //
+        // The ten-metre speed threshold covers the fast case and leaves the slow one open. Measured
+        // on the same flight: 7.2 m/s with the nearest obstacle at 7.3 m and `risk=0.15`, refused
+        // every tick — one second of closing distance, and the layer never woke. So the third way in
+        // is time rather than either raw number. Two seconds, because the manoeuvre itself needs
+        // most of that: the sidestep asks for up to ~3 m of lateral displacement and hover lean is
+        // clamped at ±16°, worth about 2.8 m/s² sideways, so the slide alone is ~1.5 s. Waking with
+        // less than that leaves the layer nothing to execute with. At rest the term is zero, which
+        // is correct — nothing is closing.
         let planarSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+        let secondsToNearestObstacle = planarSpeed > 0.1
+            ? collisionAnalysis.nearestObstacleDistance / planarSpeed
+            : .greatestFiniteMagnitude
         guard airframeIsRotorBorne,
-              collisionAnalysis.riskScore >= 0.30 || planarSpeed > 10.0 else {
+              collisionAnalysis.riskScore >= 0.30
+                || planarSpeed > 10.0
+                || secondsToNearestObstacle < 2.0 else {
+            noteRotorBorneSidestep(airframeIsRotorBorne ? "gate_risk_low" : "gate_not_rotorborne")
             multirotorAvoidanceLateralOffset = 0.0
             return nil
         }
@@ -9658,15 +9792,22 @@ final class DroneSimulationViewModel: ObservableObject {
         let searchRadius = max(28.0, rotorBorneAvoidanceLookahead() + 26.0)
         let nearbyObstacles = avoidanceObstacles(radius: searchRadius)
             .filter { blocksFlightBand($0) }
+        // Steering and clearance now use different sets on purpose — see
+        // `contactAwareClearanceObstacles`. `nearbyObstacles` picks the target; this one decides
+        // whether the path to it is survivable, and it can see the mesh geometry the other cannot.
+        let clearanceObstacles = contactAwareClearanceObstacles(radius: searchRadius)
+            .filter { blocksFlightBand($0) }
 
         // The nearest *object*, not whatever the risk report named — that can be a mesh bucket,
         // whose 17 m bounding radius would size a sidestep wider than the street it is in.
         guard let obstacle = nearbyObstacles.min(by: {
             $0.planarSignedDistance(to: current) < $1.planarSignedDistance(to: current)
         }) else {
+            noteRotorBorneSidestep("no_obstacles_in_band", inBand: 0)
             multirotorAvoidanceLateralOffset = 0.0
             return nil
         }
+        let nearestDistance = obstacle.planarSignedDistance(to: current)
         let nominal = SIMD2<Float>(nominalTarget.x, nominalTarget.z)
         let finalPlanar = SIMD2<Float>(finalGoal.x, finalGoal.z)
         var routeVector = nominal - current
@@ -9682,6 +9823,12 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         guard simd_length_squared(routeVector) > 0.0001 else {
+            noteRotorBorneSidestep(
+                "degenerate_route",
+                inBand: nearbyObstacles.count,
+                nearest: nearestDistance,
+                source: obstacle.source
+            )
             return nil
         }
 
@@ -9709,16 +9856,43 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         guard immediateRisk || routeThreatened else {
+            noteRotorBorneSidestep(
+                "not_threatened",
+                inBand: nearbyObstacles.count,
+                nearest: nearestDistance,
+                source: obstacle.source,
+                immediate: immediateRisk,
+                threatened: routeThreatened
+            )
             multirotorAvoidanceLateralOffset = 0.0
             return nil
         }
 
         let nearestCoordinates = routeCoordinates(for: obstacle)
         let preferredSign: Float = nearestCoordinates.lateral >= 0.0 ? -1.0 : 1.0
-        let sideDistance = max(
+        // How far sideways the search is allowed to look — the obstacle's size is only half of it.
+        //
+        // Sizing the widest candidate off the obstacle alone asks "how big is it", never "can I get
+        // there". Measured: a turn onto the next leg produced `off=-33.7` and then `off=+64.9` on
+        // the following tick, with the obstacle 3.3 m away and the aircraft doing 7.4 m/s. Sixty-five
+        // metres is not a sidestep at that range, it is a heading command pointing ninety degrees off
+        // the route, and the aircraft answered it with bank until the wing tip touched.
+        //
+        // So the geometric figure is capped by what lean can actually deliver in the time left:
+        // `½·a·t²` with the same 2.8 m/s² the ±16° hover clamp is worth and `t` the distance to the
+        // obstacle over the closing speed. At 11 m/s with 16 m of room that is ~2.9 m — a real
+        // sidestep. At 7.4 m/s with 3.3 m it is ~0.2 m, which is the honest answer: there is no
+        // sidestep left, only a stop, and `hold_nothing_clear` below is what says so.
+        let geometricSideDistance = max(
             6.0,
-            obstaclePlanarRadius(obstacle) + selectedDroneProfile.collisionRadius * 2.2 + 3.0
+            obstacleSupport(obstacle, along: sideAxis)
+                + selectedDroneProfile.collisionRadius * 2.2
+                + 3.0
         )
+        let secondsToNearest = max(0.25, nearestDistance / max(planarSpeed, 0.5))
+        let reachableSideDistance = 0.5 * Self.rotorBorneLateralAccelerationMps2 *
+            secondsToNearest * secondsToNearest
+        let sideDistance = max(1.0, min(geometricSideDistance, reachableSideDistance))
         let remainingDistance = max(2.5, simd_distance(current, finalPlanar))
         let forwardStep = min(
             remainingDistance,
@@ -9726,21 +9900,57 @@ final class DroneSimulationViewModel: ObservableObject {
                 ? max(4.0, min(7.0, nearestCoordinates.along + 2.5))
                 : max(4.0, min(8.0, nearestCoordinates.along + 3.0))
         )
-        let smallOffset = min(2.4, sideDistance * 0.40)
-        let mediumOffset = min(4.2, sideDistance * 0.70)
-        let candidateOffsets: [Float] = [
-            0.0,
-            preferredSign * smallOffset,
-            -preferredSign * smallOffset,
-            preferredSign * mediumOffset,
-            -preferredSign * mediumOffset,
-            preferredSign * sideDistance,
-            -preferredSign * sideDistance
-        ]
-        let requiredClearance = max(0.35, selectedDroneProfile.collisionRadius * 0.25)
+        // A ladder with no gap in it.
+        //
+        // The old rungs were 2.4 m, 4.2 m and then `sideDistance` — nothing in between. Once 4.2 m
+        // stopped clearing, the only remaining option was the full obstacle-sized jump, so the
+        // search went from "four metres" to "sixty-five" with no middle. Fractions of the (now
+        // bounded) ceiling keep the progression continuous, which is what lets the scoring below
+        // actually choose rather than fall off a cliff.
+        var candidateOffsets: [Float] = [0.0]
+        for fraction in [Float(0.35), Float(0.65), Float(1.0)] {
+            candidateOffsets.append(preferredSign * fraction * sideDistance)
+            candidateOffsets.append(-preferredSign * fraction * sideDistance)
+        }
+        // Do not cross in front of the thing you are avoiding.
+        //
+        // `preferredSign` is recomputed every tick from whichever object is nearest, so passing its
+        // centre line flips it. Two flights in a row show the result: a committed slide reversing
+        // while the obstacle was one to three metres away. Inside the hold window the committed side
+        // is the only side offered — straight ahead and the stop are still on the table, so the
+        // aircraft can still abandon the slide; it just cannot swap sides mid-manoeuvre.
+        if simulationTickCounter <= multirotorAvoidanceHoldUntilTick,
+           abs(multirotorAvoidanceLateralOffset) > 0.05 {
+            let committedSign: Float = multirotorAvoidanceLateralOffset < 0.0 ? -1.0 : 1.0
+            candidateOffsets.removeAll { $0 * committedSign < -0.05 }
+        }
+        // What counts as "clear" here — and why this is not a new number.
+        //
+        // `collisionRadius * 0.25` asks only "does the body fit", and a measured flight shows what
+        // that buys: `straight_is_clear` held while the margin fell 2.4 → 1.2 m at 15.7 m/s, and a
+        // few ticks later the layer measured itself 0.1 m *inside* a building's footprint, in a
+        // flight band that same building occupied.
+        //
+        // The planner refuses exactly this kind of line below `fixedWingRouteCertificationClearance`
+        // — 7.2 m for this airframe — for a reason already written down beside it: a 10° bank held
+        // for a second moves the aircraft three to five metres off the line, and the wing has to fit
+        // in what is left. The reactive layer flies that same line, at cruise speed, while banking
+        // on purpose. It has no business certifying twenty times less than the planner would, so it
+        // gets the planner's own figure rather than an invented one.
+        //
+        // Accepted consequence, stated rather than discovered: more `hold_nothing_clear` in tight
+        // streets — the aircraft stops instead of threading and the altitude ladder lifts it over.
+        // That is this layer's designed answer to "a façade across the route", and it is what
+        // happened on that flight anyway, only later and from one metre instead of seven.
+        //
+        // Multirotors keep the old rule. A copter at walking pace can genuinely thread a one-metre
+        // gap, and nothing measured says otherwise.
+        let requiredClearance = selectedDroneProfile.airframeClass == .hybridVTOL
+            ? fixedWingRouteCertificationClearance
+            : max(0.35, selectedDroneProfile.collisionRadius * 0.25)
 
         func clearance(at point: SIMD2<Float>) -> Float {
-            nearbyObstacles.reduce(Float.greatestFiniteMagnitude) { partial, candidate in
+            clearanceObstacles.reduce(Float.greatestFiniteMagnitude) { partial, candidate in
                 min(
                     partial,
                     candidate.planarSignedDistance(to: point) - selectedDroneProfile.collisionRadius
@@ -9796,12 +10006,31 @@ final class DroneSimulationViewModel: ObservableObject {
             (offset: offset, result: candidateScore(offset: offset))
         }
         guard let bestCandidate = scoredCandidates.max(by: { $0.result.score < $1.result.score }) else {
+            noteRotorBorneSidestep(
+                "no_candidate",
+                inBand: nearbyObstacles.count,
+                nearest: nearestDistance,
+                source: obstacle.source,
+                immediate: immediateRisk,
+                threatened: routeThreatened
+            )
             multirotorAvoidanceLateralOffset = 0.0
             return nil
         }
 
         if abs(bestCandidate.offset) < 0.10,
            bestCandidate.result.clearance >= requiredClearance {
+            // The layer looked, and going straight on is genuinely the clear choice. Distinct from
+            // every other `nil` above: those are refusals to look.
+            noteRotorBorneSidestep(
+                "straight_is_clear",
+                inBand: nearbyObstacles.count,
+                nearest: nearestDistance,
+                source: obstacle.source,
+                immediate: immediateRisk,
+                threatened: routeThreatened,
+                clearance: bestCandidate.result.clearance
+            )
             multirotorAvoidanceLateralOffset = 0.0
             multirotorAvoidanceHoldUntilTick = simulationTickCounter + 8
             return nil
@@ -9812,11 +10041,30 @@ final class DroneSimulationViewModel: ObservableObject {
         // option: with only trees in scope the least-bad choice was always survivable, but against a
         // building it is a wall at cruise speed.
         guard bestCandidate.result.clearance >= requiredClearance else {
+            noteRotorBorneSidestep(
+                "hold_nothing_clear",
+                inBand: nearbyObstacles.count,
+                nearest: nearestDistance,
+                source: obstacle.source,
+                immediate: immediateRisk,
+                threatened: routeThreatened,
+                clearance: bestCandidate.result.clearance
+            )
             multirotorAvoidanceLateralOffset = 0.0
             multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
             return clampToWorldBounds(SIMD3<Float>(current.x, travelAltitude, current.y))
         }
 
+        noteRotorBorneSidestep(
+            "sidestep",
+            inBand: nearbyObstacles.count,
+            nearest: nearestDistance,
+            source: obstacle.source,
+            immediate: immediateRisk,
+            threatened: routeThreatened,
+            clearance: bestCandidate.result.clearance,
+            offset: bestCandidate.offset
+        )
         multirotorAvoidanceLateralOffset = bestCandidate.offset
         multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
         return clampToWorldBounds(SIMD3<Float>(
@@ -10825,10 +11073,16 @@ final class DroneSimulationViewModel: ObservableObject {
             // Stop-and-pivot holds are route geometry, not generic nominal targets. The sidestep
             // helper falls back to the final waypoint when nominal == current pose; applying it
             // while aligning would move 4–8 m across the certified A* corner.
-            if HybridVTOLFlightPolicy.allowsReactiveHoverSidestep(
+            guard HybridVTOLFlightPolicy.allowsReactiveHoverSidestep(
                 decisionReason: decision.reason
-            ),
-               let adjusted = multirotorCollisionAvoidanceTarget(
+            ) else {
+                // Silence here is a decision, not an absence, so say so: without this line a
+                // missing `[Sidestep]` could mean either "the layer found nothing" or "the layer
+                // was never asked", and those need opposite fixes.
+                noteRotorBorneSidestep("not_called_policy:\(decision.reason)")
+                break
+            }
+            if let adjusted = multirotorCollisionAvoidanceTarget(
                 nominalTarget: decision.target,
                 finalGoal: finalTarget,
                 travelAltitude: decision.targetAltitude
@@ -10880,7 +11134,10 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         case .idleGrounded, .verticalTakeoff, .verticalLanding, .forcedLanding,
              .transitionAbort, .wingborneCruise:
-            break
+            // `wingborneCruise` belongs to the forward corridor layer and the rest are not
+            // translating at all, so no sidestep is expected — but the phase still has to appear,
+            // or a strike in one of them reads as the sidestep having failed.
+            noteRotorBorneSidestep("not_called_phase:\(decision.phase)")
         }
 
         switch decision.phase {
@@ -12000,9 +12257,25 @@ final class DroneSimulationViewModel: ObservableObject {
         // Sustained sink is what genuinely says "this transition is not working", and it already has
         // its own check above. What is left for this one is the slower version of the same thing: low
         // *and* still going down *and* staying that way.
+        //
+        // It also needs a ceiling, and never had one.
+        //
+        // Measured on a Quantum Trinity Pro: three aborts on one leg at `prog` 0.97, 0.95 and 0.96,
+        // each with `wb` 0.86-1.00 — the wing was already carrying. The trigger was not a failing
+        // manoeuvre but the altitude loop's standing offset: `rAlt=63.2` against 59.5-62.6 held, a
+        // 2.5-3.6 m deficit versus this rule's 1.6 m, so the aircraft sat inside the abort condition
+        // permanently and `vy=-0.19` was enough to fire it. Each abort cost the six or seven seconds
+        // of actuator travel the transition had already spent, `prog` falling to 0.70 then 0.17,
+        // and two seconds later it started again.
+        //
+        // An abort is worth taking while the transition is still cheap to give up. Past 0.80 it
+        // costs the same as finishing, so there is nothing to save. Real sink is still caught by
+        // `sinkRateExceeded` above at every progress — and its silence through all three of those
+        // aborts is exactly the point: there was no sink to catch.
         if !latchedTailsitterCruise,
            state.position.y < routeAltitude - 1.6,
            state.vtolTransitionProgress > 0.35,
+           state.vtolTransitionProgress <= Self.hybridVTOLAltitudeAbortMaximumProgress,
            state.velocity.y < -0.15 {
             let since = hybridVTOLAltitudeAbortSince ?? simulationTime
             hybridVTOLAltitudeAbortSince = since
