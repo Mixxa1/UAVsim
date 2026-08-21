@@ -18,6 +18,13 @@ struct AutopilotTrackingContext {
     /// damping while rotor-borne because their transition-sized propulsion
     /// has substantially more thrust authority than an ordinary multirotor.
     var verticalVelocityDampingGain: Float = 0.03
+    /// Ceiling on the translation speed the position term is allowed to ask for.
+    ///
+    /// Unset it behaves exactly as before — the position error is used raw, which for any target
+    /// beyond the lean saturation means "as fast as drag allows". That is the right answer for a
+    /// multirotor flying its own airframe, and the wrong one for a hybrid VTOL in hover, which
+    /// inherits whatever speed the wing left behind.
+    var maximumTranslationSpeedMps: Float = .greatestFiniteMagnitude
 }
 
 struct AutopilotControlCommand: Equatable {
@@ -41,6 +48,17 @@ private enum MulticopterRouteTuning {
     static let lateralPositionGain: Float = 1.15
     static let lateralVelocityDamping: Float = 2.1
     static let brakingSpeedThreshold: Float = 0.12
+
+    /// Position error that implies a given steady translation speed.
+    ///
+    /// The lateral law settles where `error * scale - velocity * damping` is zero, so a bounded
+    /// speed is a bounded error: `error = speed * damping`. Expressing the limit this way keeps it
+    /// inside the existing units and gains — nothing else in the loop has to be retuned, and every
+    /// target nearer than the clamp is handled exactly as it was.
+    static func approachErrorClamp(forSpeed speed: Float) -> Float {
+        guard speed.isFinite else { return .greatestFiniteMagnitude }
+        return max(holdRadiusMeters, speed * lateralVelocityDamping)
+    }
 }
 
 final class MulticopterAutopilotController {
@@ -147,7 +165,36 @@ final class MulticopterAutopilotController {
             // transition that mode hands off to.
             //
             // Position error keeps the scale, so a cautious approach still approaches cautiously.
-            let worldIntent = headingVector * alignmentScale * controlScale -
+            //
+            // The position term had no speed limit in it at all, and that is a different defect
+            // from the one above.
+            //
+            // `headingVector` is the raw error to the target, unbounded. Against a node two hundred
+            // metres away it is two hundred; the damping term at 24 m/s is fifty. Their sum pins
+            // the +-16 deg lean clamp from the first tick to the last, so the aircraft accelerates
+            // until drag balances full lean and then holds whatever speed that is. A multirotor
+            // reaches its own cruise and the answer is defensible. A hybrid VTOL that has just put
+            // the wing away reaches the speed the *wing* left behind, in a mode with none of the
+            // wing's ability to hold a line.
+            //
+            // Measured on a Wingcopter 198 flying a 221 m leg the regime rule had declared too
+            // short for cruise: phase `vtol_hover_hold_short_leg`, `rollCmd=16.0` and
+            // `pitch=-16..-18` pinned for the whole leg, ground speed 27.6 -> 24.5 m/s over 70 m —
+            // 1.2 m/s^2, against a route certified with 12.1 m of lateral clearance. It flew into
+            // a facade at `vN=24.49` with the reactive layer reporting nothing wrong, because
+            // nothing was wrong with the route: the aircraft simply could not fly it.
+            //
+            // The sign is the whole story. Unbounded, the intent is `218 - 24*2.1 = +168`: full
+            // lean *forward*, into the building. Clamped to the error a bounded speed implies, it
+            // is `25 - 50 = -25`: full lean *back*, braking. Until now this controller could not
+            // brake against a distant target at all, and no layer downstream could make up for it.
+            let approachClamp = MulticopterRouteTuning.approachErrorClamp(
+                forSpeed: context.maximumTranslationSpeedMps
+            )
+            let approachVector = headingDistance > approachClamp
+                ? headingVector * (approachClamp / headingDistance)
+                : headingVector
+            let worldIntent = approachVector * alignmentScale * controlScale -
                 planarVelocity * MulticopterRouteTuning.lateralVelocityDamping
             let localForwardIntent = simd_dot(worldIntent, bodyAxes.forward)
             let localRightIntent = simd_dot(worldIntent, bodyAxes.right)

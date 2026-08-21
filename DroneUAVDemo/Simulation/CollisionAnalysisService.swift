@@ -651,6 +651,19 @@ final class CollisionAnalysisService {
                     if timeToCollision == nil || ttc < (timeToCollision ?? .greatestFiniteMagnitude) {
                         timeToCollision = ttc
                     }
+                    // Weight 0.35 over six seconds, and do not raise it without reading the ladder
+                    // this score feeds.
+                    //
+                    // It was raised to 1.0/4 s on 2026-08-21 so that closing time could raise the
+                    // alarm on its own — which it cannot at 0.35, since the term tops out below the
+                    // 0.45 a hover costs. That reasoning was right about the symptom and wrong
+                    // about the consequence: `riskScore >= 0.85` selects `.emergencyStop`, and the
+                    // collision intervention answered that by disarming. Time alone now reached
+                    // 0.85 at six tenths of a second to contact, so both VTOLs had their motors cut
+                    // at altitude and fell. Reverted the same day.
+                    //
+                    // The blindness is real and still unfixed. Whatever replaces this must not
+                    // route a fast approach into the top of that ladder.
                     let ttcRisk = (1.0 - (ttc / 6.0)).clamped(to: 0.0...1.0)
                     obstacleRisk += ttcRisk * 0.35
                 }
