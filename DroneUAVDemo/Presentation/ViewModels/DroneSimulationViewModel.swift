@@ -9554,6 +9554,66 @@ final class DroneSimulationViewModel: ObservableObject {
             : result.filter { !$0.source.hasPrefix("world.mesh.cell") }
     }
 
+    /// Planar distance from a point to a triangle flattened onto X/Z. Negative inside.
+    ///
+    /// The degenerate case is the important one. A façade triangle is vertical, so projecting it to
+    /// X/Z collapses it to a *segment* — and distance-to-segment is exactly the lateral clearance a
+    /// wall offers. That is the whole reason to work in triangles here: the cell's bounding box
+    /// fills in the twenty-four metre square *behind* that façade as if it were solid, and a
+    /// rotorcraft flying down the open half of the tile reads as buried inside an obstacle.
+    private static func planarDistance(
+        from point: SIMD2<Float>,
+        toTriangle a: SIMD2<Float>,
+        _ b: SIMD2<Float>,
+        _ c: SIMD2<Float>
+    ) -> Float {
+        func distanceToSegment(_ p: SIMD2<Float>, _ s: SIMD2<Float>, _ e: SIMD2<Float>) -> Float {
+            let span = e - s
+            let lengthSquared = simd_length_squared(span)
+            guard lengthSquared > 1e-9 else { return simd_distance(p, s) }
+            let t = min(1.0, max(0.0, simd_dot(p - s, span) / lengthSquared))
+            return simd_distance(p, s + span * t)
+        }
+        func cross(_ u: SIMD2<Float>, _ v: SIMD2<Float>) -> Float { u.x * v.y - u.y * v.x }
+
+        let edgeDistance = min(
+            distanceToSegment(point, a, b),
+            min(distanceToSegment(point, b, c), distanceToSegment(point, c, a))
+        )
+        let s0 = cross(b - a, point - a)
+        let s1 = cross(c - b, point - b)
+        let s2 = cross(a - c, point - c)
+        let inside = (s0 >= 0.0 && s1 >= 0.0 && s2 >= 0.0)
+            || (s0 <= 0.0 && s1 <= 0.0 && s2 <= 0.0)
+        return inside ? -edgeDistance : edgeDistance
+    }
+
+    /// The mesh geometry that actually stands in the flight band, flattened for the clearance test.
+    ///
+    /// Filtering by the triangle's own vertical extent is what keeps this cheap and correct: the
+    /// ground plane and every rooftop far below drop out, and what survives is the façade the
+    /// aircraft could hit at this altitude.
+    private func bandRelevantMeshTriangles(
+        _ obstacles: [CollisionObstacle]
+    ) -> [(SIMD2<Float>, SIMD2<Float>, SIMD2<Float>)] {
+        let band = fixedWingProtectedAltitudeRange()
+        let margin = max(1.0, fixedWingNavigationEnvelopeRadius)
+        var flattened: [(SIMD2<Float>, SIMD2<Float>, SIMD2<Float>)] = []
+        for obstacle in obstacles {
+            guard let triangles = obstacle.meshTriangles else { continue }
+            for triangle in triangles {
+                guard triangle.maximum.y > band.lowerBound - margin,
+                      triangle.minimum.y < band.upperBound + margin else { continue }
+                flattened.append((
+                    SIMD2<Float>(triangle.point0.x, triangle.point0.z),
+                    SIMD2<Float>(triangle.point1.x, triangle.point1.z),
+                    SIMD2<Float>(triangle.point2.x, triangle.point2.z)
+                ))
+            }
+        }
+        return flattened
+    }
+
     /// Everything the *physics* can hit, for the clearance test alone.
     ///
     /// `avoidanceObstacles` drops `world.mesh.cell` on an object-aware OSM world, on the premise
@@ -9702,15 +9762,20 @@ final class DroneSimulationViewModel: ObservableObject {
         immediate: Bool = false,
         threatened: Bool = false,
         clearance: Float = -1.0,
-        offset: Float = 0.0
+        offset: Float = 0.0,
+        meshTris: Int = -1
     ) {
         #if DEBUG
         guard collisionAnalysis.nearestObstacleDistance < 40.0 ||
               collisionAnalysis.riskScore >= 0.20 else { return }
         let band = fixedWingProtectedAltitudeRange()
         print(String(
+            // `mtri` is how many mesh triangles stood in the flight band for the clearance test.
+            // Zero next to a low `clr` means a semantic building did it; a large number next to a
+            // permanent `hold_nothing_clear` means the mesh geometry is the thing pinning the
+            // aircraft, and that is a different fix.
             format: "[Sidestep] %@ risk=%.2f spd=%.1f rep=%.1f band=%.0f-%.0f inBand=%d "
-                + "nearest=%.1f src=%@ imm=%@ thr=%@ clr=%.1f off=%+.1f",
+                + "nearest=%.1f src=%@ imm=%@ thr=%@ clr=%.1f off=%+.1f mtri=%d",
             outcome as NSString,
             Double(collisionAnalysis.riskScore),
             Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
@@ -9723,7 +9788,8 @@ final class DroneSimulationViewModel: ObservableObject {
             (immediate ? "y" : "n") as NSString,
             (threatened ? "y" : "n") as NSString,
             Double(clearance),
-            Double(offset)
+            Double(offset),
+            meshTris
         ))
         #endif
     }
@@ -9792,11 +9858,14 @@ final class DroneSimulationViewModel: ObservableObject {
         let searchRadius = max(28.0, rotorBorneAvoidanceLookahead() + 26.0)
         let nearbyObstacles = avoidanceObstacles(radius: searchRadius)
             .filter { blocksFlightBand($0) }
-        // Steering and clearance now use different sets on purpose — see
-        // `contactAwareClearanceObstacles`. `nearbyObstacles` picks the target; this one decides
-        // whether the path to it is survivable, and it can see the mesh geometry the other cannot.
-        let clearanceObstacles = contactAwareClearanceObstacles(radius: searchRadius)
-            .filter { blocksFlightBand($0) }
+        // Steering and clearance use different sets on purpose — see
+        // `contactAwareClearanceObstacles`. `nearbyObstacles` picks the target; the mesh geometry
+        // below only ever vetoes a path, and it is measured against its own triangles rather than
+        // the tile that encloses them.
+        let clearanceMeshTriangles = bandRelevantMeshTriangles(
+            contactAwareClearanceObstacles(radius: searchRadius)
+                .filter { $0.source.hasPrefix("world.mesh.cell") && blocksFlightBand($0) }
+        )
 
         // The nearest *object*, not whatever the risk report named — that can be a mesh bucket,
         // whose 17 m bounding radius would size a sidestep wider than the street it is in.
@@ -9827,7 +9896,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 "degenerate_route",
                 inBand: nearbyObstacles.count,
                 nearest: nearestDistance,
-                source: obstacle.source
+                source: obstacle.source,
+                meshTris: clearanceMeshTriangles.count
             )
             return nil
         }
@@ -9862,7 +9932,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 nearest: nearestDistance,
                 source: obstacle.source,
                 immediate: immediateRisk,
-                threatened: routeThreatened
+                threatened: routeThreatened,
+                meshTris: clearanceMeshTriangles.count
             )
             multirotorAvoidanceLateralOffset = 0.0
             return nil
@@ -9950,12 +10021,24 @@ final class DroneSimulationViewModel: ObservableObject {
             : max(0.35, selectedDroneProfile.collisionRadius * 0.25)
 
         func clearance(at point: SIMD2<Float>) -> Float {
-            clearanceObstacles.reduce(Float.greatestFiniteMagnitude) { partial, candidate in
+            var best = nearbyObstacles.reduce(Float.greatestFiniteMagnitude) { partial, candidate in
                 min(
                     partial,
                     candidate.planarSignedDistance(to: point) - selectedDroneProfile.collisionRadius
                 )
             }
+            for triangle in clearanceMeshTriangles {
+                best = min(
+                    best,
+                    Self.planarDistance(
+                        from: point,
+                        toTriangle: triangle.0,
+                        triangle.1,
+                        triangle.2
+                    ) - selectedDroneProfile.collisionRadius
+                )
+            }
+            return best
         }
 
         func segmentClearance(to target: SIMD2<Float>) -> Float {
@@ -10012,7 +10095,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 nearest: nearestDistance,
                 source: obstacle.source,
                 immediate: immediateRisk,
-                threatened: routeThreatened
+                threatened: routeThreatened,
+                meshTris: clearanceMeshTriangles.count
             )
             multirotorAvoidanceLateralOffset = 0.0
             return nil
@@ -10029,7 +10113,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 source: obstacle.source,
                 immediate: immediateRisk,
                 threatened: routeThreatened,
-                clearance: bestCandidate.result.clearance
+                clearance: bestCandidate.result.clearance,
+                meshTris: clearanceMeshTriangles.count
             )
             multirotorAvoidanceLateralOffset = 0.0
             multirotorAvoidanceHoldUntilTick = simulationTickCounter + 8
@@ -10048,7 +10133,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 source: obstacle.source,
                 immediate: immediateRisk,
                 threatened: routeThreatened,
-                clearance: bestCandidate.result.clearance
+                clearance: bestCandidate.result.clearance,
+                meshTris: clearanceMeshTriangles.count
             )
             multirotorAvoidanceLateralOffset = 0.0
             multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
@@ -10063,7 +10149,8 @@ final class DroneSimulationViewModel: ObservableObject {
             immediate: immediateRisk,
             threatened: routeThreatened,
             clearance: bestCandidate.result.clearance,
-            offset: bestCandidate.offset
+            offset: bestCandidate.offset,
+            meshTris: clearanceMeshTriangles.count
         )
         multirotorAvoidanceLateralOffset = bestCandidate.offset
         multirotorAvoidanceHoldUntilTick = simulationTickCounter + 12
@@ -11036,6 +11123,25 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         } else {
             hybridVTOLRouteBlockedSeconds = 0.0
+            // No descent ratchet here, and the omission is deliberate.
+            //
+            // One was tried: release a storey after six seconds of continuously ready route. It
+            // stalled an aircraft outright. Measured on the next flight — `lift=24` (route altitude
+            // 41.3 m) gave `ready` in 110 of 112 samples; `lift=12` (29.3 m) gave
+            // `route_unavailable:point_safe_route_rejected` in 38 of 39, because the lower band
+            // pulled 15 217 obstacles into consideration instead of 5 734. So the ladder dropped a
+            // storey every six seconds, killed the route, spent two seconds blocked, climbed back,
+            // and repeated. The aircraft closed **two metres** toward its waypoint in the whole
+            // flight.
+            //
+            // The flaw is not the delay, it is the evidence. "The route is ready" cannot license a
+            // descent, because the route is ready *because of the lift*: acting on that evidence
+            // destroys it. A sound release would have to show the route still stands one storey
+            // lower, which costs a second certification at a hypothetical altitude — worth building
+            // if the lift ever needs to come down mid-mission. It does not today: the collapses
+            // that made this look necessary were the two resets above discarding the ladder, and
+            // those are fixed. What remains is an aircraft that keeps the altitude its worst leg
+            // needed, which is safe and which no measured flight has complained about.
         }
         var decision = hybridVTOLAutopilotDecision(
             context: context,
@@ -14536,7 +14642,15 @@ final class DroneSimulationViewModel: ObservableObject {
         resetActiveRouteTargetGuidanceCache()
     }
 
-    private func resetActiveRouteTargetGuidanceCache() {
+    /// - Parameter releasingAltitudeLadder: whether the climb the previous leg had to earn is
+    ///   discarded too. True when the aircraft is left with no route target at all — a cancel, a
+    ///   mode takeover, a cleared marker — because then the geometry it climbed over stops being
+    ///   its problem. False when one waypoint simply hands over to the next: the aircraft has not
+    ///   moved, the next leg starts among the same towers, and dropping the ladder there is what
+    ///   put a 296 m collapse into the log twice running.
+    private func resetActiveRouteTargetGuidanceCache(
+        releasingAltitudeLadder: Bool = true
+    ) {
         activeRouteTargetAltitude = nil
         activeRouteTargetAltitudeMarkerID = nil
         multirotorMarkerLastPlanTick = nil
@@ -14560,7 +14674,9 @@ final class DroneSimulationViewModel: ObservableObject {
         hybridVTOLTransitionLeverLatched = nil
         hybridVTOLTransitionLeverLatchedSince = nil
         hybridVTOLAltitudeAbortSince = nil
-        hybridVTOLRouteAltitudeLift = 0.0
+        if releasingAltitudeLadder {
+            hybridVTOLRouteAltitudeLift = 0.0
+        }
         hybridVTOLRouteBlockedSeconds = 0.0
         multicopterAutopilotController.reset()
     }
@@ -21363,11 +21479,17 @@ final class DroneSimulationViewModel: ObservableObject {
     private func resetFixedWingRuntimeRouteStart() {
         fixedWingRuntimeRouteStartKey = nil
         fixedWingRuntimeRouteStartPosition = nil
-        hybridVTOLRouteCursor.reset()
+        // Re-anchoring the join is not "start the route again" — see `resetRuntimeAnchor`. Every
+        // collision-intervention hold changes the guidance source twice, and the full reset here
+        // was throwing away the aircraft's place on a route whose identity had not changed. The
+        // cursor still restarts by itself when the route really does change.
+        hybridVTOLRouteCursor.resetRuntimeAnchor()
         hybridVTOLStopAndPivotGate.reset()
         hybridVTOLProtectedRouteHoldPosition = nil
         hybridVTOLEmergencyHoldPosition = nil
-        hybridVTOLRouteAltitudeLift = 0.0
+        // The altitude the aircraft had to climb to is not join-anchor state either. It is released
+        // by the descent ratchet above, on evidence that the corridor is open — not on the calendar
+        // event of reaching a waypoint. Zeroing it here is what produced the 296 m → 89 m collapse.
         hybridVTOLRouteBlockedSeconds = 0.0
         fixedWingGuidanceDeferredThroughTick = simulationTickCounter
         // A waypoint handoff changes only the runtime join anchor. The static
@@ -24240,7 +24362,10 @@ final class DroneSimulationViewModel: ObservableObject {
         )
         activeRouteTargetSource = acceptedMarker == nil ? .none : source
         targetMarkerState = acceptedMarker
-        resetActiveRouteTargetGuidanceCache()
+        // A waypoint handing over to the next one is a new leg, not a new flight. Everything else
+        // in this cache belongs to the leg that ended; the altitude the aircraft had to climb to
+        // belongs to the airspace, and the airspace has not changed.
+        resetActiveRouteTargetGuidanceCache(releasingAltitudeLadder: acceptedMarker == nil)
 
         if let acceptedMarker {
             autoNavigationController.replaceTarget(acceptedMarker)

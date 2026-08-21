@@ -261,6 +261,26 @@ struct HybridVTOLRouteCursor: Equatable {
         previousPlanarPosition = nil
     }
 
+    /// Forget the swept-advance history without forgetting where the aircraft got to.
+    ///
+    /// Re-anchoring the fixed-wing runtime join is not a statement about route progress, and
+    /// treating it as one is how a Wingcopter spent a whole flight walking backwards. Measured:
+    /// twenty-six collision-intervention holds, each flipping the mode to hover and back, each
+    /// change of guidance source calling the full `reset()`. The cursor lost its identity, the next
+    /// `update` saw an unfamiliar route and restarted at `minimumIndex`, and an aircraft sixteen
+    /// metres short of node 2 was sent back to node 1 forty metres *behind* it. Six times on one
+    /// route. Over the flight: 974 m closed toward the active target against **515 m flown away
+    /// from it** — 47% of the distance covered was wasted, and the third waypoint never came closer.
+    ///
+    /// Progress along a route is a property of that route, and the cursor already discards it for
+    /// the only reason that warrants it — the route identity changing (see `update`). What a
+    /// re-anchor genuinely invalidates is `previousPlanarPosition`: the swept-capture test would
+    /// otherwise draw one segment across the discontinuity and consume nodes the aircraft never
+    /// flew past. That, and only that, is cleared here.
+    mutating func resetRuntimeAnchor() {
+        previousPlanarPosition = nil
+    }
+
     /// Advances over intermediate route points and returns the next protected guidance target.
     ///
     /// The final point is never consumed here. Mission progress must continue to require the
