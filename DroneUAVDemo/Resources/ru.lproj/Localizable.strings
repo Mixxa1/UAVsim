@@ -125,8 +125,8 @@
 "payload.hose.length" = "Длина рукава";
 "payload.hose.rig_mass" = "Масса оснастки: %.0f кг";
 "payload.hose.mass_follows_rig" = "Масса определяется длиной × диаметром рукава и не редактируется напрямую.";
-"payload.hose.tether_taut" = "ТРОС НАТЯНУТ";
-"payload.hose.tether_distance" = "ТРОС %.0f / %.0f м";
+"payload.hose.tether_taut" = "РУКАВ НАТЯНУТ";
+"payload.hose.tether_distance" = "РУКАВ %.0f / %.0f м";
 
 // Оптоволоконная привязь
 "payload.fiber.reel_class" = "Класс катушки";
@@ -537,6 +537,19 @@
 "comms_link.toolbar.close" = "Закрыть модуль связи и управления";
 "payload.section" = "НАСТРОЙКА ПОЛЕЗНОЙ НАГРУЗКИ";
 "payload.console.subtitle" = "Операционный модуль полезной нагрузки для активного профиля БЛА";
+"payload.catalog.subtitle" = "Выбор и проверка совместимости в реальном времени";
+"payload.active_uav" = "АКТИВНЫЙ БЛА";
+"payload.catalog.title" = "КАТАЛОГ 3D-МОДУЛЕЙ";
+"payload.catalog.count_format" = "%d моделей · интерактивный 3D-каталог";
+"payload.configuration.title" = "КОНФИГУРАЦИЯ ВЫБРАННОГО МОДУЛЯ";
+"payload.preview.live" = "3D-ПРЕДПРОСМОТР";
+"payload.preview.drag" = "Потяните для осмотра";
+"payload.compatible" = "СОВМЕСТИМО";
+"payload.incompatible" = "НЕСОВМЕСТИМО";
+"payload.remaining_capacity" = "Остаток лимита";
+"payload.capacity_usage" = "Загрузка подвеса";
+"payload.compatibility.ready_hint" = "Масса и взлётный лимит соблюдены";
+"payload.compatibility.over_limit_hint" = "Требуется более грузоподъёмный БЛА";
 "payload.type" = "Тип полезной нагрузки";
 "payload.data_source" = "Источник данных полезной нагрузки";
 "payload.data.verified" = "ПРОВЕРЕНО";
@@ -595,6 +608,18 @@
 "payload.type.sensor_module" = "Сенсорный модуль";
 "payload.type.radio_relay" = "Радиорелейный модуль";
 "payload.type.custom" = "Пользовательская";
+"payload.type.cargoBox.description" = "Защищённый контейнер для доставки груза и снабжения.";
+"payload.type.cameraGimbal.description" = "Стабилизированная оптическая камера для наблюдения и записи.";
+"payload.type.thermalCamera.description" = "Двухканальная подвесная камера с тепловизионной оптикой.";
+"payload.type.lidarModule.description" = "Сканирующий лидар для картографии и построения облака точек.";
+"payload.type.laserRangefinder.description" = "Оптический модуль точного измерения дистанции до цели.";
+"payload.type.fireHose.description" = "Подвесной ствол и рукав ограниченной длины с подачей от пожарной машины.";
+"payload.type.fireCapsuleLauncher.description" = "Кассетная система сброса противопожарных капсул.";
+"payload.type.agriculturalSprayer.description" = "Бак, штанга и форсунки для точечного внесения раствора.";
+"payload.type.rescuePack.description" = "Защищённый медицинский комплект для экстренной доставки.";
+"payload.type.sensorModule.description" = "Мультисенсорный блок мониторинга среды и качества воздуха.";
+"payload.type.radioRelay.description" = "Ретранслятор связи для расширения зоны устойчивого сигнала.";
+"payload.type.custom.description" = "Универсальный корпус для пользовательского оборудования.";
 "control_mode.angle" = "Угловой";
 "command.arm" = "Вооружить";
 "command.disarm" = "Разоружить";
@@ -610,7 +635,7 @@
 "warning.emergency_descent" = "Аварийное снижение";
 "warning.crash_state" = "Состояние крушения";
 "warning.signal_lost_impact" = "Сигнал потерян: ударное повреждение";
-"warning.hose_tether_taut" = "Трос рукава натянут — достигнут предел удаления от машины";
+"warning.hose_tether_taut" = "Пожарный рукав натянут — достигнут предел удаления от машины";
 "damage.severity.nominal" = "Норма";
 "damage.severity.light" = "Легкие";
 "damage.severity.medium" = "Средние";
@@ -620,7 +645,7 @@
 "keybind.camera.mode4" = "Камера 4 (От первого лица)";
 "keybind.camera.mode5" = "Камера 5 (Вид сверху)";
 "keybind.camera.mode6" = "Камера (Падение полезной нагрузки)";
-"keybind.camera.mode8" = "Камера (EO-камера/дальномер ПН)";
+"keybind.camera.mode8" = "Камера ПН / управление брандспойтом";
 "keybind.camera.toggle_fpv" = "Переключить от первого лица";
 "keybind.camera.cycle_mode" = "Смена режима камеры";
 "keybind.camera.zoom_in" = "Приблизить";
@@ -2804,3 +2829,5 @@
 "lidar.color.material" = "МАТ";
 "lidar.color.semantic" = "КЛАСС";
 "lidar.hud.raw_toggle" = "RAW%@";
+"payload.hose.external_aim" = "УПРАВЛЕНИЕ БРАНДСПОЙТОМ";
+"payload.hose.external_aim_hint" = "O — выйти · ← ↑ ↓ → — наведение";

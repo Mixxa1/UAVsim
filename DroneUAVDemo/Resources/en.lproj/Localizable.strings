@@ -125,8 +125,8 @@
 "payload.hose.length" = "Hose Length";
 "payload.hose.rig_mass" = "Rig mass: %.0f kg";
 "payload.hose.mass_follows_rig" = "Mass follows hose length × diameter, not independently editable.";
-"payload.hose.tether_taut" = "TETHER TAUT";
-"payload.hose.tether_distance" = "TETHER %.0f / %.0f m";
+"payload.hose.tether_taut" = "HOSE TAUT";
+"payload.hose.tether_distance" = "HOSE %.0f / %.0f m";
 
 // Fiber-optic tether
 "payload.fiber.reel_class" = "Reel Class";
@@ -540,6 +540,19 @@
 "comms_link.toolbar.close" = "Close comms & control link console";
 "payload.section" = "PAYLOAD CONFIG";
 "payload.console.subtitle" = "Mission payload console for the active UAV profile";
+"payload.catalog.subtitle" = "Live selection and compatibility check";
+"payload.active_uav" = "ACTIVE UAV";
+"payload.catalog.title" = "3D MODULE CATALOG";
+"payload.catalog.count_format" = "%d models · interactive 3D catalog";
+"payload.configuration.title" = "SELECTED MODULE CONFIGURATION";
+"payload.preview.live" = "3D PREVIEW";
+"payload.preview.drag" = "Drag to inspect";
+"payload.compatible" = "COMPATIBLE";
+"payload.incompatible" = "INCOMPATIBLE";
+"payload.remaining_capacity" = "Capacity Left";
+"payload.capacity_usage" = "Mount Load";
+"payload.compatibility.ready_hint" = "Payload and takeoff limits are satisfied";
+"payload.compatibility.over_limit_hint" = "A higher-capacity UAV is required";
 "payload.type" = "Payload Type";
 "payload.data_source" = "Payload Data Source";
 "payload.data.verified" = "VERIFIED";
@@ -598,6 +611,18 @@
 "payload.type.sensor_module" = "Sensor Module";
 "payload.type.radio_relay" = "Radio Relay";
 "payload.type.custom" = "Custom";
+"payload.type.cargoBox.description" = "Protected container for cargo delivery and resupply.";
+"payload.type.cameraGimbal.description" = "Stabilized optical camera for observation and recording.";
+"payload.type.thermalCamera.description" = "Dual-channel gimbal with thermal imaging optics.";
+"payload.type.lidarModule.description" = "Scanning LiDAR for mapping and point-cloud capture.";
+"payload.type.laserRangefinder.description" = "Optical module for precise target distance measurement.";
+"payload.type.fireHose.description" = "Aircraft-mounted monitor on a limited-length hose supplied by the fire truck.";
+"payload.type.fireCapsuleLauncher.description" = "Cassette system for deploying fire-suppression capsules.";
+"payload.type.agriculturalSprayer.description" = "Tank, boom and nozzles for precision liquid application.";
+"payload.type.rescuePack.description" = "Protected medical kit for rapid emergency delivery.";
+"payload.type.sensorModule.description" = "Multi-sensor package for environment and air-quality monitoring.";
+"payload.type.radioRelay.description" = "Communications relay that extends reliable signal coverage.";
+"payload.type.custom.description" = "Universal enclosure for user-defined equipment.";
 "payload.placeholder.message" = "This function will be added later.";
 "control_mode.angle" = "Angle";
 "command.arm" = "Arm";
@@ -614,7 +639,7 @@
 "warning.emergency_descent" = "Emergency descent";
 "warning.crash_state" = "Crash state";
 "warning.signal_lost_impact" = "Signal lost: impact damage";
-"warning.hose_tether_taut" = "Fire hose tether taut — at maximum reach from the truck";
+"warning.hose_tether_taut" = "Fire hose taut — at maximum reach from the truck";
 "damage.severity.nominal" = "Nominal";
 "damage.severity.light" = "Light";
 "damage.severity.medium" = "Medium";
@@ -624,7 +649,7 @@
 "keybind.camera.mode4" = "Camera 4 (FPV)";
 "keybind.camera.mode5" = "Camera 5 (Top)";
 "keybind.camera.mode6" = "Camera (Payload Drop)";
-"keybind.camera.mode8" = "Camera (Payload EO/LRF)";
+"keybind.camera.mode8" = "Payload camera / nozzle control";
 "keybind.camera.toggle_fpv" = "Toggle FPV";
 "keybind.camera.cycle_mode" = "Cycle camera mode";
 "keybind.camera.zoom_in" = "Zoom in";
@@ -2809,3 +2834,5 @@
 "lidar.color.material" = "MAT";
 "lidar.color.semantic" = "CLASS";
 "lidar.hud.raw_toggle" = "RAW%@";
+"payload.hose.external_aim" = "NOZZLE AIM CONTROL";
+"payload.hose.external_aim_hint" = "O — exit · ← ↑ ↓ → — aim";

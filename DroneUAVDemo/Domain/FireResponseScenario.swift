@@ -175,7 +175,8 @@ struct FireHoseTuning: Equatable {
 /// Real firefighting-drone hoses come in two practical weight classes: a lightweight,
 /// small-diameter foldable line for medium-lift platforms, and a full-bore standard attack line
 /// for heavy/superheavy platforms. Water-filled mass scales linearly with length; `hardwareOverheadKg`
-/// accounts for the reel/valve/nozzle-turret hardware itself, independent of length.
+/// accounts for the coupling, valve and nozzle-turret hardware, independent of length. The hose
+/// remains supplied by the fire truck; there is no airborne reel.
 enum FireHoseDiameterClass: String, CaseIterable, Codable, Hashable, Identifiable {
     case narrow
     case standard
@@ -197,7 +198,7 @@ enum FireHoseDiameterClass: String, CaseIterable, Codable, Hashable, Identifiabl
         }
     }
 
-    /// Fixed reel/valve/nozzle-turret hardware mass, independent of length.
+    /// Fixed coupling/valve/nozzle-turret hardware mass, independent of length.
     var hardwareOverheadKg: Float {
         switch self {
         case .narrow: return 2.0

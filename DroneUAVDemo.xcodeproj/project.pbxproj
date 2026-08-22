@@ -65,6 +65,7 @@
 		100000000000000000000235 /* UAVFilterBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000138 /* UAVFilterBarView.swift */; };
 		100000000000000000000236 /* UAVProfileCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000139 /* UAVProfileCardView.swift */; };
 		100000000000000000000A2B /* UAVLivePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2C /* UAVLivePreviewView.swift */; };
+		A6B4D5E60000000000000001 /* PayloadLivePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B4D5E60000000000000002 /* PayloadLivePreviewView.swift */; };
 		100000000000000000000A2D /* UAVSelectionCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2E /* UAVSelectionCardView.swift */; };
 		100000000000000000000A30 /* PropulsionUnit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A2F /* PropulsionUnit.swift */; };
 		100000000000000000000A32 /* VTOLFlightPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A31 /* VTOLFlightPhase.swift */; };
@@ -484,6 +485,7 @@
 		100000000000000000000138 /* UAVFilterBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVFilterBarView.swift; sourceTree = "<group>"; };
 		100000000000000000000139 /* UAVProfileCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVProfileCardView.swift; sourceTree = "<group>"; };
 		100000000000000000000A2C /* UAVLivePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVLivePreviewView.swift; sourceTree = "<group>"; };
+		A6B4D5E60000000000000002 /* PayloadLivePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadLivePreviewView.swift; sourceTree = "<group>"; };
 		100000000000000000000A2E /* UAVSelectionCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVSelectionCardView.swift; sourceTree = "<group>"; };
 		10000000000000000000013A /* UAVCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVCatalogView.swift; sourceTree = "<group>"; };
 		10000000000000000000013B /* PayloadVisualPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadVisualPreset.swift; sourceTree = "<group>"; };
@@ -1183,6 +1185,7 @@
 				100000000000000000000138 /* UAVFilterBarView.swift */,
 				100000000000000000000139 /* UAVProfileCardView.swift */,
 				100000000000000000000A2C /* UAVLivePreviewView.swift */,
+				A6B4D5E60000000000000002 /* PayloadLivePreviewView.swift */,
 				100000000000000000000A2E /* UAVSelectionCardView.swift */,
 				1000000000000000000001AC /* UIScrollRouter.swift */,
 				1000000000000000000001AB /* VirtualKeyboardView.swift */,
@@ -1752,6 +1755,7 @@
 				100000000000000000000235 /* UAVFilterBarView.swift in Sources */,
 				100000000000000000000236 /* UAVProfileCardView.swift in Sources */,
 				100000000000000000000A2B /* UAVLivePreviewView.swift in Sources */,
+				A6B4D5E60000000000000001 /* PayloadLivePreviewView.swift in Sources */,
 				100000000000000000000A2D /* UAVSelectionCardView.swift in Sources */,
 				100000000000000000000A30 /* PropulsionUnit.swift in Sources */,
 				100000000000000000000A32 /* VTOLFlightPhase.swift in Sources */,

@@ -176,11 +176,22 @@ final class DroneSceneController {
     private let hoseRigNode = SCNNode()
     private let hoseYawNode = SCNNode()
     private let hosePitchNode = SCNNode()
+    private let hoseNozzleAssemblyNode = SCNNode()
+    private let hoseNozzleTipNode = SCNNode()
     private var hoseBodyNode: SCNNode?
     private var hoseCameraNode: SCNNode?
     private var hoseCamera: SCNCamera?
     private var hoseStreamNode: SCNNode?
     private var hoseImpactNode: SCNNode?
+    /// World-space charged hose from the parked fire truck to the UAV's swivel inlet. Kept
+    /// separate from the gimballed nozzle rig because its truck end is fixed in world space.
+    private let fireHoseTetherNode = SCNNode()
+    private var fireHoseTetherSegmentNodes: [SCNNode] = []
+    private var fireHoseTetherJointNodes: [SCNNode] = []
+    private var fireHoseParticlePositions: [SIMD3<Float>] = []
+    private var fireHosePreviousParticlePositions: [SIMD3<Float>] = []
+    private var fireHoseSimulatedLengthMeters: Float = 0.0
+    private weak var fireHoseSimulationTruckNode: SCNNode?
     // No aim rig at all (unlike the hose) — a fixed nadir mist cone under the payload mount.
     // Particle system attached/detached on the spray-state transition only, same "don't keep
     // simulating while hidden" discipline as the hose stream/impact nodes above.
@@ -254,7 +265,10 @@ final class DroneSceneController {
     private var fireTreeFoamAccumulationNodes: [SCNNode] = []
     private var lastFireTreeStatuses: [FireTreeStatus] = []
     private var fireTreeObstacleIDs: Set<UUID> = []
-    private var fireTruckNode: SCNNode?
+    private var missionFireTruckNode: SCNNode?
+    private var freeFlightFireTruckNode: SCNNode?
+    private var freeFlightFireTruckDockReference: SIMD3<Float>?
+    private var freeFlightFireTruckObstacleIDs: Set<UUID> = []
     private var missionTimeOfDay: TimeOfDay = .day
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
@@ -660,6 +674,10 @@ final class DroneSceneController {
 
         fiberTetherPathNode.name = "fiberTetherPathNode"
         scene.rootNode.addChildNode(fiberTetherPathNode)
+
+        fireHoseTetherNode.name = "fireHoseTetherNode"
+        fireHoseTetherNode.isHidden = true
+        scene.rootNode.addChildNode(fireHoseTetherNode)
 
         missionDropZoneNode.name = "missionDropZoneNode"
         missionDropZoneNode.isHidden = true
@@ -1068,10 +1086,138 @@ final class DroneSceneController {
         dockSpawnPosition
     }
 
-    /// World position of the fire-response scenario's parked truck, if one is currently spawned —
-    /// the fixed anchor point the hose's physical tether length is measured from.
+    private var activeFireTruckNode: SCNNode? {
+        missionFireTruckNode ?? freeFlightFireTruckNode
+    }
+
+    /// World position of whichever supply truck is active. Fire-response missions own their
+    /// scenario truck; sandbox/free flight gets an equivalent support truck beside the dock.
     func currentFireTruckWorldPosition() -> SIMD3<Float>? {
-        fireTruckNode?.simdWorldPosition
+        activeFireTruckNode?.simdWorldPosition
+    }
+
+    /// Exact pump outlet used by both the hard length constraint and the simulated hose chain.
+    /// Keeping one anchor prevents the visual hose from claiming more reach than the flight model.
+    func currentFireHoseAnchorWorldPosition() -> SIMD3<Float>? {
+        guard let truck = activeFireTruckNode else { return nil }
+        guard let outlet = truck.childNode(
+            withName: FireTruckAssetLoader.pumpOutletAnchorNodeName,
+            recursively: true
+        ) else { return nil }
+        let point = outlet.convertPosition(SCNVector3Zero, to: scene.rootNode)
+        return SIMD3<Float>(Float(point.x), Float(point.y), Float(point.z))
+    }
+
+    /// Offset from the physics state's aircraft origin to the actual swivel inlet. The hard
+    /// length constraint uses this rather than the vehicle centre, so a 30 m configuration means
+    /// 30 m from pump coupling to hose coupling regardless of airframe size or attitude.
+    func currentFireHosePayloadOffsetFromStateOrigin() -> SIMD3<Float> {
+        let inlet = currentFireHosePayloadAnchorWorldPosition()
+        return inlet - droneNode.simdWorldPosition + SIMD3<Float>(0.0, vehicleGroundRestLift, 0.0)
+    }
+
+    private func currentFireHosePayloadAnchorWorldPosition() -> SIMD3<Float> {
+        let point = payloadMountNode.convertPosition(
+            SCNVector3(-0.08, -0.16, 0.04),
+            to: scene.rootNode
+        )
+        return SIMD3<Float>(Float(point.x), Float(point.y), Float(point.z))
+    }
+
+    /// Makes the fire truck part of the hose equipment rather than mission-only decoration. The
+    /// free-flight truck follows the dock when the active world changes, while a fire-response
+    /// mission temporarily supplies its own scenario-positioned truck instead.
+    func setFireHoseSupportActive(_ isActive: Bool) {
+        guard isActive else {
+            let needsVisualCleanup = freeFlightFireTruckNode != nil
+                || !fireHoseParticlePositions.isEmpty
+                || !fireHoseTetherNode.isHidden
+                || !hoseRigNode.isHidden
+                || hoseStreamNode?.isHidden == false
+                || hoseImpactNode?.isHidden == false
+            removeFreeFlightFireTruck()
+            guard needsVisualCleanup else { return }
+            hoseRigNode.isHidden = true
+            hideHoseSprayVisual()
+            resetFireHoseSimulation(hideVisual: true)
+            return
+        }
+
+        guard missionFireTruckNode == nil else {
+            removeFreeFlightFireTruck()
+            return
+        }
+
+        if freeFlightFireTruckNode != nil,
+           let reference = freeFlightFireTruckDockReference,
+           simd_distance(reference, dockSpawnPosition) < 0.5 {
+            return
+        }
+
+        removeFreeFlightFireTruck()
+
+        // Close enough for the shortest supported 10 m hose even when measured from the side
+        // pump outlet, but clear of the launch pad and the aircraft's take-off envelope.
+        let dock = dockSpawnPosition
+        let planarPosition = SIMD2<Float>(dock.x + 6.0, dock.z + 4.0)
+        let groundY = supportSurfaceHeight(
+            at: planarPosition,
+            clearanceRadius: 1.4,
+            maximumHeight: max(dock.y + 12.0, 20.0)
+        ) ?? dock.y
+        let toDock = SIMD2<Float>(dock.x, dock.z) - planarPosition
+        let yaw = simd_length(toDock) > 0.001 ? atan2(toDock.x, toDock.y) : 0.0
+
+        let truck = FireTruckAssetLoader.shared.makeTruckNode(targetHeightMeters: 3.0, yaw: yaw)
+        truck.name = "support.fire_truck"
+        truck.position = SCNVector3(planarPosition.x, groundY, planarPosition.y)
+        scene.rootNode.addChildNode(truck)
+        freeFlightFireTruckNode = truck
+        freeFlightFireTruckDockReference = dock
+
+        let size = SIMD3<Float>(7.0, 3.0, 2.5)
+        let descriptor = EnvironmentObjectDescriptor(
+            id: UUID(),
+            kind: .crate,
+            biome: .forest,
+            position: SIMD3<Float>(planarPosition.x, groundY, planarPosition.y),
+            yawRadians: yaw,
+            size: size,
+            boundingRadius: max(size.x, size.z) * 0.56,
+            isCollidable: true,
+            collisionParts: [
+                EnvironmentCollisionPart(
+                    localCenter: SIMD3<Float>(0.0, size.y * 0.5, 0.0),
+                    size: size,
+                    source: "fire_truck_support",
+                    supportsLanding: false
+                )
+            ]
+        )
+        let obstacles = configureObstacleCollisionProxies(for: truck, descriptor: descriptor)
+        for obstacle in obstacles {
+            obstacleMap[obstacle.id] = truck
+            obstacleSourceByID[obstacle.id] = obstacle.source
+            freeFlightFireTruckObstacleIDs.insert(obstacle.id)
+        }
+        environmentObstacles.append(contentsOf: obstacles)
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+        environmentRevision &+= 1
+        resetFireHoseSimulation(hideVisual: true)
+    }
+
+    private func removeFreeFlightFireTruck() {
+        freeFlightFireTruckNode?.removeFromParentNode()
+        freeFlightFireTruckNode = nil
+        freeFlightFireTruckDockReference = nil
+
+        guard !freeFlightFireTruckObstacleIDs.isEmpty else { return }
+        environmentObstacles.removeAll { freeFlightFireTruckObstacleIDs.contains($0.id) }
+        obstacleMap = obstacleMap.filter { !freeFlightFireTruckObstacleIDs.contains($0.key) }
+        obstacleSourceByID = obstacleSourceByID.filter { !freeFlightFireTruckObstacleIDs.contains($0.key) }
+        freeFlightFireTruckObstacleIDs.removeAll(keepingCapacity: false)
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+        environmentRevision &+= 1
     }
 
     func configureOnlineTrialPlaceholders(_ fleetState: OnlineTrialFleetState?) {
@@ -4034,6 +4180,9 @@ final class DroneSceneController {
         terrain: TerrainConfiguration,
         printProceduralDiagnostics: Bool
     ) {
+        // The dock and support surface may move when a new world is installed. Recreate the
+        // sandbox hose truck on the next payload refresh so it cannot remain at the old origin.
+        removeFreeFlightFireTruck()
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
         supportSurfaces = environmentMapDescriptors.flatMap(supportSurfaceDescriptors(for:))
 
@@ -6336,26 +6485,86 @@ final class DroneSceneController {
 
             hoseRigNode.addChildNode(hoseYawNode)
             hoseYawNode.addChildNode(hosePitchNode)
-            hosePitchNode.simdPosition = SIMD3<Float>(0.0, -0.02, 0.02)
+            // The detailed payload model's physical monitor pivot is on its right-hand side and
+            // its branch pipe points along payload-local +X. The aiming math uses local -Z, so the
+            // base rotation aligns those coordinate systems instead of drawing an unrelated red
+            // rod straight down through the airframe.
+            hoseRigNode.simdPosition = SIMD3<Float>(0.067, -0.098, 0.0)
+            hoseRigNode.eulerAngles = SCNVector3(0.0, -Float.pi / 2.0, 0.0)
+            hosePitchNode.simdPosition = .zero
         }
 
         if hoseBodyNode == nil {
-            let bodyMaterial = SCNMaterial()
-            bodyMaterial.lightingModel = .physicallyBased
-            bodyMaterial.diffuse.contents = NSColor(calibratedRed: 0.55, green: 0.12, blue: 0.08, alpha: 1.0)
-            bodyMaterial.roughness.contents = 0.85
+            hoseNozzleAssemblyNode.name = "hoseNozzleAssemblyNode"
+            hosePitchNode.addChildNode(hoseNozzleAssemblyNode)
 
-            let geometry = SCNCylinder(radius: 0.045, height: 1.0)
-            geometry.radialSegmentCount = 10
-            geometry.firstMaterial = bodyMaterial
+            let barrelMaterial = SCNMaterial()
+            barrelMaterial.lightingModel = .physicallyBased
+            barrelMaterial.diffuse.contents = NSColor(calibratedWhite: 0.10, alpha: 1.0)
+            barrelMaterial.metalness.contents = 0.68
+            barrelMaterial.roughness.contents = 0.38
+
+            let couplingMaterial = SCNMaterial()
+            couplingMaterial.lightingModel = .physicallyBased
+            couplingMaterial.diffuse.contents = NSColor(calibratedWhite: 0.58, alpha: 1.0)
+            couplingMaterial.metalness.contents = 0.82
+            couplingMaterial.roughness.contents = 0.26
+
+            let mouthMaterial = SCNMaterial()
+            mouthMaterial.lightingModel = .physicallyBased
+            mouthMaterial.diffuse.contents = NSColor(calibratedWhite: 0.025, alpha: 1.0)
+            mouthMaterial.roughness.contents = 0.92
+
+            let geometry = SCNCylinder(radius: 0.021, height: 0.09)
+            geometry.radialSegmentCount = 24
+            geometry.firstMaterial = barrelMaterial
 
             let body = SCNNode(geometry: geometry)
             body.name = "hoseBodyNode"
             body.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+            body.position = SCNVector3(0.0, 0.0, -0.045)
             body.isHidden = true
-            hosePitchNode.addChildNode(body)
+            hoseNozzleAssemblyNode.addChildNode(body)
             hoseBodyNode = body
+
+            let reducer = SCNCone(topRadius: 0.010, bottomRadius: 0.021, height: 0.066)
+            reducer.radialSegmentCount = 24
+            reducer.firstMaterial = couplingMaterial
+            let reducerNode = SCNNode(geometry: reducer)
+            reducerNode.name = "hoseNozzleReducerNode"
+            reducerNode.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+            reducerNode.position = SCNVector3(0.0, 0.0, -0.123)
+            hoseNozzleAssemblyNode.addChildNode(reducerNode)
+
+            let lip = SCNTorus(ringRadius: 0.0105, pipeRadius: 0.0024)
+            lip.ringSegmentCount = 32
+            lip.pipeSegmentCount = 10
+            lip.firstMaterial = couplingMaterial
+            let lipNode = SCNNode(geometry: lip)
+            lipNode.name = "hoseNozzleLipNode"
+            lipNode.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            lipNode.position = SCNVector3(0.0, 0.0, -0.158)
+            hoseNozzleAssemblyNode.addChildNode(lipNode)
+
+            let mouth = SCNCylinder(radius: 0.008, height: 0.008)
+            mouth.radialSegmentCount = 24
+            mouth.firstMaterial = mouthMaterial
+            let mouthNode = SCNNode(geometry: mouth)
+            mouthNode.name = "hoseNozzleMouthNode"
+            mouthNode.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+            mouthNode.position = SCNVector3(0.0, 0.0, -0.163)
+            hoseNozzleAssemblyNode.addChildNode(mouthNode)
+
+            hoseNozzleTipNode.name = "hoseNozzleTipNode"
+            hoseNozzleTipNode.simdPosition = SIMD3<Float>(0.0, 0.0, -0.169)
+            hosePitchNode.addChildNode(hoseNozzleTipNode)
         }
+
+        // The catalogue model keeps its own fixed barrel for standalone previews. Once mounted,
+        // the animated barrel above replaces only those two static pieces; the cradle, valve and
+        // swivel remain visible and connected.
+        payloadVisualNode?.childNode(withName: "payloadFireHoseStaticBarrelNode", recursively: true)?.isHidden = true
+        payloadVisualNode?.childNode(withName: "payloadFireHoseStaticTipNode", recursively: true)?.isHidden = true
 
         if hoseCameraNode == nil {
             let node = SCNNode()
@@ -6381,9 +6590,9 @@ final class DroneSceneController {
         if hoseStreamNode == nil {
             let node = SCNNode()
             node.name = "hoseStreamNode"
-            node.simdPosition = SIMD3<Float>(0.0, 0.0, -0.4)
+            node.simdPosition = .zero
             node.isHidden = true
-            hosePitchNode.addChildNode(node)
+            hoseNozzleTipNode.addChildNode(node)
             hoseStreamNode = node
         }
 
@@ -6391,7 +6600,7 @@ final class DroneSceneController {
             let node = SCNNode()
             node.name = "hoseImpactNode"
             node.isHidden = true
-            hosePitchNode.addChildNode(node)
+            hoseNozzleTipNode.addChildNode(node)
             hoseImpactNode = node
         }
 
@@ -6401,32 +6610,322 @@ final class DroneSceneController {
         }
     }
 
-    func updateHoseGimbal(state: PayloadFireHoseOpticsState) {
+    func updateHoseGimbal(
+        state: PayloadFireHoseOpticsState,
+        tetherLengthMeters: Float,
+        diameterClass: FireHoseDiameterClass,
+        deltaTime: Float
+    ) {
         hoseOpticsState = state
         ensureHoseRig()
 
         hoseRigNode.isHidden = !state.isAvailable
+        updateFireHosePhysics(
+            isAvailable: state.isAvailable,
+            tetherLengthMeters: tetherLengthMeters,
+            diameterClass: diameterClass,
+            deltaTime: deltaTime
+        )
         hoseYawNode.eulerAngles.y = CGFloat(Float(state.gimbalYawDegrees).degreesToRadians)
         hosePitchNode.eulerAngles.x = CGFloat(Float(state.gimbalPitchDegrees).degreesToRadians)
 
         guard let body = hoseBodyNode else { return }
         guard state.isAvailable, state.isPowered else {
-            body.isHidden = true
+            hoseNozzleAssemblyNode.isHidden = true
             return
         }
-        // Cosmetic only — the hose reads as a short nozzle stub mounted on the drone (like the
-        // rangefinder's beam when idle), not a rigid boom stretched out to the full nozzle throw.
-        // It extends a little further while actively spraying, to read as a hose stream rather
-        // than a fixed antenna; `updateHoseAimAndSpray`'s raycast (using the full
-        // `nozzleThrowMeters`) is what actually governs suppression range, independent of this
-        // visual length. The real visible foam stream is `hoseStreamNode`/`hoseImpactNode`,
-        // driven from the same call.
-        let stubLength: Float = 0.35
-        let sprayStreamLength: Float = 2.5
-        let length = state.isSpraying ? sprayStreamLength : stubLength
+        // A branch pipe is rigid hardware: spraying changes only the emitted particles, never the
+        // length of the mesh. Stretching this cylinder was the visible red "cut-off" the user saw.
+        hoseNozzleAssemblyNode.isHidden = false
         body.isHidden = false
-        (body.geometry as? SCNCylinder)?.height = CGFloat(length)
-        body.position = SCNVector3(0.0, 0.0, -length / 2.0)
+    }
+
+    /// Simulates the charged supply line as a position-based dynamics chain. Every particle has
+    /// inertia and gravity, adjacent particles keep a fixed rest distance, intermediate points
+    /// collide with the ground and lose tangential speed through friction, and only the pump and
+    /// swivel endpoints are pinned. This is deliberately not an analytic curve rebuilt between
+    /// two points: turns, acceleration and landing leave visible motion in the hose itself.
+    private func updateFireHosePhysics(
+        isAvailable: Bool,
+        tetherLengthMeters: Float,
+        diameterClass: FireHoseDiameterClass,
+        deltaTime: Float
+    ) {
+        guard isAvailable,
+              let truck = activeFireTruckNode,
+              let start = currentFireHoseAnchorWorldPosition() else {
+            resetFireHoseSimulation(hideVisual: true)
+            return
+        }
+
+        let configuredLength = max(1.0, tetherLengthMeters)
+        // Short links and matching joint sleeves make the rendered line read as one continuous
+        // hose even while the PBD particles articulate independently. Long 150 m configurations
+        // cap the count to keep the per-frame constraint pass bounded.
+        let segmentCount = min(120, max(36, Int(ceil(configuredLength / 0.5))))
+        let hoseRadius: Float = diameterClass == .narrow ? 0.025 : 0.038
+        let restLength = configuredLength / Float(segmentCount)
+
+        let end = currentFireHosePayloadAnchorWorldPosition()
+
+        if fireHoseTetherSegmentNodes.count != segmentCount {
+            fireHoseTetherNode.childNodes.forEach { $0.removeFromParentNode() }
+            fireHoseTetherSegmentNodes.removeAll(keepingCapacity: true)
+            fireHoseTetherJointNodes.removeAll(keepingCapacity: true)
+
+            let hoseMaterial = SCNMaterial()
+            hoseMaterial.lightingModel = .physicallyBased
+            hoseMaterial.diffuse.contents = NSColor(calibratedRed: 0.48, green: 0.07, blue: 0.045, alpha: 1.0)
+            hoseMaterial.roughness.contents = 0.86
+            hoseMaterial.metalness.contents = 0.0
+
+            for index in 0..<segmentCount {
+                let cylinder = SCNCylinder(radius: CGFloat(hoseRadius), height: 1.0)
+                cylinder.radialSegmentCount = 8
+                cylinder.firstMaterial = hoseMaterial
+                let segment = SCNNode(geometry: cylinder)
+                segment.name = "fireHoseTetherSegment.\(index)"
+                segment.castsShadow = true
+                fireHoseTetherNode.addChildNode(segment)
+                fireHoseTetherSegmentNodes.append(segment)
+            }
+
+            for index in 1..<segmentCount {
+                let sleeve = SCNSphere(radius: CGFloat(hoseRadius * 1.02))
+                sleeve.segmentCount = 8
+                sleeve.firstMaterial = hoseMaterial
+                let joint = SCNNode(geometry: sleeve)
+                joint.name = "fireHoseTetherJoint.\(index)"
+                joint.castsShadow = true
+                fireHoseTetherNode.addChildNode(joint)
+                fireHoseTetherJointNodes.append(joint)
+            }
+        } else {
+            for segment in fireHoseTetherSegmentNodes {
+                (segment.geometry as? SCNCylinder)?.radius = CGFloat(hoseRadius)
+            }
+            for joint in fireHoseTetherJointNodes {
+                (joint.geometry as? SCNSphere)?.radius = CGFloat(hoseRadius * 1.02)
+            }
+        }
+
+        let particlesAreFinite = fireHoseParticlePositions.allSatisfy {
+            $0.x.isFinite && $0.y.isFinite && $0.z.isFinite
+        }
+        let endpointJump = fireHoseParticlePositions.last.map { simd_distance($0, end) } ?? .infinity
+        let needsReset = fireHoseParticlePositions.count != segmentCount + 1
+            || fireHosePreviousParticlePositions.count != segmentCount + 1
+            || abs(fireHoseSimulatedLengthMeters - configuredLength) > 0.01
+            || fireHoseSimulationTruckNode !== truck
+            || !particlesAreFinite
+            || endpointJump > max(5.0, restLength * 4.0)
+
+        let startGround = supportSurfaceHeight(
+            at: SIMD2<Float>(start.x, start.z),
+            clearanceRadius: hoseRadius,
+            maximumHeight: start.y + 4.0
+        ) ?? min(start.y, dockSpawnPosition.y)
+        let endGround = supportSurfaceHeight(
+            at: SIMD2<Float>(end.x, end.z),
+            clearanceRadius: hoseRadius,
+            maximumHeight: max(end.y + 4.0, startGround + 20.0)
+        ) ?? startGround
+
+        func groundHeight(for particleIndex: Int) -> Float {
+            let t = Float(particleIndex) / Float(segmentCount)
+            return startGround + (endGround - startGround) * t + hoseRadius
+        }
+
+        if needsReset {
+            fireHoseParticlePositions = []
+            fireHoseParticlePositions.reserveCapacity(segmentCount + 1)
+            let straightDistance = simd_distance(start, end)
+            let slack = max(0.0, configuredLength - straightDistance)
+            let horizontal = SIMD3<Float>(end.x - start.x, 0.0, end.z - start.z)
+            let lateral: SIMD3<Float>
+            if simd_length_squared(horizontal) > 0.0001 {
+                lateral = simd_normalize(simd_cross(SIMD3<Float>(0, 1, 0), horizontal))
+            } else {
+                lateral = SIMD3<Float>(1, 0, 0)
+            }
+            let initialSag = min(3.0, max(0.12, slack * 0.10))
+
+            // Seed slack as one broad S laid on the ground, not as compressed distance that the
+            // solver has to dispose of as a high-frequency accordion. Binary-searching the
+            // lateral amplitude gives the starting polyline the configured arc length while
+            // leaving the physical solver free to move it afterwards.
+            func initialPoint(index: Int, lateralAmplitude: Float) -> SIMD3<Float> {
+                let t = Float(index) / Float(segmentCount)
+                var point = start + (end - start) * t
+                point.y -= initialSag * sinf(.pi * t)
+                point += lateral * (lateralAmplitude * sinf(.pi * 2.0 * t))
+                if index > 0 && index < segmentCount {
+                    point.y = max(point.y, groundHeight(for: index))
+                }
+                return point
+            }
+
+            func initialPathLength(lateralAmplitude: Float) -> Float {
+                var total: Float = 0.0
+                var previous = initialPoint(index: 0, lateralAmplitude: lateralAmplitude)
+                for index in 1...segmentCount {
+                    let current = initialPoint(index: index, lateralAmplitude: lateralAmplitude)
+                    total += simd_distance(previous, current)
+                    previous = current
+                }
+                return total
+            }
+
+            var amplitudeLow: Float = 0.0
+            var amplitudeHigh = max(0.5, configuredLength * 0.55)
+            while initialPathLength(lateralAmplitude: amplitudeHigh) < configuredLength,
+                  amplitudeHigh < configuredLength {
+                amplitudeHigh *= 1.5
+            }
+            for _ in 0..<14 {
+                let candidate = (amplitudeLow + amplitudeHigh) * 0.5
+                if initialPathLength(lateralAmplitude: candidate) < configuredLength {
+                    amplitudeLow = candidate
+                } else {
+                    amplitudeHigh = candidate
+                }
+            }
+            let lateralSlack = (amplitudeLow + amplitudeHigh) * 0.5
+
+            for index in 0...segmentCount {
+                fireHoseParticlePositions.append(
+                    initialPoint(index: index, lateralAmplitude: lateralSlack)
+                )
+            }
+            fireHosePreviousParticlePositions = fireHoseParticlePositions
+            fireHoseSimulatedLengthMeters = configuredLength
+            fireHoseSimulationTruckNode = truck
+        }
+
+        let clampedDelta = min(max(0.0, deltaTime), 1.0 / 15.0)
+        if clampedDelta > 0.0001 {
+            let substepCount = min(4, max(1, Int(ceil(clampedDelta / (1.0 / 60.0)))))
+            let substepDelta = clampedDelta / Float(substepCount)
+            let damping = powf(0.985, substepDelta * 60.0)
+            let gravityStep = SIMD3<Float>(0.0, -9.81 * 0.82 * substepDelta * substepDelta, 0.0)
+
+            for _ in 0..<substepCount {
+                fireHoseParticlePositions[0] = start
+                fireHoseParticlePositions[segmentCount] = end
+                fireHosePreviousParticlePositions[0] = start
+                fireHosePreviousParticlePositions[segmentCount] = end
+
+                for index in 1..<segmentCount {
+                    let current = fireHoseParticlePositions[index]
+                    let velocity = (current - fireHosePreviousParticlePositions[index]) * damping
+                    fireHosePreviousParticlePositions[index] = current
+                    fireHoseParticlePositions[index] = current + velocity + gravityStep
+
+                    let floorY = groundHeight(for: index)
+                    if fireHoseParticlePositions[index].y < floorY {
+                        let horizontalVelocity = SIMD3<Float>(velocity.x, 0.0, velocity.z) * 0.42
+                        fireHoseParticlePositions[index].y = floorY
+                        fireHosePreviousParticlePositions[index] = fireHoseParticlePositions[index] - horizontalVelocity
+                    }
+                }
+
+                // Alternating passes keep the constraint response symmetric and propagate a
+                // moving endpoint through a long 150 m hose without making it numerically rigid.
+                for iteration in 0..<14 {
+                    let forward = iteration.isMultiple(of: 2)
+
+                    // A charged fabric hose resists sharp alternating folds. This inexpensive
+                    // bending term gives excess length broad loops while preserving dynamic lag;
+                    // the final distance-only passes restore the exact per-link rest length.
+                    if iteration < 6, forward {
+                        for index in 1..<segmentCount {
+                            let midpoint = (
+                                fireHoseParticlePositions[index - 1]
+                                    + fireHoseParticlePositions[index + 1]
+                            ) * 0.5
+                            fireHoseParticlePositions[index] += (
+                                midpoint - fireHoseParticlePositions[index]
+                            ) * 0.08
+                        }
+                    } else if iteration < 6 {
+                        for index in stride(from: segmentCount - 1, through: 1, by: -1) {
+                            let midpoint = (
+                                fireHoseParticlePositions[index - 1]
+                                    + fireHoseParticlePositions[index + 1]
+                            ) * 0.5
+                            fireHoseParticlePositions[index] += (
+                                midpoint - fireHoseParticlePositions[index]
+                            ) * 0.08
+                        }
+                    }
+
+                    func satisfyDistanceConstraint(at index: Int) {
+                        let nextIndex = index + 1
+                        let delta = fireHoseParticlePositions[nextIndex] - fireHoseParticlePositions[index]
+                        let distance = simd_length(delta)
+                        guard distance > 0.00001 else { return }
+                        let correction = delta * ((distance - restLength) / distance)
+
+                        if index == 0 {
+                            fireHoseParticlePositions[nextIndex] -= correction
+                        } else if nextIndex == segmentCount {
+                            fireHoseParticlePositions[index] += correction
+                        } else {
+                            fireHoseParticlePositions[index] += correction * 0.5
+                            fireHoseParticlePositions[nextIndex] -= correction * 0.5
+                        }
+                    }
+
+                    if forward {
+                        for index in 0..<segmentCount {
+                            satisfyDistanceConstraint(at: index)
+                        }
+                    } else {
+                        for index in stride(from: segmentCount - 1, through: 0, by: -1) {
+                            satisfyDistanceConstraint(at: index)
+                        }
+                    }
+
+                    fireHoseParticlePositions[0] = start
+                    fireHoseParticlePositions[segmentCount] = end
+                    for index in 1..<segmentCount {
+                        fireHoseParticlePositions[index].y = max(
+                            fireHoseParticlePositions[index].y,
+                            groundHeight(for: index)
+                        )
+                    }
+                }
+            }
+        }
+
+        for index in 0..<segmentCount {
+            let previousPoint = fireHoseParticlePositions[index]
+            let point = fireHoseParticlePositions[index + 1]
+            let delta = point - previousPoint
+            let length = max(0.001, simd_length(delta))
+            let segment = fireHoseTetherSegmentNodes[index]
+            segment.simdPosition = (previousPoint + point) * 0.5
+            segment.simdOrientation = simd_quatf(
+                from: SIMD3<Float>(0.0, 1.0, 0.0),
+                to: delta / length
+            )
+            (segment.geometry as? SCNCylinder)?.height = CGFloat(length)
+        }
+        for index in 1..<segmentCount {
+            fireHoseTetherJointNodes[index - 1].simdPosition = fireHoseParticlePositions[index]
+        }
+
+        fireHoseTetherNode.isHidden = false
+    }
+
+    private func resetFireHoseSimulation(hideVisual: Bool) {
+        fireHoseParticlePositions.removeAll(keepingCapacity: false)
+        fireHosePreviousParticlePositions.removeAll(keepingCapacity: false)
+        fireHoseSimulatedLengthMeters = 0.0
+        fireHoseSimulationTruckNode = nil
+        if hideVisual {
+            fireHoseTetherNode.isHidden = true
+        }
     }
 
     /// Common raycast along the hose nozzle's current aim direction, out to its fixed spray-throw
@@ -6444,9 +6943,9 @@ final class DroneSceneController {
 
         // Model transform, not `.presentation` — see `payloadCameraTargetDistance` for why
         // (avoids a ~16ms render-thread scene-lock stall).
-        let origin = hosePitchNode.simdWorldPosition
+        let origin = hoseNozzleTipNode.simdWorldPosition
         let forward = simd_normalize(simd_act(
-            simd_quatf(hosePitchNode.simdWorldTransform),
+            simd_quatf(hoseNozzleTipNode.simdWorldTransform),
             SIMD3<Float>(0.0, 0.0, -1.0)
         ))
         guard simd_length_squared(forward) > 0.000001 else { return nil }
@@ -7728,7 +8227,8 @@ final class DroneSceneController {
         fireTreeHeightsMeters.removeAll(keepingCapacity: false)
         fireTreeFoamAccumulationNodes.removeAll(keepingCapacity: false)
         lastFireTreeStatuses.removeAll(keepingCapacity: false)
-        fireTruckNode = nil
+        missionFireTruckNode = nil
+        resetFireHoseSimulation(hideVisual: true)
         if !fireTreeObstacleIDs.isEmpty {
             environmentObstacles.removeAll { fireTreeObstacleIDs.contains($0.id) }
             obstacleMap = obstacleMap.filter { !fireTreeObstacleIDs.contains($0.key) }
@@ -7758,6 +8258,7 @@ final class DroneSceneController {
     /// scene-layer anchor for per-tree VFX.
     @discardableResult
     func spawnFireResponseScenario(placement: FireZonePlacement) -> [SIMD3<Float>] {
+        removeFreeFlightFireTruck()
         clearMissionScenario()
         let groundY: Float = 0.0
 
@@ -7873,7 +8374,8 @@ final class DroneSceneController {
         let truck = FireTruckAssetLoader.shared.makeTruckNode(targetHeightMeters: 3.0, yaw: yaw)
         truck.position = SCNVector3(truckPosition2D.x, groundY, truckPosition2D.y)
         missionScenarioRootNode.addChildNode(truck)
-        fireTruckNode = truck
+        missionFireTruckNode = truck
+        resetFireHoseSimulation(hideVisual: true)
 
         let size = SIMD3<Float>(7.0, 3.0, 2.5)
         let descriptor = EnvironmentObjectDescriptor(

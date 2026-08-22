@@ -803,6 +803,9 @@ final class DroneSimulationViewModel: ObservableObject {
     private var lidarStatePublishTime: TimeInterval = 0
     private var lidarWasScanning = false
     @Published private(set) var hoseOpticsState = PayloadFireHoseOpticsState()
+    /// `O` selects this mode while the hose is mounted: arrow-key input drives the nozzle gimbal
+    /// without replacing the current chase/orbit/free camera with the nozzle camera.
+    @Published private(set) var isExternalHoseAimActive = false
     @Published private(set) var capsuleState = PayloadFireCapsuleState()
     @Published private(set) var agriculturalSprayerState = PayloadAgriculturalSprayerState()
     /// Whether the hose-tether constraint is currently in effect (a fire-response mission with an
@@ -3464,6 +3467,7 @@ final class DroneSimulationViewModel: ObservableObject {
         manualYawIntent = 0.0
         cameraLookVelocity = .zero
         payloadGimbalLookVelocity = .zero
+        isExternalHoseAimActive = false
         lastCollisionDebugEnabled = false
         releasedPayloadConfiguration = nil
         lastPayloadImpact = nil
@@ -4721,6 +4725,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let oldMode = cameraConfiguration.mode
+        if mode == .payloadOptics {
+            isExternalHoseAimActive = false
+        }
         guard oldMode != mode else {
             refreshPayloadCameraStatus()
             return
@@ -4761,6 +4768,9 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadCameraController.leavePayloadViewManually()
         }
         let nextMode = cameraConfiguration.mode.next()
+        if nextMode == .payloadOptics {
+            isExternalHoseAimActive = false
+        }
         fpvEnteredViaZoomEngage = false
         cameraConfiguration.mode = nextMode
         syncCameraSystem(from: oldMode)
@@ -8767,7 +8777,14 @@ final class DroneSimulationViewModel: ObservableObject {
             case .selectTopCamera:
                 setCameraMode(.top)
             case .selectPayloadOpticsCamera:
-                setCameraMode(.payloadOptics)
+                if isMountedHoseAvailable, cameraConfiguration.mode != .payloadOptics {
+                    isExternalHoseAimActive.toggle()
+                    cameraLookVelocity = .zero
+                    payloadGimbalLookVelocity = .zero
+                    refreshHoseAimStatus()
+                } else {
+                    setCameraMode(.payloadOptics)
+                }
             case .selectPayloadCamera:
                 setCameraMode(.payload)
             case .toggleFPV:
@@ -8807,7 +8824,11 @@ final class DroneSimulationViewModel: ObservableObject {
             case .zoomOutCamera:
                 adjustCameraZoom(inward: false)
             case .resetCameraOrientation:
-                syncCameraSystem(resetOrientation: true)
+                if isExternalHoseAimActive {
+                    resetHoseGimbalOrientation()
+                } else {
+                    syncCameraSystem(resetOrientation: true)
+                }
             case .returnHome:
                 activateReturnHome()
             case .pauseMission:
@@ -8839,6 +8860,41 @@ final class DroneSimulationViewModel: ObservableObject {
             Float(controlState.cameraTilt)
         )
         let hasLookInput = abs(controlState.cameraPan) >= 0.001 || abs(controlState.cameraTilt) >= 0.001
+
+        // External branch-pipe control deliberately takes precedence over normal camera look.
+        // The current follow/orbit/free view remains unchanged while the very same continuous
+        // arrow-key axes drive the nozzle yaw and pitch.
+        if isExternalHoseAimActive,
+           isMountedHoseAvailable,
+           cameraConfiguration.mode != .payloadOptics {
+            let targetVelocity = inputVelocity * (118.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
+            let accelerationBlend = (deltaTime * 10.0).clamped(to: 0.0...1.0)
+            payloadGimbalLookVelocity = simd_mix(
+                payloadGimbalLookVelocity,
+                targetVelocity,
+                SIMD2<Float>(repeating: accelerationBlend)
+            )
+
+            if !hasLookInput {
+                let damping = max(0.0, 1.0 - deltaTime * 8.5)
+                payloadGimbalLookVelocity *= damping
+                if simd_length_squared(payloadGimbalLookVelocity) < 0.0001 {
+                    payloadGimbalLookVelocity = .zero
+                }
+            }
+
+            cameraLookVelocity = .zero
+            guard simd_length_squared(payloadGimbalLookVelocity) > 0.0 else {
+                return
+            }
+            let yawSign: Float = cameraConfiguration.invertLookX ? -1.0 : 1.0
+            let pitchSign: Float = cameraConfiguration.invertLookY ? -1.0 : 1.0
+            adjustHoseGimbal(
+                yawDeltaDegrees: Double(payloadGimbalLookVelocity.x * deltaTime * yawSign),
+                pitchDeltaDegrees: Double(payloadGimbalLookVelocity.y * deltaTime * pitchSign)
+            )
+            return
+        }
 
         if isHandLaunchPOVActive {
             let targetVelocity = inputVelocity * (92.0 * speedMultiplier * cameraConfiguration.effectiveLookSensitivity)
@@ -15335,7 +15391,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         refreshRangefinderStatus()
         refreshLidarStatus()
-        refreshHoseAimStatus()
+        refreshHoseAimStatus(deltaTime: deltaTime)
         refreshCapsuleLauncherStatus(deltaTime: deltaTime)
         refreshAgriculturalSprayerStatus(deltaTime: deltaTime)
         refreshFlightControlDiagnostics()
@@ -15494,21 +15550,30 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    private func refreshHoseAimStatus() {
+    private func refreshHoseAimStatus(deltaTime: TimeInterval = 0.0) {
+        let hoseIsMounted = isMountedHoseAvailable
         hoseController.setAvailability(
-            isAvailable: isMountedHoseAvailable,
-            isPowered: isMountedHoseAvailable
+            isAvailable: hoseIsMounted,
+            isPowered: hoseIsMounted
         )
-        // No hose mounted (SAR and every non-fire-response mission) → nothing to gimbal, aim, or
-        // spray. Skip all scene-graph touches, including `ensureHoseRig()`'s node creation. This
-        // ran every tick before, and once the main thread starts touching the SceneKit graph while
-        // the render thread holds its scene lock (busy drawing the forest), each touch can stall
-        // up to a full frame — so an empty no-op here was still costing ~16ms/tick.
-        guard isMountedHoseAvailable else {
+        // The supply truck is equipment for the mounted hose, not a mission-only prop. In a fire
+        // response the scenario truck wins; in sandbox/free flight the scene creates one beside
+        // the dock. Turning the payload off removes only that sandbox support truck.
+        sceneController.setFireHoseSupportActive(hoseIsMounted)
+        guard hoseIsMounted else {
+            if isExternalHoseAimActive {
+                isExternalHoseAimActive = false
+            }
             hoseOpticsState = hoseController.opticsState
             return
         }
-        sceneController.updateHoseGimbal(state: hoseController.opticsState)
+        let installedHose = installedPayloadConfiguration
+        sceneController.updateHoseGimbal(
+            state: hoseController.opticsState,
+            tetherLengthMeters: installedHose?.fireHoseLengthMeters ?? 1.0,
+            diameterClass: installedHose?.fireHoseDiameterClass ?? .standard,
+            deltaTime: Float(deltaTime)
+        )
 
         // The nozzle raycast (`updateHoseAimAndSpray`) is a full-scene hit-test — by far the most
         // expensive thing this function does, and it used to run unconditionally every tick
@@ -15523,7 +15588,8 @@ final class DroneSimulationViewModel: ObservableObject {
             && !payloadCameraOpticsState.isAvailable
             && !rangefinderOpticsState.isAvailable
             && hoseController.opticsState.isAvailable
-        let shouldSampleAim = hoseController.opticsState.isAvailable && (isSpraying || isViewingHoseOptics)
+        let shouldSampleAim = hoseController.opticsState.isAvailable
+            && (isSpraying || isViewingHoseOptics || isExternalHoseAimActive)
 
         let aimedIndex: Int?
         if shouldSampleAim {
@@ -25545,13 +25611,12 @@ final class DroneSimulationViewModel: ObservableObject {
     /// A real fire hose is a fixed-length physical line to the ground truck's pump — it cannot
     /// stretch. Mirrors the altitude-ceiling clamp above (hard position stop + zero the offending
     /// velocity component), generalized from a 1-D vertical wall to a 3-D spherical one centered
-    /// on the truck, rather than the world-bounds geofence's "lose signal after a countdown"
-    /// pattern — a taut rope stops the drone immediately, it doesn't cut its signal.
+    /// on the pump outlet, rather than the world-bounds geofence's "lose signal after a countdown"
+    /// pattern. This applies in sandbox flight as well as fire-response missions.
     private func enforceHoseTetherConstraint() {
-        guard activeMissionScenarioKind == .fireResponse,
-              isMountedHoseAvailable,
+        guard isMountedHoseAvailable,
               let installed = installedPayloadConfiguration,
-              let truckPosition = sceneController.currentFireTruckWorldPosition() else {
+              let hoseAnchor = sceneController.currentFireHoseAnchorWorldPosition() else {
             isHoseTetherActive = false
             isHoseTetherTaut = false
             hoseTetherDistanceMeters = 0.0
@@ -25560,8 +25625,10 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let tetherLength = max(1.0, installed.fireHoseLengthMeters)
-        let toTruck = state.position - truckPosition
-        let distance = simd_length(toTruck)
+        let payloadOffset = sceneController.currentFireHosePayloadOffsetFromStateOrigin()
+        let payloadAnchor = state.position + payloadOffset
+        let fromAnchor = payloadAnchor - hoseAnchor
+        let distance = simd_length(fromAnchor)
 
         isHoseTetherActive = true
         hoseTetherLimitMeters = tetherLength
@@ -25573,8 +25640,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         isHoseTetherTaut = true
-        let radial = toTruck / distance
-        state.position = truckPosition + radial * tetherLength
+        let radial = fromAnchor / distance
+        state.position = hoseAnchor + radial * tetherLength - payloadOffset
         let outwardSpeed = simd_dot(state.velocity, radial)
         if outwardSpeed > 0.0 {
             state.velocity -= radial * outwardSpeed

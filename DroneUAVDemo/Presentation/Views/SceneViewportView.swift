@@ -115,6 +115,13 @@ struct SceneViewportView: View {
                     .allowsHitTesting(false)
             }
 
+            if viewModel.isExternalHoseAimActive, !payloadOpticsActive {
+                ExternalHoseAimHUDView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, overlayInset + 10)
+                    .allowsHitTesting(false)
+            }
+
             if viewModel.agriculturalSprayerState.isAvailable {
                 AgriculturalSprayerStatusHUDView(state: viewModel.agriculturalSprayerState)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -282,6 +289,32 @@ struct SceneViewportView: View {
         .background(Color.black)
         .onAppear { tabObserver.start(viewModel: viewModel) }
         .onDisappear { tabObserver.stop() }
+    }
+}
+
+private struct ExternalHoseAimHUDView: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "scope")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("payload.hose.external_aim")
+                    .font(.caption.weight(.bold))
+                Text("payload.hose.external_aim_hint")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
+        }
+        .foregroundStyle(GroundControlPalette.textPrimary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.orange.opacity(0.45), lineWidth: 1)
+        }
     }
 }
 
