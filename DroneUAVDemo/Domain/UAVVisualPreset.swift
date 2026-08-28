@@ -22,6 +22,13 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
     case colossusCA8Vulcan
     case colossusCA12Atlas
     case agroWingTitanAT40
+    case aerosondeMk47
+    case rq7bShadow
+    case deltaLoiteringMunition
+    case canardDeltaLoiteringMunition
+    case researchDeltaWing
+    case blendedWingBodyTestbed
+    case jetTargetDrone
 
     var title: String {
         switch self {
@@ -67,6 +74,20 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
             return "Colossus Aerial CA-12 Atlas"
         case .agroWingTitanAT40:
             return "AgroWing Titan AT-40"
+        case .aerosondeMk47:
+            return "Aerosonde Mk 4.7"
+        case .rq7bShadow:
+            return "RQ-7B Shadow 200"
+        case .deltaLoiteringMunition:
+            return "Tailless delta loitering munition"
+        case .canardDeltaLoiteringMunition:
+            return "Canard delta loitering munition"
+        case .researchDeltaWing:
+            return "Research delta wing"
+        case .blendedWingBodyTestbed:
+            return "Blended wing-body testbed"
+        case .jetTargetDrone:
+            return "Jet-powered delta drone"
         }
     }
 }

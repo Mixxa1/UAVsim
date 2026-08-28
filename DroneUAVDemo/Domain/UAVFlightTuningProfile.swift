@@ -302,6 +302,86 @@ struct UAVFlightTuningProfile: Hashable {
                 payloadCruisePenaltyFactor: 0.20,
                 source: source
             )
+        case .aerosondeMk47:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.46,
+                minimumSafeFlightThrottle: 0.38,
+                climbThrottleBaseline: 0.60,
+                glideThrottleFactor: 0.72,
+                stallProtectionBias: 0.30,
+                payloadCruisePenaltyFactor: 0.22,
+                source: source
+            )
+        case .rq7bShadow:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.50,
+                minimumSafeFlightThrottle: 0.42,
+                climbThrottleBaseline: 0.63,
+                glideThrottleFactor: 0.68,
+                stallProtectionBias: 0.26,
+                payloadCruisePenaltyFactor: 0.18,
+                source: source
+            )
+        // Loitering munitions carry a high wing loading on a small delta, so
+        // they need more cruise throttle and glide far worse than the survey
+        // wings above — the difference is deliberate, not copied tuning.
+        case .deltaLoiteringMunition:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.55,
+                minimumSafeFlightThrottle: 0.47,
+                climbThrottleBaseline: 0.70,
+                glideThrottleFactor: 0.55,
+                stallProtectionBias: 0.20,
+                payloadCruisePenaltyFactor: 0.14,
+                source: source
+            )
+        case .canardDeltaLoiteringMunition:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.53,
+                minimumSafeFlightThrottle: 0.45,
+                climbThrottleBaseline: 0.68,
+                glideThrottleFactor: 0.58,
+                stallProtectionBias: 0.22,
+                payloadCruisePenaltyFactor: 0.14,
+                source: source
+            )
+        case .researchDeltaWing:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.42,
+                minimumSafeFlightThrottle: 0.34,
+                climbThrottleBaseline: 0.56,
+                glideThrottleFactor: 0.78,
+                stallProtectionBias: 0.34,
+                payloadCruisePenaltyFactor: 0.24,
+                source: source
+            )
+        case .blendedWingBodyTestbed:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.52,
+                minimumSafeFlightThrottle: 0.44,
+                climbThrottleBaseline: 0.72,
+                glideThrottleFactor: 0.60,
+                stallProtectionBias: 0.26,
+                payloadCruisePenaltyFactor: 0.20,
+                source: source
+            )
+        case .jetTargetDrone:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.62,
+                minimumSafeFlightThrottle: 0.52,
+                climbThrottleBaseline: 0.82,
+                glideThrottleFactor: 0.42,
+                stallProtectionBias: 0.16,
+                payloadCruisePenaltyFactor: 0.12,
+                source: source
+            )
         case .abstractCustom:
             return custom(
                 referenceMass: max(0.35, referenceMass),

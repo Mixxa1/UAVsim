@@ -117,7 +117,11 @@ struct UAVStructuralLoadSolver {
         state: DroneState,
         airframeClass: AirframeClass,
         rotorModel: VehicleRotorModel,
-        deltaTime: Float
+        deltaTime: Float,
+        /// Ambient density the airframe is actually flying through. Defaulted to
+        /// sea level so any caller that has no atmosphere handy behaves exactly as
+        /// before; the runtime passes the real value.
+        airDensity: Float = AtmosphereModel.seaLevelDensity
     ) -> UAVStructuralLoadResult {
         guard deltaTime > 0.0001, !graph.isEmpty else { return .none }
 
@@ -127,7 +131,7 @@ struct UAVStructuralLoadSolver {
         let specificForce = max(0.25, simd_length(specificForceWorld))
         let rates = airframeClass == .multirotor ? state.angularVelocity : state.bodyAngularVelocity
         let angularRate = simd_length(rates)
-        let dynamicPressure = 0.5 * Float(1.225) * state.forwardAirspeed * state.forwardAirspeed
+        let dynamicPressure = 0.5 * max(0.02, airDensity) * state.forwardAirspeed * state.forwardAirspeed
         let totalMass = max(0.05, graph.massProperties.totalMassKg)
         let rotorCount = max(1, rotorModel.rotors.count)
         let componentSnapshot = graph.attachedComponents

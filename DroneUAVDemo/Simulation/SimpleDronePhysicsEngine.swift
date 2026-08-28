@@ -95,8 +95,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // before the battery was empty. A LiPo pack holds a broad voltage plateau through its
         // usable middle; the battery service already models that voltage curve and load sag.
         // Apply only that electrical derating here. `isDepleted` below remains the hard cutoff.
-        let batteryFactor = context.powerSystemFactor.clamped(to: 0.0...1.0) *
-            context.batteryState.voltageSagFactor
+        // Voltage sag is a battery phenomenon; a fuel aircraft must not be charged
+        // for it. `propulsionAvailabilityFactor` keeps the electric behaviour
+        // bit-identical and drops the sag term only when a fuel system is present.
+        let batteryFactor = context.propulsionAvailabilityFactor
         let mass = resolvedVehicleMass(
             context: context,
             fallback: payloadMassModel.resolvedCurrentTotalMass,
@@ -107,7 +109,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let groundRestThrottleThreshold = max(0.18, hoverThrottle * 0.68)
 
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
-        if crashOrDisarmed || context.batteryState.isDepleted || control.mode == .emergencyStop {
+        if crashOrDisarmed || context.isEnergyDepleted || control.mode == .emergencyStop {
             throttleCommand = 0.0
         }
 
@@ -599,12 +601,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
-        let batteryFactor = context.powerSystemFactor.clamped(to: 0.0...1.0) *
-            context.batteryState.voltageSagFactor
+        // Voltage sag is a battery phenomenon; a fuel aircraft must not be charged
+        // for it. `propulsionAvailabilityFactor` keeps the electric behaviour
+        // bit-identical and drops the sag term only when a fuel system is present.
+        let batteryFactor = context.propulsionAvailabilityFactor
         let crashOrDisarmed = !control.isArmed || state.physicalState == .crashed
 
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
-        if crashOrDisarmed || context.batteryState.isDepleted || control.mode == .emergencyStop {
+        if crashOrDisarmed || context.isEnergyDepleted || control.mode == .emergencyStop {
             throttleCommand = 0.0
         } else {
             let throttleFloor: Float
@@ -819,7 +823,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
         let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
 
-        let airDensity: Float = 1.225
+        // Ambient density at the aircraft's own altitude rather than a sea-level
+        // constant. Note this is NOT the density used to size the wing: that one
+        // is a sea-level calibration of the airframe's geometry against its stall
+        // speed and must stay fixed, or the wing would change area as the
+        // aircraft climbed (see FixedWingAerodynamics.build).
+        let atmosphere = context.atmosphere.state(worldY: state.position.y)
+        let airDensity = atmosphere.airDensity
         let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
 
         let (cl, cd) = aero.liftDrag(alphaRad: alpha)
@@ -1172,8 +1182,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
         let authorityPenalty = baseline.maneuverAuthorityMultiplier
         let authority = (resolvedControlAuthority(context: context) * authorityPenalty).clamped(to: 0.05...1.00)
-        let batteryFactor = context.powerSystemFactor.clamped(to: 0.0...1.0) *
-            context.batteryState.voltageSagFactor
+        // Voltage sag is a battery phenomenon; a fuel aircraft must not be charged
+        // for it. `propulsionAvailabilityFactor` keeps the electric behaviour
+        // bit-identical and drops the sag term only when a fuel system is present.
+        let batteryFactor = context.propulsionAvailabilityFactor
         let mass = resolvedVehicleMass(
             context: context,
             fallback: payloadMassModel.resolvedCurrentTotalMass,
@@ -1278,7 +1290,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
         let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
 
-        let airDensity: Float = 1.225
+        let airDensity = context.atmosphere.state(worldY: state.position.y).airDensity
         let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
 
         let (cl, cd) = aero.liftDrag(alphaRad: alpha)
@@ -1449,7 +1461,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // --- 6. Throttle: continuous hover<->cruise floor blend, driven by
         // how much of the weight the wing actually carries.
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
-        if crashOrDisarmed || context.batteryState.isDepleted || control.mode == .emergencyStop {
+        if crashOrDisarmed || context.isEnergyDepleted || control.mode == .emergencyStop {
             throttleCommand = 0.0
         } else {
             // A rotor-borne hover holds an altitude, not a throttle setting.
@@ -1744,7 +1756,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let liftCapableUnits = units.filter { $0.role == .liftRotor || $0.role == .tiltRotor }
         let cruiseUnits = units.filter { $0.role == .cruiseProp }
 
-        let airDensity: Float = 1.225
+        let airDensity = context.atmosphere.state(worldY: state.position.y).airDensity
         // Same sizing as the fixed wing, from the same function: cruise-reference throttle balances
         // level-flight drag at cruise. This used to be an inline copy that took drag at alpha 0 —
         // parasite only, no induced term — which made reference throttle over-thrust, and since a
@@ -1887,7 +1899,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // size these units purely by the "drag-canceling" cruise formula,
         // which is ~0 at hover airspeed — the aircraft would simply fall.
         var units = s.units
-        let airDensity: Float = 1.225
+        let airDensity = context.atmosphere.state(worldY: state.position.y).airDensity
         // Same sizing as the fixed wing, from the same function: cruise-reference throttle balances
         // level-flight drag at cruise. This used to be an inline copy that took drag at alpha 0 —
         // parasite only, no induced term — which made reference throttle over-thrust, and since a
@@ -2475,13 +2487,26 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         return properties
     }
 
+    /// Airframe mass the flight model integrates against, including whatever fuel
+    /// is still in the tanks.
+    ///
+    /// Fuel is *added* to the dry mass rather than subtracted from a wet one. The
+    /// subtractive form looks equivalent and is not: it only works where a
+    /// profile's base mass was back-derived from maximum takeoff weight and so
+    /// already contains a full load. Several fuel aircraft publish a real empty
+    /// weight instead (MQ-9A 2,223 kg, RQ-7B 77 kg, BWB DELTA 13.6 kg), and
+    /// subtracting burnt fuel from those drove them below their own dry weight.
+    /// Every fuel profile therefore carries an explicitly dry `baseMass`, and this
+    /// is the one place the tank contents are added back. Battery aircraft have no
+    /// fuel state and are untouched.
     private func resolvedVehicleMass(
         context: DroneSimulationContext,
         fallback: Float,
         minimum: Float
     ) -> Float {
-        let mass = resolvedGraphMassProperties(context: context)?.totalMassKg ?? fallback
-        return max(minimum, mass)
+        let dryMass = resolvedGraphMassProperties(context: context)?.totalMassKg ?? fallback
+        let fuelMass = max(0.0, context.fuelState?.remainingKg ?? 0.0)
+        return max(minimum, dryMass + fuelMass)
     }
 
     private func resolvedCenterOfMass(
@@ -2514,11 +2539,20 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         minimum: Float
     ) -> SIMD3<Float> {
         guard let properties = resolvedGraphMassProperties(context: context) else {
+            // The fixed-wing fallback tensor is built from the already
+            // fuel-adjusted mass, so it tracks a burning tank on its own.
             return simd_max(fallback, SIMD3<Float>(repeating: minimum))
         }
         let bodyAxes = properties.inertiaDiagonal
         let rateAxes = SIMD3<Float>(bodyAxes.z, bodyAxes.x, bodyAxes.y)
-        return simd_max(rateAxes, SIMD3<Float>(repeating: minimum))
+        // The graph tensor is built from the dry airframe. Scaling it by the mass
+        // actually being flown keeps inertia and mass consistent as the tanks
+        // empty; the ratio is 1.0 for every aircraft without a fuel system.
+        let fuelMass = max(0.0, context.fuelState?.remainingKg ?? 0.0)
+        let massRatio = fuelMass > 0.0 && properties.totalMassKg > 0.01
+            ? (properties.totalMassKg + fuelMass) / properties.totalMassKg
+            : 1.0
+        return simd_max(rateAxes * massRatio, SIMD3<Float>(repeating: minimum))
     }
 
     // MARK: - Uncontrolled (crashed) body
@@ -2546,9 +2580,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let referenceRadius = max(0.12, context.contactProfile.boundingRadius)
         let referenceArea = Float.pi * referenceRadius * referenceRadius * 0.35
         let speed = simd_length(state.velocity)
+        let airDensityForUncontrolledBody = context.atmosphere.state(worldY: state.position.y).airDensity
         var force = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
         if speed > 0.01 {
-            let dragMagnitude = 0.5 * 1.225 * referenceArea * 1.0 * speed * speed
+            let dragMagnitude = 0.5 * airDensityForUncontrolledBody * referenceArea * 1.0 * speed * speed
             force -= (state.velocity / speed) * dragMagnitude
         }
         next.velocity = state.velocity + (force / mass) * dt

@@ -122,6 +122,24 @@ enum UAVVisualFactory {
                     .indoorGuardCage(color: NSColor(calibratedWhite: 0.08, alpha: 1.0))
                 ]
             )
+        case "mq-9a-reaper":
+            // MQ-9B SkyGuardian is a direct derivative of the MQ-9A airframe —
+            // same fuselage, same V-tail, same rear pusher. The visible
+            // difference is the wing: 20.1 m on the A against 24 m on the B,
+            // hence the scale rather than a duplicated planform.
+            return visualVariant(
+                buildMQ9BSkyGuardian(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.mq9aReaper",
+                scale: 0.86
+            )
+        case "iai-harpy-ng":
+            // Harpy NG flies the Harop airframe (delta + canard, Wankel pusher)
+            // with the anti-radiation seeker of the original Harpy.
+            return visualVariant(
+                buildDeltaLoiteringMunition(payloadMountOffset: profile.payloadMountOffset, canards: true, halfSpan: 0.41),
+                name: "uavRoot.iaiHarpyNG",
+                scale: 1.04
+            )
         default:
             break
         }
@@ -173,6 +191,20 @@ enum UAVVisualFactory {
             return buildColossusCA12Atlas(payloadMountOffset: payloadMountOffset)
         case .agroWingTitanAT40:
             return buildAgroWingTitanAT40(payloadMountOffset: payloadMountOffset)
+        case .aerosondeMk47:
+            return buildAerosondeMk47(payloadMountOffset: payloadMountOffset)
+        case .rq7bShadow:
+            return buildRQ7BShadow(payloadMountOffset: payloadMountOffset)
+        case .deltaLoiteringMunition:
+            return buildDeltaLoiteringMunition(payloadMountOffset: payloadMountOffset, canards: false, halfSpan: 0.27)
+        case .canardDeltaLoiteringMunition:
+            return buildDeltaLoiteringMunition(payloadMountOffset: payloadMountOffset, canards: true, halfSpan: 0.41)
+        case .researchDeltaWing:
+            return buildResearchDeltaWing(payloadMountOffset: payloadMountOffset)
+        case .blendedWingBodyTestbed:
+            return buildBlendedWingBodyTestbed(payloadMountOffset: payloadMountOffset)
+        case .jetTargetDrone:
+            return buildJetTargetDrone(payloadMountOffset: payloadMountOffset)
         }
     }
 
@@ -2457,6 +2489,741 @@ enum UAVVisualFactory {
         )
     }
 
+    // MARK: - Fuel-burning and research airframes
+    //
+    // Every planform below is drawn to the aircraft's published proportions
+    // (span-to-length, sweep, tail layout, tractor vs pusher) rather than being
+    // a rescaled copy of an existing asset, because these introduce three
+    // layouts the catalogue did not have: a boom-mounted inverted-V tail, a
+    // tailless/canard delta with a rear pusher, and a blended wing body.
+    // Absolute size still comes from the profile, not from these numbers.
+    //
+    // Two conventions these builders must obey, both easy to get backwards:
+    //
+    //  1. Assets are authored NOSE TOWARD +Z (DroneModelBuilder yaws the root by
+    //     π afterwards). `planformNode` rotates its 2D path by -π/2 about X,
+    //     which maps the path's local +y onto world -z — so in a planform point
+    //     list **positive y is AFT**, negative y is toward the nose. Getting the
+    //     sign wrong puts the wing on backwards while the separately positioned
+    //     fuselage, tail and propeller stay put, which reads as parts floating
+    //     loose rather than as a mirrored aircraft.
+    //
+    //  2. `verticalSurfaceNode` and `torusNode` return nodes that ALREADY carry
+    //     an eulerAngles of their own. Assigning eulerAngles to the returned node
+    //     overwrites that and drops the surface into the wrong plane. To add a
+    //     rotation, wrap the node in a parent and rotate the parent — the same
+    //     pattern `buildLightFixedWingSurvey` uses for its right-hand fin.
+
+    /// Aerosonde Mk 4.7 — high-wing heavy-fuel pusher on twin booms with an
+    /// inverted-V tail, the layout Textron publishes for the Mk 4.7 family.
+    private static func buildAerosondeMk47(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.aerosondeMk47"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.74, green: 0.72, blue: 0.66, alpha: 1.0), roughness: 0.44, metalness: 0.10)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.62, green: 0.60, blue: 0.55, alpha: 1.0), roughness: 0.48, metalness: 0.12)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.16, green: 0.17, blue: 0.19, alpha: 1.0), roughness: 0.30, metalness: 0.40)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.90, alpha: 0.82), roughness: 0.22, metalness: 0.08)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.46, radius: 0.042, material: bodyMaterial)
+        fuselage.position = SCNVector3(0.0, 0.0, 0.03)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Fuel bay sits over the wing spar on the real aircraft; drawn as a
+        // separate block so the fuel installation is visible on the model.
+        let fuelBay = boxNode(size: SIMD3<Float>(0.075, 0.050, 0.130), chamfer: 0.012, material: accentMaterial)
+        fuelBay.position = SCNVector3(0.0, 0.034, 0.02)
+        root.addChildNode(fuelBay)
+        append(fuelBay, to: .battery, componentNodes: &componentNodes)
+
+        // High-mounted constant-chord wing. Leading edge forward (negative y).
+        // Half-span 0.75 against a ~0.79 overall length reproduces the published
+        // 3.6 m span over 1.9 m length.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.75, y: -0.07),
+                CGPoint(x: 0.75, y: -0.07),
+                CGPoint(x: 0.75, y: 0.09),
+                CGPoint(x: -0.75, y: 0.09)
+            ],
+            thickness: 0.020,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.052, 0.02)
+        root.addChildNode(wing)
+        append(wing, to: .armFL, componentNodes: &componentNodes)
+        append(wing, to: .armFR, componentNodes: &componentNodes)
+
+        for (side, leftComponent) in [(Float(-1.0), true), (Float(1.0), false)] {
+            let boom = beamNode(
+                start: SIMD3<Float>(side * 0.20, 0.046, 0.02),
+                end: SIMD3<Float>(side * 0.20, 0.046, -0.34),
+                radius: 0.011,
+                material: accentMaterial
+            )
+            root.addChildNode(boom)
+            append(boom, to: leftComponent ? .armRL : .armRR, componentNodes: &componentNodes)
+
+            // Inverted-V tail: each panel cants downward and outward from the
+            // boom tip, which is what distinguishes this family visually. The
+            // roll goes on a parent so the panel keeps verticalSurfaceNode's
+            // own orientation (see the convention note above).
+            let panelPivot = SCNNode()
+            panelPivot.position = SCNVector3(side * 0.20, 0.046, -0.36)
+            panelPivot.eulerAngles = SCNVector3(0.0, 0.0, side * Float(0.62))
+            panelPivot.addChildNode(verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.13, y: 0.0),
+                    CGPoint(x: 0.05, y: -0.17)
+                ],
+                thickness: 0.010,
+                material: wingMaterial
+            ))
+            root.addChildNode(panelPivot)
+        }
+
+        let engineBlock = boxNode(size: SIMD3<Float>(0.052, 0.052, 0.075), chamfer: 0.010, material: accentMaterial)
+        engineBlock.position = SCNVector3(0.0, 0.012, -0.20)
+        root.addChildNode(engineBlock)
+        append(engineBlock, to: .motorRR, componentNodes: &componentNodes)
+
+        let prop = forwardPropellerNode(material: rotorMaterial, radius: 0.105)
+        prop.position = SCNVector3(0.0, 0.012, -0.25)
+        prop.name = "propeller.aerosondeMk47.pusher"
+        root.addChildNode(prop)
+        append(prop, to: .propellerRR, componentNodes: &componentNodes)
+
+        let sensorPod = sphereNode(radius: 0.038, material: accentMaterial)
+        sensorPod.position = SCNVector3(0.0, -0.038, 0.13)
+        root.addChildNode(sensorPod)
+        append(sensorPod, to: .escPower, componentNodes: &componentNodes)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.012, 0.24)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [prop],
+            propellerSpinDirections: [1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// RQ-7B Shadow 200 — mid-wing twin-boom pusher with an inverted-V tail and
+    /// the nose sensor ball, launched off a pneumatic rail.
+    private static func buildRQ7BShadow(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.rq7bShadow"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.56, green: 0.57, blue: 0.53, alpha: 1.0), roughness: 0.46, metalness: 0.14)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.44, green: 0.46, blue: 0.43, alpha: 1.0), roughness: 0.50, metalness: 0.16)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.13, green: 0.14, blue: 0.15, alpha: 1.0), roughness: 0.30, metalness: 0.42)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.88, alpha: 0.82), roughness: 0.22, metalness: 0.08)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.60, radius: 0.055, material: bodyMaterial)
+        fuselage.position = SCNVector3(0.0, 0.0, 0.02)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // The RQ-7B's defining upgrade is the larger wet wing — fuel lives in
+        // the wing itself, so it is drawn as an inset panel rather than a bay.
+        // Half-span 0.56 against a ~0.90 overall length reproduces the published
+        // 4.27 m span over 3.41 m length — the Shadow is a comparatively
+        // short-span aircraft, not a high-aspect survey wing.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.56, y: -0.06),
+                CGPoint(x: 0.56, y: -0.06),
+                CGPoint(x: 0.56, y: 0.11),
+                CGPoint(x: 0.20, y: 0.15),
+                CGPoint(x: -0.20, y: 0.15),
+                CGPoint(x: -0.56, y: 0.11)
+            ],
+            thickness: 0.024,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.020, 0.01)
+        root.addChildNode(wing)
+        append(wing, to: .armFL, componentNodes: &componentNodes)
+        append(wing, to: .armFR, componentNodes: &componentNodes)
+
+        let wetWingPanel = planformNode(
+            points: [
+                CGPoint(x: -0.42, y: 0.005),
+                CGPoint(x: 0.42, y: 0.005),
+                CGPoint(x: 0.42, y: 0.032),
+                CGPoint(x: -0.42, y: 0.032)
+            ],
+            thickness: 0.005,
+            material: wingMaterial
+        )
+        wetWingPanel.position = SCNVector3(0.0, 0.034, 0.01)
+        root.addChildNode(wetWingPanel)
+        append(wetWingPanel, to: .battery, componentNodes: &componentNodes)
+
+        for (side, isLeft) in [(Float(-1.0), true), (Float(1.0), false)] {
+            let boom = beamNode(
+                start: SIMD3<Float>(side * 0.22, 0.018, 0.04),
+                end: SIMD3<Float>(side * 0.22, 0.018, -0.40),
+                radius: 0.014,
+                material: bodyMaterial
+            )
+            root.addChildNode(boom)
+            append(boom, to: isLeft ? .armRL : .armRR, componentNodes: &componentNodes)
+
+            // Inverted-V tail, same construction as the Aerosonde above: the
+            // roll lives on a parent so the panel keeps its own orientation.
+            let panelPivot = SCNNode()
+            panelPivot.position = SCNVector3(side * 0.22, 0.020, -0.42)
+            panelPivot.eulerAngles = SCNVector3(0.0, 0.0, side * Float(0.58))
+            panelPivot.addChildNode(verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.16, y: 0.0),
+                    CGPoint(x: 0.06, y: -0.22)
+                ],
+                thickness: 0.011,
+                material: wingMaterial
+            ))
+            root.addChildNode(panelPivot)
+        }
+
+        let engineBlock = boxNode(size: SIMD3<Float>(0.065, 0.062, 0.100), chamfer: 0.012, material: accentMaterial)
+        engineBlock.position = SCNVector3(0.0, 0.006, -0.24)
+        root.addChildNode(engineBlock)
+        append(engineBlock, to: .motorRR, componentNodes: &componentNodes)
+
+        let prop = forwardPropellerNode(material: rotorMaterial, radius: 0.125)
+        prop.position = SCNVector3(0.0, 0.006, -0.30)
+        prop.name = "propeller.rq7bShadow.pusher"
+        root.addChildNode(prop)
+        append(prop, to: .propellerRR, componentNodes: &componentNodes)
+
+        let sensorBall = sphereNode(radius: 0.052, material: accentMaterial)
+        sensorBall.position = SCNVector3(0.0, -0.055, 0.16)
+        root.addChildNode(sensorBall)
+        append(sensorBall, to: .escPower, componentNodes: &componentNodes)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.020, 0.30)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [prop],
+            propellerSpinDirections: [1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// IAI Harpy / Harop family — tailless delta with a rear Wankel pusher,
+    /// optionally with the forward canards that distinguish Harop and Harpy NG
+    /// from the original Harpy.
+    ///
+    /// `halfSpan` is a real difference between the two, not a styling knob: the
+    /// original Harpy is 2.1 m across a 2.7 m body (a slender arrow), while Harop
+    /// spans 3.0 m over 2.5 m. Against this build's ~0.69 overall length that is
+    /// 0.27 and 0.41 respectively.
+    private static func buildDeltaLoiteringMunition(
+        payloadMountOffset: SIMD3<Float>,
+        canards: Bool,
+        halfSpan: Float
+    ) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = canards ? "uavRoot.canardDeltaLoiteringMunition" : "uavRoot.deltaLoiteringMunition"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.36, green: 0.37, blue: 0.35, alpha: 1.0), roughness: 0.44, metalness: 0.24)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.29, green: 0.30, blue: 0.29, alpha: 1.0), roughness: 0.48, metalness: 0.22)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.11, green: 0.12, blue: 0.12, alpha: 1.0), roughness: 0.28, metalness: 0.46)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.86, alpha: 0.80), roughness: 0.22, metalness: 0.10)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.66, radius: 0.038, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Tailless delta: leading edge sweeps back sharply, trailing edge is
+        // straight and carries the elevons that do both pitch and roll.
+        let tip = CGFloat(halfSpan)
+        let deltaWing = planformNode(
+            points: [
+                CGPoint(x: 0.0, y: -0.30),
+                CGPoint(x: tip, y: 0.20),
+                CGPoint(x: tip, y: 0.30),
+                CGPoint(x: -tip, y: 0.30),
+                CGPoint(x: -tip, y: 0.20)
+            ],
+            thickness: 0.022,
+            material: wingMaterial
+        )
+        deltaWing.position = SCNVector3(0.0, 0.004, 0.02)
+        root.addChildNode(deltaWing)
+        append(deltaWing, to: .armFL, componentNodes: &componentNodes)
+        append(deltaWing, to: .armFR, componentNodes: &componentNodes)
+
+        // Elevons, drawn as a distinct trailing-edge strip so the control
+        // layout reads correctly: no separate elevator or aileron exists here.
+        for (side, isLeft) in [(Float(-1.0), true), (Float(1.0), false)] {
+            let elevon = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side) * tip * 0.20, y: 0.245),
+                    CGPoint(x: CGFloat(side) * tip * 0.97, y: 0.245),
+                    CGPoint(x: CGFloat(side) * tip * 0.97, y: 0.298),
+                    CGPoint(x: CGFloat(side) * tip * 0.20, y: 0.298)
+                ],
+                thickness: 0.010,
+                material: accentMaterial
+            )
+            elevon.position = SCNVector3(0.0, 0.018, 0.02)
+            root.addChildNode(elevon)
+            append(elevon, to: isLeft ? .armRL : .armRR, componentNodes: &componentNodes)
+        }
+
+        if canards {
+            for side in [Float(-1.0), Float(1.0)] {
+                let canard = planformNode(
+                    points: [
+                        CGPoint(x: CGFloat(side) * 0.05, y: -0.24),
+                        CGPoint(x: CGFloat(side) * tip * 0.62, y: -0.19),
+                        CGPoint(x: CGFloat(side) * tip * 0.62, y: -0.14),
+                        CGPoint(x: CGFloat(side) * 0.05, y: -0.15)
+                    ],
+                    thickness: 0.010,
+                    material: wingMaterial
+                )
+                canard.position = SCNVector3(0.0, 0.030, 0.02)
+                root.addChildNode(canard)
+            }
+        }
+
+        for side in [Float(-1.0), Float(1.0)] {
+            let fin = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.14, y: 0.0),
+                    CGPoint(x: 0.04, y: 0.12)
+                ],
+                thickness: 0.009,
+                material: wingMaterial
+            )
+            fin.position = SCNVector3(side * halfSpan * 0.94, 0.012, -0.19)
+            root.addChildNode(fin)
+        }
+
+        // Warhead / seeker section forward of the wing.
+        let seeker = sphereNode(radius: 0.046, material: accentMaterial)
+        seeker.position = SCNVector3(0.0, -0.014, 0.28)
+        root.addChildNode(seeker)
+        append(seeker, to: .escPower, componentNodes: &componentNodes)
+
+        let engineBlock = boxNode(size: SIMD3<Float>(0.058, 0.056, 0.090), chamfer: 0.010, material: accentMaterial)
+        engineBlock.position = SCNVector3(0.0, 0.006, -0.27)
+        root.addChildNode(engineBlock)
+        append(engineBlock, to: .motorRR, componentNodes: &componentNodes)
+
+        let prop = forwardPropellerNode(material: rotorMaterial, radius: 0.10)
+        prop.position = SCNVector3(0.0, 0.006, -0.33)
+        prop.name = "propeller.deltaLoiteringMunition.pusher"
+        root.addChildNode(prop)
+        append(prop, to: .propellerRR, componentNodes: &componentNodes)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.030, 0.31)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [prop],
+            propellerSpinDirections: [1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// Small electric research delta (EPFL model-based-navigation testbed) —
+    /// moulded foam delta with two elevons and a single tractor motor.
+    private static func buildResearchDeltaWing(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.researchDeltaWing"
+
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.74, green: 0.76, blue: 0.80, alpha: 1.0), roughness: 0.58, metalness: 0.04)
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.24, green: 0.44, blue: 0.70, alpha: 1.0), roughness: 0.42, metalness: 0.10)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.14, green: 0.15, blue: 0.17, alpha: 1.0), roughness: 0.32, metalness: 0.38)
+        let rotorMaterial = material(diffuse: NSColor(calibratedWhite: 0.92, alpha: 0.78), roughness: 0.20, metalness: 0.06)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        // Enlarged instrument fuselage — the modification that distinguishes
+        // the research aircraft from the stock airframe its wings come from.
+        let fuselage = horizontalCapsule(length: 0.44, radius: 0.028, material: bodyMaterial)
+        fuselage.position = SCNVector3(0.0, 0.012, 0.03)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Half-span 0.46 over a ~0.58 length matches the donor airframe's
+        // published 1.245 m span against its 0.78 m body.
+        let deltaWing = planformNode(
+            points: [
+                CGPoint(x: 0.0, y: -0.30),
+                CGPoint(x: 0.46, y: 0.16),
+                CGPoint(x: 0.46, y: 0.24),
+                CGPoint(x: -0.46, y: 0.24),
+                CGPoint(x: -0.46, y: 0.16)
+            ],
+            thickness: 0.020,
+            material: wingMaterial
+        )
+        deltaWing.position = SCNVector3(0.0, 0.0, 0.02)
+        root.addChildNode(deltaWing)
+        append(deltaWing, to: .armFL, componentNodes: &componentNodes)
+        append(deltaWing, to: .armFR, componentNodes: &componentNodes)
+
+        for (side, isLeft) in [(Float(-1.0), true), (Float(1.0), false)] {
+            let elevon = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side) * 0.08, y: 0.185),
+                    CGPoint(x: CGFloat(side) * 0.44, y: 0.185),
+                    CGPoint(x: CGFloat(side) * 0.44, y: 0.238),
+                    CGPoint(x: CGFloat(side) * 0.08, y: 0.238)
+                ],
+                thickness: 0.009,
+                material: accentMaterial
+            )
+            elevon.position = SCNVector3(0.0, 0.016, 0.02)
+            root.addChildNode(elevon)
+            append(elevon, to: isLeft ? .armRL : .armRR, componentNodes: &componentNodes)
+        }
+
+        for side in [Float(-1.0), Float(1.0)] {
+            let winglet = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.10, y: 0.0),
+                    CGPoint(x: 0.03, y: 0.10)
+                ],
+                thickness: 0.008,
+                material: bodyMaterial
+            )
+            winglet.position = SCNVector3(side * 0.44, 0.010, -0.13)
+            root.addChildNode(winglet)
+        }
+
+        let batteryPack = boxNode(size: SIMD3<Float>(0.060, 0.030, 0.100), chamfer: 0.008, material: accentMaterial)
+        batteryPack.position = SCNVector3(0.0, -0.020, 0.06)
+        root.addChildNode(batteryPack)
+        append(batteryPack, to: .battery, componentNodes: &componentNodes)
+
+        // Tractor installation: the disc has to sit ahead of the delta's apex
+        // (z = +0.30), not inside the planform.
+        let motor = forwardMotorNode(radius: 0.020, length: 0.048, material: accentMaterial)
+        motor.position = SCNVector3(0.0, 0.016, 0.31)
+        root.addChildNode(motor)
+        append(motor, to: .motorFL, componentNodes: &componentNodes)
+
+        let prop = forwardPropellerNode(material: rotorMaterial, radius: 0.085)
+        prop.position = SCNVector3(0.0, 0.016, 0.35)
+        prop.name = "propeller.researchDeltaWing.tractor"
+        root.addChildNode(prop)
+        append(prop, to: .propellerFL, componentNodes: &componentNodes)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.026, 0.20)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [prop],
+            propellerSpinDirections: [1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// Blended wing-body research testbed — no distinct fuselage, twin outboard
+    /// vertical stabilisers, dorsal-mounted mini turbojet, no landing gear
+    /// (dolly launch, skid recovery).
+    private static func buildBlendedWingBodyTestbed(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.blendedWingBodyTestbed"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.80, green: 0.81, blue: 0.84, alpha: 1.0), roughness: 0.40, metalness: 0.16)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.68, green: 0.70, blue: 0.74, alpha: 1.0), roughness: 0.44, metalness: 0.18)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.15, green: 0.16, blue: 0.18, alpha: 1.0), roughness: 0.30, metalness: 0.44)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        // Thick centre body blended straight into the wing — the whole point of
+        // the configuration is that there is no fuselage/wing joint.
+        // Half-span 0.54 over a ~0.56 length reproduces the published 2.859 m
+        // span against the 1.473 m root chord.
+        let centreBody = planformNode(
+            points: [
+                CGPoint(x: -0.05, y: -0.32),
+                CGPoint(x: 0.05, y: -0.32),
+                CGPoint(x: 0.17, y: -0.16),
+                CGPoint(x: 0.19, y: 0.20),
+                CGPoint(x: -0.19, y: 0.20),
+                CGPoint(x: -0.17, y: -0.16)
+            ],
+            thickness: 0.070,
+            material: wingMaterial
+        )
+        centreBody.position = SCNVector3(0.0, 0.0, 0.0)
+        root.addChildNode(centreBody)
+        append(centreBody, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Outboard panels: strongly tapered, root chord several times the tip.
+        let outerWing = planformNode(
+            points: [
+                CGPoint(x: -0.17, y: -0.16),
+                CGPoint(x: 0.17, y: -0.16),
+                CGPoint(x: 0.54, y: 0.06),
+                CGPoint(x: 0.54, y: 0.16),
+                CGPoint(x: -0.54, y: 0.16),
+                CGPoint(x: -0.54, y: 0.06)
+            ],
+            thickness: 0.026,
+            material: wingMaterial
+        )
+        outerWing.position = SCNVector3(0.0, 0.010, 0.0)
+        root.addChildNode(outerWing)
+        append(outerWing, to: .armFL, componentNodes: &componentNodes)
+        append(outerWing, to: .armFR, componentNodes: &componentNodes)
+
+        // Segmented trailing-edge effector array, drawn as discrete strips —
+        // this aircraft's reason for existing is that its trailing edge is a
+        // row of independent surfaces rather than one aileron per side.
+        for index in 0..<12 {
+            let side: Float = index < 6 ? -1.0 : 1.0
+            let slot = Float(index % 6)
+            let inner = 0.19 + slot * 0.057
+            let outer = inner + 0.054
+            let segment = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side * inner), y: 0.125),
+                    CGPoint(x: CGFloat(side * outer), y: 0.125),
+                    CGPoint(x: CGFloat(side * outer), y: 0.158),
+                    CGPoint(x: CGFloat(side * inner), y: 0.158)
+                ],
+                thickness: 0.008,
+                material: accentMaterial
+            )
+            segment.position = SCNVector3(0.0, 0.020, 0.0)
+            root.addChildNode(segment)
+            append(segment, to: side < 0 ? .armRL : .armRR, componentNodes: &componentNodes)
+        }
+
+        for side in [Float(-1.0), Float(1.0)] {
+            let stabiliser = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.20, y: 0.0),
+                    CGPoint(x: 0.13, y: 0.20),
+                    CGPoint(x: 0.03, y: 0.20)
+                ],
+                thickness: 0.012,
+                material: wingMaterial
+            )
+            stabiliser.position = SCNVector3(side * 0.20, 0.030, -0.10)
+            root.addChildNode(stabiliser)
+        }
+
+        let engineNacelle = horizontalCapsule(length: 0.20, radius: 0.044, material: accentMaterial)
+        engineNacelle.position = SCNVector3(0.0, 0.072, -0.12)
+        root.addChildNode(engineNacelle)
+        append(engineNacelle, to: .motorRR, componentNodes: &componentNodes)
+
+        let intake = torusNode(ringRadius: 0.042, pipeRadius: 0.009, material: bodyMaterial)
+        intake.position = SCNVector3(0.0, 0.072, -0.02)
+        root.addChildNode(intake)
+
+        let fuelCell = boxNode(size: SIMD3<Float>(0.10, 0.030, 0.13), chamfer: 0.010, material: accentMaterial)
+        fuelCell.position = SCNVector3(0.0, -0.014, 0.02)
+        root.addChildNode(fuelCell)
+        append(fuelCell, to: .battery, componentNodes: &componentNodes)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.010, 0.32)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        // A turbojet has no propeller disc to animate; the empty arrays keep the
+        // rotor-spin driver a no-op instead of spinning an invented prop.
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// Jet-powered cropped-delta drone with a dorsal intake, wingtip fins and
+    /// underwing hardpoints — rocket-assisted launch, parachute recovery, so no
+    /// landing gear is modelled.
+    private static func buildJetTargetDrone(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.jetTargetDrone"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.46, green: 0.48, blue: 0.50, alpha: 1.0), roughness: 0.38, metalness: 0.34)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.38, green: 0.40, blue: 0.42, alpha: 1.0), roughness: 0.42, metalness: 0.30)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.12, green: 0.13, blue: 0.14, alpha: 1.0), roughness: 0.26, metalness: 0.52)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.82, radius: 0.058, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let nose = sphereNode(radius: 0.056, material: bodyMaterial)
+        nose.position = SCNVector3(0.0, 0.0, 0.40)
+        nose.scale = SCNVector3(1.0, 1.0, 1.45)
+        root.addChildNode(nose)
+
+        // Cropped delta: swept leading edge, clipped tips carrying the fins.
+        // Half-span 0.30 over a ~0.96 length reproduces the published 2.5 m
+        // span against the 4.0 m fuselage — a long body on a small cropped delta.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.08, y: -0.16),
+                CGPoint(x: 0.08, y: -0.16),
+                CGPoint(x: 0.30, y: 0.18),
+                CGPoint(x: 0.30, y: 0.26),
+                CGPoint(x: -0.30, y: 0.26),
+                CGPoint(x: -0.30, y: 0.18)
+            ],
+            thickness: 0.022,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, -0.004, -0.02)
+        root.addChildNode(wing)
+        append(wing, to: .armFL, componentNodes: &componentNodes)
+        append(wing, to: .armFR, componentNodes: &componentNodes)
+
+        for (side, isLeft) in [(Float(-1.0), true), (Float(1.0), false)] {
+            let elevon = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side) * 0.07, y: 0.205),
+                    CGPoint(x: CGFloat(side) * 0.29, y: 0.205),
+                    CGPoint(x: CGFloat(side) * 0.29, y: 0.256),
+                    CGPoint(x: CGFloat(side) * 0.07, y: 0.256)
+                ],
+                thickness: 0.009,
+                material: accentMaterial
+            )
+            elevon.position = SCNVector3(0.0, 0.014, -0.02)
+            root.addChildNode(elevon)
+            append(elevon, to: isLeft ? .armRL : .armRR, componentNodes: &componentNodes)
+
+            let tipFin = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.15, y: 0.0),
+                    CGPoint(x: 0.05, y: 0.14)
+                ],
+                thickness: 0.010,
+                material: wingMaterial
+            )
+            tipFin.position = SCNVector3(side * 0.29, 0.006, -0.18)
+            root.addChildNode(tipFin)
+
+            let hardpoint = boxNode(size: SIMD3<Float>(0.030, 0.028, 0.150), chamfer: 0.008, material: accentMaterial)
+            hardpoint.position = SCNVector3(side * 0.17, -0.038, -0.05)
+            root.addChildNode(hardpoint)
+        }
+
+        // Dorsal intake and tailpipe.
+        let intakeDuct = boxNode(size: SIMD3<Float>(0.085, 0.060, 0.190), chamfer: 0.020, material: bodyMaterial)
+        intakeDuct.position = SCNVector3(0.0, 0.062, 0.05)
+        root.addChildNode(intakeDuct)
+        append(intakeDuct, to: .motorRR, componentNodes: &componentNodes)
+
+        let intakeLip = torusNode(ringRadius: 0.040, pipeRadius: 0.009, material: accentMaterial)
+        intakeLip.position = SCNVector3(0.0, 0.064, 0.145)
+        root.addChildNode(intakeLip)
+
+        let exhaust = cylinderNode(radius: 0.048, height: 0.085, material: accentMaterial)
+        exhaust.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        exhaust.position = SCNVector3(0.0, 0.0, -0.44)
+        root.addChildNode(exhaust)
+        append(exhaust, to: .escPower, componentNodes: &componentNodes)
+
+        let fuelCell = boxNode(size: SIMD3<Float>(0.090, 0.055, 0.240), chamfer: 0.014, material: accentMaterial)
+        fuelCell.position = SCNVector3(0.0, -0.014, 0.04)
+        root.addChildNode(fuelCell)
+        append(fuelCell, to: .battery, componentNodes: &componentNodes)
+
+        let verticalTail = verticalSurfaceNode(
+            points: [
+                CGPoint(x: 0.0, y: 0.0),
+                CGPoint(x: 0.22, y: 0.0),
+                CGPoint(x: 0.16, y: 0.20),
+                CGPoint(x: 0.06, y: 0.20)
+            ],
+            thickness: 0.012,
+            material: wingMaterial
+        )
+        verticalTail.position = SCNVector3(0.0, 0.030, -0.40)
+        root.addChildNode(verticalTail)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, -0.026, 0.44)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
     private static func append(_ node: SCNNode, to component: DamageComponent, componentNodes: inout [DamageComponent: [SCNNode]]) {
         componentNodes[component, default: []].append(node)
     }
@@ -2575,6 +3342,19 @@ enum UAVVisualFactory {
         return node
     }
 
+    /// Capsule spanning `start`...`end`.
+    ///
+    /// The aiming used to be built from euler angles: yaw/pitch to point the beam,
+    /// plus a `Float.pi / 2` roll about Z to stand SCNCapsule's own +Y axis up.
+    /// That silently produced a spanwise stick for every direction except ±X,
+    /// because SceneKit applies eulerAngles with the **roll last** — so the Z roll
+    /// was undoing the aim rather than preceding it. Booms and engine pylons across
+    /// the whole catalogue rendered lying across the wing instead of reaching aft,
+    /// which is what made tails and nacelles look like detached parts floating
+    /// beside the aircraft.
+    ///
+    /// Aiming the capsule's axis with a single rotation removes the ordering
+    /// question entirely.
     private static func beamNode(start: SIMD3<Float>, end: SIMD3<Float>, radius: Float, material: SCNMaterial) -> SCNNode {
         let delta = end - start
         let length = max(radius * 2.0, simd_length(delta))
@@ -2582,9 +3362,17 @@ enum UAVVisualFactory {
         node.geometry?.materials = [material]
         node.position = SCNVector3((start.x + end.x) * 0.5, (start.y + end.y) * 0.5, (start.z + end.z) * 0.5)
 
-        let yaw = atan2(delta.x, delta.z)
-        let pitch = atan2(delta.y, max(0.0001, sqrt(delta.x * delta.x + delta.z * delta.z)))
-        node.eulerAngles = SCNVector3(-pitch, -yaw, Float.pi / 2.0)
+        let capsuleAxis = SIMD3<Float>(0, 1, 0)
+        guard simd_length(delta) > 1e-5 else { return node }
+        let target = simd_normalize(delta)
+        let alignment = simd_dot(capsuleAxis, target)
+        if alignment < -0.9999 {
+            // Exactly antiparallel: `simd_quatf(from:to:)` has no defined axis
+            // there, so pick one explicitly.
+            node.simdOrientation = simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))
+        } else {
+            node.simdOrientation = simd_quatf(from: capsuleAxis, to: target)
+        }
         return node
     }
 

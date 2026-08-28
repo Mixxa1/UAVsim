@@ -675,6 +675,25 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private(set) var batteryState: BatteryState
+    /// Live fuel quantity for fuel-burning aircraft; nil for battery-electric ones,
+    /// which is every profile the catalogue had before the fuel work.
+    private(set) var fuelState: FuelSystemState?
+    private let fuelBurnService = FuelBurnService()
+
+    /// Full tanks for a fuel aircraft, nil for anything electric.
+    static func initialFuelState(for uavProfile: UAVProfile?) -> FuelSystemState? {
+        guard let fuel = uavProfile?.powerplant?.fuel, fuel.usableFuelMassKg > 0.0 else {
+            return nil
+        }
+        return .full(capacityKg: fuel.usableFuelMassKg, reserveFraction: fuel.reserveFraction)
+    }
+
+    /// Ambient air for the current site and weather. The world origin is treated as
+    /// mean sea level: the procedural maps have no published elevation, and an
+    /// imported world's terrain height already arrives as `position.y`.
+    func currentAtmosphere() -> AtmosphereModel {
+        AtmosphereModel.resolve(weather: weather, siteElevationMeters: 0.0)
+    }
     private(set) var collisionAnalysis: CollisionAnalysisSnapshot
     @Published private(set) var damageState: DamageState
     private(set) var thermalState: ThermalState
@@ -3442,6 +3461,7 @@ final class DroneSimulationViewModel: ObservableObject {
         lastFiniteState = state
         controlValues = DroneControlValues()
         batteryState = .full
+        fuelState = Self.initialFuelState(for: activeUAVProfile)
         damageState = .pristine
         rebuildVehicleComponentGraph()
         thermalState = .nominal
@@ -4653,6 +4673,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let didChangeTerrain = normalizeTerrainForSelectedDroneProfile()
 
         batteryState = .full
+        fuelState = Self.initialFuelState(for: activeUAVProfile)
         reset()
         if didChangeTerrain {
             regenerateEnvironment()
@@ -6810,7 +6831,9 @@ final class DroneSimulationViewModel: ObservableObject {
             jammedSurfaces: componentFailureRuntime.jammedSurfaces(),
             powerSystemFactor: componentFailureRuntime.functionalFactor(componentID: "battery"),
             controlSystemFactor: componentFailureRuntime.functionalFactor(componentID: "flightController"),
-            groundHeight: currentGroundHeight()
+            groundHeight: currentGroundHeight(),
+            atmosphere: currentAtmosphere(),
+            fuelState: fuelState
         )
 
         let previousState = state
@@ -7050,6 +7073,25 @@ final class DroneSimulationViewModel: ObservableObject {
             ),
             deltaTime: dt
         )
+
+        if let powerplant = activeUAVProfile?.powerplant,
+           powerplant.energySource == .fuel,
+           let currentFuel = fuelState {
+            fuelState = fuelBurnService.update(
+                current: currentFuel,
+                input: FuelBurnInput(
+                    powerplant: powerplant,
+                    throttle: state.throttle,
+                    // No engine start/stop state exists yet, so "running" means the
+                    // aircraft is armed and has not been written off. Modelling a
+                    // real ignition sequence belongs with the engine model.
+                    engineRunning: isArmed && state.physicalState != .crashed,
+                    atmosphere: currentAtmosphere().state(worldY: state.position.y),
+                    leakKgPerSec: 0.0
+                ),
+                deltaTime: dt
+            )
+        }
 
         thermalState = batteryThermalService.updateThermal(
             current: thermalState,
@@ -7590,7 +7632,8 @@ final class DroneSimulationViewModel: ObservableObject {
             state: loadState,
             airframeClass: selectedDroneProfile.airframeClass,
             rotorModel: vehicleRotorModel,
-            deltaTime: deltaTime
+            deltaTime: deltaTime,
+            airDensity: currentAtmosphere().state(worldY: state.position.y).airDensity
         )
         for entry in result.connectionDamage {
             let meaningfulDelta = entry.residualStrengthBefore - entry.residualStrengthAfter >= 0.002

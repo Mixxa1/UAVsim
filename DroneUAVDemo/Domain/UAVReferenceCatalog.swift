@@ -823,6 +823,399 @@ enum UAVReferenceCatalog {
             shortDescription: "Medium tactical catapult-launched ISR platform with modular payload stations and runway-free launch concept.",
             notes: "Conservative estimated mode based on public RQ-21 family references. Launch semantics are intentionally catapult-biased with rail heading and protected initial climb.",
             missionRole: "Tactical ISR and expeditionary surveillance"
+        ),
+
+        // MARK: - Fuel-burning and research airframes
+        //
+        // The first entries in this catalogue that are not battery-electric.
+        // Their `powerplant` block carries the real engine and tank figures;
+        // the runtime still draws energy from the battery model until the fuel
+        // subsystem exists, so nothing here changes how they fly today.
+        // Where a figure is genuinely not published (most usable-fuel masses,
+        // which manufacturers rarely release), the derivation is stated in
+        // `notes` rather than presented as a specification.
+
+        UAVProfile(
+            id: "aerosonde-mk-4-7",
+            displayName: "Aerosonde Mk 4.7",
+            manufacturer: "Textron Systems",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .medium,
+            specConfidence: .partial,
+            payloadCapabilityMode: .modular,
+            baseMass: 23.3,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 4.5,
+            maxTakeoffMass: 36.3,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 3600.0,
+                fuselageLengthMillimeters: 1900.0,
+                heightMillimeters: 500.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.06, 0.08),
+            visualPreset: .aerosondeMk47,
+            shortDescription: "Small heavy-fuel expeditionary ISR aircraft with a twin-boom inverted-V tail and a rear pusher propeller.",
+            notes: "Textron Systems and Naval Technology publish a 3.6 m wingspan, 10 lb (4.5 kg) payload, more than 12 hours endurance at full payload, 50-60 kt cruise with a 62-80 kt dash, a 4,500 m density-altitude ceiling, and a single-cylinder air-cooled direct-injected spark-ignited Lycoming EL-005 running jet fuel. Lycoming rates the EL-005 at 4 hp (about 3 kW) at 5,500 rpm with a 6.25 kg dry weight. Gross weight is taken as the widely published 80 lb (36.3 kg) figure. Usable fuel mass is NOT published: 8.5 kg is derived here from the endurance and a small heavy-fuel two-stroke's typical specific consumption, and should be treated as an estimate.",
+            missionRole: "Long-endurance expeditionary ISR, maritime patrol, and persistent overwatch from unprepared sites",
+            nominalFlightTimeSec: 50400,
+            nominalCruiseSpeedMps: 28.0,
+            nominalMaxRangeM: 1400000,
+            nominalLinkRangeM: 139000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .pistonTwoStroke,
+                engineDesignation: "Lycoming EL-005",
+                ratedShaftPowerKW: 3.0,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 0.46,
+                fuel: UAVFuelSpec(
+                    fuelType: .heavyFuel,
+                    usableFuelMassKg: 8.5,
+                    reserveFraction: 0.18
+                )
+            )
+        ),
+        UAVProfile(
+            id: "rq-7b-shadow",
+            displayName: "RQ-7B Shadow 200",
+            manufacturer: "Textron Systems (AAI)",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .medium,
+            specConfidence: .partial,
+            payloadCapabilityMode: .modular,
+            baseMass: 77.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 27.0,
+            maxTakeoffMass: 170.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 4270.0,
+                fuselageLengthMillimeters: 3410.0,
+                heightMillimeters: 1000.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.10, 0.10),
+            visualPreset: .rq7bShadow,
+            shortDescription: "Tactical twin-boom rotary-engine pusher launched from a pneumatic rail and recovered into an arresting wire.",
+            notes: "Directory of U.S. Military Rockets and Missiles lists the RQ-7B at a 4.27 m wingspan, 170 kg maximum weight, 194 km/h maximum and 111 km/h loiter speed, a 4,570 m ceiling, seven hours endurance, and a UEL AR-741 rotary engine of 28.3 kW (38 hp); the RQ-7A length of 3.41 m and height of 1.0 m carry over. The RQ-7B's defining change is a longer wet wing holding up to 44 litres of fuel, which at gasoline density is about 31.7 kg. Later RQ-7Bv2 aircraft fly a 6.1 m wing at over 209 kg gross weight — this entry models the baseline RQ-7B.",
+            missionRole: "Brigade-level tactical reconnaissance, surveillance, target acquisition, and battle damage assessment",
+            nominalFlightTimeSec: 25200,
+            nominalCruiseSpeedMps: 31.0,
+            nominalMaxRangeM: 700000,
+            nominalLinkRangeM: 125000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .wankelRotary,
+                engineDesignation: "UEL AR-741",
+                ratedShaftPowerKW: 28.3,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 0.71,
+                fuel: UAVFuelSpec(
+                    fuelType: .gasoline,
+                    usableFuelLiters: 44.0,
+                    reserveFraction: 0.20
+                )
+            )
+        ),
+        UAVProfile(
+            id: "mq-9a-reaper",
+            displayName: "MQ-9A Reaper",
+            manufacturer: "General Atomics Aeronautical Systems",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .verified,
+            payloadCapabilityMode: .modular,
+            baseMass: 2223.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 1746.0,
+            maxTakeoffMass: 4763.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 20100.0,
+                fuselageLengthMillimeters: 11000.0,
+                heightMillimeters: 3810.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.18, 0.28),
+            visualPreset: .mq9bSkyGuardian,
+            shortDescription: "Turboprop MALE hunter-killer with a V-tail, rear pusher propeller, and multi-hardpoint stores capacity.",
+            notes: "The U.S. Air Force fact sheet lists a 66 ft (20.1 m) wingspan, 36 ft (11 m) length, 4,000 lb (1,814 kg / 602 gal) fuel capacity, and a ceiling up to 50,000 ft (15,240 m). Published aggregate data give 2,223 kg empty weight, 4,763 kg maximum takeoff weight, 482 km/h maximum and 313 km/h cruise speed, and 1,900 km range. GA-ASI states over 27 hours endurance, 240 KTAS maximum airspeed, 3,850 lb (1,746 kg) total payload of which 3,000 lb (1,361 kg) is external stores, and a Honeywell TPE331-10 turboprop with digital electronic engine control.",
+            missionRole: "Armed persistent ISR, strike coordination, and long-endurance hunter-killer patrol",
+            armamentCapabilityNote: "Seven external hardpoints rated for up to 1,361 kg of stores alongside the internal sensor payload.",
+            nominalFlightTimeSec: 97200,
+            nominalCruiseSpeedMps: 87.0,
+            nominalMaxRangeM: 1900000,
+            nominalLinkRangeM: 370000,
+            estimatedDataQuality: .official,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turboprop,
+                engineDesignation: "Honeywell TPE331-10",
+                ratedShaftPowerKW: 671.0,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 2.3,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 1814.0,
+                    reserveFraction: 0.15,
+                    tankCount: 3
+                )
+            )
+        ),
+        UAVProfile(
+            id: "iai-harpy",
+            displayName: "IAI Harpy",
+            manufacturer: "Israel Aerospace Industries",
+            countryOfOrigin: "Israel",
+            vehicleType: .fixedWing,
+            massCategory: .medium,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 83.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 32.0,
+            maxTakeoffMass: 135.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 2100.0,
+                fuselageLengthMillimeters: 2700.0,
+                heightMillimeters: 550.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.05, 0.16),
+            visualPreset: .deltaLoiteringMunition,
+            shortDescription: "Tailless delta anti-radiation loitering munition with a rear Wankel pusher and canister launch from a ground vehicle.",
+            notes: "Published data give a 2.7 m length, 2.1 m wingspan, 135 kg gross weight, a single UEL AR731 Wankel rotary engine of 28 kW (38 hp), 185 km/h maximum speed, 200 km range, and a 32 kg high-explosive warhead in a tailless delta with a single pusher propeller. Endurance and usable fuel mass are not published; the 2.5 h loiter and 20 kg fuel load modelled here are derived from the published range and engine class. This is the first aircraft in the catalogue to use the delta aerodynamic family.",
+            missionRole: "Suppression of enemy air defences — autonomous radar search, loiter, and terminal attack",
+            armamentCapabilityNote: "Fixed 32 kg high-explosive warhead; the airframe is expended on the target rather than recovered.",
+            nominalFlightTimeSec: 9000,
+            nominalCruiseSpeedMps: 40.0,
+            nominalMaxRangeM: 200000,
+            nominalLinkRangeM: 200000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .wankelRotary,
+                engineDesignation: "UEL AR731",
+                ratedShaftPowerKW: 28.0,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 0.60,
+                fuel: UAVFuelSpec(
+                    fuelType: .gasoline,
+                    usableFuelMassKg: 20.0,
+                    reserveFraction: 0.10
+                )
+            )
+        ),
+        UAVProfile(
+            id: "iai-harop",
+            displayName: "IAI Harop",
+            manufacturer: "Israel Aerospace Industries",
+            countryOfOrigin: "Israel",
+            vehicleType: .fixedWing,
+            massCategory: .medium,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 89.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 16.0,
+            maxTakeoffMass: 135.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 3000.0,
+                fuselageLengthMillimeters: 2500.0,
+                heightMillimeters: 600.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.05, 0.16),
+            visualPreset: .canardDeltaLoiteringMunition,
+            shortDescription: "Canard delta man-in-the-loop loitering munition with electro-optical terminal guidance and a Wankel pusher.",
+            notes: "Published data give a 2.5 m length, 3.0 m wingspan, delta wing with canards, a single Wankel pusher engine, 417 km/h maximum speed, 200 km range, more than 6 hours endurance, a 4,600 m service ceiling, a radar cross-section under 0.5 m², a 16 kg warhead with sub-metre CEP, man-in-the-loop control, and canister launch from vehicles or ships. Gross weight is the commonly published 135 kg. Engine power and usable fuel mass are not published; the 30 kg fuel load modelled here is derived from the endurance and the engine class.",
+            missionRole: "Man-in-the-loop loitering attack against static and moving targets, and armed reconnaissance",
+            armamentCapabilityNote: "16 kg warhead with sub-metre circular error probable; the mission can be aborted and the aircraft re-tasked before terminal dive.",
+            nominalFlightTimeSec: 21600,
+            nominalCruiseSpeedMps: 42.0,
+            nominalMaxRangeM: 200000,
+            nominalLinkRangeM: 200000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .wankelRotary,
+                engineDesignation: "Wankel rotary (designation not published)",
+                ratedShaftPowerKW: 37.0,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 0.62,
+                fuel: UAVFuelSpec(
+                    fuelType: .gasoline,
+                    usableFuelMassKg: 30.0,
+                    reserveFraction: 0.10
+                )
+            )
+        ),
+        UAVProfile(
+            id: "iai-harpy-ng",
+            displayName: "IAI Harpy NG",
+            manufacturer: "Israel Aerospace Industries",
+            countryOfOrigin: "Israel",
+            vehicleType: .fixedWing,
+            massCategory: .medium,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 103.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 15.0,
+            maxTakeoffMass: 160.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 3000.0,
+                fuselageLengthMillimeters: 2500.0,
+                heightMillimeters: 600.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.05, 0.16),
+            visualPreset: .canardDeltaLoiteringMunition,
+            shortDescription: "Long-loiter anti-radiation development of the Harop airframe with a wider-band seeker and a Wankel pusher.",
+            notes: "Public material describes Harpy NG as an anti-radiation loitering weapon combining the Harop airframe with the Harpy's SEAD role, quoting 9 hours airborne time, a seeker band widened from 2-18 GHz to 0.8-18 GHz, ground-vehicle launch, and improvements in loiter time, range, altitude, maintenance and training. Reported total weight is about 160 kg with roughly 15 kg of explosive. Dimensions are inherited from the Harop airframe and engine power and fuel mass are not published — this entry is deliberately marked as estimated.",
+            missionRole: "Extended-loiter suppression of enemy air defences against intermittently radiating emitters",
+            armamentCapabilityNote: "Roughly 15 kg high-explosive warhead; fire-and-forget anti-radiation engagement.",
+            nominalFlightTimeSec: 32400,
+            nominalCruiseSpeedMps: 43.0,
+            nominalMaxRangeM: 250000,
+            nominalLinkRangeM: 250000,
+            estimatedDataQuality: .estimated,
+            powerplant: UAVPowerplantSpec(
+                engineType: .wankelRotary,
+                engineDesignation: "Wankel rotary (designation not published)",
+                ratedShaftPowerKW: 37.0,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 0.62,
+                fuel: UAVFuelSpec(
+                    fuelType: .gasoline,
+                    usableFuelMassKg: 42.0,
+                    reserveFraction: 0.10
+                )
+            )
+        ),
+        UAVProfile(
+            id: "epfl-delta-wing-uav",
+            displayName: "EPFL Delta-Wing UAV",
+            manufacturer: "EPFL (Environmental Sensing Observatory)",
+            countryOfOrigin: "Switzerland",
+            vehicleType: .fixedWing,
+            massCategory: .micro,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: nil,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.45,
+            maxPayloadMass: nil,
+            estimatedMaxPayloadMass: 0.60,
+            maxTakeoffMass: nil,
+            estimatedMaxTakeoffMass: 2.6,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 1245.0,
+                fuselageLengthMillimeters: 780.0,
+                heightMillimeters: 220.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.03, 0.04),
+            visualPreset: .researchDeltaWing,
+            shortDescription: "Small electric research delta built to identify a delta-wing aerodynamic model for vehicle-dynamic-model navigation.",
+            notes: "EPFL's Environmental Sensing Observatory describes a custom delta-wing UAV whose wings come from a Multiplex Xeno Electric airframe while the fuselage was redesigned for a larger payload and the power-train uprated for the added weight; the platform is used to identify a delta-wing aerodynamic model from combined wind-tunnel and in-flight data for model-based navigation in GNSS-denied conditions. Multiplex publishes the donor airframe at a 1,245 mm wingspan, 32 dm² (0.32 m²) wing area and 650-690 g all-up electric weight. The modified aircraft's mass, payload and airspeeds are not published — the figures here are estimates for the modified configuration and are marked accordingly. This aircraft is electric: it is in this group as an aerodynamic reference for the delta family, not as a fuel-burning platform.",
+            missionRole: "Aerodynamic model identification, model-based navigation research, and delta-wing handling reference",
+            nominalFlightTimeSec: 2400,
+            nominalCruiseSpeedMps: 18.0,
+            nominalMaxRangeM: 30000,
+            nominalLinkRangeM: 5000,
+            estimatedDataQuality: .estimated,
+            powerplant: UAVPowerplantSpec(
+                engineType: .electricMotor,
+                engineDesignation: "Brushless outrunner (uprated from donor airframe)",
+                propellerPlacement: .tractor,
+                propellerDiameterM: 0.20,
+                fuel: nil
+            )
+        ),
+        UAVProfile(
+            id: "ncstate-bwb-delta",
+            displayName: "NC State BWB DELTA",
+            manufacturer: "North Carolina State University",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .light,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 13.6,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 6.8,
+            maxTakeoffMass: 19.05,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 2859.0,
+                fuselageLengthMillimeters: 1473.0,
+                heightMillimeters: 450.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.04, 0.06),
+            visualPreset: .blendedWingBodyTestbed,
+            shortDescription: "Turbojet blended wing-body flight-controls testbed with a segmented trailing-edge effector array in place of conventional surfaces.",
+            notes: "NASA-funded NC State research (Barnwell MS thesis, 2003, and AIAA 2004-5114) describes the UAV BWB DELTA — designed, built and flight tested at NC State, sharing its planform with the NASA blended wing-body design — with a NACA 0015 section, 58 in (1.473 m) root chord tapering to a 5.25 in tip, 34.3 in (0.871 m) mean aerodynamic chord, 17.77 ft² (1.651 m²) wing area over a 9.38 ft (2.859 m) wingspan, 30 lb (13.6 kg) dry weight with a 15 lb (6.8 kg) payload capacity, and an AMT mini-turbojet rated at 15-18 lbf static thrust. Published speeds are 120 ft/s (36.6 m/s) cruise and 45 ft/s (13.7 m/s) stall, with the MESA test configuration listed at 42 lb (19.05 kg) takeoff weight, 117 ft/s cruise and 44 ft/s stall. The aircraft has no landing gear: it is dolly-launched and skid-recovered. Endurance is not published; the figure here reflects a mini-turbojet's typical fuel fraction and is an estimate.",
+            missionRole: "Distributed actuation and sensing research, flight-control law development, and blended wing-body handling reference",
+            nominalFlightTimeSec: 720,
+            nominalCruiseSpeedMps: 35.7,
+            nominalMaxRangeM: 25000,
+            nominalLinkRangeM: 8000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "AMT AT-180 mini-turbojet",
+                ratedThrustN: 66.7,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 2.0,
+                    reserveFraction: 0.20
+                )
+            )
+        ),
+        UAVProfile(
+            id: "hesa-karrar",
+            displayName: "HESA Karrar",
+            manufacturer: "HESA",
+            countryOfOrigin: "Iran",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .modular,
+            baseMass: 263.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 227.0,
+            maxTakeoffMass: 700.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 2500.0,
+                fuselageLengthMillimeters: 4000.0,
+                heightMillimeters: 950.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.10, 0.10),
+            visualPreset: .jetTargetDrone,
+            shortDescription: "Turbojet cropped-delta drone with a dorsal intake and underwing hardpoints, rocket-boosted off a rail and recovered by parachute.",
+            notes: "Published data list a 4 m length, 2.5 m wingspan, 700 kg maximum takeoff weight, 227 kg payload, one Tolloue-5 or Microturbo TRI 60-5 turbojet of an estimated 4.2-4.4 kN thrust, 900 km/h maximum speed, 1,000 km range with a 500 km combat radius, three hardpoints, a rocket-assist system for takeoff and parachute recovery. Service ceiling, endurance and fuel capacity are not published. The 210 kg fuel load and one-hour endurance modelled here are derived together from the engine's rated thrust and a turbojet's specific consumption, so that tank, engine and endurance agree with each other rather than being three independent guesses; they are estimates, not specifications. Rocket-assisted launch and parachute recovery are not modelled, so this aircraft uses the standard start like the other runway-class aircraft in the catalogue.",
+            missionRole: "High-speed target presentation, reconnaissance, and strike carriage",
+            armamentCapabilityNote: "Three hardpoints for missiles, bombs, or torpedoes depending on configuration.",
+            nominalFlightTimeSec: 3600,
+            nominalCruiseSpeedMps: 170.0,
+            nominalMaxRangeM: 1000000,
+            nominalLinkRangeM: 250000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "Tolloue-5 / Microturbo TRI 60-5",
+                ratedThrustN: 4200.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 210.0,
+                    reserveFraction: 0.12,
+                    tankCount: 2
+                )
+            )
         )
     ]
 
@@ -925,6 +1318,24 @@ enum UAVReferenceCatalog {
             return URL(string: "https://ageagle.com/drone-sensors/ebee-tac/")
         case "rq-21-integrator":
             return URL(string: "https://www.insitu.com/products/integrator")
+        case "aerosonde-mk-4-7":
+            return URL(string: "https://www.naval-technology.com/projects/aerosonde-mark-47-small-unmanned-aircraft-system-suas/")
+        case "rq-7b-shadow":
+            return URL(string: "https://www.designation-systems.net/dusrm/app2/q-7.html")
+        case "mq-9a-reaper":
+            return URL(string: "https://www.ga-asi.com/remotely-piloted-aircraft/mq-9a")
+        case "iai-harpy":
+            return URL(string: "https://en.wikipedia.org/wiki/IAI_Harpy")
+        case "iai-harop":
+            return URL(string: "https://en.wikipedia.org/wiki/IAI_Harop")
+        case "iai-harpy-ng":
+            return URL(string: "https://en.wikipedia.org/wiki/IAI_Harpy_NG")
+        case "epfl-delta-wing-uav":
+            return URL(string: "https://link.springer.com/article/10.1007/s13272-024-00727-9")
+        case "ncstate-bwb-delta":
+            return URL(string: "https://ntrs.nasa.gov/citations/20050169564")
+        case "hesa-karrar":
+            return URL(string: "https://en.wikipedia.org/wiki/HESA_Karrar")
         default:
             return nil
         }

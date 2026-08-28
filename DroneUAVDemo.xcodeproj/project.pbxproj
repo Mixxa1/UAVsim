@@ -30,6 +30,8 @@
 		100000000000000000000213 /* CameraConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000113 /* CameraConfiguration.swift */; };
 		100000000000000000000214 /* DamageThermalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000114 /* DamageThermalModel.swift */; };
 		100000000000000000000215 /* BatteryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000115 /* BatteryState.swift */; };
+		10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC20 /* FuelSystemRuntime.swift */; };
+		10000000000000000000FC11 /* AtmosphereModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC10 /* AtmosphereModel.swift */; };
 		100000000000000000000216 /* CollisionAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000116 /* CollisionAnalysis.swift */; };
 		100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000117 /* BatteryThermalSimulationService.swift */; };
 		100000000000000000000218 /* CollisionAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000118 /* CollisionAnalysisService.swift */; };
@@ -448,6 +450,8 @@
 		100000000000000000000113 /* CameraConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConfiguration.swift; sourceTree = "<group>"; };
 		100000000000000000000114 /* DamageThermalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DamageThermalModel.swift; sourceTree = "<group>"; };
 		100000000000000000000115 /* BatteryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryState.swift; sourceTree = "<group>"; };
+		10000000000000000000FC20 /* FuelSystemRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuelSystemRuntime.swift; sourceTree = "<group>"; };
+		10000000000000000000FC10 /* AtmosphereModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphereModel.swift; sourceTree = "<group>"; };
 		100000000000000000000116 /* CollisionAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysis.swift; sourceTree = "<group>"; };
 		100000000000000000000117 /* BatteryThermalSimulationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryThermalSimulationService.swift; sourceTree = "<group>"; };
 		100000000000000000000118 /* CollisionAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysisService.swift; sourceTree = "<group>"; };
@@ -985,6 +989,7 @@
 				10000000000000000000012F /* UAVPayloadCapabilityMode.swift */,
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
+				10000000000000000000FC10 /* AtmosphereModel.swift */,
 				10000000000000000000039F /* RuntimePerformancePolicy.swift */,
 				100000000000000000000137 /* UAVSelectionState.swift */,
 				10000000000000000000012E /* UAVSpecConfidence.swift */,
@@ -1025,6 +1030,7 @@
 				100000000000000000000122 /* AutoPathPlannerService.swift */,
 				100000000000000000000152 /* AutoNavigationController.swift */,
 				100000000000000000000117 /* BatteryThermalSimulationService.swift */,
+				10000000000000000000FC20 /* FuelSystemRuntime.swift */,
 				100000000000000000000118 /* CollisionAnalysisService.swift */,
 				10000000000000000000F007 /* ImpactResolutionService.swift */,
 				10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */,
@@ -1635,6 +1641,8 @@
 				100000000000000000000213 /* CameraConfiguration.swift in Sources */,
 				100000000000000000000214 /* DamageThermalModel.swift in Sources */,
 				100000000000000000000215 /* BatteryState.swift in Sources */,
+				10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */,
+				10000000000000000000FC11 /* AtmosphereModel.swift in Sources */,
 				100000000000000000000216 /* CollisionAnalysis.swift in Sources */,
 				100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */,
 				100000000000000000000218 /* CollisionAnalysisService.swift in Sources */,

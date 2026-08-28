@@ -214,8 +214,17 @@ struct FixedWingAerodynamics {
         // every airframe's stall/liftoff feel consistent with its existing
         // speed tuning regardless of how (un)realistic the guessed aspect
         // ratio would otherwise have been.
+        //
+        // The density here is deliberately the fixed sea-level value and NOT the
+        // ambient density from `AtmosphereModel`, even though every dynamic-pressure
+        // calculation downstream now uses the latter. This expression is a
+        // *calibration* — it solves for the airframe's geometry from a stall speed
+        // quoted at sea level. Feeding it live density would make the wing physically
+        // grow as the aircraft climbed, which is the opposite of the altitude effect
+        // being modelled: real altitude performance comes from the thinner air acting
+        // on a fixed wing, and that happens in the solver.
         let stallSpeed = max(minSustainableSpeedMps, 3.0)
-        let area = ((2.0 * mass * 9.81) / (1.225 * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
+        let area = ((2.0 * mass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
         let chord = area / span
         // Effective aspect ratio, back-derived from the calibrated area, used
         // only for induced drag — clamped to a believable range so a

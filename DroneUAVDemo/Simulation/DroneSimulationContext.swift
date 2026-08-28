@@ -74,6 +74,38 @@ struct DroneSimulationContext {
     /// construction site keeps compiling and behaving exactly as before.
     var groundHeight: Float = 0.0
 
+    /// Ambient air the aerodynamics are evaluated in. Defaults to the standard
+    /// sea-level day, which is exactly the constant every dynamic-pressure
+    /// calculation used before this existed — so a caller that does not supply
+    /// one gets the previous behaviour unchanged.
+    var atmosphere: AtmosphereModel = .standard
+
+    /// Live fuel quantity, for aircraft that burn it. `nil` means the aircraft is
+    /// battery-electric, which is every profile that predates the fuel work.
+    var fuelState: FuelSystemState?
+
+    /// Whether propulsion has any energy left to draw on, whichever kind it uses.
+    /// The plan's `energyUnsafe` in miniature: fixed-wing thrust used to be gated
+    /// on `batteryState.isDepleted` alone, which is meaningless for an engine
+    /// fed from a tank.
+    var isEnergyDepleted: Bool {
+        if let fuelState {
+            return fuelState.isStarved
+        }
+        return batteryState.isDepleted
+    }
+
+    /// Derating applied to available propulsion. Voltage sag is a battery
+    /// phenomenon and must not be charged to a piston engine; a fuel aircraft
+    /// keeps only the component-failure factor.
+    var propulsionAvailabilityFactor: Float {
+        let functional = min(1.0, max(0.0, powerSystemFactor))
+        guard fuelState == nil else {
+            return functional
+        }
+        return functional * batteryState.voltageSagFactor
+    }
+
     init(
         profile: DroneModelProfile,
         activeUAVProfile: UAVProfile?,
@@ -92,7 +124,9 @@ struct DroneSimulationContext {
         jammedSurfaces: [FlightSurfaceChannel: Float] = [:],
         powerSystemFactor: Float = 1.0,
         controlSystemFactor: Float = 1.0,
-        groundHeight: Float = 0.0
+        groundHeight: Float = 0.0,
+        atmosphere: AtmosphereModel = .standard,
+        fuelState: FuelSystemState? = nil
     ) {
         self.profile = profile
         self.activeUAVProfile = activeUAVProfile
@@ -112,5 +146,7 @@ struct DroneSimulationContext {
         self.powerSystemFactor = powerSystemFactor
         self.controlSystemFactor = controlSystemFactor
         self.groundHeight = groundHeight
+        self.atmosphere = atmosphere
+        self.fuelState = fuelState
     }
 }

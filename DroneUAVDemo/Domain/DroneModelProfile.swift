@@ -1461,6 +1461,308 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 collisionRadiusMeters: 0.28,
                 structuralQualityFactor: 0.85
             )
+        // MARK: Fuel-burning and research airframes
+        //
+        // `batteryEnergyWh` on these is the same runtime energy-store analogue
+        // the existing MQ-9B and Hermes 900 entries already use — it is NOT the
+        // aircraft's fuel energy, which is orders of magnitude larger and lives
+        // on `UAVPowerplantSpec.fuel` in the catalogue instead. Endurance is
+        // driven by `maxFlightTimeMin` (see BatteryThermalSimulationService,
+        // where the Wh figure cancels out of the drain rate), so these values
+        // are scaled to stay consistent with the rest of the fleet's displayed
+        // power draw rather than being invented independently.
+        case .aerosondeMk47:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 36.3,
+                fallbackDimensions: DroneDimensionsMM(x: 3600, y: 1900, z: 500),
+                maxHorizontalSpeedMps: 41.0,
+                maxAscentSpeedMps: 3.0,
+                maxDescentSpeedMps: 4.0,
+                maxFlightTimeMin: 840.0,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 1600.0,
+                visualClass: .fixedWingRectangular,
+                controlResponsiveness: 0.46,
+                cameraPreset: DroneCameraPreset(fpvFov: 66.0, followDistance: 7.0, followHeight: 2.2),
+                collisionRadiusMeters: 0.34,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 18.0,
+                    cruiseSpeedMps: 28.0,
+                    climbSpeedMps: 22.0,
+                    stallWarningSpeedMps: 15.5,
+                    waypointAcceptanceRadiusMeters: 14.0,
+                    nominalTurnRateDegPerSec: 11.0,
+                    bankResponseGain: 0.74,
+                    climbResponseGain: 0.62,
+                    descentResponseGain: 0.54,
+                    dragFactor: 1.00,
+                    throttleResponseGain: 0.60,
+                    turnAuthority: 0.52,
+                    maxBankAngleDeg: 35.0,
+                    supportedLaunchModes: [.catapult],
+                    preferredLaunchMode: .catapult,
+                    maxAirspeed: 41.0,
+                    nominalClimbRateMps: 2.6,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 13.0,
+                    catapultExitSpeed: 25.0,
+                    initialClimbTargetAltitude: 22.0
+                ),
+                structuralQualityFactor: 0.95
+            )
+        case .rq7bShadow:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 170.0,
+                fallbackDimensions: DroneDimensionsMM(x: 4270, y: 3410, z: 1000),
+                maxHorizontalSpeedMps: 54.0,
+                maxAscentSpeedMps: 3.5,
+                maxDescentSpeedMps: 4.2,
+                maxFlightTimeMin: 420.0,
+                maxWindResistanceMps: 14.0,
+                batteryEnergyWh: 3000.0,
+                visualClass: .fixedWingRectangular,
+                landingMethod: .linearBellyLanding,
+                controlResponsiveness: 0.42,
+                cameraPreset: DroneCameraPreset(fpvFov: 62.0, followDistance: 8.5, followHeight: 2.7),
+                collisionRadiusMeters: 0.42,
+                fixedWingParameters: FixedWingParameters(
+                    family: .conventionalSurvey,
+                    minSustainableSpeedMps: 25.0,
+                    cruiseSpeedMps: 31.0,
+                    climbSpeedMps: 27.0,
+                    stallWarningSpeedMps: 21.5,
+                    waypointAcceptanceRadiusMeters: 16.0,
+                    nominalTurnRateDegPerSec: 10.0,
+                    bankResponseGain: 0.70,
+                    climbResponseGain: 0.58,
+                    descentResponseGain: 0.50,
+                    dragFactor: 1.02,
+                    throttleResponseGain: 0.58,
+                    turnAuthority: 0.46,
+                    maxBankAngleDeg: 33.0,
+                    supportedLaunchModes: [.catapult],
+                    preferredLaunchMode: .catapult,
+                    maxAirspeed: 54.0,
+                    nominalClimbRateMps: 3.0,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 12.0,
+                    catapultExitSpeed: 32.0,
+                    initialClimbTargetAltitude: 26.0
+                ),
+                structuralQualityFactor: 1.05
+            )
+        // Harpy: tailless delta, no canard. Small span on a heavy body gives a
+        // markedly higher stall and cruise than the survey wings above.
+        case .deltaLoiteringMunition:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 135.0,
+                fallbackDimensions: DroneDimensionsMM(x: 2100, y: 2700, z: 550),
+                maxHorizontalSpeedMps: 51.0,
+                maxAscentSpeedMps: 4.0,
+                maxDescentSpeedMps: 5.5,
+                maxFlightTimeMin: 150.0,
+                maxWindResistanceMps: 16.0,
+                batteryEnergyWh: 950.0,
+                visualClass: .fixedWingDelta,
+                airframeStyle: .flyingWing,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.44,
+                cameraPreset: DroneCameraPreset(fpvFov: 60.0, followDistance: 7.6, followHeight: 2.4),
+                collisionRadiusMeters: 0.36,
+                fixedWingParameters: FixedWingParameters(
+                    family: .delta,
+                    minSustainableSpeedMps: 30.0,
+                    cruiseSpeedMps: 40.0,
+                    climbSpeedMps: 35.0,
+                    stallWarningSpeedMps: 26.0,
+                    waypointAcceptanceRadiusMeters: 18.0,
+                    nominalTurnRateDegPerSec: 12.0,
+                    bankResponseGain: 0.68,
+                    climbResponseGain: 0.56,
+                    descentResponseGain: 0.52,
+                    dragFactor: 1.04,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.44,
+                    maxBankAngleDeg: 38.0,
+                    maxAirspeed: 51.0,
+                    nominalClimbRateMps: 3.4,
+                    initialClimbPitchDeg: 11.0,
+                    maxInitialBankDeg: 14.0,
+                    initialClimbTargetAltitude: 28.0
+                ),
+                structuralQualityFactor: 1.00
+            )
+        // Harop / Harpy NG: same delta with forward canards, a longer-endurance
+        // installation and a higher dash speed.
+        case .canardDeltaLoiteringMunition:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 135.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3000, y: 2500, z: 600),
+                maxHorizontalSpeedMps: 116.0,
+                maxAscentSpeedMps: 4.5,
+                maxDescentSpeedMps: 6.0,
+                maxFlightTimeMin: 360.0,
+                maxWindResistanceMps: 16.0,
+                batteryEnergyWh: 2200.0,
+                visualClass: .fixedWingDelta,
+                airframeStyle: .flyingWing,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.46,
+                cameraPreset: DroneCameraPreset(fpvFov: 60.0, followDistance: 7.8, followHeight: 2.4),
+                collisionRadiusMeters: 0.36,
+                fixedWingParameters: FixedWingParameters(
+                    family: .delta,
+                    minSustainableSpeedMps: 27.0,
+                    cruiseSpeedMps: 42.0,
+                    climbSpeedMps: 36.0,
+                    stallWarningSpeedMps: 23.5,
+                    waypointAcceptanceRadiusMeters: 18.0,
+                    nominalTurnRateDegPerSec: 13.0,
+                    bankResponseGain: 0.72,
+                    climbResponseGain: 0.60,
+                    descentResponseGain: 0.54,
+                    dragFactor: 1.02,
+                    throttleResponseGain: 0.64,
+                    turnAuthority: 0.50,
+                    maxBankAngleDeg: 40.0,
+                    maxAirspeed: 116.0,
+                    nominalClimbRateMps: 4.0,
+                    initialClimbPitchDeg: 12.0,
+                    maxInitialBankDeg: 15.0,
+                    initialClimbTargetAltitude: 30.0
+                ),
+                structuralQualityFactor: 1.00
+            )
+        case .researchDeltaWing:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 2.6,
+                fallbackDimensions: DroneDimensionsMM(x: 1245, y: 780, z: 220),
+                maxHorizontalSpeedMps: 26.0,
+                maxAscentSpeedMps: 4.0,
+                maxDescentSpeedMps: 3.8,
+                maxFlightTimeMin: 40.0,
+                maxWindResistanceMps: 10.0,
+                batteryEnergyWh: 96.0,
+                visualClass: .fixedWingDelta,
+                airframeStyle: .flyingWing,
+                controlResponsiveness: 0.62,
+                cameraPreset: DroneCameraPreset(fpvFov: 74.0, followDistance: 4.6, followHeight: 1.5),
+                collisionRadiusMeters: 0.20,
+                fixedWingParameters: FixedWingParameters(
+                    family: .delta,
+                    minSustainableSpeedMps: 12.0,
+                    cruiseSpeedMps: 18.0,
+                    climbSpeedMps: 15.0,
+                    stallWarningSpeedMps: 10.5,
+                    waypointAcceptanceRadiusMeters: 8.0,
+                    nominalTurnRateDegPerSec: 16.0,
+                    bankResponseGain: 0.82,
+                    climbResponseGain: 0.70,
+                    descentResponseGain: 0.60,
+                    dragFactor: 0.98,
+                    throttleResponseGain: 0.70,
+                    turnAuthority: 0.66,
+                    maxBankAngleDeg: 42.0,
+                    supportedLaunchModes: [.handLaunch],
+                    preferredLaunchMode: .handLaunch,
+                    maxAirspeed: 26.0,
+                    nominalClimbRateMps: 2.6,
+                    initialClimbPitchDeg: 12.0,
+                    maxInitialBankDeg: 16.0,
+                    handThrowSpeed: 15.0,
+                    initialClimbTargetAltitude: 16.0
+                ),
+                structuralQualityFactor: 0.70
+            )
+        // NC State / NASA BWB DELTA: dolly-launched, skid-recovered mini-turbojet
+        // testbed. No landing gear on the real aircraft, hence belly landing.
+        case .blendedWingBodyTestbed:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 19.05,
+                fallbackDimensions: DroneDimensionsMM(x: 2859, y: 1473, z: 450),
+                maxHorizontalSpeedMps: 48.0,
+                maxAscentSpeedMps: 5.5,
+                maxDescentSpeedMps: 5.0,
+                maxFlightTimeMin: 12.0,
+                maxWindResistanceMps: 11.0,
+                batteryEnergyWh: 500.0,
+                visualClass: .fixedWingDelta,
+                airframeStyle: .flyingWing,
+                controlResponsiveness: 0.58,
+                cameraPreset: DroneCameraPreset(fpvFov: 70.0, followDistance: 6.4, followHeight: 2.0),
+                collisionRadiusMeters: 0.30,
+                fixedWingParameters: FixedWingParameters(
+                    family: .flyingWing,
+                    minSustainableSpeedMps: 13.4,
+                    cruiseSpeedMps: 35.7,
+                    climbSpeedMps: 24.0,
+                    stallWarningSpeedMps: 11.5,
+                    waypointAcceptanceRadiusMeters: 12.0,
+                    nominalTurnRateDegPerSec: 14.0,
+                    bankResponseGain: 0.78,
+                    climbResponseGain: 0.66,
+                    descentResponseGain: 0.58,
+                    dragFactor: 0.96,
+                    throttleResponseGain: 0.72,
+                    turnAuthority: 0.60,
+                    maxBankAngleDeg: 40.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    maxAirspeed: 48.0,
+                    nominalClimbRateMps: 5.0,
+                    takeoffRotationSpeed: 15.0,
+                    initialClimbPitchDeg: 12.0,
+                    maxInitialBankDeg: 15.0,
+                    runwayTakeoffDistance: 60.0,
+                    initialClimbTargetAltitude: 20.0
+                ),
+                structuralQualityFactor: 0.80
+            )
+        // HESA Karrar: turbojet cropped delta. Rocket-assisted launch and
+        // parachute recovery are not modelled, so it uses the standard start
+        // like the other runway-class aircraft in this catalogue.
+        case .jetTargetDrone:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 700.0,
+                fallbackDimensions: DroneDimensionsMM(x: 2500, y: 4000, z: 950),
+                maxHorizontalSpeedMps: 250.0,
+                maxAscentSpeedMps: 18.0,
+                maxDescentSpeedMps: 16.0,
+                maxFlightTimeMin: 60.0,
+                maxWindResistanceMps: 24.0,
+                batteryEnergyWh: 5200.0,
+                visualClass: .fixedWingDelta,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.34,
+                cameraPreset: DroneCameraPreset(fpvFov: 56.0, followDistance: 11.0, followHeight: 3.4),
+                collisionRadiusMeters: 0.50,
+                fixedWingParameters: FixedWingParameters(
+                    family: .delta,
+                    minSustainableSpeedMps: 63.0,
+                    cruiseSpeedMps: 170.0,
+                    climbSpeedMps: 110.0,
+                    stallWarningSpeedMps: 55.0,
+                    waypointAcceptanceRadiusMeters: 40.0,
+                    nominalTurnRateDegPerSec: 9.0,
+                    bankResponseGain: 0.62,
+                    climbResponseGain: 0.54,
+                    descentResponseGain: 0.50,
+                    dragFactor: 1.10,
+                    throttleResponseGain: 0.46,
+                    turnAuthority: 0.36,
+                    maxBankAngleDeg: 45.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    maxAirspeed: 250.0,
+                    nominalClimbRateMps: 18.0,
+                    initialClimbPitchDeg: 12.0,
+                    maxInitialBankDeg: 14.0,
+                    runwayTakeoffDistance: 420.0,
+                    initialClimbTargetAltitude: 90.0
+                ),
+                structuralQualityFactor: 1.20
+            )
         }
     }
 
@@ -1468,6 +1770,92 @@ struct LIPODroneModelRepository: DroneModelRepository {
         for uavProfile: UAVProfile
     ) -> RuntimeTuning? {
         switch uavProfile.id {
+        // MQ-9A shares MQ-9B's visual preset (same airframe lineage) but is a
+        // lighter, shorter-winged and faster aircraft, so it cannot inherit the
+        // MQ-9B tuning wholesale.
+        case "mq-9a-reaper":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 4763.0,
+                fallbackDimensions: DroneDimensionsMM(x: 20100, y: 11000, z: 3810),
+                runtimeSceneDimensionsOverride: DroneDimensionsMM(x: 2750, y: 1630, z: 775),
+                maxHorizontalSpeedMps: 134.0,
+                maxAscentSpeedMps: 4.4,
+                maxDescentSpeedMps: 5.6,
+                maxFlightTimeMin: 1620.0,
+                maxWindResistanceMps: 24.0,
+                batteryEnergyWh: 26000.0,
+                visualClass: .fixedWingSwept,
+                controlResponsiveness: 0.22,
+                cameraPreset: DroneCameraPreset(fpvFov: 54.0, followDistance: 10.2, followHeight: 3.4),
+                collisionRadiusMeters: 0.54,
+                fixedWingParameters: FixedWingParameters(
+                    family: .swept,
+                    minSustainableSpeedMps: 40.0,
+                    cruiseSpeedMps: 87.0,
+                    climbSpeedMps: 62.0,
+                    stallWarningSpeedMps: 35.0,
+                    waypointAcceptanceRadiusMeters: 26.0,
+                    nominalTurnRateDegPerSec: 8.2,
+                    bankResponseGain: 0.60,
+                    climbResponseGain: 0.50,
+                    descentResponseGain: 0.44,
+                    dragFactor: 1.06,
+                    throttleResponseGain: 0.54,
+                    turnAuthority: 0.34,
+                    maxBankAngleDeg: 29.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    maxAirspeed: 134.0,
+                    nominalClimbRateMps: 4.2,
+                    takeoffRotationSpeed: 48.0,
+                    initialClimbPitchDeg: 8.0,
+                    maxInitialBankDeg: 10.0,
+                    runwayTakeoffDistance: 240.0,
+                    initialClimbTargetAltitude: 50.0
+                ),
+                structuralQualityFactor: 1.35
+            )
+        // Harpy NG flies the Harop airframe with a heavier installation and a
+        // longer loiter, so it overrides that preset's mass and endurance.
+        case "iai-harpy-ng":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 160.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3000, y: 2500, z: 600),
+                maxHorizontalSpeedMps: 116.0,
+                maxAscentSpeedMps: 4.2,
+                maxDescentSpeedMps: 5.8,
+                maxFlightTimeMin: 540.0,
+                maxWindResistanceMps: 16.0,
+                batteryEnergyWh: 3800.0,
+                visualClass: .fixedWingDelta,
+                airframeStyle: .flyingWing,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.44,
+                cameraPreset: DroneCameraPreset(fpvFov: 60.0, followDistance: 7.8, followHeight: 2.4),
+                collisionRadiusMeters: 0.37,
+                fixedWingParameters: FixedWingParameters(
+                    family: .delta,
+                    minSustainableSpeedMps: 29.0,
+                    cruiseSpeedMps: 43.0,
+                    climbSpeedMps: 37.0,
+                    stallWarningSpeedMps: 25.0,
+                    waypointAcceptanceRadiusMeters: 18.0,
+                    nominalTurnRateDegPerSec: 12.5,
+                    bankResponseGain: 0.70,
+                    climbResponseGain: 0.58,
+                    descentResponseGain: 0.53,
+                    dragFactor: 1.03,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.48,
+                    maxBankAngleDeg: 39.0,
+                    maxAirspeed: 116.0,
+                    nominalClimbRateMps: 3.8,
+                    initialClimbPitchDeg: 12.0,
+                    maxInitialBankDeg: 15.0,
+                    initialClimbTargetAltitude: 30.0
+                ),
+                structuralQualityFactor: 1.00
+            )
         case "dji-mavic-3t":
             return multirotorRuntimeTuning(
                 fallbackTakeoffMass: 1.05,

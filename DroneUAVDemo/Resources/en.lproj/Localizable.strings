@@ -990,6 +990,42 @@
 "uav.profile.abstract-uav.short_description" = "User-defined custom UAV profile kept for future parameter tuning.";
 "uav.profile.abstract-uav.mission_role" = "User-defined custom mission";
 
+"uav.profile.aerosonde-mk-4-7.short_description" = "Small heavy-fuel expeditionary ISR aircraft with a twin-boom inverted-V tail and a rear pusher propeller.";
+"uav.profile.aerosonde-mk-4-7.mission_role" = "Long-endurance expeditionary ISR, maritime patrol, and persistent overwatch from unprepared sites";
+"uav.profile.rq-7b-shadow.short_description" = "Tactical twin-boom rotary-engine pusher launched from a pneumatic rail and recovered into an arresting wire.";
+"uav.profile.rq-7b-shadow.mission_role" = "Brigade-level tactical reconnaissance, surveillance, target acquisition, and battle damage assessment";
+"uav.profile.mq-9a-reaper.short_description" = "Turboprop MALE hunter-killer with a V-tail, rear pusher propeller, and multi-hardpoint stores capacity.";
+"uav.profile.mq-9a-reaper.mission_role" = "Armed persistent ISR, strike coordination, and long-endurance hunter-killer patrol";
+"uav.profile.mq-9a-reaper.armament_note" = "Seven external hardpoints rated for up to 1,361 kg of stores alongside the internal sensor payload.";
+"uav.profile.iai-harpy.short_description" = "Tailless delta anti-radiation loitering munition with a rear Wankel pusher and canister launch from a ground vehicle.";
+"uav.profile.iai-harpy.mission_role" = "Suppression of enemy air defences — autonomous radar search, loiter, and terminal attack";
+"uav.profile.iai-harpy.armament_note" = "Fixed 32 kg high-explosive warhead; the airframe is expended on the target rather than recovered.";
+"uav.profile.iai-harop.short_description" = "Canard delta man-in-the-loop loitering munition with electro-optical terminal guidance and a Wankel pusher.";
+"uav.profile.iai-harop.mission_role" = "Man-in-the-loop loitering attack against static and moving targets, and armed reconnaissance";
+"uav.profile.iai-harop.armament_note" = "16 kg warhead with sub-metre circular error probable; the mission can be aborted and the aircraft re-tasked before terminal dive.";
+"uav.profile.iai-harpy-ng.short_description" = "Long-loiter anti-radiation development of the Harop airframe with a wider-band seeker and a Wankel pusher.";
+"uav.profile.iai-harpy-ng.mission_role" = "Extended-loiter suppression of enemy air defences against intermittently radiating emitters";
+"uav.profile.iai-harpy-ng.armament_note" = "Roughly 15 kg high-explosive warhead; fire-and-forget anti-radiation engagement.";
+"uav.profile.epfl-delta-wing-uav.short_description" = "Small electric research delta built to identify a delta-wing aerodynamic model for vehicle-dynamic-model navigation.";
+"uav.profile.epfl-delta-wing-uav.mission_role" = "Aerodynamic model identification, model-based navigation research, and delta-wing handling reference";
+"uav.profile.ncstate-bwb-delta.short_description" = "Turbojet blended wing-body flight-controls testbed with a segmented trailing-edge effector array in place of conventional surfaces.";
+"uav.profile.ncstate-bwb-delta.mission_role" = "Distributed actuation and sensing research, flight-control law development, and blended wing-body handling reference";
+"uav.profile.hesa-karrar.short_description" = "Turbojet cropped-delta drone with a dorsal intake and underwing hardpoints, rocket-boosted off a rail and recovered by parachute.";
+"uav.profile.hesa-karrar.mission_role" = "High-speed target presentation, reconnaissance, and strike carriage";
+"uav.profile.hesa-karrar.armament_note" = "Three hardpoints for missiles, bombs, or torpedoes depending on configuration.";
+
+"country.iran" = "Iran";
+
+"uav.fuel.type.gasoline" = "Gasoline";
+"uav.fuel.type.heavyFuel" = "Heavy fuel (JP-5/JP-8/Jet A)";
+"uav.fuel.type.turbineKerosene" = "Turbine kerosene (Jet A)";
+"uav.engine.type.electricMotor" = "Electric motor";
+"uav.engine.type.pistonTwoStroke" = "Two-stroke piston";
+"uav.engine.type.pistonFourStroke" = "Four-stroke piston";
+"uav.engine.type.wankelRotary" = "Wankel rotary";
+"uav.engine.type.turboprop" = "Turboprop";
+"uav.engine.type.turbojet" = "Turbojet";
+
 "telemetry.path_status" = "Path status";
 "telemetry.path_status.idle" = "Idle";
 "telemetry.path_status.valid" = "Valid";

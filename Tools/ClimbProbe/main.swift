@@ -29,15 +29,27 @@ var underDelivering: [String] = []
 for profile in repository.allProfiles where profile.airframeClass == .fixedWing {
     guard let wing = profile.fixedWingParameters else { continue }
     let massModel = VehicleMassModel.baseline(for: profile, uavProfile: nil)
+    // Full tanks. A declared climb rate is quoted for a departing aircraft, and a
+    // fuel profile's catalogue mass is now its DRY mass — measuring one of these
+    // without fuel would flatter it by the whole tank.
+    let fuelState: FuelSystemState? = profile.resolvedUAVProfile?.powerplant?.fuel.map {
+        .full(capacityKg: $0.usableFuelMassKg, reserveFraction: $0.reserveFraction)
+    }
     let baseline = FlightBaselineResolver.resolve(
         runtimeProfile: profile,
-        activeUAVProfile: nil,
+        activeUAVProfile: profile.resolvedUAVProfile,
         vehicleMassModel: massModel,
         flightMode: .autoPath
     )
 
+    // 300 m, not 3000. Declared climb rates are sea-level figures, and now that
+    // `AtmosphereModel` makes density fall with altitude, measuring at 3 km and
+    // comparing against a sea-level number is not a like-for-like test — it
+    // charges every airframe an altitude penalty its own datasheet never claimed.
+    // 300 m is also the altitude the question actually matters at: whether the
+    // aircraft can climb over a city before reaching the first building.
     var state = DroneState(
-        position: SIMD3<Float>(0, 3000, 0),
+        position: SIMD3<Float>(0, 300, 0),
         velocity: SIMD3<Float>(0, 0, -wing.climbAirspeed),
         orientation: .zero,
         angularVelocity: .zero,
@@ -64,15 +76,24 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             mode: .autoPath,
             controlMode: .stabilized
         )
+        // The catalogue profile is NOT optional context here. `stepFixedWingAerodynamic` reads the
+        // real wingspan from it and only falls back to `profile.dimensionsUnfoldedMm` when it is
+        // absent — and for the aircraft that carry a `runtimeSceneDimensionsOverride` (MQ-9B,
+        // Hermes 900, MQ-9A) that fallback is the *scene asset* size, a few metres instead of
+        // fifteen to twenty-four. Passing nil therefore undersized their wing area, and with it
+        // the drag-sized thrust, and the probe reported them as unable to sustain flight at full
+        // power — a defect in the harness, not in the airframes. The app has always passed the
+        // real profile.
         let context = DroneSimulationContext(
             profile: profile,
-            activeUAVProfile: nil,
+            activeUAVProfile: profile.resolvedUAVProfile,
             weather: .normal,
             damageState: .pristine,
             batteryState: .full,
             collisionRisk: 0.0,
             windVector: .zero,
-            vehicleMassModel: massModel
+            vehicleMassModel: massModel,
+            fuelState: fuelState
         )
         state = engine.step(state: state, control: control, context: context, deltaTime: dt)
         if tick > 60 * 30 {
