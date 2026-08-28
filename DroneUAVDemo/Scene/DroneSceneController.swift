@@ -1569,8 +1569,19 @@ final class DroneSceneController {
         return best ?? launchGroundFallbackY
     }
 
+    /// Is the airframe currently inside a sealed canister?
+    ///
+    /// A stored flag rather than a call to `droneNode.isHidden`, because the camera
+    /// update rewrites that every frame — it unhides the aircraft unconditionally
+    /// whenever the view is not first-person, which silently undid the launch
+    /// presentation's hiding on the very next tick. Two writers, one property; the
+    /// one that runs last wins, and it was not the one that knew.
+    private var canisterRoundSealed = false
+
     func setLaunchAsset(_ asset: LaunchAsset?) {
         currentLaunchAsset = asset
+        // A round placed on the map is sealed until its launch is commanded.
+        canisterRoundSealed = asset?.isCanister == true
         launchAssetNode.childNodes.forEach { $0.removeFromParentNode() }
 
         guard let asset else {
@@ -1606,10 +1617,9 @@ final class DroneSceneController {
     ) {
         let clampedProgress = progress.clamped(to: 0.0...1.0)
         updateAirframeBoosterEfflux(state: state)
-        // Only a canister hides its round; anything else that hid it must give it
-        // back, including a canister launch that was aborted or reset.
-        if currentLaunchAsset?.isCanister != true, droneNode.isHidden {
-            droneNode.isHidden = false
+        // Only a canister hides its round.
+        if currentLaunchAsset?.isCanister != true {
+            canisterRoundSealed = false
         }
         switch currentLaunchAsset {
         case .catapult(let catapult):
@@ -1640,7 +1650,7 @@ final class DroneSceneController {
             // launcher, most obviously at a steep elevation. It appears when the cap
             // comes off and the booster fires, which is when it really appears.
             let sealedInTube = state == .idle || state == .prelaunchCheck || state == .aligning
-            if droneNode.isHidden != sealedInTube { droneNode.isHidden = sealedInTube }
+            canisterRoundSealed = sealedInTube
             if let cap = launchAssetNode.childNode(withName: "canister_muzzle_cap", recursively: true) {
                 cap.opacity = sealedInTube ? 1.0 : 0.0
             }
@@ -5493,7 +5503,7 @@ final class DroneSceneController {
         fpvObstructionHidingActive = (camera.mode == .fpv) && camera.fpv.hideObstructingParts
         visualRootNode.isHidden = fpvPresentationActive
         if camera.mode != .fpv {
-            droneNode.isHidden = false
+            droneNode.isHidden = canisterRoundSealed
             droneNode.opacity = 1.0
         }
         applyPayloadFPVPresentation()
@@ -7828,7 +7838,7 @@ final class DroneSceneController {
     }
 
     private func restoreAfterFPVIfNeeded() {
-        droneNode.isHidden = false
+        droneNode.isHidden = canisterRoundSealed
         droneNode.opacity = 1.0
         visualRootNode.isHidden = false
         fpvObstructionHidingActive = false
