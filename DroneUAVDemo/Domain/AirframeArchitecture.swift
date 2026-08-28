@@ -334,4 +334,9 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
         if case .runway = self { return true }
         return false
     }
+
+    var isCanister: Bool {
+        if case .canister = self { return true }
+        return false
+    }
 }

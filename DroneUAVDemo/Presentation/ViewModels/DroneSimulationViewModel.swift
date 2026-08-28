@@ -1599,6 +1599,13 @@ final class DroneSimulationViewModel: ObservableObject {
     private var signalLossCause: SignalLossCause?
     private var collisionCooldown: Float = 0.0
     private var groundImpactCooldown: Float = 0.0
+    /// Seconds the airframe has been continuously clear of the surface. See
+    /// `resolveGroundImpactIfNeeded`.
+    private var groundContactClearElapsed: Float = 0.0
+    #if DEBUG
+    private var lightTouchImpactCount = 0
+    private var lightTouchImpactElapsed: Float = 0.0
+    #endif
     /// Auto mode suspended by a collision-intervention hover hold, and how long the hold has run.
     ///
     /// The hold parks the aircraft in `.hover`, which `DroneFlightMode.isAutoControlled` reports
@@ -6672,7 +6679,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 wingTelemetryAccumulator = 0.0
                 print(String(
                     format: "[WingTick] mode=%@ y=%.1f speed=%.1f pitchCmd=%.1f pitchActual=%.1f "
-                        + "vy=%.2f rollCmd=%.1f roll=%.1f throttle=%.2f risk=%.2f obstacle=%@ "
+                        + "vy=%.2f rollCmd=%.1f roll=%.1f p=%.0f q=%.0f Ixx=%.0f "
+                        + "throttle=%.2f risk=%.2f obstacle=%@ "
                         + "why=%@ pending=%@ avoid=%@ turnR=%.0f hold=%@ heldCrs=%.0f "
                         + "band=%.0f-%.0f nav=%d state=%@ sup=%@ "
                         + "asstRoll=%@ avOwns=%@ holdRem=%.2f avCrsErr=%@ avRawBank=%@",
@@ -6684,6 +6692,18 @@ final class DroneSimulationViewModel: ObservableObject {
                     Double(state.velocity.y),
                     controlValues.roll,
                     Double(state.orientation.x.radiansToDegrees),
+                    // Roll and pitch RATE, and the roll inertia the solver is using.
+                    //
+                    // Without the rates an attitude that jumps between samples is
+                    // ambiguous — a genuine departure and a mis-extracted angle look
+                    // identical once a second — and that ambiguity cost a whole
+                    // round of flight testing. Without the inertia there is no way
+                    // to see from a log that the solver is flying a different
+                    // aeroplane from the one the aerodynamics describe, which is
+                    // exactly what a scene-scale mass graph makes it do.
+                    Double(state.bodyAngularVelocity.x.radiansToDegrees),
+                    Double(state.bodyAngularVelocity.y.radiansToDegrees),
+                    Double(vehicleMassProperties.inertiaDiagonal.x),
                     controlValues.throttle,
                     Double(collisionAnalysis.riskScore),
                     (collisionAnalysis.nearestObstacleID.flatMap {
@@ -7334,6 +7354,20 @@ final class DroneSimulationViewModel: ObservableObject {
         )
 
         #if DEBUG
+        // Light touches used to be invisible, and that is how a ground-contact loop
+        // ran twenty times a second for a whole flight without appearing in a log.
+        // Counted rather than printed per event, so a landing rollout does not bury
+        // everything else.
+        if report.tier == .lightTouch {
+            lightTouchImpactCount += 1
+            lightTouchImpactElapsed += 1.0
+            if lightTouchImpactCount % 20 == 0 {
+                print("[GroundTouch] \(lightTouchImpactCount) light contacts on "
+                      + "\(report.componentID) src=\(report.obstacleSource ?? "?") "
+                      + "— a run of these means the contact solver is re-firing on an "
+                      + "airframe that is already resting on the ground")
+            }
+        }
         if report.tier != .lightTouch {
             let damageSummary = report.damage
                 .map { entry in
@@ -7551,6 +7585,14 @@ final class DroneSimulationViewModel: ObservableObject {
         return report
     }
 
+    /// How far clear of the surface the airframe must get before a return to it
+    /// counts as an impact again. Sized above the ground clamp's own jitter and
+    /// above a wheel rolling over a bump, and below any descent worth resolving.
+    private static let groundImpactRearmHeightMeters: Float = 0.20
+    /// And for how long. One tick of clearance is noise; a fifth of a second of it
+    /// is an aircraft that genuinely left the ground.
+    private static let groundImpactRearmSeconds: Float = 0.20
+
     private func resolveGroundImpactIfNeeded(
         previousState: DroneState,
         deltaTime: Float
@@ -7595,7 +7637,32 @@ final class DroneSimulationViewModel: ObservableObject {
         let currentHeight = currentLowest.point.y - supportY + restGroundOffset
         let previousSupportY = supportSurfaceY(for: previousState.position)
         let previousHeight = previousLowest.point.y - previousSupportY + restGroundOffset
-        guard currentHeight <= 0.035, previousHeight > 0.018 else { return nil }
+
+        // An aircraft that is *on* the ground is not arriving at it.
+        //
+        // The old window — clear by 18 mm last tick, within 35 mm this one — is
+        // narrower than the ground clamp's own jitter. An airframe resting or
+        // sliding on the surface crosses it every few ticks forever, so the impulse
+        // solver re-fired twenty times a second at whatever the lowest contact
+        // happened to be. Every one of those was a `.lightTouch`, which is not
+        // logged and does no damage, so nothing in a flight log said it was
+        // happening — and the only visible symptom was an attitude that jittered a
+        // degree per tick while altitude, speed and pitch sat frozen. A heavy
+        // aircraft that got a wing down at speed was then held there by the same
+        // solver that was supposed to be modelling its arrival.
+        //
+        // Requiring real clearance first — more than the gear's own travel, and for
+        // more than a single tick — restores what this check is for: an aircraft
+        // that was flying and is now touching. Resting on the ground is the ground
+        // clamp's business, and sliding along it is the weight-on-wheels model's.
+        let hadRealClearance = previousHeight > Self.groundImpactRearmHeightMeters
+            && groundContactClearElapsed >= Self.groundImpactRearmSeconds
+        if previousHeight > Self.groundImpactRearmHeightMeters {
+            groundContactClearElapsed += deltaTime
+        } else {
+            groundContactClearElapsed = 0.0
+        }
+        guard currentHeight <= 0.035, hadRealClearance else { return nil }
 
         let rates = selectedDroneProfile.airframeClass == .multirotor
             ? previousState.angularVelocity
@@ -22946,9 +23013,20 @@ final class DroneSimulationViewModel: ObservableObject {
         state.motorThrottle = 0.0
     }
 
+    /// Where the airframe is physically held before launch — a catapult shuttle,
+    /// an operator's hand, a canister tube.
+    ///
+    /// A runway has no cradle. The aircraft stands on its own wheels, and holding
+    /// it there means the throttle does nothing until the launch sequence is
+    /// commanded: an operator who opened the throttle on an MQ-9B watched it sit
+    /// at a hundred per cent and not move, because a hold meant for a catapult
+    /// shuttle had been applied to a taxiway. Brakes-on during an actual runway
+    /// launch is still modelled — the sequence's own `.held` dynamics phase does
+    /// it, and releases at commit.
     private func launchCradlePoint() -> SIMD3<Float>? {
         guard selectedDroneProfile.airframeClass == .fixedWing,
               activeLaunchMode().requiresLaunchObject,
+              activeLaunchMode() != .runway,
               let asset = activeLaunchAsset() else {
             return nil
         }

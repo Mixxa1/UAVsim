@@ -1187,11 +1187,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // yet, and every term below scales with that share. The constraint
         // therefore fades out exactly as lift builds, so rotation and lift-off need
         // no separate release — at `wheelLoad == 0` this block does nothing at all.
-        let liftNewtons = cl * dynamicPressure * aero.wingArea
+        // How much of the weight the gear still carries — and that is the *vertical*
+        // component of the aerodynamic force, not its magnitude.
+        //
+        // `cl · q · S` is how much lift the wing is making; it says nothing about
+        // where that lift is pointing. Roll the aircraft ninety degrees and the
+        // number is unchanged while the wing is holding up precisely nothing. So a
+        // banked airframe reported a nearly unloaded undercarriage exactly when it
+        // was leaning its whole weight on one wheel, the levelling faded out at the
+        // moment it was needed most, and a heavy aircraft that got a wing down at
+        // speed stayed down. Rotating the force into the world costs one quaternion
+        // multiply and removes the whole class of error.
+        let verticalAeroForce = simd_act(next.fixedWingOrientationQuat, aeroForceBody).y
         let weightNewtons = max(1.0, mass * Tuning.gravity)
         let inGroundContact = next.position.y <= groundClearance + 0.05
         let wheelLoad = inGroundContact && state.physicalState != .crashed
-            ? (1.0 - liftNewtons / weightNewtons).clamped(to: 0.0...1.0)
+            ? (1.0 - verticalAeroForce / weightNewtons).clamped(to: 0.0...1.0)
             : 0.0
 
         if wheelLoad > 0.001 {
@@ -2896,7 +2907,44 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let massRatio = fuelMass > 0.0 && properties.totalMassKg > 0.01
             ? (properties.totalMassKg + fuelMass) / properties.totalMassKg
             : 1.0
-        return simd_max(rateAxes * massRatio, SIMD3<Float>(repeating: minimum))
+
+        // ⚠️ The graph tensor is measured on the VISUAL, and for the aircraft that
+        // carry a `runtimeSceneDimensionsOverride` the visual is a scene-scale
+        // stand-in: three metres of model standing in for twenty-four metres of
+        // aeroplane. Inertia goes with the square of length, so the MQ-9B was being
+        // flown with about one fiftieth of its real roll inertia while its
+        // aerodynamic moments were computed from the real twenty-four-metre wing.
+        // Every moment therefore produced roughly fifty times the angular
+        // acceleration it should, and the three override aircraft — MQ-9B,
+        // Hermes 900, MQ-9A — departed in roll from nothing at all. It is the same
+        // contamination that put a scene-scale lever under the centre-of-mass
+        // moment, in the same field, one layer down.
+        let corrected = rateAxes * massRatio * visualInertiaScaleCorrection(context: context)
+
+        // And a floor and ceiling against the aerodynamic tensor, which is built
+        // from the catalogue's real dimensions and is therefore the one number here
+        // that cannot be scene-contaminated. The correction above fixes the known
+        // cause; this bounds every unknown one. A graph tensor that disagrees with
+        // the airframe's own geometry by more than a factor of three is not
+        // describing this aircraft.
+        let floor = simd_max(fallback * 0.33, SIMD3<Float>(repeating: minimum))
+        let ceiling = fallback * 3.0
+        return simd_min(simd_max(corrected, floor), ceiling)
+    }
+
+    /// How far the component graph's geometry is from the airframe's real size.
+    ///
+    /// 1.0 for every aircraft whose visual is at true scale, which is most of them.
+    /// Squared because that is how a moment of inertia scales with length.
+    private func visualInertiaScaleCorrection(context: DroneSimulationContext) -> Float {
+        guard let realSpanMm = context.activeUAVProfile?.dimensions.wingspanMillimeters,
+              realSpanMm > 1.0 else {
+            return 1.0
+        }
+        let visualSpanMm = context.profile.dimensionsUnfoldedMm.x
+        guard visualSpanMm > 1.0 else { return 1.0 }
+        let ratio = realSpanMm / visualSpanMm
+        return (ratio * ratio).clamped(to: 1.0...400.0)
     }
 
     // MARK: - Uncontrolled (crashed) body

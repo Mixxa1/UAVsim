@@ -27,7 +27,10 @@ var failures: [String] = []
 var stillHunting: [String] = []
 let repository = LIPODroneModelRepository()
 let physics = SimpleDronePhysicsEngine()
-let dt: Float = 1.0 / 90.0
+// The operator's frame rate, not the probe's comfortable one. A guidance loop
+// tuned at 90 Hz and flown at 20 has three times the delay it was designed for,
+// and the flight logs from the field are full of `hz=20`.
+let dt: Float = CommandLine.arguments.contains("-slow") ? 1.0 / 20.0 : 1.0 / 90.0
 let verbose = CommandLine.arguments.contains("-v")
 let filter = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") })
 
@@ -105,6 +108,27 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
         state.engineRuntime = warm
     }
 
+    // The mass properties the app actually supplies: measured on the visual, which
+    // for the override aircraft is a scene-scale stand-in.
+    let dryMass = max(0.2, massModel.resolvedCurrentTotalMass)
+    let visualSpan = profile.dimensionsUnfoldedMm.x / 1000.0
+    let visualLength = profile.dimensionsUnfoldedMm.y / 1000.0
+    let sceneScaleMassProperties = VehicleMassProperties(
+        totalMassKg: dryMass,
+        centerOfMassOffset: SIMD3<Float>(0.0, -0.02, 0.05),
+        inertiaDiagonal: SIMD3<Float>(
+            dryMass * visualSpan * visualSpan / 12.0,
+            dryMass * visualLength * visualLength / 12.0,
+            dryMass * (visualSpan * visualSpan + visualLength * visualLength) / 12.0
+        )
+    )
+    let sceneScaleContactProfile = VehicleContactProfile(
+        spheres: [
+            VehicleContactSphere(componentID: "gear.main", offset: SIMD3<Float>(0, -0.25, 0), radius: 0.25)
+        ],
+        boundingRadius: max(0.5, visualSpan * 0.5)
+    )
+
     let controller = FixedWingAutopilotController()
     var commandedPitch: [Float] = []
     var actualPitch: [Float] = []
@@ -181,6 +205,8 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             collisionRisk: 0.0,
             windVector: .zero,
             vehicleMassModel: massModel,
+            vehicleMassProperties: sceneScaleMassProperties,
+            contactProfile: sceneScaleContactProfile,
             fuelState: fuelState,
             engineState: state.engineRuntime,
             fuelPropulsion: backend

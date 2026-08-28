@@ -1606,6 +1606,11 @@ final class DroneSceneController {
     ) {
         let clampedProgress = progress.clamped(to: 0.0...1.0)
         updateAirframeBoosterEfflux(state: state)
+        // Only a canister hides its round; anything else that hid it must give it
+        // back, including a canister launch that was aborted or reset.
+        if currentLaunchAsset?.isCanister != true, droneNode.isHidden {
+            droneNode.isHidden = false
+        }
         switch currentLaunchAsset {
         case .catapult(let catapult):
             if let carriage = launchAssetNode.childNode(
@@ -1629,9 +1634,15 @@ final class DroneSceneController {
             // The launcher itself does not move; the launch reads through the round
             // leaving it, so only the cap over the launch cell is animated away at
             // commit — and the booster efflux fires with it.
+            // Sealed means sealed: the round is inside the tube with its wings
+            // folded, and the cell it sits in is narrower than its own span. Leaving
+            // the airframe drawn put a wings-out aircraft visibly outside its own
+            // launcher, most obviously at a steep elevation. It appears when the cap
+            // comes off and the booster fires, which is when it really appears.
+            let sealedInTube = state == .idle || state == .prelaunchCheck || state == .aligning
+            if droneNode.isHidden != sealedInTube { droneNode.isHidden = sealedInTube }
             if let cap = launchAssetNode.childNode(withName: "canister_muzzle_cap", recursively: true) {
-                let opened = state != .idle && state != .prelaunchCheck && state != .aligning
-                cap.opacity = opened ? 0.0 : 1.0
+                cap.opacity = sealedInTube ? 1.0 : 0.0
             }
             if let efflux = launchAssetNode.childNode(
                 withName: "canister_booster_efflux",
@@ -2566,20 +2577,24 @@ final class DroneSceneController {
     /// nothing at all while it accelerates reads as unpowered.
     private func makeJetExhaustPlume() -> SCNParticleSystem {
         let system = SCNParticleSystem()
-        system.particleColor = NSColor(calibratedRed: 0.72, green: 0.80, blue: 1.0, alpha: 0.32)
-        system.particleColorVariation = SCNVector4(0.05, 0.06, 0.10, 0.10)
-        system.particleSize = 0.16
-        system.particleSizeVariation = 0.10
+        // Small and dark. A turbojet's visible exhaust is a thin, sooty shimmer, not
+        // a bright plume — that is the rocket booster's job, and the two must not
+        // look alike or a launch stops reading as a launch. Alpha rather than
+        // additive for the same reason: additive is what makes something glow.
+        system.particleColor = NSColor(calibratedRed: 0.30, green: 0.32, blue: 0.38, alpha: 0.24)
+        system.particleColorVariation = SCNVector4(0.04, 0.04, 0.06, 0.08)
+        system.particleSize = 0.07
+        system.particleSizeVariation = 0.04
         system.birthRate = 0
         system.particleLifeSpan = 0.22
         system.particleLifeSpanVariation = 0.10
-        system.emitterShape = SCNSphere(radius: 0.05)
-        system.spreadingAngle = 7
+        system.emitterShape = SCNSphere(radius: 0.03)
+        system.spreadingAngle = 5
         system.particleVelocity = 26
         system.particleVelocityVariation = 8
         system.emittingDirection = SCNVector3(0, 0, 1)
         system.isAffectedByGravity = false
-        system.blendMode = .additive
+        system.blendMode = .alpha
         system.isLightingEnabled = false
         system.loops = true
         return system
