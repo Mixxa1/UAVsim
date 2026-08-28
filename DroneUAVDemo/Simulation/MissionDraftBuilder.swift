@@ -217,6 +217,10 @@ final class MissionDraftBuilder {
             return 8.0
         case .vtolStartPoint:
             return 0.0
+        case .launchCanister:
+            // Published canister launchers sit steeply nose-up so the booster
+            // carries the airframe clear of the vehicle before the wings deploy.
+            return 45.0
         }
     }
 

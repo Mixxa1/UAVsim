@@ -30,6 +30,9 @@
 		100000000000000000000213 /* CameraConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000113 /* CameraConfiguration.swift */; };
 		100000000000000000000214 /* DamageThermalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000114 /* DamageThermalModel.swift */; };
 		100000000000000000000215 /* BatteryState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000115 /* BatteryState.swift */; };
+		10000000000000000000FD31 /* PropellerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD30 /* PropellerModel.swift */; };
+		10000000000000000000FD21 /* PropulsionBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD20 /* PropulsionBackend.swift */; };
+		10000000000000000000FD11 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD10 /* EngineRuntime.swift */; };
 		10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC20 /* FuelSystemRuntime.swift */; };
 		10000000000000000000FC11 /* AtmosphereModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC10 /* AtmosphereModel.swift */; };
 		100000000000000000000216 /* CollisionAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000116 /* CollisionAnalysis.swift */; };
@@ -310,11 +313,13 @@
 		100000000000000000000A11 /* AppGraphicsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A12 /* AppGraphicsSettings.swift */; };
 		100000000000000000000A03 /* Man.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A04 /* Man.usdz */; };
 		100000000000000000000A1B /* Fire_Truck.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1C /* Fire_Truck.usdz */; };
+		10000000000000000000F010 /* Runway.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F011 /* Runway.usdz */; };
 		100000000000000000000A1F /* flames.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A20 /* flames.usdz */; };
 		100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A24 /* Fire_sheet_baseColor.png */; };
 		100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A26 /* Fire_sheet_emissive.jpg */; };
 		100000000000000000000A40 /* HandLaunchArm.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A41 /* HandLaunchArm.usdz */; };
 		100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1E /* FireTruckAssetLoader.swift */; };
+		10000000000000000000F008 /* RunwayAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F009 /* RunwayAssetLoader.swift */; };
 		100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A22 /* FireVisualAssetLoader.swift */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
@@ -450,6 +455,9 @@
 		100000000000000000000113 /* CameraConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraConfiguration.swift; sourceTree = "<group>"; };
 		100000000000000000000114 /* DamageThermalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DamageThermalModel.swift; sourceTree = "<group>"; };
 		100000000000000000000115 /* BatteryState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryState.swift; sourceTree = "<group>"; };
+		10000000000000000000FD30 /* PropellerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropellerModel.swift; sourceTree = "<group>"; };
+		10000000000000000000FD20 /* PropulsionBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropulsionBackend.swift; sourceTree = "<group>"; };
+		10000000000000000000FD10 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC20 /* FuelSystemRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuelSystemRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC10 /* AtmosphereModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphereModel.swift; sourceTree = "<group>"; };
 		100000000000000000000116 /* CollisionAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysis.swift; sourceTree = "<group>"; };
@@ -716,6 +724,7 @@
 		10000000000000000000038F /* OnlineTrialNetworkBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineTrialNetworkBridge.swift; sourceTree = "<group>"; };
 		100000000000000000000401 /* PineTreeAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PineTreeAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000A1E /* FireTruckAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireTruckAssetLoader.swift; sourceTree = "<group>"; };
+		10000000000000000000F009 /* RunwayAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunwayAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000A22 /* FireVisualAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireVisualAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000403 /* GenericGrassMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericGrassMaterialLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000405 /* EnvironmentDebugOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentDebugOptions.swift; sourceTree = "<group>"; };
@@ -732,6 +741,7 @@
 		100000000000000000000A10 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		100000000000000000000A04 /* Man.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Man.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A1C /* Fire_Truck.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Fire_Truck.usdz"; sourceTree = "<group>"; };
+		10000000000000000000F011 /* Runway.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Runway.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A20 /* flames.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/flames.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A24 /* Fire_sheet_baseColor.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Models/Scenario/Fire_sheet_baseColor.png"; sourceTree = "<group>"; };
 		100000000000000000000A26 /* Fire_sheet_emissive.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "Models/Scenario/Fire_sheet_emissive.jpg"; sourceTree = "<group>"; };
@@ -989,6 +999,7 @@
 				10000000000000000000012F /* UAVPayloadCapabilityMode.swift */,
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
+				10000000000000000000FD30 /* PropellerModel.swift */,
 				10000000000000000000FC10 /* AtmosphereModel.swift */,
 				10000000000000000000039F /* RuntimePerformancePolicy.swift */,
 				100000000000000000000137 /* UAVSelectionState.swift */,
@@ -1030,6 +1041,8 @@
 				100000000000000000000122 /* AutoPathPlannerService.swift */,
 				100000000000000000000152 /* AutoNavigationController.swift */,
 				100000000000000000000117 /* BatteryThermalSimulationService.swift */,
+				10000000000000000000FD20 /* PropulsionBackend.swift */,
+				10000000000000000000FD10 /* EngineRuntime.swift */,
 				10000000000000000000FC20 /* FuelSystemRuntime.swift */,
 				100000000000000000000118 /* CollisionAnalysisService.swift */,
 				10000000000000000000F007 /* ImpactResolutionService.swift */,
@@ -1098,6 +1111,7 @@
 				100000000000000000000405 /* EnvironmentDebugOptions.swift */,
 				100000000000000000000401 /* PineTreeAssetLoader.swift */,
 				100000000000000000000A1E /* FireTruckAssetLoader.swift */,
+				10000000000000000000F009 /* RunwayAssetLoader.swift */,
 				100000000000000000000A22 /* FireVisualAssetLoader.swift */,
 				100000000000000000000A02 /* ManAssetLoader.swift */,
 				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
@@ -1286,6 +1300,7 @@
 				100000000000000000000409 /* Pine_Tree.usdz */,
 				100000000000000000000A04 /* Man.usdz */,
 				100000000000000000000A1C /* Fire_Truck.usdz */,
+				10000000000000000000F011 /* Runway.usdz */,
 				100000000000000000000A20 /* flames.usdz */,
 				100000000000000000000A24 /* Fire_sheet_baseColor.png */,
 				100000000000000000000A26 /* Fire_sheet_emissive.jpg */,
@@ -1522,6 +1537,7 @@
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
 				100000000000000000000A03 /* Man.usdz in Resources */,
 				100000000000000000000A1B /* Fire_Truck.usdz in Resources */,
+				10000000000000000000F010 /* Runway.usdz in Resources */,
 				100000000000000000000A1F /* flames.usdz in Resources */,
 				100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */,
 				100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */,
@@ -1641,6 +1657,9 @@
 				100000000000000000000213 /* CameraConfiguration.swift in Sources */,
 				100000000000000000000214 /* DamageThermalModel.swift in Sources */,
 				100000000000000000000215 /* BatteryState.swift in Sources */,
+				10000000000000000000FD31 /* PropellerModel.swift in Sources */,
+				10000000000000000000FD21 /* PropulsionBackend.swift in Sources */,
+				10000000000000000000FD11 /* EngineRuntime.swift in Sources */,
 				10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */,
 				10000000000000000000FC11 /* AtmosphereModel.swift in Sources */,
 				100000000000000000000216 /* CollisionAnalysis.swift in Sources */,
@@ -1678,6 +1697,7 @@
 				10000000000000000000021D /* ScenePopulationService.swift in Sources */,
 				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
 				100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */,
+				10000000000000000000F008 /* RunwayAssetLoader.swift in Sources */,
 				100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */,
 				100000000000000000000A01 /* ManAssetLoader.swift in Sources */,
 				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,

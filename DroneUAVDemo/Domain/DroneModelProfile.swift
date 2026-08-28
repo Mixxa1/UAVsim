@@ -26,6 +26,7 @@ enum LaunchMethod: String, CaseIterable {
     case handLaunch
     case catapult
     case runway
+    case canister
 
     static func resolved(from mode: LaunchMode, fallback: LaunchMethod) -> LaunchMethod {
         switch mode {
@@ -37,6 +38,8 @@ enum LaunchMethod: String, CaseIterable {
             return .runway
         case .vtol:
             return .vertical
+        case .canister:
+            return .canister
         case .standard:
             return fallback
         }
@@ -60,6 +63,11 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     case catapult
     case runway
     case vtol
+    /// Rocket-boosted ejection from a sealed canister. Distinct from a catapult in
+    /// the one way that matters to the flight model: the engine is not running at
+    /// release. It is started in the air once the booster has separated and the
+    /// airframe has flying speed.
+    case canister
 
     var id: String { rawValue }
 
@@ -79,6 +87,8 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
             return .runwayStrip
         case .vtol:
             return .vtolStartPoint
+        case .canister:
+            return .launchCanister
         }
     }
 
@@ -86,16 +96,56 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
         "tactical.map.launch.mode.\(rawValue)"
     }
 
-    /// Runway and mission-placed VTOL starts remain separate future features.
-    /// Do not expose them through the assisted fixed-wing launch workflow until
-    /// they have their own ground-roll/transition dynamics.
+    /// Mission-placed VTOL starts remain a separate future feature. Do not expose
+    /// them through the assisted fixed-wing launch workflow until they have their
+    /// own transition dynamics.
     var isRuntimeImplemented: Bool {
         switch self {
-        case .standard, .handLaunch, .catapult:
+        case .standard, .handLaunch, .catapult, .canister, .runway:
             return true
-        case .runway, .vtol:
+        case .vtol:
             return false
         }
+    }
+
+    /// Does this mode run the fixed-wing launch state machine?
+    ///
+    /// Everything except `.standard`, which is "already airborne, fly it" and has
+    /// no sequence to run. Written once here because it used to be spelled out as
+    /// `mode == .handLaunch || mode == .catapult` in a dozen places across the
+    /// view model, and adding a mode meant finding all of them — `.canister` was
+    /// declared runtime-implemented for a whole release while every one of those
+    /// gates still turned it away, so its sequence never actually ran.
+    var runsLaunchSequence: Bool {
+        switch self {
+        case .handLaunch, .catapult, .canister, .runway:
+            return true
+        case .standard, .vtol:
+            return false
+        }
+    }
+
+    /// Is the aircraft accelerated by something other than its own engine?
+    ///
+    /// True for a rail, a throw and a booster. False for a runway, where the
+    /// sequence only holds the brakes, watches the airspeed and calls the
+    /// rotation — every newton comes from the aircraft itself.
+    var usesExternalLaunchEnergy: Bool {
+        switch self {
+        case .handLaunch, .catapult, .canister:
+            return true
+        case .standard, .runway, .vtol:
+            return false
+        }
+    }
+
+    /// Must the engine be running and warm before the aircraft is released?
+    ///
+    /// False only for a canister launch, whose airframe is sealed in a tube until
+    /// the booster fires — asking it to run its engine on the rail would mean
+    /// running it inside the tube.
+    var requiresRunningEngineBeforeRelease: Bool {
+        self != .canister
     }
 }
 
@@ -238,6 +288,12 @@ struct FixedWingParameters: Hashable {
     let catapultRailAngleDegrees: Float
     let catapultRailLengthMeters: Float
     let maxCatapultAccelerationG: Float
+    /// Is the rail driven by a rocket booster rather than a catapult?
+    ///
+    /// Same launch geometry, different equipment and a different order of
+    /// acceleration — and the operator can see which it is, because a bottle
+    /// firing off a rail looks nothing like a shuttle running down one.
+    let catapultUsesRocketBooster: Bool
     let launchPreSpoolSeconds: Float
     let runwayTakeoffDistance: Float
     let initialClimbTargetAltitude: Float
@@ -281,6 +337,7 @@ struct FixedWingParameters: Hashable {
         catapultRailAngleDegrees: Float = 12.0,
         catapultRailLengthMeters: Float? = nil,
         maxCatapultAccelerationG: Float = 8.0,
+        catapultUsesRocketBooster: Bool = false,
         launchPreSpoolSeconds: Float = 0.45,
         runwayTakeoffDistance: Float = 45.0,
         initialClimbTargetAltitude: Float = 18.0
@@ -358,6 +415,8 @@ struct FixedWingParameters: Hashable {
             handThrowSpeed ?? 0.0,
             max(7.0, self.minSafeAirspeed * 1.22)
         )
+        // Also the canister booster's burnout speed: both are "the launcher must
+        // hand the airframe over above its stall speed, with margin".
         self.catapultExitSpeed = max(
             catapultExitSpeed ?? 0.0,
             max(self.minSafeAirspeed * 1.28, self.climbAirspeed)
@@ -367,9 +426,21 @@ struct FixedWingParameters: Hashable {
         )
         self.handReleaseHeightMeters = handReleaseHeightMeters.clamped(to: 0.8...2.2)
         self.catapultRailAngleDegrees = catapultRailAngleDegrees.clamped(to: 4.0...22.0)
-        self.maxCatapultAccelerationG = maxCatapultAccelerationG.clamped(to: 2.0...12.0)
-        let minimumRailLength = (self.catapultExitSpeed * self.catapultExitSpeed) /
-            (2.0 * self.maxCatapultAccelerationG * 9.81)
+        // Ceiling 30 g, not 12: a pneumatic or bungee catapult lives at the bottom
+        // of this range, but a rocket-assisted rail does not. A jet target drone
+        // leaves its launcher at flying speed off a bottle that would tear a
+        // catapult shuttle apart, and capping it at a catapult's figure forced a
+        // twenty-metre rail onto a trailer that is nine metres long.
+        self.maxCatapultAccelerationG = maxCatapultAccelerationG.clamped(to: 2.0...30.0)
+        self.catapultUsesRocketBooster = catapultUsesRocketBooster
+        // A catapult shuttle has to deliver the whole release speed before the rail
+        // ends, so its rail cannot be shorter than that takes. A rocket bottle does
+        // not: it keeps burning after the round is clear, so its rail is whatever
+        // the trailer carries.
+        let minimumRailLength = catapultUsesRocketBooster
+            ? 2.0
+            : (self.catapultExitSpeed * self.catapultExitSpeed) /
+                (2.0 * self.maxCatapultAccelerationG * 9.81)
         self.catapultRailLengthMeters = max(
             minimumRailLength,
             catapultRailLengthMeters ?? max(4.2, minimumRailLength)
@@ -391,6 +462,22 @@ struct FixedWingParameters: Hashable {
             waypointAcceptanceRadiusMeters * 1.1,
             (referenceSpeed * referenceSpeed) / (9.81 * tan(bankRad))
         )
+    }
+
+    /// Does the airframe roll on wheels, or sit on its belly?
+    ///
+    /// Declared runway capability is the honest test. `landingMethod` is not: every
+    /// fixed wing in the catalogue recovers belly-down — including the MQ-9A, the
+    /// MQ-9B and the Hermes 900, which all have retractable tricycle gear — because
+    /// that field describes how the recovery is *modelled*, not what the aircraft
+    /// stands on. Using it to pick rolling resistance gave a 900 shp turboprop the
+    /// friction of a skid dragging through grass and it could not move.
+    ///
+    /// `supportedLaunchModes` is read here rather than `DroneModelProfile`'s
+    /// runtime-filtered list on purpose: the undercarriage is a property of the
+    /// airframe, not of which launch modes the simulation happens to implement.
+    var hasWheeledUndercarriage: Bool {
+        supportedLaunchModes.contains(.runway)
     }
 
     /// Radius of the waypoint volume that is both rendered to the operator and
@@ -432,6 +519,10 @@ struct FixedWingParameters: Hashable {
             return max(24.0, runwayTakeoffDistance)
         case .vtol:
             return max(8.0, waypointAcceptanceRadiusMeters * 0.9)
+        case .canister:
+            // A booster throws the airframe up and clear rather than along a
+            // shallow departure path, so the corridor it needs is short.
+            return max(10.0, waypointAcceptanceRadiusMeters * 1.1)
         }
     }
 }
@@ -1310,7 +1401,13 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     takeoffRotationSpeed: 53.0,
                     initialClimbPitchDeg: 8.0,
                     maxInitialBankDeg: 10.0,
-                    runwayTakeoffDistance: 260.0,
+                    // Published ground roll, not a placeholder. This value now
+                    // sizes the drafted strip, the preflight corridor and the
+                    // runway sequence's own abort, so a figure the aircraft cannot
+                    // achieve would abort every takeoff. Measured need: 656 m,
+                    // which is the same over-delivery gap as this airframe's
+                    // 72 %-of-declared climb — its thrust sizing, not the runway.
+                    runwayTakeoffDistance: 520.0,
                     initialClimbTargetAltitude: 55.0
                 ),
                 launchMethod: .handLaunch,
@@ -1358,7 +1455,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     takeoffRotationSpeed: 35.0,
                     initialClimbPitchDeg: 8.5,
                     maxInitialBankDeg: 11.0,
-                    runwayTakeoffDistance: 180.0,
+                    // Elbit quote a take-off run near this; measured need 317 m.
+                    runwayTakeoffDistance: 350.0,
                     initialClimbTargetAltitude: 40.0
                 ),
                 launchMethod: .handLaunch,
@@ -1585,6 +1683,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.62,
                     turnAuthority: 0.44,
                     maxBankAngleDeg: 38.0,
+                    supportedLaunchModes: [.canister],
+                    preferredLaunchMode: .canister,
                     maxAirspeed: 51.0,
                     nominalClimbRateMps: 3.4,
                     initialClimbPitchDeg: 11.0,
@@ -1626,6 +1726,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.64,
                     turnAuthority: 0.50,
                     maxBankAngleDeg: 40.0,
+                    supportedLaunchModes: [.canister],
+                    preferredLaunchMode: .canister,
                     maxAirspeed: 116.0,
                     nominalClimbRateMps: 4.0,
                     initialClimbPitchDeg: 12.0,
@@ -1719,9 +1821,12 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 ),
                 structuralQualityFactor: 0.80
             )
-        // HESA Karrar: turbojet cropped delta. Rocket-assisted launch and
-        // parachute recovery are not modelled, so it uses the standard start
-        // like the other runway-class aircraft in this catalogue.
+        // HESA Karrar: turbojet cropped delta, launched off an inclined rail on a
+        // trailer by a solid booster and recovered by parachute. It has no
+        // undercarriage and never rolls, so it is not a runway aircraft — the
+        // `.runway` support it used to declare was a stand-in from before the rail
+        // could be flown, and it made the flight model give a rocket-launched
+        // target drone tyres.
         case .jetTargetDrone:
             return fixedWingRuntimeTuning(
                 fallbackTakeoffMass: 700.0,
@@ -1752,12 +1857,22 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.46,
                     turnAuthority: 0.36,
                     maxBankAngleDeg: 45.0,
-                    supportedLaunchModes: [.standard, .runway],
-                    preferredLaunchMode: .runway,
+                    supportedLaunchModes: [.catapult],
+                    preferredLaunchMode: .catapult,
                     maxAirspeed: 250.0,
                     nominalClimbRateMps: 18.0,
                     initialClimbPitchDeg: 12.0,
                     maxInitialBankDeg: 14.0,
+                    // Nine metres of rail and a booster that pulls it to flying
+                    // speed on the way up it — the published launchers for this
+                    // class are short, steep and violent.
+                    catapultRailAngleDegrees: 15.0,
+                    catapultRailLengthMeters: 9.0,
+                    // 14 g. The rail only has to get it moving — the bottle goes on
+                    // burning in the air until the aircraft has flying speed, the
+                    // same way a canister booster does.
+                    maxCatapultAccelerationG: 14.0,
+                    catapultUsesRocketBooster: true,
                     runwayTakeoffDistance: 420.0,
                     initialClimbTargetAltitude: 90.0
                 ),
@@ -1810,7 +1925,9 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     takeoffRotationSpeed: 48.0,
                     initialClimbPitchDeg: 8.0,
                     maxInitialBankDeg: 10.0,
-                    runwayTakeoffDistance: 240.0,
+                    // ~1,600 ft of ground roll at weight, the published figure.
+                    // The model needs 530 m, an eight per cent spread.
+                    runwayTakeoffDistance: 490.0,
                     initialClimbTargetAltitude: 50.0
                 ),
                 structuralQualityFactor: 1.35
@@ -1848,6 +1965,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     throttleResponseGain: 0.62,
                     turnAuthority: 0.48,
                     maxBankAngleDeg: 39.0,
+                    supportedLaunchModes: [.canister],
+                    preferredLaunchMode: .canister,
                     maxAirspeed: 116.0,
                     nominalClimbRateMps: 3.8,
                     initialClimbPitchDeg: 12.0,

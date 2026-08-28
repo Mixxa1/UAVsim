@@ -1119,6 +1119,12 @@
 "launch.state.aborted" = "ПРЕРВАНО";
 "launch.reason.configuration_failed" = "Разместите правильный стартовый объект и проверьте, что аппарат вооружён.";
 "launch.reason.corridor_invalid" = "Стартовый коридор выходит из безопасной области миссии или пересекает запретную зону.";
+"launch.reason.launcher_not_configured" = "Пусковая установка не сконфигурирована: режим пуска и объект на карте не совпадают.";
+"launch.reason.launch_angle_invalid" = "Угол пусковой установки вне допустимого диапазона для этого типа старта.";
+"launch.reason.corridor_outside_world" = "Стартовый коридор выходит за границы мира.";
+"launch.reason.corridor_edge_margin" = "Слишком мало места до края карты для стартового коридора.";
+"launch.reason.corridor_zone" = "Стартовый коридор пересекает запретную зону.";
+"launch.reason.runway_too_short" = "Полосы не хватает для разбега при текущем попутном ветре.";
 "launch.reason.mass_exceeded" = "Фактическая масса аппарата превышает допустимую для пускового устройства.";
 "launch.reason.tailwind_unsafe" = "Из-за попутного ветра воздушной скорости при отделении недостаточно. Разверните курс запуска против ветра.";
 "launch.reason.crosswind_unsafe" = "Боковой ветер превышает безопасный предел запуска. Измените курс или погодные условия.";
@@ -1374,10 +1380,12 @@
 "tactical.map.launch.mode.standard" = "Обычный";
 "tactical.map.launch.mode.handLaunch" = "Бросок рукой";
 "tactical.map.launch.mode.catapult" = "Катапульта";
+"tactical.map.launch.mode.canister" = "Контейнерный пуск";
 "tactical.map.launch.mode.runway" = "Взлётная полоса";
 "tactical.map.launch.mode.vtol" = "VTOL";
 "tactical.map.launch.object.handLaunchPoint" = "Точка ручного запуска";
 "tactical.map.launch.object.catapultLine" = "Линия катапульты";
+"tactical.map.launch.object.launchCanister" = "Пусковой контейнер";
 "tactical.map.launch.object.runwayStrip" = "Полоса разбега";
 "tactical.map.launch.object.vtolStartPoint" = "Точка VTOL-старта";
 "tactical.map.action.clear_launch_object" = "Очистить Старт";
@@ -2867,3 +2875,20 @@
 "lidar.hud.raw_toggle" = "RAW%@";
 "payload.hose.external_aim" = "УПРАВЛЕНИЕ БРАНДСПОЙТОМ";
 "payload.hose.external_aim_hint" = "O — выйти · ← ↑ ↓ → — наведение";
+
+"engine.state.off" = "Двигатель выключен";
+"engine.state.priming" = "Подкачка топлива";
+"engine.state.cranking" = "Прокрутка стартером";
+"engine.state.lightOff" = "Запуск состоялся";
+"engine.state.warmingUp" = "Прогрев";
+"engine.state.ready" = "Готов";
+"engine.state.startAborted" = "Запуск прерван";
+"engine.state.stopped" = "Двигатель остановлен";
+"uav.engine.starter.none" = "Без стартера";
+"uav.engine.starter.electricStarter" = "Электростартер";
+"uav.engine.starter.airTurbineStarter" = "Воздушный стартер";
+"uav.engine.starter.pyrotechnicCartridge" = "Пиропатрон";
+"uav.engine.start_policy.groundStartBeforeLaunch" = "Запуск на земле до старта";
+"uav.engine.start_policy.airStartAfterBoost" = "Запуск в воздухе после отделения ускорителя";
+"hud.compact.engine" = "ДВС %@  %.0f об/мин  %.0f°C";
+"hud.compact.fuel" = "ТОПЛ %.1f кг  %.0f%%  %.1f кг/ч";

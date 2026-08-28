@@ -2119,6 +2119,21 @@ enum UAVVisualFactory {
         root.addChildNode(sensorBall)
         append(sensorBall, to: .escPower, componentNodes: &componentNodes)
 
+        // Retractable tricycle gear, drawn extended. The nose leg sits ahead of
+        // the sensor turret and the mains just behind the wing root, which is
+        // where an MQ-9 carries them.
+        let landingGear = tricycleLandingGearNode(
+            noseZ: 0.50,
+            mainZ: -0.06,
+            mainTrack: 0.16,
+            attachY: -0.045,
+            strutDrop: 0.075,
+            wheelRadius: 0.030,
+            strutMaterial: accentMaterial,
+            tyreMaterial: material(diffuse: NSColor(calibratedWhite: 0.10, alpha: 1.0), roughness: 0.92, metalness: 0.02)
+        )
+        root.addChildNode(landingGear)
+
         let rearMotor = forwardMotorNode(radius: 0.030, length: 0.080, material: accentMaterial)
         rearMotor.position = SCNVector3(0.0, 0.09, -0.82)
         root.addChildNode(rearMotor)
@@ -2239,6 +2254,20 @@ enum UAVVisualFactory {
         bellySensor.position = SCNVector3(0.0, -0.07, 0.06)
         root.addChildNode(bellySensor)
         append(bellySensor, to: .battery, componentNodes: &componentNodes)
+
+        // Tricycle undercarriage — the Hermes 900 operates from a runway and has
+        // one, and the mains sit outboard of the belly sensor.
+        let landingGear = tricycleLandingGearNode(
+            noseZ: 0.38,
+            mainZ: -0.08,
+            mainTrack: 0.14,
+            attachY: -0.040,
+            strutDrop: 0.060,
+            wheelRadius: 0.026,
+            strutMaterial: accentMaterial,
+            tyreMaterial: material(diffuse: NSColor(calibratedWhite: 0.10, alpha: 1.0), roughness: 0.92, metalness: 0.02)
+        )
+        root.addChildNode(landingGear)
 
         let rearMotor = forwardMotorNode(radius: 0.026, length: 0.070, material: accentMaterial)
         rearMotor.position = SCNVector3(0.0, 0.03, -0.40)
@@ -2718,6 +2747,22 @@ enum UAVVisualFactory {
         root.addChildNode(sensorBall)
         append(sensorBall, to: .escPower, componentNodes: &componentNodes)
 
+        // Fixed tricycle gear. The Shadow leaves on a catapult but comes back onto
+        // a strip into an arresting cable, and it carries its wheels the whole
+        // time — which is why the physics gives it a skid's friction and the
+        // picture should not.
+        let landingGear = tricycleLandingGearNode(
+            noseZ: 0.22,
+            mainZ: -0.06,
+            mainTrack: 0.10,
+            attachY: -0.038,
+            strutDrop: 0.045,
+            wheelRadius: 0.022,
+            strutMaterial: accentMaterial,
+            tyreMaterial: material(diffuse: NSColor(calibratedWhite: 0.10, alpha: 1.0), roughness: 0.92, metalness: 0.02)
+        )
+        root.addChildNode(landingGear)
+
         let fpvAnchor = SCNNode()
         fpvAnchor.name = "fpvCameraAnchor"
         fpvAnchor.position = SCNVector3(0.0, -0.020, 0.30)
@@ -2974,8 +3019,8 @@ enum UAVVisualFactory {
     }
 
     /// Blended wing-body research testbed — no distinct fuselage, twin outboard
-    /// vertical stabilisers, dorsal-mounted mini turbojet, no landing gear
-    /// (dolly launch, skid recovery).
+    /// vertical stabilisers, dorsal-mounted mini turbojet, light fixed tricycle
+    /// gear for its runway takeoff.
     private static func buildBlendedWingBodyTestbed(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
         let root = SCNNode()
         root.name = "uavRoot.blendedWingBodyTestbed"
@@ -3067,6 +3112,29 @@ enum UAVVisualFactory {
         root.addChildNode(engineNacelle)
         append(engineNacelle, to: .motorRR, componentNodes: &componentNodes)
 
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, 0.072, -0.23)
+        root.addChildNode(jetExhaustAnchor)
+
+        // A light fixed tricycle gear. The header of this builder used to say the
+        // testbed had none and was dolly-launched; its catalogue entry declares a
+        // runway takeoff, and the flight model now gives it wheels and a tyre's
+        // rolling resistance on the strength of that. Two answers to one question
+        // is the thing worth fixing — this is the one the rest of the aircraft is
+        // built around.
+        let landingGear = tricycleLandingGearNode(
+            noseZ: 0.10,
+            mainZ: -0.06,
+            mainTrack: 0.12,
+            attachY: -0.020,
+            strutDrop: 0.038,
+            wheelRadius: 0.020,
+            strutMaterial: accentMaterial,
+            tyreMaterial: material(diffuse: NSColor(calibratedWhite: 0.12, alpha: 1.0), roughness: 0.92, metalness: 0.02)
+        )
+        root.addChildNode(landingGear)
+
         let intake = torusNode(ringRadius: 0.042, pipeRadius: 0.009, material: bodyMaterial)
         intake.position = SCNVector3(0.0, 0.072, -0.02)
         root.addChildNode(intake)
@@ -3113,6 +3181,14 @@ enum UAVVisualFactory {
         let fuselage = horizontalCapsule(length: 0.82, radius: 0.058, material: bodyMaterial)
         root.addChildNode(fuselage)
         append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Tailpipe. The scene controller hangs the exhaust plume here and drives it
+        // from the engine's spool fraction; a jet with a cold tailpipe at 200 m/s
+        // reads as a glider.
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, 0.0, -0.44)
+        root.addChildNode(jetExhaustAnchor)
 
         let nose = sphereNode(radius: 0.056, material: bodyMaterial)
         nose.position = SCNVector3(0.0, 0.0, 0.40)
@@ -3327,6 +3403,58 @@ enum UAVVisualFactory {
         let node = SCNNode(geometry: SCNCylinder(radius: CGFloat(radius), height: CGFloat(height)))
         node.geometry?.materials = [material]
         return node
+    }
+
+    /// Tricycle undercarriage: a nose leg and two main legs, each a strut and a
+    /// wheel.
+    ///
+    /// Every airframe in the catalogue was drawn without one, including the ones
+    /// that unambiguously have retractable tricycle gear — an MQ-9 parked beside a
+    /// runway read as a model resting on its belly in the grass. The physics engine
+    /// now gives runway-capable airframes real wheels (`hasWheeledUndercarriage`),
+    /// so the picture and the flight model were saying different things.
+    ///
+    /// `attachY` is where the legs meet the airframe and `strutDrop` how far below
+    /// that the axle sits; the wheel hangs another radius below, which is what sets
+    /// the aircraft's standing height. The ground clamp is rest-normalized, so
+    /// adding this lowers the visible airframe onto its wheels rather than pushing
+    /// the whole aircraft up.
+    private static func tricycleLandingGearNode(
+        noseZ: Float,
+        mainZ: Float,
+        mainTrack: Float,
+        attachY: Float,
+        strutDrop: Float,
+        wheelRadius: Float,
+        strutMaterial: SCNMaterial,
+        tyreMaterial: SCNMaterial
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = "landingGear"
+
+        func leg(x: Float, z: Float, radius: Float, drop: Float) {
+            let strut = beamNode(
+                start: SIMD3<Float>(x, attachY, z),
+                end: SIMD3<Float>(x, attachY - drop, z),
+                radius: max(0.004, radius * 0.32),
+                material: strutMaterial
+            )
+            root.addChildNode(strut)
+
+            // SCNCylinder's axis is Y; a wheel turns about X, so the quarter turn
+            // is about Z. Assigned on a plain cylinder node, never on a helper that
+            // already carries an orientation of its own.
+            let wheel = cylinderNode(radius: radius, height: radius * 0.62, material: tyreMaterial)
+            wheel.eulerAngles = SCNVector3(0.0, 0.0, Float.pi / 2.0)
+            wheel.position = SCNVector3(x, attachY - drop, z)
+            root.addChildNode(wheel)
+        }
+
+        // The nose leg carries less weight and is usually the smaller wheel.
+        leg(x: 0.0, z: noseZ, radius: wheelRadius * 0.78, drop: strutDrop)
+        leg(x: -mainTrack, z: mainZ, radius: wheelRadius, drop: strutDrop)
+        leg(x: mainTrack, z: mainZ, radius: wheelRadius, drop: strutDrop)
+        return root
     }
 
     private static func sphereNode(radius: Float, material: SCNMaterial) -> SCNNode {

@@ -6,12 +6,16 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
     case catapultLine
     case runwayStrip
     case vtolStartPoint
+    /// Sealed launch canister on a ground vehicle. The airframe is ejected by a
+    /// rocket booster, unfolds its wings and only then starts its own engine —
+    /// which is why it is not a variety of catapult.
+    case launchCanister
 
     var id: String { rawValue }
 
     var requiresHeading: Bool {
         switch self {
-        case .handLaunchPoint, .catapultLine, .runwayStrip:
+        case .handLaunchPoint, .catapultLine, .runwayStrip, .launchCanister:
             return true
         case .vtolStartPoint:
             return false
@@ -22,7 +26,9 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
         switch self {
         case .handLaunchPoint, .catapultLine, .runwayStrip:
             return true
-        case .vtolStartPoint:
+        // A canister fires the airframe steeply upward on a booster; it does not
+        // need the long shallow departure corridor a rail or a runway does.
+        case .vtolStartPoint, .launchCanister:
             return false
         }
     }
@@ -37,6 +43,8 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
             return .runway
         case .vtolStartPoint:
             return .vtol
+        case .launchCanister:
+            return .canister
         }
     }
 
@@ -50,6 +58,10 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
             return 0.0...12.0
         case .vtolStartPoint:
             return 0.0...0.0
+        // Canisters are elevated steeply so the booster carries the airframe clear
+        // of the launch vehicle before the wings come out.
+        case .launchCanister:
+            return 25.0...65.0
         }
     }
 
@@ -167,7 +179,25 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
                     )
                 )
             )
-        case .runwayStrip, .vtolStartPoint:
+        case .launchCanister:
+            return .canister(
+                CanisterLaunchAsset(
+                    id: id,
+                    position: position,
+                    headingDegrees: headingDegrees,
+                    elevationDegrees: railAngleDegrees
+                )
+            )
+        case .runwayStrip:
+            return .runway(
+                RunwayLaunchAsset(
+                    id: id,
+                    position: position,
+                    headingDegrees: launchDirectionDegrees,
+                    groundAttitudeDegrees: railAngleDegrees
+                )
+            )
+        case .vtolStartPoint:
             return nil
         }
     }

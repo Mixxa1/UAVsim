@@ -35,6 +35,12 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
     let fuelState: FuelSystemState? = profile.resolvedUAVProfile?.powerplant?.fuel.map {
         .full(capacityKg: $0.usableFuelMassKg, reserveFraction: $0.reserveFraction)
     }
+    // Fuel aircraft fly on the engine/propeller chain; electric ones keep the
+    // calibrated thrust backend, which this probe must not disturb.
+    let backend = FuelPropulsionBackend(
+        powerplant: profile.resolvedUAVProfile?.powerplant,
+        cruiseSpeedMps: wing.cruiseSpeedMps
+    )
     let baseline = FlightBaselineResolver.resolve(
         runtimeProfile: profile,
         activeUAVProfile: profile.resolvedUAVProfile,
@@ -61,6 +67,15 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
         mode: .autoPath
     )
     state.armState = .armed
+    if let backend {
+        // Seeded already running: this probe measures climb, not the start sequence.
+        var warm = EngineRuntimeState.cold(ambientTemperatureC: 15.0)
+        warm.runState = .ready
+        warm.shaftRPM = (backend.powerplant.ratedShaftRPM ?? 6000.0) * 0.9
+        warm.temperatureC = EngineOperatingEnvelope
+            .envelope(for: backend.powerplant.engineType).operatingTemperatureC
+        state.engineRuntime = warm
+    }
 
     // Full power, climb pitch held at the profile's own initial-climb attitude; let it settle,
     // then average the vertical rate over the following ten seconds.
@@ -93,7 +108,9 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             collisionRisk: 0.0,
             windVector: .zero,
             vehicleMassModel: massModel,
-            fuelState: fuelState
+            fuelState: fuelState,
+            engineState: state.engineRuntime,
+            fuelPropulsion: backend
         )
         state = engine.step(state: state, control: control, context: context, deltaTime: dt)
         if tick > 60 * 30 {

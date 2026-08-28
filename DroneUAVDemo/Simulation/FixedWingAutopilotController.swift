@@ -736,12 +736,31 @@ final class FixedWingLaunchController {
         let preSpoolSeconds: Float
         let minSafeAirspeedMps: Float
         let initialClimbAltitudeMeters: Float
+        /// False for a canister launch, whose engine is lit in the air after the
+        /// booster separates and therefore cannot be running on the rail.
+        var requiresRunningEngineBeforeLaunch: Bool = true
+        /// A rail driven by a rocket bottle rather than a catapult shuttle.
+        ///
+        /// The difference is not decoration: a shuttle stops at the end of the rail
+        /// and everything the aircraft has must be delivered before then, while a
+        /// bottle keeps burning in the air. Charging a rocket launch to a shuttle
+        /// forced the Karrar's 110 m/s release onto a twenty-two-metre rail, which
+        /// no trailer carries.
+        var usesRocketBooster: Bool = false
     }
 
     private var configuration: Configuration?
     private var state: LaunchState = .idle
     private var phaseElapsed: Float = 0.0
     private var totalElapsed: Float = 0.0
+    /// Seconds the sequence has spent waiting for the engine to come up, excluded
+    /// from the global backstop below.
+    private var engineHoldElapsed: Float = 0.0
+    /// Seconds spent on the takeoff roll, likewise excluded from the backstop. A
+    /// rail launch is over in a fraction of a second; a heavy turboprop needs
+    /// twenty-five seconds and half a kilometre to reach rotation speed, and the
+    /// backstop was written when no launch could last that long.
+    private var groundRollElapsed: Float = 0.0
     private var transitionReason: String?
 
     var isActive: Bool {
@@ -753,6 +772,8 @@ final class FixedWingLaunchController {
         state = .idle
         phaseElapsed = 0.0
         totalElapsed = 0.0
+        engineHoldElapsed = 0.0
+        groundRollElapsed = 0.0
         transitionReason = nil
     }
 
@@ -770,6 +791,7 @@ final class FixedWingLaunchController {
         let travelLength: Float
         let releaseSpeed: Float
         let launchID: UUID
+        var usesRocketBooster = false
 
         switch (mode, asset) {
         case (.handLaunch, .handLaunch(let hand)):
@@ -786,6 +808,35 @@ final class FixedWingLaunchController {
             travelLength = max(0.5, catapult.rail.railLengthMeters)
             releaseSpeed = wing.catapultExitSpeed
             launchID = catapult.id
+            usesRocketBooster = catapult.rail.usesRocketBooster
+        case (.canister, .canister(let canister)):
+            // `travelLength` here is the tube, which only constrains attitude —
+            // the booster keeps accelerating the airframe past the muzzle.
+            direction = MissionLaunchGeometry.direction3D(
+                headingDegrees: canister.headingDegrees,
+                pitchDegrees: canister.elevationDegrees
+            )
+            yaw = MissionLaunchGeometry.worldYawRadians(headingDegrees: canister.headingDegrees)
+            pitch = canister.elevationDegrees.degreesToRadians
+            travelLength = max(0.5, canister.tubeLengthMeters)
+            releaseSpeed = wing.catapultExitSpeed
+            launchID = canister.id
+        case (.runway, .runway(let runway)):
+            // The strip is horizontal even though the airframe sits nose-up on its
+            // gear, so the direction carries no pitch. `travelLength` is the usable
+            // strip rather than a stroke, and `releaseSpeed` is the rotation speed
+            // the aircraft has to reach under its own power — nothing accelerates
+            // it but its own engine.
+            direction = runway.direction3D
+            yaw = runway.worldYawRadians
+            pitch = runway.groundAttitudeDegrees.degreesToRadians
+            // The strip is however long the strip is. The airframe's declared
+            // takeoff distance is advisory — it sizes the preflight corridor and
+            // the drafted object, and must not shorten a runway that is genuinely
+            // there.
+            travelLength = max(20.0, runway.usableLengthMeters)
+            releaseSpeed = wing.takeoffRotationSpeed
+            launchID = runway.id
         default:
             reset()
             state = .aborted
@@ -815,11 +866,15 @@ final class FixedWingLaunchController {
             nominalLaunchMassKg: max(0.2, nominalLaunchMassKg),
             preSpoolSeconds: wing.launchPreSpoolSeconds,
             minSafeAirspeedMps: wing.minSafeAirspeed,
-            initialClimbAltitudeMeters: wing.initialClimbTargetAltitude
+            initialClimbAltitudeMeters: wing.initialClimbTargetAltitude,
+            requiresRunningEngineBeforeLaunch: mode.requiresRunningEngineBeforeRelease,
+            usesRocketBooster: usesRocketBooster
         )
         state = .prelaunchCheck
         phaseElapsed = 0.0
         totalElapsed = 0.0
+        engineHoldElapsed = 0.0
+        groundRollElapsed = 0.0
         transitionReason = "launch_preflight_started"
         return true
     }
@@ -829,6 +884,14 @@ final class FixedWingLaunchController {
         windVector: SIMD3<Float>,
         isArmed: Bool,
         batteryAvailable: Bool,
+        /// Engine state for a fuel aircraft, `nil` for an electric one.
+        ///
+        /// This is what turns `prelaunchCheck` from a timer into a check. It used
+        /// to wait out a fraction of `preSpoolSeconds` and move on regardless,
+        /// which is meaningless for a piston or turbine aircraft: it would let a
+        /// catapult fire with an engine that had not been started. An electric
+        /// aircraft passes `nil` and keeps exactly the old timing.
+        engineState: EngineRuntimeState? = nil,
         deltaTime: Float
     ) -> FixedWingLaunchRuntimeSnapshot {
         guard let configuration else {
@@ -849,6 +912,16 @@ final class FixedWingLaunchController {
         if state != .completed && state != .aborted {
             phaseElapsed += dt
             totalElapsed += dt
+            if state == .prelaunchCheck,
+               let engineState,
+               configuration.requiresRunningEngineBeforeLaunch,
+               !engineState.runState.isClearedForLaunch,
+               engineState.runState != .startAborted {
+                engineHoldElapsed += dt
+            }
+            if state == .assistedAcceleration, configuration.mode == .runway {
+                groundRollElapsed += dt
+            }
         }
 
         let relativeAirVelocity = aircraftState.velocity - windVector
@@ -861,12 +934,17 @@ final class FixedWingLaunchController {
 
         if !isArmed || !batteryAvailable || aircraftState.physicalState == .crashed {
             transition(to: .aborted, reason: "launch_preflight_runtime_failure")
+        } else if let engineState, engineState.runState == .startAborted, !isReleasedState(state) {
+            // A failed start before the aircraft leaves the rail is a scrubbed
+            // launch, not something to fly through.
+            transition(to: .aborted, reason: "launch_engine_start_failed")
         } else {
             advance(
                 railProgress: railProgress,
                 longitudinalAirspeed: longitudinalAirspeed,
                 altitudeAboveLaunch: altitudeAboveLaunch,
-                configuration: configuration
+                configuration: configuration,
+                engineState: engineState
             )
         }
 
@@ -887,12 +965,30 @@ final class FixedWingLaunchController {
         railProgress: Float,
         longitudinalAirspeed: Float,
         altitudeAboveLaunch: Float,
-        configuration: Configuration
+        configuration: Configuration,
+        engineState: EngineRuntimeState?
     ) {
         switch state {
         case .idle, .completed, .aborted:
             return
         case .prelaunchCheck:
+            // A fuel aircraft holds here until its engine is genuinely at operating
+            // speed and temperature. `ready`, not merely running: an engine still
+            // warming up bogs down when a catapult stroke asks it for full power.
+            // Aircraft that light their engine in the air after a booster separation
+            // obviously cannot satisfy that on the rail, and are not asked to.
+            if let engineState,
+               configuration.requiresRunningEngineBeforeLaunch,
+               !engineState.runState.isClearedForLaunch {
+                // Held, not stalled: the phase timer must not run either, or the
+                // aircraft would step straight to alignment the instant the engine
+                // finally came up.
+                phaseElapsed = 0.0
+                if totalElapsed > 180.0 {
+                    transition(to: .aborted, reason: "launch_engine_never_ready")
+                }
+                return
+            }
             if phaseElapsed >= max(0.12, configuration.preSpoolSeconds * 0.45) {
                 transition(to: .aligning, reason: "launch_alignment_started")
             }
@@ -902,12 +998,52 @@ final class FixedWingLaunchController {
             }
         case .launchCommit:
             if phaseElapsed >= 0.10 {
-                transition(to: .assistedAcceleration, reason: configuration.mode == .catapult
-                    ? "catapult_carriage_released"
-                    : "hand_throw_released")
+                let reason: String
+                switch configuration.mode {
+                case .catapult: reason = "catapult_carriage_released"
+                case .canister: reason = "canister_booster_fired"
+                case .runway: reason = "takeoff_roll_brakes_released"
+                default: reason = "hand_throw_released"
+                }
+                transition(to: .assistedAcceleration, reason: reason)
             }
         case .assistedAcceleration:
-            if configuration.mode == .catapult {
+            if configuration.mode == .runway {
+                // The takeoff roll. Nothing here accelerates the aircraft — it is
+                // the only launch mode where the sequence waits on the airframe
+                // rather than driving it, so the only question is whether rotation
+                // speed arrives before the strip runs out.
+                // Flying away below the declared rotation speed is a takeoff, not a
+                // failure. Several airframes' `takeoffRotationSpeed` sits above the
+                // speed at which their wing simply lifts them off at the ground
+                // attitude, and waiting for a number the aircraft has already made
+                // irrelevant would abort a successful departure — and then keep
+                // charging runway against an aircraft that is thirty metres up.
+                if longitudinalAirspeed >= configuration.releaseSpeedMps
+                    || altitudeAboveLaunch >= 0.6 {
+                    transition(to: .rotation, reason: altitudeAboveLaunch >= 0.6
+                        ? "takeoff_unstuck_below_rotation_speed"
+                        : "takeoff_rotation_speed_reached")
+                } else if railProgress >= 0.995 {
+                    transition(to: .aborted, reason: "takeoff_roll_ran_out_of_runway")
+                } else if phaseElapsed > 120.0 {
+                    transition(to: .aborted, reason: "takeoff_roll_timeout")
+                }
+            } else if configuration.mode == .canister {
+                // The booster burns for a fixed time rather than to the end of a
+                // rail; the airframe is out of the tube long before it finishes.
+                if phaseElapsed >= 1.1 {
+                    transition(to: .rotation, reason: "canister_booster_burnout")
+                }
+            } else if configuration.mode == .catapult, configuration.usesRocketBooster {
+                // Rocket-assisted: the round is off the rail long before the bottle
+                // is spent, so the end of the boost is a speed, not a distance.
+                if longitudinalAirspeed >= configuration.releaseSpeedMps * 0.995 {
+                    transition(to: .rotation, reason: "booster_burnout_at_release_speed")
+                } else if phaseElapsed > 6.0 {
+                    transition(to: .aborted, reason: "booster_acceleration_timeout")
+                }
+            } else if configuration.mode == .catapult {
                 if railProgress >= 0.995 {
                     transition(to: .rotation, reason: "catapult_rail_end_reached")
                 } else if phaseElapsed > 3.5 {
@@ -917,6 +1053,19 @@ final class FixedWingLaunchController {
                 transition(to: .rotation, reason: "hand_throw_impulse_complete")
             }
         case .rotation:
+            if configuration.mode == .runway {
+                // Rotation on a runway is a real manoeuvre with a duration: the
+                // elevator comes back, the nose comes up, and the wing takes the
+                // weight over a second or two while the main wheels are still down.
+                // Energy is not the test — the aircraft already has rotation speed
+                // by definition — so leaving the ground is.
+                if altitudeAboveLaunch >= 0.6 {
+                    transition(to: .initialClimb, reason: "takeoff_unstuck")
+                } else if phaseElapsed > 6.0 {
+                    transition(to: .initialClimb, reason: "takeoff_rotation_timeout")
+                }
+                break
+            }
             let energyReady = longitudinalAirspeed >= configuration.minSafeAirspeedMps * 0.82
             if energyReady || altitudeAboveLaunch >= 0.65 || phaseElapsed > 2.0 {
                 transition(to: .initialClimb, reason: energyReady
@@ -945,14 +1094,33 @@ final class FixedWingLaunchController {
             // point is the cheapest honest test available here, and the global 16 s backstop
             // below still resolves a launch that never gets there.
             let safeHandoffAltitude = max(6.0, configuration.initialClimbAltitudeMeters * 0.35)
-            if altitudeReady && speedReady {
+            // A canister airframe is thrown clear with a dead engine by design, and
+            // it lights that engine on the way up. Declaring the launch complete
+            // before it does hands the operator a dart: it was a coin-toss which
+            // side of the handover the light-off fell on, and the Harpy lost it
+            // while the Harop and the Harpy NG won it by two tenths of a second.
+            // The global backstop below still resolves a start that never happens.
+            let enginePending = configuration.mode == .canister
+                && (engineState.map { !$0.runState.isFiring && $0.runState != .startAborted }
+                    ?? false)
+            if altitudeReady && speedReady && !enginePending {
                 transition(to: .completed, reason: "launch_sequence_completed")
-            } else if phaseElapsed > 4.0, altitudeAboveLaunch >= safeHandoffAltitude {
+            } else if phaseElapsed > 4.0, altitudeAboveLaunch >= safeHandoffAltitude, !enginePending {
                 transition(to: .completed, reason: "launch_sequence_handoff_timeout")
             }
         }
 
-        if totalElapsed > 16.0,
+        // The global backstop exists to stop a launch that has genuinely stalled.
+        // Waiting for an engine to start is not a stalled launch — it is the launch
+        // working. Sixteen seconds was written when nothing could hold the sequence
+        // up, and it now fires *before* a rotary engine finishes its start at 16.9 s:
+        // the RQ-7B sat at full throttle warming up, the backstop scrubbed it at
+        // sixteen, and the aircraft was released inverted. Time spent legitimately
+        // waiting on the engine therefore does not count against it.
+        let waitingOnEngineStart = state == .prelaunchCheck
+            && engineState.map { !$0.runState.isClearedForLaunch && $0.runState != .startAborted } ?? false
+        if !waitingOnEngineStart,
+           totalElapsed - engineHoldElapsed - groundRollElapsed > 16.0,
            state != .completed,
            state != .aborted {
             if isReleasedState(state) {
@@ -971,7 +1139,26 @@ final class FixedWingLaunchController {
         case .prelaunchCheck, .aligning, .launchCommit:
             phase = .held
         case .assistedAcceleration:
-            phase = configuration.mode == .catapult ? .catapultRail : .handRelease
+            switch configuration.mode {
+            case .catapult:
+                // A bottle is a thrust source, not a shuttle, so it uses the same
+                // dynamics the canister does: attitude held for the rail's length,
+                // acceleration continuing past its end.
+                phase = configuration.usesRocketBooster ? .canisterBoost : .catapultRail
+            case .canister:
+                phase = .canisterBoost
+            case .runway:
+                // No dynamics at all. A rail, a hand and a booster all impose
+                // motion on the airframe; a runway does not, and pinning attitude
+                // or position during the roll would be inventing a constraint that
+                // does not exist. The weight-on-wheels model in the physics engine
+                // is what holds the aircraft on its heading and wings-level, and it
+                // releases itself as lift builds — which is exactly the handover
+                // this sequence would otherwise have to fake.
+                return nil
+            default:
+                phase = .handRelease
+            }
         case .idle, .rotation, .initialClimb, .transitionToFlight, .completed, .aborted:
             return nil
         }

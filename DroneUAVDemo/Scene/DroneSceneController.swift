@@ -1515,6 +1515,33 @@ final class DroneSceneController {
                 supportY + LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset,
                 catapult.position.y
             )
+        case .canister(let canister):
+            // Inside the tube, not at its mouth.
+            //
+            // A sealed round is not visible before launch — that is what "sealed"
+            // means — and parking it at the muzzle left it standing proud of its
+            // own launcher, nose in the air, which is not how a canister looks on
+            // the ground. A third of the way up the tube puts the airframe within
+            // the cell it is fired from; the booster carries it out through the
+            // rest of the tube on the way.
+            let supportY = launchPadSupportHeight(at: asset.position)
+            let elevation = canister.elevationDegrees.degreesToRadians
+            let muzzle = canister.tubeLengthMeters * 0.32
+            let horizontal = MissionLaunchGeometry.horizontalDirection(
+                headingDegrees: canister.headingDegrees
+            ) * (muzzle * cos(elevation))
+            return SIMD3<Float>(
+                canister.position.x + horizontal.x,
+                supportY + LaunchRigMetrics.canisterPivotHeight + muzzle * sin(elevation),
+                canister.position.y + horizontal.y
+            )
+        case .runway(let runway):
+            // Standing on its own gear at the threshold. The physics engine's
+            // ground clamp puts the origin at the support height at rest, so no
+            // rig offset belongs here — unlike a cradle, a deck or a muzzle, the
+            // strip holds nothing up.
+            let supportY = launchPadSupportHeight(at: asset.position)
+            return SIMD3<Float>(runway.position.x, supportY, runway.position.y)
         }
     }
 
@@ -1566,6 +1593,10 @@ final class DroneSceneController {
             launchAssetNode.addChildNode(makeHandLaunchNode(for: hand))
         case .catapult(let catapult):
             launchAssetNode.addChildNode(makeCatapultNode(for: catapult))
+        case .canister(let canister):
+            launchAssetNode.addChildNode(makeCanisterNode(for: canister))
+        case .runway(let runway):
+            launchAssetNode.addChildNode(makeRunwayNode(for: runway))
         }
     }
 
@@ -1574,6 +1605,7 @@ final class DroneSceneController {
         state: LaunchState
     ) {
         let clampedProgress = progress.clamped(to: 0.0...1.0)
+        updateAirframeBoosterEfflux(state: state)
         switch currentLaunchAsset {
         case .catapult(let catapult):
             if let carriage = launchAssetNode.childNode(
@@ -1583,6 +1615,40 @@ final class DroneSceneController {
                 carriage.simdPosition.z = -catapult.rail.railLengthMeters * clampedProgress
                 carriage.opacity = state == .aborted ? 0.45 : 1.0
             }
+            if let efflux = launchAssetNode.childNode(
+                withName: "catapult_booster_efflux",
+                recursively: true
+            ) {
+                // Burning only while the booster is: the bottle lights at commit
+                // and is spent by the time the round is off the rail.
+                let burning = state == .assistedAcceleration
+                if efflux.isHidden == burning { efflux.isHidden = !burning }
+                efflux.particleSystems?.forEach { $0.birthRate = burning ? 900 : 0 }
+            }
+        case .canister(let canister):
+            // The launcher itself does not move; the launch reads through the round
+            // leaving it, so only the cap over the launch cell is animated away at
+            // commit — and the booster efflux fires with it.
+            if let cap = launchAssetNode.childNode(withName: "canister_muzzle_cap", recursively: true) {
+                let opened = state != .idle && state != .prelaunchCheck && state != .aligning
+                cap.opacity = opened ? 0.0 : 1.0
+            }
+            if let efflux = launchAssetNode.childNode(
+                withName: "canister_booster_efflux",
+                recursively: true
+            ) {
+                // Burning only while the booster is: `assistedAcceleration` is the
+                // boost phase, and the smoke should stop when the motor does rather
+                // than trail the aircraft for the rest of the climb.
+                let burning = state == .assistedAcceleration
+                if efflux.isHidden == burning { efflux.isHidden = !burning }
+                efflux.particleSystems?.forEach { $0.birthRate = burning ? 900 : 0 }
+            }
+            _ = canister
+        case .runway:
+            // Nothing to animate: the strip is scenery, and the launch reads
+            // entirely through the aircraft rolling along it.
+            break
         case .handLaunch:
             let throwing = state == .assistedAcceleration
             let released = state == .rotation ||
@@ -2111,6 +2177,8 @@ final class DroneSceneController {
         static let handHoldDropBelowEyes: Float = 0.22
         static let handHoldSideOffset: Float = -0.18
         static let handEyeAboveRelease: Float = 0.20
+        /// Height of the canister trunnion above the launch vehicle's deck.
+        static let canisterPivotHeight: Float = 1.35
     }
 
     /// Loads `HandLaunchArm.usdz` (sculpted human arm, shoulder ball to open
@@ -2261,6 +2329,262 @@ final class DroneSceneController {
         return node
     }
 
+    /// Truck-mounted launch canister: a flatbed, a trunnion and an elevated tube.
+    /// Deliberately not a rail — a canister launch has no carriage travelling
+    /// along anything, which is exactly the difference from a catapult.
+    /// The strip. Geometry lives in `RunwayAssetLoader`, which prefers a bundled
+    /// `Runway.usdz` and falls back to a procedural paved strip with markings.
+    private func makeRunwayNode(for asset: RunwayLaunchAsset) -> SCNNode {
+        RunwayAssetLoader.shared.makeRunwayNode(lengthMeters: asset.usableLengthMeters)
+    }
+
+    private func makeCanisterNode(for asset: CanisterLaunchAsset) -> SCNNode {
+        let root = SCNNode()
+        let elevation = asset.elevationDegrees.degreesToRadians
+        let tubeLength = max(1.6, asset.tubeLengthMeters)
+        let pivotHeight = LaunchRigMetrics.canisterPivotHeight
+
+        let deckMaterial = SCNMaterial()
+        deckMaterial.diffuse.contents = NSColor(calibratedRed: 0.30, green: 0.33, blue: 0.29, alpha: 1.0)
+        deckMaterial.roughness.contents = 0.62
+        deckMaterial.metalness.contents = 0.34
+
+        let tubeMaterial = SCNMaterial()
+        tubeMaterial.diffuse.contents = NSColor(calibratedRed: 0.38, green: 0.41, blue: 0.38, alpha: 1.0)
+        tubeMaterial.roughness.contents = 0.44
+        tubeMaterial.metalness.contents = 0.58
+
+        let capMaterial = SCNMaterial()
+        capMaterial.diffuse.contents = NSColor.systemOrange.withAlphaComponent(0.92)
+        capMaterial.roughness.contents = 0.50
+
+        let tyreMaterial = SCNMaterial()
+        tyreMaterial.diffuse.contents = NSColor(calibratedWhite: 0.09, alpha: 1.0)
+        tyreMaterial.roughness.contents = 0.94
+
+        let deck = SCNNode(geometry: SCNBox(width: 2.3, height: 0.34, length: 5.4, chamferRadius: 0.06))
+        deck.geometry?.materials = [deckMaterial]
+        deck.simdPosition = SIMD3<Float>(0.0, 0.86, 0.0)
+        root.addChildNode(deck)
+
+        let cab = SCNNode(geometry: SCNBox(width: 2.1, height: 1.3, length: 1.7, chamferRadius: 0.12))
+        cab.geometry?.materials = [deckMaterial]
+        cab.simdPosition = SIMD3<Float>(0.0, 1.65, 1.9)
+        root.addChildNode(cab)
+
+        for side in [Float(-1.0), Float(1.0)] {
+            for axle in [Float(-1.6), Float(0.4), Float(1.9)] {
+                let wheel = SCNNode(geometry: SCNCylinder(radius: 0.52, height: 0.34))
+                wheel.geometry?.materials = [tyreMaterial]
+                wheel.eulerAngles = SCNVector3(0.0, 0.0, SCNFloat.pi / 2.0)
+                wheel.simdPosition = SIMD3<Float>(side * 1.12, 0.52, axle)
+                root.addChildNode(wheel)
+            }
+        }
+
+        // Trunnion and the elevated tube. The tube points along -Z at zero
+        // elevation, matching the launch heading applied to the parent node.
+        let trunnion = SCNNode()
+        trunnion.simdPosition = SIMD3<Float>(0.0, pivotHeight, -0.6)
+        trunnion.eulerAngles = SCNVector3(SCNFloat(-elevation), 0.0, 0.0)
+        root.addChildNode(trunnion)
+
+        // A single tube was wrong for both aircraft that use this launcher. The
+        // Harpy is carried as a rack of separate containerised rounds, the Harop in
+        // one inclined pack whose face is a grid of large square muzzles — the
+        // launcher in almost every published photograph of it. The airframe leaves
+        // from the centre cell either way, which is where the physics puts it.
+        let columns: Int
+        let rows: Int
+        let cellSize: Float
+        let cellGap: Float
+        switch asset.launcherPattern {
+        case .containerRack:
+            columns = 3
+            rows = 3
+            cellSize = 0.56
+            cellGap = 0.12
+        case .cellBlock:
+            // Three by three, not three by two: the launch cell has to be the
+            // centre one, or the round sits offset from the axis the physics
+            // spawns it on and appears to hang beside its own launcher.
+            columns = 3
+            rows = 3
+            cellSize = 0.78
+            cellGap = 0.03
+        }
+        let pitchX = cellSize + cellGap
+        let pitchY = cellSize + cellGap
+
+        if asset.launcherPattern == .cellBlock {
+            // One structural pack: the cells are cut into a single block rather
+            // than being individual containers strapped to a frame.
+            let pack = SCNNode(geometry: SCNBox(
+                width: CGFloat(Float(columns) * pitchX + 0.10),
+                height: CGFloat(Float(rows) * pitchY + 0.10),
+                length: CGFloat(tubeLength),
+                chamferRadius: 0.04
+            ))
+            pack.geometry?.materials = [tubeMaterial]
+            pack.simdPosition = SIMD3<Float>(0.0, 0.0, -tubeLength * 0.5)
+            trunnion.addChildNode(pack)
+        }
+
+        for column in 0..<columns {
+            for row in 0..<rows {
+                let x = (Float(column) - Float(columns - 1) * 0.5) * pitchX
+                let y = (Float(row) - Float(rows - 1) * 0.5) * pitchY
+                let isLaunchCell = column == columns / 2 && row == rows / 2
+
+                if asset.launcherPattern == .containerRack {
+                    let container = SCNNode(geometry: SCNBox(
+                        width: CGFloat(cellSize),
+                        height: CGFloat(cellSize),
+                        length: CGFloat(tubeLength),
+                        chamferRadius: 0.05
+                    ))
+                    container.geometry?.materials = [tubeMaterial]
+                    container.simdPosition = SIMD3<Float>(x, y, -tubeLength * 0.5)
+                    trunnion.addChildNode(container)
+                } else {
+                    // The muzzle opening, recessed into the pack face.
+                    let mouth = SCNNode(geometry: SCNBox(
+                        width: CGFloat(cellSize * 0.86),
+                        height: CGFloat(cellSize * 0.86),
+                        length: 0.16,
+                        chamferRadius: 0.02
+                    ))
+                    mouth.geometry?.materials = [deckMaterial]
+                    mouth.simdPosition = SIMD3<Float>(x, y, -tubeLength + 0.06)
+                    trunnion.addChildNode(mouth)
+                }
+
+                let cap = SCNNode(geometry: SCNBox(
+                    width: CGFloat(cellSize * (asset.launcherPattern == .containerRack ? 1.06 : 0.9)),
+                    height: CGFloat(cellSize * (asset.launcherPattern == .containerRack ? 1.06 : 0.9)),
+                    length: 0.07,
+                    chamferRadius: 0.03
+                ))
+                cap.geometry?.materials = [capMaterial]
+                // Only the cell the airframe leaves from is animated away at commit.
+                cap.name = isLaunchCell ? "canister_muzzle_cap" : "canister_cap_\(column)_\(row)"
+                cap.simdPosition = SIMD3<Float>(x, y, -tubeLength - 0.035)
+                trunnion.addChildNode(cap)
+            }
+        }
+
+        // Booster efflux. A canister round is thrown out by a rocket motor, and the
+        // launch is unmistakable from outside because of it: a bright plume off the
+        // muzzle and a cloud that hangs over the vehicle afterwards. Parked here on
+        // the launcher rather than on the airframe so it stays where the smoke
+        // actually is once the aircraft has gone.
+        let effluxAnchor = SCNNode()
+        effluxAnchor.name = "canister_booster_efflux"
+        effluxAnchor.simdPosition = SIMD3<Float>(0.0, 0.0, -tubeLength - 0.2)
+        effluxAnchor.addParticleSystem(makeCanisterBoosterPlume())
+        effluxAnchor.isHidden = true
+        trunnion.addChildNode(effluxAnchor)
+
+        return root
+    }
+
+    /// The round's own booster, burning behind the airframe after it leaves.
+    ///
+    /// The launcher-side plume stops at the muzzle, and in every photograph of a
+    /// canister or rail launch the flame is still there once the aircraft is
+    /// clear — the booster burns for another second in the air. Only a launch that
+    /// is actually boosted gets one: a hand throw and a runway roll have no motor
+    /// to show.
+    private func updateAirframeBoosterEfflux(state: LaunchState) {
+        let boosted: Bool
+        switch currentLaunchAsset {
+        case .canister:
+            boosted = true
+        case .catapult(let catapult):
+            boosted = catapult.rail.usesRocketBooster
+        default:
+            boosted = false
+        }
+        let burning = boosted && state == .assistedAcceleration
+
+        let existing = droneNode.childNode(withName: "airframeBoosterEfflux", recursively: true)
+        guard burning || existing != nil else { return }
+
+        let anchor: SCNNode
+        if let existing {
+            anchor = existing
+        } else {
+            anchor = SCNNode()
+            anchor.name = "airframeBoosterEfflux"
+            // Behind the tail: the airframe's nose is -Z, so the motor fires +Z.
+            let (minBB, maxBB) = droneNode.boundingBox
+            anchor.simdPosition = SIMD3<Float>(0.0, 0.0, Float(maxBB.z - minBB.z) * 0.5 + 0.05)
+            anchor.addParticleSystem(makeBoosterPlume(scale: 0.45))
+            droneNode.addChildNode(anchor)
+        }
+        if anchor.isHidden == burning { anchor.isHidden = !burning }
+        anchor.particleSystems?.forEach { $0.birthRate = burning ? 700 : 0 }
+    }
+
+    /// Rocket efflux off the muzzle at the moment of ejection.
+    private func makeCanisterBoosterPlume() -> SCNParticleSystem {
+        // Fired forward along the tube: the plume comes out of the muzzle with the
+        // round, which is the whole reason a canister launch is visible from a
+        // kilometre away.
+        makeBoosterPlume(scale: 1.0, direction: SCNVector3(0, 0, -1))
+    }
+
+    /// Solid-booster efflux. One shape for every rocket launch in the simulation —
+    /// a canister muzzle, a rocket-assisted rail — because they are the same event.
+    private func makeBoosterPlume(
+        scale: Float,
+        direction: SCNVector3 = SCNVector3(0, 0, 1)
+    ) -> SCNParticleSystem {
+        let system = SCNParticleSystem()
+        system.particleColor = NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.42, alpha: 0.95)
+        system.particleColorVariation = SCNVector4(0.06, 0.22, 0.30, 0.20)
+        system.particleSize = CGFloat(0.55 * scale)
+        system.particleSizeVariation = CGFloat(0.35 * scale)
+        system.birthRate = 900
+        system.particleLifeSpan = 0.55
+        system.particleLifeSpanVariation = 0.30
+        system.emitterShape = SCNSphere(radius: CGFloat(0.16 * scale))
+        system.spreadingAngle = 26
+        system.particleVelocity = CGFloat(22.0 * scale)
+        system.particleVelocityVariation = CGFloat(9.0 * scale)
+        system.emittingDirection = direction
+        system.acceleration = SCNVector3(0, 2.4, 0)
+        system.isAffectedByGravity = false
+        system.blendMode = .additive
+        system.isLightingEnabled = false
+        system.loops = true
+        return system
+    }
+
+    /// Turbojet exhaust. Not a rocket: no flame front, a much tighter cone, and it
+    /// is a heat-haze bloom rather than a plume — but a jet whose tailpipe shows
+    /// nothing at all while it accelerates reads as unpowered.
+    private func makeJetExhaustPlume() -> SCNParticleSystem {
+        let system = SCNParticleSystem()
+        system.particleColor = NSColor(calibratedRed: 0.72, green: 0.80, blue: 1.0, alpha: 0.32)
+        system.particleColorVariation = SCNVector4(0.05, 0.06, 0.10, 0.10)
+        system.particleSize = 0.16
+        system.particleSizeVariation = 0.10
+        system.birthRate = 0
+        system.particleLifeSpan = 0.22
+        system.particleLifeSpanVariation = 0.10
+        system.emitterShape = SCNSphere(radius: 0.05)
+        system.spreadingAngle = 7
+        system.particleVelocity = 26
+        system.particleVelocityVariation = 8
+        system.emittingDirection = SCNVector3(0, 0, 1)
+        system.isAffectedByGravity = false
+        system.blendMode = .additive
+        system.isLightingEnabled = false
+        system.loops = true
+        return system
+    }
+
     private func makeCatapultNode(for asset: CatapultLaunchAsset) -> SCNNode {
         let root = SCNNode()
         let railPitch = asset.rail.railAngleDegrees.degreesToRadians
@@ -2371,20 +2695,44 @@ final class DroneSceneController {
             root.addChildNode(pad)
         }
 
-        // --- Pneumatic charge system on the trailer bed --------------------
-        for x: Float in [-0.20, 0.20] {
-            let receiver = SCNNode(geometry: SCNCylinder(radius: 0.14, height: 1.05))
-            receiver.geometry?.materials = [tankMaterial]
-            receiver.simdPosition = SIMD3<Float>(x, 0.60, 0.72)
-            receiver.eulerAngles.x = SCNFloat.pi / 2.0
-            root.addChildNode(receiver)
+        // --- What drives the rail -------------------------------------------
+        //
+        // A pneumatic catapult stores its energy on the trailer, in receivers and a
+        // manifold. A rocket-assisted rail stores none: the energy arrives with the
+        // round, in a bottle strapped under it, and what the trailer needs instead
+        // is a blast deflector so the efflux does not go into its own chassis.
+        if asset.rail.usesRocketBooster {
+            let deflector = SCNNode(geometry: SCNBox(
+                width: 1.10, height: 0.90, length: 0.10, chamferRadius: 0.03
+            ))
+            deflector.geometry?.materials = [frameMaterial]
+            deflector.simdPosition = SIMD3<Float>(0.0, deckHeight + 0.34, 0.86)
+            deflector.eulerAngles.x = SCNFloat(-0.45)
+            root.addChildNode(deflector)
+
+            for x: Float in [-0.46, 0.46] {
+                let brace = SCNNode(geometry: SCNBox(
+                    width: 0.07, height: 0.07, length: 0.80, chamferRadius: 0.02
+                ))
+                brace.geometry?.materials = [steelMaterial]
+                brace.simdPosition = SIMD3<Float>(x, deckHeight + 0.05, 1.02)
+                root.addChildNode(brace)
+            }
+        } else {
+            for x: Float in [-0.20, 0.20] {
+                let receiver = SCNNode(geometry: SCNCylinder(radius: 0.14, height: 1.05))
+                receiver.geometry?.materials = [tankMaterial]
+                receiver.simdPosition = SIMD3<Float>(x, 0.60, 0.72)
+                receiver.eulerAngles.x = SCNFloat.pi / 2.0
+                root.addChildNode(receiver)
+            }
+            let manifold = SCNNode(geometry: SCNBox(
+                width: 0.34, height: 0.20, length: 0.26, chamferRadius: 0.03
+            ))
+            manifold.geometry?.materials = [steelMaterial]
+            manifold.simdPosition = SIMD3<Float>(0.0, 0.58, 1.32)
+            root.addChildNode(manifold)
         }
-        let manifold = SCNNode(geometry: SCNBox(
-            width: 0.34, height: 0.20, length: 0.26, chamferRadius: 0.03
-        ))
-        manifold.geometry?.materials = [steelMaterial]
-        manifold.simdPosition = SIMD3<Float>(0.0, 0.58, 1.32)
-        root.addChildNode(manifold)
 
         // --- Inclined launch rail ------------------------------------------
         let railAssembly = SCNNode()
@@ -2489,6 +2837,31 @@ final class DroneSceneController {
         pusherPlate.geometry?.materials = [shuttleMaterial]
         pusherPlate.simdPosition = SIMD3<Float>(0.0, 0.16, 0.235)
         shuttle.addChildNode(pusherPlate)
+
+        if asset.rail.usesRocketBooster {
+            // The bottle rides with the round and its nozzle points back down the
+            // rail, which is where the flame goes.
+            let bottle = SCNNode(geometry: SCNCylinder(radius: 0.085, height: 0.62))
+            bottle.geometry?.materials = [tankMaterial]
+            bottle.simdPosition = SIMD3<Float>(0.0, 0.10, 0.16)
+            bottle.eulerAngles.x = SCNFloat.pi / 2.0
+            shuttle.addChildNode(bottle)
+
+            let nozzle = SCNNode(geometry: SCNCone(
+                topRadius: 0.045, bottomRadius: 0.085, height: 0.14
+            ))
+            nozzle.geometry?.materials = [steelMaterial]
+            nozzle.simdPosition = SIMD3<Float>(0.0, 0.10, 0.50)
+            nozzle.eulerAngles.x = SCNFloat(-Float.pi / 2.0)
+            shuttle.addChildNode(nozzle)
+
+            let efflux = SCNNode()
+            efflux.name = "catapult_booster_efflux"
+            efflux.simdPosition = SIMD3<Float>(0.0, 0.10, 0.60)
+            efflux.addParticleSystem(makeBoosterPlume(scale: 1.0))
+            efflux.isHidden = true
+            shuttle.addChildNode(efflux)
+        }
 
         // --- Forward support legs under the high end ------------------------
         let legFraction: Float = 0.86
@@ -5113,6 +5486,7 @@ final class DroneSceneController {
 
         updatePropulsionUnitVisuals(state: state)
         rotatePropellers(state: state, deltaTime: deltaTime)
+        updateJetExhaust(state: state)
         updateDroppedPayloadRuntime(deltaTime: deltaTime)
         applyComponentOverlays(damage: damage, thermal: thermal, mode: diagnosticMode)
         updateCameras(
@@ -7677,6 +8051,37 @@ final class DroneSceneController {
         while angle > Float.pi { angle -= tau }
         while angle < -Float.pi { angle += tau }
         return angle
+    }
+
+    /// Turbojet tailpipe efflux, driven by the engine's own spool fraction.
+    ///
+    /// A propeller aircraft shows its power in the disc; a jet shows nothing at all
+    /// unless the tailpipe does, and a target drone accelerating past 200 m/s with
+    /// a cold, empty exhaust reads as a glider. Driven by shaft speed rather than
+    /// by the throttle lever, so it follows the spool up and down the way the
+    /// thrust does — an engine still winding up is not yet making a plume.
+    private func updateJetExhaust(state: DroneState) {
+        guard let anchor = droneNode.childNode(withName: "jetExhaustAnchor", recursively: true) else {
+            return
+        }
+        if anchor.particleSystems?.isEmpty ?? true {
+            anchor.addParticleSystem(makeJetExhaustPlume())
+        }
+        let ratedRPM = max(1.0, activeProfile.resolvedUAVProfile?.powerplant?.ratedShaftRPM ?? 30_000.0)
+        let spool: Float
+        if let engine = state.engineRuntime, engine.runState.isFiring {
+            spool = (engine.shaftRPM / ratedRPM).clamped(to: 0.0...1.2)
+        } else {
+            spool = 0.0
+        }
+        // Idle barely shows; the plume grows with the square of the spool fraction
+        // above it, the same shape the thrust follows.
+        let above = max(0.0, spool - 0.35) / 0.65
+        let intensity = (above * above).clamped(to: 0.0...1.0)
+        anchor.particleSystems?.forEach { system in
+            system.birthRate = CGFloat(140.0 * intensity)
+            system.particleVelocity = CGFloat(14.0 + 26.0 * intensity)
+        }
     }
 
     private func rotatePropellers(state: DroneState, deltaTime: Float) {

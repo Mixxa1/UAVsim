@@ -40,6 +40,17 @@ struct TelemetrySnapshot {
     var powerDrawW: Double
     var estimatedRemainingMin: Double
     var batteryVoltage: Double
+
+    /// Engine start state, shaft speed, temperature and fuel — nil for a
+    /// battery-electric aircraft. Without this on the HUD the whole start sequence
+    /// is invisible: the operator opens the throttle and simply waits, with nothing
+    /// saying the engine is priming, cranking or still too cold to be launched.
+    var engineStateKey: String?
+    var engineShaftRPM: Double
+    var engineTemperatureC: Double
+    var fuelRemainingKg: Double
+    var fuelCapacityKg: Double
+    var fuelFlowKgPerHour: Double
     var batteryCellVoltage: Double
     var batteryCurrentDrawA: Double
 
@@ -160,6 +171,12 @@ struct TelemetrySnapshot {
         powerDrawW: 0.0,
         estimatedRemainingMin: 0.0,
         batteryVoltage: 0.0,
+        engineStateKey: nil,
+        engineShaftRPM: 0.0,
+        engineTemperatureC: 0.0,
+        fuelRemainingKg: 0.0,
+        fuelCapacityKg: 0.0,
+        fuelFlowKgPerHour: 0.0,
         batteryCellVoltage: 0.0,
         batteryCurrentDrawA: 0.0,
         weatherPreset: WeatherPreset.normal.title,

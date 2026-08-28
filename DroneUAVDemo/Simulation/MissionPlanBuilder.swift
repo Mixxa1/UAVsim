@@ -96,7 +96,23 @@ final class MissionPlanBuilder {
             asset = .handLaunch(hand)
         case .catapult(var catapult):
             catapult.rail.railLengthMeters = fixedWingParameters.catapultRailLengthMeters
+            catapult.rail.usesRocketBooster = fixedWingParameters.catapultUsesRocketBooster
             asset = .catapult(catapult)
+        case .canister:
+            // The tube's geometry belongs to the launcher, not to the airframe's
+            // catapult tuning. Which launcher it is, though, is the airframe's —
+            // and this builder does not carry the profile, so the view model
+            // resolves it in `activeLaunchAsset()`.
+            break
+        case .runway(var runway):
+            // The strip has to be long enough for *this* airframe's roll, which
+            // the drafted object cannot know: the same runway serves a 14 kg BWB
+            // and a four-tonne turboprop.
+            runway.usableLengthMeters = max(
+                runway.usableLengthMeters,
+                FixedWingRunwayGeometry.stripLength(for: fixedWingParameters)
+            )
+            asset = .runway(runway)
         }
         return asset
     }

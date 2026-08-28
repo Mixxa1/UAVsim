@@ -74,13 +74,37 @@ struct FuelSystemState: Hashable {
 
 struct FuelBurnInput {
     let powerplant: UAVPowerplantSpec
-    /// Commanded/achieved throttle, 0...1.
+    /// Commanded/achieved throttle, 0...1. Only used when no engine model is
+    /// supplying real shaft power.
     let throttle: Float
     /// True while the engine should be consuming fuel at all.
     let engineRunning: Bool
     let atmosphere: AtmosphereState
     /// Extra loss from tank or line damage, kg/s.
     let leakKgPerSec: Float
+    /// Shaft power the engine is actually delivering, kW.
+    ///
+    /// When present this replaces the throttle-to-power proxy entirely, which is
+    /// the whole point: consumption is `BSFC × shaft power`, and the shaft power is
+    /// now a real number produced by the engine/propeller torque balance rather
+    /// than a curve fitted to the lever position.
+    let shaftPowerKW: Float?
+
+    init(
+        powerplant: UAVPowerplantSpec,
+        throttle: Float,
+        engineRunning: Bool,
+        atmosphere: AtmosphereState,
+        leakKgPerSec: Float,
+        shaftPowerKW: Float? = nil
+    ) {
+        self.powerplant = powerplant
+        self.throttle = throttle
+        self.engineRunning = engineRunning
+        self.atmosphere = atmosphere
+        self.leakKgPerSec = leakKgPerSec
+        self.shaftPowerKW = shaftPowerKW
+    }
 }
 
 /// Turns throttle into a real fuel mass flow.
@@ -158,19 +182,27 @@ final class FuelBurnService {
                 let thrust = ratedThrust * fraction * input.atmosphere.densityRatio
                 burnKgPerSec = tsfc * thrust / 3600.0
             } else {
-                let ratedPowerKW = input.powerplant.totalRatedShaftPowerKW ?? 0.0
                 let bsfc = Self.brakeSpecificConsumptionKgPerKWh(for: input.powerplant.engineType)
-                // A naturally aspirated piston engine loses power with density
-                // almost one-for-one; a turboprop is flat-rated far higher and
-                // barely notices the altitudes this simulation flies at.
-                let altitudeFactor: Float
-                switch input.powerplant.engineType {
-                case .turboprop:
-                    altitudeFactor = max(0.55, pow(input.atmosphere.densityRatio, 0.35))
-                default:
-                    altitudeFactor = max(0.25, input.atmosphere.densityRatio)
+                let shaftPowerKW: Float
+                if let measured = input.shaftPowerKW {
+                    // Real delivered power from the engine model. An idling engine
+                    // still burns, so there is a floor rather than a hard zero.
+                    let ratedPowerKW = input.powerplant.totalRatedShaftPowerKW ?? 0.0
+                    shaftPowerKW = max(measured, ratedPowerKW * 0.04)
+                } else {
+                    let ratedPowerKW = input.powerplant.totalRatedShaftPowerKW ?? 0.0
+                    // A naturally aspirated piston engine loses power with density
+                    // almost one-for-one; a turboprop is flat-rated far higher and
+                    // barely notices the altitudes this simulation flies at.
+                    let altitudeFactor: Float
+                    switch input.powerplant.engineType {
+                    case .turboprop:
+                        altitudeFactor = max(0.55, pow(input.atmosphere.densityRatio, 0.35))
+                    default:
+                        altitudeFactor = max(0.25, input.atmosphere.densityRatio)
+                    }
+                    shaftPowerKW = ratedPowerKW * fraction * altitudeFactor
                 }
-                let shaftPowerKW = ratedPowerKW * fraction * altitudeFactor
                 burnKgPerSec = bsfc * shaftPowerKW / 3600.0
             }
         }

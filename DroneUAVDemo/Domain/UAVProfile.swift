@@ -71,6 +71,42 @@ enum UAVPropellerPlacement: String, Hashable {
     case pusher
 }
 
+/// Where the engine is started from.
+///
+/// Not a cosmetic distinction. A canister-launched loitering munition does not
+/// start its engine on the ground at all: it is ejected by a rocket booster,
+/// unfolds its wings, and only then lights the piston engine. Modelling that as a
+/// ground start would let the operator run the engine inside a sealed tube.
+enum UAVEngineStartPolicy: String, Hashable {
+    /// Started and stabilised before the aircraft is launched — runway, catapult,
+    /// rail or dolly.
+    case groundStartBeforeLaunch
+    /// Started in flight once the booster has separated and the airframe has
+    /// flying speed.
+    case airStartAfterBoost
+
+    var localizationKey: String { "uav.engine.start_policy.\(rawValue)" }
+}
+
+/// How the engine is cranked. Determines whether a start can be attempted at all
+/// and how the crank phase behaves.
+enum UAVEngineStarterKind: String, Hashable {
+    /// No starter — an electric motor is simply commanded.
+    case none
+    /// Electric starter or starter-generator, the usual small-UAV installation.
+    case electricStarter
+    /// Bleed/air motor, typical of a turbine on a ground cart.
+    case airTurbineStarter
+    /// Single-use pyrotechnic cartridge — one attempt, then the engine must
+    /// windmill-start or the launch is lost.
+    case pyrotechnicCartridge
+
+    var localizationKey: String { "uav.engine.starter.\(rawValue)" }
+
+    /// A cartridge is expended on use; everything else can be re-attempted.
+    var supportsRestart: Bool { self != .pyrotechnicCartridge }
+}
+
 /// One aircraft's published fuel installation.
 struct UAVFuelSpec: Hashable {
     let fuelType: UAVFuelType
@@ -125,6 +161,15 @@ struct UAVPowerplantSpec: Hashable {
     let ratedThrustN: Float?
     let propellerPlacement: UAVPropellerPlacement?
     let propellerDiameterM: Float?
+    /// Propeller-shaft speed at rated power, rev/min — the *output* shaft, so it is
+    /// already through any reduction gearbox. This is what sizes the propeller: a
+    /// 5,500 rpm two-stroke and a 1,591 rpm turboprop shaft need very different
+    /// discs to absorb their power.
+    let ratedShaftRPM: Float?
+    /// Blade count. Only used to shape the propeller's power coefficient.
+    let propellerBladeCount: Int
+    let starter: UAVEngineStarterKind
+    let startPolicy: UAVEngineStartPolicy
     let fuel: UAVFuelSpec?
 
     init(
@@ -135,6 +180,10 @@ struct UAVPowerplantSpec: Hashable {
         ratedThrustN: Float? = nil,
         propellerPlacement: UAVPropellerPlacement? = nil,
         propellerDiameterM: Float? = nil,
+        ratedShaftRPM: Float? = nil,
+        propellerBladeCount: Int = 2,
+        starter: UAVEngineStarterKind? = nil,
+        startPolicy: UAVEngineStartPolicy = .groundStartBeforeLaunch,
         fuel: UAVFuelSpec? = nil
     ) {
         self.engineType = engineType
@@ -144,7 +193,32 @@ struct UAVPowerplantSpec: Hashable {
         self.ratedThrustN = ratedThrustN
         self.propellerPlacement = propellerPlacement
         self.propellerDiameterM = propellerDiameterM
+        self.ratedShaftRPM = ratedShaftRPM
+        self.propellerBladeCount = max(1, propellerBladeCount)
+        self.starter = starter ?? (engineType == .electricMotor ? .none : .electricStarter)
+        self.startPolicy = startPolicy
         self.fuel = fuel
+    }
+
+    /// True for anything that drives a propeller — piston, rotary and turboprop.
+    var drivesPropeller: Bool {
+        engineType != .turbojet && propellerDiameterM != nil
+    }
+
+    /// True where the propeller is governed — its blade angle changes to hold a
+    /// commanded shaft speed instead of the shaft speed floating to wherever a
+    /// fixed blade angle happens to balance the engine.
+    ///
+    /// This is not a cosmetic distinction. A fixed-pitch disc absorbs power with
+    /// the cube of shaft speed, so an engine that makes little power at low speed
+    /// settles at whatever low speed the disc will let it reach — for the MQ-9A's
+    /// TPE331 that equilibrium was 840 rpm of a rated 1,591 and 84 kW of a rated
+    /// 671, which is why it needed three kilometres of ground roll to reach flying
+    /// speed. A governed disc coarsens as the aircraft accelerates, so the engine
+    /// is at rated speed and full power from brake release, which is precisely
+    /// what makes a turboprop takeoff possible.
+    var hasConstantSpeedPropeller: Bool {
+        drivesPropeller && engineType == .turboprop
     }
 
     var energySource: UAVEnergySourceType {

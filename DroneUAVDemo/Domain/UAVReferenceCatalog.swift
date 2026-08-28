@@ -870,6 +870,10 @@ enum UAVReferenceCatalog {
                 ratedShaftPowerKW: 3.0,
                 propellerPlacement: .pusher,
                 propellerDiameterM: 0.46,
+                ratedShaftRPM: 5500.0,
+                propellerBladeCount: 2,
+                starter: .electricStarter,
+                startPolicy: .groundStartBeforeLaunch,
                 fuel: UAVFuelSpec(
                     fuelType: .heavyFuel,
                     usableFuelMassKg: 8.5,
@@ -912,6 +916,10 @@ enum UAVReferenceCatalog {
                 ratedShaftPowerKW: 28.3,
                 propellerPlacement: .pusher,
                 propellerDiameterM: 0.71,
+                ratedShaftRPM: 6000.0,
+                propellerBladeCount: 2,
+                starter: .electricStarter,
+                startPolicy: .groundStartBeforeLaunch,
                 fuel: UAVFuelSpec(
                     fuelType: .gasoline,
                     usableFuelLiters: 44.0,
@@ -955,6 +963,10 @@ enum UAVReferenceCatalog {
                 ratedShaftPowerKW: 671.0,
                 propellerPlacement: .pusher,
                 propellerDiameterM: 2.3,
+                ratedShaftRPM: 1591.0,
+                propellerBladeCount: 3,
+                starter: .electricStarter,
+                startPolicy: .groundStartBeforeLaunch,
                 fuel: UAVFuelSpec(
                     fuelType: .turbineKerosene,
                     usableFuelMassKg: 1814.0,
@@ -999,6 +1011,10 @@ enum UAVReferenceCatalog {
                 ratedShaftPowerKW: 28.0,
                 propellerPlacement: .pusher,
                 propellerDiameterM: 0.60,
+                ratedShaftRPM: 6000.0,
+                propellerBladeCount: 2,
+                starter: .electricStarter,
+                startPolicy: .airStartAfterBoost,
                 fuel: UAVFuelSpec(
                     fuelType: .gasoline,
                     usableFuelMassKg: 20.0,
@@ -1042,6 +1058,10 @@ enum UAVReferenceCatalog {
                 ratedShaftPowerKW: 37.0,
                 propellerPlacement: .pusher,
                 propellerDiameterM: 0.62,
+                ratedShaftRPM: 6000.0,
+                propellerBladeCount: 2,
+                starter: .electricStarter,
+                startPolicy: .airStartAfterBoost,
                 fuel: UAVFuelSpec(
                     fuelType: .gasoline,
                     usableFuelMassKg: 30.0,
@@ -1085,6 +1105,10 @@ enum UAVReferenceCatalog {
                 ratedShaftPowerKW: 37.0,
                 propellerPlacement: .pusher,
                 propellerDiameterM: 0.62,
+                ratedShaftRPM: 6000.0,
+                propellerBladeCount: 2,
+                starter: .electricStarter,
+                startPolicy: .airStartAfterBoost,
                 fuel: UAVFuelSpec(
                     fuelType: .gasoline,
                     usableFuelMassKg: 42.0,
@@ -1128,6 +1152,9 @@ enum UAVReferenceCatalog {
                 engineDesignation: "Brushless outrunner (uprated from donor airframe)",
                 propellerPlacement: .tractor,
                 propellerDiameterM: 0.20,
+                ratedShaftRPM: 9000.0,
+                propellerBladeCount: 2,
+                starter: UAVEngineStarterKind.none,
                 fuel: nil
             )
         ),
@@ -1166,6 +1193,9 @@ enum UAVReferenceCatalog {
                 ratedThrustN: 66.7,
                 propellerPlacement: nil,
                 propellerDiameterM: nil,
+                ratedShaftRPM: 120000.0,
+                starter: .electricStarter,
+                startPolicy: .groundStartBeforeLaunch,
                 fuel: UAVFuelSpec(
                     fuelType: .turbineKerosene,
                     usableFuelMassKg: 2.0,
@@ -1209,6 +1239,9 @@ enum UAVReferenceCatalog {
                 ratedThrustN: 4200.0,
                 propellerPlacement: nil,
                 propellerDiameterM: nil,
+                ratedShaftRPM: 30000.0,
+                starter: .pyrotechnicCartridge,
+                startPolicy: .groundStartBeforeLaunch,
                 fuel: UAVFuelSpec(
                     fuelType: .turbineKerosene,
                     usableFuelMassKg: 210.0,

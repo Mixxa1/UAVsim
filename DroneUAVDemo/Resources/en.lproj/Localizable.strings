@@ -1124,6 +1124,12 @@
 "launch.state.aborted" = "ABORTED";
 "launch.reason.configuration_failed" = "Place the correct launch object and verify that the aircraft is armed.";
 "launch.reason.corridor_invalid" = "The configured launch corridor is outside the safe mission area or intersects a restricted zone.";
+"launch.reason.launcher_not_configured" = "Launcher not configured: the launch mode and the map object do not match.";
+"launch.reason.launch_angle_invalid" = "Launcher elevation is outside the range this launch type allows.";
+"launch.reason.corridor_outside_world" = "The launch corridor leaves the world bounds.";
+"launch.reason.corridor_edge_margin" = "Not enough room to the map edge for the launch corridor.";
+"launch.reason.corridor_zone" = "The launch corridor crosses a restricted zone.";
+"launch.reason.runway_too_short" = "The runway is too short for the takeoff roll in the current tailwind.";
 "launch.reason.mass_exceeded" = "Installed aircraft mass exceeds the launcher envelope.";
 "launch.reason.tailwind_unsafe" = "Tailwind leaves insufficient predicted airspeed at release. Turn the launch heading into the wind.";
 "launch.reason.crosswind_unsafe" = "Crosswind exceeds the safe launch limit. Change heading or weather conditions.";
@@ -1379,10 +1385,12 @@
 "tactical.map.launch.mode.standard" = "Standard";
 "tactical.map.launch.mode.handLaunch" = "Hand Launch";
 "tactical.map.launch.mode.catapult" = "Catapult";
+"tactical.map.launch.mode.canister" = "Launch canister";
 "tactical.map.launch.mode.runway" = "Runway";
 "tactical.map.launch.mode.vtol" = "VTOL";
 "tactical.map.launch.object.handLaunchPoint" = "Hand launch point";
 "tactical.map.launch.object.catapultLine" = "Catapult line";
+"tactical.map.launch.object.launchCanister" = "Launch canister";
 "tactical.map.launch.object.runwayStrip" = "Runway strip";
 "tactical.map.launch.object.vtolStartPoint" = "VTOL start point";
 "tactical.map.action.clear_launch_object" = "Clear Launch";
@@ -2872,3 +2880,20 @@
 "lidar.hud.raw_toggle" = "RAW%@";
 "payload.hose.external_aim" = "NOZZLE AIM CONTROL";
 "payload.hose.external_aim_hint" = "O — exit · ← ↑ ↓ → — aim";
+
+"engine.state.off" = "Engine off";
+"engine.state.priming" = "Priming";
+"engine.state.cranking" = "Cranking";
+"engine.state.lightOff" = "Light-off";
+"engine.state.warmingUp" = "Warming up";
+"engine.state.ready" = "Ready";
+"engine.state.startAborted" = "Start aborted";
+"engine.state.stopped" = "Engine stopped";
+"uav.engine.starter.none" = "No starter";
+"uav.engine.starter.electricStarter" = "Electric starter";
+"uav.engine.starter.airTurbineStarter" = "Air turbine starter";
+"uav.engine.starter.pyrotechnicCartridge" = "Pyrotechnic cartridge";
+"uav.engine.start_policy.groundStartBeforeLaunch" = "Started on the ground before launch";
+"uav.engine.start_policy.airStartAfterBoost" = "Started in the air after booster separation";
+"hud.compact.engine" = "ENG %@  %.0f rpm  %.0f°C";
+"hud.compact.fuel" = "FUEL %.1f kg  %.0f%%  %.1f kg/h";

@@ -91,3 +91,21 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
         }
     }
 }
+
+extension UAVVisualPreset {
+    /// Which canister launcher an airframe of this shape is carried in.
+    ///
+    /// The visual preset is the right key because the distinction is generational
+    /// and this enum already separates the two generations: the plain delta is the
+    /// original Harpy, carried as separate containerised rounds, and the canard
+    /// delta is the Harop family, carried in the inclined cell block that appears
+    /// in nearly every published photograph of it.
+    var canisterLauncherPattern: CanisterLauncherPattern {
+        switch self {
+        case .deltaLoiteringMunition:
+            return .containerRack
+        default:
+            return .cellBlock
+        }
+    }
+}

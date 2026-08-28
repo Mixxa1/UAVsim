@@ -266,6 +266,25 @@ struct FixedWingAerodynamics {
         let clpFloorMagnitude = (preset.clDeltaA * turnGain) *
             (2.0 * referenceSpeed / span) / targetMaxRollRateRadPerSec
 
+        // Pitch-damping floor, the exact counterpart of the roll floor above and
+        // added for the same reason.
+        //
+        // `dampingScale` collapses to its 0.5 floor for a light airframe while the
+        // qHat = q·c/2V lever also shrinks with the small chord. On a 2.6 kg delta
+        // that left cmq at -2.5 against a `cmDeltaE` of 0.17 and a pitch inertia
+        // near 0.1 kg·m², so full elevator commanded some 700 deg/s² and the
+        // attitude loop's proportional term drove a divergent oscillation: measured
+        // in flight, pitch went +22.8°, +1.6°, -7.4°, -40.8° on consecutive samples
+        // and the aircraft hit the ground inverted. The `.delta` preset is worst hit
+        // because its cmqBase is a third of the flying wing's.
+        //
+        // Floor cmq so the implied short-period damping stays believable for the
+        // airframe's size. For the heavier fleet this computes below their existing
+        // damping and changes nothing.
+        let targetPitchRateRadPerSec = (3.2 / max(0.08, chord)).clamped(to: 1.2...9.0)
+        let cmqFloorMagnitude = (preset.cmDeltaE)
+            * (2.0 * referenceSpeed / max(0.08, chord)) / targetPitchRateRadPerSec
+
         let inertia = boxInertiaTensor(
             massKg: mass,
             wingSpanM: span,
@@ -285,7 +304,7 @@ struct FixedWingAerodynamics {
             cm0: preset.cm0,
             cmAlpha: preset.cmAlpha,
             cmDeltaE: preset.cmDeltaE,
-            cmq: preset.cmqBase * dampingScale,
+            cmq: -max(abs(preset.cmqBase * dampingScale), cmqFloorMagnitude),
             clBeta: preset.clBetaSlope,
             clDeltaA: preset.clDeltaA * turnGain,
             clp: -max(abs(preset.clpBase * dampingScale), clpFloorMagnitude),

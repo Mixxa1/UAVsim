@@ -99,6 +99,13 @@ struct DroneState {
     var fixedWingOrientationQuat: simd_quatf = identityOrientationQuat
     /// True body-frame angular rates (p, q, r) in rad/s. Fixed-wing only.
     var bodyAngularVelocity: SIMD3<Float> = .zero
+    /// Live engine state for a fuel-burning aircraft — where it is in its start
+    /// sequence, shaft speed, delivered power and temperature. Lives on the state
+    /// rather than on the engine object because it is physical state that has to
+    /// survive across ticks and be recorded, not filter state. `nil` for every
+    /// battery-electric aircraft, which has no start sequence to model.
+    var engineRuntime: EngineRuntimeState?
+
     /// Angle of attack, radians. Fixed-wing telemetry/debug only.
     var angleOfAttack: Float = 0.0
     /// Sideslip angle, radians. Fixed-wing telemetry/debug only.

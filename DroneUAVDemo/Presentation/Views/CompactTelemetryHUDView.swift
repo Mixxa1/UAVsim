@@ -19,6 +19,27 @@ struct CompactTelemetryHUDView: View {
                 telemetry.batteryVoltage
             ))
                 .font(.caption2.monospaced())
+            // Engine and fuel, for aircraft that have them. This is what makes the
+            // start sequence visible: priming, cranking, warming up and ready are
+            // otherwise indistinguishable from an unresponsive throttle.
+            if let engineStateKey = telemetry.engineStateKey {
+                Text(String(
+                    format: localized("hud.compact.engine"),
+                    localized(engineStateKey),
+                    telemetry.engineShaftRPM,
+                    telemetry.engineTemperatureC
+                ))
+                    .font(.caption2.monospaced())
+                if telemetry.fuelCapacityKg > 0.01 {
+                    Text(String(
+                        format: localized("hud.compact.fuel"),
+                        telemetry.fuelRemainingKg,
+                        telemetry.fuelRemainingKg / telemetry.fuelCapacityKg * 100.0,
+                        telemetry.fuelFlowKgPerHour
+                    ))
+                        .font(.caption2.monospaced())
+                }
+            }
             if telemetry.autoNavigationActive || telemetry.targetDistanceMeters.isFinite {
                 Text(autoNavigationLine)
                     .font(.caption2.monospaced())

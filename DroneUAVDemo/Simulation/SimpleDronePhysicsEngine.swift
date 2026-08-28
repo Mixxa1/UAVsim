@@ -25,6 +25,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// engine-instance filter state, like `windGustState` above.
     private var vibrationPhase: Float = 0.0
 
+    /// Start-sequence and shaft dynamics for fuel-burning aircraft. Stateless
+    /// itself — the state it advances lives on `DroneState.engineRuntime`.
+    private let engineService = EngineRuntimeService()
+
     func step(
         state: DroneState,
         control: DroneControlInput,
@@ -37,30 +41,54 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         var remaining = clampedDelta
         while remaining > 0.0 {
             let dt = min(Tuning.fixedStep, remaining)
+            // Engine and propeller advance on the same substep as the airframe, so
+            // the disc's load, the shaft's speed and the thrust it makes all belong
+            // to the same instant. `substepContext` is the only thing that differs
+            // from `context`; an aircraft with no fuel propulsion never enters here
+            // and its context is passed through untouched.
+            var substepContext = context
+            if let backend = context.fuelPropulsion {
+                next.engineRuntime = advanceEngine(
+                    state: &next,
+                    control: control,
+                    context: context,
+                    backend: backend,
+                    dt: dt
+                )
+                substepContext.engineState = next.engineRuntime
+                if let engineRuntime = next.engineRuntime {
+                    substepContext.propulsionOutput = backend.output(
+                        engine: engineRuntime,
+                        airspeedMps: max(0.0, next.forwardAirspeed),
+                        atmosphere: context.atmosphere.state(worldY: next.position.y)
+                    )
+                }
+            }
+
             // `crashed` is a compatibility/UI lifecycle label, not a switch
             // to a different universe. The normal airframe solver keeps
             // surviving aero surfaces, rotors and their asymmetric forces;
             // disarm/control failure already removes only unavailable input.
             switch context.profile.airframeClass {
             case .multirotor:
-                next = stepMultirotorBaseline(state: next, control: control, context: context, dt: dt)
+                next = stepMultirotorBaseline(state: next, control: control, context: substepContext, dt: dt)
             case .fixedWing:
                 let previousSubstep = next
-                next = stepFixedWingAerodynamic(state: next, control: control, context: context, dt: dt)
+                next = stepFixedWingAerodynamic(state: next, control: control, context: substepContext, dt: dt)
                 if let launchDynamics = context.fixedWingLaunchDynamics {
                     next = applyFixedWingLaunchDynamics(
                         previousState: previousSubstep,
                         integratedState: next,
                         dynamics: launchDynamics,
-                        context: context,
+                        context: substepContext,
                         dt: dt
                     )
                 }
             case .hybridVTOL:
                 if context.profile.airframeStyle == .tailsitterVTOL {
-                    next = stepTailsitterVTOLTransitional(state: next, control: control, context: context, dt: dt)
+                    next = stepTailsitterVTOLTransitional(state: next, control: control, context: substepContext, dt: dt)
                 } else {
-                    next = stepHybridVTOLTransitional(state: next, control: control, context: context, dt: dt)
+                    next = stepHybridVTOLTransitional(state: next, control: control, context: substepContext, dt: dt)
                 }
             }
             remaining -= dt
@@ -68,6 +96,102 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         next.mode = control.mode
         return next
+    }
+
+    /// Angular acceleration for a rigid body, including the gyroscopic coupling
+    /// term the engine used to drop.
+    ///
+    /// `omega_dot = I⁻¹ · (M - omega × (I·omega))`. Leaving out the cross product
+    /// makes each axis independent, which is only true while the body's rates are
+    /// small or its inertias are nearly equal. Neither holds for a fast delta, a
+    /// heavily damaged asymmetric airframe, or anything doing an acro roll: a
+    /// rolling aircraft with unequal pitch and yaw inertia genuinely pitches and
+    /// yaws from the roll alone, and that coupling is what makes a departure look
+    /// like a departure instead of three separate first-order responses.
+    ///
+    /// **Axis convention.** This engine stores rates and moments as
+    /// `(roll, pitch, yaw)` about world (Z, X, Y) — mirrored against the textbook
+    /// body frame on the roll and yaw axes, as `FixedWingAerodynamics` documents at
+    /// length. The cross product is therefore evaluated in a properly right-handed
+    /// frame and mapped back, rather than being applied to the mirrored triple
+    /// directly, which would silently flip the sign of the coupling.
+    private func rotationalAcceleration(
+        momentBody: SIMD3<Float>,
+        omegaBody: SIMD3<Float>,
+        inertiaRateOrdered: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        let inertia = simd_max(inertiaRateOrdered, SIMD3<Float>(repeating: 1.0e-4))
+        // (roll, pitch, yaw) -> right-handed (x, y, z) for the cross product.
+        let omegaXYZ = SIMD3<Float>(omegaBody.y, omegaBody.z, omegaBody.x)
+        let inertiaXYZ = SIMD3<Float>(inertia.y, inertia.z, inertia.x)
+        let angularMomentumXYZ = inertiaXYZ * omegaXYZ
+        let couplingXYZ = simd_cross(omegaXYZ, angularMomentumXYZ)
+        // ...and back to (roll, pitch, yaw).
+        let coupling = SIMD3<Float>(couplingXYZ.z, couplingXYZ.x, couplingXYZ.y)
+        return (momentBody - coupling) / inertia
+    }
+
+    /// Advances the engine one substep and returns its new state.
+    ///
+    /// The start request is not simply "armed". A ground-started aircraft begins
+    /// its sequence as soon as it is armed, so the operator watches it crank, catch
+    /// and warm before the launch is cleared. A canister-launched loitering munition
+    /// cannot do that at all — it is sealed in a tube and ejected by a booster, and
+    /// only lights its engine once it is out and has flying speed.
+    private func advanceEngine(
+        state: inout DroneState,
+        control: DroneControlInput,
+        context: DroneSimulationContext,
+        backend: FuelPropulsionBackend,
+        dt: Float
+    ) -> EngineRuntimeState {
+        let atmosphere = context.atmosphere.state(worldY: state.position.y)
+        var engine = state.engineRuntime
+            ?? context.engineState
+            ?? .cold(ambientTemperatureC: atmosphere.temperatureK - 273.15)
+
+        let airspeed = max(0.0, state.forwardAirspeed)
+        let isAirborne = state.position.y > context.groundHeight + 0.8
+        let startRequested: Bool
+        switch backend.powerplant.startPolicy {
+        case .groundStartBeforeLaunch:
+            startRequested = control.isArmed && state.physicalState != .crashed
+        case .airStartAfterBoost:
+            // Sealed in its canister the engine genuinely cannot run, and it lights
+            // only once the booster has thrown the airframe clear. But "cannot start
+            // in the tube" is not "cannot ever start on the ground": with no
+            // launcher present the aircraft is simply parked, and refusing to start
+            // there left the whole Harpy family dead on the pad with the throttle
+            // open — armed, full power commanded, and not moving.
+            let sealedInCanister = context.fixedWingLaunchDynamics != nil && !isAirborne
+            startRequested = control.isArmed
+                && state.physicalState != .crashed
+                && !sealedInCanister
+        }
+
+        let hasFuel = (context.fuelState.map { !$0.isStarved && $0.remainingKg > 0.0 }) ?? true
+        let load = backend.propellerLoadWatts(
+            engine: engine,
+            airspeedMps: airspeed,
+            airDensity: atmosphere.airDensity
+        )
+
+        engine = engineService.update(
+            current: engine,
+            input: EngineUpdateInput(
+                powerplant: backend.powerplant,
+                throttle: control.isArmed ? state.motorThrottle : 0.0,
+                startRequested: startRequested,
+                atmosphere: atmosphere,
+                airspeedMps: airspeed,
+                isAirborne: isAirborne,
+                hasFuel: hasFuel,
+                healthFactor: context.powerSystemFactor,
+                propellerAbsorbedPowerW: load
+            ),
+            deltaTime: dt
+        )
+        return engine
     }
 
     private func stepMultirotorBaseline(
@@ -760,7 +884,21 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 // needs 0.44, and 15° — this wing's `maxPitchUpDeg` — needs 0.59. A tighter bound
                 // silently re-imposes the droop it exists to remove; ±0.65 covers the envelope and
                 // still leaves a third of the surface to the P and rate terms.
-                let unsaturatedElevator = (pitchErrorNorm * 3.5 - pitchRateNorm * 0.4)
+                // Rate gain 0.9, not 0.4: the pitch loop was under-damped and it
+                // showed up as the launch "resonance" the operator kept reporting.
+                //
+                // Held level at altitude the loop is quiet (a tenth of a degree
+                // across the fleet), which is why it never looked wrong in a steady
+                // measurement. Through a climb-out it is not steady — speed and trim
+                // are both moving — and 0.4 against a P of 3.5 leaves a damping
+                // ratio near 0.2: measured on the FT5, +/-2 degrees at 0.6 Hz,
+                // halving per cycle. That is Level 2 handling by MIL-F-8785C, which
+                // asks for at least 0.35 in this flight phase and is exactly the
+                // band a pilot describes as the aircraft hunting. 0.9 puts the
+                // damping near 0.45 and costs nothing in steady state, because the
+                // droop the rate term would otherwise add is what the elevator trim
+                // integrator below already removes.
+                let unsaturatedElevator = (pitchErrorNorm * 3.5 - pitchRateNorm * 0.9)
                     * authority * max(0.75, wing.climbResponseGain)
                 // The plain integrator, as first written.
                 //
@@ -886,20 +1024,51 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // wing delivered about a third of its declared rate, and the MQ-9B and Hermes 900 could not
         // climb at all.
         let commandedThrottle = crashOrDisarmed ? 0.0 : motorThrottle
-        let thrustMagnitude = wingborneThrustMagnitude(
-            commandedThrottle: commandedThrottle,
-            aero: aero,
-            wing: wing,
-            cruiseReferenceThrottle: baseline.cruiseReferenceThrottle,
-            mass: mass,
-            airDensity: airDensity
-        ) * batteryFactor * context.rotorModel.cruiseThrustFactor
+        // A fuel aircraft's thrust comes from its engine and propeller, not from
+        // its weight. `wingborneThrustMagnitude` remains the only backend for every
+        // battery-electric profile, whose cruise and climb figures it is calibrated
+        // against — none of that calibration is re-opened here.
+        let thrustMagnitude: Float
+        if let propulsion = context.propulsionOutput {
+            thrustMagnitude = propulsion.thrustNewtons
+                * batteryFactor
+                * context.rotorModel.cruiseThrustFactor
+        } else {
+            thrustMagnitude = wingborneThrustMagnitude(
+                commandedThrottle: commandedThrottle,
+                aero: aero,
+                wing: wing,
+                cruiseReferenceThrottle: baseline.cruiseReferenceThrottle,
+                mass: mass,
+                airDensity: airDensity
+            ) * batteryFactor * context.rotorModel.cruiseThrustFactor
+        }
         let thrustForceBody = SIMD3<Float>(0, 0, -1) * thrustMagnitude
 
         // --- Propulsion-airframe coupling: prop wash on the tail, torque
         // reaction, P-factor, gyroscopic precession. None of this existed
         // before — thrust only ever pushed the aircraft forward.
-        if !crashOrDisarmed {
+        //
+        // Every term below is a *propeller* phenomenon and none of it belongs to a
+        // turbojet, which has no disc to react against. Charging them to one rolled
+        // the HESA Karrar onto its back on the ground at 2 m/s: at that speed there
+        // is no dynamic pressure for the aero damping to work against, so a
+        // constant thrust-derived roll moment had nothing opposing it at all.
+        let hasPropeller = context.fuelPropulsion.map { $0.propeller != nil } ?? true
+        // On the ground the landing gear reacts torque into the surface — that is
+        // why a real aircraft does not roll over when its engine is run up on the
+        // ramp. There is no gear model here, so the reaction is applied directly:
+        // thrust-induced roll and yaw fade out as the airframe settles onto its
+        // contact point. Without this a 4-tonne MQ-9A tipped over during its ground
+        // roll at 34 m/s under nothing but its own propeller torque.
+        let groundClearanceForReaction = contactGroundClearance(
+            context: context,
+            orientation: state.fixedWingOrientationQuat
+        )
+        let heightAboveSurface = state.position.y - groundClearanceForReaction
+        let gearReactionRelief = (heightAboveSurface / 1.5).clamped(to: 0.0...1.0)
+
+        if !crashOrDisarmed && hasPropeller {
             // Prop wash gives the elevator/rudder extra authority beyond
             // what freestream airspeed alone would provide (e.g. holding the
             // nose up during a slow takeoff roll) — added as the *delta*
@@ -913,11 +1082,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             momentBody.z += aero.cnDeltaR * rudderFraction * extraQ * aero.wingArea * aero.wingSpan
 
             // Torque reaction: the airframe rolls opposite to the prop spin.
-            momentBody.x += -aero.propSpinSign * thrustMagnitude * aero.propRadius * aero.torqueThrustRatio
+            momentBody.x += -aero.propSpinSign * thrustMagnitude * aero.propRadius
+                * aero.torqueThrustRatio * gearReactionRelief
 
             // P-factor: asymmetric blade loading at high AoA/low speed yaws
             // the nose, growing with both thrust and AoA.
-            momentBody.z += aero.propSpinSign * sin(alpha) * thrustMagnitude * aero.propRadius * aero.pFactorGain
+            momentBody.z += aero.propSpinSign * sin(alpha) * thrustMagnitude * aero.propRadius
+                * aero.pFactorGain * gearReactionRelief
 
             // Gyroscopic precession of the spinning prop disk against body
             // rotation. Remapped from this codebase's (roll,pitch,yaw)
@@ -928,6 +1099,34 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let bodyRateXYZ = SIMD3<Float>(pitchRate, yawRate, rollRate)
             let gyroMomentXYZ = aero.propInertia * simd_cross(propSpinVectorXYZ, bodyRateXYZ)
             momentBody += SIMD3<Float>(gyroMomentXYZ.z, gyroMomentXYZ.x, gyroMomentXYZ.y)
+        }
+
+        // --- Centre-of-mass shift as fuel burns off.
+        //
+        // NOT a blanket `r × F` about the centre of mass. That looks like the
+        // obvious way to do it and is wrong twice over.
+        //
+        // First it double-counts: `Cm` from the coefficient build-up already *is*
+        // the pitching moment about the reference point. Adding the lift force's
+        // own moment arm on top charges the same physics twice. Second, the lever
+        // it used was the component graph's centre-of-mass offset, which for the
+        // aircraft carrying a `runtimeSceneDimensionsOverride` is measured on a
+        // scene-scale visual — three metres standing in for twenty. Applied to
+        // thrust that produced a pitch-up with no airspeed to damp it, and every
+        // fuel aircraft reared onto its tail from a standing start: the MQ-9A went
+        // from 0° to 51° of pitch while still doing 0.5 m/s.
+        //
+        // The physically correct statement is the textbook one — moving the centre
+        // of mass changes where the aerodynamic moment is referenced:
+        // `Cm_cg = Cm_ac + CL · Δx / c̄`. Only the *change* from fuel burn belongs
+        // here, because the airframe's baseline balance is already inside
+        // `cmAlpha`. Aft shift destabilises and trims nose-up; forward does the
+        // reverse. Zero at full tanks by construction, and zero for every aircraft
+        // that carries no fuel.
+        let fuelBalanceShiftAft = fuelCentreOfMassShift(context: context).z
+        if abs(fuelBalanceShiftAft) > 1.0e-4 {
+            let deltaCm = cl * fuelBalanceShiftAft / max(0.05, aero.meanChord)
+            momentBody.y += deltaCm * dynamicPressure * aero.wingArea * aero.meanChord
         }
 
         // --- Integration: semi-implicit Euler (unconditionally stable for damped oscillatory systems).
@@ -943,7 +1142,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             fallback: aero.inertiaTensor,
             minimum: 0.001
         )
-        let angularAccel = momentBody / inertiaRates
+        let angularAccel = rotationalAcceleration(
+            momentBody: momentBody,
+            omegaBody: state.bodyAngularVelocity,
+            inertiaRateOrdered: inertiaRates
+        )
         next.bodyAngularVelocity = clampMagnitude(state.bodyAngularVelocity + angularAccel * dt, limit: 10.0)
         next.fixedWingOrientationQuat = integrateFixedWingOrientation(
             state.fixedWingOrientationQuat,
@@ -964,6 +1167,83 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             if next.velocity.y < 0.0 {
                 next.velocity.y = 0.0
             }
+        }
+
+        // --- Weight on wheels.
+        //
+        // Until this existed, a fixed wing under power on the ground was a free
+        // rigid body sliding on a frictionless floor: nothing reacted roll, nothing
+        // resisted sideslip, nothing held it on its heading. The only ground term
+        // in the solver was the rest block below, gated on a nearly closed throttle,
+        // so it never ran during a takeoff. At low speed there is no dynamic
+        // pressure for the aerodynamic damping to work against either, so any
+        // disturbance — a gust, a torque reaction, a metre of sloping ground — grew
+        // unopposed until a wingtip was the lowest point, the ground clamp lifted
+        // the airframe onto it, and the contact solver tore the gear off. That is
+        // the ground roll-over every fuel aircraft reported.
+        //
+        // The gear is modelled by what it physically does rather than by freezing
+        // the aircraft: it carries the share of the weight the wing has not taken
+        // yet, and every term below scales with that share. The constraint
+        // therefore fades out exactly as lift builds, so rotation and lift-off need
+        // no separate release — at `wheelLoad == 0` this block does nothing at all.
+        let liftNewtons = cl * dynamicPressure * aero.wingArea
+        let weightNewtons = max(1.0, mass * Tuning.gravity)
+        let inGroundContact = next.position.y <= groundClearance + 0.05
+        let wheelLoad = inGroundContact && state.physicalState != .crashed
+            ? (1.0 - liftNewtons / weightNewtons).clamped(to: 0.0...1.0)
+            : 0.0
+
+        if wheelLoad > 0.001 {
+            var euler = next.orientation
+
+            // Roll: main gear on both sides reacts a bank moment straight into the
+            // surface. Levelling rather than merely damping is the honest model —
+            // an aircraft standing on two wheels cannot hold a bank angle.
+            let levelRate = min(1.0, dt * 9.0 * wheelLoad)
+            euler.x -= euler.x * levelRate
+            next.bodyAngularVelocity.x *= max(0.0, 1.0 - dt * 12.0 * wheelLoad)
+
+            // Pitch: the nose gear stops it pitching below the rest attitude and
+            // the tail stops it going past the strike angle. Between those the
+            // elevator is free, which is what makes rotation possible at all.
+            let tailStrikeLimit: Float = 0.26
+            if euler.y < 0.0 {
+                euler.y -= euler.y * levelRate
+                if next.bodyAngularVelocity.y < 0.0 { next.bodyAngularVelocity.y = 0.0 }
+            } else if euler.y > tailStrikeLimit {
+                euler.y = tailStrikeLimit
+                if next.bodyAngularVelocity.y > 0.0 { next.bodyAngularVelocity.y = 0.0 }
+            }
+
+            next.orientation = euler
+            next.fixedWingOrientationQuat = orientationQuaternion(from: euler)
+
+            // Tyres resist sideways motion far harder than they resist rolling, so
+            // the aircraft tracks where it points instead of drifting across the
+            // strip. Yaw damping is deliberately light: the rudder and the
+            // nosewheel still have to be able to steer it.
+            let heading = SIMD3<Float>(-sin(euler.z), 0.0, -cos(euler.z))
+            let horizontal = SIMD3<Float>(next.velocity.x, 0.0, next.velocity.z)
+            let lateral = horizontal - heading * simd_dot(horizontal, heading)
+            next.velocity -= lateral * min(1.0, dt * 7.0 * wheelLoad)
+            next.bodyAngularVelocity.z *= max(0.0, 1.0 - dt * 3.0 * wheelLoad)
+
+            // Rolling resistance. Wheels on a prepared surface are cheap; a belly
+            // or a skid dragging through grass is not, and that difference is most
+            // of what stops an aircraft after a wheels-up landing.
+            let rollingFriction: Float = wing.hasWheeledUndercarriage ? 0.035 : 0.38
+            let groundSpeed = simd_length(horizontal)
+            if groundSpeed > 0.05 {
+                let decelerated = max(
+                    0.0,
+                    groundSpeed - rollingFriction * Tuning.gravity * wheelLoad * dt
+                )
+                let scale = decelerated / groundSpeed
+                next.velocity.x *= scale
+                next.velocity.z *= scale
+            }
+            next.angularVelocity = next.bodyAngularVelocity
         }
 
         let groundRestState = next.position.y <= groundClearance + 0.03 && state.physicalState.isGroundRestState && motorThrottle < 0.18
@@ -1054,6 +1334,32 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             next.velocity = direction * nextSpeed
             next.forwardAirspeed = simd_length(next.velocity - context.windVector)
             constrainAttitudeAndRates(&next)
+
+        case .canisterBoost:
+            // A booster is a thrust source, not a rail: it keeps accelerating the
+            // airframe along the tube axis for its whole burn, well past the point
+            // where the aircraft has left the tube. Attitude is held to the launch
+            // axis for the tube length only — after that the airframe is free and
+            // the aero model takes over while the booster is still pushing.
+            let actualMass = resolvedVehicleMass(
+                context: context,
+                fallback: context.vehicleMassModel.resolvedCurrentTotalMass,
+                minimum: 0.20
+            )
+            let boosterAcceleration = dynamics.maximumAccelerationMps2
+                * max(0.2, dynamics.nominalLaunchMassKg) / actualMass
+            let priorSpeed = max(0.0, simd_dot(previousState.velocity, direction))
+            let targetSpeed = max(0.1, dynamics.targetReleaseSpeedMps)
+            let nextSpeed = min(targetSpeed, priorSpeed + boosterAcceleration * dt)
+            let travelled = simd_dot(previousState.position - dynamics.origin, direction)
+
+            next.velocity = direction * nextSpeed
+            next.position = previousState.position + next.velocity * dt
+            next.forwardAirspeed = simd_length(next.velocity - context.windVector)
+            if travelled < dynamics.travelLengthMeters {
+                // Still constrained by the tube.
+                constrainAttitudeAndRates(&next)
+            }
 
         case .handRelease:
             let actualMass = resolvedVehicleMass(
@@ -1821,7 +2127,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             fallback: s.aero.inertiaTensor,
             minimum: 0.001
         )
-        let aeroAngularAccel = s.aeroMomentBody / inertiaRates
+        let aeroAngularAccel = rotationalAcceleration(
+            momentBody: s.aeroMomentBody,
+            omegaBody: state.bodyAngularVelocity,
+            inertiaRateOrdered: inertiaRates
+        )
         let angularAccel = hoverAngularAccel * (1.0 - s.wingborneBlend) + aeroAngularAccel * s.wingborneBlend
 
         next = integrateVTOLBody(
@@ -2079,7 +2389,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             fallback: s.aero.inertiaTensor,
             minimum: 0.001
         )
-        let aeroAngularAccel = s.aeroMomentBody / inertiaRates
+        let aeroAngularAccel = rotationalAcceleration(
+            momentBody: s.aeroMomentBody,
+            omegaBody: state.bodyAngularVelocity,
+            inertiaRateOrdered: inertiaRates
+        )
         // Attitude authority blends by *pilot-commanded* progress here, not
         // by wingborneBlend (unlike Wingcopter, where thrust direction is
         // already locked to the tilt angle regardless of aero authority).
@@ -2513,6 +2827,36 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         context: DroneSimulationContext
     ) -> SIMD3<Float> {
         resolvedGraphMassProperties(context: context)?.centerOfMassOffset ?? .zero
+    }
+
+    /// How far the centre of mass moves as the tanks empty, metres in body axes.
+    ///
+    /// Tanks sit near the balance point by design — an aircraft whose trim ran away
+    /// as it burned fuel would be unflyable — but "near" is not "at", and the
+    /// residual shift is a real handling change over a long flight. The offset is
+    /// taken as a small fraction of the airframe's own length rather than being
+    /// given per-aircraft, because no manufacturer in this catalogue publishes a
+    /// tank station.
+    ///
+    /// Two per cent of length, not six: on the MQ-9A six per cent worked out to a
+    /// fifth of the mean chord of travel, which is several times what any real
+    /// aircraft's loading limits permit. This lands near five per cent MAC — a trim
+    /// change the pilot notices and trims out, not a stability change.
+    private func fuelCentreOfMassShift(context: DroneSimulationContext) -> SIMD3<Float> {
+        guard let fuel = context.fuelState, fuel.capacityKg > 0.01 else { return .zero }
+        let burnedFraction = (fuel.consumedKg / fuel.capacityKg).clamped(to: 0.0...1.0)
+        guard burnedFraction > 0.001 else { return .zero }
+
+        let dryMass = max(0.2, context.vehicleMassModel.resolvedCurrentTotalMass)
+        let fuelMass = max(0.0, fuel.remainingKg)
+        // Body Z is aft. A tank slightly aft of the balance point moves the centre
+        // of mass forward as it empties.
+        let lengthMm = context.activeUAVProfile?.dimensions.fuselageLengthMillimeters
+            ?? context.profile.dimensionsUnfoldedMm.y
+        let tankStationAft = (lengthMm / 1000.0) * 0.02
+        let massFraction = fuelMass / max(0.2, dryMass + fuelMass)
+        let fullTankShift = tankStationAft * (fuel.capacityKg / max(0.2, dryMass + fuel.capacityKg))
+        return SIMD3<Float>(0.0, 0.0, tankStationAft * massFraction - fullTankShift)
     }
 
     /// Legacy damage authority averages motors, propellers and structure.

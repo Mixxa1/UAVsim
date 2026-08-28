@@ -9,6 +9,35 @@ struct BatteryComputationInput {
     let verticalSpeedMps: Float
     let throttle: Float
     let maneuverAggressiveness: Float
+    /// Does propulsion actually draw from this battery?
+    ///
+    /// False for a fuel aircraft, where the pack runs avionics and servos and the
+    /// engine burns fuel. Without this distinction the model sized the draw from
+    /// `batteryEnergyWh / maxFlightTimeMin` as though the battery flew the
+    /// aircraft: on the NC State BWB DELTA — a turbojet with a twelve-minute
+    /// endurance — that came out as 2.5 kW from a six-cell pack, roughly 113 A,
+    /// which cooked the battery twice in a row on the ramp.
+    let propulsionDrawsFromBattery: Bool
+
+    init(
+        droneProfile: DroneModelProfile,
+        weather: WeatherModel,
+        damageState: DamageState,
+        speedMps: Float,
+        verticalSpeedMps: Float,
+        throttle: Float,
+        maneuverAggressiveness: Float,
+        propulsionDrawsFromBattery: Bool = true
+    ) {
+        self.droneProfile = droneProfile
+        self.weather = weather
+        self.damageState = damageState
+        self.speedMps = speedMps
+        self.verticalSpeedMps = verticalSpeedMps
+        self.throttle = throttle
+        self.maneuverAggressiveness = maneuverAggressiveness
+        self.propulsionDrawsFromBattery = propulsionDrawsFromBattery
+    }
 }
 
 final class BatteryThermalSimulationService {
@@ -19,11 +48,21 @@ final class BatteryThermalSimulationService {
     ) -> BatteryState {
         var next = battery
 
-        let baseHoverPower = input.droneProfile.batteryEnergyWh / max(0.1, (input.droneProfile.maxFlightTimeMin / 60.0))
+        // An electric aircraft's pack carries the whole flight. A fuel aircraft's
+        // carries avionics, servos and payload while the engine does the work, so
+        // it draws a small fraction and is sized to outlast the tanks rather than
+        // to move the airframe.
+        let fullFlightPower = input.droneProfile.batteryEnergyWh / max(0.1, (input.droneProfile.maxFlightTimeMin / 60.0))
+        let baseHoverPower = input.propulsionDrawsFromBattery
+            ? fullFlightPower
+            : fullFlightPower * 0.08
 
         let speedFactor = 1.0 + (input.speedMps / max(0.1, input.droneProfile.maxHorizontalSpeedMps)) * 0.58
         let verticalFactor = 1.0 + abs(input.verticalSpeedMps) / max(0.1, input.droneProfile.maxVerticalSpeedMps) * 0.42
-        let throttleFactor = 0.66 + input.throttle * 1.24
+        // Throttle only loads the pack when the pack is what turns the propellers.
+        let throttleFactor = input.propulsionDrawsFromBattery
+            ? 0.66 + input.throttle * 1.24
+            : 1.0
         let maneuverFactor = 1.0 + input.maneuverAggressiveness * 0.36
         let weatherFactor = input.weather.effectiveFactors.batteryDrainMultiplier
         let damageFactor = input.damageState.batteryPenaltyMultiplier
@@ -118,10 +157,16 @@ final class BatteryThermalSimulationService {
         damageState: DamageState,
         collisionRisk: Float,
         maneuverAggressiveness: Float,
-        deltaTime: Float
+        deltaTime: Float,
+        /// False for a fuel aircraft, whose battery, ESC and motors are not what
+        /// the throttle lever commands. Heating them by it is the same mistake as
+        /// draining the pack for propulsion — the engine's own heat is modelled
+        /// separately, on the engine.
+        propulsionDrawsFromBattery: Bool = true
     ) -> ThermalState {
         var next = thermalState
         let factors = weather.effectiveFactors
+        let throttle = propulsionDrawsFromBattery ? throttle : throttle * 0.10
 
         for component in DamageComponent.allCases {
             let currentTemp = thermalState.temperature(for: component)

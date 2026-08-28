@@ -679,6 +679,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// which is every profile the catalogue had before the fuel work.
     private(set) var fuelState: FuelSystemState?
     private let fuelBurnService = FuelBurnService()
+    /// Engine + propeller chain for the selected aircraft. Nil for electric ones,
+    /// which keep the calibrated thrust backend.
+    private var fuelPropulsionBackend: FuelPropulsionBackend?
 
     /// Full tanks for a fuel aircraft, nil for anything electric.
     static func initialFuelState(for uavProfile: UAVProfile?) -> FuelSystemState? {
@@ -694,6 +697,20 @@ final class DroneSimulationViewModel: ObservableObject {
     func currentAtmosphere() -> AtmosphereModel {
         AtmosphereModel.resolve(weather: weather, siteElevationMeters: 0.0)
     }
+
+    /// Rebuilds the propulsion chain for the selected aircraft. The propeller is
+    /// sized against the airframe's own cruise speed, so it has to be rebuilt
+    /// whenever the aircraft changes.
+    private func rebuildFuelPropulsionBackend() {
+        fuelPropulsionBackend = FuelPropulsionBackend(
+            powerplant: activeUAVProfile?.powerplant,
+            cruiseSpeedMps: selectedDroneProfile.fixedWingParameters?.cruiseSpeedMps
+                ?? max(6.0, selectedDroneProfile.maxHorizontalSpeedMps * 0.6)
+        )
+    }
+
+    /// Engine state as reported by the physics engine, for HUD and debrief.
+    var engineRuntimeState: EngineRuntimeState? { state.engineRuntime }
     private(set) var collisionAnalysis: CollisionAnalysisSnapshot
     @Published private(set) var damageState: DamageState
     private(set) var thermalState: ThermalState
@@ -919,9 +936,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     var showsFixedWingLaunchStatus: Bool {
         selectedDroneProfile.airframeClass == .fixedWing &&
-            selectedDroneProfile.supportedLaunchModes.contains {
-                $0 == .handLaunch || $0 == .catapult
-            }
+            selectedDroneProfile.supportedLaunchModes.contains(where: \.runsLaunchSequence)
     }
 
     var canInitiateTakeoffCommand: Bool {
@@ -934,7 +949,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return true
         }
         let launchMode = activeLaunchMode()
-        guard launchMode == .handLaunch || launchMode == .catapult else {
+        guard launchMode.runsLaunchSequence else {
             return true
         }
         return selectedDroneProfile.supportedLaunchModes.contains(launchMode) &&
@@ -980,6 +995,19 @@ final class DroneSimulationViewModel: ObservableObject {
             return "launch.reason.configuration_failed"
         case "launch_preflight_corridor_invalid":
             return "launch.reason.corridor_invalid"
+        // The four refusals that used to share `corridor_invalid` between them.
+        case "launch_preflight_launcher_not_configured":
+            return "launch.reason.launcher_not_configured"
+        case "launch_preflight_launch_angle_invalid":
+            return "launch.reason.launch_angle_invalid"
+        case "launch_preflight_corridor_outside_world":
+            return "launch.reason.corridor_outside_world"
+        case "launch_preflight_corridor_edge_margin":
+            return "launch.reason.corridor_edge_margin"
+        case "launch_preflight_corridor_zone":
+            return "launch.reason.corridor_zone"
+        case "launch_preflight_runway_too_short":
+            return "launch.reason.runway_too_short"
         case "launch_preflight_mass_exceeded":
             return "launch.reason.mass_exceeded"
         case "launch_preflight_tailwind_unsafe":
@@ -3462,6 +3490,10 @@ final class DroneSimulationViewModel: ObservableObject {
         controlValues = DroneControlValues()
         batteryState = .full
         fuelState = Self.initialFuelState(for: activeUAVProfile)
+        rebuildFuelPropulsionBackend()
+        state.engineRuntime = fuelPropulsionBackend == nil
+            ? nil
+            : .cold(ambientTemperatureC: currentAtmosphere().state(worldY: 0).temperatureK - 273.15)
         damageState = .pristine
         rebuildVehicleComponentGraph()
         thermalState = .nominal
@@ -3622,7 +3654,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
         if selectedDroneProfile.airframeClass == .fixedWing,
-           activeLaunchMode() == .handLaunch || activeLaunchMode() == .catapult,
+           activeLaunchMode().runsLaunchSequence,
            let launchAsset = activeLaunchAsset() {
             fixedWingLaunchPreflightPrepared = false
             // Advisory, not a veto.
@@ -3933,7 +3965,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if mode == .launchObject,
            !workingTacticalMissionDraft.selectedLaunchMode.requiresLaunchObject,
            let assistedMode = selectedDroneProfile.supportedLaunchModes.first(where: {
-               ($0 == .handLaunch || $0 == .catapult) && $0.isRuntimeImplemented
+               $0.runsLaunchSequence && $0.isRuntimeImplemented
            }) {
             workingTacticalMissionDraft = missionDraftBuilder.setLaunchMode(
                 assistedMode,
@@ -3968,7 +4000,7 @@ final class DroneSimulationViewModel: ObservableObject {
             var launchMode = workingTacticalMissionDraft.selectedLaunchMode
             if !launchMode.requiresLaunchObject,
                let assistedMode = selectedDroneProfile.supportedLaunchModes.first(where: {
-                   ($0 == .handLaunch || $0 == .catapult) && $0.isRuntimeImplemented
+                   $0.runsLaunchSequence && $0.isRuntimeImplemented
                }) {
                 launchMode = assistedMode
                 workingTacticalMissionDraft = missionDraftBuilder.setLaunchMode(
@@ -4101,6 +4133,10 @@ final class DroneSimulationViewModel: ObservableObject {
             return wing.handLaunchAngleDegrees
         case .catapult:
             return wing.catapultRailAngleDegrees
+        case .canister:
+            // The tube's elevation belongs to the launcher, not the airframe, so
+            // the drafted angle stands.
+            return nil
         case .standard, .runway, .vtol:
             return nil
         }
@@ -4674,6 +4710,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         batteryState = .full
         fuelState = Self.initialFuelState(for: activeUAVProfile)
+        rebuildFuelPropulsionBackend()
         reset()
         if didChangeTerrain {
             regenerateEnvironment()
@@ -6833,7 +6870,9 @@ final class DroneSimulationViewModel: ObservableObject {
             controlSystemFactor: componentFailureRuntime.functionalFactor(componentID: "flightController"),
             groundHeight: currentGroundHeight(),
             atmosphere: currentAtmosphere(),
-            fuelState: fuelState
+            fuelState: fuelState,
+            engineState: state.engineRuntime,
+            fuelPropulsion: fuelPropulsionBackend
         )
 
         let previousState = state
@@ -7069,7 +7108,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 speedMps: simd_length(state.velocity),
                 verticalSpeedMps: abs(state.velocity.y),
                 throttle: state.throttle,
-                maneuverAggressiveness: maneuverAggressiveness
+                maneuverAggressiveness: maneuverAggressiveness,
+                propulsionDrawsFromBattery: fuelPropulsionBackend == nil
             ),
             deltaTime: dt
         )
@@ -7082,12 +7122,13 @@ final class DroneSimulationViewModel: ObservableObject {
                 input: FuelBurnInput(
                     powerplant: powerplant,
                     throttle: state.throttle,
-                    // No engine start/stop state exists yet, so "running" means the
-                    // aircraft is armed and has not been written off. Modelling a
-                    // real ignition sequence belongs with the engine model.
-                    engineRunning: isArmed && state.physicalState != .crashed,
+                    // "Running" now means the engine is actually firing, which it is
+                    // not while it primes, cranks or after it has been shut down.
+                    engineRunning: state.engineRuntime?.runState.isFiring
+                        ?? (isArmed && state.physicalState != .crashed),
                     atmosphere: currentAtmosphere().state(worldY: state.position.y),
-                    leakKgPerSec: 0.0
+                    leakKgPerSec: 0.0,
+                    shaftPowerKW: state.engineRuntime?.shaftPowerKW
                 ),
                 deltaTime: dt
             )
@@ -7100,7 +7141,8 @@ final class DroneSimulationViewModel: ObservableObject {
             damageState: damageState,
             collisionRisk: collisionAnalysis.riskScore,
             maneuverAggressiveness: maneuverAggressiveness,
-            deltaTime: dt
+            deltaTime: dt,
+            propulsionDrawsFromBattery: fuelPropulsionBackend == nil
         )
         updateBatteryFireState(deltaTime: dt)
 
@@ -7568,7 +7610,21 @@ final class DroneSimulationViewModel: ObservableObject {
             omegaWorld,
             previousLowest.point + vehicleBodyOriginWorldOffset - previousCoM
         )
-        let closingSpeed = -simd_dot(incomingContactVelocity, normal)
+        // How hard the aircraft came *down* onto the ground, not how fast it was
+        // travelling across it.
+        //
+        // `-dot(v, n)` is the right closing speed against a wall. Against a support
+        // surface it is not: the normal tilts with every slope and undulation the
+        // terrain has, and the projection then charges the whole ground speed to
+        // the impact. Measured in flight, an aircraft doing 31.7 m/s along a field
+        // with 0.63 m/s of sink registered a 6.38 m/s closing speed and a 6.3 kJ
+        // hit — enough to tear the main gear off during an ordinary ground roll,
+        // on ground that merely rose ahead of it. Wheels and skids ride over that;
+        // they do not collide with it. The vertical closure is the honest measure,
+        // and a genuine arrival — a stall onto the ground, a dive into a hillside —
+        // has all of its energy there anyway.
+        let projectedClosingSpeed = -simd_dot(incomingContactVelocity, normal)
+        let closingSpeed = min(projectedClosingSpeed, max(0.0, -incomingContactVelocity.y))
         guard closingSpeed > 0.35 else { return nil }
 
         // The legacy engine/support constraint may already have erased the
@@ -12843,8 +12899,7 @@ final class DroneSimulationViewModel: ObservableObject {
             // to engage the intercept there would silently leave the aircraft in heading hold: the
             // launch would be permitted and the route still not flown, which is the worst of both.
             // The in-flight planner then owns the route, exactly as on the standard launch path.
-            let requiresPreparedLaunchRoute = (activeLaunchMode() == .handLaunch ||
-                activeLaunchMode() == .catapult)
+            let requiresPreparedLaunchRoute = activeLaunchMode().runsLaunchSequence
                 && fixedWingLaunchPreflightWarningReason == nil
             guard let queuedWaypoint = pendingFixedWingAssistWaypoint,
                   let liveIndex = fixedWingAssistWaypointOptions.firstIndex(where: {
@@ -16695,6 +16750,12 @@ final class DroneSimulationViewModel: ObservableObject {
             powerDrawW: Double(batteryState.powerDrawW.isFinite ? batteryState.powerDrawW : 0.0),
             estimatedRemainingMin: Double(batteryState.remainingTimeSec / 60.0),
             batteryVoltage: Double(batteryState.packVoltage.isFinite ? batteryState.packVoltage : 0.0),
+            engineStateKey: state.engineRuntime?.runState.localizationKey,
+            engineShaftRPM: Double(state.engineRuntime?.shaftRPM ?? 0.0),
+            engineTemperatureC: Double(state.engineRuntime?.temperatureC ?? 0.0),
+            fuelRemainingKg: Double(fuelState?.remainingKg ?? 0.0),
+            fuelCapacityKg: Double(fuelState?.capacityKg ?? 0.0),
+            fuelFlowKgPerHour: Double(fuelState?.flowKgPerHour ?? 0.0),
             batteryCellVoltage: Double(batteryState.cellVoltage.isFinite ? batteryState.cellVoltage : 0.0),
             batteryCurrentDrawA: Double(batteryState.currentDrawA.isFinite ? batteryState.currentDrawA : 0.0),
             weatherPreset: weather.preset.title,
@@ -22327,8 +22388,24 @@ final class DroneSimulationViewModel: ObservableObject {
         case .catapult(var catapult):
             if let wing {
                 catapult.rail.railLengthMeters = wing.catapultRailLengthMeters
+                catapult.rail.usesRocketBooster = wing.catapultUsesRocketBooster
             }
             asset = .catapult(catapult)
+        case .canister(var canister):
+            // Tube geometry is a property of the launcher, but which launcher is a
+            // property of the round it holds — an original Harpy is carried as
+            // separate containerised rounds, a Harop in an inclined cell block.
+            canister.launcherPattern = selectedDroneProfile.resolvedUAVProfile?
+                .visualPreset.canisterLauncherPattern ?? .cellBlock
+            asset = .canister(canister)
+        case .runway(var runway):
+            if let wing {
+                runway.usableLengthMeters = max(
+                    runway.usableLengthMeters,
+                    FixedWingRunwayGeometry.stripLength(for: wing)
+                )
+            }
+            asset = .runway(runway)
         }
         return asset
     }
@@ -22616,7 +22693,7 @@ final class DroneSimulationViewModel: ObservableObject {
             in: .empty,
             defaultLaunchAngleDegrees: preferredLaunchAngleDegrees(for: launchMode)
         )
-        guard launchMode == .handLaunch || launchMode == .catapult,
+        guard launchMode.runsLaunchSequence,
               selectedDroneProfile.supportedLaunchModes.contains(launchMode),
               let objectType = launchMode.defaultLaunchObjectType else {
             return draft
@@ -22690,7 +22767,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func beginFixedWingLaunchSequence() {
         guard selectedDroneProfile.airframeClass == .fixedWing,
-              activeLaunchMode() == .handLaunch || activeLaunchMode() == .catapult else {
+              activeLaunchMode().runsLaunchSequence else {
             resetFixedWingAutopilotCommands()
             return
         }
@@ -22708,22 +22785,49 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        // Validate the mode that is actually in force, not the one the draft
+        // happens to hold.
+        //
+        // `activeLaunchMode()` substitutes a supported mode when the stored one is
+        // not available on this airframe, and everything that arms, renders and
+        // flies the launch goes through it. The preview was handed the raw stored
+        // mode instead, and for the Harpy family — the only aircraft whose
+        // supported list does not contain `.standard` — the two disagreed on every
+        // default mission: the canister was drawn, armed and reported as the active
+        // launcher while the preview was asked about a `.standard` launch, refused
+        // to build one at all, and the launch aborted as an invalid corridor. Which
+        // is why the entire canister series could not be launched.
+        let resolvedDraft = MissionDraft(
+            waypoints: activeLaunchDraft().waypoints,
+            zones: activeLaunchDraft().zones,
+            constraints: activeLaunchDraft().constraints,
+            selectedLaunchMode: launchMode,
+            launchObject: launchObject
+        )
         let launchPreview = missionPreviewBuilder.buildLaunchPreview(
-            draft: currentMissionPlan.map { plan in
-                MissionDraft(
-                    waypoints: activeLaunchDraft().waypoints,
-                    zones: activeLaunchDraft().zones,
-                    constraints: activeLaunchDraft().constraints,
-                    selectedLaunchMode: plan.launchMode,
-                    launchObject: plan.launchObject
-                )
-            } ?? activeLaunchDraft(),
+            draft: resolvedDraft,
             viewport: currentTacticalMapViewport(),
             fixedWingParameters: selectedDroneProfile.fixedWingParameters,
             supportedLaunchModes: selectedDroneProfile.supportedLaunchModes
         )
-        guard launchPreview?.isValid == true else {
-            abortFixedWingLaunch(reason: "launch_preflight_corridor_invalid")
+        guard let launchPreview else {
+            abortFixedWingLaunch(reason: "launch_preflight_launcher_not_configured")
+            return
+        }
+        // One message for four different refusals told an operator nothing about
+        // which of them fired, and cost a whole flight-test round to find out.
+        guard launchPreview.isValid else {
+            let reason: String
+            if !launchPreview.hasValidLaunchAngle {
+                reason = "launch_preflight_launch_angle_invalid"
+            } else if !launchPreview.isWithinWorldBounds {
+                reason = "launch_preflight_corridor_outside_world"
+            } else if !launchPreview.hasSafeEdgeMargin {
+                reason = "launch_preflight_corridor_edge_margin"
+            } else {
+                reason = "launch_preflight_corridor_zone"
+            }
+            abortFixedWingLaunch(reason: reason)
             return
         }
 
@@ -23006,10 +23110,17 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let direction = simd_normalize(asset.direction3D)
         let nominalReleaseSpeed: Float
-        if mode == .handLaunch {
+        switch mode {
+        case .handLaunch:
             nominalReleaseSpeed = wing.handThrowSpeed *
                 sqrt(nominalMass / currentMass).clamped(to: 0.65...1.15)
-        } else {
+        case .runway:
+            // Nothing releases the aircraft, so there is no release speed to
+            // predict: it accelerates until it *has* rotation airspeed. Charging
+            // it the catapult's stroke equation would have refused every runway
+            // takeoff on a formula about a rail it does not have.
+            nominalReleaseSpeed = wing.takeoffRotationSpeed
+        default:
             let availableAcceleration = wing.maxCatapultAccelerationG * 9.81 *
                 nominalMass / currentMass
             let forceLimitedExitSpeed = sqrt(
@@ -23018,18 +23129,32 @@ final class DroneSimulationViewModel: ObservableObject {
             nominalReleaseSpeed = min(wing.catapultExitSpeed, forceLimitedExitSpeed)
         }
         let longitudinalWind = simd_dot(weather.windVector, direction)
-        let predictedLongitudinalAirspeed = nominalReleaseSpeed - longitudinalWind
         let crosswind = simd_length(weather.windVector - direction * longitudinalWind)
-        // The airframe must leave the launcher flying, not stalling: predicted
-        // airspeed at release (throw/exit speed corrected for the along-track
-        // wind) has to retain the mode-specific margin above minSafeAirspeed,
-        // or the launch is refused as a tailwind/overweight configuration
-        // instead of being allowed to mush into the ground after release.
-        let minimumReleaseEnergy = wing.minSafeAirspeed * (mode == .handLaunch
-            ? FixedWingHandLaunchTuning.minimumReleaseAirspeedFactor
-            : 1.02)
-        guard predictedLongitudinalAirspeed >= minimumReleaseEnergy else {
-            return "launch_preflight_tailwind_unsafe"
+        if mode == .runway {
+            // A tailwind does not leave a rolling aircraft slow — it leaves it
+            // long. Ground run scales with the square of the ratio between ground
+            // speed and airspeed at rotation, and the test is whether that still
+            // fits the strip.
+            let tailwind = max(0.0, -longitudinalWind)
+            let speedRatio = (wing.takeoffRotationSpeed + tailwind)
+                / max(1.0, wing.takeoffRotationSpeed)
+            let requiredRoll = wing.runwayTakeoffDistance * speedRatio * speedRatio
+            guard requiredRoll <= FixedWingRunwayGeometry.stripLength(for: wing) else {
+                return "launch_preflight_runway_too_short"
+            }
+        } else {
+            // The airframe must leave the launcher flying, not stalling: predicted
+            // airspeed at release (throw/exit speed corrected for the along-track
+            // wind) has to retain the mode-specific margin above minSafeAirspeed,
+            // or the launch is refused as a tailwind/overweight configuration
+            // instead of being allowed to mush into the ground after release.
+            let predictedLongitudinalAirspeed = nominalReleaseSpeed - longitudinalWind
+            let minimumReleaseEnergy = wing.minSafeAirspeed * (mode == .handLaunch
+                ? FixedWingHandLaunchTuning.minimumReleaseAirspeedFactor
+                : 1.02)
+            guard predictedLongitudinalAirspeed >= minimumReleaseEnergy else {
+                return "launch_preflight_tailwind_unsafe"
+            }
         }
         let crosswindLimit = min(
             selectedDroneProfile.maxWindResistanceMps,
@@ -23308,6 +23433,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 return max(wing.takeoffRotationSpeed * 1.2, 20.0)
             case .vtol:
                 return max(wing.initialClimbTargetAltitude * 0.45, 8.0)
+            case .canister:
+                // The booster throws the airframe steeply clear; the climb-out
+                // point sits close in and high rather than far downrange.
+                return max(wing.minSafeAirspeed * 1.2, 14.0)
             case .standard:
                 return max(wing.cruiseAirspeed, 10.0)
             }
@@ -23339,7 +23468,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let launchMode = activeLaunchMode()
-        guard launchMode == .handLaunch || launchMode == .catapult else {
+        guard launchMode.runsLaunchSequence else {
             return
         }
 
@@ -23372,7 +23501,10 @@ final class DroneSimulationViewModel: ObservableObject {
             aircraftState: state,
             windVector: weather.windVector,
             isArmed: isArmed,
-            batteryAvailable: !batteryState.isDepleted,
+            // Energy availability, whichever kind the aircraft carries: an empty
+            // tank must scrub a launch exactly as a flat battery does.
+            batteryAvailable: fuelState.map { !$0.isStarved } ?? !batteryState.isDepleted,
+            engineState: state.engineRuntime,
             deltaTime: deltaTime
         )
         updateLegacyLaunchState(launchRuntimeSnapshot.state, deltaTime: deltaTime)
@@ -23390,14 +23522,20 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingLaunchReleaseElapsed = 0.0
             let yaw = activeLaunchAsset()?.worldYawRadians ?? state.orientation.z
             let pitch = activeLaunchAsset()?.railAngleDegrees ?? 0.0
+            // A takeoff roll is flown at takeoff power, not at the cruise-derived
+            // takeoff reference: the aircraft has to make its own rotation speed
+            // before the strip runs out, and every other mode gets its energy from
+            // the launcher instead.
+            let rollingUnderOwnPower = launchMode == .runway
+                && launchRuntimeSnapshot.state == .assistedAcceleration
+            let commandedThrottle = rollingUnderOwnPower
+                ? wing.maxThrottle
+                : resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference
             updateControlValues({ values in
                 values.roll = 0.0
                 values.pitch = Double(pitch)
                 values.yaw = Double(yaw.radiansToDegrees)
-                values.throttle = max(
-                    values.throttle,
-                    Double(resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference)
-                )
+                values.throttle = max(values.throttle, Double(commandedThrottle))
             }, markManual: false)
             return
         case .aborted:
@@ -23530,7 +23668,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func refreshFixedWingLaunchPresentation() {
-        guard activeLaunchMode() == .handLaunch || activeLaunchMode() == .catapult else {
+        guard activeLaunchMode().runsLaunchSequence else {
             return
         }
 
