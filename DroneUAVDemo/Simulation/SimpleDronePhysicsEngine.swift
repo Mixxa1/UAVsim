@@ -94,7 +94,94 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             remaining -= dt
         }
 
+        // Heating and the envelope are advanced once per frame rather than per substep.
+        //
+        // Not a shortcut. Both are slow next to the airframe's dynamics — a skin panel's
+        // thermal time constant is tens of seconds — and the thermal integration is
+        // implicit, so a step of a frame rather than a substep changes the answer by
+        // nothing measurable while costing a ninetieth as much. What the substep loop
+        // gets wrong at one frame per second, this cannot.
+        next = advanceHighSpeedState(state: next, context: context, deltaTime: clampedDelta)
+
         next.mode = control.mode
+        return next
+    }
+
+    /// Skin temperatures and envelope margins, from the flow state the substeps left
+    /// behind.
+    ///
+    /// Fixed-wing and VTOL only. A multirotor has neither a Mach number worth the name
+    /// nor a structural envelope written in these terms, and running the model on one
+    /// would spend time to produce ambient temperature and zeros.
+    private func advanceHighSpeedState(
+        state: DroneState,
+        context: DroneSimulationContext,
+        deltaTime: Float
+    ) -> DroneState {
+        guard context.profile.airframeClass != .multirotor,
+              let wing = context.profile.fixedWingParameters else {
+            return state
+        }
+        var next = state
+        let atmosphere = context.atmosphere.state(worldY: state.position.y)
+        let flow = CompressibleFlowState(
+            atmosphere: atmosphere,
+            trueAirspeedMps: max(0.0, state.forwardAirspeed)
+        )
+
+        // Real span and length, from the catalogue rather than from `profile.dimensions`
+        // — the latter may be a scene-scale visual override, and an airframe modelled at
+        // a seventh of its size would report a seventh of the Reynolds number and heat
+        // up far too slowly.
+        let catalogDimensions = context.activeUAVProfile?.dimensions
+        let spanM = (catalogDimensions?.wingspanMillimeters
+            ?? context.profile.dimensionsUnfoldedMm.x) / 1000.0
+        let lengthM = (catalogDimensions?.fuselageLengthMillimeters
+            ?? (spanM * 550.0)) / 1000.0
+
+        let thermal = AeroThermalModel(
+            material: context.profile.skinMaterial,
+            referenceLengthM: lengthM,
+            // Wetted area as a multiple of the planform box. A crude but stable proxy:
+            // what matters here is that a large airframe has proportionally more skin to
+            // heat and more to radiate from, not the exact figure.
+            referenceAreaM2: max(0.2, spanM * lengthM * 0.55)
+        )
+        next.aeroThermal = thermal.advance(
+            state: state.aeroThermal,
+            flow: flow,
+            deltaTime: deltaTime
+        )
+
+        // Published here rather than only in the fixed-wing step so the VTOL steppers
+        // report them too. For a fixed wing this is the same flow the substeps already
+        // wrote, computed from the same airspeed, so it overwrites with itself.
+        next.machNumber = flow.mach
+        next.dynamicPressurePa = flow.dynamicPressurePa
+        next.equivalentAirspeedMps = flow.equivalentAirspeedMps
+
+        let limits = FlightEnvelopeLimits.derived(
+            maxAirspeedMps: wing.maxAirspeed,
+            stallAlphaRad: FixedWingAerodynamics.stallAngleOfAttack(for: wing.family),
+            dragDivergenceMach: FixedWingAerodynamics.dragDivergenceMach(for: wing.family),
+            structuralQualityFactor: context.profile.structuralQualityFactor,
+            skinMaterial: context.profile.skinMaterial
+        )
+        let inletInEnvelope = context.fuelPropulsion?.inlet
+            .isWithinEnvelope(mach: flow.mach) ?? true
+        next.flightEnvelope = FlightEnvelopeMonitor(limits: limits).evaluate(
+            previous: state.flightEnvelope,
+            mach: flow.mach,
+            dynamicPressurePa: flow.dynamicPressurePa,
+            // Set by the fixed-wing solver from the real force balance. A VTOL in
+            // rotor-borne flight leaves it at its neutral default, which is honest: n =
+            // L/W is a wing quantity and there is no wing carrying the aircraft there.
+            loadFactor: state.loadFactor,
+            angleOfAttackRad: state.angleOfAttack,
+            skinTemperatureK: next.aeroThermal.hottestK,
+            inletWithinEnvelope: inletInEnvelope,
+            deltaTime: deltaTime
+        )
         return next
     }
 
@@ -997,9 +1084,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // aircraft climbed (see FixedWingAerodynamics.build).
         let atmosphere = context.atmosphere.state(worldY: state.position.y)
         let airDensity = atmosphere.airDensity
-        let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
+        // One flow state per substep, shared by the aerodynamics, the structural
+        // envelope and the telemetry, rather than four places each recomputing their
+        // own `0.5 * rho * v * v` and none of them computing Mach at all. Built from
+        // the *air-relative* speed — `airspeed` already has wind and gusts removed, so
+        // an aircraft holding station in a jet stream is correctly flying, not stopped.
+        let flow = CompressibleFlowState(atmosphere: atmosphere, trueAirspeedMps: airspeed)
+        let mach = flow.mach
+        let dynamicPressure = flow.dynamicPressurePa
 
-        let (cl, cd) = aero.liftDrag(alphaRad: alpha)
+        let (cl, cd) = aero.liftDrag(alphaRad: alpha, mach: mach)
         let cy = aero.cyBeta * beta
 
         let normalizedWindDir = simd_length(bodyAirflow) > 0.0001 ? simd_normalize(bodyAirflow) : SIMD3<Float>(0, 0, -1)
@@ -1023,9 +1117,26 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let qHat = pitchRate * aero.meanChord / (2.0 * airspeed)
         let rHat = yawRate * aero.wingSpan / (2.0 * airspeed)
 
-        let cmPitch = aero.pitchMoment(alphaRad: alpha, elevatorFraction: elevatorFraction, qHat: qHat)
-        let clRoll = aero.rollMoment(alphaRad: alpha, betaRad: beta, aileronFraction: aileronFraction, pHat: pHat)
-        let cnYaw = aero.yawMoment(alphaRad: alpha, betaRad: beta, rudderFraction: rudderFraction, rHat: rHat)
+        let cmPitch = aero.pitchMoment(
+            alphaRad: alpha,
+            elevatorFraction: elevatorFraction,
+            qHat: qHat,
+            mach: mach
+        )
+        let clRoll = aero.rollMoment(
+            alphaRad: alpha,
+            betaRad: beta,
+            aileronFraction: aileronFraction,
+            pHat: pHat,
+            mach: mach
+        )
+        let cnYaw = aero.yawMoment(
+            alphaRad: alpha,
+            betaRad: beta,
+            rudderFraction: rudderFraction,
+            rHat: rHat,
+            mach: mach
+        )
 
         var momentBody = SIMD3<Float>(
             clRoll * dynamicPressure * aero.wingArea * aero.wingSpan,
@@ -1188,6 +1299,19 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.angularVelocity = next.bodyAngularVelocity
         next.angleOfAttack = alpha
         next.sideslipAngle = beta
+        next.machNumber = mach
+        next.dynamicPressurePa = dynamicPressure
+        next.equivalentAirspeedMps = flow.equivalentAirspeedMps
+        next.waveDragCoefficient = aero.waveDragCoefficient(alphaRad: alpha, mach: mach)
+        next.propulsionThrustNewtons = thrustMagnitude
+        next.inletPressureRecovery = context.fuelPropulsion?.inlet
+            .pressureRecovery(mach: mach, angleOfAttackRad: alpha) ?? 1.0
+        // Load factor, n = L/W. The *body-vertical component* of the non-gravitational
+        // force over the weight, which is what a structural limit is written against —
+        // not the magnitude of the aerodynamic force, and not the mass ratio that
+        // `FlightBaselineResolver` unfortunately also calls a load factor.
+        next.loadFactor = simd_dot(aeroForceBody + thrustForceBody, SIMD3<Float>(0, 1, 0))
+            / max(1.0, mass * Tuning.gravity)
 
         // --- Ground handling.
         let groundClearance = contactGroundClearance(context: context, orientation: next.fixedWingOrientationQuat)

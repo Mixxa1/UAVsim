@@ -71,6 +71,14 @@ struct FixedWingAerodynamics {
 
     let cyBeta: Float
 
+    /// Compressibility corrections for this airframe's planform.
+    ///
+    /// Every coefficient above this line is a low-speed number, exactly as it always
+    /// was. This is what turns them into functions of Mach — and it is inert below
+    /// Mach 0.3, so an airframe flying where the rest of the catalogue flies gets
+    /// bit-identical coefficients to the ones it got before compressibility existed.
+    let transonic: TransonicAeroModel
+
     /// Constant rolling/yawing-moment offsets from asymmetric structural
     /// damage (see FixedWingAeroDamage). Zero for a pristine airframe.
     var clRollDamageOffset: Float = 0.0
@@ -127,39 +135,105 @@ struct FixedWingAerodynamics {
         return t * t * (3.0 - 2.0 * t)
     }
 
-    /// Lift + drag coefficients at the given angle of attack.
-    func liftDrag(alphaRad: Float) -> (cl: Float, cd: Float) {
-        let cl = clTable.sample(alphaRad)
+    /// Lift + drag coefficients at the given angle of attack and Mach number.
+    ///
+    /// `mach` defaults to zero, which makes every compressibility term inert — so the
+    /// dozens of existing call sites that have no flow state to hand keep the exact
+    /// coefficients they had before. The physics step passes the real value.
+    func liftDrag(alphaRad: Float, mach: Float = 0.0) -> (cl: Float, cd: Float) {
+        let incompressibleCl = clTable.sample(alphaRad)
         let blend = stallBlend(alphaRad: alphaRad)
-        let cd = cd0 + inducedDragFactor * cl * cl + blend * stallDragBump
+        let cl = incompressibleCl * transonic.liftFactor(mach: mach)
+        // Induced drag is charged on the *compressible* lift, because that is the lift
+        // the wing is actually making and therefore the vorticity it is actually
+        // shedding. Wave drag is separate and additive — it is a different mechanism,
+        // and keeping it separate is what lets it be logged and diagnosed on its own,
+        // which the plan asks for.
+        let cd = cd0
+            + inducedDragFactor * cl * cl
+            + blend * stallDragBump
+            + transonic.waveDragIncrement(mach: mach, liftCoefficient: cl)
         return (cl, cd)
+    }
+
+    /// The wave-drag part of `liftDrag`'s CD on its own, for telemetry and the drag
+    /// breakdown the engineering diagnostics need. Recomputing it rather than
+    /// returning it from `liftDrag` keeps that call's return shape unchanged for the
+    /// solver, which runs it every substep for every aircraft.
+    func waveDragCoefficient(alphaRad: Float, mach: Float) -> Float {
+        let cl = clTable.sample(alphaRad) * transonic.liftFactor(mach: mach)
+        return transonic.waveDragIncrement(mach: mach, liftCoefficient: cl)
     }
 
     /// Pitching moment coefficient: alpha-dependent static stability term
     /// (weakened past stall) + elevator + pitch-rate damping (also weakened
     /// past stall, modeling real tail-effectiveness loss in the wing's wake).
-    func pitchMoment(alphaRad: Float, elevatorFraction: Float, qHat: Float) -> Float {
+    /// Pitching moment, including the aerodynamic-centre shift through the transonic.
+    ///
+    /// The shift is applied as a change of moment *reference point* —
+    /// `Cm_cg = Cm_ac + CL·Δx/c̄`, negative because the centre moves aft — and not as a
+    /// force acting on a lever about the centre of mass. Written the other way it
+    /// double-counts a moment the coefficient build-up already contains.
+    ///
+    /// This term is what stops an aircraft crossing Mach 1 on its old trim. It is also
+    /// why a supersonic aircraft needs so much more nose-up elevator to hold level
+    /// flight than the same airframe does subsonically.
+    func pitchMoment(
+        alphaRad: Float,
+        elevatorFraction: Float,
+        qHat: Float,
+        mach: Float = 0.0
+    ) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
+        let controlScale = transonic.controlEffectiveness(mach: mach)
         let effectiveCmAlpha = cmAlpha * (1.0 - 0.6 * blend)
-        let effectiveCmq = cmq * (1.0 - 0.5 * blend)
-        return cm0 + effectiveCmAlpha * alphaRad + cmDeltaE * elevatorFraction + effectiveCmq * qHat
+        let effectiveCmq = cmq * (1.0 - 0.5 * blend) * controlScale
+        let base = cm0
+            + effectiveCmAlpha * alphaRad
+            + cmDeltaE * controlScale * elevatorFraction
+            + effectiveCmq * qHat
+
+        let shift = transonic.aeroCenterShiftFraction(mach: mach)
+        guard shift > 1.0e-5 else { return base }
+        let cl = clTable.sample(alphaRad) * transonic.liftFactor(mach: mach)
+        return base - cl * shift
     }
 
     /// Rolling moment coefficient: sideslip (dihedral) + aileron + roll-rate
     /// damping + the constant asymmetric-damage offset.
-    func rollMoment(alphaRad: Float, betaRad: Float, aileronFraction: Float, pHat: Float) -> Float {
+    func rollMoment(
+        alphaRad: Float,
+        betaRad: Float,
+        aileronFraction: Float,
+        pHat: Float,
+        mach: Float = 0.0
+    ) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
-        let effectiveClp = clp * (1.0 - 0.5 * blend)
-        return clBeta * betaRad + clDeltaA * aileronFraction + effectiveClp * pHat + clRollDamageOffset
+        let controlScale = transonic.controlEffectiveness(mach: mach)
+        let effectiveClp = clp * (1.0 - 0.5 * blend) * controlScale
+        return clBeta * betaRad
+            + clDeltaA * controlScale * aileronFraction
+            + effectiveClp * pHat
+            + clRollDamageOffset
     }
 
     /// Yawing moment coefficient: sideslip (weathercock) + rudder + yaw-rate
     /// damping + the constant asymmetric-damage offset.
-    func yawMoment(alphaRad: Float, betaRad: Float, rudderFraction: Float, rHat: Float) -> Float {
+    func yawMoment(
+        alphaRad: Float,
+        betaRad: Float,
+        rudderFraction: Float,
+        rHat: Float,
+        mach: Float = 0.0
+    ) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
+        let controlScale = transonic.controlEffectiveness(mach: mach)
         let effectiveCnBeta = cnBeta * (1.0 - 0.5 * blend)
-        let effectiveCnr = cnr * (1.0 - 0.5 * blend)
-        return effectiveCnBeta * betaRad + cnDeltaR * rudderFraction + effectiveCnr * rHat + cnYawDamageOffset
+        let effectiveCnr = cnr * (1.0 - 0.5 * blend) * controlScale
+        return effectiveCnBeta * betaRad
+            + cnDeltaR * controlScale * rudderFraction
+            + effectiveCnr * rHat
+            + cnYawDamageOffset
     }
 
     /// Applies structural-damage deltas on top of the pristine model.
@@ -180,6 +254,25 @@ struct FixedWingAerodynamics {
         damaged.clRollDamageOffset = clRollDamageOffset + damage.clRollOffset
         damaged.cnYawDamageOffset = cnYawDamageOffset + damage.cnYawOffset
         return damaged
+    }
+
+    /// This family's stall angle of attack, radians.
+    ///
+    /// Exposed on its own because the flight envelope needs it without needing an
+    /// airframe: building a whole coefficient set to read one preset value would mean
+    /// supplying a mass, a span and a stall speed that have nothing to do with the
+    /// question being asked.
+    static func stallAngleOfAttack(for family: FixedWingFamily) -> Float {
+        FamilyAeroPreset.preset(for: family).stallAlphaRad
+    }
+
+    /// Mach at which this planform's drag rise becomes steep.
+    ///
+    /// Exposed for the same reason as the stall angle, and used for the same kind of
+    /// thing: it is the aerodynamic ceiling a subsonic airframe actually has, and it
+    /// belongs to the shape rather than to any particular aircraft's declared speeds.
+    static func dragDivergenceMach(for family: FixedWingFamily) -> Float {
+        FamilyAeroPreset.preset(for: family).dragDivergenceMach
     }
 
     static func build(
@@ -312,6 +405,12 @@ struct FixedWingAerodynamics {
             cnDeltaR: preset.cnDeltaR * turnGain,
             cnr: preset.cnrBase * dampingScale,
             cyBeta: preset.cyBeta,
+            transonic: TransonicAeroModel(
+                criticalMach: preset.criticalMach,
+                dragDivergenceMach: preset.dragDivergenceMach,
+                waveDragPeak: preset.waveDragPeak,
+                supersonicAeroCenterShift: preset.supersonicAeroCenterShift
+            ),
             maxElevatorRad: preset.maxElevatorDeg.fwDegreesToRadians,
             maxAileronRad: preset.maxAileronDeg.fwDegreesToRadians,
             maxRudderRad: preset.maxRudderDeg.fwDegreesToRadians,
@@ -388,6 +487,15 @@ private struct FamilyAeroPreset {
     let cnDeltaR: Float // per radian of rudder deflection
     let cnrBase: Float
     let cyBeta: Float // per radian sideslip
+    // Compressibility shape parameters. Diagnostic and fallback figures rather than
+    // measured ones — the plan asks for them to be stored per profile precisely so that
+    // a universal "+30 % drag above Mach 1" is impossible to write. A thin slender delta
+    // and a thick straight wing differ here by a factor of three, which is most of why
+    // one of them can go supersonic and the other cannot.
+    let criticalMach: Float
+    let dragDivergenceMach: Float
+    let waveDragPeak: Float
+    let supersonicAeroCenterShift: Float
     let maxElevatorDeg: Float
     let maxAileronDeg: Float
     let maxRudderDeg: Float
@@ -405,6 +513,8 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.10, clDeltaA: 0.12, clpBase: -0.45,
                 cnBetaSlope: -0.10, cnDeltaR: 0.06, cnrBase: -0.22,
                 cyBeta: -0.30,
+                criticalMach: 0.68, dragDivergenceMach: 0.74,
+                waveDragPeak: 0.075, supersonicAeroCenterShift: 0.24,
                 maxElevatorDeg: 24.0, maxAileronDeg: 20.0, maxRudderDeg: 18.0,
                 torqueThrustRatio: 0.08, pFactorGain: 0.05, tailSlipstreamCoverage: 0.30
             )
@@ -416,6 +526,8 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.06, clDeltaA: 0.09, clpBase: -0.35,
                 cnBetaSlope: -0.07, cnDeltaR: 0.05, cnrBase: -0.15,
                 cyBeta: -0.22,
+                criticalMach: 0.82, dragDivergenceMach: 0.90,
+                waveDragPeak: 0.030, supersonicAeroCenterShift: 0.22,
                 maxElevatorDeg: 22.0, maxAileronDeg: 18.0, maxRudderDeg: 16.0,
                 torqueThrustRatio: 0.06, pFactorGain: 0.03, tailSlipstreamCoverage: 0.20
             )
@@ -427,6 +539,8 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.09, clDeltaA: 0.10, clpBase: -0.40,
                 cnBetaSlope: -0.12, cnDeltaR: 0.07, cnrBase: -0.24,
                 cyBeta: -0.28,
+                criticalMach: 0.76, dragDivergenceMach: 0.82,
+                waveDragPeak: 0.050, supersonicAeroCenterShift: 0.25,
                 maxElevatorDeg: 20.0, maxAileronDeg: 18.0, maxRudderDeg: 16.0,
                 // MQ-9B (the only user of this family) is a confirmed rear
                 // pusher-prop design — tail sits ahead of the disk, barely
@@ -441,6 +555,8 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.07, clDeltaA: 0.11, clpBase: -0.38,
                 cnBetaSlope: -0.06, cnDeltaR: 0.045, cnrBase: -0.13,
                 cyBeta: -0.18,
+                criticalMach: 0.78, dragDivergenceMach: 0.85,
+                waveDragPeak: 0.040, supersonicAeroCenterShift: 0.20,
                 maxElevatorDeg: 18.0, maxAileronDeg: 18.0, maxRudderDeg: 12.0,
                 torqueThrustRatio: 0.05, pFactorGain: 0.02, tailSlipstreamCoverage: 0.15
             )
@@ -452,6 +568,8 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.09, clDeltaA: 0.115, clpBase: -0.42,
                 cnBetaSlope: -0.11, cnDeltaR: 0.065, cnrBase: -0.22,
                 cyBeta: -0.27,
+                criticalMach: 0.70, dragDivergenceMach: 0.76,
+                waveDragPeak: 0.070, supersonicAeroCenterShift: 0.24,
                 maxElevatorDeg: 22.0, maxAileronDeg: 20.0, maxRudderDeg: 18.0,
                 torqueThrustRatio: 0.08, pFactorGain: 0.05, tailSlipstreamCoverage: 0.30
             )
@@ -463,8 +581,82 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.08, clDeltaA: 0.10, clpBase: -0.40,
                 cnBetaSlope: -0.09, cnDeltaR: 0.06, cnrBase: -0.19,
                 cyBeta: -0.25,
+                criticalMach: 0.68, dragDivergenceMach: 0.74,
+                waveDragPeak: 0.080, supersonicAeroCenterShift: 0.24,
                 maxElevatorDeg: 20.0, maxAileronDeg: 18.0, maxRudderDeg: 16.0,
                 torqueThrustRatio: 0.07, pFactorGain: 0.04, tailSlipstreamCoverage: 0.25
+            )
+        // MARK: Supersonic planforms
+        //
+        // The three below differ where it matters and are alike where it does not. All
+        // are thin and slender, so all pay far less wave drag than the subsonic families
+        // above — a cropped-delta target drone's wave-drag peak is a third of a thick
+        // straight wing's, which is most of why one of them can go supersonic on 8 kN and
+        // the other cannot go supersonic at all.
+        //
+        // Where they part company is the aerodynamic-centre shift, and that is not a
+        // detail: it is the trim change through Mach 1. A tailless delta pays the most, a
+        // cruciform-tailed slender body somewhat less, and a close-coupled canard the
+        // least — which is the actual aerodynamic argument for putting a canard on a
+        // supersonic aircraft, and the reason all three configurations exist.
+        //
+        // Propeller-coupling terms are zero throughout. Every aircraft on these planforms
+        // is a jet, and the solver gates those terms on having a disc to react against.
+        case .supersonicCruciform:
+            return FamilyAeroPreset(
+                cl0: 0.04, clAlpha: 2.9, stallAlphaRad: Float(20.0).fwDegreesToRadians,
+                cd0: 0.022, oswaldEfficiency: 0.66, stallDragBump: 0.55,
+                cm0: 0.0, cmAlpha: -0.46, cmDeltaE: 0.20, cmqBase: -9.0,
+                clBetaSlope: 0.05, clDeltaA: 0.085, clpBase: -0.30,
+                // A cruciform tail is a large fin: this planform weathercocks hard, which
+                // is what keeps a slender body pointed the right way at Mach 1.8.
+                cnBetaSlope: -0.16, cnDeltaR: 0.085, cnrBase: -0.30,
+                cyBeta: -0.34,
+                criticalMach: 0.88, dragDivergenceMach: 0.95,
+                // 0.014, not the 0.022 first written. A body of revolution with small
+                // wings is the lowest-wave-drag shape there is, and the reference
+                // aircraft on this planform could not reach their published speeds at the
+                // higher figure. The estimate moved; their published performance did not.
+                waveDragPeak: 0.014, supersonicAeroCenterShift: 0.26,
+                maxElevatorDeg: 22.0, maxAileronDeg: 18.0, maxRudderDeg: 22.0,
+                torqueThrustRatio: 0.0, pFactorGain: 0.0, tailSlipstreamCoverage: 0.0
+            )
+        case .supersonicDelta:
+            return FamilyAeroPreset(
+                // Vortex lift: a thin delta keeps making lift to angles that would have
+                // stalled a straight wing long before, and it does it with a lift-curve
+                // slope that is low all the way up.
+                cl0: 0.03, clAlpha: 2.6, stallAlphaRad: Float(28.0).fwDegreesToRadians,
+                cd0: 0.020, oswaldEfficiency: 0.62, stallDragBump: 0.5,
+                cm0: 0.0, cmAlpha: -0.30, cmDeltaE: 0.16, cmqBase: -4.5,
+                clBetaSlope: 0.05, clDeltaA: 0.095, clpBase: -0.32,
+                cnBetaSlope: -0.06, cnDeltaR: 0.05, cnrBase: -0.14,
+                cyBeta: -0.20,
+                criticalMach: 0.90, dragDivergenceMach: 0.98,
+                waveDragPeak: 0.014, supersonicAeroCenterShift: 0.24,
+                maxElevatorDeg: 24.0, maxAileronDeg: 20.0, maxRudderDeg: 18.0,
+                torqueThrustRatio: 0.0, pFactorGain: 0.0, tailSlipstreamCoverage: 0.0
+            )
+        case .canardDelta:
+            return FamilyAeroPreset(
+                // The canard carries lift of its own, so the configuration's lift-curve
+                // slope is higher than a bare delta's and its induced efficiency better.
+                cl0: 0.08, clAlpha: 3.4, stallAlphaRad: Float(26.0).fwDegreesToRadians,
+                cd0: 0.024, oswaldEfficiency: 0.72, stallDragBump: 0.6,
+                // Deliberately weak static stability. A close-coupled canard aircraft is
+                // built near neutral and flown by its computer — HiMAT explicitly so —
+                // and pretending otherwise would make it handle like an airliner.
+                cm0: 0.01, cmAlpha: -0.22, cmDeltaE: 0.24, cmqBase: -5.5,
+                clBetaSlope: 0.06, clDeltaA: 0.115, clpBase: -0.34,
+                cnBetaSlope: -0.09, cnDeltaR: 0.06, cnrBase: -0.18,
+                cyBeta: -0.24,
+                criticalMach: 0.86, dragDivergenceMach: 0.94,
+                waveDragPeak: 0.019,
+                // Half the shift of a tailless delta. This single number is the
+                // configuration's whole reason for existing.
+                supersonicAeroCenterShift: 0.13,
+                maxElevatorDeg: 25.0, maxAileronDeg: 22.0, maxRudderDeg: 20.0,
+                torqueThrustRatio: 0.0, pFactorGain: 0.0, tailSlipstreamCoverage: 0.0
             )
         case .surveyEVTOL:
             return FamilyAeroPreset(
@@ -474,6 +666,8 @@ private struct FamilyAeroPreset {
                 clBetaSlope: 0.085, clDeltaA: 0.11, clpBase: -0.41,
                 cnBetaSlope: -0.10, cnDeltaR: 0.06, cnrBase: -0.20,
                 cyBeta: -0.26,
+                criticalMach: 0.70, dragDivergenceMach: 0.76,
+                waveDragPeak: 0.075, supersonicAeroCenterShift: 0.24,
                 maxElevatorDeg: 21.0, maxAileronDeg: 19.0, maxRudderDeg: 17.0,
                 torqueThrustRatio: 0.07, pFactorGain: 0.04, tailSlipstreamCoverage: 0.25
             )

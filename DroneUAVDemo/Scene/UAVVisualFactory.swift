@@ -205,6 +205,16 @@ enum UAVVisualFactory {
             return buildBlendedWingBodyTestbed(payloadMountOffset: payloadMountOffset)
         case .jetTargetDrone:
             return buildJetTargetDrone(payloadMountOffset: payloadMountOffset)
+        case .bqm34fFirebeeII:
+            return buildFirebeeII(payloadMountOffset: payloadMountOffset)
+        case .aqm35TargetDrone:
+            return buildAQM35(payloadMountOffset: payloadMountOffset)
+        case .rockwellHiMAT:
+            return buildHiMAT(payloadMountOffset: payloadMountOffset)
+        case .hermeusQuarterhorse:
+            return buildQuarterhorse(payloadMountOffset: payloadMountOffset)
+        case .northAmericanX10:
+            return buildX10(payloadMountOffset: payloadMountOffset)
         }
     }
 
@@ -3284,6 +3294,649 @@ enum UAVVisualFactory {
         let fpvAnchor = SCNNode()
         fpvAnchor.name = "fpvCameraAnchor"
         fpvAnchor.position = SCNVector3(0.0, -0.026, 0.44)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    // MARK: - Supersonic reference aircraft
+    //
+    // All five are authored at roughly one sixth of full size, which is the scale the
+    // existing large airframes in this catalogue use (the MQ-9B's scene model is 3.2 m
+    // against a 24 m span). The physics does not read these dimensions — it takes the
+    // real ones from the catalogue entry — so the scale here is a scene convention, and
+    // matching the rest of the fleet matters more than matching a tape measure.
+    //
+    // Shape conventions in this file, both of which are easy to get wrong: the nose
+    // points along **+Z**, and inside `planformNode` a shape's **+Y is aft**.
+
+    /// Ryan BQM-34F Firebee II.
+    ///
+    /// The silhouette that matters is the slenderness. Almost all of this aircraft is
+    /// fuselage: a 8.89 m body on a 2.94 m span, with a small cropped-delta wing set low
+    /// and a cruciform tail. That ratio is not styling — it is why a 951 kg target drone
+    /// on 8.5 kN of thrust reaches Mach 1.78, and why its wave-drag peak is a third of
+    /// what a straight-winged aircraft would pay.
+    private static func buildFirebeeII(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.bqm34fFirebeeII"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.86, green: 0.32, blue: 0.13, alpha: 1.0), roughness: 0.42, metalness: 0.22)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.78, green: 0.29, blue: 0.12, alpha: 1.0), roughness: 0.46, metalness: 0.20)
+        let accentMaterial = material(diffuse: NSColor(calibratedWhite: 0.13, alpha: 1.0), roughness: 0.30, metalness: 0.55)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 1.30, radius: 0.055, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let nose = sphereNode(radius: 0.054, material: bodyMaterial)
+        nose.position = SCNVector3(0.0, 0.0, 0.66)
+        nose.scale = SCNVector3(1.0, 1.0, 1.9)
+        root.addChildNode(nose)
+
+        // Chin scoop: a plain forward-facing hole under the forward fuselage. One normal
+        // shock, and the reason this aircraft dashes to Mach 1.78 rather than cruising
+        // there.
+        let intake = boxNode(size: SIMD3<Float>(0.090, 0.060, 0.230), chamfer: 0.022, material: bodyMaterial)
+        intake.position = SCNVector3(0.0, -0.062, 0.20)
+        root.addChildNode(intake)
+        append(intake, to: .motorRR, componentNodes: &componentNodes)
+
+        let intakeLip = torusNode(ringRadius: 0.040, pipeRadius: 0.008, material: accentMaterial)
+        intakeLip.position = SCNVector3(0.0, -0.064, 0.312)
+        root.addChildNode(intakeLip)
+
+        // Cropped delta, low-set. Half-span 0.245 against a 1.48 m length reproduces the
+        // published 2.94 m span on an 8.89 m body.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.055, y: -0.10),
+                CGPoint(x: 0.055, y: -0.10),
+                CGPoint(x: 0.245, y: 0.16),
+                CGPoint(x: 0.245, y: 0.22),
+                CGPoint(x: -0.245, y: 0.22),
+                CGPoint(x: -0.245, y: 0.16)
+            ],
+            thickness: 0.016,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, -0.020, 0.02)
+        root.addChildNode(wing)
+        append(wing, to: .armFL, componentNodes: &componentNodes)
+        append(wing, to: .armFR, componentNodes: &componentNodes)
+
+        // Cruciform tail: four identical surfaces at ninety degrees. The large total fin
+        // area is what keeps a slender body pointed the right way at Mach 1.8, and it is
+        // why this planform's weathercock stability is set so much higher than a
+        // conventional wing's.
+        for index in 0..<4 {
+            let surface = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.20, y: 0.0),
+                    CGPoint(x: 0.17, y: 0.15),
+                    CGPoint(x: 0.07, y: 0.15)
+                ],
+                thickness: 0.010,
+                material: wingMaterial
+            )
+            let carrier = SCNNode()
+            carrier.addChildNode(surface)
+            carrier.eulerAngles = SCNVector3(0.0, 0.0, Float(index) * Float.pi / 2.0)
+            carrier.position = SCNVector3(0.0, 0.0, -0.56)
+            root.addChildNode(carrier)
+            append(carrier, to: index % 2 == 0 ? .armRL : .armRR, componentNodes: &componentNodes)
+        }
+
+        let exhaust = cylinderNode(radius: 0.046, height: 0.070, material: accentMaterial)
+        exhaust.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        exhaust.position = SCNVector3(0.0, 0.0, -0.70)
+        root.addChildNode(exhaust)
+
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, 0.0, -0.74)
+        root.addChildNode(jetExhaustAnchor)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.012, 0.60)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// Northrop AQM-35, both marks.
+    ///
+    /// A 20-inch tube with wings — the published body diameter is 0.51 m on a 10 m
+    /// length, which is a fineness ratio of twenty. The wing is mid-mounted, small and
+    /// nearly unswept at the trailing edge; the tail is cruciform like the Firebee's but
+    /// set further aft on a longer moment arm.
+    private static func buildAQM35(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.aqm35TargetDrone"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedRed: 0.90, green: 0.88, blue: 0.84, alpha: 1.0), roughness: 0.38, metalness: 0.30)
+        let wingMaterial = material(diffuse: NSColor(calibratedRed: 0.80, green: 0.20, blue: 0.16, alpha: 1.0), roughness: 0.44, metalness: 0.22)
+        let accentMaterial = material(diffuse: NSColor(calibratedWhite: 0.15, alpha: 1.0), roughness: 0.30, metalness: 0.58)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 1.52, radius: 0.043, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // A sharp ogive nose rather than a rounded one. Above Mach 1.5 the nose shape is
+        // a drag term rather than a styling choice.
+        let nose = cylinderNode(radius: 0.043, height: 0.24, material: bodyMaterial)
+        nose.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        nose.scale = SCNVector3(1.0, 1.0, 0.45)
+        nose.position = SCNVector3(0.0, 0.0, 0.78)
+        root.addChildNode(nose)
+
+        let noseTip = sphereNode(radius: 0.020, material: accentMaterial)
+        noseTip.position = SCNVector3(0.0, 0.0, 0.90)
+        noseTip.scale = SCNVector3(1.0, 1.0, 2.2)
+        root.addChildNode(noseTip)
+
+        // Twin side intakes with a splitter plate — the fixed-ramp arrangement the B
+        // needs for Mach 2, and visibly different from the Firebee's single chin scoop.
+        for side in [Float(-1.0), Float(1.0)] {
+            let duct = boxNode(size: SIMD3<Float>(0.055, 0.055, 0.210), chamfer: 0.016, material: bodyMaterial)
+            duct.position = SCNVector3(side * 0.058, -0.012, 0.24)
+            root.addChildNode(duct)
+            append(duct, to: side < 0 ? .motorRL : .motorRR, componentNodes: &componentNodes)
+
+            let splitter = boxNode(size: SIMD3<Float>(0.008, 0.048, 0.120), chamfer: 0.003, material: accentMaterial)
+            splitter.position = SCNVector3(side * 0.086, -0.012, 0.30)
+            root.addChildNode(splitter)
+        }
+
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.048, y: -0.09),
+                CGPoint(x: 0.048, y: -0.09),
+                CGPoint(x: 0.282, y: 0.10),
+                CGPoint(x: 0.282, y: 0.18),
+                CGPoint(x: -0.282, y: 0.18),
+                CGPoint(x: -0.282, y: 0.10)
+            ],
+            thickness: 0.014,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.0, -0.04)
+        root.addChildNode(wing)
+        append(wing, to: .armFL, componentNodes: &componentNodes)
+        append(wing, to: .armFR, componentNodes: &componentNodes)
+
+        for index in 0..<4 {
+            let surface = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.18, y: 0.0),
+                    CGPoint(x: 0.15, y: 0.14),
+                    CGPoint(x: 0.05, y: 0.14)
+                ],
+                thickness: 0.009,
+                material: wingMaterial
+            )
+            let carrier = SCNNode()
+            carrier.addChildNode(surface)
+            carrier.eulerAngles = SCNVector3(0.0, 0.0, Float(index) * Float.pi / 2.0 + Float.pi / 4.0)
+            carrier.position = SCNVector3(0.0, 0.0, -0.66)
+            root.addChildNode(carrier)
+            append(carrier, to: index % 2 == 0 ? .armRL : .armRR, componentNodes: &componentNodes)
+        }
+
+        let exhaust = cylinderNode(radius: 0.038, height: 0.060, material: accentMaterial)
+        exhaust.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        exhaust.position = SCNVector3(0.0, 0.0, -0.80)
+        root.addChildNode(exhaust)
+
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, 0.0, -0.84)
+        root.addChildNode(jetExhaustAnchor)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.010, 0.72)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// NASA / Rockwell HiMAT.
+    ///
+    /// Four features, and every one of them was a research objective rather than
+    /// decoration: close-coupled canards ahead of the wing, winglets at the tips, twin
+    /// outward-canted fins, and a rearward-swept planform with aeroelastically tailored
+    /// composite skins. The canards are the reason this aircraft's aerodynamic centre
+    /// barely moves through Mach 1, which is modelled explicitly in its aero family.
+    private static func buildHiMAT(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.rockwellHiMAT"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedWhite: 0.93, alpha: 1.0), roughness: 0.34, metalness: 0.18)
+        let wingMaterial = material(diffuse: NSColor(calibratedWhite: 0.88, alpha: 1.0), roughness: 0.38, metalness: 0.16)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.10, green: 0.24, blue: 0.52, alpha: 1.0), roughness: 0.30, metalness: 0.30)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 0.98, radius: 0.062, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let nose = sphereNode(radius: 0.058, material: bodyMaterial)
+        nose.position = SCNVector3(0.0, 0.006, 0.50)
+        nose.scale = SCNVector3(0.9, 0.8, 2.1)
+        root.addChildNode(nose)
+
+        // Chin inlet, set well under the forebody so it stays in clean air when the
+        // aircraft is pulling eight g.
+        let intake = boxNode(size: SIMD3<Float>(0.110, 0.055, 0.200), chamfer: 0.020, material: bodyMaterial)
+        intake.position = SCNVector3(0.0, -0.068, 0.16)
+        root.addChildNode(intake)
+        append(intake, to: .motorRR, componentNodes: &componentNodes)
+
+        // Close-coupled canards: small, well forward, and set slightly above the wing
+        // plane so their vortices pass over it rather than into it.
+        for side in [Float(-1.0), Float(1.0)] {
+            let canard = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side) * 0.045, y: -0.035),
+                    CGPoint(x: CGFloat(side) * 0.185, y: 0.030),
+                    CGPoint(x: CGFloat(side) * 0.185, y: 0.062),
+                    CGPoint(x: CGFloat(side) * 0.045, y: 0.055)
+                ],
+                thickness: 0.010,
+                material: accentMaterial
+            )
+            canard.position = SCNVector3(0.0, 0.028, 0.28)
+            root.addChildNode(canard)
+            append(canard, to: side < 0 ? .armFL : .armFR, componentNodes: &componentNodes)
+        }
+
+        // Cranked, sharply swept wing with winglets.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.062, y: -0.20),
+                CGPoint(x: 0.062, y: -0.20),
+                CGPoint(x: 0.396, y: 0.16),
+                CGPoint(x: 0.396, y: 0.235),
+                CGPoint(x: -0.396, y: 0.235),
+                CGPoint(x: -0.396, y: 0.16)
+            ],
+            thickness: 0.016,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, -0.006, -0.10)
+        root.addChildNode(wing)
+        append(wing, to: .armRL, componentNodes: &componentNodes)
+        append(wing, to: .armRR, componentNodes: &componentNodes)
+
+        for side in [Float(-1.0), Float(1.0)] {
+            // Winglets — one of the technologies the programme existed to demonstrate.
+            let winglet = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.09, y: 0.0),
+                    CGPoint(x: 0.06, y: 0.10),
+                    CGPoint(x: 0.02, y: 0.10)
+                ],
+                thickness: 0.008,
+                material: accentMaterial
+            )
+            winglet.position = SCNVector3(side * 0.396, 0.004, -0.02)
+            root.addChildNode(winglet)
+
+            // Twin fins, canted outward, mounted on the aft fuselage.
+            let fin = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.15, y: 0.0),
+                    CGPoint(x: 0.11, y: 0.16),
+                    CGPoint(x: 0.03, y: 0.16)
+                ],
+                thickness: 0.009,
+                material: wingMaterial
+            )
+            let finCarrier = SCNNode()
+            finCarrier.addChildNode(fin)
+            finCarrier.eulerAngles = SCNVector3(0.0, 0.0, side * 0.30)
+            finCarrier.position = SCNVector3(side * 0.075, 0.030, -0.36)
+            root.addChildNode(finCarrier)
+        }
+
+        let exhaust = cylinderNode(radius: 0.050, height: 0.070, material: accentMaterial)
+        exhaust.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        exhaust.position = SCNVector3(0.0, 0.0, -0.52)
+        root.addChildNode(exhaust)
+
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, 0.0, -0.56)
+        root.addChildNode(jetExhaustAnchor)
+
+        // Three skids rather than wheels: it lands on a dry lakebed and there is no
+        // runway anywhere in the programme.
+        for offset in [SIMD3<Float>(0.0, -0.070, 0.24), SIMD3<Float>(-0.16, -0.072, -0.12), SIMD3<Float>(0.16, -0.072, -0.12)] {
+            let skid = boxNode(size: SIMD3<Float>(0.026, 0.016, 0.100), chamfer: 0.006, material: accentMaterial)
+            skid.position = SCNVector3(offset.x, offset.y, offset.z)
+            root.addChildNode(skid)
+            append(skid, to: .escPower, componentNodes: &componentNodes)
+        }
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.026, 0.44)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// Hermeus Quarterhorse Mk 2.1.
+    ///
+    /// Built from what Hermeus has actually shown: a delta wing, a single vertical
+    /// stabiliser, and a variable inlet in the nose — the aircraft breathes through its
+    /// nose cone rather than through side or chin intakes, which is unusual enough to be
+    /// the recognisable feature. Proportions follow the company's own description of an
+    /// F-16-sized aircraft; exact dimensions are not published, which the catalogue entry
+    /// states plainly.
+    private static func buildQuarterhorse(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.hermeusQuarterhorse"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedWhite: 0.20, alpha: 1.0), roughness: 0.36, metalness: 0.52)
+        let wingMaterial = material(diffuse: NSColor(calibratedWhite: 0.16, alpha: 1.0), roughness: 0.40, metalness: 0.48)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.85, green: 0.55, blue: 0.10, alpha: 1.0), roughness: 0.28, metalness: 0.40)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 2.10, radius: 0.105, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // The nose inlet. An annular lip around a translating centrebody: this is the
+        // variable geometry that makes a Mach 2.5 target reachable, and the precooler
+        // sits directly behind it.
+        let inletLip = torusNode(ringRadius: 0.095, pipeRadius: 0.016, material: accentMaterial)
+        inletLip.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        inletLip.position = SCNVector3(0.0, 0.0, 1.05)
+        root.addChildNode(inletLip)
+        append(inletLip, to: .motorRR, componentNodes: &componentNodes)
+
+        let centreBody = cylinderNode(radius: 0.048, height: 0.18, material: bodyMaterial)
+        centreBody.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        centreBody.scale = SCNVector3(1.0, 1.0, 0.5)
+        centreBody.position = SCNVector3(0.0, 0.0, 1.10)
+        root.addChildNode(centreBody)
+
+        let centreBodyTip = sphereNode(radius: 0.044, material: accentMaterial)
+        centreBodyTip.position = SCNVector3(0.0, 0.0, 1.16)
+        centreBodyTip.scale = SCNVector3(1.0, 1.0, 1.8)
+        root.addChildNode(centreBodyTip)
+
+        // Delta wing, blended into the body.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.105, y: -0.62),
+                CGPoint(x: 0.105, y: -0.62),
+                CGPoint(x: 0.700, y: 0.42),
+                CGPoint(x: 0.700, y: 0.54),
+                CGPoint(x: -0.700, y: 0.54),
+                CGPoint(x: -0.700, y: 0.42)
+            ],
+            thickness: 0.028,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, -0.026, -0.18)
+        root.addChildNode(wing)
+        append(wing, to: .armFL, componentNodes: &componentNodes)
+        append(wing, to: .armFR, componentNodes: &componentNodes)
+
+        for (side, isLeft) in [(Float(-1.0), true), (Float(1.0), false)] {
+            let elevon = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side) * 0.16, y: 0.455),
+                    CGPoint(x: CGFloat(side) * 0.68, y: 0.455),
+                    CGPoint(x: CGFloat(side) * 0.68, y: 0.535),
+                    CGPoint(x: CGFloat(side) * 0.16, y: 0.535)
+                ],
+                thickness: 0.012,
+                material: accentMaterial
+            )
+            elevon.position = SCNVector3(0.0, -0.008, -0.18)
+            root.addChildNode(elevon)
+            append(elevon, to: isLeft ? .armRL : .armRR, componentNodes: &componentNodes)
+
+            // Retractable tricycle gear: this aircraft takes off and lands on a runway
+            // under its own power, which is what separates it from every other
+            // supersonic aircraft in this catalogue except the X-10.
+            let gear = boxNode(size: SIMD3<Float>(0.030, 0.090, 0.048), chamfer: 0.010, material: accentMaterial)
+            gear.position = SCNVector3(side * 0.24, -0.132, -0.16)
+            root.addChildNode(gear)
+            append(gear, to: .escPower, componentNodes: &componentNodes)
+        }
+
+        let noseGear = boxNode(size: SIMD3<Float>(0.026, 0.080, 0.042), chamfer: 0.009, material: accentMaterial)
+        noseGear.position = SCNVector3(0.0, -0.126, 0.62)
+        root.addChildNode(noseGear)
+        append(noseGear, to: .escPower, componentNodes: &componentNodes)
+
+        let fin = verticalSurfaceNode(
+            points: [
+                CGPoint(x: 0.0, y: 0.0),
+                CGPoint(x: 0.42, y: 0.0),
+                CGPoint(x: 0.34, y: 0.40),
+                CGPoint(x: 0.16, y: 0.40)
+            ],
+            thickness: 0.018,
+            material: wingMaterial
+        )
+        fin.position = SCNVector3(0.0, 0.060, -0.86)
+        root.addChildNode(fin)
+
+        let exhaust = cylinderNode(radius: 0.092, height: 0.130, material: accentMaterial)
+        exhaust.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        exhaust.position = SCNVector3(0.0, 0.0, -1.06)
+        root.addChildNode(exhaust)
+
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, 0.0, -1.14)
+        root.addChildNode(jetExhaustAnchor)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.070, 0.72)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: [],
+            propellerSpinDirections: [],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
+    }
+
+    /// North American X-10.
+    ///
+    /// A 20-metre canard delta from 1953 with two afterburning turbojets side by side in
+    /// the aft fuselage, a large mid-set delta wing, twin canted fins and retractable
+    /// tricycle gear. It is the only twin-engined aircraft in this catalogue, and the
+    /// only supersonic one besides the Quarterhorse that leaves the ground on its own
+    /// wheels.
+    private static func buildX10(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.northAmericanX10"
+
+        let bodyMaterial = material(diffuse: NSColor(calibratedWhite: 0.80, alpha: 1.0), roughness: 0.30, metalness: 0.62)
+        let wingMaterial = material(diffuse: NSColor(calibratedWhite: 0.74, alpha: 1.0), roughness: 0.34, metalness: 0.58)
+        let accentMaterial = material(diffuse: NSColor(calibratedRed: 0.72, green: 0.16, blue: 0.14, alpha: 1.0), roughness: 0.32, metalness: 0.30)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        let fuselage = horizontalCapsule(length: 2.90, radius: 0.115, material: bodyMaterial)
+        root.addChildNode(fuselage)
+        append(fuselage, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let nose = cylinderNode(radius: 0.112, height: 0.50, material: bodyMaterial)
+        nose.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        nose.scale = SCNVector3(1.0, 1.0, 0.40)
+        nose.position = SCNVector3(0.0, 0.0, 1.52)
+        root.addChildNode(nose)
+
+        let noseTip = sphereNode(radius: 0.048, material: accentMaterial)
+        noseTip.position = SCNVector3(0.0, 0.0, 1.70)
+        noseTip.scale = SCNVector3(1.0, 1.0, 2.0)
+        root.addChildNode(noseTip)
+
+        // Canards well forward on the nose. On the X-10 they are trimming surfaces on a
+        // long arm rather than the close-coupled lift generators HiMAT carries — the same
+        // configuration name doing a different job, which is why both aircraft use the
+        // canard-delta family and differ in everything else.
+        for side in [Float(-1.0), Float(1.0)] {
+            let canard = planformNode(
+                points: [
+                    CGPoint(x: CGFloat(side) * 0.090, y: -0.10),
+                    CGPoint(x: CGFloat(side) * 0.340, y: 0.02),
+                    CGPoint(x: CGFloat(side) * 0.340, y: 0.10),
+                    CGPoint(x: CGFloat(side) * 0.090, y: 0.14)
+                ],
+                thickness: 0.016,
+                material: accentMaterial
+            )
+            canard.position = SCNVector3(0.0, 0.030, 1.10)
+            root.addChildNode(canard)
+            append(canard, to: side < 0 ? .armFL : .armFR, componentNodes: &componentNodes)
+        }
+
+        // Mid-set delta. Half-span 0.715 on a 3.36 m length reproduces the published
+        // 8.59 m span against a 20.17 m body.
+        let wing = planformNode(
+            points: [
+                CGPoint(x: -0.115, y: -0.72),
+                CGPoint(x: 0.115, y: -0.72),
+                CGPoint(x: 0.715, y: 0.34),
+                CGPoint(x: 0.715, y: 0.46),
+                CGPoint(x: -0.715, y: 0.46),
+                CGPoint(x: -0.715, y: 0.34)
+            ],
+            thickness: 0.030,
+            material: wingMaterial
+        )
+        wing.position = SCNVector3(0.0, 0.004, -0.34)
+        root.addChildNode(wing)
+        append(wing, to: .armRL, componentNodes: &componentNodes)
+        append(wing, to: .armRR, componentNodes: &componentNodes)
+
+        for side in [Float(-1.0), Float(1.0)] {
+            // Twin fins, canted outward at the wingtips — the X-10's most recognisable
+            // feature after its size.
+            let fin = verticalSurfaceNode(
+                points: [
+                    CGPoint(x: 0.0, y: 0.0),
+                    CGPoint(x: 0.36, y: 0.0),
+                    CGPoint(x: 0.27, y: 0.34),
+                    CGPoint(x: 0.09, y: 0.34)
+                ],
+                thickness: 0.016,
+                material: wingMaterial
+            )
+            let carrier = SCNNode()
+            carrier.addChildNode(fin)
+            carrier.eulerAngles = SCNVector3(0.0, 0.0, side * 0.26)
+            carrier.position = SCNVector3(side * 0.640, 0.020, -0.62)
+            root.addChildNode(carrier)
+
+            // Two engines, side by side in the aft fuselage.
+            let exhaust = cylinderNode(radius: 0.072, height: 0.150, material: accentMaterial)
+            exhaust.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+            exhaust.position = SCNVector3(side * 0.082, -0.010, -1.44)
+            root.addChildNode(exhaust)
+            append(exhaust, to: side < 0 ? .motorRL : .motorRR, componentNodes: &componentNodes)
+
+            // Fixed side intakes with a splitter, cut for Mach 2.
+            let duct = boxNode(size: SIMD3<Float>(0.085, 0.105, 0.420), chamfer: 0.024, material: bodyMaterial)
+            duct.position = SCNVector3(side * 0.150, -0.020, 0.10)
+            root.addChildNode(duct)
+
+            let splitter = boxNode(size: SIMD3<Float>(0.010, 0.095, 0.180), chamfer: 0.004, material: accentMaterial)
+            splitter.position = SCNVector3(side * 0.194, -0.020, 0.28)
+            root.addChildNode(splitter)
+
+            let mainGear = boxNode(size: SIMD3<Float>(0.038, 0.115, 0.062), chamfer: 0.012, material: accentMaterial)
+            mainGear.position = SCNVector3(side * 0.30, -0.168, -0.28)
+            root.addChildNode(mainGear)
+            append(mainGear, to: .escPower, componentNodes: &componentNodes)
+        }
+
+        let noseGear = boxNode(size: SIMD3<Float>(0.032, 0.105, 0.055), chamfer: 0.010, material: accentMaterial)
+        noseGear.position = SCNVector3(0.0, -0.162, 0.94)
+        root.addChildNode(noseGear)
+        append(noseGear, to: .escPower, componentNodes: &componentNodes)
+
+        let jetExhaustAnchor = SCNNode()
+        jetExhaustAnchor.name = "jetExhaustAnchor"
+        jetExhaustAnchor.position = SCNVector3(0.0, -0.010, -1.56)
+        root.addChildNode(jetExhaustAnchor)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.060, 1.24)
         root.addChildNode(fpvAnchor)
         append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
 

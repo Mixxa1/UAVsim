@@ -1547,6 +1547,11 @@ final class DroneSceneController {
             // strip holds nothing up.
             let supportY = launchPadSupportHeight(at: asset.position)
             return SIMD3<Float>(runway.position.x, supportY, runway.position.y)
+        case .airLaunch(let release):
+            // The one spawn point with no ground under it. Nothing is holding the
+            // aircraft up because nothing needs to: it is at the carrier's altitude and
+            // about to be at the carrier's speed.
+            return release.releasePosition
         }
     }
 
@@ -1613,6 +1618,12 @@ final class DroneSceneController {
             launchAssetNode.addChildNode(makeCanisterNode(for: canister))
         case .runway(let runway):
             launchAssetNode.addChildNode(makeRunwayNode(for: runway))
+        case .airLaunch:
+            // Nothing to build. The carrier is not in the scene — the aircraft simply
+            // appears where it was released, already flying, which is exactly what the
+            // plan asks for: inherited kinematics and then ordinary 6DOF, with no
+            // scripted release animation to go wrong.
+            break
         }
     }
 
@@ -1690,6 +1701,11 @@ final class DroneSceneController {
             ) {
                 armPivot.eulerAngles.x = SCNFloat(-releaseBlend * 1.05)
             }
+        case .airLaunch:
+            // No launcher in the scene to animate: a carrier release is the absence of
+            // an attachment, and the only thing that changes is that the aircraft is
+            // now flying on its own.
+            break
         case .none:
             break
         }
@@ -9166,7 +9182,15 @@ final class DroneSceneController {
         }
 
         let gridHalfExtent = min(terrain.worldHalfExtent, max(108.0, terrain.signalBoundaryRadius + 18.0))
-        let gridSpacing: Float = gridHalfExtent > 180.0 ? 12.0 : 8.0
+        let preferredSpacing: Float = gridHalfExtent > 180.0 ? 12.0 : 8.0
+        // The guide is one SCNNode per line, so its node count grows linearly with the
+        // map. At 12 m spacing the largest conventional map already builds about four
+        // thousand of them; an extended range at the same spacing would ask for over a
+        // hundred thousand and the world would never finish loading. Capping the count
+        // rather than the extent keeps every existing map's spacing exactly as it was —
+        // at x256 the cap computes to 11.1 m, which loses to the preferred 12 m.
+        let maximumLinesPerAxis: Float = 2_200.0
+        let gridSpacing = max(preferredSpacing, (gridHalfExtent * 2.0) / maximumLinesPerAxis)
         rebuildGridGuide(halfExtent: gridHalfExtent, spacing: gridSpacing)
     }
 

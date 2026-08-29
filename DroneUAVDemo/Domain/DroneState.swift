@@ -111,6 +111,43 @@ struct DroneState {
     /// Sideslip angle, radians. Fixed-wing telemetry/debug only.
     var sideslipAngle: Float = 0.0
 
+    /// Flight Mach number at the last physics substep.
+    ///
+    /// Published as state rather than recomputed by every reader because "speed" stops
+    /// being one quantity above the tropopause: Mach governs compressibility, dynamic
+    /// pressure governs loads, and true airspeed governs where the aircraft ends up.
+    /// A warning that cannot tell an overspeed from an over-q is not a warning.
+    var machNumber: Float = 0.0
+    /// Dynamic pressure `q = ½ρV²` at the last physics substep, Pa.
+    var dynamicPressurePa: Float = 0.0
+    /// Equivalent airspeed, m/s — the sea-level speed that would give this dynamic
+    /// pressure. At Mach 1.8 and 18 km an aircraft's true airspeed is 530 m/s and this
+    /// is under 190; the structure only ever feels the second number.
+    var equivalentAirspeedMps: Float = 0.0
+    /// Wave-drag contribution to CD at the last substep, kept separate from the total
+    /// so the drag breakdown the diagnostics need does not have to be inferred.
+    var waveDragCoefficient: Float = 0.0
+    /// Thrust actually applied to the airframe at the last substep, N.
+    ///
+    /// Published because it stopped being derivable from the throttle lever. A jet's
+    /// thrust now depends on Mach, ambient pressure and what its intake recovers, so
+    /// "throttle × rating" is no longer an answer — and the fuel model needs the real
+    /// number rather than its own second guess at it.
+    var propulsionThrustNewtons: Float = 0.0
+    /// Total-pressure recovery the intake is achieving, 0...1. One for anything with a
+    /// propeller and for any jet below Mach 1.
+    var inletPressureRecovery: Float = 1.0
+    /// Normal load factor, n = L/W, positive up. One in level flight, zero in free fall.
+    ///
+    /// Not the mass ratio that `FlightBaselineResolver.normalizedLoadFactor` carries
+    /// under a similar name — that one is payload bookkeeping. This is the aerodynamic
+    /// quantity a structural limit is written against.
+    var loadFactor: Float = 1.0
+    /// Skin, nose, leading-edge and intake-lip temperatures.
+    var aeroThermal: AeroThermalState = .standard
+    /// Where the aircraft sits inside its own limits, and which limit is closest.
+    var flightEnvelope: FlightEnvelopeState = .nominal
+
     /// Actual (servo-rate-limited) control surface positions, -1...1
     /// fraction of max deflection — distinct from the instantaneously
     /// *commanded* fraction, since a real actuator can't snap to a new

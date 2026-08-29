@@ -403,6 +403,13 @@ enum DroneModelBuilder {
         case .swept, .tailsitterVTOL, .surveyEVTOL:
             fuselageLength = 0.72
             fuselageRadius = 0.048
+        // Supersonic planforms are long and thin — most of a supersonic aircraft's
+        // volume is fuselage, and the slenderness is what keeps its wave drag down.
+        // This builder is the generic placeholder shape; the real geometry for each
+        // supersonic aircraft lives in `UAVVisualFactory`.
+        case .supersonicCruciform, .supersonicDelta, .canardDelta:
+            fuselageLength = 0.94
+            fuselageRadius = 0.034
         }
 
         var componentNodes: [DamageComponent: [SCNNode]] = [:]
@@ -477,7 +484,12 @@ enum DroneModelBuilder {
             componentNodes[.armFL, default: []].append(wing)
             componentNodes[.armFR, default: []].append(wing)
 
-        case .swept, .tailsitterVTOL, .surveyEVTOL:
+        // Sharing the swept branch is a deliberate placeholder, not an equivalence: this
+        // builder makes the generic silhouette used where no authored model exists, and
+        // every supersonic aircraft in the catalogue has its own geometry in
+        // `UAVVisualFactory`. A swept stub is the closest of the shapes available here.
+        case .swept, .tailsitterVTOL, .surveyEVTOL,
+             .supersonicCruciform, .supersonicDelta, .canardDelta:
             let centerWing = SCNNode(geometry: SCNBox(
                 width: 0.38,
                 height: CGFloat(fuselageRadius * 0.28),

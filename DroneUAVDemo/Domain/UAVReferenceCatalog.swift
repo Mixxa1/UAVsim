@@ -1231,6 +1231,7 @@ enum UAVReferenceCatalog {
             nominalFlightTimeSec: 3600,
             nominalCruiseSpeedMps: 170.0,
             nominalMaxRangeM: 1000000,
+            nominalCruiseAltitudeMeters: 7_000.0,
             nominalLinkRangeM: 250000,
             estimatedDataQuality: .derived,
             powerplant: UAVPowerplantSpec(
@@ -1248,6 +1249,331 @@ enum UAVReferenceCatalog {
                     reserveFraction: 0.12,
                     tankCount: 2
                 )
+            )
+        ),
+
+        // MARK: - Supersonic reference aircraft
+        //
+        // Each of these exists to close one control point that no other aircraft in the
+        // catalogue reaches. A visual asset without a validation sheet is not a reference
+        // model, so where the published record is silent the notes say so in the aircraft's
+        // own entry rather than presenting a derivation as a specification.
+
+        UAVProfile(
+            id: "ryan-bqm-34f-firebee-ii",
+            displayName: "Ryan BQM-34F Firebee II",
+            manufacturer: "Ryan Aeronautical / Teledyne Ryan",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 640.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 81.0,
+            maxTakeoffMass: 951.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 2940.0,
+                fuselageLengthMillimeters: 8890.0,
+                heightMillimeters: 1710.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.12, 0.10),
+            visualPreset: .bqm34fFirebeeII,
+            shortDescription: "Supersonic target drone: slender body, cropped delta wing and cruciform tail, air-launched from a DC-130 or fired off a rail on a solid booster.",
+            notes: "Published data (designation-systems.net, USAF Museum of Aviation, Wikipedia): 8.89 m long, 2.94 m span, 1.71 m high, 0.66 m body diameter, 951 kg at air launch and 1,110 kg on the ground with its booster — the 159 kg difference being the booster itself. One Teledyne CAE J69-T-406 turbojet of 8.5 kN (1,920 lbf); Wikipedia quotes a J69-T-6 at 1,840 lbf, which is a different mark of the same engine. Mach 1.1 at sea level and Mach 1.78 at 13,700 m, ceiling 16,800 m, 73-75 minutes of subsonic endurance and 1,125-1,430 km of range with a conformal external tank that is jettisoned before the supersonic run. Recovery is by parachute with an 80 ft canopy and mid-air retrieval by helicopter. The operational profile that matters here is a four-minute Mach 1.5 dash at 60,000 ft rather than a supersonic cruise. Wing area and fuel capacity are not published: the 230 kg modelled here is derived from the engine's rated thrust and a turbojet's specific consumption against the quoted endurance, so tank, engine and endurance agree with each other rather than being three independent guesses.",
+            missionRole: "Supersonic aerial target for air-to-air and surface-to-air weapon development",
+            nominalFlightTimeSec: 4380,
+            nominalCruiseSpeedMps: 240.0,
+            nominalMaxRangeM: 1_275_000,
+            nominalCruiseAltitudeMeters: 12_000.0,
+            nominalLinkRangeM: 320_000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "Teledyne CAE J69-T-406",
+                ratedThrustN: 8_500.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                ratedShaftRPM: 21_500.0,
+                starter: .pyrotechnicCartridge,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 230.0,
+                    reserveFraction: 0.08
+                ),
+                // A chin scoop under the forward fuselage: one normal shock, and the
+                // reason the aircraft is a Mach 1.8 dash rather than a Mach 2 cruise.
+                inletType: .pitot
+            )
+        ),
+
+        UAVProfile(
+            id: "northrop-aqm-35a",
+            displayName: "Northrop AQM-35A",
+            manufacturer: "Northrop (Radioplane)",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 590.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 60.0,
+            maxTakeoffMass: 900.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 3380.0,
+                fuselageLengthMillimeters: 10060.0,
+                heightMillimeters: 1690.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.10, 0.14),
+            visualPreset: .aqm35TargetDrone,
+            shortDescription: "First-generation supersonic target drone, originally the Q-4: a 20-inch body with a small mid-mounted wing, air-launched and recovered on three parachutes and four airbags.",
+            notes: "Published data (designation-systems.net, Wikipedia): 10.06 m long, 3.38 m span, 1.69 m high, 0.51 m body diameter, 900 kg launch weight, one Westinghouse XJ81-WE-3 lightweight expendable turbojet of 8.0 kN (1,810 lbf), Mach 1.55, ceiling 18,300 m. First flight January 1956; 25 of all types built; retired in the mid-1960s. Air-launched by a B-50D, GC-130A or DC-130; ground launch was designed but never tested, so it is not offered here. Sources disagree on one figure that matters: designation-systems lists 900 kg as the *launch* weight while Wikipedia lists the same 1,980 lb as the *empty* weight. The launch reading is used, because the alternative implies a fuel and payload fraction this airframe has no room for. Wing area, fuel capacity and endurance are not published. The programme was judged unsuccessful partly because the aircraft was too fast to be a realistic target for the missiles it was meant to test.",
+            missionRole: "Supersonic aerial target for missile development",
+            nominalFlightTimeSec: 3600,
+            nominalCruiseSpeedMps: 230.0,
+            nominalMaxRangeM: 420_000,
+            nominalCruiseAltitudeMeters: 15_000.0,
+            nominalLinkRangeM: 300_000,
+            estimatedDataQuality: .estimated,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "Westinghouse XJ81-WE-3",
+                ratedThrustN: 8_000.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                ratedShaftRPM: 22_000.0,
+                starter: .pyrotechnicCartridge,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    // 120 kg, not 190: at the AQM-35A's own 15 km working altitude the
+                    // larger figure implied a two-hour sortie for a target drone whose
+                    // endurance nobody published. Tank, engine and endurance are derived
+                    // together here rather than guessed separately.
+                    usableFuelMassKg: 120.0,
+                    reserveFraction: 0.08
+                ),
+                inletType: .pitot
+            )
+        ),
+
+        UAVProfile(
+            id: "northrop-aqm-35b",
+            displayName: "Northrop AQM-35B",
+            manufacturer: "Northrop (Radioplane)",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 980.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 70.0,
+            maxTakeoffMass: 1540.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 3860.0,
+                fuselageLengthMillimeters: 10770.0,
+                heightMillimeters: 1880.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.10, 0.16),
+            visualPreset: .aqm35TargetDrone,
+            shortDescription: "The AQM-35A stretched, strengthened and re-engined: the same planform with more than twice the thrust, reaching Mach 2 and 70,000 feet.",
+            notes: "Published data (designation-systems.net, Wikipedia): 10.77 m long, 3.86 m span, 1.88 m high, 1,540 kg launch weight, one General Electric J85-GE-5 turbojet of 17.1 kN (3,850 lbf), Mach 2.0, ceiling 21,300 m. First flown March 1961, after a Q-4A powered by the Fairchild J83 was cancelled when that engine fell behind. It is catalogued separately from the AQM-35A on purpose: the pair is the same airframe with 8.0 kN and 17.1 kN of thrust, so the difference between what they can reach is a direct test that achievable Mach comes out of the thrust-and-drag balance rather than out of a declared speed limit. Wing area, fuel capacity and endurance are not published.",
+            missionRole: "High-supersonic aerial target for missile development",
+            nominalFlightTimeSec: 5400,
+            nominalCruiseSpeedMps: 300.0,
+            nominalMaxRangeM: 450_000,
+            nominalCruiseAltitudeMeters: 16_000.0,
+            nominalLinkRangeM: 300_000,
+            estimatedDataQuality: .estimated,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "General Electric J85-GE-5",
+                ratedThrustN: 17_100.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                ratedShaftRPM: 16_500.0,
+                starter: .pyrotechnicCartridge,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 250.0,
+                    reserveFraction: 0.08
+                ),
+                // A fixed half-cone on each side, cut for the Mach it was built to reach.
+                // This is what a plain pitot intake could not have given the AQM-35A.
+                inletType: .fixedRamp,
+                inletDesignMach: 2.0
+            )
+        ),
+
+        UAVProfile(
+            id: "rockwell-himat",
+            displayName: "NASA / Rockwell HiMAT",
+            manufacturer: "Rockwell International / NASA",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 1289.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 45.0,
+            maxTakeoffMass: 1588.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 4750.0,
+                fuselageLengthMillimeters: 6860.0,
+                heightMillimeters: 1310.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.08, 0.05),
+            visualPreset: .rockwellHiMAT,
+            shortDescription: "Subscale remotely piloted fighter-technology demonstrator: close-coupled canards, winglets, aeroelastically tailored composite wings and a digital flight-control system, dropped from an NB-52B and landed on skids.",
+            notes: "Published data (NASA Dryden programme material, designation-systems.net, Wikipedia): 0.44 scale of a full-size fighter, 6.86 m long, 4.75 m span, 1.31 m high, 1,588 kg gross with 299 kg of fuel, one General Electric J85-GE-21 with afterburner rated 22.3 kN (5,004 lbf) static at sea level. Dropped from the NB-52B at 13,700 m and Mach 0.68; top speed Mach 1.4. Landed on retractable three-point skids on Rogers Dry Lake with a typical run of about 1,370 m. 26 flights on two aircraft between July 1979 and January 1983, each about 30 minutes. The design points are what make this aircraft useful as a reference rather than the top speed: a sustained 8 g turn at Mach 0.9 and 7,600 m, and 3 g held for three and a half minutes at Mach 1.4 and 12,200 m — numerical acceptance criteria rather than an impression of agility. Sources disagree on the masses (3,501 lb gross with 659 lb of fuel in the programme material against 3,370 lb empty and 4,030 lb gross in Wikipedia) and on the top speed (Mach 1.4 from NASA, Mach 1.6 from designation-systems); the programme figures are used. Wing area is not available in any text source — the NASA reports carrying it are scanned images.",
+            missionRole: "Fighter-manoeuvrability, aeroelastic-tailoring and digital flight-control research",
+            nominalFlightTimeSec: 1800,
+            nominalCruiseSpeedMps: 260.0,
+            nominalMaxRangeM: 260_000,
+            nominalCruiseAltitudeMeters: 12_200.0,
+            nominalLinkRangeM: 120_000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "General Electric J85-GE-21 (afterburning)",
+                ratedThrustN: 22_300.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                ratedShaftRPM: 16_500.0,
+                starter: .electricStarter,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 299.0,
+                    reserveFraction: 0.10
+                ),
+                // A fixed submerged inlet under the fuselage, cut for the transonic
+                // manoeuvring the aircraft was built to do rather than for a dash.
+                inletType: .fixedRamp,
+                inletDesignMach: 1.4
+            )
+        ),
+
+        UAVProfile(
+            id: "hermeus-quarterhorse-mk21",
+            displayName: "Hermeus Quarterhorse Mk 2.1",
+            manufacturer: "Hermeus",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 6800.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 450.0,
+            maxTakeoffMass: 11000.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 8400.0,
+                fuselageLengthMillimeters: 15200.0,
+                heightMillimeters: 3600.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.14, 0.20),
+            visualPreset: .hermeusQuarterhorse,
+            shortDescription: "Uncrewed supersonic testbed: delta wing, single fin, a variable nose inlet with a precooler, and an F-16's engine. The first privately developed uncrewed aircraft to go supersonic.",
+            notes: "Confirmed by Hermeus and contemporary reporting (FlightGlobal, Army Recognition, New Atlas, Aviation Today): first flight from Spaceport America in New Mexico in late February or early March 2026 — sources give 27 February and 2 March — and first supersonic flight on 26 or 28 May 2026 at Mach 1.21, about 1,484 km/h, on the aircraft's third flight. Powered by a Pratt & Whitney F100 afterburning turbofan quoted at more than 23,000 lbf in reheat; the F100-PW-229's catalogue figures are 17,800 lbf dry and 29,160 lbf with afterburner. Delta wing, single vertical stabiliser, variable inlet in the nose with a precooler, remotely piloted from a ground station, conventional runway takeoff and landing. The programme target for the Mk 2 series is Mach 2.5, with Mach 3 sought in 2027 on the Chimera combined-cycle engine. WARNING — dimensions and weights are NOT published. Hermeus states only that the aircraft is about the size of an F-16 and nearly three times larger and four times heavier than the Mk 1, which is roughly 12.2 m long with a 3.7 m span. The 15.2 m length, 8.4 m span and 11,000 kg maximum weight modelled here are estimates built from those two statements and are labelled as such. The skin material is likewise unpublished; titanium is inferred from the declared Mach 2.5 target, which aluminium could not sustain thermally, and the precooler on the intake is itself a thermal-management device.",
+            missionRole: "Reusable high-speed flight test, and a testbed for reconnaissance, electronic warfare and time-sensitive targeting",
+            nominalFlightTimeSec: 4500,
+            nominalCruiseSpeedMps: 420.0,
+            nominalMaxRangeM: 900_000,
+            nominalCruiseAltitudeMeters: 12_000.0,
+            nominalLinkRangeM: 400_000,
+            estimatedDataQuality: .estimated,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "Pratt & Whitney F100 (afterburning turbofan)",
+                ratedThrustN: 102_300.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                ratedShaftRPM: 13_500.0,
+                starter: .airTurbineStarter,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 2000.0,
+                    reserveFraction: 0.12,
+                    tankCount: 3
+                ),
+                // The feature the aircraft is built around, and the one thing about its
+                // intake that *is* published: a variable nose inlet with a precooler,
+                // which is what a Mach 2.5 target requires and a fixed geometry could not
+                // deliver.
+                inletType: .variableRamp,
+                inletDesignMach: 2.5
+            )
+        ),
+
+        UAVProfile(
+            id: "north-american-x-10",
+            displayName: "North American X-10",
+            manufacturer: "North American Aviation",
+            countryOfOrigin: "United States",
+            vehicleType: .fixedWing,
+            massCategory: .heavy,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 11703.0,
+            batteryMass: nil,
+            estimatedBatteryMass: 0.0,
+            maxPayloadMass: 900.0,
+            maxTakeoffMass: 19187.0,
+            dimensions: UAVDimensions(
+                wingspanMillimeters: 8590.0,
+                fuselageLengthMillimeters: 20170.0,
+                heightMillimeters: 4400.0
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.18, 0.30),
+            visualPreset: .northAmericanX10,
+            shortDescription: "Reusable canard-delta aerodynamic testbed for the Navaho missile: two afterburning turbojets, retractable tricycle gear, conventional runway operation and Mach 2.05 in 1956.",
+            notes: "Published data (designation-systems.net, Military Factory, Wikipedia): 8.59 m span, 4.40 m high, 39.5 m² wing area, 11,703 kg empty, 15,876 kg gross, 19,187 kg maximum, two Westinghouse XJ40-WE-1 turbojets of 48.4 kN (10,900 lbf) each with afterburner, 2,090 km/h maximum, service ceiling 13,650 m, rate of climb 26.5 m/s, range 1,370 km. Radio-command guidance with an optional N-6 inertial system. Thirteen built; first flight 14 October 1953; only one survives. Sources disagree on the length: 66.1 ft from designation-systems and Military Factory, 71 ft from aero-web, 77 ft from Wikipedia. The two independent sources that agree are used, giving 20.17 m. Between 1953 and 1955 five aircraft flew fifteen sorties from Edwards, reaching Mach 1.84, 12,500 m and 644 km; six more at Cape Canaveral reached 15,000 m, 1,009 km and Mach 2.05. Fuel capacity is not published; the 4,000 kg modelled here is the difference between the empty and gross weights less an allowance for equipment. This is the only twin-engined aircraft in the catalogue and the only supersonic one that takes off from a runway under its own power.",
+            missionRole: "Aerodynamic, guidance and propulsion testbed for the SM-64 Navaho cruise missile",
+            armamentCapabilityNote: "None. The X-10 carried guidance and instrumentation in place of the warhead the Navaho would have.",
+            nominalFlightTimeSec: 3600,
+            nominalCruiseSpeedMps: 420.0,
+            nominalMaxRangeM: 1_370_000,
+            nominalCruiseAltitudeMeters: 12_000.0,
+            nominalLinkRangeM: 500_000,
+            estimatedDataQuality: .derived,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turbojet,
+                engineDesignation: "Westinghouse XJ40-WE-1 (afterburning)",
+                engineCount: 2,
+                ratedThrustN: 48_400.0,
+                propellerPlacement: nil,
+                propellerDiameterM: nil,
+                ratedShaftRPM: 7_600.0,
+                starter: .airTurbineStarter,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    // 1,500 kg, not the 4,000 first taken from the empty-to-gross
+                    // difference. Most of that 4,173 kg is the guidance and
+                    // instrumentation the Navaho's warhead would have replaced, not fuel —
+                    // and 1,500 kg is what the published 1,370 km range costs at this
+                    // engine's consumption, which makes the two figures agree instead of
+                    // contradicting each other.
+                    usableFuelMassKg: 1500.0,
+                    reserveFraction: 0.10,
+                    tankCount: 2
+                ),
+                // Fixed side intakes with a splitter, cut for the Mach 2 the aircraft was
+                // built to demonstrate.
+                inletType: .fixedRamp,
+                inletDesignMach: 2.0
             )
         )
     ]
@@ -1369,6 +1695,16 @@ enum UAVReferenceCatalog {
             return URL(string: "https://ntrs.nasa.gov/citations/20050169564")
         case "hesa-karrar":
             return URL(string: "https://en.wikipedia.org/wiki/HESA_Karrar")
+        case "ryan-bqm-34f-firebee-ii":
+            return URL(string: "https://www.designation-systems.net/dusrm/m-34.html")
+        case "northrop-aqm-35a", "northrop-aqm-35b":
+            return URL(string: "https://www.designation-systems.net/dusrm/m-35.html")
+        case "rockwell-himat":
+            return URL(string: "https://www.designation-systems.net/dusrm/app4/himat.html")
+        case "hermeus-quarterhorse-mk21":
+            return URL(string: "https://www.hermeus.com/quarterhorse")
+        case "north-american-x-10":
+            return URL(string: "https://www.designation-systems.net/dusrm/app1/x-10.html")
         default:
             return nil
         }

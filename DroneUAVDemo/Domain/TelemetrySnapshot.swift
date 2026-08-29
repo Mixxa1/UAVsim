@@ -54,6 +54,31 @@ struct TelemetrySnapshot {
     var batteryCellVoltage: Double
     var batteryCurrentDrawA: Double
 
+    // MARK: High-speed flight state
+    //
+    // Above the tropopause "speed" stops being one quantity, so the log stops recording
+    // it as one. Mach governs compressibility, dynamic pressure governs structural load,
+    // and true airspeed governs where the aircraft ends up — and a log that carries only
+    // the last of the three cannot answer why an airframe broke.
+    var machNumber: Double
+    var trueAirspeedMps: Double
+    var equivalentAirspeedMps: Double
+    var dynamicPressurePa: Double
+    var totalTemperatureK: Double
+    var loadFactor: Double
+    var waveDragCoefficient: Double
+    var propulsionThrustN: Double
+    var inletPressureRecovery: Double
+    var skinTemperatureK: Double
+    var noseTemperatureK: Double
+    var recoveryTemperatureK: Double
+    /// Which limit the aircraft is closest to, and how close as a fraction of it.
+    var envelopeLimitKey: String
+    var envelopeWorstFraction: Double
+    var envelopeExceedanceSeconds: Double
+    /// `nil` where the airframe has no published flutter boundary, which is most of them.
+    var flutterMargin: Double?
+
     var weatherPreset: String
     var weatherPresetKey: String
     var weatherIntensity: Double
@@ -179,6 +204,22 @@ struct TelemetrySnapshot {
         fuelFlowKgPerHour: 0.0,
         batteryCellVoltage: 0.0,
         batteryCurrentDrawA: 0.0,
+        machNumber: 0.0,
+        trueAirspeedMps: 0.0,
+        equivalentAirspeedMps: 0.0,
+        dynamicPressurePa: 0.0,
+        totalTemperatureK: 288.15,
+        loadFactor: 1.0,
+        waveDragCoefficient: 0.0,
+        propulsionThrustN: 0.0,
+        inletPressureRecovery: 1.0,
+        skinTemperatureK: 288.15,
+        noseTemperatureK: 288.15,
+        recoveryTemperatureK: 288.15,
+        envelopeLimitKey: FlightEnvelopeLimit.mach.localizationKey,
+        envelopeWorstFraction: 0.0,
+        envelopeExceedanceSeconds: 0.0,
+        flutterMargin: nil,
         weatherPreset: WeatherPreset.normal.title,
         weatherPresetKey: WeatherPreset.normal.titleKey,
         weatherIntensity: 0.0,

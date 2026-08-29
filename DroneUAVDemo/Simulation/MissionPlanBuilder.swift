@@ -113,6 +113,12 @@ final class MissionPlanBuilder {
                 FixedWingRunwayGeometry.stripLength(for: fixedWingParameters)
             )
             asset = .runway(runway)
+        case .airLaunch(var release):
+            // Release altitude and speed are the aircraft's, not the map object's: the
+            // drafted point only says where over the ground the carrier lets go.
+            release.releaseAltitudeMeters = fixedWingParameters.airLaunchReleaseAltitude
+            release.releaseSpeedMps = fixedWingParameters.airLaunchReleaseSpeed
+            asset = .airLaunch(release)
         }
         return asset
     }

@@ -167,6 +167,19 @@ struct EngineOperatingEnvelope: Hashable {
                 lightOffSeconds: 12.0, warmupSeconds: 10.0, hangBand: 0.12...0.20,
                 operatingTemperatureC: 420.0, deratingTemperatureC: 780.0, shaftInertia: 0.06
             )
+        case .ramjet:
+            // A ramjet has no shaft, so almost every field here is a formality: there is
+            // nothing to crank, nothing to spool and no speed fraction that means
+            // anything. What it does have is an ignition delay and a running
+            // temperature, and those are real. Every speed fraction is zero so that
+            // `speedFraction` arithmetic elsewhere treats it as permanently "at idle
+            // speed" rather than as an engine that has failed to spool.
+            return EngineOperatingEnvelope(
+                crankSpeedFraction: 0.0, lightOffSpeedFraction: 0.0, idleSpeedFraction: 0.0,
+                starterCutoutFraction: 0.0, primeSeconds: 0.0, crankSeconds: 0.0,
+                lightOffSeconds: 1.5, warmupSeconds: 0.0, hangBand: nil,
+                operatingTemperatureC: 900.0, deratingTemperatureC: 1_500.0, shaftInertia: 0.001
+            )
         }
     }
 }
@@ -254,6 +267,18 @@ final class EngineRuntimeService {
             next.shaftRPM = input.startRequested ? ratedRPM * input.throttle.clampedUnit() : 0.0
             next.shaftPowerKW = (input.powerplant.ratedShaftPowerKW ?? 0.0) * input.throttle.clampedUnit()
             return next
+        }
+
+        // A ramjet is not started, it is *arrived at*. It has no shaft to crank and no
+        // idle to settle at, so the shaft-speed state machine below has nothing to work
+        // with; running it through that machine would have it cranking a rotor it does
+        // not have and aborting the start when the rotor failed to spin up.
+        //
+        // What it does have is a flight condition. Below its light-off Mach there is no
+        // compression, no combustion and no thrust — not a small thrust, none — and if
+        // the aircraft ever drops back below that Mach the flame goes out again.
+        if input.powerplant.engineType == .ramjet {
+            return updateRamjet(next, input: input, envelope: envelope, deltaTime: dt)
         }
 
         let ambient = input.atmosphere.temperatureK - 273.15
@@ -419,6 +444,67 @@ final class EngineRuntimeService {
         let thermalTau = (next.runState.isFiring ? 22.0 : 55.0) / coolingAirflow
         next.temperatureC += (steadyTemperature - next.temperatureC) * min(1.0, dt / max(0.5, thermalTau))
 
+        return next
+    }
+
+    /// The ramjet's whole state machine: is the aircraft fast enough, and has the flame
+    /// had time to take hold?
+    ///
+    /// Three states rather than eight. `off` while it is too slow or not commanded,
+    /// `lightOff` for the ignition delay once it is fast enough, `ready` while it burns.
+    /// Dropping below the light-off Mach is a flameout, and re-lighting means going
+    /// through the delay again — a ramjet that falls out of its envelope does not simply
+    /// pick up where it left off.
+    private func updateRamjet(
+        _ current: EngineRuntimeState,
+        input: EngineUpdateInput,
+        envelope: EngineOperatingEnvelope,
+        deltaTime: Float
+    ) -> EngineRuntimeState {
+        var next = current
+        let mach = input.atmosphere.machNumber(trueAirspeedMps: input.airspeedMps)
+        let hasRam = mach >= FuelPropulsionBackend.ramjetMinimumOperableMach
+        let commanded = input.startRequested && input.hasFuel && input.healthFactor > 0.02
+        let ambient = input.atmosphere.temperatureK - 273.15
+
+        // No rotor. Reporting a shaft speed would invite every consumer that divides by
+        // rated RPM to believe there is one.
+        next.shaftRPM = 0.0
+        next.shaftPowerKW = 0.0
+
+        if !commanded || !hasRam {
+            if current.runState.isFiring {
+                next = transition(next, to: .stopped)
+            } else if current.runState != .stopped {
+                next = transition(next, to: .off)
+            }
+            // Cools toward ambient once the flame is out.
+            next.temperatureC += (ambient - next.temperatureC) * min(1.0, deltaTime * 0.12)
+            return next
+        }
+
+        switch next.runState {
+        case .off, .stopped, .startAborted, .priming, .cranking:
+            next = transition(next, to: .lightOff)
+        case .lightOff:
+            if next.phaseElapsed >= envelope.lightOffSeconds {
+                next = transition(next, to: .ready)
+            }
+        case .warmingUp, .ready:
+            next.runState = .ready
+        }
+
+        // Total temperature is the physical target: the air arrives already heated by
+        // its own deceleration, and combustion adds to that. It is why a ramjet's
+        // structure is a materials problem before it is an aerodynamic one.
+        let totalTemperatureC = CompressibleFlowState(
+            atmosphere: input.atmosphere,
+            trueAirspeedMps: input.airspeedMps
+        ).totalTemperatureK - 273.15
+        let target = next.runState.isFiring
+            ? max(envelope.operatingTemperatureC, totalTemperatureC)
+            : ambient
+        next.temperatureC += (target - next.temperatureC) * min(1.0, deltaTime * 0.35)
         return next
     }
 

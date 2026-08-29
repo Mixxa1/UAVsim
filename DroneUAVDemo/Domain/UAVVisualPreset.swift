@@ -29,6 +29,16 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
     case researchDeltaWing
     case blendedWingBodyTestbed
     case jetTargetDrone
+    // Supersonic reference aircraft.
+    case bqm34fFirebeeII
+    /// Shared by the AQM-35A and the AQM-35B. They are the same airframe: the B is the A
+    /// stretched, strengthened and re-engined, and giving them one silhouette is a
+    /// statement about the aircraft rather than a saving — the pair exists in this
+    /// catalogue precisely to show one planform with two engines.
+    case aqm35TargetDrone
+    case rockwellHiMAT
+    case hermeusQuarterhorse
+    case northAmericanX10
 
     var title: String {
         switch self {
@@ -88,6 +98,16 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
             return "Blended wing-body testbed"
         case .jetTargetDrone:
             return "Jet-powered delta drone"
+        case .bqm34fFirebeeII:
+            return "Ryan BQM-34F Firebee II"
+        case .aqm35TargetDrone:
+            return "Northrop AQM-35"
+        case .rockwellHiMAT:
+            return "NASA / Rockwell HiMAT"
+        case .hermeusQuarterhorse:
+            return "Hermeus Quarterhorse Mk 2.1"
+        case .northAmericanX10:
+            return "North American X-10"
         }
     }
 }

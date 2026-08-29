@@ -1331,6 +1331,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private let remoteInputProvider: RemoteInputProvider
     private let inputManager: InputManager
     private let collisionService: CollisionAnalysisService
+    /// Tracks whether the aircraft's shock cone has swept over the operator.
+    private var sonicBoomTracker = SonicBoomTracker()
+    /// The simulation's audio output. Lazily started, and only ever by a sound that is
+    /// actually going to play — the entire subsonic fleet never touches it.
+    private let simulationAudio = SimulationAudioService()
     private let impactResolutionService = ImpactResolutionService()
     private let structuralLoadSolver = UAVStructuralLoadSolver()
     private let damageEventRecorder = UAVDamageEventRecorder()
@@ -4198,6 +4203,10 @@ final class DroneSimulationViewModel: ObservableObject {
             // The tube's elevation belongs to the launcher, not the airframe, so
             // the drafted angle stands.
             return nil
+        case .airLaunch:
+            // The carrier's flight-path angle at release, which belongs to the carrier
+            // and not to the aircraft hanging under it.
+            return nil
         case .standard, .runway, .vtol:
             return nil
         }
@@ -6362,6 +6371,36 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.applyWorldClock(worldClock)
     }
 
+    /// Obstacles the proximity analysis should consider this tick.
+    ///
+    /// A swept tube along the velocity rather than a sphere around the aircraft. The
+    /// distinction only starts to matter once the horizon grows: a sphere costs
+    /// horizon², so a 900 m horizon would sweep some three thousand broad-phase cells
+    /// every tick, while a tube of the same reach touches a few dozen — and a tube is
+    /// the more honest shape anyway, because what an aircraft doing 600 m/s needs to
+    /// know about is what lies ahead of it, not what it left behind.
+    ///
+    /// Below the horizon's anchor speed this is the sphere query it has always been —
+    /// the same call, the same radius, the same obstacles — so every aircraft that is
+    /// not going fast enough for the horizon to open up is untouched.
+    private func collisionCandidateObstacles(
+        at position: SIMD3<Float>,
+        velocity: SIMD3<Float>
+    ) -> [CollisionObstacle] {
+        let speed = simd_length(velocity)
+        let margin = collisionService.spatialQueryRadius
+        let horizon = collisionService.broadPhaseDistance(forSpeedMps: speed)
+        guard speed.isFinite, speed > 1.0, horizon > margin else {
+            return sceneController.nearbyEnvironmentObstacles(near: position, radius: margin)
+        }
+        let ahead = position + (velocity / speed) * horizon
+        return sceneController.nearbyEnvironmentObstacles(
+            from: position,
+            to: ahead,
+            margin: margin
+        )
+    }
+
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
@@ -6551,10 +6590,9 @@ final class DroneSimulationViewModel: ObservableObject {
 
         _ = updateFleetStatus(deltaTime: dt)
 
-        let collisionCandidateRadius = collisionService.spatialQueryRadius
-        let prePhysicsCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
-            near: state.position,
-            radius: collisionCandidateRadius
+        let prePhysicsCollisionObstacles = collisionCandidateObstacles(
+            at: state.position,
+            velocity: state.velocity
         )
         let prePhysicsCollisionAnalysis = collisionService.analyze(
             input: CollisionAnalysisInput(
@@ -7160,9 +7198,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
             }
         } else {
-            let postPhysicsCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
-                near: state.position,
-                radius: collisionCandidateRadius
+            let postPhysicsCollisionObstacles = collisionCandidateObstacles(
+                at: state.position,
+                velocity: state.velocity
             )
             postPhysicsCollisionAnalysis = collisionService.analyze(
                 input: CollisionAnalysisInput(
@@ -7232,9 +7270,9 @@ final class DroneSimulationViewModel: ObservableObject {
         enforceComponentFunctionalState()
 
         if needsCollisionAnalysisRefresh {
-            let refreshedCollisionObstacles = sceneController.nearbyEnvironmentObstacles(
-                near: state.position,
-                radius: collisionCandidateRadius
+            let refreshedCollisionObstacles = collisionCandidateObstacles(
+                at: state.position,
+                velocity: state.velocity
             )
             collisionAnalysis = collisionService.analyze(
                 input: CollisionAnalysisInput(
@@ -7249,6 +7287,7 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
+        advanceSonicBoom(deltaTime: dt)
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         if let launchDynamics = activeFixedWingLaunchDynamics,
            launchDynamics.phase == .held || launchDynamics.phase == .catapultRail {
@@ -7321,7 +7360,13 @@ final class DroneSimulationViewModel: ObservableObject {
                         ?? (isArmed && state.physicalState != .crashed),
                     atmosphere: currentAtmosphere().state(worldY: state.position.y),
                     leakKgPerSec: 0.0,
-                    shaftPowerKW: state.engineRuntime?.shaftPowerKW
+                    shaftPowerKW: state.engineRuntime?.shaftPowerKW,
+                    // Only for jets, and only because their thrust stopped being a
+                    // function of the throttle lever alone. A propeller aircraft is
+                    // still billed on shaft power, which is where its fuel actually goes.
+                    thrustNewtons: powerplant.drivesPropeller
+                        ? nil
+                        : state.propulsionThrustNewtons
                 ),
                 deltaTime: dt
             )
@@ -7917,6 +7962,67 @@ final class DroneSimulationViewModel: ObservableObject {
         return report
     }
 
+    /// How much strength aerodynamic heating has taken out of the structure right now.
+    ///
+    /// Zero for every aircraft in the catalogue at the speeds they fly; it starts to
+    /// matter only once a skin temperature passes the material's working limit, which
+    /// takes sustained flight above about Mach 2.
+    /// Decides whether the operator hears a boom this tick, and plays it if so.
+    ///
+    /// The listener is the ground station, not the camera. A chase camera flies inside the
+    /// cone with the aircraft and would never hear anything; an aircraft never hears its
+    /// own boom at all. The person standing at the launch point is the one the effect is
+    /// about, and the delay between the aircraft passing overhead and the bang arriving is
+    /// most of what makes it recognisable.
+    private func advanceSonicBoom(deltaTime: Float) {
+        guard selectedDroneProfile.airframeClass != .multirotor else { return }
+        let atmosphere = currentAtmosphere().state(worldY: state.position.y)
+        let lengthM = (activeUAVProfile?.dimensions.fuselageLengthMillimeters
+            ?? selectedDroneProfile.dimensionsUnfoldedMm.y) / 1000.0
+        guard let boom = sonicBoomTracker.update(
+            aircraftPosition: state.position,
+            aircraftVelocity: state.velocity,
+            mach: state.machNumber,
+            observerPosition: homePosition,
+            atmosphere: atmosphere,
+            aircraftMassKg: selectedDroneProfile.takeoffMassKg,
+            aircraftLengthM: lengthM,
+            deltaTime: deltaTime
+        ) else { return }
+
+        simulationAudio.playSonicBoom(
+            overpressurePa: boom.overpressurePa,
+            durationSeconds: SimulationAudioService.nWaveDuration(
+                aircraftLengthM: lengthM,
+                slantRangeMeters: boom.slantRangeMeters
+            ),
+            delaySeconds: boom.arrivalDelaySeconds
+        )
+        recordMissionReplayEvent(
+            .warning,
+            message: String(
+                format: NSLocalizedString("event.sonic_boom", comment: ""),
+                boom.mach,
+                boom.overpressurePa,
+                boom.arrivalDelaySeconds
+            )
+        )
+    }
+
+    private func currentThermalWeakening() -> Float {
+        guard let wing = selectedDroneProfile.fixedWingParameters else { return 0.0 }
+        let limits = FlightEnvelopeLimits.derived(
+            maxAirspeedMps: wing.maxAirspeed,
+            stallAlphaRad: FixedWingAerodynamics.stallAngleOfAttack(for: wing.family),
+            dragDivergenceMach: FixedWingAerodynamics.dragDivergenceMach(for: wing.family),
+            structuralQualityFactor: selectedDroneProfile.structuralQualityFactor,
+            skinMaterial: selectedDroneProfile.skinMaterial
+        )
+        let hottest = state.aeroThermal.hottestK
+        guard hottest > limits.maxSkinTemperatureK else { return 0.0 }
+        return min(1.0, (hottest - limits.maxSkinTemperatureK) / 250.0)
+    }
+
     private func advanceStructuralDamage(
         previousState: DroneState,
         loadState: DroneState,
@@ -7929,7 +8035,8 @@ final class DroneSimulationViewModel: ObservableObject {
             airframeClass: selectedDroneProfile.airframeClass,
             rotorModel: vehicleRotorModel,
             deltaTime: deltaTime,
-            airDensity: currentAtmosphere().state(worldY: state.position.y).airDensity
+            airDensity: currentAtmosphere().state(worldY: state.position.y).airDensity,
+            thermalWeakening: currentThermalWeakening()
         )
         for entry in result.connectionDamage {
             let meaningfulDelta = entry.residualStrengthBefore - entry.residualStrengthAfter >= 0.002
@@ -17039,6 +17146,27 @@ final class DroneSimulationViewModel: ObservableObject {
             fuelFlowKgPerHour: Double(fuelState?.flowKgPerHour ?? 0.0),
             batteryCellVoltage: Double(batteryState.cellVoltage.isFinite ? batteryState.cellVoltage : 0.0),
             batteryCurrentDrawA: Double(batteryState.currentDrawA.isFinite ? batteryState.currentDrawA : 0.0),
+            machNumber: Double(state.machNumber),
+            trueAirspeedMps: Double(state.forwardAirspeed),
+            equivalentAirspeedMps: Double(state.equivalentAirspeedMps),
+            dynamicPressurePa: Double(state.dynamicPressurePa),
+            totalTemperatureK: Double(
+                CompressibleFlowState(
+                    atmosphere: currentAtmosphere().state(worldY: state.position.y),
+                    trueAirspeedMps: state.forwardAirspeed
+                ).totalTemperatureK
+            ),
+            loadFactor: Double(state.loadFactor),
+            waveDragCoefficient: Double(state.waveDragCoefficient),
+            propulsionThrustN: Double(state.propulsionThrustNewtons),
+            inletPressureRecovery: Double(state.inletPressureRecovery),
+            skinTemperatureK: Double(state.aeroThermal.skinK),
+            noseTemperatureK: Double(state.aeroThermal.noseK),
+            recoveryTemperatureK: Double(state.aeroThermal.recoveryTemperatureK),
+            envelopeLimitKey: state.flightEnvelope.bindingLimit.localizationKey,
+            envelopeWorstFraction: Double(state.flightEnvelope.worstFraction),
+            envelopeExceedanceSeconds: Double(state.flightEnvelope.exceedanceSeconds),
+            flutterMargin: state.flightEnvelope.flutterMargin.map(Double.init),
             weatherPreset: weather.preset.title,
             weatherPresetKey: weather.preset.titleKey,
             weatherIntensity: Double(weather.normalizedIntensity),
@@ -22707,6 +22835,15 @@ final class DroneSimulationViewModel: ObservableObject {
                 )
             }
             asset = .runway(runway)
+        case .airLaunch(var release):
+            // The drafted point says where over the ground the carrier lets go; how high
+            // and how fast belong to the pairing of aircraft and carrier, so they come
+            // from the airframe.
+            if let wing {
+                release.releaseAltitudeMeters = wing.airLaunchReleaseAltitude
+                release.releaseSpeedMps = wing.airLaunchReleaseSpeed
+            }
+            asset = .airLaunch(release)
         }
         return asset
     }
@@ -23086,6 +23223,21 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        // An air launch has no sequence to run, and giving it one would be inventing
+        // physics rather than modelling it.
+        //
+        // Every other mode is a machine that accelerates the aircraft, and the state
+        // machine below exists to walk through that: held, accelerating, rotation,
+        // initial climb. A carrier does none of it. The aircraft is already at the
+        // carrier's altitude and already at the carrier's speed; the launch is the
+        // shackle opening, and what follows is ordinary flight. The plan says this in as
+        // many words — inherit the carrier's kinematics and then run under 6DOF alone,
+        // with no scripted trajectory — so the release is exactly that and nothing more.
+        if launchMode == .airLaunch, let release = launchAsset.airLaunchAsset {
+            performCarrierRelease(release)
+            return
+        }
+
         // Validate the mode that is actually in force, not the one the draft
         // happens to hold.
         //
@@ -23209,6 +23361,76 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.throttle,
                 Double(resolvedFlightBaseline(for: .takeoff).takeoffThrottleReference)
             )
+        }, markManual: false)
+    }
+
+    /// Hands the aircraft the carrier's state vector and lets go.
+    ///
+    /// Deliberately short, because the physical event is. There is no impulse to apply,
+    /// no rail to run down and no rotation to command — the aircraft is placed where the
+    /// carrier was, moving how the carrier was moving, and from the next physics tick it
+    /// is an ordinary aeroplane. Anything more elaborate here would be the scripted
+    /// trajectory the plan forbids.
+    ///
+    /// The engine is already running: a target drone under a DC-130's wing has its
+    /// turbojet started and stabilised long before the shackle opens, because there is no
+    /// second attempt at ten kilometres.
+    private func performCarrierRelease(_ release: AirLaunchAsset) {
+        fixedWingLaunchController.reset()
+        activeFixedWingLaunchDynamics = nil
+        launchCradleHoldActive = false
+        fixedWingLaunchPreflightPrepared = false
+        fixedWingLaunchPreflightWarningReason = nil
+
+        let releasePosition = release.releasePosition
+        let releaseVelocity = release.releaseVelocity
+        homePosition = releasePosition
+        state.position = releasePosition
+        state.velocity = releaseVelocity
+        state.forwardAirspeed = simd_length(releaseVelocity)
+        state.orientation.x = 0.0
+        // Pointed along the flight path, not at the carrier's deck angle: the aircraft
+        // is flying, and a released aircraft that is not aligned with its own velocity
+        // vector starts at an angle of attack nobody commanded.
+        state.orientation.y = release.releasePitchDegrees.degreesToRadians
+        state.orientation.z = release.worldYawRadians
+        resyncFixedWingAttitudeFromEuler()
+
+        if var engine = state.engineRuntime {
+            // Warm and cleared. Not a shortcut — the alternative is an aircraft dropped
+            // at altitude with a cold engine, which is a way to lose one, not to launch it.
+            engine.runState = .ready
+            engine.temperatureC = EngineOperatingEnvelope
+                .envelope(for: activeUAVProfile?.powerplant?.engineType ?? .turbojet)
+                .operatingTemperatureC
+            engine.shaftRPM = (activeUAVProfile?.powerplant?.ratedShaftRPM ?? 30_000.0) * 0.92
+            state.engineRuntime = engine
+        }
+
+        fixedWingAutopilotAltitudeCommand = releasePosition.y
+        fixedWingAutopilotCourseCommand = release.worldYawRadians
+        activeLaunchCorridor = nil
+        launchRuntimeSnapshot = FixedWingLaunchRuntimeSnapshot(
+            mode: .airLaunch,
+            state: .completed,
+            railProgress: 1.0,
+            longitudinalAirspeedMps: state.forwardAirspeed,
+            altitudeAboveLaunchMeters: 0.0,
+            transitionReason: "carrier_release_complete",
+            dynamics: nil
+        )
+        transitionPhysicalState(.airborne)
+        lastFiniteState = state
+        updateLegacyLaunchState(.completed)
+        refreshSceneLaunchAsset()
+        updateControlValues({ values in
+            values.x = Double(releasePosition.x)
+            values.y = Double(releasePosition.y)
+            values.z = Double(releasePosition.z)
+            values.roll = 0.0
+            values.pitch = Double(release.releasePitchDegrees)
+            values.yaw = Double(release.worldYawRadians.radiansToDegrees)
+            values.throttle = max(values.throttle, 0.85)
         }, markManual: false)
     }
 
@@ -23749,6 +23971,11 @@ final class DroneSimulationViewModel: ObservableObject {
                 // The booster throws the airframe steeply clear; the climb-out
                 // point sits close in and high rather than far downrange.
                 return max(wing.minSafeAirspeed * 1.2, 14.0)
+            case .airLaunch:
+                // Already at flying speed and kilometres above anything. There is no
+                // departure to protect, so the climb-out point is simply far enough
+                // ahead not to be behind the aircraft on the next tick.
+                return max(wing.cruiseAirspeed * 2.0, 200.0)
             case .standard:
                 return max(wing.cruiseAirspeed, 10.0)
             }
@@ -27029,6 +27256,14 @@ final class DroneSimulationViewModel: ObservableObject {
             return 26.0
         case .x256:
             return 30.0
+        // A range exists so a fast aircraft has room to take off, accelerate and turn
+        // around. Thirty metres of clear ground is what a survey quadcopter needs; an
+        // aircraft that rotates at 60 m/s needs a strip, and the departure-corridor
+        // check downstream still decides whether the one it gets is long enough.
+        case .x512, .x1024:
+            return 450.0
+        case .x2048, .x4096, .x8192:
+            return 700.0
         }
     }
 
@@ -27905,7 +28140,15 @@ private extension DroneSimulationViewModel {
             activeWaypointIndex: missionExecutionState.activeWaypointIndex,
             batteryPercent: Double(batteryState.chargePercent),
             payloadStatusDescription: payloadStatusMessageKey,
-            warningCount: warnings.count
+            warningCount: warnings.count,
+            // Recorded deterministically alongside the kinematics so a replay can answer
+            // why an airframe broke, not only where it was when it did.
+            machNumber: Double(state.machNumber),
+            dynamicPressurePa: Double(state.dynamicPressurePa),
+            loadFactor: Double(state.loadFactor),
+            skinTemperatureK: Double(state.aeroThermal.hottestK),
+            envelopeLimitKey: state.flightEnvelope.bindingLimit.localizationKey,
+            envelopeWorstFraction: Double(state.flightEnvelope.worstFraction)
         )
         missionReplayRecorder.recordFrame(frame)
     }

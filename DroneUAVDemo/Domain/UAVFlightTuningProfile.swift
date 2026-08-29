@@ -382,6 +382,72 @@ struct UAVFlightTuningProfile: Hashable {
                 payloadCruisePenaltyFactor: 0.12,
                 source: source
             )
+        // Supersonic reference aircraft.
+        //
+        // Cruise throttle is high and glide is poor throughout, and both follow from the
+        // same fact: these are jets on small wings. A turbojet at altitude makes a
+        // fraction of its sea-level thrust, so holding cruise takes most of the lever;
+        // and a slender supersonic planform has a lift-to-drag ratio a survey wing would
+        // find humiliating, so with the throttle closed it descends rather than glides.
+        case .bqm34fFirebeeII:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.58,
+                minimumSafeFlightThrottle: 0.48,
+                climbThrottleBaseline: 0.86,
+                glideThrottleFactor: 0.38,
+                stallProtectionBias: 0.14,
+                payloadCruisePenaltyFactor: 0.10,
+                source: source
+            )
+        case .aqm35TargetDrone:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.60,
+                minimumSafeFlightThrottle: 0.50,
+                climbThrottleBaseline: 0.90,
+                glideThrottleFactor: 0.34,
+                stallProtectionBias: 0.12,
+                payloadCruisePenaltyFactor: 0.08,
+                source: source
+            )
+        // A research aircraft flown by a ground station, deliberately built near neutral
+        // stability and expected to hold 8 g. Its throttle discipline is not a target
+        // drone's: it is dropped with a full tank for a thirty-minute sortie and spends
+        // most of it manoeuvring rather than cruising.
+        case .rockwellHiMAT:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.52,
+                minimumSafeFlightThrottle: 0.42,
+                climbThrottleBaseline: 0.88,
+                glideThrottleFactor: 0.44,
+                stallProtectionBias: 0.18,
+                payloadCruisePenaltyFactor: 0.12,
+                source: source
+            )
+        case .hermeusQuarterhorse:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.50,
+                minimumSafeFlightThrottle: 0.40,
+                climbThrottleBaseline: 0.92,
+                glideThrottleFactor: 0.46,
+                stallProtectionBias: 0.16,
+                payloadCruisePenaltyFactor: 0.10,
+                source: source
+            )
+        case .northAmericanX10:
+            return fixedWing(
+                referenceMass: referenceMass,
+                cruiseThrottleBaseline: 0.56,
+                minimumSafeFlightThrottle: 0.46,
+                climbThrottleBaseline: 0.90,
+                glideThrottleFactor: 0.42,
+                stallProtectionBias: 0.15,
+                payloadCruisePenaltyFactor: 0.09,
+                source: source
+            )
         case .abstractCustom:
             return custom(
                 referenceMass: max(0.35, referenceMass),

@@ -18,7 +18,12 @@ struct AbandonedCityOptions {
             return 12
         case .x32:
             return targetBuildings
-        case .x64, .x128, .x256:
+        // The extended ranges get the same block of buildings as the largest ordinary
+        // map, not a proportionally bigger city. The abandoned-city layout places a
+        // handful of authored buildings around the spawn to fly between; scaled up to
+        // an 800-kilometre range that stops being a city and becomes scattered debris,
+        // and the aircraft these ranges exist for is not flying between buildings.
+        case .x64, .x128, .x256, .x512, .x1024, .x2048, .x4096, .x8192:
             return maxBuildings
         }
     }
@@ -27,7 +32,7 @@ struct AbandonedCityOptions {
         switch mapScale {
         case .x4, .x8:
             return 6
-        case .x16, .x32, .x64, .x128, .x256:
+        case .x16, .x32, .x64, .x128, .x256, .x512, .x1024, .x2048, .x4096, .x8192:
             return minBuildings
         }
     }
@@ -44,6 +49,12 @@ struct AbandonedCityOptions {
             return 50.0
         case .x128, .x256:
             return 60.0
+        // A supersonic aircraft needs more than sixty metres of clear ground around
+        // its start point. This is only the radius the city layout keeps free; the
+        // departure-corridor check still has the final word on whether a given
+        // aircraft can actually get out.
+        case .x512, .x1024, .x2048, .x4096, .x8192:
+            return 400.0
         }
     }
 }
@@ -238,6 +249,12 @@ enum AbandonedCityLayout {
         case .x128:
             return 1.24
         case .x256:
+            return 1.32
+        // Held at the x256 value. This factor spreads the authored buildings further
+        // apart as the map grows; continuing the ramp onto a range hundreds of
+        // kilometres across would scatter fourteen buildings so far apart that none of
+        // them is ever visible from another.
+        case .x512, .x1024, .x2048, .x4096, .x8192:
             return 1.32
         }
     }

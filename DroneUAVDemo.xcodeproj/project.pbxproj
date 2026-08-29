@@ -35,6 +35,13 @@
 		10000000000000000000FD11 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD10 /* EngineRuntime.swift */; };
 		10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC20 /* FuelSystemRuntime.swift */; };
 		10000000000000000000FC11 /* AtmosphereModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC10 /* AtmosphereModel.swift */; };
+		10000000000000000000FE61 /* SonicBoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE60 /* SonicBoomModel.swift */; };
+		10000000000000000000FE71 /* SimulationAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE70 /* SimulationAudioService.swift */; };
+		10000000000000000000FE41 /* FlightEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE40 /* FlightEnvelope.swift */; };
+		10000000000000000000FE51 /* AeroThermalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE50 /* AeroThermalModel.swift */; };
+		10000000000000000000FE31 /* HighSpeedInletModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE30 /* HighSpeedInletModel.swift */; };
+		10000000000000000000FE11 /* CompressibleFlowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE10 /* CompressibleFlowState.swift */; };
+		10000000000000000000FE21 /* TransonicAeroModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE20 /* TransonicAeroModel.swift */; };
 		100000000000000000000216 /* CollisionAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000116 /* CollisionAnalysis.swift */; };
 		100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000117 /* BatteryThermalSimulationService.swift */; };
 		100000000000000000000218 /* CollisionAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000118 /* CollisionAnalysisService.swift */; };
@@ -462,6 +469,13 @@
 		10000000000000000000FD10 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC20 /* FuelSystemRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuelSystemRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC10 /* AtmosphereModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphereModel.swift; sourceTree = "<group>"; };
+		10000000000000000000FE60 /* SonicBoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonicBoomModel.swift; sourceTree = "<group>"; };
+		10000000000000000000FE70 /* SimulationAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationAudioService.swift; sourceTree = "<group>"; };
+		10000000000000000000FE40 /* FlightEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightEnvelope.swift; sourceTree = "<group>"; };
+		10000000000000000000FE50 /* AeroThermalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroThermalModel.swift; sourceTree = "<group>"; };
+		10000000000000000000FE30 /* HighSpeedInletModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighSpeedInletModel.swift; sourceTree = "<group>"; };
+		10000000000000000000FE10 /* CompressibleFlowState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressibleFlowState.swift; sourceTree = "<group>"; };
+		10000000000000000000FE20 /* TransonicAeroModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransonicAeroModel.swift; sourceTree = "<group>"; };
 		100000000000000000000116 /* CollisionAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysis.swift; sourceTree = "<group>"; };
 		100000000000000000000117 /* BatteryThermalSimulationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatteryThermalSimulationService.swift; sourceTree = "<group>"; };
 		100000000000000000000118 /* CollisionAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionAnalysisService.swift; sourceTree = "<group>"; };
@@ -1006,6 +1020,12 @@
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
 				10000000000000000000FD30 /* PropellerModel.swift */,
 				10000000000000000000FC10 /* AtmosphereModel.swift */,
+				10000000000000000000FE60 /* SonicBoomModel.swift */,
+				10000000000000000000FE40 /* FlightEnvelope.swift */,
+				10000000000000000000FE50 /* AeroThermalModel.swift */,
+				10000000000000000000FE30 /* HighSpeedInletModel.swift */,
+				10000000000000000000FE10 /* CompressibleFlowState.swift */,
+				10000000000000000000FE20 /* TransonicAeroModel.swift */,
 				10000000000000000000039F /* RuntimePerformancePolicy.swift */,
 				100000000000000000000137 /* UAVSelectionState.swift */,
 				10000000000000000000012E /* UAVSpecConfidence.swift */,
@@ -1268,6 +1288,7 @@
 				1B40C5E52ED7C5C71E5C4E65 /* LidarRawStreamWriter.swift */,
 				9235F9D6D84F0D14A4063490 /* World */,
 				10000000000000000000011B /* TelemetryExportService.swift */,
+				10000000000000000000FE70 /* SimulationAudioService.swift */,
 				1000000000000000000002D1 /* MissionReplayStorageService.swift */,
 				1000000000000000000002D2 /* MissionReplaySettingsStore.swift */,
 				1000000000000000000002F4 /* ReplayVideoExportService.swift */,
@@ -1668,6 +1689,13 @@
 				10000000000000000000FD11 /* EngineRuntime.swift in Sources */,
 				10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */,
 				10000000000000000000FC11 /* AtmosphereModel.swift in Sources */,
+				10000000000000000000FE61 /* SonicBoomModel.swift in Sources */,
+				10000000000000000000FE71 /* SimulationAudioService.swift in Sources */,
+				10000000000000000000FE41 /* FlightEnvelope.swift in Sources */,
+				10000000000000000000FE51 /* AeroThermalModel.swift in Sources */,
+				10000000000000000000FE31 /* HighSpeedInletModel.swift in Sources */,
+				10000000000000000000FE11 /* CompressibleFlowState.swift in Sources */,
+				10000000000000000000FE21 /* TransonicAeroModel.swift in Sources */,
 				100000000000000000000216 /* CollisionAnalysis.swift in Sources */,
 				100000000000000000000217 /* BatteryThermalSimulationService.swift in Sources */,
 				100000000000000000000218 /* CollisionAnalysisService.swift in Sources */,

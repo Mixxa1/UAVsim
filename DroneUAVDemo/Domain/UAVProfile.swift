@@ -59,11 +59,54 @@ enum UAVEngineType: String, Hashable {
     case wankelRotary
     case turboprop
     case turbojet
+    /// Ram compression only — no compressor, no turbine, no moving parts in the gas
+    /// path at all.
+    ///
+    /// The one engine here that cannot be started. It has nothing to compress the air
+    /// but the aircraft's own speed, so on the ground it makes no thrust whatsoever and
+    /// there is no throttle setting that changes that. Something else has to deliver it
+    /// to its operating Mach first — which is why every ramjet aircraft ever built was
+    /// either air-launched or sat on top of a booster.
+    case ramjet
 
     /// Does this engine burn fuel that has to be carried as consumable mass?
     var consumesFuel: Bool { self != .electricMotor }
 
+    /// Can this engine produce useful thrust standing still?
+    ///
+    /// False only for the ramjet, and the distinction is load-bearing rather than
+    /// descriptive: a launch sequence that waits for a running engine before releasing
+    /// the aircraft would wait for ever.
+    var producesStaticThrust: Bool { self != .ramjet }
+
     var localizationKey: String { "uav.engine.type.\(rawValue)" }
+}
+
+/// What is in front of the engine.
+///
+/// Not cosmetic, and not a detail that can be folded into a single thrust number. Above
+/// Mach 1 the intake decides how much of the free stream's total pressure ever reaches
+/// the engine, and the answer differs by a factor of two between a plain hole and a
+/// variable ramp. It is most of why one supersonic aircraft tops out at Mach 1.6 and
+/// another with a similar engine reaches Mach 3.
+enum UAVInletType: String, Hashable {
+    /// No intake to model — anything driving a propeller.
+    case none
+    /// A plain forward-facing opening. Swallows one normal shock, which is cheap to
+    /// build and expensive to fly: past about Mach 1.6 most of the total pressure is
+    /// lost across that single shock and the engine is being starved.
+    case pitot
+    /// A fixed cone, wedge or splitter plate that stages the compression through
+    /// oblique shocks. Very good at the Mach it was shaped for and progressively worse
+    /// away from it, in both directions.
+    case fixedRamp
+    /// Moving ramps or a translating spike, scheduled with flight condition. The only
+    /// arrangement that holds good recovery across a wide Mach range, and the reason
+    /// aircraft designed for Mach 2 and above carry the mechanism's weight and
+    /// complexity.
+    case variableRamp
+
+    var localizationKey: String { "uav.inlet.type.\(rawValue)" }
 }
 
 enum UAVPropellerPlacement: String, Hashable {
@@ -171,6 +214,13 @@ struct UAVPowerplantSpec: Hashable {
     let starter: UAVEngineStarterKind
     let startPolicy: UAVEngineStartPolicy
     let fuel: UAVFuelSpec?
+    /// Intake arrangement. Defaults to `.none` for anything driving a propeller and to
+    /// `.pitot` for a jet, which is what every jet already in the catalogue has — so no
+    /// existing profile changes by gaining this field.
+    let inletType: UAVInletType
+    /// Free-stream Mach the intake is shaped for. Only meaningful for a ramp inlet: a
+    /// fixed ramp is cut for one condition and pays for being anywhere else.
+    let inletDesignMach: Float
 
     init(
         engineType: UAVEngineType,
@@ -184,7 +234,9 @@ struct UAVPowerplantSpec: Hashable {
         propellerBladeCount: Int = 2,
         starter: UAVEngineStarterKind? = nil,
         startPolicy: UAVEngineStartPolicy = .groundStartBeforeLaunch,
-        fuel: UAVFuelSpec? = nil
+        fuel: UAVFuelSpec? = nil,
+        inletType: UAVInletType? = nil,
+        inletDesignMach: Float = 2.0
     ) {
         self.engineType = engineType
         self.engineDesignation = engineDesignation
@@ -198,6 +250,18 @@ struct UAVPowerplantSpec: Hashable {
         self.starter = starter ?? (engineType == .electricMotor ? .none : .electricStarter)
         self.startPolicy = startPolicy
         self.fuel = fuel
+        self.inletType = inletType ?? {
+            switch engineType {
+            case .turbojet, .ramjet:
+                // A plain pitot intake is what every jet already catalogued has, and it
+                // is the honest default: assuming a variable ramp would hand an
+                // uncharacterised aircraft the Mach 3 capability that mechanism buys.
+                return .pitot
+            case .electricMotor, .pistonTwoStroke, .pistonFourStroke, .wankelRotary, .turboprop:
+                return .none
+            }
+        }()
+        self.inletDesignMach = max(1.0, inletDesignMach)
     }
 
     /// True for anything that drives a propeller — piston, rotary and turboprop.
@@ -267,6 +331,17 @@ struct UAVProfile: Identifiable, Hashable {
     let nominalFlightTimeSec: Float?
     let nominalCruiseSpeedMps: Float?
     let nominalMaxRangeM: Float?
+    /// Altitude the aircraft normally works at, m.
+    ///
+    /// Added with the supersonic aircraft because their endurance figures stop making
+    /// sense without it. A turbojet's fuel flow follows ambient pressure, so the same
+    /// throttle burns six times as much at 1.5 km as it does at 14 km — and every
+    /// published turbojet endurance is a high-altitude figure. Judged down low, a Firebee
+    /// II empties its tanks in twenty-eight minutes against a published seventy-three,
+    /// which is a statement about where the measurement was taken rather than about the
+    /// aircraft. `nil` means the aircraft works low, which is true of everything that
+    /// predates this field.
+    let nominalCruiseAltitudeMeters: Float?
     let nominalLinkRangeM: Float?
     let batteryReserveFraction: Float?
     let payloadRangePenaltyPerKg: Float?
@@ -313,6 +388,7 @@ struct UAVProfile: Identifiable, Hashable {
         nominalFlightTimeSec: Float? = nil,
         nominalCruiseSpeedMps: Float? = nil,
         nominalMaxRangeM: Float? = nil,
+        nominalCruiseAltitudeMeters: Float? = nil,
         nominalLinkRangeM: Float? = nil,
         batteryReserveFraction: Float? = nil,
         payloadRangePenaltyPerKg: Float? = nil,
@@ -354,6 +430,7 @@ struct UAVProfile: Identifiable, Hashable {
         self.nominalFlightTimeSec = nominalFlightTimeSec
         self.nominalCruiseSpeedMps = nominalCruiseSpeedMps
         self.nominalMaxRangeM = nominalMaxRangeM
+        self.nominalCruiseAltitudeMeters = nominalCruiseAltitudeMeters
         self.nominalLinkRangeM = nominalLinkRangeM
         self.batteryReserveFraction = batteryReserveFraction
         self.payloadRangePenaltyPerKg = payloadRangePenaltyPerKg

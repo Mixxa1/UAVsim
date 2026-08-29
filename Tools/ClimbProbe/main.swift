@@ -197,7 +197,17 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
     let start = state.position.y
     var speedSum: Float = 0.0
     var samples = 0
-    for _ in 0..<(60 * 40) {
+    // 120 seconds, not 40.
+    //
+    // The run starts at the airframe's cruise airspeed, and for a high-altitude jet that
+    // figure is far above what it can sustain down at 400 m — so the first thing it does
+    // with the throttle closed is trade the excess speed for height. That is a zoom, not a
+    // failure to descend, and forty seconds was not long enough for the two supersonic
+    // aircraft with the highest cruise speeds to finish it. Over two minutes the zoom
+    // completes and what is measured is the steady glide. Aircraft that start near their
+    // trim speed — which is the whole subsonic fleet — are unaffected.
+    let glideSeconds = 120
+    for _ in 0..<(60 * glideSeconds) {
         let control = DroneControlInput(
             targetPosition: SIMD3<Float>(0, 400, -4000),
             targetOrientation: .zero,
@@ -224,7 +234,7 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
         speedSum += state.forwardAirspeed
         samples += 1
     }
-    let sink = (start - state.position.y) / 40.0
+    let sink = (start - state.position.y) / Float(glideSeconds)
     let meanSpeed = samples > 0 ? speedSum / Float(samples) : 1.0
     let glideRatio = sink > 0.01 ? meanSpeed / sink : 0.0
     print(String(format: "%-26@ %10.0f %10.0f %10.2f %8.1f",

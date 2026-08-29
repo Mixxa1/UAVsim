@@ -27,6 +27,8 @@ enum LaunchMethod: String, CaseIterable {
     case catapult
     case runway
     case canister
+    /// Released from a carrier aircraft at altitude and speed.
+    case airLaunch
 
     static func resolved(from mode: LaunchMode, fallback: LaunchMethod) -> LaunchMethod {
         switch mode {
@@ -40,6 +42,8 @@ enum LaunchMethod: String, CaseIterable {
             return .vertical
         case .canister:
             return .canister
+        case .airLaunch:
+            return .airLaunch
         case .standard:
             return fallback
         }
@@ -68,6 +72,15 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     /// release. It is started in the air once the booster has separated and the
     /// airframe has flying speed.
     case canister
+    /// Carried aloft by another aircraft and released at altitude and speed.
+    ///
+    /// Distinct from every other mode in the one way that matters to the flight model:
+    /// nothing accelerates the aircraft. It is already moving, because the carrier was,
+    /// and the whole launch consists of stopping being attached to it. The plan is
+    /// explicit that what follows must be ordinary 6DOF flight with no scripted
+    /// trajectory, which is exactly what "inherit the carrier's kinematics and then let
+    /// go" produces.
+    case airLaunch
 
     var id: String { rawValue }
 
@@ -89,6 +102,8 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
             return .vtolStartPoint
         case .canister:
             return .launchCanister
+        case .airLaunch:
+            return .carrierReleasePoint
         }
     }
 
@@ -101,7 +116,7 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     /// own transition dynamics.
     var isRuntimeImplemented: Bool {
         switch self {
-        case .standard, .handLaunch, .catapult, .canister, .runway:
+        case .standard, .handLaunch, .catapult, .canister, .runway, .airLaunch:
             return true
         case .vtol:
             return false
@@ -118,7 +133,7 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     /// gates still turned it away, so its sequence never actually ran.
     var runsLaunchSequence: Bool {
         switch self {
-        case .handLaunch, .catapult, .canister, .runway:
+        case .handLaunch, .catapult, .canister, .runway, .airLaunch:
             return true
         case .standard, .vtol:
             return false
@@ -132,7 +147,11 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
     /// rotation — every newton comes from the aircraft itself.
     var usesExternalLaunchEnergy: Bool {
         switch self {
-        case .handLaunch, .catapult, .canister:
+        // An air launch adds no energy at release — the carrier already gave the
+        // aircraft all of it, on the way up. Listed here anyway because everything
+        // downstream reads this as "did the aircraft get its flying speed from
+        // somewhere other than its own engine", and it did.
+        case .handLaunch, .catapult, .canister, .airLaunch:
             return true
         case .standard, .runway, .vtol:
             return false
@@ -141,9 +160,11 @@ enum LaunchMode: String, CaseIterable, Identifiable, Hashable {
 
     /// Must the engine be running and warm before the aircraft is released?
     ///
-    /// False only for a canister launch, whose airframe is sealed in a tube until
-    /// the booster fires — asking it to run its engine on the rail would mean
-    /// running it inside the tube.
+    /// False for a canister launch, whose airframe is sealed in a tube until the booster
+    /// fires — asking it to run its engine on the rail would mean running it inside the
+    /// tube. True for an air launch: a target drone hanging under a DC-130's wing has its
+    /// turbojet started and stabilised long before the shackle opens, because there is no
+    /// second chance at 10,000 metres.
     var requiresRunningEngineBeforeRelease: Bool {
         self != .canister
     }
@@ -190,6 +211,23 @@ enum FixedWingFamily: String, CaseIterable {
     case conventionalSurvey
     case tailsitterVTOL
     case surveyEVTOL
+    // Supersonic planforms. Added with the supersonic scope, and added as three rather
+    // than one because the differences between them are exactly what decides how each
+    // behaves through Mach 1 — the plan is explicit that one universal supersonic
+    // coefficient set must not be handed to every delta.
+    /// Slender body, small cropped or trapezoidal wing, cruciform tail. The shape of a
+    /// supersonic target drone: almost all of the volume is fuselage, the wing is there
+    /// to trim rather than to lift, and it pays very little wave drag for it.
+    case supersonicCruciform
+    /// Thin delta with a single fin. High usable angle of attack from vortex lift and a
+    /// large rearward shift of the aerodynamic centre through the transonic — which is
+    /// most of why a tailless delta needs so much nose-up trim supersonically.
+    case supersonicDelta
+    /// Close-coupled canard ahead of a swept or delta wing. The canard carries lift and,
+    /// more importantly here, holds the aerodynamic centre nearly still through the
+    /// transonic — the real aerodynamic reason for the configuration, and the reason a
+    /// canard aircraft does not need to re-trim as violently through Mach 1.
+    case canardDelta
 }
 
 enum DroneVisualClass: String, CaseIterable {
@@ -297,6 +335,15 @@ struct FixedWingParameters: Hashable {
     let launchPreSpoolSeconds: Float
     let runwayTakeoffDistance: Float
     let initialClimbTargetAltitude: Float
+    /// Height above the world origin at which a carrier releases this aircraft, m.
+    ///
+    /// A property of the aircraft rather than of the map object, because it is a
+    /// property of the pairing: a Firebee II comes off a DC-130's wing at around 10 km
+    /// because that is where a DC-130 flies, and a HiMAT comes off an NB-52B at 13.7 km
+    /// for the same reason.
+    let airLaunchReleaseAltitude: Float
+    /// The carrier's true airspeed at release, m/s. The aircraft inherits it whole.
+    let airLaunchReleaseSpeed: Float
 
     init(
         family: FixedWingFamily,
@@ -340,7 +387,9 @@ struct FixedWingParameters: Hashable {
         catapultUsesRocketBooster: Bool = false,
         launchPreSpoolSeconds: Float = 0.45,
         runwayTakeoffDistance: Float = 45.0,
-        initialClimbTargetAltitude: Float = 18.0
+        initialClimbTargetAltitude: Float = 18.0,
+        airLaunchReleaseAltitude: Float? = nil,
+        airLaunchReleaseSpeed: Float? = nil
     ) {
         self.family = family
         self.minSustainableSpeedMps = minSustainableSpeedMps
@@ -448,6 +497,15 @@ struct FixedWingParameters: Hashable {
         self.launchPreSpoolSeconds = launchPreSpoolSeconds.clamped(to: 0.15...2.0)
         self.runwayTakeoffDistance = runwayTakeoffDistance
         self.initialClimbTargetAltitude = initialClimbTargetAltitude
+        // Defaulted rather than required, so no existing profile changes by the field
+        // appearing. The defaults describe an ordinary transport-altitude drop at a
+        // comfortable margin over this airframe's own cruise, which is what a carrier
+        // release is when nothing more specific is known.
+        self.airLaunchReleaseAltitude = max(200.0, airLaunchReleaseAltitude ?? 6_000.0)
+        self.airLaunchReleaseSpeed = max(
+            self.minSafeAirspeed * 1.15,
+            airLaunchReleaseSpeed ?? (resolvedCruiseAirspeed * 0.95)
+        )
     }
 
     /// Lift-based turn radius `R = V²/(g·tan(bank))`, not the old kinematic
@@ -523,6 +581,10 @@ struct FixedWingParameters: Hashable {
             // A booster throws the airframe up and clear rather than along a
             // shallow departure path, so the corridor it needs is short.
             return max(10.0, waypointAcceptanceRadiusMeters * 1.1)
+        case .airLaunch:
+            // Released with kilometres of clear air under it. There is no departure
+            // corridor to keep clear because there is no ground anywhere near it.
+            return 0.0
         }
     }
 }
@@ -628,6 +690,14 @@ struct DroneModelProfile: Identifiable, Hashable {
     /// Structural build-quality multiplier scaling `VehicleComponentGraphBuilder`'s
     /// per-component-kind strength table for this specific airframe. 1.0 = unmodified table.
     let structuralQualityFactor: Float
+
+    /// What the airframe's skin is made of.
+    ///
+    /// Only matters once the aircraft is fast enough for the air to heat it, which is
+    /// why it defaults to aluminium and why every existing subsonic profile can ignore
+    /// it. Above Mach 2 it stops being a detail: it is the difference between an
+    /// aircraft that can hold a speed and one that can only dash to it.
+    var skinMaterial: UAVSkinMaterial = .aluminium
 
     /// Defaulted to `.unsealed` because that is what almost every real airframe is: consumer and
     /// commercial multirotors carry no immersion rating at all. Aircraft that genuinely differ are
@@ -841,7 +911,7 @@ struct LIPODroneModelRepository: DroneModelRepository {
         } ?? uavProfile.dimensions.resolvedFoldedMillimeters(fallback: defaultFoldedFallback)
         let runtimeMass = uavProfile.maxTakeoffMass ?? uavProfile.baseMass ?? tuning.fallbackTakeoffMass
 
-        return DroneModelProfile(
+        var profile = DroneModelProfile(
             id: uavProfile.id,
             displayName: uavProfile.displayName,
             displayNameKey: uavProfile.displayName,
@@ -875,6 +945,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             uavProfileID: uavProfile.id,
             structuralQualityFactor: tuning.structuralQualityFactor
         )
+        profile.skinMaterial = tuning.skinMaterial
+        return profile
     }
 
     private static func runtimeTuning(for uavProfile: UAVProfile) -> RuntimeTuning {
@@ -1878,6 +1950,271 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 ),
                 structuralQualityFactor: 1.20
             )
+
+        // MARK: Supersonic reference aircraft
+        //
+        // Stall speeds here are doing more work than they look like they are. The
+        // aerodynamic model calibrates each airframe's wing *area* from its stall speed
+        // and mass rather than from a guessed aspect ratio, so `minSustainableSpeedMps`
+        // is where the wing comes from. Every one below was chosen by working backwards
+        // from the planform: the Firebee II's 75 m/s yields 2.6 m² against a 2.94 m span,
+        // and the X-10's 63 m/s yields 39.5 m² — which is its *published* wing area, and
+        // therefore a genuine cross-check rather than a fit.
+
+        case .bqm34fFirebeeII:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 951.0,
+                fallbackDimensions: DroneDimensionsMM(x: 2940, y: 8890, z: 1710),
+                maxHorizontalSpeedMps: 525.0,
+                maxAscentSpeedMps: 55.0,
+                maxDescentSpeedMps: 40.0,
+                maxFlightTimeMin: 73.0,
+                maxWindResistanceMps: 30.0,
+                batteryEnergyWh: 6400.0,
+                visualClass: .fixedWingDelta,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.42,
+                cameraPreset: DroneCameraPreset(fpvFov: 58.0, followDistance: 22.0, followHeight: 5.5),
+                collisionRadiusMeters: 0.70,
+                fixedWingParameters: FixedWingParameters(
+                    family: .supersonicCruciform,
+                    minSustainableSpeedMps: 75.0,
+                    cruiseSpeedMps: 240.0,
+                    climbSpeedMps: 200.0,
+                    stallWarningSpeedMps: 68.0,
+                    waypointAcceptanceRadiusMeters: 120.0,
+                    nominalTurnRateDegPerSec: 6.0,
+                    bankResponseGain: 0.68,
+                    climbResponseGain: 0.58,
+                    descentResponseGain: 0.54,
+                    dragFactor: 1.04,
+                    throttleResponseGain: 0.42,
+                    turnAuthority: 0.42,
+                    maxBankAngleDeg: 60.0,
+                    // Both real launch methods. The rail is the RATO ground launch, which
+                    // is a rocket bottle rather than a catapult shuttle — the same
+                    // distinction the Karrar already draws.
+                    supportedLaunchModes: [.airLaunch, .catapult],
+                    preferredLaunchMode: .airLaunch,
+                    maxAirspeed: 525.0,
+                    nominalClimbRateMps: 45.0,
+                    initialClimbPitchDeg: 14.0,
+                    maxInitialBankDeg: 16.0,
+                    catapultRailAngleDegrees: 15.0,
+                    catapultRailLengthMeters: 12.0,
+                    maxCatapultAccelerationG: 16.0,
+                    catapultUsesRocketBooster: true,
+                    runwayTakeoffDistance: 900.0,
+                    initialClimbTargetAltitude: 400.0,
+                    // A DC-130 carries it at around 10 km and 150 m/s.
+                    airLaunchReleaseAltitude: 10_000.0,
+                    airLaunchReleaseSpeed: 150.0
+                ),
+                structuralQualityFactor: 1.45,
+                skinMaterial: .aluminium
+            )
+
+        case .aqm35TargetDrone:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 900.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3380, y: 10060, z: 1690),
+                maxHorizontalSpeedMps: 457.0,
+                maxAscentSpeedMps: 60.0,
+                maxDescentSpeedMps: 45.0,
+                maxFlightTimeMin: 30.0,
+                maxWindResistanceMps: 30.0,
+                batteryEnergyWh: 5600.0,
+                visualClass: .fixedWingDelta,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.40,
+                cameraPreset: DroneCameraPreset(fpvFov: 58.0, followDistance: 24.0, followHeight: 6.0),
+                collisionRadiusMeters: 0.72,
+                fixedWingParameters: FixedWingParameters(
+                    family: .supersonicCruciform,
+                    minSustainableSpeedMps: 72.0,
+                    cruiseSpeedMps: 230.0,
+                    climbSpeedMps: 195.0,
+                    stallWarningSpeedMps: 65.0,
+                    waypointAcceptanceRadiusMeters: 120.0,
+                    nominalTurnRateDegPerSec: 5.5,
+                    bankResponseGain: 0.66,
+                    climbResponseGain: 0.56,
+                    descentResponseGain: 0.52,
+                    dragFactor: 1.05,
+                    throttleResponseGain: 0.40,
+                    turnAuthority: 0.40,
+                    maxBankAngleDeg: 58.0,
+                    // Ground launch was designed and never tested, so it is not offered.
+                    supportedLaunchModes: [.airLaunch],
+                    preferredLaunchMode: .airLaunch,
+                    maxAirspeed: 457.0,
+                    nominalClimbRateMps: 48.0,
+                    initialClimbPitchDeg: 14.0,
+                    maxInitialBankDeg: 15.0,
+                    initialClimbTargetAltitude: 400.0,
+                    airLaunchReleaseAltitude: 10_500.0,
+                    airLaunchReleaseSpeed: 145.0
+                ),
+                structuralQualityFactor: 1.40,
+                skinMaterial: .aluminium
+            )
+
+        case .rockwellHiMAT:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 1588.0,
+                fallbackDimensions: DroneDimensionsMM(x: 4750, y: 6860, z: 1310),
+                maxHorizontalSpeedMps: 413.0,
+                maxAscentSpeedMps: 90.0,
+                maxDescentSpeedMps: 60.0,
+                maxFlightTimeMin: 30.0,
+                maxWindResistanceMps: 28.0,
+                batteryEnergyWh: 7200.0,
+                visualClass: .fixedWingDelta,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.62,
+                cameraPreset: DroneCameraPreset(fpvFov: 62.0, followDistance: 18.0, followHeight: 4.6),
+                collisionRadiusMeters: 0.62,
+                fixedWingParameters: FixedWingParameters(
+                    family: .canardDelta,
+                    minSustainableSpeedMps: 50.0,
+                    cruiseSpeedMps: 260.0,
+                    climbSpeedMps: 210.0,
+                    stallWarningSpeedMps: 45.0,
+                    waypointAcceptanceRadiusMeters: 90.0,
+                    nominalTurnRateDegPerSec: 14.0,
+                    bankResponseGain: 0.92,
+                    climbResponseGain: 0.82,
+                    descentResponseGain: 0.74,
+                    dragFactor: 0.98,
+                    throttleResponseGain: 0.62,
+                    turnAuthority: 0.88,
+                    // Built to hold 8 g. A 60° bank limit would make that unreachable and
+                    // would quietly delete the aircraft's entire reason for existing.
+                    maxBankAngleDeg: 80.0,
+                    supportedLaunchModes: [.airLaunch],
+                    preferredLaunchMode: .airLaunch,
+                    maxAirspeed: 413.0,
+                    nominalClimbRateMps: 75.0,
+                    initialClimbPitchDeg: 16.0,
+                    maxInitialBankDeg: 25.0,
+                    initialClimbTargetAltitude: 300.0,
+                    // The NB-52B drop point: 13,700 m at Mach 0.68.
+                    airLaunchReleaseAltitude: 13_700.0,
+                    airLaunchReleaseSpeed: 201.0
+                ),
+                structuralQualityFactor: 1.75,
+                // Graphite and fibreglass wings with aeroelastic tailoring — one of the
+                // technologies the programme existed to demonstrate.
+                skinMaterial: .composite
+            )
+
+        case .hermeusQuarterhorse:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 11000.0,
+                fallbackDimensions: DroneDimensionsMM(x: 8400, y: 15200, z: 3600),
+                maxHorizontalSpeedMps: 738.0,
+                maxAscentSpeedMps: 130.0,
+                maxDescentSpeedMps: 80.0,
+                maxFlightTimeMin: 45.0,
+                maxWindResistanceMps: 32.0,
+                batteryEnergyWh: 24000.0,
+                visualClass: .fixedWingDelta,
+                launchMethod: .runway,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.55,
+                cameraPreset: DroneCameraPreset(fpvFov: 60.0, followDistance: 34.0, followHeight: 8.5),
+                collisionRadiusMeters: 1.10,
+                fixedWingParameters: FixedWingParameters(
+                    family: .supersonicDelta,
+                    minSustainableSpeedMps: 75.0,
+                    cruiseSpeedMps: 420.0,
+                    climbSpeedMps: 300.0,
+                    stallWarningSpeedMps: 68.0,
+                    waypointAcceptanceRadiusMeters: 200.0,
+                    nominalTurnRateDegPerSec: 8.0,
+                    bankResponseGain: 0.80,
+                    climbResponseGain: 0.72,
+                    descentResponseGain: 0.64,
+                    dragFactor: 0.96,
+                    throttleResponseGain: 0.58,
+                    turnAuthority: 0.62,
+                    maxBankAngleDeg: 70.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    // The Mach 2.5 the Mk 2 series is built for, not the Mach 1.21 the
+                    // aircraft has flown so far. This is a limit, and a limit describes
+                    // the airframe rather than the test programme's progress through it.
+                    maxAirspeed: 738.0,
+                    // 80 m/s, not the 110 first written. Nobody publishes this aircraft's
+                    // climb rate, so the first figure was an aspiration; the climb probe
+                    // measured 79 m/s from its published thrust against its own drag, and
+                    // a declared figure the airframe cannot deliver is worse than no
+                    // figure at all — every consumer of it would be planning on fiction.
+                    nominalClimbRateMps: 80.0,
+                    takeoffRotationSpeed: 82.0,
+                    initialClimbPitchDeg: 14.0,
+                    maxInitialBankDeg: 12.0,
+                    runwayTakeoffDistance: 1400.0,
+                    initialClimbTargetAltitude: 300.0
+                ),
+                structuralQualityFactor: 1.85,
+                skinMaterial: .titanium
+            )
+
+        case .northAmericanX10:
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 15876.0,
+                fallbackDimensions: DroneDimensionsMM(x: 8590, y: 20170, z: 4400),
+                maxHorizontalSpeedMps: 580.0,
+                maxAscentSpeedMps: 26.5,
+                maxDescentSpeedMps: 50.0,
+                maxFlightTimeMin: 30.0,
+                maxWindResistanceMps: 32.0,
+                batteryEnergyWh: 30000.0,
+                visualClass: .fixedWingDelta,
+                launchMethod: .runway,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.36,
+                cameraPreset: DroneCameraPreset(fpvFov: 58.0, followDistance: 42.0, followHeight: 10.0),
+                collisionRadiusMeters: 1.30,
+                fixedWingParameters: FixedWingParameters(
+                    family: .canardDelta,
+                    // 69 m/s is not a guess: it is the stall speed at which the model's
+                    // calibrated wing area comes out at the X-10's published 39.5 m².
+                    //
+                    // It was 63 first, derived against the 15,876 kg *gross* weight — and
+                    // the acceptance probe reported 47.7 m², twenty per cent out. The
+                    // runtime flies the aircraft at its 19,187 kg *maximum*, which is the
+                    // mass the calibration actually sees. Reading the wrong one of two
+                    // published weights is a quiet error and it took a published wing area
+                    // to catch it.
+                    minSustainableSpeedMps: 69.0,
+                    cruiseSpeedMps: 420.0,
+                    climbSpeedMps: 260.0,
+                    stallWarningSpeedMps: 57.0,
+                    waypointAcceptanceRadiusMeters: 220.0,
+                    nominalTurnRateDegPerSec: 5.0,
+                    bankResponseGain: 0.58,
+                    climbResponseGain: 0.50,
+                    descentResponseGain: 0.46,
+                    dragFactor: 1.02,
+                    throttleResponseGain: 0.40,
+                    turnAuthority: 0.38,
+                    maxBankAngleDeg: 60.0,
+                    supportedLaunchModes: [.standard, .runway],
+                    preferredLaunchMode: .runway,
+                    maxAirspeed: 580.0,
+                    // The published 5,224 ft/min.
+                    nominalClimbRateMps: 26.5,
+                    takeoffRotationSpeed: 78.0,
+                    initialClimbPitchDeg: 10.0,
+                    maxInitialBankDeg: 10.0,
+                    runwayTakeoffDistance: 1300.0,
+                    initialClimbTargetAltitude: 250.0
+                ),
+                structuralQualityFactor: 1.60,
+                skinMaterial: .aluminium
+            )
         }
     }
 
@@ -1888,6 +2225,52 @@ struct LIPODroneModelRepository: DroneModelRepository {
         // MQ-9A shares MQ-9B's visual preset (same airframe lineage) but is a
         // lighter, shorter-winged and faster aircraft, so it cannot inherit the
         // MQ-9B tuning wholesale.
+        // The AQM-35B shares the A's visual preset because it is the same airframe —
+        // stretched, strengthened and re-engined — but it is half a ton heavier with more
+        // than twice the thrust, so it cannot inherit the A's tuning.
+        case "northrop-aqm-35b":
+            return fixedWingRuntimeTuning(
+                fallbackTakeoffMass: 1540.0,
+                fallbackDimensions: DroneDimensionsMM(x: 3860, y: 10770, z: 1880),
+                maxHorizontalSpeedMps: 592.0,
+                maxAscentSpeedMps: 85.0,
+                maxDescentSpeedMps: 55.0,
+                maxFlightTimeMin: 25.0,
+                maxWindResistanceMps: 30.0,
+                batteryEnergyWh: 9600.0,
+                visualClass: .fixedWingDelta,
+                landingMethod: .bellyLanding,
+                controlResponsiveness: 0.38,
+                cameraPreset: DroneCameraPreset(fpvFov: 58.0, followDistance: 26.0, followHeight: 6.4),
+                collisionRadiusMeters: 0.78,
+                fixedWingParameters: FixedWingParameters(
+                    family: .supersonicCruciform,
+                    minSustainableSpeedMps: 85.0,
+                    cruiseSpeedMps: 300.0,
+                    climbSpeedMps: 240.0,
+                    stallWarningSpeedMps: 77.0,
+                    waypointAcceptanceRadiusMeters: 150.0,
+                    nominalTurnRateDegPerSec: 5.0,
+                    bankResponseGain: 0.64,
+                    climbResponseGain: 0.56,
+                    descentResponseGain: 0.52,
+                    dragFactor: 1.03,
+                    throttleResponseGain: 0.44,
+                    turnAuthority: 0.40,
+                    maxBankAngleDeg: 58.0,
+                    supportedLaunchModes: [.airLaunch],
+                    preferredLaunchMode: .airLaunch,
+                    maxAirspeed: 592.0,
+                    nominalClimbRateMps: 70.0,
+                    initialClimbPitchDeg: 14.0,
+                    maxInitialBankDeg: 15.0,
+                    initialClimbTargetAltitude: 450.0,
+                    airLaunchReleaseAltitude: 11_000.0,
+                    airLaunchReleaseSpeed: 150.0
+                ),
+                structuralQualityFactor: 1.55,
+                skinMaterial: .aluminium
+            )
         case "mq-9a-reaper":
             return fixedWingRuntimeTuning(
                 fallbackTakeoffMass: 4763.0,
@@ -2419,7 +2802,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
         cameraPreset: DroneCameraPreset,
         collisionRadiusMeters: Float,
         fixedWingParameters: FixedWingParameters,
-        structuralQualityFactor: Float = 1.0
+        structuralQualityFactor: Float = 1.0,
+        skinMaterial: UAVSkinMaterial = .aluminium
     ) -> RuntimeTuning {
         RuntimeTuning(
             fallbackTakeoffMass: fallbackTakeoffMass,
@@ -2444,7 +2828,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             hoverThrottle: 0.0,
             cameraPreset: cameraPreset,
             collisionRadiusMeters: collisionRadiusMeters,
-            structuralQualityFactor: structuralQualityFactor
+            structuralQualityFactor: structuralQualityFactor,
+            skinMaterial: skinMaterial
         )
     }
 
@@ -2564,6 +2949,9 @@ private struct RuntimeTuning {
     /// derived from any other field, so it defaults to neutral for every profile not explicitly
     /// tuned.
     let structuralQualityFactor: Float
+    /// Skin material. Only matters above about Mach 2, which is why it defaults to
+    /// aluminium and why no subsonic entry sets it.
+    let skinMaterial: UAVSkinMaterial
 
     init(
         fallbackTakeoffMass: Float,
@@ -2589,7 +2977,8 @@ private struct RuntimeTuning {
         cameraPreset: DroneCameraPreset,
         collisionRadiusMeters: Float,
         propulsionUnitTemplate: [PropulsionUnit] = [],
-        structuralQualityFactor: Float = 1.0
+        structuralQualityFactor: Float = 1.0,
+        skinMaterial: UAVSkinMaterial = .aluminium
     ) {
         self.fallbackTakeoffMass = fallbackTakeoffMass
         self.fallbackDimensions = fallbackDimensions
@@ -2615,6 +3004,7 @@ private struct RuntimeTuning {
         self.collisionRadiusMeters = collisionRadiusMeters
         self.propulsionUnitTemplate = propulsionUnitTemplate
         self.structuralQualityFactor = structuralQualityFactor
+        self.skinMaterial = skinMaterial
     }
 }
 
@@ -3166,7 +3556,19 @@ private enum UAVMapScaleRecommendationResolver {
         var recommendedOperational: MapScale = operationalProfile.preferredMapScaleMax
         var unsuitable: [MapScale] = []
 
-        for scale in MapScale.allCases {
+        // The adviser searches only the ordinary map sizes.
+        //
+        // Its "largest map that is not tight" rule has no upper bound of its own, so
+        // before the extended ranges existed it always landed on the biggest scale
+        // there was — harmless while that was 25.6 km, and nonsense the moment an
+        // 819 km range joined the list, because every aircraft in the catalogue down
+        // to a DJI Neo would have been advised to fly on it. Extended ranges are
+        // chosen deliberately for high-altitude work, not recommended by area
+        // arithmetic. `advisedCases` is `conventionalCases`, so behaviour for every
+        // existing aircraft is exactly what it was.
+        let advisedCases = MapScale.conventionalCases
+
+        for scale in advisedCases {
             let extent = scale.worldHalfExtentMeters
             let suitability = resolveSuitability(
                 extent: extent,
@@ -3187,7 +3589,7 @@ private enum UAVMapScaleRecommendationResolver {
             }
         }
 
-        if let firstPreferred = MapScale.allCases.first(where: {
+        if let firstPreferred = advisedCases.first(where: {
             resolveSuitability(
                 extent: $0.worldHalfExtentMeters,
                 maneuverFloor: maneuverFloor,
@@ -3199,7 +3601,7 @@ private enum UAVMapScaleRecommendationResolver {
             recommendedMin = firstPreferred
         }
 
-        if let lastPreferred = MapScale.allCases.last(where: {
+        if let lastPreferred = advisedCases.last(where: {
             resolveSuitability(
                 extent: $0.worldHalfExtentMeters,
                 maneuverFloor: maneuverFloor,
@@ -3208,9 +3610,9 @@ private enum UAVMapScaleRecommendationResolver {
                 preferredUpperExtent: preferredUpperExtent
             ) != .tight
         }) {
-            let minIndex = MapScale.allCases.firstIndex(of: recommendedMin) ?? 0
-            let lastIndex = MapScale.allCases.firstIndex(of: lastPreferred) ?? minIndex
-            recommendedMax = MapScale.allCases[max(minIndex, lastIndex)]
+            let minIndex = advisedCases.firstIndex(of: recommendedMin) ?? 0
+            let lastIndex = advisedCases.firstIndex(of: lastPreferred) ?? minIndex
+            recommendedMax = advisedCases[max(minIndex, lastIndex)]
         } else {
             recommendedMax = recommendedOperationalScale(targetHalfExtent: targetHalfExtent)
         }
@@ -3235,7 +3637,7 @@ private enum UAVMapScaleRecommendationResolver {
     }
 
     private static func recommendedOperationalScale(targetHalfExtent: Float) -> MapScale {
-        MapScale.allCases.min { lhs, rhs in
+        MapScale.conventionalCases.min { lhs, rhs in
             abs(lhs.worldHalfExtentMeters - targetHalfExtent) <
                 abs(rhs.worldHalfExtentMeters - targetHalfExtent)
         } ?? .x32

@@ -10,12 +10,20 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
     /// rocket booster, unfolds its wings and only then starts its own engine —
     /// which is why it is not a variety of catapult.
     case launchCanister
+    /// A release point under a carrier aircraft.
+    ///
+    /// The only launch object that is not on the ground. It marks where the carrier lets
+    /// go — a position, a heading, an altitude and a speed — and after that the aircraft
+    /// is simply flying. Four of the six supersonic reference aircraft are launched this
+    /// way, because a target drone or a research vehicle that needs to start at altitude
+    /// and at speed has no other way to get there.
+    case carrierReleasePoint
 
     var id: String { rawValue }
 
     var requiresHeading: Bool {
         switch self {
-        case .handLaunchPoint, .catapultLine, .runwayStrip, .launchCanister:
+        case .handLaunchPoint, .catapultLine, .runwayStrip, .launchCanister, .carrierReleasePoint:
             return true
         case .vtolStartPoint:
             return false
@@ -28,7 +36,10 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
             return true
         // A canister fires the airframe steeply upward on a booster; it does not
         // need the long shallow departure corridor a rail or a runway does.
-        case .vtolStartPoint, .launchCanister:
+        // A canister fires the airframe steeply upward on a booster, and a carrier
+        // release happens kilometres above anything: neither needs the long shallow
+        // departure corridor a rail or a runway does.
+        case .vtolStartPoint, .launchCanister, .carrierReleasePoint:
             return false
         }
     }
@@ -45,6 +56,8 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
             return .vtol
         case .launchCanister:
             return .canister
+        case .carrierReleasePoint:
+            return .airLaunch
         }
     }
 
@@ -62,6 +75,11 @@ enum MissionLaunchObjectType: String, CaseIterable, Identifiable {
         // of the launch vehicle before the wings come out.
         case .launchCanister:
             return 25.0...65.0
+        // A carrier flies level or very slightly nose-up when it releases. A drop is
+        // not a dive, and this is the carrier's flight-path angle rather than any
+        // angle the released aircraft is pointed at.
+        case .carrierReleasePoint:
+            return -5.0...5.0
         }
     }
 
@@ -195,6 +213,21 @@ struct MissionLaunchObject: Identifiable, Equatable, Hashable {
                     position: position,
                     headingDegrees: launchDirectionDegrees,
                     groundAttitudeDegrees: railAngleDegrees
+                )
+            )
+        case .carrierReleasePoint:
+            // Release altitude and speed are not properties of the map object: they
+            // belong to the aircraft, which knows what carrier it hangs under and how
+            // fast that carrier flies. The placeholders here are filled from the
+            // profile's own launch parameters when the sequence is armed.
+            return .airLaunch(
+                AirLaunchAsset(
+                    id: id,
+                    position: position,
+                    headingDegrees: launchDirectionDegrees,
+                    releaseAltitudeMeters: 6_000.0,
+                    releaseSpeedMps: 150.0,
+                    releasePitchDegrees: railAngleDegrees
                 )
             )
         case .vtolStartPoint:

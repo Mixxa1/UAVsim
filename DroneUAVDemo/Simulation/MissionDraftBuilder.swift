@@ -221,6 +221,10 @@ final class MissionDraftBuilder {
             // Published canister launchers sit steeply nose-up so the booster
             // carries the airframe clear of the vehicle before the wings deploy.
             return 45.0
+        case .carrierReleasePoint:
+            // A carrier flies level when it drops. This is its flight-path angle, not
+            // an angle anything is pointed down at.
+            return 0.0
         }
     }
 

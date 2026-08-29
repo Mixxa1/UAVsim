@@ -998,6 +998,21 @@ final class AutoPathPlannerService {
             base = 2.75
         case .x256:
             base = 3.35
+        // These bases never bind on an extended range: `gridBudgetCellSize` below
+        // divides the map width by 1200, which is already 21 m at x256 and hundreds of
+        // metres above it. They are written out rather than folded into a default so
+        // that adding a map size stays a compile error here, which is how this switch
+        // has caught every previous one.
+        case .x512:
+            base = 3.60
+        case .x1024:
+            base = 3.85
+        case .x2048:
+            base = 4.10
+        case .x4096:
+            base = 4.35
+        case .x8192:
+            base = 4.60
         }
 
         let densityAdjustment: Float = terrain.density > 0.75 ? 0.28 : (terrain.density > 0.55 ? 0.14 : 0.0)

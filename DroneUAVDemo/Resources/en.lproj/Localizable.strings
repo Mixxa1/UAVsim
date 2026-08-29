@@ -286,6 +286,11 @@
 "terrain.scale.64x64" = "64x64";
 "terrain.scale.128x128" = "128x128";
 "terrain.scale.256x256" = "256x256";
+"terrain.scale.512x512" = "512x512";
+"terrain.scale.1024x1024" = "1024x1024";
+"terrain.scale.2048x2048" = "2048x2048";
+"terrain.scale.4096x4096" = "4096x4096";
+"terrain.scale.8192x8192" = "8192x8192";
 "environment.boundary_barrier_visible" = "Show boundary barrier";
 
 "diagnostic.mode" = "Diagnostic mode";
@@ -1025,6 +1030,11 @@
 "uav.engine.type.wankelRotary" = "Wankel rotary";
 "uav.engine.type.turboprop" = "Turboprop";
 "uav.engine.type.turbojet" = "Turbojet";
+"uav.engine.type.ramjet" = "Ramjet";
+"uav.inlet.type.none" = "None";
+"uav.inlet.type.pitot" = "Pitot intake";
+"uav.inlet.type.fixedRamp" = "Fixed-ramp intake";
+"uav.inlet.type.variableRamp" = "Variable-ramp intake";
 
 "telemetry.path_status" = "Path status";
 "telemetry.path_status.idle" = "Idle";
@@ -2911,3 +2921,40 @@
 "uav.engine.start_policy.airStartAfterBoost" = "Started in the air after booster separation";
 "hud.compact.engine" = "ENG %@  %.0f rpm  %.0f°C";
 "hud.compact.fuel" = "FUEL %.1f kg  %.0f%%  %.1f kg/h";
+
+// MARK: - High-speed flight envelope
+"hud.compact.high_speed" = "M %.2f  EAS %.0f m/s  q %.1f kPa  n %.1f";
+"hud.compact.skin_temperature" = "SKIN %.0f°C  (recovery %.0f°C)";
+"hud.compact.envelope" = "LIMIT %@  %.0f%%";
+"envelope.limit.mach" = "Mach";
+"envelope.limit.dynamicPressure" = "dynamic pressure";
+"envelope.limit.loadFactor" = "load factor";
+"envelope.limit.angleOfAttack" = "angle of attack";
+"envelope.limit.thermal" = "skin temperature";
+"envelope.limit.inlet" = "intake envelope";
+"envelope.remedy.mach" = "Reduce Mach — throttle back";
+"envelope.remedy.dynamicPressure" = "Climb, or reduce speed";
+"envelope.remedy.loadFactor" = "Unload — ease the pull";
+"envelope.remedy.angleOfAttack" = "Lower the nose";
+"envelope.remedy.thermal" = "Slow down and let it cool";
+"envelope.remedy.inlet" = "Outside the intake envelope — reduce Mach";
+"thermal.zone.nose" = "Nose";
+"thermal.zone.leadingEdge" = "Leading edge";
+"thermal.zone.skin" = "Skin";
+"thermal.zone.inletLip" = "Intake lip";
+"uav.skin.material.aluminium" = "Aluminium";
+"uav.skin.material.titanium" = "Titanium";
+"uav.skin.material.stainlessSteel" = "Stainless steel";
+"uav.skin.material.composite" = "Composite";
+
+// MARK: - Supersonic reference aircraft and air launch
+"launch.mode.airLaunch" = "Air launch";
+"tactical.map.launch.mode.airLaunch" = "Air launch";
+"mission.launch_object.carrierReleasePoint" = "Carrier release point";
+"uav.profile.ryan-bqm-34f-firebee-ii.display_name" = "Ryan BQM-34F Firebee II";
+"uav.profile.northrop-aqm-35a.display_name" = "Northrop AQM-35A";
+"uav.profile.northrop-aqm-35b.display_name" = "Northrop AQM-35B";
+"uav.profile.rockwell-himat.display_name" = "NASA / Rockwell HiMAT";
+"uav.profile.hermeus-quarterhorse-mk21.display_name" = "Hermeus Quarterhorse Mk 2.1";
+"uav.profile.north-american-x-10.display_name" = "North American X-10";
+"event.sonic_boom" = "Sonic boom — Mach %.2f, %.0f Pa, arriving in %.0f s";

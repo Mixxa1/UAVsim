@@ -286,6 +286,11 @@
 "terrain.scale.64x64" = "64x64";
 "terrain.scale.128x128" = "128x128";
 "terrain.scale.256x256" = "256x256";
+"terrain.scale.512x512" = "512x512";
+"terrain.scale.1024x1024" = "1024x1024";
+"terrain.scale.2048x2048" = "2048x2048";
+"terrain.scale.4096x4096" = "4096x4096";
+"terrain.scale.8192x8192" = "8192x8192";
 "environment.boundary_barrier_visible" = "Показывать граничный барьер";
 
 "diagnostic.mode" = "Режим диагностики";
@@ -1020,6 +1025,11 @@
 "uav.engine.type.wankelRotary" = "Роторно-поршневой (Ванкеля)";
 "uav.engine.type.turboprop" = "Турбовинтовой";
 "uav.engine.type.turbojet" = "Турбореактивный";
+"uav.engine.type.ramjet" = "Прямоточный ВРД";
+"uav.inlet.type.none" = "Нет";
+"uav.inlet.type.pitot" = "Лобовой заборник";
+"uav.inlet.type.fixedRamp" = "Заборник с неподвижным клином";
+"uav.inlet.type.variableRamp" = "Заборник с регулируемым клином";
 
 "telemetry.path_status" = "Статус маршрута";
 "telemetry.path_status.idle" = "Ожидание";
@@ -2906,3 +2916,40 @@
 "uav.engine.start_policy.airStartAfterBoost" = "Запуск в воздухе после отделения ускорителя";
 "hud.compact.engine" = "ДВС %@  %.0f об/мин  %.0f°C";
 "hud.compact.fuel" = "ТОПЛ %.1f кг  %.0f%%  %.1f кг/ч";
+
+// MARK: - High-speed flight envelope
+"hud.compact.high_speed" = "M %.2f  ПРИБ %.0f м/с  q %.1f кПа  n %.1f";
+"hud.compact.skin_temperature" = "ОБШИВКА %.0f°C  (равновесие %.0f°C)";
+"hud.compact.envelope" = "ПРЕДЕЛ %@  %.0f%%";
+"envelope.limit.mach" = "число Маха";
+"envelope.limit.dynamicPressure" = "скоростной напор";
+"envelope.limit.loadFactor" = "перегрузка";
+"envelope.limit.angleOfAttack" = "угол атаки";
+"envelope.limit.thermal" = "нагрев обшивки";
+"envelope.limit.inlet" = "конверт заборника";
+"envelope.remedy.mach" = "Снизить число Маха — убрать газ";
+"envelope.remedy.dynamicPressure" = "Набрать высоту или сбросить скорость";
+"envelope.remedy.loadFactor" = "Разгрузить — ослабить тягу на себя";
+"envelope.remedy.angleOfAttack" = "Опустить нос";
+"envelope.remedy.thermal" = "Замедлиться и дать остыть";
+"envelope.remedy.inlet" = "Вне конверта заборника — снизить число Маха";
+"thermal.zone.nose" = "Носок";
+"thermal.zone.leadingEdge" = "Передняя кромка";
+"thermal.zone.skin" = "Обшивка";
+"thermal.zone.inletLip" = "Губа заборника";
+"uav.skin.material.aluminium" = "Алюминий";
+"uav.skin.material.titanium" = "Титан";
+"uav.skin.material.stainlessSteel" = "Нержавеющая сталь";
+"uav.skin.material.composite" = "Композит";
+
+// MARK: - Supersonic reference aircraft and air launch
+"launch.mode.airLaunch" = "Воздушный старт";
+"tactical.map.launch.mode.airLaunch" = "Воздушный старт";
+"mission.launch_object.carrierReleasePoint" = "Точка отделения от носителя";
+"uav.profile.ryan-bqm-34f-firebee-ii.display_name" = "Ryan BQM-34F Firebee II";
+"uav.profile.northrop-aqm-35a.display_name" = "Northrop AQM-35A";
+"uav.profile.northrop-aqm-35b.display_name" = "Northrop AQM-35B";
+"uav.profile.rockwell-himat.display_name" = "NASA / Rockwell HiMAT";
+"uav.profile.hermeus-quarterhorse-mk21.display_name" = "Hermeus Quarterhorse Mk 2.1";
+"uav.profile.north-american-x-10.display_name" = "North American X-10";
+"event.sonic_boom" = "Звуковой удар — M %.2f, %.0f Па, придёт через %.0f с";

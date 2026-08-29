@@ -40,6 +40,44 @@ struct CompactTelemetryHUDView: View {
                         .font(.caption2.monospaced())
                 }
             }
+            // High-speed block. Appears only when there is something to say — an aircraft
+            // below Mach 0.3 with plenty of envelope left has no use for three more lines
+            // of numbers, and the entire existing fleet flies there.
+            if showsHighSpeedBlock {
+                Text(String(
+                    format: localized("hud.compact.high_speed"),
+                    telemetry.machNumber,
+                    telemetry.equivalentAirspeedMps,
+                    telemetry.dynamicPressurePa / 1000.0,
+                    telemetry.loadFactor
+                ))
+                    .font(.caption2.monospaced())
+                if telemetry.skinTemperatureK > 320.0 {
+                    Text(String(
+                        format: localized("hud.compact.skin_temperature"),
+                        telemetry.skinTemperatureK - 273.15,
+                        telemetry.recoveryTemperatureK - 273.15
+                    ))
+                        .font(.caption2.monospaced())
+                }
+                // The reason, not just the fact. Which limit is binding decides what the
+                // operator should do about it, and the four answers point in different
+                // directions — climbing fixes a dynamic-pressure limit and makes a Mach
+                // limit worse.
+                if telemetry.envelopeWorstFraction > 0.85 {
+                    Text(String(
+                        format: localized("hud.compact.envelope"),
+                        localized(telemetry.envelopeLimitKey),
+                        telemetry.envelopeWorstFraction * 100.0
+                    ))
+                        .font(.caption2.weight(.semibold).monospaced())
+                        .foregroundStyle(
+                            telemetry.envelopeWorstFraction > 1.0
+                                ? GroundControlPalette.danger
+                                : GroundControlPalette.warning
+                        )
+                }
+            }
             if telemetry.autoNavigationActive || telemetry.targetDistanceMeters.isFinite {
                 Text(autoNavigationLine)
                     .font(.caption2.monospaced())
@@ -65,6 +103,16 @@ struct CompactTelemetryHUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
         )
+    }
+
+    /// Is the aircraft anywhere the compressible numbers mean anything?
+    ///
+    /// Mach 0.3 is the same threshold the aerodynamics use for legacy equivalence, so the
+    /// HUD starts showing these values exactly where they start affecting the flight. The
+    /// envelope clause catches the other case: an aircraft that is slow but pulling hard,
+    /// or one that has got hot and not yet cooled.
+    private var showsHighSpeedBlock: Bool {
+        telemetry.machNumber >= 0.30 || telemetry.envelopeWorstFraction > 0.85
     }
 
     private var autoNavigationLine: String {

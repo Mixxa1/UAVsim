@@ -89,6 +89,15 @@ struct FuelBurnInput {
     /// now a real number produced by the engine/propeller torque balance rather
     /// than a curve fitted to the lever position.
     let shaftPowerKW: Float?
+    /// Thrust the jet is actually producing, N.
+    ///
+    /// The exact counterpart of `shaftPowerKW`, and it became necessary for the same
+    /// reason. Consumption is `TSFC × thrust`, and thrust used to be recoverable from
+    /// the throttle and the density ratio. It is not any more: a turbojet's output now
+    /// depends on Mach and on what its intake recovers, so the burn model has to be
+    /// told what the engine did rather than guessing at it — otherwise an aircraft at
+    /// Mach 2 making half again its rated thrust would be billed for its static rating.
+    let thrustNewtons: Float?
 
     init(
         powerplant: UAVPowerplantSpec,
@@ -96,7 +105,8 @@ struct FuelBurnInput {
         engineRunning: Bool,
         atmosphere: AtmosphereState,
         leakKgPerSec: Float,
-        shaftPowerKW: Float? = nil
+        shaftPowerKW: Float? = nil,
+        thrustNewtons: Float? = nil
     ) {
         self.powerplant = powerplant
         self.throttle = throttle
@@ -104,6 +114,7 @@ struct FuelBurnInput {
         self.atmosphere = atmosphere
         self.leakKgPerSec = leakKgPerSec
         self.shaftPowerKW = shaftPowerKW
+        self.thrustNewtons = thrustNewtons
     }
 }
 
@@ -132,7 +143,10 @@ final class FuelBurnService {
             return 0.40
         case .turboprop:
             return 0.30
-        case .turbojet:
+        case .turbojet, .ramjet:
+            // Neither turns a shaft that does useful work on air through a disc, so
+            // there is no brake power to charge consumption against. Both are billed by
+            // thrust instead — see `thrustSpecificConsumptionKgPerNH`.
             return 0.0
         }
     }
@@ -140,8 +154,18 @@ final class FuelBurnService {
     /// Thrust specific fuel consumption, kg per newton-hour. Small turbojets are
     /// dramatically thirstier per unit thrust than the metre-class engines that
     /// power cruise missiles and target drones, so this is not one number.
-    static func thrustSpecificConsumptionKgPerNH(ratedThrustN: Float) -> Float {
-        ratedThrustN < 400.0 ? 0.18 : 0.11
+    static func thrustSpecificConsumptionKgPerNH(
+        ratedThrustN: Float,
+        engineType: UAVEngineType = .turbojet
+    ) -> Float {
+        // A ramjet burns roughly twice what a turbojet does for the same thrust: no
+        // compressor means a low pressure ratio, and a low pressure ratio means poor
+        // thermal efficiency. It is a fair trade only where a turbojet cannot run at
+        // all, which is exactly the flight regime it is used in.
+        if engineType == .ramjet {
+            return ratedThrustN < 400.0 ? 0.34 : 0.22
+        }
+        return ratedThrustN < 400.0 ? 0.18 : 0.11
     }
 
     /// Fraction of rated output an engine delivers at a given throttle. The floor
@@ -149,7 +173,7 @@ final class FuelBurnService {
     static func outputFraction(throttle: Float, engineType: UAVEngineType) -> Float {
         let idle: Float
         switch engineType {
-        case .turbojet, .turboprop:
+        case .turbojet, .turboprop, .ramjet:
             idle = 0.12
         default:
             idle = 0.06
@@ -172,14 +196,25 @@ final class FuelBurnService {
                 throttle: input.throttle,
                 engineType: input.powerplant.engineType
             )
-            if input.powerplant.engineType == .turbojet {
+            let engineType = input.powerplant.engineType
+            if engineType == .turbojet || engineType == .ramjet {
                 let ratedThrust = input.powerplant.totalRatedThrustN ?? 0.0
                 let tsfc = Self.thrustSpecificConsumptionKgPerNH(
-                    ratedThrustN: input.powerplant.ratedThrustN ?? ratedThrust
+                    ratedThrustN: input.powerplant.ratedThrustN ?? ratedThrust,
+                    engineType: engineType
                 )
-                // A turbojet's thrust falls roughly with density, and so does the
-                // fuel it burns making it.
-                let thrust = ratedThrust * fraction * input.atmosphere.densityRatio
+                let thrust: Float
+                if let measured = input.thrustNewtons {
+                    // What the engine is really making. A running jet at idle still
+                    // burns, so there is a floor rather than a hard zero — and for a
+                    // ramjet outside its envelope, where the real thrust is zero, that
+                    // floor is the fuel being dumped into a pipe that will not light.
+                    thrust = max(measured, ratedThrust * 0.05)
+                } else {
+                    // No engine model in the loop: the old proxy, kept so any caller
+                    // that has no thrust to hand behaves exactly as it did.
+                    thrust = ratedThrust * fraction * input.atmosphere.densityRatio
+                }
                 burnKgPerSec = tsfc * thrust / 3600.0
             } else {
                 let bsfc = Self.brakeSpecificConsumptionKgPerKWh(for: input.powerplant.engineType)

@@ -121,7 +121,14 @@ struct UAVStructuralLoadSolver {
         /// Ambient density the airframe is actually flying through. Defaulted to
         /// sea level so any caller that has no atmosphere handy behaves exactly as
         /// before; the runtime passes the real value.
-        airDensity: Float = AtmosphereModel.seaLevelDensity
+        airDensity: Float = AtmosphereModel.seaLevelDensity,
+        /// How much strength the structure has lost to heat, 0...1.
+        ///
+        /// This is how aerodynamic heating actually destroys an airframe. It does not
+        /// melt it — it takes the strength out of it, and then a manoeuvre the aircraft
+        /// would have flown cold breaks something. Zero for every aircraft that never
+        /// gets hot, so the default leaves existing behaviour untouched.
+        thermalWeakening: Float = 0.0
     ) -> UAVStructuralLoadResult {
         guard deltaTime > 0.0001, !graph.isEmpty else { return .none }
 
@@ -235,6 +242,7 @@ struct UAVStructuralLoadSolver {
             let residual = max(
                 0.015,
                 min(connection.residualStrength, child.residualStrength)
+                    * (1.0 - max(0.0, min(0.95, thermalWeakening)))
             )
             let tensileRatio = force / max(0.01, connection.tensileLimitN * residual)
             let shearRatio = force / max(0.01, connection.shearLimitN * residual)

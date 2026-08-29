@@ -21,4 +21,56 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
     let batteryPercent: Double?
     let payloadStatusDescription: String?
     let warningCount: Int
+
+    // MARK: High-speed flight state
+    //
+    // Optional, and that is the point rather than an omission: replays recorded before
+    // these existed decode with `nil` here instead of failing outright, so every session
+    // already on disk stays playable. A viewer that finds `nil` says the recording
+    // predates the measurement — which is true — rather than showing a Mach number of
+    // zero, which would be a lie about a flight that happened.
+    let machNumber: Double?
+    let dynamicPressurePa: Double?
+    let loadFactor: Double?
+    let skinTemperatureK: Double?
+    let envelopeLimitKey: String?
+    let envelopeWorstFraction: Double?
+
+    init(
+        id: UUID,
+        timestamp: TimeInterval,
+        position: CodableVector3D,
+        velocity: CodableVector3D,
+        attitude: MissionAttitudeSnapshot,
+        flightModeDescription: String,
+        autopilotDescription: String?,
+        activeWaypointIndex: Int?,
+        batteryPercent: Double?,
+        payloadStatusDescription: String?,
+        warningCount: Int,
+        machNumber: Double? = nil,
+        dynamicPressurePa: Double? = nil,
+        loadFactor: Double? = nil,
+        skinTemperatureK: Double? = nil,
+        envelopeLimitKey: String? = nil,
+        envelopeWorstFraction: Double? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.position = position
+        self.velocity = velocity
+        self.attitude = attitude
+        self.flightModeDescription = flightModeDescription
+        self.autopilotDescription = autopilotDescription
+        self.activeWaypointIndex = activeWaypointIndex
+        self.batteryPercent = batteryPercent
+        self.payloadStatusDescription = payloadStatusDescription
+        self.warningCount = warningCount
+        self.machNumber = machNumber
+        self.dynamicPressurePa = dynamicPressurePa
+        self.loadFactor = loadFactor
+        self.skinTemperatureK = skinTemperatureK
+        self.envelopeLimitKey = envelopeLimitKey
+        self.envelopeWorstFraction = envelopeWorstFraction
+    }
 }

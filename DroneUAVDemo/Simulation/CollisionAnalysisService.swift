@@ -473,11 +473,51 @@ struct CollisionAnalysisInput {
 }
 
 final class CollisionAnalysisService {
-    private let broadPhaseDistance: Float = 26.0
+    /// Shortest horizon the proximity analysis ever uses, metres. This is the constant
+    /// the whole analysis used to run on, unconditionally.
+    private let broadPhaseFloorDistance: Float = 26.0
+    /// The horizon is really a time, not a distance: how far ahead an aircraft can see
+    /// is how far it travels before it gets there. 26 m is a comfortable second and a
+    /// bit at 20 m/s, which is what everything in the catalogue used to do. It is 44
+    /// milliseconds at Mach 2 — not a warning, a post-mortem.
+    let broadPhaseLookaheadSeconds: Float = 1.4
+    /// Speed below which the horizon stays at the old constant, m/s.
+    ///
+    /// Deliberately conservative, and the reason is compatibility rather than physics.
+    /// A pure time-based horizon would widen proximity detection for the whole existing
+    /// fixed-wing fleet — an MQ-9B at 87 m/s would go from 26 m to 122 m — and the
+    /// avoidance layers sitting downstream of this analysis have a documented history of
+    /// latching into a permanent "blocked" state when they are fed more contacts than
+    /// they were tuned against. Widening them is a real fix that deserves its own flight
+    /// testing, not a side effect of the supersonic work.
+    ///
+    /// 120 m/s is above the maximum airspeed of every propeller aircraft in the
+    /// catalogue, so all of them keep exactly the horizon they have today, and the curve
+    /// is continuous through the anchor rather than stepping at it.
+    private let broadPhaseAnchorSpeedMps: Float = 120.0
+    /// Ceiling on the horizon. Not a physical limit — a cost one: candidate selection
+    /// walks every obstacle handed to it, and past this distance the useful work is
+    /// done by route planning rather than by proximity warning.
+    private let broadPhaseCeilingDistance: Float = 900.0
     private let maxCandidateCount = 48
 
+    /// The horizon at a given ground speed: the old constant up to the anchor speed,
+    /// then a second and a half of flight on top of it.
+    func broadPhaseDistance(forSpeedMps speed: Float) -> Float {
+        guard speed.isFinite else { return broadPhaseFloorDistance }
+        let excess = max(0.0, speed) - broadPhaseAnchorSpeedMps
+        return min(
+            broadPhaseCeilingDistance,
+            broadPhaseFloorDistance + max(0.0, excess) * broadPhaseLookaheadSeconds
+        )
+    }
+
     var spatialQueryRadius: Float {
-        broadPhaseDistance + 12.0
+        broadPhaseFloorDistance + 12.0
+    }
+
+    func spatialQueryRadius(forSpeedMps speed: Float) -> Float {
+        broadPhaseDistance(forSpeedMps: speed) + 12.0
     }
 
     func analyze(input: CollisionAnalysisInput) -> CollisionAnalysisSnapshot {
@@ -485,7 +525,8 @@ final class CollisionAnalysisService {
             return .safe
         }
 
-        let broadPhaseDistanceSq = broadPhaseDistance * broadPhaseDistance
+        let horizon = broadPhaseDistance(forSpeedMps: simd_length(input.droneVelocity))
+        let broadPhaseDistanceSq = horizon * horizon
         let dronePlanar = SIMD2<Float>(input.dronePosition.x, input.dronePosition.z)
         var candidates: [(obstacle: CollisionObstacle, combinedGapSq: Float)] = []
         candidates.reserveCapacity(maxCandidateCount)

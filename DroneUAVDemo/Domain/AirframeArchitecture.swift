@@ -233,11 +233,78 @@ struct HandLaunchAsset: Identifiable, Equatable, Hashable {
     }
 }
 
+/// Where a carrier aircraft lets go.
+///
+/// The only launch object in this file that is not touching the ground, and the only one
+/// that adds no energy. A catapult, a hand and a booster all accelerate the airframe; a
+/// runway gives it room to accelerate itself. A carrier does neither — the aircraft is
+/// already at altitude and already at speed, and the launch consists entirely of the
+/// shackle opening.
+///
+/// That is why this carries a release altitude and a release speed instead of a stroke,
+/// a rail or a burn time: those are the whole of what the aircraft inherits.
+struct AirLaunchAsset: Identifiable, Equatable, Hashable {
+    let id: UUID
+    /// Ground track of the release point.
+    var position: SIMD2<Float>
+    var headingDegrees: Float
+    /// Height above the world origin at which the shackle opens, m.
+    var releaseAltitudeMeters: Float
+    /// The carrier's true airspeed at release, m/s. Inherited whole.
+    var releaseSpeedMps: Float
+    /// Flight-path angle of the carrier at release, degrees. Almost always level or
+    /// slightly climbing; a drop is not a dive.
+    var releasePitchDegrees: Float
+
+    init(
+        id: UUID = UUID(),
+        position: SIMD2<Float>,
+        headingDegrees: Float,
+        releaseAltitudeMeters: Float,
+        releaseSpeedMps: Float,
+        releasePitchDegrees: Float = 0.0
+    ) {
+        self.id = id
+        self.position = position
+        self.headingDegrees = headingDegrees
+        self.releaseAltitudeMeters = max(50.0, releaseAltitudeMeters)
+        self.releaseSpeedMps = max(20.0, releaseSpeedMps)
+        self.releasePitchDegrees = min(10.0, max(-10.0, releasePitchDegrees))
+    }
+
+    var horizontalDirection: SIMD2<Float> {
+        MissionLaunchGeometry.horizontalDirection(headingDegrees: headingDegrees)
+    }
+
+    var direction3D: SIMD3<Float> {
+        MissionLaunchGeometry.direction3D(
+            headingDegrees: headingDegrees,
+            pitchDegrees: releasePitchDegrees
+        )
+    }
+
+    var worldYawRadians: Float {
+        MissionLaunchGeometry.worldYawRadians(headingDegrees: headingDegrees)
+    }
+
+    /// World-space release point.
+    var releasePosition: SIMD3<Float> {
+        SIMD3<Float>(position.x, releaseAltitudeMeters, position.y)
+    }
+
+    /// The velocity the aircraft is handed. Not an impulse and not a scripted path — the
+    /// state vector it starts flying from.
+    var releaseVelocity: SIMD3<Float> {
+        direction3D * releaseSpeedMps
+    }
+}
+
 enum LaunchAsset: Identifiable, Equatable, Hashable {
     case handLaunch(HandLaunchAsset)
     case catapult(CatapultLaunchAsset)
     case canister(CanisterLaunchAsset)
     case runway(RunwayLaunchAsset)
+    case airLaunch(AirLaunchAsset)
 
     var id: UUID {
         switch self {
@@ -248,6 +315,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
         case .canister(let asset):
             return asset.id
         case .runway(let asset):
+            return asset.id
+        case .airLaunch(let asset):
             return asset.id
         }
     }
@@ -261,6 +330,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
         case .canister(let asset):
             return asset.position
         case .runway(let asset):
+            return asset.position
+        case .airLaunch(let asset):
             return asset.position
         }
     }
@@ -276,6 +347,9 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
         // Not a launch angle at all: the attitude the gear holds while rolling.
         case .runway(let asset):
             return asset.groundAttitudeDegrees
+        // Also not a launch angle: the carrier's flight-path angle at release.
+        case .airLaunch(let asset):
+            return asset.releasePitchDegrees
         }
     }
 
@@ -288,6 +362,8 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
         case .canister(let asset):
             return asset.headingDegrees
         case .runway(let asset):
+            return asset.headingDegrees
+        case .airLaunch(let asset):
             return asset.headingDegrees
         }
     }
@@ -302,8 +378,18 @@ enum LaunchAsset: Identifiable, Equatable, Hashable {
             return asset.headingDegrees
         case .runway(let asset):
             return asset.headingDegrees
+        case .airLaunch(let asset):
+            return asset.headingDegrees
         }
     }
+
+    /// The carrier release this asset describes, if it is one.
+    var airLaunchAsset: AirLaunchAsset? {
+        if case .airLaunch(let asset) = self { return asset }
+        return nil
+    }
+
+    var isAirLaunch: Bool { airLaunchAsset != nil }
 
     var headingRadians: Float {
         headingDegrees * .pi / 180.0

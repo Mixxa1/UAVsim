@@ -27,7 +27,15 @@ print(String(format: "%8@ %10@ %10@ %10@ %10@ %8@",
              "alt m" as NSString, "T model" as NSString, "T ref" as NSString,
              "rho model" as NSString, "rho ref" as NSString, "err %" as NSString))
 
-// Published ISA: temperature K and density kg/m3.
+// Published ISA (US Standard Atmosphere 1976): geometric altitude m, temperature K,
+// density kg/m3.
+//
+// The rows above 11 km were added with the supersonic scope. They are not decoration:
+// every reference aircraft in that scope works between 13 km and 21 km, and the model
+// used to continue the tropopause isotherm all the way up — which is right to 20 km
+// and wrong above it, in the direction that makes air colder, denser and slower-
+// sounding than it is. A one-per-cent error in the speed of sound is a one-per-cent
+// error in the Mach number the whole stage is judged on.
 let isaReference: [(Float, Float, Float)] = [
     (0, 288.15, 1.2250),
     (500, 284.90, 1.1673),
@@ -36,7 +44,21 @@ let isaReference: [(Float, Float, Float)] = [
     (3000, 268.65, 0.9093),
     (5000, 255.65, 0.7364),
     (8000, 236.15, 0.5258),
-    (11000, 216.65, 0.3639)
+    // 0.36480, not the 0.3639 this row used to carry. Published ISA tables are indexed
+    // by geopotential altitude, and geopotential 11,000 m is geometric 11,019 m — the
+    // old value was simply one row of a different index. It mattered for nothing while
+    // the model also ignored the distinction; now that the model converts, the two have
+    // to be quoted against the same altitude or the check reports a 0.25 % error that
+    // belongs to the table rather than to the code.
+    (11000, 216.77, 0.36480),
+    (13700, 216.65, 0.23884),   // Firebee II supersonic dash altitude
+    (15000, 216.65, 0.19475),
+    (16800, 216.65, 0.14684),   // BQM-34F ceiling
+    (18300, 216.65, 0.11606),   // AQM-35A ceiling
+    (20000, 216.65, 0.08891),
+    (21300, 217.88, 0.07216),   // AQM-35B ceiling — first row above the inversion
+    (25000, 221.55, 0.04008),
+    (30000, 226.51, 0.01841)
 ]
 
 let atmosphere = AtmosphereModel.standard
@@ -63,6 +85,37 @@ if abs(seaLevel.speedOfSoundMps - 340.29) > 0.5 {
 }
 print(String(format: "\nsea level: a = %.2f m/s, mu = %.3e Pa.s, rho = %.4f",
              seaLevel.speedOfSoundMps, seaLevel.dynamicViscosityPaS, seaLevel.airDensity))
+
+// Speed of sound is checked separately from density because it is what the whole
+// supersonic scope is scored against: Mach is TAS over this number, so an error here
+// is an error in every acceptance criterion at once. The dash-altitude rows are the
+// ones the reference aircraft are actually judged at.
+print("\nSpeed of sound and the true airspeed that puts each reference point on Mach")
+print(String(repeating: "-", count: 76))
+let speedOfSoundReference: [(Float, Float, String)] = [
+    (13700, 295.07, "BQM-34F dash, M 1.78"),
+    (18300, 295.07, "AQM-35A ceiling, M 1.55"),
+    (21300, 295.91, "AQM-35B ceiling, M 2.0"),
+    (12200, 295.07, "HiMAT M 1.4 point"),
+    (13650, 295.07, "X-10 ceiling, M 2.05")
+]
+for (altitude, referenceSpeed, label) in speedOfSoundReference {
+    let modelled = atmosphere.state(altitudeMeters: altitude)
+    let error = abs(modelled.speedOfSoundMps - referenceSpeed)
+    if error > 0.6 {
+        failures.append(String(format: "speed of sound at %.0f m is %.2f, expected %.2f",
+                               altitude, modelled.speedOfSoundMps, referenceSpeed))
+    }
+    // Round-trips the accessor that used to return the Mach number of a 1 m/s aircraft.
+    let machAtRef = modelled.machNumber(trueAirspeedMps: referenceSpeed * 1.5)
+    if abs(machAtRef - 1.5) > 0.01 {
+        failures.append(String(format: "machNumber at %.0f m returned %.3f for M 1.5",
+                               altitude, machAtRef))
+    }
+    print(String(format: "%8.0f m  a = %6.2f (ref %6.2f)  err %.2f m/s   %@",
+                 altitude, modelled.speedOfSoundMps, referenceSpeed, error,
+                 label as NSString))
+}
 
 // MARK: - 2. Does tank + engine + BSFC reproduce the declared endurance?
 
@@ -98,7 +151,16 @@ for runtimeProfile in repository.allProfiles {
     let step: Float = 60.0
     var seconds: Float = 0.0
     var firstFlow: Float = 0.0
-    let cruiseAtmosphere = atmosphere.state(altitudeMeters: 1500.0)
+    // Each aircraft's endurance is burned at *its own* working altitude.
+    //
+    // 1,500 m is right for the propeller fleet and badly wrong for a high-altitude
+    // turbojet: a jet's thrust follows ambient pressure, so the same throttle at 1.5 km
+    // burns six times what it burns at 14 km, and every published turbojet endurance is a
+    // high-altitude figure. Judged down low the Firebee II emptied its tanks in
+    // twenty-eight minutes against a published seventy-three, which said nothing about the
+    // aircraft and everything about where the test was standing.
+    let cruiseAltitude = uavProfile.nominalCruiseAltitudeMeters ?? 1_500.0
+    let cruiseAtmosphere = atmosphere.state(altitudeMeters: cruiseAltitude)
     while !fuelState.isStarved && seconds < 60.0 * 60.0 * 60.0 {
         fuelState = burnService.update(
             current: fuelState,

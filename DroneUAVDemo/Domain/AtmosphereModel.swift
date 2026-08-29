@@ -26,8 +26,14 @@ struct AtmosphereState: Hashable {
         airDensity / AtmosphereModel.seaLevelDensity
     }
 
-    var machNumber: Float {
-        speedOfSoundMps > 1.0 ? 1.0 / speedOfSoundMps : 0.0
+    /// Flight Mach number at a given true airspeed.
+    ///
+    /// Was a computed property returning `1.0 / speedOfSoundMps` — the Mach number
+    /// of an aircraft doing one metre per second, which is nobody. Nothing read it,
+    /// so the error never surfaced; it is a function now because Mach describes the
+    /// *aircraft's* motion through this air, not a property of the air itself.
+    func machNumber(trueAirspeedMps: Float) -> Float {
+        speedOfSoundMps > 1.0 ? max(0.0, trueAirspeedMps) / speedOfSoundMps : 0.0
     }
 
     static let seaLevelStandard = AtmosphereModel.standard.state(altitudeMeters: 0.0)
@@ -50,12 +56,29 @@ struct AtmosphereModel: Hashable {
     /// Specific gas constant for dry air, J/(kg·K).
     static let gasConstantJPerKgK: Float = 287.052_87
     static let gravityMps2: Float = 9.806_65
+    /// Effective Earth radius used by the ISA to convert geometric altitude to the
+    /// geopotential altitude its layer definitions are written against, m.
+    static let earthRadiusMeters: Float = 6_356_766.0
     static let ratioOfSpecificHeats: Float = 1.4
     /// Top of the modelled troposphere. Above this the lapse rate stops and the
-    /// profile becomes isothermal — no aircraft in this catalogue reaches it, but
-    /// clamping keeps the exponent well behaved rather than producing a negative
-    /// absolute temperature for an out-of-range altitude.
+    /// profile becomes isothermal.
     static let tropopauseAltitudeMeters: Float = 11_000.0
+    /// Top of the isothermal lower stratosphere. Above it the ISA temperature climbs
+    /// again as ozone absorbs solar ultraviolet, and a model that keeps extending the
+    /// 216.65 K isotherm upward reports air that is steadily too cold, too dense and
+    /// too slow-sounding — which lands directly on the Mach number of anything flying
+    /// there. Below 20 km this constant changes nothing: the layer above is only
+    /// evaluated when the aircraft is actually in it.
+    static let stratosphereInversionAltitudeMeters: Float = 20_000.0
+    /// Top of the modelled column. Every reference aircraft in the supersonic scope
+    /// works below 22 km; past 32 km the single-gas ISA relations stop being the
+    /// right model at all, so the profile is clamped rather than extrapolated.
+    static let modelCeilingAltitudeMeters: Float = 32_000.0
+    /// ISA temperature gradient in the 20–32 km layer, K per metre. Positive, and
+    /// deliberately not expressed as a negative `temperatureLapseRateKPerM`: the sign
+    /// convention on the tropospheric constant is "temperature falls by this much",
+    /// and reusing it for a warming layer is exactly how a sign error gets written.
+    static let stratosphereWarmingRateKPerM: Float = 0.001
 
     /// Difference from the standard day at sea level, K. Positive is hotter, which
     /// thins the air.
@@ -91,23 +114,63 @@ struct AtmosphereModel: Hashable {
 
     func state(altitudeMeters: Float) -> AtmosphereState {
         let altitude = altitudeMeters.isFinite ? altitudeMeters : 0.0
-        let lapsedAltitude = min(max(altitude, -500.0), Self.tropopauseAltitudeMeters)
+        let geometric = min(max(altitude, -500.0), Self.modelCeilingAltitudeMeters)
+        // The ISA layer boundaries and lapse rates are defined against *geopotential*
+        // altitude, which folds the weakening of gravity with height into the height
+        // itself. Feeding geometric altitude straight in is what the model used to do,
+        // and below the tropopause the difference is small enough to disappear into
+        // the tuning: 0.02 % of density at 1 km, 0.2 % at 11 km. It is not small where
+        // the supersonic scope lives — at 25 km it is a hundred metres of altitude and
+        // 1.5 % of pressure — so the conversion is applied over the whole column
+        // rather than only above 20 km, which would put a kink in the middle of it.
+        let column = Self.earthRadiusMeters * geometric / (Self.earthRadiusMeters + geometric)
+        let lapsedAltitude = min(column, Self.tropopauseAltitudeMeters)
 
-        let standardTemperature = Self.seaLevelTemperatureK - Self.temperatureLapseRateKPerM * lapsedAltitude
+        // --- Layer 0: troposphere, up to 11 km.
+        let tropopauseTemperature = Self.seaLevelTemperatureK - Self.temperatureLapseRateKPerM * lapsedAltitude
+        var standardTemperature = tropopauseTemperature
         // The offset shifts the whole column; pressure still integrates the
         // standard lapse, which is what keeps the model physical rather than
         // letting a "hot day" quietly rewrite the barometric relation.
         let pressureExponent = Self.gravityMps2
             / (Self.temperatureLapseRateKPerM * Self.gasConstantJPerKgK)
-        let temperatureRatio = max(0.05, standardTemperature / Self.seaLevelTemperatureK)
+        let temperatureRatio = max(0.05, tropopauseTemperature / Self.seaLevelTemperatureK)
         var pressure = Self.seaLevelPressurePa * pow(temperatureRatio, pressureExponent)
-        // An isothermal continuation past the tropopause, for completeness.
-        if altitude > Self.tropopauseAltitudeMeters {
-            let excess = altitude - Self.tropopauseAltitudeMeters
-            let scaleHeight = Self.gasConstantJPerKgK * standardTemperature / Self.gravityMps2
+
+        // --- Layer 1: isothermal lower stratosphere, 11 km to 20 km.
+        if column > Self.tropopauseAltitudeMeters {
+            let excess = min(column, Self.stratosphereInversionAltitudeMeters)
+                - Self.tropopauseAltitudeMeters
+            let scaleHeight = Self.gasConstantJPerKgK * tropopauseTemperature / Self.gravityMps2
             pressure *= exp(-excess / max(1.0, scaleHeight))
         }
-        pressure = max(100.0, pressure + pressureOffsetPa)
+
+        // --- Layer 2: warming stratosphere, 20 km to 32 km.
+        //
+        // The reference aircraft that need this are real: the AQM-35B's published
+        // ceiling is 21,300 m and the Firebee II's supersonic dash sits at 13,700 m
+        // on the way there. Held isothermal, the air at 21 km comes out about 5 K
+        // colder than standard — a one-per-cent error in the speed of sound, which is
+        // a one-per-cent error in every Mach number the aircraft reports at exactly
+        // the altitude the whole scope is about.
+        if column > Self.stratosphereInversionAltitudeMeters {
+            let excess = column - Self.stratosphereInversionAltitudeMeters
+            let layerTopTemperature = tropopauseTemperature
+                + Self.stratosphereWarmingRateKPerM * excess
+            let exponent = -Self.gravityMps2
+                / (Self.stratosphereWarmingRateKPerM * Self.gasConstantJPerKgK)
+            pressure *= pow(layerTopTemperature / tropopauseTemperature, exponent)
+            standardTemperature = layerTopTemperature
+        }
+
+        // The weather anomaly is a *sea-level* pressure difference. Added unchanged at
+        // altitude it would be nonsense — the whole column at 25 km is about 2.5 kPa
+        // against a clamp of ±6 kPa, so a "low" could drive the pressure negative.
+        // Carried up as a fraction of the local pressure instead. Every weather preset
+        // supplies zero today, so this is identical to the previous arithmetic for
+        // every case the simulation actually produces.
+        let pressureAnomalyFraction = pressureOffsetPa / Self.seaLevelPressurePa
+        pressure = max(1.0, pressure * (1.0 + pressureAnomalyFraction))
 
         let temperature = max(150.0, standardTemperature + temperatureOffsetK)
         let density = pressure / (Self.gasConstantJPerKgK * temperature)
@@ -125,7 +188,12 @@ struct AtmosphereModel: Hashable {
             altitudeMeters: altitude,
             temperatureK: temperature,
             pressurePa: pressure,
-            airDensity: max(0.02, density),
+            // Floor lowered from 0.02 to 0.001 kg/m³ when the column was extended past
+            // 20 km. Standard density at 30 km is 0.0184, so the old floor silently
+            // clamped — an aircraft climbing through 30 km would have stopped losing
+            // lift and drag exactly where it should have been losing them fastest.
+            // 0.001 corresponds to roughly 48 km, well outside the modelled column.
+            airDensity: max(0.001, density),
             speedOfSoundMps: speedOfSound,
             dynamicViscosityPaS: max(1.0e-6, viscosity)
         )
