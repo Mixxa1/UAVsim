@@ -561,6 +561,23 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var mode: DroneFlightMode
     @Published private(set) var flightControlMode: FlightControlMode
     @Published private(set) var isSimulationRunning: Bool
+    /// `HH:MM` in the world's own time. Published separately from `worldClock` so the HUD
+    /// redraws once a displayed minute changes rather than on every tick.
+    @Published private(set) var worldClockText: String = "12:00"
+    @Published private(set) var worldDayPhase: DayPhase = .day
+    /// Requested world speed. Manual flight is deliberately excluded from anything above 1× — at
+    /// 64× a rendered frame covers a second of flight, which no human can fly.
+    @Published private(set) var timeScale: SimulationTimeScale = .realtime
+    /// Steps actually completed in the last frame. Below `timeScale.stepsPerFrame` means the frame
+    /// budget ran out, and the operator is watching a slower world than they asked for — worth
+    /// showing rather than hiding.
+    @Published private(set) var achievedTimeScale: Double = 1.0
+    /// True while running a catch-up step that will not be presented.
+    private var isCatchUpStep = false
+    /// Set while fast-forwarding so every step of a frame advances the same simulated delta.
+    private var forcedDeltaTime: Float?
+    /// Presentation is skipped on catch-up steps: only the last step of a frame draws.
+    private var shouldPresentThisStep: Bool { !performancePolicy.stopRendering && !isCatchUpStep }
 
     // MARK: - FPV OSD overlay inputs
     // Feed the aircraft-camera "digital viewfinder" HUD (`FPVViewportOverlayView`). All computed
@@ -733,6 +750,13 @@ final class DroneSimulationViewModel: ObservableObject {
     /// proven, and when that proof was last retried. The proof reads the *live* pose, so it can
     /// start succeeding as the aircraft climbs or the obstacle set changes — without these the
     /// hold was permanent.
+    ///
+    /// ⚠️ Both are stamped in **simulated** time (`simulatedNow`), not wall time. Everything below
+    /// is sized in metres of flight — the force-advance comment works out 2.5 s as ~60 m of
+    /// overshoot at 24 m/s — and that arithmetic is only true if the clock these run on is the
+    /// same clock the aircraft moves on. Under time acceleration a wall-clock stamp would make
+    /// 2.5 s mean 160 s of flight at 64x, so the escape hatch that rescues a stuck capture would
+    /// effectively stop existing exactly when the operator is fast-forwarding to watch for it.
     private var fixedWingCaptureHoldStartedAt: TimeInterval?
     private var fixedWingCaptureHoldLastRetryAt: TimeInterval = 0.0
     /// The proof sweeps a full trajectory rollout, so it is too costly to run every tick.
@@ -1397,6 +1421,21 @@ final class DroneSimulationViewModel: ObservableObject {
     private var simulationTimer: Timer?
     private var lastTimestamp: CFTimeInterval?
     private var simulationTime: Float = 0.0
+    /// Now, on the clock the *aircraft* lives on.
+    ///
+    /// Anything whose duration is really a distance — how far the aircraft flies while a hold
+    /// lasts, how much route a retry cadence costs — must be timed against this and not against
+    /// `CACurrentMediaTime()`, or time acceleration silently rescales it. Frame timing, UI publish
+    /// throttles and network arrival stamps are the opposite case and correctly stay on the wall
+    /// clock: they are about the human and the machine, not about the flight.
+    private var simulatedNow: TimeInterval { TimeInterval(simulationTime) }
+    /// The world's own clock. Advanced from simulated time, never from the wall clock, so time
+    /// acceleration carries the day along with it without this needing to know it exists.
+    private(set) var worldClock = WorldClock()
+    /// Sun elevation the scene was last lit for. The lighting pass rebuilds materials, so it runs
+    /// on a meaningful change in the sun rather than every frame — a quarter of a degree is finer
+    /// than the eye resolves and still gives ~230 updates across a day.
+    private var lastAppliedSunElevationDegrees: Double = .infinity
     private var telemetrySamplingAccumulator: Float = 0.0
     private var hudPublishAccumulator: Float = 0.0
     private var diagnosticsSamplingAccumulator: Float = 0.0
@@ -5926,6 +5965,63 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// One timer fire: advances the world by `timeScale` ticks and presents once.
+    ///
+    /// Time acceleration is *more steps*, never a bigger step. `SimpleDronePhysicsEngine.step`
+    /// clamps the delta it is given to 1/20 s and walks it in fixed 1/90 s substeps, so handing it
+    /// a larger delta would silently discard the extra time rather than simulate it — and even if
+    /// it did not, integrating attitude at 0.7 s per step is meaningless for an airframe whose
+    /// roll mode settles in about a second.
+    ///
+    /// The catch-up steps run the whole simulation — physics, autopilot, collision analysis — and
+    /// skip only presentation, so what the operator watches at 64x is the same flight they would
+    /// have watched at 1x, just sampled less often.
+    private func runSimulationFrame() {
+        // No automatic cancellation. `operatorIsOnTheControls` is written by
+        // `updateControlValues(markManual:)`, which every UI setter goes through — so opening a
+        // panel or pressing a header button counted as "flying" and silently dropped the world
+        // back to 1x. The operator's rule stands: if the speed is set, it is set, and only the
+        // operator unsets it.
+        let steps = max(1, timeScale.stepsPerFrame)
+        guard steps > 1 else {
+            tick()
+            return
+        }
+
+        // One wall-clock delta for the whole frame, spent as `steps` equal simulated steps. Taking
+        // the delta once is what makes the multiplier exact: reading the clock per step would give
+        // every step after the first a delta of nearly zero.
+        let now = CACurrentMediaTime()
+        let wallDelta = Float(max(1.0 / 240.0, min(now - (lastTimestamp ?? now), 1.0 / 20.0)))
+
+        // A frame that overruns its own budget must not spiral: each overrun would make the next
+        // frame's wall delta larger, which asks for even more work. Stop early and report what was
+        // actually achieved instead of falling further behind.
+        let budget = Self.simulationTickInterval * 3.0
+        let frameStarted = CACurrentMediaTime()
+        var completed = 0
+
+        for index in 0..<steps {
+            isCatchUpStep = index < steps - 1
+            forcedDeltaTime = wallDelta
+            tick()
+            completed += 1
+            if isCatchUpStep, CACurrentMediaTime() - frameStarted > budget {
+                // Present this one after all, so the frame the operator sees is the last one
+                // simulated rather than a stale one.
+                isCatchUpStep = false
+                forcedDeltaTime = wallDelta
+                tick()
+                completed += 1
+                break
+            }
+        }
+
+        isCatchUpStep = false
+        forcedDeltaTime = nil
+        achievedTimeScale = Double(completed)
+    }
+
     private func startSimulationLoop() {
         simulationTimer?.invalidate()
         simulationTimer = Timer(timeInterval: Self.simulationTickInterval, repeats: true) { [weak self] _ in
@@ -5933,7 +6029,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 return
             }
             MainActor.assumeIsolated {
-                self.tick()
+                self.runSimulationFrame()
             }
         }
         simulationTimer?.tolerance = Self.simulationTickInterval * 0.08
@@ -6017,7 +6113,9 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         setWeatherPreset(params.weather)
         setWeatherIntensity(Double(params.weatherIntensity))
-        sceneController.applyMissionTimeOfDay(params.timeOfDay)
+        // The scenario's coarse choice is now a *starting* time, not a fixed one: the world clock
+        // takes it as its start hour and runs from there.
+        resetWorldClock(to: params.timeOfDay)
 
         setPayloadType(config.payloadType)
         if config.payloadType == .fireHose {
@@ -6205,6 +6303,50 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
+    /// Sets how fast the world runs.
+    ///
+    /// Fast-forward is for watching, not for flying: at 32× a single rendered frame covers half a
+    /// second of flight, so a hand on the sticks cannot close a control loop. Rather than refuse
+    /// the setting, the loop drops back to real time the moment the operator touches anything —
+    /// the same rule the assists follow, so the pilot never fights a hidden mode.
+    func setTimeScale(_ scale: SimulationTimeScale) {
+        guard scale != timeScale else { return }
+        timeScale = scale
+        if scale == .realtime { achievedTimeScale = 1.0 }
+    }
+
+
+    /// Advances the world's clock and pushes the consequences out — the displayed time, and the
+    /// scene's lighting when the sun has actually moved.
+    ///
+    /// Called once per simulation tick with that tick's simulated `dt`. Under time acceleration
+    /// the tick runs more often, so the day speeds up on its own: the multiplier lives in how
+    /// often simulated time is advanced, not in a second factor here that could drift out of step
+    /// with the physics.
+    private func advanceWorldClock(bySimulatedSeconds seconds: Double) {
+        worldClock.advance(bySimulatedSeconds: seconds)
+
+        let text = worldClock.formattedTime
+        if text != worldClockText { worldClockText = text }
+        let phase = worldClock.phase
+        if phase != worldDayPhase { worldDayPhase = phase }
+
+        let elevation = worldClock.sunElevationDegrees
+        guard abs(elevation - lastAppliedSunElevationDegrees) >= 0.25 else { return }
+        lastAppliedSunElevationDegrees = elevation
+        sceneController.applyWorldClock(worldClock)
+    }
+
+    /// Puts the world clock at a known time and relights the scene for it immediately, rather than
+    /// waiting for the sun to drift a quarter-degree.
+    private func resetWorldClock(to timeOfDay: TimeOfDay) {
+        worldClock = WorldClock(timeOfDay: timeOfDay)
+        worldClockText = worldClock.formattedTime
+        worldDayPhase = worldClock.phase
+        lastAppliedSunElevationDegrees = worldClock.sunElevationDegrees
+        sceneController.applyWorldClock(worldClock)
+    }
+
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
@@ -6235,7 +6377,7 @@ final class DroneSimulationViewModel: ObservableObject {
             backgroundTickSkipCounter += 1
             if backgroundTickSkipCounter < performancePolicy.backgroundTickDivisor {
                 if onlineRuntimeContext != nil {
-                    if !performancePolicy.stopRendering {
+                    if shouldPresentThisStep {
                         cleanupOnlineRemoteSnapshotsIfNeeded(now: now)
                         updateOnlineInterpolatedRemoteStates(now: now)
                     }
@@ -6274,9 +6416,13 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let dt = Float(max(1.0 / 240.0, min(now - lastTimestamp, 1.0 / 20.0)))
+        // While fast-forwarding, every step of the frame advances the same simulated delta:
+        // the wall clock is read once per frame, not once per step.
+        let dt = forcedDeltaTime
+            ?? Float(max(1.0 / 240.0, min(now - lastTimestamp, 1.0 / 20.0)))
         self.lastTimestamp = now
         simulationTime += dt
+        advanceWorldClock(bySimulatedSeconds: Double(dt))
         simulationTickCounter &+= 1
         state.armState = isArmed ? .armed : .disarmed
         invalidateFixedWingRouteTrackingContextCache()
@@ -6299,7 +6445,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshDiagnosticHz(now: now)
         updateOnlineInterpolatedRemoteStates(now: now)
         if isSpectatorMode {
-            if !performancePolicy.stopRendering {
+            if shouldPresentThisStep {
                 updateSpectatorRuntime(deltaTime: dt)
             }
             return
@@ -6332,7 +6478,7 @@ final class DroneSimulationViewModel: ObservableObject {
         guard !isAwaitingImportedWorld, isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
-            if !performancePolicy.stopRendering {
+            if shouldPresentThisStep {
                 sceneController.update(
                     with: state,
                     camera: cameraConfiguration,
@@ -7181,7 +7327,7 @@ final class DroneSimulationViewModel: ObservableObject {
         updateThunderstormLightning(deltaTime: dt)
 
         let renderStart = CACurrentMediaTime()
-        if !performancePolicy.stopRendering {
+        if shouldPresentThisStep {
             sceneController.setDamageVibrationLevel(
                 vehicleRotorModel.vibrationLevel * state.motorThrottle
             )
@@ -7220,7 +7366,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         collisionDebugAccumulator += dt
         let collisionDebugStateChanged = (lastCollisionDebugEnabled != collisionDebugEnabled)
-        if !performancePolicy.stopRendering,
+        if shouldPresentThisStep,
            (collisionDebugEnabled && collisionDebugAccumulator > 0.12) || collisionDebugStateChanged {
             sceneController.updateCollisionDebug(risk: collisionAnalysis, enabled: collisionDebugEnabled)
             sceneController.updatePathDebug(
@@ -7235,7 +7381,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         diagnosticsSamplingAccumulator += dt
-        if !performancePolicy.stopRendering,
+        if shouldPresentThisStep,
            diagnosticsSamplingAccumulator >= 0.45 || cachedDiagnostics.activeObjectCount == 0 {
             let sceneStats = sceneController.sceneDiagnostics()
             let nextDiagnostics = SimulationDiagnostics(
@@ -20576,7 +20722,7 @@ final class DroneSimulationViewModel: ObservableObject {
         // it is the same rule: a value that is latched and re-evaluated must not depend on the
         // quantity it controls.
         if fixedWingCaptureHoldStartedAt == nil {
-            fixedWingCaptureHoldStartedAt = CACurrentMediaTime()
+            fixedWingCaptureHoldStartedAt = simulatedNow
             fixedWingAssistState.targetHeadingRadians = state.orientation.z
         }
         if fixedWingAssistState.targetAltitudeMeters == nil {
@@ -20630,7 +20776,7 @@ final class DroneSimulationViewModel: ObservableObject {
             // the stale-snapshot path the guard was written to block — it is the only thing that
             // can lift the hold without the operator pressing the button. Throttled, because it
             // sweeps a full trajectory rollout.
-            let now = CACurrentMediaTime()
+            let now = simulatedNow
             guard now - fixedWingCaptureHoldLastRetryAt
                     >= Self.fixedWingCaptureHoldRetryInterval else {
                 return holdFixedWingAutoAdvanceForCaptureAuthorization()
@@ -21145,7 +21291,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// map, even after the geometry became flyable again.
     @discardableResult
     private func retryFixedWingCaptureHoldIfDue() -> Bool {
-        let now = CACurrentMediaTime()
+        let now = simulatedNow
         let heldSince = fixedWingCaptureHoldStartedAt ?? now
         fixedWingCaptureHoldStartedAt = heldSince
 
@@ -21248,7 +21394,7 @@ final class DroneSimulationViewModel: ObservableObject {
             // re-taking the current heading each time is the same "fly the course you are already
             // flying" identity, just at a slower cadence.
             if fixedWingCaptureHoldStartedAt == nil {
-                fixedWingCaptureHoldStartedAt = CACurrentMediaTime()
+                fixedWingCaptureHoldStartedAt = simulatedNow
                 fixedWingAssistState.targetHeadingRadians = state.orientation.z
                 fixedWingAssistState.targetAltitudeMeters = max(
                     fixedWingAssistState.targetAltitudeMeters ?? 0.0,
@@ -25399,7 +25545,8 @@ final class DroneSimulationViewModel: ObservableObject {
             fixedWingDebugState: selectedDroneProfile.airframeClass == .fixedWing ||
                 selectedDroneProfile.airframeClass == .hybridVTOL
                 ? fixedWingAutopilotDebugState
-                : nil
+                : nil,
+            simulatedNow: simulatedNow
         )
         let operationalStatus = currentMissionOperationalStatus(
             missionDistanceEstimate: currentMissionDistanceEstimate()

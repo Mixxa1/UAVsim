@@ -51,6 +51,7 @@
 		100000000000000000000222 /* AutoPathPlannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000122 /* AutoPathPlannerService.swift */; };
 		100000000000000000000223 /* AbstractModelEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000123 /* AbstractModelEditorView.swift */; };
 		100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000124 /* CompactTelemetryHUDView.swift */; };
+		100000000000000000000C73 /* WorldClockChipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000C74 /* WorldClockChipView.swift */; };
 		100000000000000000000225 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000126 /* Localizable.strings */; };
 		100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000129 /* KeyBindingsSettingsView.swift */; };
 		100000000000000000000228 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012B /* Assets.xcassets */; };
@@ -303,6 +304,7 @@
 		100000000000000000000408 /* Pine_Tree.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000409 /* Pine_Tree.usdz */; };
 		100000000000000000000A01 /* ManAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A02 /* ManAssetLoader.swift */; };
 		100000000000000000000A05 /* MissionScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A06 /* MissionScenario.swift */; };
+		100000000000000000000C71 /* WorldClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000C72 /* WorldClock.swift */; };
 		100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A08 /* MissionScenarioRuntime.swift */; };
 		100000000000000000000A13 /* FireResponseScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A14 /* FireResponseScenario.swift */; };
 		100000000000000000000A15 /* FireResponseRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A16 /* FireResponseRuntime.swift */; };
@@ -477,6 +479,7 @@
 		100000000000000000000122 /* AutoPathPlannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoPathPlannerService.swift; sourceTree = "<group>"; };
 		100000000000000000000123 /* AbstractModelEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbstractModelEditorView.swift; sourceTree = "<group>"; };
 		100000000000000000000124 /* CompactTelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactTelemetryHUDView.swift; sourceTree = "<group>"; };
+		100000000000000000000C74 /* WorldClockChipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldClockChipView.swift; sourceTree = "<group>"; };
 		100000000000000000000127 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000128 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000129 /* KeyBindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingsSettingsView.swift; sourceTree = "<group>"; };
@@ -732,6 +735,7 @@
 		100000000000000000000409 /* Pine_Tree.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Pine_Tree.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A02 /* ManAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000A06 /* MissionScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenario.swift; sourceTree = "<group>"; };
+		100000000000000000000C72 /* WorldClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldClock.swift; sourceTree = "<group>"; };
 		100000000000000000000A08 /* MissionScenarioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioRuntime.swift; sourceTree = "<group>"; };
 		100000000000000000000A14 /* FireResponseScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireResponseScenario.swift; sourceTree = "<group>"; };
 		100000000000000000000A16 /* FireResponseRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireResponseRuntime.swift; sourceTree = "<group>"; };
@@ -970,6 +974,7 @@
 				1000000000000000000002A7 /* MissionLeg.swift */,
 				100000000000000000000179 /* MissionPlan.swift */,
 				100000000000000000000A06 /* MissionScenario.swift */,
+				100000000000000000000C72 /* WorldClock.swift */,
 				100000000000000000000A14 /* FireResponseScenario.swift */,
 				100000000000000000000175 /* MissionPlanStatus.swift */,
 				100000000000000000000158 /* MissionPlanningState.swift */,
@@ -1163,6 +1168,7 @@
 				F1000000000000000000000B /* WorkbenchView.swift */,
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
+				100000000000000000000C74 /* WorldClockChipView.swift */,
 				100000000000000000000154 /* CompassOverlayView.swift */,
 				100000000000000000000101 /* ContentView.swift */,
 				1000000000000000000001AA /* ControllerCursorOverlay.swift */,
@@ -1728,6 +1734,7 @@
 				100000000000000000000223 /* AbstractModelEditorView.swift in Sources */,
 				1000000000000000000002B7 /* BindingsViewModel.swift in Sources */,
 				100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */,
+				100000000000000000000C73 /* WorldClockChipView.swift in Sources */,
 				100000000000000000000251 /* CompassOverlayView.swift in Sources */,
 				100000000000000000000250 /* CompassViewModel.swift in Sources */,
 				100000000000000000000252 /* PayloadCameraController.swift in Sources */,
@@ -1745,6 +1752,7 @@
 				100000000000000000000285 /* MissionOutcome.swift in Sources */,
 				100000000000000000000270 /* MissionPlan.swift in Sources */,
 				100000000000000000000A05 /* MissionScenario.swift in Sources */,
+				100000000000000000000C71 /* WorldClock.swift in Sources */,
 				100000000000000000000A13 /* FireResponseScenario.swift in Sources */,
 				10000000000000000000026C /* MissionPlanStatus.swift in Sources */,
 				100000000000000000000255 /* MissionPlanningState.swift in Sources */,

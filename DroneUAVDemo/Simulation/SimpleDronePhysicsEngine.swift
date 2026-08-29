@@ -829,6 +829,26 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             minSustainableSpeedMps: wing.minSustainableSpeedMps
         ).applyingDamage(context.aeroDamage)
 
+        // --- Airflow state.
+        //
+        // Hoisted above the control mapping because the rudder's turn coordinator now closes a
+        // loop on sideslip, and a term read one tick late is a term with a lag in exactly the
+        // feedback that makes coordination airframe-independent. Safe to move: nothing between
+        // here and where this used to sit touches `state.velocity` or the attitude quaternion,
+        // and `effectiveWindWithGusts` is still called exactly once per step, so the gust
+        // sequence is unchanged.
+        let effectiveWind = effectiveWindWithGusts(
+            baseWind: context.windVector,
+            altitudeM: state.position.y,
+            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
+            dt: dt,
+            referenceAirspeed: max(simd_length(state.velocity), 1.0)
+        )
+        let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity - effectiveWind)
+        let airspeed = max(simd_length(bodyAirflow), 0.5)
+        let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
+        let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
+
         // --- Control surface mapping: stick/angle commands -> elevator/aileron/rudder deflection fractions.
         var elevatorFraction: Float = 0.0
         var aileronFraction: Float = 0.0
@@ -942,7 +962,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                     authority: authority,
                     wing: wing,
                     fallbackHeading: wrap(control.targetOrientation.z),
-                    coordinationBankRad: currentEuler.x
+                    coordinationBankRad: currentEuler.x,
+                    sideslipRad: beta
                 )
             }
         }
@@ -966,17 +987,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.rudderDeflection = rudderFraction
 
         // --- Aerodynamics: real angle-of-attack/sideslip-driven forces and moments.
-        let effectiveWind = effectiveWindWithGusts(
-            baseWind: context.windVector,
-            altitudeM: state.position.y,
-            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
-            dt: dt,
-            referenceAirspeed: max(simd_length(state.velocity), 1.0)
-        )
-        let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity - effectiveWind)
-        let airspeed = max(simd_length(bodyAirflow), 0.5)
-        let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
-        let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
+        // `alpha`, `beta`, `airspeed` and `bodyAirflow` are computed above, before the control
+        // mapping, because the rudder coordinator needs sideslip.
 
         // Ambient density at the aircraft's own altitude rather than a sea-level
         // constant. Note this is NOT the density used to size the wing: that one
@@ -1546,7 +1558,23 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             minSustainableSpeedMps: wing.minSustainableSpeedMps
         ).applyingDamage(context.aeroDamage)
 
-        // --- 2. Control surfaces: identical stick/angle -> elevator/aileron/
+        // --- 2. Airflow state, ahead of the surfaces for the same reason as
+        // stepFixedWingAerodynamic: the rudder coordinator closes a loop on
+        // sideslip and must not read it a tick late. `effectiveWindWithGusts`
+        // is still called exactly once per step.
+        let effectiveWind = effectiveWindWithGusts(
+            baseWind: context.windVector,
+            altitudeM: state.position.y,
+            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
+            dt: dt,
+            referenceAirspeed: max(simd_length(state.velocity), 1.0)
+        )
+        let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity - effectiveWind)
+        let airspeed = max(simd_length(bodyAirflow), 0.5)
+        let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
+        let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
+
+        // --- 3. Control surfaces: identical stick/angle -> elevator/aileron/
         // rudder mapping as stepFixedWingAerodynamic (reused verbatim so the
         // pilot's roll/pitch commands mean the same thing in both phases).
         var elevatorFraction: Float = 0.0
@@ -1593,7 +1621,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                     authority: authority,
                     wing: wing,
                     fallbackHeading: wrap(control.targetOrientation.z),
-                    coordinationBankRad: currentEuler.x
+                    coordinationBankRad: currentEuler.x,
+                    sideslipRad: beta
                 )
             }
         }
@@ -1608,21 +1637,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         if let frozen = context.jammedSurfaces[.aileron] { aileronFraction = frozen }
         if let frozen = context.jammedSurfaces[.rudder] { rudderFraction = frozen }
 
-        // --- 3. Aerodynamics: identical angle-of-attack model as
+        // --- 4. Aerodynamics: identical angle-of-attack model as
         // stepFixedWingAerodynamic. No hover-gating needed — `airspeed` is
         // floored at 0.5 m/s, so dynamic pressure (and therefore lift/drag/
         // moment) is naturally ~900x smaller at hover than at cruise.
-        let effectiveWind = effectiveWindWithGusts(
-            baseWind: context.windVector,
-            altitudeM: state.position.y,
-            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
-            dt: dt,
-            referenceAirspeed: max(simd_length(state.velocity), 1.0)
-        )
-        let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity - effectiveWind)
-        let airspeed = max(simd_length(bodyAirflow), 0.5)
-        let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
-        let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
+        // `alpha`, `beta`, `airspeed` and `bodyAirflow` are computed in step 2.
 
         let airDensity = context.atmosphere.state(worldY: state.position.y).airDensity
         let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
@@ -2682,7 +2701,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         authority: Float,
         wing: FixedWingParameters,
         fallbackHeading: Float,
-        coordinationBankRad: Float = 0.0
+        coordinationBankRad: Float = 0.0,
+        sideslipRad: Float = 0.0
     ) -> Float {
         // Yaw-rate damper (active in every mode): opposes yaw rate to suppress
         // the lightly-damped Dutch-roll wallow that the real 6DOF model now
@@ -2699,7 +2719,49 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // oppose it. Without this the turn is flown on ailerons alone and
         // has to build sideslip before the fuselage/fin "catch up" to the
         // turn — exactly the slip that was feeding the Dutch-roll wallow.
-        let coordination = coordinationBankRad * 0.5
+        //
+        // ⚠️ This was `coordinationBankRad * 0.5` — linear in the bank angle. A coordinated turn
+        // needs a yaw rate of g*tan(phi)/V, so the requirement grows with the *tangent*, and the
+        // two only agree while the bank is small. Measured across the fleet in a steady automatic
+        // turn (TurnCoordinationProbe): the three aircraft that command 26-28 deg settled inside
+        // 1.5 deg of sideslip, while everything commanding 36-43 deg sat at 6-9 deg and lost up
+        // to 16% of the turn rate its own bank should have delivered. Twelve of fifteen airframes
+        // were skidding through every automatic turn.
+        //
+        // `tan` restores the geometry, but a feedforward alone still cannot be right for the
+        // whole fleet: the rudder needed to hold a given yaw rate depends on airspeed and on how
+        // much fin the airframe carries, and neither appears here. So the feedforward gets the
+        // shape and a sideslip feedback term removes what is left — the loop that a single
+        // fleet-wide constant can never close. Feedback is what makes this airframe-independent;
+        // the feedforward is only there so the loop does not have to build the deflection from
+        // zero on every roll-in.
+        let coordinationTangent = tan(coordinationBankRad.clamped(to: -1.0...1.0))
+        let coordination = (coordinationTangent * 0.5).clamped(to: -0.6...0.6)
+        // Sign, established by measurement rather than by reading the axes: the body frame is
+        // X right, Y up, nose along -Z, so a positive yaw rate about the up axis swings the nose
+        // *left*, and positive rudder produces positive yaw rate (that is what makes the damper
+        // above a damper). Sideslip is `asin(bodyAirflow.x / airspeed)`, so beta > 0 means the
+        // velocity vector lies to the right of the nose — which needs the nose driven right, and
+        // therefore negative rudder.
+        //
+        // Getting this backwards is not a small error, it is a sign flip on a feedback loop, and
+        // the probe showed it as one: rudder saturating at 1.0, achieved bank running 8 deg past
+        // the command, and sideslip tripling to 17-21 deg. Rudder yaws, yaw couples into roll
+        // through the dihedral effect, more bank asks for more rudder — a spiral that winds
+        // itself up. Recorded here because the sign cannot be re-derived from the variable names.
+        //
+        // Gain 1.6/rad reaches full deflection at ~36 deg of slip, far outside any coordinated
+        // turn; bounded so a gust transient cannot hand the whole surface to this one term.
+        //
+        // ⚠️ 1.6 is not the gain that meets the target — it is the gain that is stable everywhere.
+        // Measured: at 1.6 every airframe settles (peak-to-peak sideslip 0.00-0.05 deg) but ten of
+        // fifteen still hold 3-6 deg of steady slip. Raised to 12.0 the mean drops below 2 deg on
+        // thirteen, and the senseFly eBee TAC and EPFL Delta-Wing — the two airframes with the
+        // least fin — go into a limit cycle of 39 and 34 deg peak-to-peak. Loop gain scales with
+        // fin authority and dynamic pressure, neither of which is in this constant, so no single
+        // fleet-wide proportional gain is both sufficient and stable. Closing the remaining error
+        // needs an integrator, not a bigger number here.
+        let sideslipCorrection = (-sideslipRad * 1.6).clamped(to: -0.45...0.45)
         let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
         if abs(manualIntent) > 0.001 {
             return (manualIntent * 0.6 * authority + yawDamper).clamped(to: -1.0...1.0)
@@ -2709,7 +2771,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // term lags the wobble and pumps energy *into* the Dutch roll instead
         // of holding course. Cut to 0.25 and let the yaw damper do the work.
         let headingError = wrap(fallbackHeading - currentYaw)
-        return (headingError * 0.25 * wing.bankResponseGain + yawDamper + coordination).clamped(to: -1.0...1.0)
+        return (headingError * 0.25 * wing.bankResponseGain
+            + yawDamper
+            + coordination
+            + sideslipCorrection).clamped(to: -1.0...1.0)
     }
 
     private func angleTrackingRates(

@@ -2696,6 +2696,16 @@
 "mission.time_of_day.day" = "День";
 "mission.time_of_day.dusk" = "Сумерки";
 "mission.time_of_day.night" = "Ночь";
+
+"hud.time_scale" = "Скорость симуляции";
+
+/* World clock — named stretches of the simulated day. */
+"world.day_phase.dawn" = "Рассвет";
+"world.day_phase.morning" = "Утро";
+"world.day_phase.day" = "День";
+"world.day_phase.sunset" = "Закат";
+"world.day_phase.evening" = "Вечер";
+"world.day_phase.night" = "Ночь";
 "mission.difficulty.easy" = "Лёгкая";
 "mission.difficulty.medium" = "Средняя";
 "mission.difficulty.hard" = "Сложная";

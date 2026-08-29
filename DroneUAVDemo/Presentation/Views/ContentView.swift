@@ -2033,6 +2033,33 @@ struct ContentView: View {
             .menuStyle(.borderlessButton)
             .help(String(localized: "toolbar.header.project"))
 
+            Menu {
+                ForEach(SimulationTimeScale.allCases) { scale in
+                    Button {
+                        viewModel.setTimeScale(scale)
+                    } label: {
+                        if scale == viewModel.timeScale {
+                            Label(scale.label, systemImage: "checkmark")
+                        } else {
+                            Text(scale.label)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    headerUtilityButtonLabel(systemImage: "forward")
+                    // The multiplier is only worth screen space while it is not 1x.
+                    if viewModel.timeScale != .realtime {
+                        Text(viewModel.timeScale.label)
+                            .font(.caption2.monospaced().weight(.bold))
+                            .foregroundStyle(GroundControlPalette.textPrimary)
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(String(localized: "hud.time_scale"))
+
             Button {
                 viewModel.replayLibraryViewModel.refresh()
                 isReplayCenterPresented = true

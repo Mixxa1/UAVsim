@@ -24,9 +24,13 @@ final class MissionRuntimeMonitor {
     private var lastObservedTargetID: UUID?
     private var lastObservedDistance: Float?
     private var closestObservedDistance: Float?
-    private var lastProgressAt: Date?
-    private var targetMissingObservedAt: Date?
-    private var runtimeMismatchObservedAt: Date?
+    // ⚠️ Simulated time, not wall time. Every timeout in this monitor is really a distance —
+    // "the aircraft has flown this long without getting closer" — so under time acceleration a
+    // wall-clock stamp would stretch the stall detector by the multiplier and it would stop
+    // firing exactly when the operator fast-forwards to watch the autopilot work.
+    private var lastProgressAt: TimeInterval?
+    private var targetMissingObservedAt: TimeInterval?
+    private var runtimeMismatchObservedAt: TimeInterval?
 
     init(
         stallTimeout: TimeInterval = 6.0,
@@ -49,7 +53,8 @@ final class MissionRuntimeMonitor {
         launchState: LaunchState,
         airframeClass: AirframeClass,
         fixedWingParameters: FixedWingParameters?,
-        fixedWingDebugState: FixedWingAutopilotDebugState?
+        fixedWingDebugState: FixedWingAutopilotDebugState?,
+        simulatedNow: TimeInterval
     ) -> MissionRuntimeMonitorReport {
         guard executionState.status == .running,
               let activeTarget = executionState.activeTarget else {
@@ -57,7 +62,7 @@ final class MissionRuntimeMonitor {
             return .idle
         }
 
-        let now = Date()
+        let now = simulatedNow
         let fixedWingRouteCapable = airframeClass == .fixedWing || airframeClass == .hybridVTOL
         let fixedWingRouteActive = fixedWingRouteCapable &&
             isFixedWingRouteActive(debugState: fixedWingDebugState)
@@ -178,11 +183,11 @@ final class MissionRuntimeMonitor {
                 let transitionGrace = hybridVTOLTransitionGraceTimeout(
                     fixedWingParameters: fixedWingParameters
                 )
-                if now.timeIntervalSince(lastProgressAt) < transitionGrace {
+                if now - lastProgressAt < transitionGrace {
                     return false
                 }
             }
-            return now.timeIntervalSince(lastProgressAt) >= effectiveStallTimeout(
+            return now - lastProgressAt >= effectiveStallTimeout(
                 for: airframeClass,
                 fixedWingParameters: fixedWingParameters
             )
@@ -328,8 +333,8 @@ final class MissionRuntimeMonitor {
 
     private func confirmedState(
         isDetected: Bool,
-        observedAt: inout Date?,
-        now: Date,
+        observedAt: inout TimeInterval?,
+        now: TimeInterval,
         delay: TimeInterval
     ) -> Bool {
         guard isDetected else {
@@ -339,7 +344,7 @@ final class MissionRuntimeMonitor {
         if observedAt == nil {
             observedAt = now
         }
-        let duration = now.timeIntervalSince(observedAt ?? now)
+        let duration = now - (observedAt ?? now)
         return duration >= delay
     }
 

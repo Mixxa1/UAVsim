@@ -240,6 +240,13 @@ struct SceneViewportView: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
+                WorldClockChipView(
+                    time: viewModel.worldClockText,
+                    phase: viewModel.worldDayPhase,
+                    timeScale: viewModel.timeScale,
+                    achieved: viewModel.achievedTimeScale
+                )
+
                 if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive, !fpvHUDActive {
                     CompassOverlayView(
                         viewModel: viewModel.compassViewModel,

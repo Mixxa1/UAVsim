@@ -2701,6 +2701,16 @@
 "mission.time_of_day.day" = "Day";
 "mission.time_of_day.dusk" = "Dusk";
 "mission.time_of_day.night" = "Night";
+
+"hud.time_scale" = "Simulation speed";
+
+/* World clock — named stretches of the simulated day. */
+"world.day_phase.dawn" = "Dawn";
+"world.day_phase.morning" = "Morning";
+"world.day_phase.day" = "Day";
+"world.day_phase.sunset" = "Sunset";
+"world.day_phase.evening" = "Evening";
+"world.day_phase.night" = "Night";
 "mission.difficulty.easy" = "Easy";
 "mission.difficulty.medium" = "Medium";
 "mission.difficulty.hard" = "Hard";

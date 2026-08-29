@@ -270,6 +270,11 @@ final class DroneSceneController {
     private var freeFlightFireTruckDockReference: SIMD3<Float>?
     private var freeFlightFireTruckObstacleIDs: Set<UUID> = []
     private var missionTimeOfDay: TimeOfDay = .day
+    /// Continuous world time. `missionTimeOfDay` remains the coarse value existing consumers read;
+    /// this is what the lighting actually uses, so dawn and dusk are gradients rather than steps.
+    private var worldClock = WorldClock()
+    /// Night blend the sky image was last generated for. Twilight is the only time it moves.
+    private var lastAppliedNightBlend: Double = -1.0
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
     // v1.4.4: timestamp for computing deltaTime inside applyOnlineInterpolatedRemoteStates.
@@ -8524,12 +8529,15 @@ final class DroneSceneController {
         // Reverted from literal 0 back to the (small, non-zero) multiplier values: a separate
         // test isolating variables is needed before trying absolute zero again — see the
         // dedicated [[project_missions_increment1_bugfixes]] memory note on the FPV-mode crash.
-        let sunFactor = CGFloat(missionTimeOfDay.sunIntensityMultiplier)
-        let envFactor = CGFloat(missionTimeOfDay.ambientIntensityMultiplier)
+        //
+        // These come from the continuous clock now, not from the three-way enum. The enum's
+        // multipliers were a step function — 1.0, then 0.45, then 0.01 — so dusk arrived as a
+        // single jump. The clock's versions are smoothsteps across the sun's own elevation, which
+        // is why sunrise and sunset now take real time to happen.
+        let sunFactor = CGFloat(worldClock.sunIntensityMultiplier)
+        let envFactor = CGFloat(worldClock.ambientIntensityMultiplier)
         sunLightNode.light?.intensity = sunIntensity * sunFactor
-        sunLightNode.light?.color = missionTimeOfDay == .day
-            ? sunColor
-            : nightTintedSunColor(sunColor, timeOfDay: missionTimeOfDay)
+        sunLightNode.light?.color = sunColorForWorldClock(base: sunColor)
         scene.lightingEnvironment.intensity = environmentIntensity * envFactor
         // SceneFactory's always-on ambient + omni fill lights are independent of terrain/weather
         // and were never part of this day/night model — at fixed intensity they alone (300+340)
@@ -8538,41 +8546,38 @@ final class DroneSceneController {
         ambientLightNode.light?.intensity = SceneFactory.ambientLightBaseIntensity * envFactor
         fillLightNode.light?.intensity = SceneFactory.fillLightBaseIntensity * envFactor
 
-        if missionTimeOfDay == .night {
-            print("[Mission] night lighting applied: sun=\(sunLightNode.light?.intensity ?? -1) env=\(scene.lightingEnvironment.intensity) bg=\(String(describing: scene.background.contents)) lightingEnvContents=\(String(describing: scene.lightingEnvironment.contents))")
-            dumpAllSceneLights()
-            dumpGroundMaterial()
-        }
     }
 
-    /// Temporary diagnostic: dumps the ground material's actual rendering-relevant properties, so
-    /// "scene still looks lit with every light at 0" can be traced to a material override (e.g.
-    /// emission, an unlit lighting model, or a baked-bright albedo) rather than guessed at.
-    /// Remove once night brightness is confirmed fixed.
-    private func dumpGroundMaterial() {
-        guard let material = groundNode.geometry?.firstMaterial else {
-            print("[Mission] ground material: <none>")
-            return
+    /// Sun colour for the current world time: the terrain's own daylight tint high in the sky,
+    /// reddening as the sun approaches the horizon, and the cold night tint once it is down.
+    ///
+    /// Golden hour is not a special case here — it is what `sunWarmth` produces on its own as the
+    /// elevation falls, which is why it arrives and leaves gradually.
+    private func sunColorForWorldClock(base: NSColor) -> NSColor {
+        let night = nightTintedSunColor(base, timeOfDay: .night)
+        // Below the horizon, fade the (already dim) sun to the night tint.
+        if worldClock.sunElevationDegrees <= 0.0 {
+            return night
         }
-        print("[Mission] ground material: lightingModel=\(material.lightingModel.rawValue) emission=\(String(describing: material.emission.contents)) ambient=\(String(describing: material.ambient.contents)) locksAmbientWithDiffuse=\(material.locksAmbientWithDiffuse) diffuse=\(String(describing: material.diffuse.contents))")
+        let warmth = CGFloat(worldClock.sunWarmth)
+        guard warmth > 0.001 else { return base }
+        let horizon = NSColor(calibratedRed: 1.0, green: 0.62, blue: 0.34, alpha: 1.0)
+        return blend(base, horizon, amount: warmth)
     }
 
-    /// Temporary diagnostic: lists every SCNLight in the scene graph with its type/intensity, so
-    /// an unexpectedly-bright night can be traced to a light source the night dimming code never
-    /// considered (rather than guessing). Remove once night brightness is confirmed fixed.
-    private func dumpAllSceneLights() {
-        var lines: [String] = []
-        func walk(_ node: SCNNode) {
-            if let light = node.light {
-                lines.append("  \(node.name ?? "<unnamed>"): type=\(light.type.rawValue) intensity=\(light.intensity) hidden=\(node.isHidden)")
-            }
-            for child in node.childNodes {
-                walk(child)
-            }
-        }
-        walk(scene.rootNode)
-        print("[Mission] scene lights (\(lines.count)):\n" + lines.joined(separator: "\n"))
+    private func blend(_ a: NSColor, _ b: NSColor, amount: CGFloat) -> NSColor {
+        let t = max(0.0, min(1.0, amount))
+        let lhs = a.usingColorSpace(.deviceRGB) ?? a
+        let rhs = b.usingColorSpace(.deviceRGB) ?? b
+        return NSColor(
+            calibratedRed: lhs.redComponent + (rhs.redComponent - lhs.redComponent) * t,
+            green: lhs.greenComponent + (rhs.greenComponent - lhs.greenComponent) * t,
+            blue: lhs.blueComponent + (rhs.blueComponent - lhs.blueComponent) * t,
+            alpha: 1.0
+        )
     }
+
+
 
     private func nightTintedSunColor(_ base: NSColor, timeOfDay: TimeOfDay) -> NSColor {
         guard let rgb = base.usingColorSpace(.deviceRGB) else { return base }
@@ -8600,8 +8605,64 @@ final class DroneSceneController {
     /// override has to live here and be called from both, or whichever ran most recently silently
     /// wins and undoes the other's night sky / thermal-restore snapshot.
     private func nightOverriddenBackground(_ base: Any) -> Any {
-        guard missionTimeOfDay == .night else { return base }
-        return NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.085, alpha: 1.0)
+        // ⚠️ This was `missionTimeOfDay == .night ? nightColour : base` — a binary switch, so the
+        // whole sky went from the full daylight gradient to a flat dark blue in one frame the
+        // moment the sun crossed -6 deg. That is the "it was light, then someone turned the
+        // lights off" the operator reported, and it was the sky doing it, not the lamps: the
+        // ground was already fading continuously while the sky was still waiting to snap.
+        let blend = CGFloat(worldClock.nightBlend)
+        let night = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.085, alpha: 1.0)
+        guard blend > 0.002 else { return base }
+        guard blend < 0.998, let image = base as? NSImage else { return night }
+        return image.tinted(with: night, alpha: blend)
+    }
+
+    /// Applies the world clock: continuous sun angle and light levels, plus the coarse
+    /// `TimeOfDay` the thermal pipeline and the night handling already speak.
+    ///
+    /// The sun is *moved*, not just dimmed. Dimming alone gives a night that looks like an
+    /// underexposed noon — shadows still point where they did at midday — so the light node is
+    /// aimed from the clock's own elevation and azimuth and the whole scene's shadows travel with
+    /// it across the day.
+    func applyWorldClock(_ clock: WorldClock) {
+        worldClock = clock
+        let previousTimeOfDay = missionTimeOfDay
+        missionTimeOfDay = clock.legacyTimeOfDay
+        aimSunLight(for: clock)
+
+        // Cheap path, every update: lamp intensities, colour and angle. This is what makes the
+        // day read as continuous.
+        applyLightingProfile(for: lastTerrainConfig?.preset ?? .field)
+
+        // Expensive path: the sky is a generated 1024x768 gradient and rebuilding it drags the
+        // whole terrain visual style along. It only needs to run while the sky is actually
+        // changing colour — during twilight — so it is keyed on the night blend rather than on
+        // the sun angle. Outside dawn and dusk the blend is pinned at 0 or 1 and this never fires,
+        // which matters at 64x where a whole day passes in twenty seconds.
+        if abs(clock.nightBlend - lastAppliedNightBlend) >= 0.05 {
+            lastAppliedNightBlend = clock.nightBlend
+            if let terrain = lastTerrainConfig {
+                applyTerrainVisualStyle(terrain)
+            }
+        }
+
+        if previousTimeOfDay != missionTimeOfDay {
+            refreshThermalContextForTimeOfDay()
+        }
+    }
+
+    /// Points the directional light from the sun's current position.
+    private func aimSunLight(for clock: WorldClock) {
+        let elevation = Float(clock.sunElevationDegrees).degreesToRadians
+        let azimuth = Float(clock.sunAzimuthDegrees).degreesToRadians
+        // Euler order here is (pitch, yaw, roll) on the node: pitch it down from the horizontal by
+        // the elevation and swing it round by the azimuth. Negative pitch aims the light's -Z at
+        // the ground, which is the direction SceneKit shines a directional light along.
+        sunLightNode.eulerAngles = SCNVector3(
+            CGFloat(-(Float.pi / 2.0 - elevation)),
+            CGFloat(azimuth),
+            0.0
+        )
     }
 
     /// Applies a mission time-of-day setting: re-runs lighting/sky for the current terrain and
@@ -10840,5 +10901,22 @@ private struct TerrainDetailSeededGenerator: RandomNumberGenerator {
     mutating func next() -> UInt64 {
         state = 2862933555777941757 &* state &+ 3037000493
         return state
+    }
+}
+
+
+private extension NSImage {
+    /// Returns a copy with `colour` composited over it at `alpha`.
+    ///
+    /// Used to carry the sky gradient continuously into night rather than swapping it for a flat
+    /// colour, so dusk is a fade instead of a cut.
+    func tinted(with colour: NSColor, alpha: CGFloat) -> NSImage {
+        let result = NSImage(size: size)
+        result.lockFocus()
+        draw(in: NSRect(origin: .zero, size: size))
+        colour.withAlphaComponent(max(0.0, min(1.0, alpha))).setFill()
+        NSRect(origin: .zero, size: size).fill(using: .sourceOver)
+        result.unlockFocus()
+        return result
     }
 }
