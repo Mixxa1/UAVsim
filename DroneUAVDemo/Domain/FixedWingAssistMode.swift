@@ -136,6 +136,18 @@ struct FixedWingAssistState: Equatable {
     var targetAltitudeMeters: Float?
     var interceptCompleted: Bool
     var captureCompletedReason: String?
+    /// How far the aircraft actually was when a waypoint was counted as passed by the emergency
+    /// abeam rule, or nil when it was captured normally. Recorded so a route that only "completed"
+    /// because the emergency path fired cannot look like a clean one.
+    var lastWaypointMissDistanceMeters: Float?
+    /// Heading swept while chasing the active waypoint, degrees. 360 is the orbit-trap threshold.
+    var activeWaypointSweptHeadingDegrees: Float?
+    /// Where the aircraft actually was when the emergency abeam pass credited a waypoint.
+    ///
+    /// This, not the waypoint, is the place the route was really flown through — marking the
+    /// original waypoint red says the operator planned something wrong, when what happened is that
+    /// the aircraft went somewhere else and called it done.
+    var lastWaypointPassPosition: SIMD2<Float>?
     var autoAdvanceSuppressed: Bool
     var autoAdvanceSuppressedReason: String?
     var currentLegStart: SIMD2<Float>?
@@ -205,6 +217,9 @@ struct FixedWingAssistState: Equatable {
         targetAltitudeMeters: nil,
         interceptCompleted: false,
         captureCompletedReason: nil,
+        lastWaypointMissDistanceMeters: nil,
+        activeWaypointSweptHeadingDegrees: nil,
+        lastWaypointPassPosition: nil,
         autoAdvanceSuppressed: false,
         autoAdvanceSuppressedReason: nil,
         currentLegStart: nil,

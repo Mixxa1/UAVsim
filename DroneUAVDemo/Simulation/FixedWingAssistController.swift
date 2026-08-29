@@ -89,6 +89,17 @@ final class FixedWingAssistController {
         var legStartPosition: SIMD2<Float>
         var previousAircraftPlanar: SIMD2<Float>
         var hasPreviousAircraftPlanar: Bool
+        /// Total heading swept while chasing this one waypoint, radians.
+        ///
+        /// A full turn is the evidence that the emergency pass is warranted, and it is evidence
+        /// rather than a timeout: an aircraft that has turned through 360° and is still not at the
+        /// point is not approaching it — the point lies inside its own turn circle, which is the
+        /// one geometry a constant-radius turn can never reach. An ordinary route corner is under
+        /// 180°, so no normal flight can reach this.
+        var sweptHeadingRadians: Float = 0.0
+        var previousHeadingRadians: Float = 0.0
+        var hasPreviousHeading: Bool = false
+        var emergencyPassArmed: Bool = false
     }
 
     private var filteredBankDeg: Float = 0.0
@@ -371,17 +382,95 @@ final class FixedWingAssistController {
                 center: target,
                 radius: captureRadius
             )
+            // Is this waypoint reachable at all, right now?
+            //
+            // An aircraft holding its tightest turn traces a circle of radius R whose centre lies
+            // R to the side of it. While it circles, the closest it ever comes to a fixed point is
+            // `R − d`, with `d` the distance from that centre to the point. So if `R − d` exceeds
+            // the acceptance radius, the point can never be captured — not after a while, not
+            // ever. That is an exact statement about geometry, available on the first tick, and it
+            // replaces the previous "wait for a full 360° orbit" evidence.
+            //
+            // The wait was not merely slow, it was harmful: at R = 1485 m and 88 m/s one orbit
+            // takes 106 seconds, and the operator's logs show the airframe departing before it
+            // elapsed — pitch command and pitch response of opposite signs, 53° of bank against a
+            // 28° limit, altitude 111 m down to 0. The aircraft was not surviving the evidence
+            // being gathered.
+            //
+            // The circle tested is the one the aircraft would turn into, chosen by which side the
+            // target lies on: a point inside the *other* circle is still reachable the long way
+            // round, and calling that trapped would fire the emergency path on ordinary routes.
+            let heading = aircraftState.orientation.z
+            let turnRadius = wing.minimumTurnRadius(
+                airspeed: max(aircraftState.forwardAirspeed, wing.minSafeAirspeed)
+            )
+            let forward = SIMD2<Float>(-sin(heading), -cos(heading))
+            let toTarget = target - aircraftPlanar
+            // Cross product sign says which side the target is on, and therefore which way the
+            // guidance will roll.
+            let turnsLeft = (forward.x * toTarget.y - forward.y * toTarget.x) > 0.0
+            let sideNormal = turnsLeft
+                ? SIMD2<Float>(-forward.y, forward.x)
+                : SIMD2<Float>(forward.y, -forward.x)
+            let turnCentre = aircraftPlanar + sideNormal * turnRadius
+            let closestApproach = turnRadius - simd_length(turnCentre - target)
+            let unreachable = closestApproach > captureRadius
+
             if var t = tracker {
+                if t.hasPreviousHeading {
+                    t.sweptHeadingRadians += abs(shortestAngle(heading - t.previousHeadingRadians))
+                }
+                t.previousHeadingRadians = heading
+                t.hasPreviousHeading = true
+                // Latching, not momentary: once the geometry has proved the point unreachable the
+                // aircraft should stop trying, and a circling aircraft crosses the abeam plane on
+                // its own within part of a turn.
+                if unreachable {
+                    t.emergencyPassArmed = true
+                }
+                nextState.activeWaypointSweptHeadingDegrees = t.sweptHeadingRadians * 180.0 / .pi
                 t.previousAircraftPlanar = aircraftPlanar
                 t.hasPreviousAircraftPlanar = true
                 tracker = t
             }
 
+            // The emergency pass. ⚠️ Deliberately NOT the normal way a waypoint is reached.
+            //
+            // Normally a waypoint is captured only by its acceptance circle, and that stays true:
+            // this branch is armed solely after the aircraft has turned through a **full 360°**
+            // still chasing the same point. That is not slowness, it is proof of an orbit trap —
+            // the point sits inside the aircraft's own turn circle, and a constant-radius turn can
+            // never reach such a point no matter how long it flies. Measured on an MQ-9B: turn
+            // radius 1485 m against a 140 m acceptance circle, orbiting one waypoint for a
+            // simulated day without ever closing.
+            //
+            // Once armed, the point is counted as passed when the aircraft crosses the plane
+            // through it perpendicular to the inbound leg — the ArduPlane/PX4 rule. The sign of
+            // this dot product flips exactly once per pass, so progress is guaranteed.
+            //
+            // The miss distance is recorded rather than hidden: the route continues, but it
+            // continues having missed this point by a real and reportable margin.
+            var emergencyPassed = false
+            if let t = tracker, t.emergencyPassArmed, hadPreviousAircraftPlanar {
+                let legDelta = target - t.legStartPosition
+                let legLength = simd_length(legDelta)
+                let legDirection = legLength > 0.001
+                    ? legDelta / legLength
+                    : SIMD2<Float>(-sin(heading), -cos(heading))
+                let previousSide = simd_dot(previousAircraftPlanar - target, legDirection)
+                let currentSide = simd_dot(aircraftPlanar - target, legDirection)
+                emergencyPassed = previousSide <= 0.0 && currentSide > 0.0
+            }
+
             let entered = distance <= captureRadius
-            if entered || crossedCaptureCircle {
+            if entered || crossedCaptureCircle || emergencyPassed {
                 nextState.interceptCompleted = true
                 nextState.interceptState = .terminalCapture
-                nextState.captureCompletedReason = entered ? "entered_capture_circle" : "crossed_capture_circle"
+                nextState.captureCompletedReason = emergencyPassed
+                    ? "emergency_abeam_pass"
+                    : (entered ? "entered_capture_circle" : "crossed_capture_circle")
+                nextState.lastWaypointMissDistanceMeters = emergencyPassed ? distance : nil
+                nextState.lastWaypointPassPosition = emergencyPassed ? aircraftPlanar : nil
                 nextState.activeGuidanceTargetType = "terminalCapture"
                 nextState.activeGuidanceMode = "terminalCapture"
                 nextState.targetHeadingRadians = aircraftState.orientation.z

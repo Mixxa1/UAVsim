@@ -1637,6 +1637,10 @@
 "mission.status.field.profile" = "ПРОФИЛЬ";
 "mission.status.field.feasibility" = "ВЫПОЛНИМОСТЬ";
 "mission.status.field.primary_issue" = "ОСНОВНАЯ ПРОБЛЕМА";
+
+/* Emergency abeam pass — standing note in the mission planner. */
+"mission.status.emergency_pass.title" = "АВАРИЙНЫЙ ПРОХОД";
+"mission.status.emergency_pass.note" = "Точка внутри круга разворота аппарата недостижима. После полного витка она засчитывается по траверзу с указанием промаха.";
 "mission.status.value.present" = "Есть";
 "mission.status.value.absent" = "Нет";
 "mission.status.value.bound" = "Да";

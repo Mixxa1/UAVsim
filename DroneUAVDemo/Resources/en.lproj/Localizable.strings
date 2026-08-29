@@ -1642,6 +1642,10 @@
 "mission.status.field.profile" = "PROFILE";
 "mission.status.field.feasibility" = "FEASIBILITY";
 "mission.status.field.primary_issue" = "PRIMARY ISSUE";
+
+/* Emergency abeam pass — standing note in the mission planner. */
+"mission.status.emergency_pass.title" = "EMERGENCY PASS";
+"mission.status.emergency_pass.note" = "A waypoint inside the aircraft's turn circle cannot be reached. After a full orbit it is credited abeam, with the miss distance recorded.";
 "mission.status.value.present" = "Present";
 "mission.status.value.absent" = "Absent";
 "mission.status.value.bound" = "Bound";

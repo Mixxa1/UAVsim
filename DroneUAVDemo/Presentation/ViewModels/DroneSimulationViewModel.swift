@@ -511,6 +511,8 @@ extension DroneSimulationViewModel {
         let activeLegPoints: [SIMD2<Float>]
         let predictedPathPoints: [SIMD2<Float>]
         let missionWaypoints: [TerrainMapMissionWaypoint]
+        /// Places the route was actually flown through when a waypoint could not be reached.
+        let emergencyWaypointPasses: [EmergencyWaypointPass]
         let noFlyZones: [MissionZone]
         let payloadImpact: TerrainMapPayloadImpact?
         let trail: [SIMD2<Float>]
@@ -543,6 +545,7 @@ extension DroneSimulationViewModel {
             activeLegPoints: [],
             predictedPathPoints: [],
             missionWaypoints: [],
+            emergencyWaypointPasses: [],
             noFlyZones: [],
             payloadImpact: nil,
             trail: [],
@@ -1436,6 +1439,18 @@ final class DroneSimulationViewModel: ObservableObject {
     /// on a meaningful change in the sun rather than every frame — a quarter of a degree is finer
     /// than the eye resolves and still gives ~230 updates across a day.
     private var lastAppliedSunElevationDegrees: Double = .infinity
+    /// Where the route was actually flown through when a waypoint could not be reached.
+    ///
+    /// One entry per emergency abeam pass, positioned at the aircraft, not at the waypoint. The
+    /// waypoint is where the operator asked the aircraft to go; this is where it went instead, and
+    /// those are different facts. Recorded here because the assist reports it on the single tick it
+    /// credits the point.
+    struct EmergencyWaypointPass: Identifiable, Equatable {
+        let id: UUID
+        let position: SIMD2<Float>
+        let missMeters: Float
+    }
+    private(set) var emergencyWaypointPasses: [EmergencyWaypointPass] = []
     private var telemetrySamplingAccumulator: Float = 0.0
     private var hudPublishAccumulator: Float = 0.0
     private var diagnosticsSamplingAccumulator: Float = 0.0
@@ -6421,8 +6436,6 @@ final class DroneSimulationViewModel: ObservableObject {
         let dt = forcedDeltaTime
             ?? Float(max(1.0 / 240.0, min(now - lastTimestamp, 1.0 / 20.0)))
         self.lastTimestamp = now
-        simulationTime += dt
-        advanceWorldClock(bySimulatedSeconds: Double(dt))
         simulationTickCounter &+= 1
         state.armState = isArmed ? .armed : .disarmed
         invalidateFixedWingRouteTrackingContextCache()
@@ -6475,6 +6488,13 @@ final class DroneSimulationViewModel: ObservableObject {
         // query returns nothing and the safety floor sits a metre under a ground height that is
         // still zero. The aircraft was therefore *below the terrain* by the time the terrain
         // arrived — seen as being carried off the pad and left under the textures.
+        // ⚠️ Simulated time advances *below* the running guard, not above it.
+        //
+        // It used to be stamped as soon as the frame delta was known, which meant a stopped
+        // simulation still accumulated simulated seconds: the aircraft stood frozen while the
+        // world clock kept running, and the day went past it. Anything keyed on `simulationTime`
+        // — the world clock, the capture-hold timers — was measuring wall time wearing a
+        // simulated name whenever the operator paused.
         guard !isAwaitingImportedWorld, isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
@@ -6493,6 +6513,9 @@ final class DroneSimulationViewModel: ObservableObject {
             syncPayloadLifecycleEvents()
             return
         }
+
+        simulationTime += dt
+        advanceWorldClock(bySimulatedSeconds: Double(dt))
 
         let blocksSimulationForSignalLoss = signalState.isInteractionBlocking &&
             signalLossCause != .impactDamage
@@ -6829,7 +6852,10 @@ final class DroneSimulationViewModel: ObservableObject {
                         + "throttle=%.2f risk=%.2f obstacle=%@ "
                         + "why=%@ pending=%@ avoid=%@ turnR=%.0f hold=%@ heldCrs=%.0f "
                         + "band=%.0f-%.0f nav=%d state=%@ sup=%@ "
-                        + "asstRoll=%@ avOwns=%@ holdRem=%.2f avCrsErr=%@ avRawBank=%@",
+                        + "asstRoll=%@ avOwns=%@ holdRem=%.2f avCrsErr=%@ avRawBank=%@ "
+                        // How far round the active waypoint the aircraft has already turned. 360
+                        // is the orbit-trap threshold that arms the emergency abeam pass.
+                        + "swept=%.0f",
                     mode.rawValue,
                     Double(state.position.y),
                     Double(simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))),
@@ -6894,7 +6920,8 @@ final class DroneSimulationViewModel: ObservableObject {
                     } ?? "-") as NSString,
                     (fixedWingAvoidanceDiagRawBankDegrees.map {
                         String(format: "%+.1f", $0)
-                    } ?? "-") as NSString
+                    } ?? "-") as NSString,
+                    Double(fixedWingAssistState.activeWaypointSweptHeadingDegrees ?? -1.0)
                 ))
             }
         }
@@ -8860,6 +8887,24 @@ final class DroneSimulationViewModel: ObservableObject {
                     let previousAssistState = fixedWingAssistState
                     let captureTransitionOccurred = !previousAssistState.interceptCompleted && assistOutput.state.interceptCompleted
                     fixedWingAssistState = assistOutput.state
+                    // Reported on one tick only — record it or it is gone.
+                    if captureTransitionOccurred,
+                       assistOutput.state.captureCompletedReason == "emergency_abeam_pass",
+                       let missedID = assistOutput.state.selectedWaypointID,
+                       let miss = assistOutput.state.lastWaypointMissDistanceMeters,
+                       let passPoint = assistOutput.state.lastWaypointPassPosition {
+                        emergencyWaypointPasses.append(EmergencyWaypointPass(
+                            id: missedID,
+                            position: passPoint,
+                            missMeters: miss
+                        ))
+                        #if DEBUG
+                        print(String(
+                            format: "[Orbit] emergency abeam pass: waypoint missed by %.0f m after a full orbit",
+                            Double(miss)
+                        ))
+                        #endif
+                    }
                     applyFixedWingAssistFlyBySnapshot(guidanceSnapshot, to: &fixedWingAssistState)
                     syncFixedWingAssistSelection()
 
@@ -20572,9 +20617,11 @@ final class DroneSimulationViewModel: ObservableObject {
     ) {
         if assistState.mode == .waypointIntercept,
            assistState.interceptCompleted {
+            // Only an obstacle suppresses the transition now. A corner that is merely too tight is
+            // flown as an overshoot-and-reacquire rather than held — see the poor-geometry branch
+            // in `applyFixedWingAssistFlyBySnapshot`.
             let transitionSuppressed = snapshot == nil ||
-                snapshot?.shouldPauseForObstacle == true ||
-                snapshot?.shouldPauseForPoorGeometry == true
+                snapshot?.shouldPauseForObstacle == true
             assistState.flyByTransitionActive = false
             assistState.flyByTransitionFeasible = snapshot?.flyByTransitionFeasible ?? false
             assistState.headingErrorToNextWaypointDegrees = snapshot?.headingErrorToNextWaypointDegrees
@@ -20645,8 +20692,26 @@ final class DroneSimulationViewModel: ObservableObject {
             assistState.autoAdvanceSuppressed = true
             assistState.autoAdvanceSuppressedReason = snapshot.suppressedReason
         } else if snapshot.shouldPauseForPoorGeometry {
-            assistState.interceptState = .autoAdvancePausedPoorGeometry
-            assistState.autoAdvanceSuppressed = true
+            // Geometry does not stop a mission — it only decides *how* the corner is flown.
+            //
+            // This used to set `autoAdvanceSuppressed = true`, and because the refusal is computed
+            // from leg lengths, which do not change as the aircraft flies, once refused it was
+            // refused forever: a deadlock by construction. Measured on an MQ-9B over a simulated
+            // day, 2406 of 2469 samples sat on `turn_transition_segment_too_short` and the aircraft
+            // orbited the same waypoint without ever passing one.
+            //
+            // A real autopilot never does this. Given a corner it cannot cut, it overshoots, turns
+            // back and re-acquires — the route is flown badly and visibly, which is the honest
+            // answer, rather than not flown at all. `FixedWingAutopilot` already takes exactly this
+            // line ("a miss must never be counted as a completed waypoint… causing a turn back and
+            // reacquisition"), and the assist's aim point is already capped at the waypoint centre
+            // in `fixedWingAssistCaptureLineAimPoint`, so the turn-back falls out on its own once
+            // the suppression is gone.
+            //
+            // The reason string is kept: the operator should still be told the corner is too tight,
+            // just not by the aircraft refusing to fly.
+            assistState.interceptState = fixedWingAssistInterceptState(for: snapshot.guidanceMode)
+            assistState.autoAdvanceSuppressed = false
             assistState.autoAdvanceSuppressedReason = snapshot.suppressedReason
         } else {
             assistState.interceptState = fixedWingAssistInterceptState(for: snapshot.guidanceMode)
@@ -24008,6 +24073,7 @@ final class DroneSimulationViewModel: ObservableObject {
             activeLegPoints: activeLegPoints,
             predictedPathPoints: predictedPathPoints,
             missionWaypoints: staticOverlay.waypoints,
+            emergencyWaypointPasses: emergencyWaypointPasses,
             noFlyZones: staticOverlay.noFlyZones,
             payloadImpact: lastPayloadImpact,
             trail: terrainMapTrail,

@@ -771,6 +771,8 @@ private struct TacticalMapCanvas: View {
             drawPayloadImpact(in: &context, projection: projection)
             drawDock(in: &context, projection: projection)
             drawWaypoints(in: &context, projection: projection)
+            // After the waypoints, so a cross is never hidden under a pin.
+            drawEmergencyPasses(in: &context, projection: projection)
             drawDrone(in: &context, projection: projection)
             context.stroke(
                 Path(projection.mapRect),
@@ -1708,6 +1710,35 @@ private struct TacticalMapCanvas: View {
         crosshair.move(to: CGPoint(x: center.x, y: center.y - 10))
         crosshair.addLine(to: CGPoint(x: center.x, y: center.y + 10))
         context.stroke(crosshair, with: .color(GroundControlPalette.warning.opacity(0.76)), lineWidth: 1.0)
+    }
+
+    /// Marks the places the route was actually flown through when a waypoint could not be reached.
+    ///
+    /// Drawn at the aircraft's own position at the moment of the pass, not on the waypoint: the
+    /// waypoint is where the operator asked it to go and is not at fault. A cross rather than a pin,
+    /// because this is not a place anybody planned.
+    private func drawEmergencyPasses(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        for pass in snapshot.emergencyWaypointPasses {
+            let center = projection.project(pass.position)
+            let arm: CGFloat = 6.0
+            var cross = Path()
+            cross.move(to: CGPoint(x: center.x - arm, y: center.y - arm))
+            cross.addLine(to: CGPoint(x: center.x + arm, y: center.y + arm))
+            cross.move(to: CGPoint(x: center.x + arm, y: center.y - arm))
+            cross.addLine(to: CGPoint(x: center.x - arm, y: center.y + arm))
+            context.stroke(cross, with: .color(Color.black.opacity(0.5)), lineWidth: 3.4)
+            context.stroke(cross, with: .color(GroundControlPalette.danger.opacity(0.98)), lineWidth: 1.9)
+            context.draw(
+                Text(String(format: "−%.0f m", pass.missMeters))
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundColor(GroundControlPalette.danger),
+                at: CGPoint(x: center.x, y: center.y - arm - 6.0),
+                anchor: .center
+            )
+        }
     }
 
     private func drawWaypoints(

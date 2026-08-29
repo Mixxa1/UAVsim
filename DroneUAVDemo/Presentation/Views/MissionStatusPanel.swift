@@ -61,6 +61,23 @@ struct MissionStatusPanel: View {
                         .stroke(borderTint(for: explanation.severity), lineWidth: 1)
                 )
             }
+
+            // Standing note, not a per-route warning. The emergency abeam pass exists so a route
+            // the airframe cannot physically fly ends instead of orbiting forever — but it counts
+            // a waypoint as reached from however far away the aircraft happened to be, so the
+            // operator has to know it can happen before they read a "completed" mission.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("mission.status.emergency_pass.title")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                Text("mission.status.emergency_pass.note")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 
