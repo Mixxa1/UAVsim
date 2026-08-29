@@ -11,6 +11,9 @@ private enum RunwayAssetConstants {
     static let widthMeters: Float = 45.0
     /// How far the paved surface stands above the surrounding ground.
     static let surfaceProudMeters: Float = 0.02
+    /// Paved distance behind the threshold, so the aircraft starts on the strip
+    /// rather than on its edge.
+    static let thresholdOverrunMeters: Float = 60.0
 }
 
 /// Loads `Runway.usdz` as the runway strip, with a procedural strip as the fallback.
@@ -58,7 +61,12 @@ final class RunwayAssetLoader {
         // proportions, and lay down as many copies as the strip needs.
         let scale = RunwayAssetConstants.widthMeters / max(modelNativeWidth, 0.001)
         let tileLength = max(1.0, modelNativeLength * scale)
-        let tiles = max(1, Int((length / tileLength).rounded(.up)))
+        // Pavement behind the threshold as well as ahead of it. The aircraft is
+        // spawned at the threshold, and a strip that begins exactly there leaves it
+        // standing on the lip with its tail over the grass — which reads as the
+        // runway being a separate object the aeroplane happens to be next to.
+        let overrun = RunwayAssetConstants.thresholdOverrunMeters
+        let tiles = max(1, Int(((length + overrun) / tileLength).rounded(.up)))
 
         let wrapper = SCNNode()
         wrapper.name = RunwayAssetConstants.nodeName
@@ -74,7 +82,7 @@ final class RunwayAssetLoader {
             model.position = SCNVector3(
                 -modelNativeCenter.x * scale,
                 -modelNativeMaxY * scale + RunwayAssetConstants.surfaceProudMeters,
-                -modelNativeCenter.z * scale - tileLength * (Float(index) + 0.5)
+                -modelNativeCenter.z * scale - tileLength * (Float(index) + 0.5) + overrun
             )
             wrapper.addChildNode(model)
         }
@@ -114,17 +122,29 @@ final class RunwayAssetLoader {
             root.eulerAngles = SCNVector3(0.0, SCNFloat.pi / 2.0, 0.0)
             modelNativeLength = extentX
             modelNativeWidth = extentZ
+            // ⚠️ The centre offset has to be measured in the frame the model ENDS UP
+            // in, not the one it was authored in. A +90° turn about Y sends
+            // (x, z) -> (z, -x), so the along-strip offset that has to be cancelled
+            // is the old X one and it now lives on Z. Cancelling it on X instead
+            // laid the whole runway a hundred and thirty metres to the side of the
+            // aircraft — the asset's own origin sits 72 % of the way along it — and
+            // that is why the strip and the aeroplane were two separate objects.
+            modelNativeCenter = SIMD3<Float>(
+                Float(minBB.z + maxBB.z) * 0.5,
+                0.0,
+                -Float(minBB.x + maxBB.x) * 0.5
+            )
         } else {
             modelNativeLength = extentZ
             modelNativeWidth = extentX
+            modelNativeCenter = SIMD3<Float>(
+                Float(minBB.x + maxBB.x) * 0.5,
+                0.0,
+                Float(minBB.z + maxBB.z) * 0.5
+            )
         }
         modelNativeLength = max(modelNativeLength, 0.001)
         modelNativeMaxY = Float(maxBB.y)
-        modelNativeCenter = SIMD3<Float>(
-            Float(minBB.x + maxBB.x) * 0.5,
-            0.0,
-            Float(minBB.z + maxBB.z) * 0.5
-        )
         print("[Launch] Runway.usdz loaded: nativeLength=\(modelNativeLength) "
               + "nativeWidth=\(modelNativeWidth) nativeTop=\(modelNativeMaxY) units "
               + "(bounding box); one tile covers "
@@ -164,14 +184,19 @@ final class RunwayAssetLoader {
         markingMaterial.writesToDepthBuffer = false
         markingMaterial.readsFromDepthBuffer = false
 
+        let overrun = RunwayAssetConstants.thresholdOverrunMeters
         let surface = SCNNode(geometry: SCNBox(
             width: width,
             height: 0.08,
-            length: CGFloat(length),
+            length: CGFloat(length + overrun),
             chamferRadius: 0.0
         ))
         surface.geometry?.materials = [surfaceMaterial]
-        surface.simdPosition = SIMD3<Float>(0.0, RunwayAssetConstants.surfaceProudMeters - 0.04, -length * 0.5)
+        surface.simdPosition = SIMD3<Float>(
+            0.0,
+            RunwayAssetConstants.surfaceProudMeters - 0.04,
+            -(length + overrun) * 0.5 + overrun
+        )
         surface.renderingOrder = -20
         root.addChildNode(surface)
 

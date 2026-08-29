@@ -8607,7 +8607,30 @@ final class DroneSimulationViewModel: ObservableObject {
             let wingBorneFraction: Double = selectedDroneProfile.airframeClass == .hybridVTOL
                 ? Double(state.vtolWingborneBlend)
                 : 1.0
-            let stallBias = Double(max(0.0, wing.stallWarningSpeedMps - currentHorizontalSpeed)) * 0.018 * Double(deltaTime) * wingBorneFraction
+            //
+            // Two more things it must not do, both found the same way — an operator
+            // holding Q and watching the number go up.
+            //
+            // It must not run **on the ground**: a takeoff roll is below the stall
+            // warning speed for its entire length, by definition, and an aeroplane
+            // with its weight on its wheels is not about to stall. On the MQ-9B the
+            // bias came to +0.30 per second against the 0.156 the throttle key
+            // commands, so the pilot could not close the throttle at all below
+            // 29 m/s — and above it he could, which is why the same key sometimes
+            // added power and sometimes took it away.
+            //
+            // And it must not fight an **explicit** throttle-down command anywhere.
+            // A protection that quietly overrules the stick, with nothing on the
+            // HUD to say so, is indistinguishable from a broken control. Hands off
+            // the throttle it still works exactly as before, which is when it is
+            // actually protecting anything.
+            let heightAboveSupport = state.position.y - supportSurfaceY(for: state.position)
+            let pilotClosingThrottle = effectiveAxis.vertical < -0.001
+            let stallProtectionApplies = heightAboveSupport > 0.5 && !pilotClosingThrottle
+            let stallBias = stallProtectionApplies
+                ? Double(max(0.0, wing.stallWarningSpeedMps - currentHorizontalSpeed))
+                    * 0.018 * Double(deltaTime) * wingBorneFraction
+                : 0.0
             let rollGain = Double((effectiveControlMode == .acro ? 58.0 : 30.0) * wing.bankResponseGain) * speedRatioDouble
             let pitchAuthority = Double(effectiveControlMode == .acro ? 50.0 : 24.0)
             let pitchResponseGain = Double(effectiveAxis.forward < 0.0 ? wing.climbResponseGain : wing.descentResponseGain)

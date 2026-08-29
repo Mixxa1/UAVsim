@@ -140,6 +140,101 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
     _ = baseline
 }
 
+
+// MARK: - The other end of the throttle
+//
+// A climb probe only ever asks whether full power climbs. It never asked whether
+// *no* power descends — and it did not: the physics floors a fixed wing's throttle
+// at `effectiveMinimumSafeFlightThrottle` above 15 cm, which on the MQ-9B turned a
+// commanded 0 % into 46 % against a 51 % cruise baseline. An aircraft the operator
+// had throttled to idle went on climbing at ten metres per second and gained two
+// hundred metres at a time. Closing the throttle is not an error state for an
+// aeroplane: it is how it descends, glides and lands.
+
+print("\n\nThrottle closed in flight — does it come down?")
+print(String(repeating: "-", count: 72))
+print(String(format: "%-26@ %10@ %10@ %10@ %8@",
+             "profile" as NSString, "start m" as NSString, "after 40s" as NSString,
+             "sink m/s" as NSString, "L/D" as NSString))
+
+var wouldNotDescend: [String] = []
+
+for profile in repository.allProfiles where profile.airframeClass == .fixedWing {
+    guard let wing = profile.fixedWingParameters else { continue }
+    let uav = profile.resolvedUAVProfile
+    let massModel = VehicleMassModel.baseline(for: profile, uavProfile: uav)
+    let fuelState: FuelSystemState? = uav?.powerplant?.fuel.map {
+        .full(capacityKg: $0.usableFuelMassKg, reserveFraction: $0.reserveFraction)
+    }
+    let backend = FuelPropulsionBackend(
+        powerplant: uav?.powerplant,
+        cruiseSpeedMps: wing.cruiseSpeedMps
+    )
+
+    var state = DroneState(
+        position: SIMD3<Float>(0, 400, 0),
+        velocity: SIMD3<Float>(0, 0, -wing.cruiseAirspeed),
+        orientation: .zero,
+        angularVelocity: .zero,
+        throttle: 0.0,
+        motorThrottle: 0.0,
+        rotorAngularSpeed: .zero,
+        forwardAirspeed: wing.cruiseAirspeed,
+        physicalState: .airborne,
+        mode: .manual
+    )
+    state.armState = .armed
+    if let backend {
+        // Running, but at idle — a closed throttle does not stop the engine.
+        var idle = EngineRuntimeState.cold(ambientTemperatureC: 15.0)
+        idle.runState = .ready
+        idle.shaftRPM = (backend.powerplant.ratedShaftRPM ?? 6000.0) * 0.4
+        idle.temperatureC = EngineOperatingEnvelope
+            .envelope(for: backend.powerplant.engineType).operatingTemperatureC
+        state.engineRuntime = idle
+    }
+
+    let start = state.position.y
+    var speedSum: Float = 0.0
+    var samples = 0
+    for _ in 0..<(60 * 40) {
+        let control = DroneControlInput(
+            targetPosition: SIMD3<Float>(0, 400, -4000),
+            targetOrientation: .zero,
+            yawIntent: 0.0,
+            throttle: 0.0,
+            isArmed: true,
+            mode: .manual,
+            controlMode: .stabilized
+        )
+        let context = DroneSimulationContext(
+            profile: profile,
+            activeUAVProfile: uav,
+            weather: .normal,
+            damageState: .pristine,
+            batteryState: .full,
+            collisionRisk: 0.0,
+            windVector: .zero,
+            vehicleMassModel: massModel,
+            fuelState: fuelState,
+            engineState: state.engineRuntime,
+            fuelPropulsion: backend
+        )
+        state = engine.step(state: state, control: control, context: context, deltaTime: dt)
+        speedSum += state.forwardAirspeed
+        samples += 1
+    }
+    let sink = (start - state.position.y) / 40.0
+    let meanSpeed = samples > 0 ? speedSum / Float(samples) : 1.0
+    let glideRatio = sink > 0.01 ? meanSpeed / sink : 0.0
+    print(String(format: "%-26@ %10.0f %10.0f %10.2f %8.1f",
+                 profile.displayName as NSString, start, state.position.y, sink, glideRatio))
+
+    if sink <= 0.0 {
+        wouldNotDescend.append(profile.displayName)
+    }
+}
+
 print("")
 if !sinking.isEmpty {
     // Not a climb-rate shortfall: these lose height at full power and climb attitude, which is a
@@ -151,7 +246,10 @@ if !underDelivering.isEmpty {
 }
 print("")
 print("A 6% gradient needs 800 m of travel to gain 50 m; 15% needs 330 m.")
-let healthy = sinking.isEmpty && underDelivering.isEmpty
+if !wouldNotDescend.isEmpty {
+    print("THROTTLE CLOSED AND STILL NOT DESCENDING: \(wouldNotDescend.joined(separator: ", "))")
+}
+let healthy = sinking.isEmpty && underDelivering.isEmpty && wouldNotDescend.isEmpty
 print(healthy
     ? "RESULT: PASS - every profile delivers its declared climb"
     : "RESULT: FAIL - see the categories above")

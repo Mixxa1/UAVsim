@@ -743,6 +743,23 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                     throttleFloor = baseline.takeoffThrottleReference
                 case .landing:
                     throttleFloor = baseline.landingThrottleReference
+                case .manual:
+                    // No floor when a person is holding the throttle.
+                    //
+                    // This floor is a backstop for guidance that forgets to command
+                    // power; in manual there is nothing to back up, because the
+                    // commanded value *is* the pilot's. Applied there it silently
+                    // turned a closed throttle into 46 % on the MQ-9B — against a
+                    // cruise baseline of 51 % — so an aircraft the operator had
+                    // throttled to idle went on climbing at ten metres per second,
+                    // gaining two hundred metres at a time. Closing the throttle in
+                    // flight is not an error state for an aeroplane: it is how it
+                    // descends, glides and lands, and for a fuel aircraft it is also
+                    // the only way the engine ever reaches idle.
+                    //
+                    // Multirotors and VTOLs keep their floor unconditionally — for
+                    // them a closed throttle really is a fall.
+                    throttleFloor = 0.0
                 default:
                     throttleFloor = state.position.y > 0.15 ? baseline.effectiveMinimumSafeFlightThrottle : 0.0
                 }
