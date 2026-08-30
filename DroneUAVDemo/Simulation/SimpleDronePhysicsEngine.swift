@@ -20,6 +20,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// one instance per simulation) rather than on `DroneState`/`WeatherModel`
     /// since it's filter state, not physical state — fixed-wing only.
     private var windGustState = SIMD3<Float>(repeating: 0.0)
+    /// Gust noise stream.
+    ///
+    /// Seeded and owned by the engine rather than drawn from the global generator. Two
+    /// reasons, and the second one is why this changed.
+    ///
+    /// A gust is a disturbance, and a simulation whose disturbances are irreproducible
+    /// cannot be debugged: the same flight flown twice takes two different paths, and the
+    /// question "why did it do that" has no answer. A replay that re-runs the physics
+    /// inherits the same problem.
+    ///
+    /// And the headless probes measure differences of tens of metres over a minute. As long
+    /// as gusts only existed below 1000 ft, high-altitude probes flew through still air and
+    /// never noticed; the moment clear-air turbulence was added they began comparing two
+    /// flights through two different atmospheres and reporting the difference as a defect in
+    /// whatever they were actually testing.
+    private var gustNoiseState: UInt64 = 0x9E3779B97F4A7C15
 
     /// Oscillator phase for the blade-imbalance vibration disturbance —
     /// engine-instance filter state, like `windGustState` above.
@@ -159,6 +175,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.machNumber = flow.mach
         next.dynamicPressurePa = flow.dynamicPressurePa
         next.equivalentAirspeedMps = flow.equivalentAirspeedMps
+        next.condensationConeStrength = CondensationCone.strength(
+            mach: flow.mach,
+            relativeHumidity: context.weather.relativeHumidity,
+            atmosphere: atmosphere
+        )
 
         let limits = FlightEnvelopeLimits.derived(
             maxAirspeedMps: wing.maxAirspeed,
@@ -183,6 +204,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             deltaTime: deltaTime
         )
         return next
+    }
+
+    /// Puts the atmospheric disturbance back to a known starting point.
+    ///
+    /// The engine carries two pieces of memory that belong to the *flight* rather than to
+    /// the aircraft: the gust filter's current output, and the position of its noise stream.
+    /// Neither should survive into the next flight — a fresh take-off inheriting the gust the
+    /// last one ended on is a small wrongness, and a headless comparison of two flights that
+    /// silently gave them two different atmospheres is a large one.
+    ///
+    /// The seed is a parameter so a caller that needs two flights through *identical* air
+    /// can have it. That is what a precision or A/B comparison needs, and it is the only way
+    /// to ask a stochastic model a deterministic question.
+    func resetAtmosphericDisturbance(seed: UInt64 = 0x9E37_79B9_7F4A_7C15) {
+        windGustState = .zero
+        gustNoiseState = seed
     }
 
     /// Angular acceleration for a rigid body, including the gyroscopic coupling
@@ -936,6 +973,25 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let alpha = atan2(-bodyAirflow.y, -bodyAirflow.z).clamped(to: -1.4...1.4)
         let beta = asin((bodyAirflow.x / airspeed).clamped(to: -1.0...1.0))
 
+        // Ambient density at the aircraft's own altitude rather than a sea-level
+        // constant. Note this is NOT the density used to size the wing: that one
+        // is a sea-level calibration of the airframe's geometry against its stall
+        // speed and must stay fixed, or the wing would change area as the
+        // aircraft climbed (see FixedWingAerodynamics.build).
+        let atmosphere = context.atmosphere.state(worldY: state.position.y)
+        let airDensity = atmosphere.airDensity
+        // One flow state per substep, shared by the aerodynamics, the structural
+        // envelope and the telemetry, rather than four places each recomputing their
+        // own `0.5 * rho * v * v` and none of them computing Mach at all. Built from
+        // the *air-relative* speed — `airspeed` already has wind and gusts removed, so
+        // an aircraft holding station in a jet stream is correctly flying, not stopped.
+        let flow = CompressibleFlowState(atmosphere: atmosphere, trueAirspeedMps: airspeed)
+        let mach = flow.mach
+        let dynamicPressure = flow.dynamicPressurePa
+        // Hoisted above the control mapping: how far and how fast the surfaces can move
+        // depends on the dynamic pressure they work against, so `q` has to exist before
+        // the sticks are turned into deflections rather than after.
+
         // --- Control surface mapping: stick/angle commands -> elevator/aileron/rudder deflection fractions.
         var elevatorFraction: Float = 0.0
         var aileronFraction: Float = 0.0
@@ -1055,12 +1111,45 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             }
         }
 
+        // --- Hinge moments: what the actuator can still do at this dynamic pressure.
+        //
+        // A control surface's hinge moment is `q · S · c · Ch(δ)`, so at four times the
+        // dynamic pressure the same deflection costs four times the torque. An actuator has
+        // a finite torque and a finite speed, and past the condition it was sized for it
+        // simply cannot reach full deflection, nor get there as quickly. Without this the
+        // same stick input produced the same surface angle at 30 m/s and at Mach 2, which
+        // is the "unreal aircraft" the plan names.
+        //
+        // The reference condition is the airframe's **never-exceed** dynamic pressure, not
+        // its cruise: an actuator is sized so the aircraft is fully controllable to the
+        // limit it is cleared to. That choice is what keeps this from disturbing the
+        // existing fleet — every one of them has full authority everywhere inside its own
+        // envelope, exactly as before. It bites only past VNE, where an aircraft *should*
+        // be losing authority, and on the supersonic profiles that spend their lives out
+        // there.
+        //
+        // Floored rather than taken to zero. A surface under a load its actuator cannot
+        // hold still moves; it moves slowly and not very far, and an aircraft with no
+        // control at all is a different failure from one with heavy controls.
+        let hingeReferenceQ = 0.5 * AtmosphereModel.seaLevelDensity
+            * wing.maxAirspeed * wing.maxAirspeed
+        let hingeLoadRatio = dynamicPressure / max(1.0, hingeReferenceQ)
+        let controlAuthorityFromQ = (1.0 / max(1.0, hingeLoadRatio)).clamped(to: 0.18...1.0)
+        elevatorFraction *= controlAuthorityFromQ
+        aileronFraction *= controlAuthorityFromQ
+        rudderFraction *= controlAuthorityFromQ
+
         // --- Actuator slew-rate limiting: a real servo can't snap to a new
         // deflection in one tick — applies to manual and autopilot input
         // alike, since it's a property of the actuator, not of who issued
         // the command. ~4/s means a full -1...1 swing takes ~0.5s, roughly
         // a 90°/s small-UAV servo for a ±20-25° surface.
-        let surfaceSlewRate: Float = 4.0
+        //
+        // The rate falls with load for the same reason the travel does: an actuator
+        // working against a hinge moment has less torque left over to accelerate the
+        // surface with. Square-rooted rather than proportional, because a servo's speed
+        // degrades more gently under load than its stall travel does.
+        let surfaceSlewRate: Float = 4.0 * sqrt(controlAuthorityFromQ)
         elevatorFraction = approach(current: state.elevatorDeflection, target: elevatorFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
         aileronFraction = approach(current: state.aileronDeflection, target: aileronFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
         rudderFraction = approach(current: state.rudderDeflection, target: rudderFraction, increaseRate: surfaceSlewRate, decreaseRate: surfaceSlewRate, dt: dt)
@@ -1076,22 +1165,6 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // --- Aerodynamics: real angle-of-attack/sideslip-driven forces and moments.
         // `alpha`, `beta`, `airspeed` and `bodyAirflow` are computed above, before the control
         // mapping, because the rudder coordinator needs sideslip.
-
-        // Ambient density at the aircraft's own altitude rather than a sea-level
-        // constant. Note this is NOT the density used to size the wing: that one
-        // is a sea-level calibration of the airframe's geometry against its stall
-        // speed and must stay fixed, or the wing would change area as the
-        // aircraft climbed (see FixedWingAerodynamics.build).
-        let atmosphere = context.atmosphere.state(worldY: state.position.y)
-        let airDensity = atmosphere.airDensity
-        // One flow state per substep, shared by the aerodynamics, the structural
-        // envelope and the telemetry, rather than four places each recomputing their
-        // own `0.5 * rho * v * v` and none of them computing Mach at all. Built from
-        // the *air-relative* speed — `airspeed` already has wind and gusts removed, so
-        // an aircraft holding station in a jet stream is correctly flying, not stopped.
-        let flow = CompressibleFlowState(atmosphere: atmosphere, trueAirspeedMps: airspeed)
-        let mach = flow.mach
-        let dynamicPressure = flow.dynamicPressurePa
 
         let (cl, cd) = aero.liftDrag(alphaRad: alpha, mach: mach)
         let cy = aero.cyBeta * beta
@@ -3426,14 +3499,32 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         return current + max(delta, -decreaseRate * dt)
     }
 
-    /// Adds a near-ground turbulence gust (Dryden low-altitude model,
-    /// MIL-F-8785C) on top of the steady wind — strongest at the surface,
-    /// fading to none by ~1000 ft. Driven by the existing steady wind speed
-    /// (real mechanical/boundary-layer turbulence needs wind to exist),
-    /// then *compounded* — not gated — by the weather preset's
-    /// turbulenceFactor, so calm conditions with some ambient wind still get
-    /// a believable bump on takeoff/landing and storms get more, rather
-    /// than calm weather (turbulenceFactor 0) zeroing it outright.
+    /// Adds a turbulence gust on top of the steady wind, from whichever of the two
+    /// MIL-F-8785C Dryden forms applies at this altitude.
+    ///
+    /// **Low altitude** (below 1000 ft) is mechanical, boundary-layer turbulence: intensity
+    /// scales with the steady wind that stirs it, scale lengths grow with height, and the
+    /// vertical component is much weaker than the horizontal because the ground is in the
+    /// way. Compounded — not gated — by the weather preset's `turbulenceFactor`, so calm
+    /// conditions with some ambient wind still get a believable bump on take-off rather
+    /// than a `turbulenceFactor` of 0 zeroing it outright.
+    ///
+    /// **High altitude** (above 2000 ft) is clear-air turbulence, and it is a different
+    /// phenomenon that happens to share a filter. It has nothing to do with the surface
+    /// wind — it comes from shear in and around the jet stream, so it *peaks* at the
+    /// tropopause rather than fading with height, and it is isotropic, with the same
+    /// intensity on all three axes because there is no ground to suppress the vertical one.
+    /// Its scale length is the standard 1750 ft on every axis, three times the near-ground
+    /// figure, which is why turbulence up there is felt as long swells rather than the
+    /// rattle of a low approach.
+    ///
+    /// Between 1000 and 2000 ft the two are blended, as the specification prescribes.
+    ///
+    /// This is what closes the gap the plan names: gusts used to vanish entirely above
+    /// 305 m, so every high-altitude aircraft — which is now most of them — flew through
+    /// perfectly still air for its whole mission, and the one flight regime where a gust
+    /// matters most went unmodelled. Near coffin corner the margin between stall and
+    /// Mach limit can be a few tens of knots, and a gust is what closes it.
     private func effectiveWindWithGusts(
         baseWind: SIMD3<Float>,
         altitudeM: Float,
@@ -3442,32 +3533,81 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         referenceAirspeed: Float
     ) -> SIMD3<Float> {
         let altitudeFt = max(altitudeM, 0.0) * 3.28084
-        let fadeOut = (1.0 - altitudeFt / 1000.0).clamped(to: 0.0...1.0)
-        guard fadeOut > 0.0 else {
-            windGustState = .zero
-            return baseWind
-        }
+        // The specification's own blend: pure boundary layer to 1000 ft, pure clear-air
+        // above 2000 ft, linear across the gap.
+        let highShare = ((altitudeFt - 1000.0) / 1000.0).clamped(to: 0.0...1.0)
+        let lowShare = 1.0 - highShare
 
         // MIL-F-8785C low-altitude form is defined in feet; convert the
         // resulting scale lengths back to meters for the sim's own units.
         let referenceWindSpeed = max(simd_length(baseWind), 0.5)
         let altitudeFtFloored = max(altitudeFt, 3.0)
-        let shapingTerm = (0.177 + 0.000823 * altitudeFtFloored)
-        let sigmaW = 0.1 * referenceWindSpeed
-        let sigmaUV = sigmaW / max(0.05, pow(shapingTerm, 0.4))
-        let scaleLengthWM = altitudeFtFloored * 0.3048
-        let scaleLengthUVM = (altitudeFtFloored / max(0.05, pow(shapingTerm, 1.2))) * 0.3048
+        let shapingTerm = (0.177 + 0.000823 * min(altitudeFtFloored, 1000.0))
+        let lowSigmaW = 0.1 * referenceWindSpeed
+        let lowSigmaUV = lowSigmaW / max(0.05, pow(shapingTerm, 0.4))
+        let lowScaleW = min(altitudeFtFloored, 1000.0) * 0.3048
+        let lowScaleUV = (min(altitudeFtFloored, 1000.0) / max(0.05, pow(shapingTerm, 1.2))) * 0.3048
+
+        // Clear-air turbulence: isotropic, 1750 ft on every axis.
+        let highSigma = clearAirGustSigma(altitudeM: altitudeM, turbulenceFactor: turbulenceFactor)
+        let highScale: Float = 1750.0 * 0.3048
+
+        let intensityBoost = 0.6 + 0.4 * turbulenceFactor.clamped(to: 0.0...1.0)
+        // Blend the *parameters*, not two independent gust states. Running two filters and
+        // cross-fading their outputs would make the gust jump every time the aircraft
+        // crossed the blend band, because the two states are uncorrelated; blending the
+        // sigma and the scale length keeps one continuous process throughout.
+        let sigmaUV = lowSigmaUV * intensityBoost * lowShare + highSigma * highShare
+        let sigmaW = lowSigmaW * intensityBoost * lowShare + highSigma * highShare
+        let scaleUV = lowScaleUV * lowShare + highScale * highShare
+        let scaleW = lowScaleW * lowShare + highScale * highShare
+
+        guard sigmaUV > 1.0e-4 || sigmaW > 1.0e-4 else {
+            windGustState = .zero
+            return baseWind
+        }
 
         let v = max(referenceAirspeed, 1.0)
-        let intensityBoost = 0.6 + 0.4 * turbulenceFactor.clamped(to: 0.0...1.0)
-
         windGustState = SIMD3<Float>(
-            ouGustStep(current: windGustState.x, sigma: sigmaUV, scaleLength: scaleLengthUVM, airspeed: v, dt: dt),
-            ouGustStep(current: windGustState.y, sigma: sigmaW, scaleLength: scaleLengthWM, airspeed: v, dt: dt),
-            ouGustStep(current: windGustState.z, sigma: sigmaUV, scaleLength: scaleLengthUVM, airspeed: v, dt: dt)
+            ouGustStep(current: windGustState.x, sigma: sigmaUV, scaleLength: scaleUV, airspeed: v, dt: dt),
+            ouGustStep(current: windGustState.y, sigma: sigmaW, scaleLength: scaleW, airspeed: v, dt: dt),
+            ouGustStep(current: windGustState.z, sigma: sigmaUV, scaleLength: scaleUV, airspeed: v, dt: dt)
         )
 
-        return baseWind + windGustState * (fadeOut * intensityBoost)
+        return baseWind + windGustState
+    }
+
+    /// Clear-air turbulence intensity against altitude, m/s.
+    ///
+    /// Shaped to where the atmosphere actually is rough. The jet stream sits at the
+    /// tropopause and its shear is the dominant source of high-altitude turbulence, so the
+    /// profile peaks in the 8-13 km band and falls away on both sides. Above the tropopause
+    /// the stratosphere is stably stratified and genuinely smooth — a U-2 or a Global Hawk
+    /// at 20 km is in still air, and an aircraft at 30 km is in air that barely exists —
+    /// which is why this decays rather than continuing to grow with height.
+    ///
+    /// Values are the light-to-moderate band of MIL-F-8785C's exceedance curves; the
+    /// weather preset moves the whole profile up or down within it.
+    private func clearAirGustSigma(altitudeM: Float, turbulenceFactor: Float) -> Float {
+        let km = max(0.0, altitudeM) * 0.001
+        let base: Float
+        switch km {
+        case ..<8.0:
+            // Rising into the jet-stream band.
+            base = 0.55 + (km / 8.0) * 0.95
+        case ..<13.0:
+            // The band itself, where the shear is.
+            base = 1.50
+        case ..<20.0:
+            // Above the tropopause the stratification damps it out.
+            base = 1.50 - ((km - 13.0) / 7.0) * 1.15
+        default:
+            base = 0.35 * max(0.0, 1.0 - (km - 20.0) / 12.0)
+        }
+        // Never zero for calm weather, for the same reason the near-ground model is not
+        // gated by the preset: calm means less turbulence, not an atmosphere that has
+        // stopped moving.
+        return base * (0.45 + 0.85 * turbulenceFactor.clamped(to: 0.0...1.0))
     }
 
     /// One step of the discrete-time Ornstein-Uhlenbeck process — the exact
@@ -3479,10 +3619,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         return current * decay + noise
     }
 
+    /// Box-Muller over a SplitMix64 stream.
     private func gaussianRandomSample() -> Float {
-        let u1 = max(1e-6, Float.random(in: 0.0...1.0))
-        let u2 = Float.random(in: 0.0...1.0)
+        let u1 = max(1e-6, nextGustUnitSample())
+        let u2 = nextGustUnitSample()
         return sqrt(-2.0 * log(u1)) * cos(2.0 * Float.pi * u2)
+    }
+
+    /// One uniform sample in 0..<1 from the engine's own SplitMix64 stream.
+    private func nextGustUnitSample() -> Float {
+        gustNoiseState &+= 0x9E37_79B9_7F4A_7C15
+        var z = gustNoiseState
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z = z ^ (z >> 31)
+        // Top 24 bits, which is the whole of a Float's mantissa and no more.
+        return Float(z >> 40) / Float(1 << 24)
     }
 }
 

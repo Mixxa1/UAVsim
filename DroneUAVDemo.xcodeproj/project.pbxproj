@@ -35,9 +35,13 @@
 		10000000000000000000FD11 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD10 /* EngineRuntime.swift */; };
 		10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC20 /* FuelSystemRuntime.swift */; };
 		10000000000000000000FC11 /* AtmosphereModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC10 /* AtmosphereModel.swift */; };
+		10000000000000000000FE81 /* CarrierAircraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE80 /* CarrierAircraft.swift */; };
+		10000000000000000000FE91 /* CarrierAircraftLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE90 /* CarrierAircraftLoader.swift */; };
 		10000000000000000000FE61 /* SonicBoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE60 /* SonicBoomModel.swift */; };
 		10000000000000000000FE71 /* SimulationAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE70 /* SimulationAudioService.swift */; };
 		10000000000000000000FE41 /* FlightEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE40 /* FlightEnvelope.swift */; };
+		10000000000000000000FF23 /* AeroTableCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF22 /* AeroTableCodec.swift */; };
+		10000000000000000000FF13 /* MachCoefficientDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF12 /* MachCoefficientDatabase.swift */; };
 		10000000000000000000FE51 /* AeroThermalModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE50 /* AeroThermalModel.swift */; };
 		10000000000000000000FE31 /* HighSpeedInletModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE30 /* HighSpeedInletModel.swift */; };
 		10000000000000000000FE11 /* CompressibleFlowState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE10 /* CompressibleFlowState.swift */; };
@@ -130,6 +134,7 @@
 		10000000000000000000024B /* CameraModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014E /* CameraModuleView.swift */; };
 		10000000000000000000024C /* ScenarioModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014F /* ScenarioModuleView.swift */; };
 		10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000150 /* DiagnosticsModuleView.swift */; };
+		10000000000000000000FF33 /* AeroDiagnosticsPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */; };
 		10000000000000000000024E /* TargetMarkerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000151 /* TargetMarkerState.swift */; };
 		10000000000000000000024F /* AutoNavigationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000152 /* AutoNavigationController.swift */; };
 		100000000000000000000250 /* CompassViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000153 /* CompassViewModel.swift */; };
@@ -323,6 +328,8 @@
 		100000000000000000000A03 /* Man.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A04 /* Man.usdz */; };
 		100000000000000000000A1B /* Fire_Truck.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1C /* Fire_Truck.usdz */; };
 		10000000000000000000F010 /* Runway.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F011 /* Runway.usdz */; };
+		10000000000000000000FF11 /* C130.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF10 /* C130.usdz */; };
+		10000000000000000000FF21 /* B52_Stratofortress.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF20 /* B52_Stratofortress.usdz */; };
 		100000000000000000000A1F /* flames.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A20 /* flames.usdz */; };
 		100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A24 /* Fire_sheet_baseColor.png */; };
 		100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A26 /* Fire_sheet_emissive.jpg */; };
@@ -469,9 +476,13 @@
 		10000000000000000000FD10 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC20 /* FuelSystemRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuelSystemRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC10 /* AtmosphereModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphereModel.swift; sourceTree = "<group>"; };
+		10000000000000000000FE80 /* CarrierAircraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierAircraft.swift; sourceTree = "<group>"; };
+		10000000000000000000FE90 /* CarrierAircraftLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierAircraftLoader.swift; sourceTree = "<group>"; };
 		10000000000000000000FE60 /* SonicBoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonicBoomModel.swift; sourceTree = "<group>"; };
 		10000000000000000000FE70 /* SimulationAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationAudioService.swift; sourceTree = "<group>"; };
 		10000000000000000000FE40 /* FlightEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightEnvelope.swift; sourceTree = "<group>"; };
+		10000000000000000000FF22 /* AeroTableCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroTableCodec.swift; sourceTree = "<group>"; };
+		10000000000000000000FF12 /* MachCoefficientDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachCoefficientDatabase.swift; sourceTree = "<group>"; };
 		10000000000000000000FE50 /* AeroThermalModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroThermalModel.swift; sourceTree = "<group>"; };
 		10000000000000000000FE30 /* HighSpeedInletModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighSpeedInletModel.swift; sourceTree = "<group>"; };
 		10000000000000000000FE10 /* CompressibleFlowState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressibleFlowState.swift; sourceTree = "<group>"; };
@@ -564,6 +575,7 @@
 		10000000000000000000014E /* CameraModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000014F /* ScenarioModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioModuleView.swift; sourceTree = "<group>"; };
 		100000000000000000000150 /* DiagnosticsModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModuleView.swift; sourceTree = "<group>"; };
+		10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroDiagnosticsPanelView.swift; sourceTree = "<group>"; };
 		100000000000000000000151 /* TargetMarkerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TargetMarkerState.swift; sourceTree = "<group>"; };
 		100000000000000000000152 /* AutoNavigationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoNavigationController.swift; sourceTree = "<group>"; };
 		100000000000000000000153 /* CompassViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompassViewModel.swift; sourceTree = "<group>"; };
@@ -760,6 +772,8 @@
 		100000000000000000000A04 /* Man.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Man.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A1C /* Fire_Truck.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Fire_Truck.usdz"; sourceTree = "<group>"; };
 		10000000000000000000F011 /* Runway.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Runway.usdz"; sourceTree = "<group>"; };
+		10000000000000000000FF10 /* C130.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Carriers/C130.usdz"; sourceTree = "<group>"; };
+		10000000000000000000FF20 /* B52_Stratofortress.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Carriers/B52_Stratofortress.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A20 /* flames.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/flames.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A24 /* Fire_sheet_baseColor.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Models/Scenario/Fire_sheet_baseColor.png"; sourceTree = "<group>"; };
 		100000000000000000000A26 /* Fire_sheet_emissive.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "Models/Scenario/Fire_sheet_emissive.jpg"; sourceTree = "<group>"; };
@@ -1020,8 +1034,11 @@
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
 				10000000000000000000FD30 /* PropellerModel.swift */,
 				10000000000000000000FC10 /* AtmosphereModel.swift */,
+				10000000000000000000FE80 /* CarrierAircraft.swift */,
 				10000000000000000000FE60 /* SonicBoomModel.swift */,
 				10000000000000000000FE40 /* FlightEnvelope.swift */,
+				10000000000000000000FF22 /* AeroTableCodec.swift */,
+				10000000000000000000FF12 /* MachCoefficientDatabase.swift */,
 				10000000000000000000FE50 /* AeroThermalModel.swift */,
 				10000000000000000000FE30 /* HighSpeedInletModel.swift */,
 				10000000000000000000FE10 /* CompressibleFlowState.swift */,
@@ -1162,6 +1179,7 @@
 				10000000000000000000010D /* SceneFactory.swift */,
 				10000000000000000000011D /* ScenePopulationService.swift */,
 				100000000000000000000134 /* UAVVisualFactory.swift */,
+				10000000000000000000FE90 /* CarrierAircraftLoader.swift */,
 				100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */,
 				1000000000000000000002DE /* MissionReplaySceneController.swift */,
 				7C0F000000000000000000F0 /* Thermal */,
@@ -1206,6 +1224,7 @@
 				100000000000000000000A0E /* PayloadGimbalSliderControls.swift */,
 				100000000000000000000A10 /* SettingsView.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
+				10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */,
 				100000000000000000000120 /* DroneSceneViewRepresentable.swift */,
 				100000000000000000000129 /* KeyBindingsSettingsView.swift */,
 				10000000000000000000037D /* LANOnlineTrialsView.swift */,
@@ -1328,6 +1347,8 @@
 				100000000000000000000A04 /* Man.usdz */,
 				100000000000000000000A1C /* Fire_Truck.usdz */,
 				10000000000000000000F011 /* Runway.usdz */,
+				10000000000000000000FF10 /* C130.usdz */,
+				10000000000000000000FF20 /* B52_Stratofortress.usdz */,
 				100000000000000000000A20 /* flames.usdz */,
 				100000000000000000000A24 /* Fire_sheet_baseColor.png */,
 				100000000000000000000A26 /* Fire_sheet_emissive.jpg */,
@@ -1565,6 +1586,8 @@
 				100000000000000000000A03 /* Man.usdz in Resources */,
 				100000000000000000000A1B /* Fire_Truck.usdz in Resources */,
 				10000000000000000000F010 /* Runway.usdz in Resources */,
+				10000000000000000000FF11 /* C130.usdz in Resources */,
+				10000000000000000000FF21 /* B52_Stratofortress.usdz in Resources */,
 				100000000000000000000A1F /* flames.usdz in Resources */,
 				100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */,
 				100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */,
@@ -1689,9 +1712,13 @@
 				10000000000000000000FD11 /* EngineRuntime.swift in Sources */,
 				10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */,
 				10000000000000000000FC11 /* AtmosphereModel.swift in Sources */,
+				10000000000000000000FE81 /* CarrierAircraft.swift in Sources */,
+				10000000000000000000FE91 /* CarrierAircraftLoader.swift in Sources */,
 				10000000000000000000FE61 /* SonicBoomModel.swift in Sources */,
 				10000000000000000000FE71 /* SimulationAudioService.swift in Sources */,
 				10000000000000000000FE41 /* FlightEnvelope.swift in Sources */,
+				10000000000000000000FF23 /* AeroTableCodec.swift in Sources */,
+				10000000000000000000FF13 /* MachCoefficientDatabase.swift in Sources */,
 				10000000000000000000FE51 /* AeroThermalModel.swift in Sources */,
 				10000000000000000000FE31 /* HighSpeedInletModel.swift in Sources */,
 				10000000000000000000FE11 /* CompressibleFlowState.swift in Sources */,
@@ -1875,6 +1902,7 @@
 				100000000000000000000A0D /* PayloadGimbalSliderControls.swift in Sources */,
 				100000000000000000000A0F /* SettingsView.swift in Sources */,
 				10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */,
+				10000000000000000000FF33 /* AeroDiagnosticsPanelView.swift in Sources */,
 				100000000000000000000262 /* MissionDraftBuilder.swift in Sources */,
 				100000000000000000000263 /* MissionDraftValidator.swift in Sources */,
 				100000000000000000000274 /* MissionAutopilotAdapter.swift in Sources */,

@@ -50,7 +50,8 @@ enum UAVBuildProfileSynthesizer {
     static func synthesizeProfile(for build: WorkbenchBuild) -> DroneModelProfile {
         let parameters = abstractParameters(for: build)
         let stats = WorkbenchBuildAnalyzer.analyze(build)
-        let architecture = build.resolvedFrame.architecture
+        let frame = build.resolvedFrame
+        let architecture = frame.architecture
         let endurance = enduranceMinutes(for: build, stats: stats)
         let flightTime = Float(max(endurance.maximumFlight, 1.0))
         let hoverTime: Float = architecture == .fixedWing
@@ -62,7 +63,7 @@ enum UAVBuildProfileSynthesizer {
             : Float(max(0.18, min(0.92, sqrt(1 / max(liftRatio, 0.01)))))
         let runtimeArchitecture = runtimeArchitecture(for: architecture)
         let propulsionUnits = propulsionUnits(for: build)
-        return DroneModelProfile(
+        var profile = DroneModelProfile(
             id: profileID(for: build),
             displayName: build.name.isEmpty ? "Workbench UAV" : build.name,
             displayNameKey: build.name,
@@ -85,7 +86,8 @@ enum UAVBuildProfileSynthesizer {
             airframeStyle: runtimeArchitecture.airframeStyle,
             fixedWingParameters: fixedWingParameters(
                 architecture: architecture,
-                speed: parameters.maxHorizontalSpeedMps),
+                speed: parameters.maxHorizontalSpeedMps,
+                planform: frame.fixedWingPlanform),
             launchMethod: runtimeArchitecture.launchMethod,
             landingMethod: runtimeArchitecture.landingMethod,
             controlResponsiveness: parameters.controlResponsiveness,
@@ -96,6 +98,11 @@ enum UAVBuildProfileSynthesizer {
             notes: "Синтезировано из Workbench: \(stats.componentCount) компонентов",
             sourceURL: nil,
             workbenchBuild: build)
+        // Declared skin, or the aluminium every build has implicitly been made of until
+        // now. Applied after construction because it is a property of the airframe rather
+        // than a flight parameter, and the initialiser above takes flight parameters.
+        profile.skinMaterial = frame.skinMaterial ?? .aluminium
+        return profile
     }
 
     static func catalogProfile(for build: WorkbenchBuild) -> UAVProfile {
@@ -202,7 +209,8 @@ enum UAVBuildProfileSynthesizer {
 
     private static func fixedWingParameters(
         architecture: WorkbenchVehicleArchitecture,
-        speed: Float
+        speed: Float,
+        planform: FixedWingFamily?
     ) -> FixedWingParameters? {
         guard architecture != .multicopter else { return nil }
         let cruise = max(13.0, min(speed, 34.0))
@@ -211,7 +219,11 @@ enum UAVBuildProfileSynthesizer {
         let climb = max(minimum + 1.0, cruise * 0.78)
         let isVTOL = architecture == .liftCruiseVTOL
         return FixedWingParameters(
-            family: isVTOL ? .surveyEVTOL : .conventionalSurvey,
+            // A frame that declares its own planform gets it. Without that declaration the
+            // choice below is the safe one rather than the right one — it is what the
+            // synthesizer has always assumed, and it stays the assumption for every build
+            // that does not say otherwise.
+            family: planform ?? (isVTOL ? .surveyEVTOL : .conventionalSurvey),
             minSustainableSpeedMps: minimum,
             cruiseSpeedMps: cruise,
             climbSpeedMps: climb,

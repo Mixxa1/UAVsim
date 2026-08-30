@@ -128,7 +128,7 @@ struct FlightEnvelopeLimits: Hashable {
 /// minutes or only dash through it. It is why the Firebee II's Mach 1.5 is quoted as a
 /// four-minute dash and why an aircraft meant to cruise at Mach 3 is built of something
 /// other than aluminium.
-enum UAVSkinMaterial: String, Hashable, CaseIterable {
+enum UAVSkinMaterial: String, Hashable, CaseIterable, Codable {
     /// Ordinary aircraft aluminium. Loses strength quickly past about 400 K, which
     /// corresponds to sustained flight around Mach 2 at altitude.
     case aluminium
@@ -234,7 +234,20 @@ struct FlightEnvelopeMonitor {
         next.loadFactorFraction = loadFactor >= 0.0
             ? safeFraction(loadFactor, limits.maxPositiveLoadFactor)
             : safeFraction(-loadFactor, limits.maxNegativeLoadFactor)
+        // Angle of attack means nothing without flow over the wing. A parked aircraft's
+        // airflow vector is whatever rounding left in it, and the angle derived from it was
+        // being reported as a bound limit — three times over, on a machine that was sitting
+        // still with the engine off. Nor is it only cosmetic: a stationary aircraft cannot
+        // stall, because stalling is the loss of a lift it is not producing.
+        //
+        // Faded in over the first one percent of the never-exceed dynamic pressure, which
+        // is a tenth of the never-exceed *speed* and so sits far below any airframe's stall
+        // — the limit is at full strength long before the aircraft can reach a condition
+        // where it binds, and this cannot hide a real low-speed stall.
+        let aeroAngleCredibility = (dynamicPressurePa / max(1.0, limits.maxDynamicPressurePa * 0.01))
+            .clamped(to: 0.0...1.0)
         next.angleOfAttackFraction = safeFraction(abs(angleOfAttackRad), limits.maxAngleOfAttackRad)
+            * aeroAngleCredibility
         // Referenced to the working limit above ambient rather than to absolute zero, so
         // an aircraft sitting on a warm apron does not report a third of its thermal
         // budget already spent.

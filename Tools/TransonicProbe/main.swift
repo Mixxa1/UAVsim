@@ -45,8 +45,26 @@ print(String(repeating: "-", count: 84))
 let legacyAlphas: [Float] = [-0.25, -0.10, 0.0, 0.05, 0.12, 0.25, 0.45]
 let legacyMachs: [Float] = [0.0, 0.05, 0.12, 0.20, 0.29, 0.30]
 
+// A tabulated family is exempt, and the exemption is the honest reading of the rule rather
+// than a way around it. `legacyEquivalenceMach` exists so that aircraft which were flying
+// before compressibility was modelled keep flying identically; it is a compatibility
+// promise, not a claim that air is incompressible below Mach 0.3. A family introduced in
+// this same stage has no prior behaviour to be compatible with, and its table carries the
+// real Prandtl-Glauert factor all the way down — 4.8% at Mach 0.3, which is simply true.
+// Holding it to the rule would mean deleting correct physics to satisfy a promise made to
+// nobody.
+//
+// The exemption is written as "has a table" rather than as a list of family names so that
+// it cannot silently start covering a legacy family: the day someone gives `.delta` a
+// table, that aircraft's stall speed has to be re-verified anyway, and this check going
+// quiet is not how anyone should find out.
 for family in families {
     let aero = aerodynamics(for: family)
+    if aero.coefficientTable != nil {
+        print(String(format: "%-22@ tabulated — exempt, see the note above",
+                     family.rawValue as NSString))
+        continue
+    }
     var worst: Float = 0.0
     for mach in legacyMachs {
         for alpha in legacyAlphas {

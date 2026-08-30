@@ -119,6 +119,10 @@ func flyLevel(
         cruiseSpeedMps: wing.cruiseSpeedMps
     )
 
+    // Same air for every run, so that the only thing that can differ between an aircraft at
+    // the origin and the same aircraft 400 km out is where the numbers land in a Float.
+    engine.resetAtmosphericDisturbance()
+
     let start = SIMD3<Float>(offsetMeters, 6_000.0, 0.0)
     var state = DroneState(
         position: start,
@@ -155,11 +159,15 @@ func flyLevel(
         let context = DroneSimulationContext(
             profile: profile,
             activeUAVProfile: profile.resolvedUAVProfile,
-            // Still air on purpose. `effectiveWindWithGusts` draws from a random
-            // generator, so any turbulence at all would make two runs differ for
-            // reasons that have nothing to do with float precision — the very thing
-            // being measured. Weather `.normal` at zero wind leaves the gust state at
-            // rest above 1,000 ft anyway, and this flight is at 6 km.
+            // Calm weather, and — since clear-air turbulence was added — that is no
+            // longer enough on its own. Gusts now exist at 6 km whatever the surface
+            // weather is doing, because jet-stream shear does not care what the surface
+            // weather is doing. Two runs through two different random gust sequences
+            // differ by tens of metres over a minute, which would be reported here as a
+            // float-precision failure it has nothing to do with. The engine's disturbance
+            // is therefore reset to the same seed before each run, below, so both flights
+            // pass through *the same* air and the only thing left to differ is the
+            // arithmetic.
             weather: .normal,
             damageState: .pristine,
             batteryState: .full,

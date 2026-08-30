@@ -170,6 +170,10 @@ final class FixedWingAutopilot {
     }
 
     private struct InternalState {
+        /// Last commanded airspeed, m/s — the anchor for the acceleration corridor below.
+        var previousTargetSpeed: Float = 0.0
+        var hasTargetSpeed: Bool = false
+
         var routeIdentifier: String?
         var activeWaypointIndex: Int = 0
         var filteredBankRad: Float = 0.0
@@ -282,6 +286,38 @@ final class FixedWingAutopilot {
             cruiseAirspeedOverride ?? wing.cruiseAirspeed
         )
         let stallSafeSpeed = wing.minSafeAirspeed * Tuning.stallSpeedSafetyFactor
+        // --- The speed corridor, scheduled on altitude.
+        //
+        // Every speed in the catalogue is a number in metres per second, and the autopilot
+        // used to treat all of them as if the air were sea-level air. Two things break when
+        // it does.
+        //
+        // A stall speed is an *indicated* speed — it is a statement about dynamic pressure,
+        // not about how fast the ground goes past. The true airspeed at which a wing stalls
+        // grows as `sqrt(rho0/rho)`, so an aircraft at 13 km stalls at more than twice the
+        // TAS it stalls at on the deck. An autopilot holding the sea-level figure as its
+        // floor up there is holding a floor a thousand metres below the real one, and will
+        // fly a high-altitude aircraft into a stall while its own logic reports margin.
+        //
+        // And the ceiling is not a speed at all up there, it is a Mach number: the same TAS
+        // that is comfortably subsonic at sea level is past drag divergence in the cold thin
+        // air of the tropopause, because the speed of sound has dropped by a sixth.
+        //
+        // Standard atmosphere rather than the weather's: this is the airframe's structural
+        // and aerodynamic corridor, which does not move because a front came through.
+        let scheduleAtmosphere = AtmosphereModel.standard.state(
+            altitudeMeters: max(0.0, input.aircraftPosition.y)
+        )
+        let stallTrueAirspeedScale = sqrt(
+            AtmosphereModel.seaLevelDensity / max(0.001, scheduleAtmosphere.airDensity)
+        )
+        let altitudeStallFloor = stallSafeSpeed * stallTrueAirspeedScale
+        // Held a little under drag divergence. An autopilot that commands exactly the
+        // divergence Mach is commanding the speed at which the drag rise begins, and will
+        // sit in it.
+        let machCeilingSpeed = FixedWingAerodynamics.dragDivergenceMach(for: wing.family)
+            * scheduleAtmosphere.speedOfSoundMps * 0.97
+
         let currentSpeed = max(0.0, input.aircraftAirspeed.isFinite ? input.aircraftAirspeed : 0.0)
 
         // Commit the next real turn before capture processing. Otherwise an intermediate route
@@ -669,7 +705,7 @@ final class FixedWingAutopilot {
 
         // Stall protection — if we are dangerously slow, force nose down.
         var stallProtectionActive = false
-        if currentSpeed < stallSafeSpeed && input.aircraftPosition.y > 1.5 {
+        if currentSpeed < altitudeStallFloor && input.aircraftPosition.y > 1.5 {
             let stallPitchDown = -Tuning.stallPitchDownDeg.degreesToRadians
             rawPitchRad = min(rawPitchRad, stallPitchDown)
             stallProtectionActive = true
@@ -716,9 +752,42 @@ final class FixedWingAutopilot {
         // Mission speed bounds narrow the airframe's own safe envelope, never
         // widen it — a mission can ask to cruise slower/faster within what's
         // physically flyable, not below stall or above the airframe's max.
-        let missionSpeedFloor = max(stallSafeSpeed, missionMinAirspeed ?? stallSafeSpeed)
-        let missionSpeedCeiling = max(missionSpeedFloor, min(wing.maxAirspeed, missionMaxAirspeed ?? wing.maxAirspeed))
-        let targetSpeed = (cruiseAirspeed * approachScale).clamped(to: missionSpeedFloor...missionSpeedCeiling)
+        let missionSpeedFloor = max(altitudeStallFloor, missionMinAirspeed ?? stallSafeSpeed)
+        // Floor wins if the two cross. That crossing is coffin corner — the altitude where
+        // the stall speed has risen to meet the Mach limit — and when an aircraft is in it
+        // the honest command is the one that keeps the wing flying, not the one that keeps
+        // it subsonic. Note the aircraft is not *held* there: nothing here clamps the
+        // achieved speed, only what is asked for.
+        let missionSpeedCeiling = max(
+            missionSpeedFloor,
+            min(wing.maxAirspeed, machCeilingSpeed, missionMaxAirspeed ?? wing.maxAirspeed)
+        )
+        let desiredSpeed = (cruiseAirspeed * approachScale).clamped(to: missionSpeedFloor...missionSpeedCeiling)
+
+        // --- The acceleration corridor.
+        //
+        // A commanded speed that steps is a commanded acceleration of infinity, and the
+        // throttle loop answers a step by going to a stop. That was survivable while every
+        // aircraft in the catalogue cruised within a few tens of m/s of every other; it is
+        // not survivable for an aircraft whose corridor moves by hundreds of m/s as it
+        // climbs, and it is exactly how a supersonic aircraft ends up being *told* to jump
+        // the transonic rise rather than accelerate through it.
+        //
+        // 0.35 g in acceleration and 0.5 g in deceleration: an aircraft can always slow
+        // down harder than it can speed up, because drag helps in one direction and fights
+        // in the other. These bound the *command*, not the aircraft — an airframe with the
+        // thrust to beat them still will, it just will not be asked to.
+        let targetSpeed: Float = {
+            guard state.hasTargetSpeed else { return desiredSpeed }
+            let gravity = AtmosphereModel.gravityMps2
+            let up = 0.35 * gravity * input.deltaTime
+            let down = 0.50 * gravity * input.deltaTime
+            let delta = desiredSpeed - state.previousTargetSpeed
+            if delta > 0.0 { return state.previousTargetSpeed + min(delta, up) }
+            return state.previousTargetSpeed + max(delta, -down)
+        }()
+        state.previousTargetSpeed = targetSpeed
+        state.hasTargetSpeed = true
         let speedError = targetSpeed - currentSpeed
         let cruiseHover: Float = 0.55
         let altitudeBoost = max(0.0, altitudeError) * Tuning.throttleAltitudeAssistGain

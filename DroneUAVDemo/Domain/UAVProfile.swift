@@ -89,7 +89,7 @@ enum UAVEngineType: String, Hashable {
 /// the engine, and the answer differs by a factor of two between a plain hole and a
 /// variable ramp. It is most of why one supersonic aircraft tops out at Mach 1.6 and
 /// another with a similar engine reaches Mach 3.
-enum UAVInletType: String, Hashable {
+enum UAVInletType: String, Hashable, Codable, CaseIterable {
     /// No intake to model — anything driving a propeller.
     case none
     /// A plain forward-facing opening. Swallows one normal shock, which is cheap to

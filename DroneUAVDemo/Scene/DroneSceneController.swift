@@ -235,6 +235,14 @@ final class DroneSceneController {
     private let gridNode: SCNNode
     private let axesNode: SCNNode
     private let groundNode: SCNNode
+    /// Camera-following plane carrying the real ground texture on extended ranges.
+    /// Nil everywhere else — see `refreshGroundDetailPatch`.
+    private var groundDetailNode: SCNNode?
+    private var carrierNode: SCNNode?
+    private var carrierPropellers: [SCNNode] = []
+    private var carrierPylon: SCNNode?
+    private var carrierPropellerAngle: Float = 0.0
+    private var installedCarrierKind: CarrierAircraftKind?
     private let terrainDetailNode = SCNNode()
     private let worldBoundsNode = SCNNode()
     private let dockStationNode = SCNNode()
@@ -5499,6 +5507,8 @@ final class DroneSceneController {
         droneNode.simdOrientation = droneOrientation
 
 
+        updateGroundDetailPatch(around: state.position)
+
         skyCloudsNode.position = SCNVector3(
             CGFloat(state.position.x),
             CGFloat(state.position.y + Self.skyCloudAltitudeAboveDrone),
@@ -5533,6 +5543,7 @@ final class DroneSceneController {
         updatePropulsionUnitVisuals(state: state)
         rotatePropellers(state: state, deltaTime: deltaTime)
         updateJetExhaust(state: state)
+        updateCondensationCone(state: state)
         updateDroppedPayloadRuntime(deltaTime: deltaTime)
         applyComponentOverlays(damage: damage, thermal: thermal, mode: diagnosticMode)
         updateCameras(
@@ -7625,14 +7636,27 @@ final class DroneSceneController {
             response = blend.clamped(to: 0.05...1.0)
         }
 
-        let dronePos = state.position
-        let yawOnly = simd_quatf(angle: state.orientation.z, axis: SIMD3<Float>(0, 1, 0))
-        let bodyForward = modelForwardLocal()
+        // While the aircraft is hanging on a carrier's pylon, the carrier is what the chase
+        // camera is looking at.
+        //
+        // Not a cosmetic preference. Every range in this function is derived from
+        // `subjectScale`, and taking that from an eight-metre target drone caps the chase at
+        // about fifty metres — so a request to sit seventy-five metres behind a C-130 was
+        // silently cut down, and the aeroplane was framed from a rear quarter instead of
+        // from directly astern. Substituting the subject fixes the clamps and the aim
+        // together: the anchor becomes the carrier's own centre, the axis its own heading,
+        // and the shot is from the tail because it is built from the tail.
+        let attached = attachedCarrierForCamera
+        let dronePos = attached?.position ?? state.position
+        let yawAngle = attached?.headingRadians ?? state.orientation.z
+        let yawOnly = simd_quatf(angle: yawAngle, axis: SIMD3<Float>(0, 1, 0))
+        let bodyForward = attached == nil ? modelForwardLocal() : SIMD3<Float>(0.0, 0.0, 1.0)
         let forward = simd_normalize(simd_act(yawOnly, bodyForward))
         let up = SIMD3<Float>(0.0, 1.0, 0.0)
 
         let dims = activeProfile.dimensions
-        let subjectScale = max(activeProfile.collisionRadius * 2.0, max(dims.widthM, dims.lengthM))
+        let subjectScale = attached.map { $0.kind.lengthMeters }
+            ?? max(activeProfile.collisionRadius * 2.0, max(dims.widthM, dims.lengthM))
 
         let chaseDistanceRange: ClosedRange<Float>
         let chaseHeightRange: ClosedRange<Float>
@@ -7674,8 +7698,18 @@ final class DroneSceneController {
         let chaseHeight = chaseHeightRequested.clamped(
             to: chaseHeightRange.lowerBound...max(chaseHeightRange.lowerBound, effectiveChaseHeightCeiling)
         )
-        let chaseAnchor = dronePos + up * anchorLift
-        let chaseVerticalOffset = up * max(0.12, subjectScale * 0.14)
+        // A carried aircraft is framed on the carrier's own centre.
+        //
+        // Both lifts below exist for a drone: raising the anchor and aiming above it keeps a
+        // small airframe off the bottom edge of the frame. Scaled by a thirty-metre subject
+        // they come to seven metres, so the camera ended up looking at a point well over the
+        // carrier's back and the aeroplane sat low in the shot. With the carrier as the
+        // subject there is nothing to lift it off — it fills the frame on its own.
+        let framingLift = attached == nil ? anchorLift : 0.0
+        let chaseAnchor = dronePos + up * framingLift
+        let chaseVerticalOffset = attached == nil
+            ? up * max(0.12, subjectScale * 0.14)
+            : SIMD3<Float>(repeating: 0.0)
 
         followRigNode.simdPosition = chaseAnchor
         followRigNode.simdOrientation = simd_quatf(from: SIMD3<Float>(0.0, 0.0, -1.0), to: forward)
@@ -8106,6 +8140,90 @@ final class DroneSceneController {
     /// a cold, empty exhaust reads as a glider. Driven by shaft speed rather than
     /// by the throttle lever, so it follows the spool up and down the way the
     /// thrust does — an engine still winding up is not yet making a plume.
+    /// The standing condensation cloud, and the shock cone it sits on.
+    ///
+    /// Not a Mach-1 effect, whatever the photographs suggest. What is being seen is water
+    /// condensing in the low-pressure region behind the strong expansion over the aircraft's
+    /// upper surfaces, so it needs three things at once: enough speed for that expansion to
+    /// be strong, enough water in the air to condense, and warm enough air to be holding it.
+    /// `CondensationCone` decides that; this only draws what it decides, which is why the
+    /// cloud appears on a humid low-level dash and not on the same aircraft at Mach 2 in the
+    /// stratosphere.
+    ///
+    /// The cone geometry is real Mach-cone geometry: its half-angle is `asin(1/M)`, so it
+    /// starts as a flat disc at Mach 1 and closes down around the aircraft as it accelerates.
+    /// Drawn from the aircraft backwards, since that is the half of the cone that exists.
+    private func updateCondensationCone(state: DroneState) {
+        let strength = state.condensationConeStrength.clamped(to: 0.0...1.0)
+        let existing = droneNode.childNode(withName: "condensationCone", recursively: false)
+
+        // A faint cloud is no cloud. At 0.02 this was drawing a barely-there wash in ordinary
+        // weather, where the humidity only just clears the model's own threshold — and a
+        // barely-there wash across a large surface is exactly what reads as a white sheet
+        // across the screen rather than as vapour around an aeroplane. The effect either
+        // happens or it does not.
+        guard strength > 0.18 else {
+            existing?.removeFromParentNode()
+            return
+        }
+
+        let node: SCNNode
+        if let existing {
+            node = existing
+        } else {
+            node = SCNNode()
+            node.name = "condensationCone"
+            node.castsShadow = false
+            let material = SCNMaterial()
+            material.lightingModel = .constant
+            material.diffuse.contents = NSColor(calibratedWhite: 1.0, alpha: 1.0)
+            material.blendMode = .add
+            material.isDoubleSided = true
+            // The cloud is fog, not a surface. Writing it into the depth buffer would let it
+            // hide the aircraft that is inside it.
+            material.writesToDepthBuffer = false
+            material.readsFromDepthBuffer = true
+            let cone = SCNCone(topRadius: 0.0, bottomRadius: 1.0, height: 1.0)
+            cone.materials = [material]
+            node.geometry = cone
+            droneNode.addChildNode(node)
+        }
+
+        // Mach-cone half angle, and a hard ceiling on it.
+        //
+        // Below Mach 1 there is no cone at all — the disturbance outruns the aircraft — so
+        // the shape wants to open out. Letting it open all the way was the bug: a half angle
+        // of 82 degrees has a tangent of nearly seven, so the radius came out seven times
+        // the length, and a 9 m drone grew a 35 m disc that filled the screen from a camera
+        // 22 m behind it. What the photographs actually show is a shroud about as wide as
+        // the aircraft is long, so that is the ceiling.
+        let mach = max(0.80, state.machNumber)
+        let maxHalfAngle: Float = 50.0 * .pi / 180.0
+        let halfAngle: Float = mach > 1.0
+            ? min(maxHalfAngle, asin((1.0 / mach).clamped(to: 0.05...1.0)))
+            : maxHalfAngle
+
+        // Sized off the airframe so it reads correctly for a 3 m target drone and a 21 m
+        // X-10 alike.
+        let bodyLength = max(1.0, Float(activeProfile.dimensionsUnfoldedMm.y) / 1000.0)
+        let coneLength = bodyLength * (0.55 + 0.65 * strength)
+        // Belt and braces: even inside the angle ceiling the radius stays within the
+        // aircraft's own length, so no combination of numbers can put a sheet across the
+        // camera again.
+        let radius = min(coneLength * tan(halfAngle), bodyLength * 0.9)
+
+        if let cone = node.geometry as? SCNCone {
+            cone.height = CGFloat(coneLength)
+            cone.bottomRadius = CGFloat(radius)
+            cone.firstMaterial?.transparency = CGFloat(0.06 + 0.30 * strength)
+        }
+        // SCNCone points up its own +Y with the apex at the top; the cone wanted here has
+        // its apex forward on the aircraft and opens aft, so it is laid down along -Z and
+        // pushed back by half its length.
+        node.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+        node.position = SCNVector3(0.0, 0.0, -coneLength * 0.5)
+    }
+
     private func updateJetExhaust(state: DroneState) {
         guard let anchor = droneNode.childNode(withName: "jetExhaustAnchor", recursively: true) else {
             return
@@ -8205,6 +8323,203 @@ final class DroneSceneController {
         }
     }
 
+    // MARK: - Carrier aircraft
+
+    /// Installs, updates or removes the carrier.
+    ///
+    /// Called every tick with the current state, so there is one path rather than separate
+    /// create/update/destroy calls that could disagree about whether a carrier exists.
+    /// The carrier the aircraft is currently hanging from, if any.
+    ///
+    /// Kept here so the camera can make it the subject of the chase shot without the view
+    /// model having to reach into the camera rig. Cleared the moment the shackle opens: from
+    /// then on the aircraft is what the operator is watching.
+    private var attachedCarrierForCamera: CarrierAircraftState?
+
+    func syncCarrier(_ carrier: CarrierAircraftState?, deltaTime: Float) {
+        attachedCarrierForCamera = (carrier?.hasReleased ?? true) ? nil : carrier
+        guard let carrier, carrier.isVisible else {
+            carrierNode?.removeFromParentNode()
+            carrierNode = nil
+            carrierPropellers = []
+            carrierPylon = nil
+            carrierPropellerAngle = 0.0
+            return
+        }
+
+        if carrierNode == nil || installedCarrierKind != carrier.kind {
+            carrierNode?.removeFromParentNode()
+            guard let prepared = CarrierAircraftLoader.prepare(kind: carrier.kind) else {
+                carrierNode = nil
+                return
+            }
+            scene.rootNode.addChildNode(prepared.rootNode)
+            carrierNode = prepared.rootNode
+            carrierPropellers = prepared.propellerNodes
+            carrierPylon = prepared.bayNode
+            installedCarrierKind = carrier.kind
+        }
+        guard let node = carrierNode else { return }
+
+        node.position = SCNVector3(carrier.position.x, carrier.position.y, carrier.position.z)
+        node.eulerAngles = SCNVector3(0.0, carrier.headingRadians, 0.0)
+
+        // Propellers turn at a fixed rate rather than at anything derived from airspeed:
+        // a constant-speed propeller holds its rpm, which is the whole point of one, and a
+        // C-130's turns at a little over a thousand a minute whatever the aircraft is doing.
+        if !carrierPropellers.isEmpty {
+            carrierPropellerAngle += deltaTime * 18.0
+            if carrierPropellerAngle > .pi * 2.0 {
+                carrierPropellerAngle -= .pi * 2.0
+            }
+            for propeller in carrierPropellers {
+                propeller.eulerAngles.z = SCNFloat(carrierPropellerAngle)
+            }
+        }
+
+        // The shackle swings down and out of the way as the round is released.
+        if let shackle = carrierPylon?.childNode(withName: "carrier_shackle", recursively: false) {
+            shackle.eulerAngles.x = SCNFloat(-carrier.bayOpenFraction * 1.15)
+        }
+    }
+
+    // MARK: - Ground detail patch
+    //
+    // Why the ground turns to soap on a large map, and why capping the tiling does not fix
+    // it.
+    //
+    // The world is one plane the size of the whole map, and its texture is tiled by
+    // setting a repeat count proportional to that size. At the ordinary map sizes that is
+    // a few thousand repeats and looks right. An extended range is a thousand kilometres
+    // across, which asks for a hundred and eighty thousand — and a texture coordinate of
+    // 180,000 in a 32-bit float has a spacing of about 0.016, which is nearly two per cent
+    // of a tile. The sampler is being handed coordinates that quantise inside a single
+    // blade of grass, and the result is exactly the smearing in the screenshots.
+    //
+    // Capping the repeat count trades one blur for another: the coordinates become precise
+    // and each tile becomes eighty metres across, which is a grass texture magnified until
+    // it is a green cloud. Both roads lead to soap.
+    //
+    // So the far ground keeps a capped, coarse tiling — it is kilometres away and nobody
+    // can resolve it — and a second, much smaller plane carries the real texture at its
+    // designed eight-metre tile and follows the aircraft. Twelve kilometres across is
+    // beyond the distance grass detail can be resolved at all, and at that size the repeat
+    // count is 1,500, where float coordinates are exact to a thousandth of a tile.
+    //
+    // The patch is snapped to whole tiles as it moves. Without that the texture would slide
+    // under the aircraft — the classic swimming-ground artefact, which is more distracting
+    // than the blur it replaces.
+    private func updateGroundDetailPatch(around position: SIMD3<Float>) {
+        guard let patch = groundDetailNode, !patch.isHidden else { return }
+        let tile = Self.groundDetailTileMeters
+        let snappedX = (position.x / tile).rounded() * tile
+        let snappedZ = (position.z / tile).rounded() * tile
+        patch.position = SCNVector3(
+            snappedX,
+            Float(groundNode.position.y) + Self.groundDetailLift,
+            snappedZ
+        )
+    }
+
+    /// Side of the detail patch, m.
+    ///
+    /// 40 km, not the 12 km first tried. The patch has to cover everything the operator can
+    /// actually resolve, because whatever lies beyond it is drawn by the far ground — and
+    /// on an extended range that plane's tiles are a hundred and seventy metres across. A
+    /// twelve-kilometre patch left most of the visible world to it, which is why the
+    /// screenshots still showed a dandelion the size of the aircraft.
+    ///
+    /// 40 km still divides exactly by the eight-metre tile, giving 5,000 repeats, where a
+    /// float texture coordinate is precise to a five-thousandth of a tile.
+    private static let groundDetailExtentMeters: Float = 40_000.0
+    /// The grass asset's designed tile size. Snapping to it is what stops the texture
+    /// swimming as the patch follows the aircraft.
+    private static let groundDetailTileMeters: Float = 8.0
+    /// How far above the main ground plane the patch sits: nothing at all.
+    ///
+    /// It was 3 cm, which flickered, and then 40 cm, which stopped the flicker and buried
+    /// every aircraft. Both were attempts to win a depth fight with geometry, and both were
+    /// the wrong tool — the ground the aircraft rests on is defined by the physics at
+    /// `groundNode`'s own height, so *any* lift puts the grass above the wheels.
+    ///
+    /// The fight is settled in the depth test instead. The patch renders after the far
+    /// ground and does not read depth, so it always wins against the plane underneath it,
+    /// and it still writes depth, so the aircraft and everything else standing on the ground
+    /// sort against it correctly. Two coplanar planes, no z-fighting, and nothing buried.
+    private static let groundDetailLift: Float = 0.0
+
+    /// Builds or removes the detail patch for this terrain.
+    ///
+    /// Only ever present on an extended range. Every ordinary map size tiles its ground
+    /// plane at a repeat count where float coordinates are exact, so adding a second plane
+    /// there would be cost with no benefit — and a behaviour change to worlds that already
+    /// look right.
+    private func refreshGroundDetailPatch(for terrain: TerrainConfiguration) {
+        // The far ground goes down first, before the patch and before everything else.
+        // Harmless in every world — a ground plane is what you want drawn first anyway — and
+        // it is what lets the coplanar patch win by order instead of by a geometric lift.
+        groundNode.renderingOrder = -2
+        guard terrain.mapScale.isExtendedRange,
+              terrain.preset != .gridDemo,
+              terrain.preset != .city else {
+            groundDetailNode?.removeFromParentNode()
+            groundDetailNode = nil
+            return
+        }
+
+        let extent = Self.groundDetailExtentMeters
+        let node: SCNNode
+        if let existing = groundDetailNode {
+            node = existing
+        } else {
+            node = SCNNode()
+            node.name = "groundDetailPatch"
+            node.eulerAngles = SCNVector3(-Float.pi / 2.0, 0.0, 0.0)
+            // Under the aircraft and under everything placed on the ground, but over the
+            // far ground plane — which is the coplanar surface it has to beat. Drawn after
+            // it and with the depth comparison switched off on the material below, so the
+            // winner is decided by order rather than by a fraction of a millimetre of
+            // floating-point depth that changes from frame to frame.
+            node.renderingOrder = -1
+            scene.rootNode.addChildNode(node)
+            groundDetailNode = node
+        }
+
+        let plane = (node.geometry as? SCNPlane) ?? SCNPlane(width: 1, height: 1)
+        plane.width = CGFloat(extent)
+        plane.height = CGFloat(extent)
+        node.geometry = plane
+
+        // The same loader the far ground uses, asked for a plane that is forty kilometres
+        // across rather than a thousand — which is the whole fix, since the repeat count is
+        // computed from exactly this number.
+        let material: SCNMaterial = currentWeather.preset == .snow
+            ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: extent)
+            : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: extent)
+        // Always drawn over the far ground, never by being nudged above it.
+        material.readsFromDepthBuffer = false
+        material.writesToDepthBuffer = true
+        plane.materials = [material]
+        node.isHidden = false
+    }
+
+    /// Untextured ground for beyond the detail patch, tinted to the texture's own average
+    /// so the join is a change of detail rather than a change of colour.
+    private static func flatFarGroundMaterial(isSnow: Bool) -> SCNMaterial {
+        let material = SCNMaterial()
+        material.lightingModel = .lambert
+        // Beaten by the detail patch on purpose: the patch renders after this and ignores
+        // depth, so wherever the two overlap the textured one is what is seen. This still
+        // writes depth, so anything standing on the ground beyond the patch sorts normally.
+        material.writesToDepthBuffer = true
+        material.diffuse.contents = isSnow
+            ? NSColor(calibratedRed: 0.86, green: 0.89, blue: 0.93, alpha: 1.0)
+            : NSColor(calibratedRed: 0.40, green: 0.50, blue: 0.26, alpha: 1.0)
+        material.roughness.contents = NSNumber(value: 0.95)
+        material.metalness.contents = NSNumber(value: 0.0)
+        return material
+    }
+
     private func refreshGroundMaterial(for terrain: TerrainConfiguration) {
         guard let geometry = groundNode.geometry, terrain.preset != .gridDemo else { return }
         // Matches the ground plane's own size (`configureWorldSurfaceGeometry`, keyed off
@@ -8216,12 +8531,24 @@ final class DroneSceneController {
             material = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(
                 mapSizeMeters: mapSizeMeters
             )
+        } else if terrain.mapScale.isExtendedRange {
+            // No texture at all out here.
+            //
+            // A thousand-kilometre plane cannot carry an eight-metre tile — the repeat count
+            // needed for that is where float texture coordinates fall apart — and capping the
+            // repeat instead stretches each tile to a hundred and seventy metres, which is
+            // what put a dandelion the size of the aircraft on the ground. Neither is worth
+            // having, and neither is *needed*: everything within sight is drawn by the detail
+            // patch, and what lies past it is far enough away that a flat tone under the haze
+            // is indistinguishable from anything more elaborate.
+            material = Self.flatFarGroundMaterial(isSnow: currentWeather.preset == .snow)
         } else {
             material = (currentWeather.preset == .snow)
                 ? SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
                 : GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
         }
         geometry.materials = [material]
+        refreshGroundDetailPatch(for: terrain)
     }
 
     private func buildSnowDecorations(for terrain: TerrainConfiguration) {
@@ -8353,7 +8680,15 @@ final class DroneSceneController {
                     groundMaterial = AsphaltMaterialLoader.makeAsphaltMaterial(mapSizeMeters: mapSizeMeters)
                 }
             case .field, .forest:
-                if currentWeather.preset == .snow {
+                // The second of two places that dress the ground, and the one that runs
+                // last on a terrain change — so an extended range has to be handled here
+                // too, or the flat far-field material set by `refreshGroundMaterial` is
+                // immediately overwritten with a texture stretched to 170-metre tiles. That
+                // is exactly what left a dandelion the size of the aircraft on the ground
+                // after the first attempt at this fix.
+                if terrain.mapScale.isExtendedRange {
+                    groundMaterial = Self.flatFarGroundMaterial(isSnow: currentWeather.preset == .snow)
+                } else if currentWeather.preset == .snow {
                     groundMaterial = SnowTerrainMaterialLoader.makeSnowMaterial(mapSizeMeters: mapSizeMeters)
                 } else {
                     groundMaterial = GenericGrassMaterialLoader.makeGrassMaterial(mapSizeMeters: mapSizeMeters)
@@ -8373,6 +8708,7 @@ final class DroneSceneController {
             }
             geometry.materials = [groundMaterial]
         }
+        refreshGroundDetailPatch(for: terrain)
 
         updateTerrainDetailGeometry(for: terrain)
     }

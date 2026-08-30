@@ -122,12 +122,16 @@ struct UAVStructuralLoadSolver {
         /// sea level so any caller that has no atmosphere handy behaves exactly as
         /// before; the runtime passes the real value.
         airDensity: Float = AtmosphereModel.seaLevelDensity,
-        /// How much strength the structure has lost to heat, 0...1.
+        /// How much strength the structure has lost, 0...1, to heat and to time spent
+        /// outside the flight envelope.
         ///
-        /// This is how aerodynamic heating actually destroys an airframe. It does not
-        /// melt it — it takes the strength out of it, and then a manoeuvre the aircraft
-        /// would have flown cold breaks something. Zero for every aircraft that never
-        /// gets hot, so the default leaves existing behaviour untouched.
+        /// Neither mechanism breaks anything by itself. Heat softens the material and a
+        /// sustained exceedance fatigues it; what they do is lower the load at which the
+        /// arithmetic below decides a joint has had enough. That is how both actually
+        /// destroy an airframe — not by melting or by snapping at the instant a limit is
+        /// crossed, but by making an ordinary manoeuvre the one that finds the weakness.
+        /// Zero for every aircraft that stays cold and inside its limits, so the default
+        /// leaves existing behaviour untouched.
         thermalWeakening: Float = 0.0
     ) -> UAVStructuralLoadResult {
         guard deltaTime > 0.0001, !graph.isEmpty else { return .none }

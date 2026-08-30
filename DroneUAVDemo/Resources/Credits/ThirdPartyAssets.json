@@ -243,6 +243,24 @@
       "licenseName": "Creative Commons Attribution",
       "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
       "changes": "Imported as USDZ and used as the runway strip for the fixed-wing runway launch in DroneUAVDemo; scaled to the strip length the mission requires."
+    },
+    {
+      "id": "c130_manilov_ap",
+      "title": "C130",
+      "author": "manilov.ap",
+      "sourceURL": "https://skfb.ly/YQ97",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ, scaled to the real aircraft's length and re-oriented, and used as the carrier aeroplane for air-launched UAVs in DroneUAVDemo."
+    },
+    {
+      "id": "b52_stratofortress_bohmerang",
+      "title": "Boeing B-52 Stratofortress",
+      "author": "bohmerang",
+      "sourceURL": "https://skfb.ly/oLo8p",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ, scaled to the real aircraft's length and re-oriented, and used as the carrier aeroplane for the air-launched HiMAT in DroneUAVDemo."
     }
   ]
 }

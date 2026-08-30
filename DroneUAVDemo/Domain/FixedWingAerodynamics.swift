@@ -71,6 +71,13 @@ struct FixedWingAerodynamics {
 
     let cyBeta: Float
 
+    /// Tabulated (alpha, Mach) coefficients, when this airframe has them.
+    ///
+    /// `nil` for the whole existing catalogue, which is what keeps this addition free: a
+    /// `nil` here means every code path below behaves exactly as it did before the table
+    /// existed. See `MachCoefficientDatabase`.
+    let coefficientTable: AeroCoefficientTable?
+
     /// Compressibility corrections for this airframe's planform.
     ///
     /// Every coefficient above this line is a low-speed number, exactly as it always
@@ -141,6 +148,13 @@ struct FixedWingAerodynamics {
     /// dozens of existing call sites that have no flow state to hand keep the exact
     /// coefficients they had before. The physics step passes the real value.
     func liftDrag(alphaRad: Float, mach: Float = 0.0) -> (cl: Float, cd: Float) {
+        // A tabulated airframe uses its table whole. Its numbers already contain
+        // compressibility, wave drag and the vortex behaviour the closed form below models
+        // separately, so applying those corrections on top would count each of them twice.
+        if let table = coefficientTable {
+            let sample = table.sample(alphaRad: alphaRad, mach: mach)
+            return (sample.cl, sample.cd)
+        }
         let incompressibleCl = clTable.sample(alphaRad)
         let blend = stallBlend(alphaRad: alphaRad)
         let cl = incompressibleCl * transonic.liftFactor(mach: mach)
@@ -161,6 +175,14 @@ struct FixedWingAerodynamics {
     /// returning it from `liftDrag` keeps that call's return shape unchanged for the
     /// solver, which runs it every substep for every aircraft.
     func waveDragCoefficient(alphaRad: Float, mach: Float) -> Float {
+        if let table = coefficientTable {
+            // A table carries total drag, not a breakdown, so the wave part is recovered as
+            // the rise over the same aircraft's incompressible drag at the same alpha.
+            // Reported as a difference because that is honestly what is known about it.
+            let here = table.sample(alphaRad: alphaRad, mach: mach)
+            let low = table.sample(alphaRad: alphaRad, mach: 0.0)
+            return max(0.0, here.cd - low.cd)
+        }
         let cl = clTable.sample(alphaRad) * transonic.liftFactor(mach: mach)
         return transonic.waveDragIncrement(mach: mach, liftCoefficient: cl)
     }
@@ -293,7 +315,29 @@ struct FixedWingAerodynamics {
         // span using a typical small-UAV prop-to-span ratio.
         let propRadius = (span * 0.035).clamped(to: 0.03...1.2)
 
-        let clMaxAtStall = preset.cl0 + preset.clAlpha * preset.stallAlphaRad
+        let coefficientTable = MachCoefficientDatabase.table(profileID: nil, family: family)
+        // Calibrate the area against whichever lift curve this airframe will actually fly
+        // on. Solving the area from the closed form and then flying a table is how an
+        // aircraft ends up stalling nowhere near its published speed — the area and the
+        // curve have to be two halves of one statement.
+        let clMaxAtStall: Float = {
+            guard let table = coefficientTable else {
+                return preset.cl0 + preset.clAlpha * preset.stallAlphaRad
+            }
+            // Read at the family's stall angle and at low speed — the same two conditions
+            // the closed form's own CLmax is evaluated at, so the calibration keeps meaning
+            // the same thing whichever curve supplies the number.
+            //
+            // Not the table's global peak, which for a delta sits out past 30 degrees where
+            // the leading-edge vortex is at its strongest. That value is real, and it is
+            // real for the wrong question: a stall speed is quoted at a usable attitude, and
+            // taking the vortex maximum instead reported the aircraft as having twice the
+            // lift it can use, which halved its wing and then let it fly at Mach 2.2 on a
+            // published 1.40. The extra lift above the stall angle is still there in the
+            // table and still available in flight — that is the point of having it — it is
+            // just not what sizes the wing.
+            return max(0.3, table.sample(alphaRad: preset.stallAlphaRad, mach: 0.15).cl)
+        }()
         let clMinAtNegStall = (2.0 * preset.cl0) - clMaxAtStall
 
         // Wing area is calibrated so THIS airframe's modeled stall speed
@@ -405,6 +449,7 @@ struct FixedWingAerodynamics {
             cnDeltaR: preset.cnDeltaR * turnGain,
             cnr: preset.cnrBase * dampingScale,
             cyBeta: preset.cyBeta,
+            coefficientTable: coefficientTable,
             transonic: TransonicAeroModel(
                 criticalMach: preset.criticalMach,
                 dragDivergenceMach: preset.dragDivergenceMach,

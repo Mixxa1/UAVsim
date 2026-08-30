@@ -67,6 +67,9 @@ struct TelemetrySnapshot {
     var totalTemperatureK: Double
     var loadFactor: Double
     var waveDragCoefficient: Double
+    /// Angle of attack, radians. Recorded alongside Mach because the two together are what
+    /// a coefficient is a function of — either on its own indexes nothing.
+    var angleOfAttackRad: Double
     var propulsionThrustN: Double
     var inletPressureRecovery: Double
     var skinTemperatureK: Double
@@ -211,6 +214,7 @@ struct TelemetrySnapshot {
         totalTemperatureK: 288.15,
         loadFactor: 1.0,
         waveDragCoefficient: 0.0,
+        angleOfAttackRad: 0.0,
         propulsionThrustN: 0.0,
         inletPressureRecovery: 1.0,
         skinTemperatureK: 288.15,

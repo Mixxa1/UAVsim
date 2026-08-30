@@ -39,6 +39,12 @@ struct DiagnosticsModuleView: View {
             overviewPanel
         case .telemetry:
             telemetryPanel
+        case .aerodynamics:
+            AeroDiagnosticsPanelView(
+                profile: viewModel.selectedDroneProfile,
+                liveMach: Float(viewModel.telemetry.machNumber),
+                liveAlphaRad: Float(viewModel.telemetry.angleOfAttackRad)
+            )
         case .fleet:
             fleetPanel
         case .service:
@@ -453,6 +459,7 @@ private struct BlackBoxReportView: View {
 private enum DiagnosticsDetailPanel: String, CaseIterable, Identifiable {
     case overview
     case telemetry
+    case aerodynamics
     case fleet
     case service
 
@@ -464,6 +471,8 @@ private enum DiagnosticsDetailPanel: String, CaseIterable, Identifiable {
             return "module.diagnostics.panel.overview"
         case .telemetry:
             return "module.diagnostics.panel.telemetry"
+        case .aerodynamics:
+            return "module.diagnostics.panel.aero"
         case .fleet:
             return "module.diagnostics.panel.fleet"
         case .service:

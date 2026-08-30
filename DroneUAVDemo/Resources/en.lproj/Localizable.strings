@@ -2958,3 +2958,29 @@
 "uav.profile.hermeus-quarterhorse-mk21.display_name" = "Hermeus Quarterhorse Mk 2.1";
 "uav.profile.north-american-x-10.display_name" = "North American X-10";
 "event.sonic_boom" = "Sonic boom — Mach %.2f, %.0f Pa, arriving in %.0f s";
+
+// MARK: - Carrier aircraft
+"carrier.menu.title" = "Carrier";
+"carrier.menu.release" = "Release from carrier";
+"carrier.c130" = "Lockheed C-130";
+"carrier.b52" = "Boeing B-52";
+"event.carrier_release" = "Released from carrier at %.0f m, %.0f m/s";
+
+/* Engineering aerodynamics diagnostics */
+"module.diagnostics.panel.aero" = "Aerodynamics";
+"diagnostics.aero.curves" = "Coefficients against angle of attack";
+"diagnostics.aero.curves.subtitle" = "The lift, drag and moment curves the solver is using, at one Mach number. Each is drawn against its own scale, printed top left. The dashed line is the stall angle; the solid one is where the aircraft is now.";
+"diagnostics.aero.drag_breakdown" = "Where the drag goes";
+"diagnostics.aero.drag_breakdown.subtitle" = "Parasite, induced and wave drag against Mach, at the current angle of attack. The bands sum to the drag the solver actually charges.";
+"diagnostics.aero.model" = "Model";
+"diagnostics.aero.model.subtitle" = "What this airframe's aerodynamics were built from.";
+"diagnostics.aero.wing_area" = "Wing area";
+"diagnostics.aero.aspect_ratio" = "Aspect ratio";
+"diagnostics.aero.divergence_mach" = "Drag divergence";
+"diagnostics.aero.source" = "Coefficient source";
+"diagnostics.aero.source.closed_form" = "Closed-form planform model";
+"diagnostics.aero.follow_live" = "Follow the aircraft's Mach";
+"diagnostics.aero.cl" = "Lift CL";
+"diagnostics.aero.cd" = "Drag CD";
+"diagnostics.aero.cm" = "Moment Cm";
+"diagnostics.aero.rotary_only" = "This airframe has no wing, so it has no lift curve to plot.";

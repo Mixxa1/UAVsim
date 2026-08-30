@@ -132,6 +132,32 @@ struct WeatherModel {
         intensity.clamped(to: 0.0...1.0)
     }
 
+    /// Relative humidity implied by the conditions, 0-1.
+    ///
+    /// Derived rather than stored, because the weather here is chosen as a *scene* — the
+    /// operator picks "fog" or "rain", not a dew point — and adding a humidity slider to
+    /// that UI would be asking for a number nobody has. What the presets already say is
+    /// enough: fog is by definition air at saturation, rain is falling through air very
+    /// near it, and a clear day over land is not.
+    ///
+    /// Read by the condensation-cone model, which needs to know whether there is water in
+    /// the air for a transonic expansion to condense. That is why the famous photographs
+    /// of the effect are all taken low over the sea and none of them on a dry clear day.
+    var relativeHumidity: Float {
+        let base: Float
+        switch preset {
+        case .fog: base = 0.99
+        case .rain: base = 0.92
+        case .thunderstorm: base = 0.95
+        case .snow: base = 0.85
+        case .smog: base = 0.70
+        case .wind: base = 0.55
+        case .normal: base = 0.48
+        }
+        // Intensity moves it toward saturation, never away: a heavier shower is not drier.
+        return (base + (1.0 - base) * normalizedIntensity * 0.6).clamped(to: 0.0...1.0)
+    }
+
     var effectiveFactors: WeatherFactors {
         let i = normalizedIntensity
         let base = preset.baseFactors

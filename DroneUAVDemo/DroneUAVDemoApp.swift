@@ -89,6 +89,14 @@ enum WindowFullscreenController {
 
 @main
 struct DroneUAVDemoApp: App {
+    init() {
+        // Coefficient tables dropped into the bundle replace the ones compiled in. Done at
+        // launch, before any aircraft is built, because a table participates in calibrating
+        // the wing area — arriving later would leave an airframe flying one curve with a
+        // wing sized for another.
+        MachCoefficientDatabase.importBundledTables()
+    }
+
     var body: some Scene {
         WindowGroup {
             LegalGateRootView()
@@ -101,6 +109,16 @@ struct DroneUAVDemoApp: App {
                     WindowFullscreenController.toggle()
                 }
                 .keyboardShortcut("f", modifiers: [.control, .command])
+            }
+            CommandMenu("carrier.menu.title") {
+                Button("carrier.menu.release") {
+                    NotificationCenter.default.post(name: .uavsimCarrierRelease, object: nil)
+                }
+                // Cmd+E rather than a plain key: E on its own is the climb control, and the
+                // flight window grabs unmodified keys through its own monitor before SwiftUI
+                // sees them. A menu item is also the only way an operator finds out the
+                // shortcut exists.
+                .keyboardShortcut("e", modifiers: .command)
             }
             CommandMenu("cadnext.menu.title") {
                 Button("cadnext.menu.open") {
@@ -118,4 +136,12 @@ struct DroneUAVDemoApp: App {
             }
         }
     }
+}
+
+extension Notification.Name {
+    /// Posted by the Carrier menu's release item. A notification rather than a direct call
+    /// because SwiftUI's `.commands` block has no route to the running simulation's view
+    /// model, and threading one through the whole scene hierarchy to deliver one keystroke
+    /// would be a worse trade than a named message.
+    static let uavsimCarrierRelease = Notification.Name("uavsim.carrier.release")
 }

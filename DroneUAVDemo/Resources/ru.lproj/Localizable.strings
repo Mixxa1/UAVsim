@@ -2953,3 +2953,29 @@
 "uav.profile.hermeus-quarterhorse-mk21.display_name" = "Hermeus Quarterhorse Mk 2.1";
 "uav.profile.north-american-x-10.display_name" = "North American X-10";
 "event.sonic_boom" = "Звуковой удар — M %.2f, %.0f Па, придёт через %.0f с";
+
+// MARK: - Carrier aircraft
+"carrier.menu.title" = "Носитель";
+"carrier.menu.release" = "Сбросить с носителя";
+"carrier.c130" = "Lockheed C-130";
+"carrier.b52" = "Boeing B-52";
+"event.carrier_release" = "Отделение от носителя на %.0f м, %.0f м/с";
+
+/* Engineering aerodynamics diagnostics */
+"module.diagnostics.panel.aero" = "Аэродинамика";
+"diagnostics.aero.curves" = "Коэффициенты по углу атаки";
+"diagnostics.aero.curves.subtitle" = "Кривые подъёмной силы, сопротивления и момента, по которым считает решатель, на одном числе Маха. Каждая нормирована на свой масштаб, он выведен слева вверху. Пунктир — угол сваливания, сплошная линия — текущее положение аппарата.";
+"diagnostics.aero.drag_breakdown" = "Из чего складывается сопротивление";
+"diagnostics.aero.drag_breakdown.subtitle" = "Вредное, индуктивное и волновое сопротивление по числу Маха при текущем угле атаки. Полосы в сумме дают ровно то сопротивление, которое начисляет решатель.";
+"diagnostics.aero.model" = "Модель";
+"diagnostics.aero.model.subtitle" = "Из чего построена аэродинамика этого планера.";
+"diagnostics.aero.wing_area" = "Площадь крыла";
+"diagnostics.aero.aspect_ratio" = "Удлинение";
+"diagnostics.aero.divergence_mach" = "Расхождение сопротивления";
+"diagnostics.aero.source" = "Источник коэффициентов";
+"diagnostics.aero.source.closed_form" = "Замкнутая модель планформы";
+"diagnostics.aero.follow_live" = "Следовать за числом Маха аппарата";
+"diagnostics.aero.cl" = "Подъёмная CL";
+"diagnostics.aero.cd" = "Сопротивление CD";
+"diagnostics.aero.cm" = "Момент Cm";
+"diagnostics.aero.rotary_only" = "У этого аппарата нет крыла, поэтому строить кривую подъёмной силы не по чему.";

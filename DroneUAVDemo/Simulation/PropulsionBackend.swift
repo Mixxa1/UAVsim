@@ -47,14 +47,24 @@ struct FuelPropulsionBackend {
     let propeller: PropellerModel?
     let inlet: HighSpeedInletModel
 
-    init?(powerplant: UAVPowerplantSpec?, cruiseSpeedMps: Float) {
+    init?(
+        powerplant: UAVPowerplantSpec?,
+        cruiseSpeedMps: Float,
+        inletOverride: UAVInletType? = nil
+    ) {
         guard let powerplant, powerplant.energySource == .fuel else { return nil }
         self.powerplant = powerplant
         self.propeller = PropellerModel.resolve(
             powerplant: powerplant,
             cruiseSpeedMps: cruiseSpeedMps
         )
-        self.inlet = HighSpeedInletModel(powerplant: powerplant)
+        // A frame that states its own intake overrides whatever the powerplant descriptor
+        // implies. That ordering is right round: the intake is part of the airframe, not
+        // part of the engine — the same engine behind a pitot intake and behind a variable
+        // ramp is two different aircraft above Mach 1.5, and it is the airframe that decides
+        // which one was built.
+        self.inlet = inletOverride.map { HighSpeedInletModel(type: $0) }
+            ?? HighSpeedInletModel(powerplant: powerplant)
     }
 
     // MARK: - Jet thrust against flight condition

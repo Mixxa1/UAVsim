@@ -25,8 +25,26 @@ enum GenericGrassMaterialLoader {
         material.diffuse.wrapS = .repeat
         material.diffuse.wrapT = .repeat
 
-        let repeatCount = CGFloat(max(mapSizeMeters / GrassConstants.tileMeters, 1.0))
+        // Capped at 8,192 repeats.
+        //
+        // A texture coordinate is a 32-bit float, and past about twenty thousand repeats
+        // its spacing grows to a visible fraction of a tile: the sampler quantises inside
+        // a single blade of grass and the ground smears. At 8,192 the coordinates are
+        // exact to a ten-thousandth of a tile.
+        //
+        // The cap only binds on the extended map ranges, where it makes the far ground
+        // coarse — which does not matter, because on those maps the near ground is drawn
+        // by the detail patch that follows the aircraft (see
+        // `DroneSceneController.refreshGroundDetailPatch`), and the capped plane is only
+        // ever seen kilometres away.
+        let repeatCount = CGFloat(
+            min(8_192.0, max(mapSizeMeters / GrassConstants.tileMeters, 1.0))
+        )
         material.diffuse.contentsTransform = SCNMatrix4MakeScale(repeatCount, repeatCount, 1)
+        // Grazing angles are most of what a low-flying camera sees of the ground, and they
+        // are exactly where an isotropic sample collapses to a blur.
+        material.diffuse.mipFilter = .linear
+        material.diffuse.maxAnisotropy = 8.0
 
         material.normal.contents = nil
         material.displacement.contents = nil

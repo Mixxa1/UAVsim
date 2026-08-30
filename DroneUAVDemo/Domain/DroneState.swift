@@ -137,6 +137,14 @@ struct DroneState {
     /// Total-pressure recovery the intake is achieving, 0...1. One for anything with a
     /// propeller and for any jet below Mach 1.
     var inletPressureRecovery: Float = 1.0
+
+    /// Strength of the standing condensation cloud, 0-1.
+    ///
+    /// Purely a visual quantity — it changes nothing about the flight — but it is derived
+    /// from the flow state and the air's water content rather than from a Mach threshold,
+    /// so it appears when the air can actually condense and not merely when the aircraft
+    /// is going fast.
+    var condensationConeStrength: Float = 0.0
     /// Normal load factor, n = L/W, positive up. One in level flight, zero in free fall.
     ///
     /// Not the mass ratio that `FlightBaselineResolver.normalizedLoadFactor` carries

@@ -725,7 +725,13 @@ final class DroneSimulationViewModel: ObservableObject {
         fuelPropulsionBackend = FuelPropulsionBackend(
             powerplant: activeUAVProfile?.powerplant,
             cruiseSpeedMps: selectedDroneProfile.fixedWingParameters?.cruiseSpeedMps
-                ?? max(6.0, selectedDroneProfile.maxHorizontalSpeedMps * 0.6)
+                ?? max(6.0, selectedDroneProfile.maxHorizontalSpeedMps * 0.6),
+            // A Workbench build's frame may declare its own intake. Nothing in the current
+            // component library produces a jet for it to feed, so today this changes nothing
+            // for a bench-built aircraft — but the descriptor is carried end to end rather
+            // than being written to a file and forgotten, which is the difference between a
+            // format that will work when a jet is added and one that will need finding.
+            inletOverride: selectedDroneProfile.workbenchBuild?.resolvedFrame.inletType
         )
     }
 
@@ -1331,6 +1337,15 @@ final class DroneSimulationViewModel: ObservableObject {
     private let remoteInputProvider: RemoteInputProvider
     private let inputManager: InputManager
     private let collisionService: CollisionAnalysisService
+    /// The aeroplane carrying an air-launched aircraft, while it is still attached.
+    /// Nil for every other launch mode and once the carrier has left the scene.
+    @Published private(set) var carrierState: CarrierAircraftState?
+    /// The chase camera's own distance ceiling, saved while it is temporarily raised to
+    /// frame a carrier. Restored on release, so widening the shot for a fifty-metre
+    /// aeroplane does not leave the operator able to zoom a quadrotor out to the horizon.
+    private var followMaxDistanceBeforeCarrier: Float?
+    private var carrierReleaseObserver: NSObjectProtocol?
+
     /// Tracks whether the aircraft's shock cone has swept over the operator.
     private var sonicBoomTracker = SonicBoomTracker()
     /// The simulation's audio output. Lazily started, and only ever by a sound that is
@@ -3561,6 +3576,12 @@ final class DroneSimulationViewModel: ObservableObject {
             ? nil
             : .cold(ambientTemperatureC: currentAtmosphere().state(worldY: 0).temperatureK - 273.15)
         damageState = .pristine
+        clearCarrier()
+        sonicBoomTracker.reset()
+        // Staged here rather than on the first tick, because `homePosition` and the initial
+        // aircraft placement are both resolved further down this same reset — and they ask
+        // `currentSpawnPoint()`, which now answers with the pylon.
+        stageCarrierIfNeeded()
         rebuildVehicleComponentGraph()
         thermalState = .nominal
         diagnosticMode = .normal
@@ -7287,6 +7308,7 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
+        advanceCarrier(deltaTime: dt)
         advanceSonicBoom(deltaTime: dt)
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         if let launchDynamics = activeFixedWingLaunchDynamics,
@@ -7967,6 +7989,179 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Zero for every aircraft in the catalogue at the speeds they fly; it starts to
     /// matter only once a skin temperature passes the material's working limit, which
     /// takes sustained flight above about Mach 2.
+    // MARK: - Carrier aircraft
+
+    /// Puts the carrier in the scene, flies it, and lets it go when told to.
+    ///
+    /// Runs after the physics step and pins the aircraft to the pylon while it is still
+    /// attached. Pinning rather than adding a constraint to the solver is deliberate: an
+    /// aircraft hanging on a shackle is not flying, and modelling the attachment as forces
+    /// would mean inventing a shackle's stiffness to hold something that is simply bolted
+    /// on. This is the same approach the existing launch state machine's `.held` phase
+    /// takes for a catapult cradle.
+    private func advanceCarrier(deltaTime: Float) {
+        stageCarrierIfNeeded()
+        guard var carrier = carrierState else { return }
+
+        let wasAttached = !carrier.hasReleased
+        carrier.advance(deltaTime: deltaTime)
+
+        if wasAttached && !carrier.hasReleased {
+            // Still on the pylon: the aircraft goes where the carrier goes.
+            applyCarrierChaseFraming(kind: carrier.kind)
+            // And so does the point every "hold it where it started" path resolves to. The
+            // aircraft is attached to something that is moving; its home is moving with it.
+            homePosition = carrier.attachedUAVPosition()
+            state.position = carrier.attachedUAVPosition()
+            state.velocity = carrier.velocity
+            state.orientation = SIMD3<Float>(0.0, 0.0, carrier.headingRadians)
+            state.forwardAirspeed = simd_length(carrier.velocity)
+            resyncFixedWingAttitudeFromEuler()
+            lastFiniteState = state
+        } else if wasAttached && carrier.hasReleased {
+            // The shackle has opened. From here the aircraft is on its own, and everything
+            // the release needs to set up lives in one place.
+            performCarrierRelease(
+                AirLaunchAsset(
+                    position: SIMD2<Float>(carrier.position.x, carrier.position.z),
+                    headingDegrees: carrier.headingRadians * 180.0 / .pi,
+                    releaseAltitudeMeters: carrier.attachedUAVPosition().y,
+                    releaseSpeedMps: simd_length(carrier.velocity)
+                )
+            )
+            recordMissionReplayEvent(
+                .warning,
+                message: String(
+                    format: NSLocalizedString("event.carrier_release", comment: ""),
+                    carrier.attachedUAVPosition().y,
+                    simd_length(carrier.velocity)
+                )
+            )
+        }
+
+        carrierState = carrier.isVisible ? carrier : nil
+        sceneController.syncCarrier(carrierState, deltaTime: deltaTime)
+    }
+
+    /// Creates the carrier the first time an air-launched aircraft needs one.
+    ///
+    /// Which aeroplane it is comes from the aircraft, not from the map: a Firebee came off
+    /// a DC-130's wing and HiMAT off NASA's NB-52B, and those pairings are facts about the
+    /// aircraft rather than choices a mission planner makes.
+    private func stageCarrierIfNeeded() {
+        guard carrierState == nil,
+              activeLaunchMode() == .airLaunch,
+              let wing = selectedDroneProfile.fixedWingParameters,
+              let release = activeLaunchAsset()?.airLaunchAsset,
+              // Only before the drop. Once the launch sequence has run its course the
+              // carrier is gone and must not be re-staged under an aircraft that is
+              // already flying on its own.
+              launchRuntimeSnapshot.state == .idle
+                || launchRuntimeSnapshot.state == .prelaunchCheck else {
+            return
+        }
+        _ = wing
+        observeCarrierReleaseCommandIfNeeded()
+        let kind = CarrierAircraftKind.carrier(forProfileID: selectedDroneProfile.id)
+        // The carrier is staged at the altitude the aircraft can actually be at, not at the
+        // one its datasheet names.
+        //
+        // A Firebee comes off a DC-130 at ten kilometres, and that is the number in the
+        // profile. An ordinary map's ceiling is seven hundred and twenty metres, and the
+        // aircraft is clamped to it — so staging the carrier at the datasheet figure put the
+        // two of them nine kilometres apart, with the carrier a speck somewhere above the
+        // top of the screen and the drone apparently hanging from nothing. Both have to
+        // answer to the same ceiling or they are not attached to each other at all.
+        //
+        // The historical release altitude is available on an extended map scale, which is
+        // what those scales were added for.
+        var releasePosition = release.releasePosition
+        releasePosition.y = min(releasePosition.y, max(2.0, terrain.maxFlightAltitude - 2.0))
+        carrierState = CarrierAircraftState.staged(
+            kind: kind,
+            releasePosition: releasePosition,
+            releaseVelocity: release.releaseVelocity,
+            headingRadians: release.worldYawRadians
+        )
+
+        // Behind the tail of the *carrier*, not of the drone.
+        //
+        // The chase camera was already behind the drone, correctly, and that was the
+        // problem: the drone hangs off a wing pylon, so from twenty-two metres behind it the
+        // carrier sits half out of frame to one side and the pair reads as two unrelated
+        // aircraft. Pulled back to two and a half carrier-lengths and shifted onto the
+        // carrier's centreline, the same shot shows one aeroplane with a drone under its
+        // wing, seen from its six o'clock — which is the whole point of watching a drop.
+        //
+        // The lateral shift is the negative of the pylon offset because the camera is
+        // stationed on the *drone*: moving it the other way by exactly the pylon's own
+        // sideways offset puts it back on the fuselage's centreline.
+        setCameraMode(.follow)
+        applyCarrierChaseFraming(kind: kind)
+    }
+
+    /// Puts the chase camera behind the carrier's tail, and keeps it there.
+    ///
+    /// Re-applied every tick while the aircraft is attached rather than set once when the
+    /// carrier is staged. Arming, selecting a platform and several other ordinary actions
+    /// re-derive the camera from the *drone's* profile, and any one of them silently undid a
+    /// single set-up at staging — which is why the shot kept coming back to twenty-two
+    /// metres beside the carrier instead of staying seventy-five behind it. Idempotent and
+    /// three assignments long, so running it per tick costs nothing.
+    private func applyCarrierChaseFraming(kind: CarrierAircraftKind) {
+        // The ceiling has to be lifted before the distance is set, or the distance is
+        // silently clamped to it and nothing appears to happen: the chase camera's limit is
+        // 24 m and the request is 75.
+        if followMaxDistanceBeforeCarrier == nil {
+            followMaxDistanceBeforeCarrier = cameraConfiguration.follow.maxDistance
+        }
+        cameraConfiguration.follow.maxDistance = max(
+            cameraConfiguration.follow.maxDistance,
+            kind.attachedCameraDistance * 1.2
+        )
+        cameraConfiguration.follow.distance = kind.attachedCameraDistance
+        cameraConfiguration.follow.height = kind.attachedCameraHeight
+        // Dead astern, with no sideways shift at all. The scene's chase rig now takes the
+        // carrier itself as the subject while the aircraft is attached, so the camera is
+        // already on the carrier's centreline and looking down its axis; nudging it sideways
+        // to compensate for the pylon would only push it back off again.
+        cameraConfiguration.follow.lateralOffset = 0.0
+    }
+
+    /// Starts listening for the Carrier menu's release command.
+    ///
+    /// Called once, lazily, from the first carrier the session stages — there is no point
+    /// subscribing for the whole subsonic fleet, which never has a carrier to release from.
+    private func observeCarrierReleaseCommandIfNeeded() {
+        guard carrierReleaseObserver == nil else { return }
+        carrierReleaseObserver = NotificationCenter.default.addObserver(
+            forName: .uavsimCarrierRelease,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.releaseFromCarrier()
+            }
+        }
+    }
+
+    /// Opens the shackle. Bound to the Carrier menu's release item.
+    func releaseFromCarrier() {
+        guard var carrier = carrierState, carrier.phase == .carrying else { return }
+        carrier.phase = .releasing
+        carrierState = carrier
+    }
+
+    /// Clears the carrier so the next reset stages a fresh one.
+    private func clearCarrier() {
+        if let restored = followMaxDistanceBeforeCarrier {
+            cameraConfiguration.follow.maxDistance = restored
+            followMaxDistanceBeforeCarrier = nil
+        }
+        carrierState = nil
+        sceneController.syncCarrier(nil, deltaTime: 0.0)
+    }
+
     /// Decides whether the operator hears a boom this tick, and plays it if so.
     ///
     /// The listener is the ground station, not the camera. A chase camera flies inside the
@@ -8009,6 +8204,29 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    /// Everything that has taken strength out of the structure, combined, 0...1.
+    ///
+    /// Two mechanisms, and they are different in kind. Heat *softens* the material, so a
+    /// hot airframe fails at loads it would have carried cold. Time outside the envelope
+    /// *fatigues* it: nothing breaks the moment a limit is crossed — the plan is explicit
+    /// that an exceedance must accumulate consequence rather than trigger a scripted break
+    /// — but an airframe held over its limits is being used up, and the next manoeuvre is
+    /// the one that finds out.
+    ///
+    /// This is what makes the envelope more than a warning light. Over-g and over-q were
+    /// already damaging through the load solver's own arithmetic, because it works from
+    /// the real specific force and the real dynamic pressure; what was missing was the
+    /// *duration*. A four-second excursion and a four-minute one produced the same
+    /// structure.
+    private func currentStructuralWeakening() -> Float {
+        let thermal = currentThermalWeakening()
+        // Two minutes outside the envelope costs half the residual strength. Capped well
+        // short of total, because this is fatigue rather than failure: the airframe is
+        // weaker, and the load solver decides whether that is enough to break anything.
+        let fatigue = min(0.5, state.flightEnvelope.exceedanceSeconds / 120.0)
+        return min(0.95, 1.0 - (1.0 - thermal) * (1.0 - fatigue))
+    }
+
     private func currentThermalWeakening() -> Float {
         guard let wing = selectedDroneProfile.fixedWingParameters else { return 0.0 }
         let limits = FlightEnvelopeLimits.derived(
@@ -8036,7 +8254,7 @@ final class DroneSimulationViewModel: ObservableObject {
             rotorModel: vehicleRotorModel,
             deltaTime: deltaTime,
             airDensity: currentAtmosphere().state(worldY: state.position.y).airDensity,
-            thermalWeakening: currentThermalWeakening()
+            thermalWeakening: currentStructuralWeakening()
         )
         for entry in result.connectionDamage {
             let meaningfulDelta = entry.residualStrengthBefore - entry.residualStrengthAfter >= 0.002
@@ -17158,6 +17376,7 @@ final class DroneSimulationViewModel: ObservableObject {
             ),
             loadFactor: Double(state.loadFactor),
             waveDragCoefficient: Double(state.waveDragCoefficient),
+            angleOfAttackRad: Double(state.angleOfAttack),
             propulsionThrustN: Double(state.propulsionThrustNewtons),
             inletPressureRecovery: Double(state.inletPressureRecovery),
             skinTemperatureK: Double(state.aeroThermal.skinK),
@@ -23376,6 +23595,19 @@ final class DroneSimulationViewModel: ObservableObject {
     /// turbojet started and stabilised long before the shackle opens, because there is no
     /// second attempt at ten kilometres.
     private func performCarrierRelease(_ release: AirLaunchAsset) {
+        // The camera comes back to the aircraft that is now flying. It was pulled back and
+        // shifted sideways to frame the carrier while the drone was attached; from the
+        // moment the shackle opens the subject of the shot is the drone again, and leaving
+        // it framed for a fifty-metre aeroplane would keep the released aircraft as a speck
+        // in the corner of a picture of something it has just left.
+        if let restored = followMaxDistanceBeforeCarrier {
+            cameraConfiguration.follow.maxDistance = restored
+            followMaxDistanceBeforeCarrier = nil
+        }
+        cameraConfiguration.follow.distance = selectedDroneProfile.cameraPreset.followDistance
+        cameraConfiguration.follow.height = selectedDroneProfile.cameraPreset.followHeight
+        cameraConfiguration.follow.lateralOffset = 0.0
+
         fixedWingLaunchController.reset()
         activeFixedWingLaunchDynamics = nil
         launchCradleHoldActive = false
@@ -23578,6 +23810,23 @@ final class DroneSimulationViewModel: ObservableObject {
     /// launch configuration) releases it.
     private func maintainLaunchCradleHoldIfNeeded() -> Bool {
         guard launchCradleHoldActive else {
+            return false
+        }
+        // An aircraft on a carrier's pylon is not on a cradle, and this was quietly
+        // undoing the whole air launch.
+        //
+        // The cradle hold pins position and zeroes velocity, and it runs later in the tick
+        // than the carrier does — so every frame the carrier placed the aircraft on its
+        // pylon and moving at a hundred and fifty metres a second, and a few lines later
+        // this put it back at the launch point, stopped. What the operator saw was an
+        // aeroplane flying away from a drone hanging motionless in the air, which is
+        // precisely what the code was doing.
+        //
+        // Two holds cannot own one aircraft. The carrier wins while it is carrying, because
+        // it is the one that is physically attached.
+        if let carrier = carrierState, !carrier.hasReleased {
+            launchCradleHoldActive = false
+            setHandLaunchPOVActive(false)
             return false
         }
         guard physicalState != .crashed,
@@ -24990,6 +25239,19 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func currentSpawnPoint() -> SIMD3<Float> {
+        // While the aircraft is on a carrier's pylon, its start point *is* the pylon, and
+        // the pylon is moving.
+        //
+        // Pinning the aircraft once per tick after the physics step was not enough: a
+        // disarmed aircraft is held at its spawn point by several paths that all resolve
+        // it through this one function, and every one of them put it back at the static
+        // drop coordinate the mission planner had drafted. The carrier flew away and left
+        // it hanging there — which is exactly what the screenshots showed. Answering the
+        // question "where does this aircraft start" with the live pylon position fixes all
+        // of those paths at once instead of racing them.
+        if let carrier = carrierState, !carrier.hasReleased {
+            return carrier.attachedUAVPosition()
+        }
         if activeLaunchMode().requiresLaunchObject,
            let launchPoint = sceneController.currentLaunchSpawnPoint(for: activeLaunchAsset()) {
             return launchPoint

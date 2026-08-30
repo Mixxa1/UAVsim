@@ -203,7 +203,7 @@ enum LandingMethod: String, CaseIterable {
     case tailsitterVerticalLanding
 }
 
-enum FixedWingFamily: String, CaseIterable {
+enum FixedWingFamily: String, CaseIterable, Codable {
     case rectangular
     case delta
     case swept

@@ -71,6 +71,34 @@ struct WorkbenchFrameSpec: Codable, Hashable, Identifiable {
     var massKg: Double
     var sizeMeters: CodableVector3D
 
+    // MARK: High-speed descriptors
+    //
+    // Optional throughout, and optional on purpose. A frame saved before any of this
+    // existed decodes with all three absent and behaves exactly as it did, and a frame that
+    // is never going to go fast has no reason to carry them. What they do is let a
+    // Workbench build say the three things about itself that the high-speed model cannot
+    // infer from a mass and a wing area.
+    //
+    // Planform, because the whole point of having three supersonic families is that the
+    // difference between them decides how an aircraft behaves through Mach 1, and no
+    // amount of looking at motor mounts reveals whether the wing is a delta.
+    //
+    // Skin material, because whether an airframe survives Mach 3 is a question about what
+    // it is made of and about nothing else — aluminium is done at about Mach 2, and the
+    // same shape in titanium is not.
+    //
+    // Intake, because a jet's thrust at Mach 2 is mostly a statement about its inlet, and a
+    // pitot intake and a variable ramp differ by more than a factor of two up there.
+
+    /// Aerodynamic planform class. `nil` keeps the synthesizer's own choice, which is a
+    /// conventional survey wing.
+    var fixedWingPlanform: FixedWingFamily?
+    /// Structural skin. `nil` means aluminium, the assumption every existing build already
+    /// flies under.
+    var skinMaterial: UAVSkinMaterial?
+    /// Air intake. `nil` means none, which is right for anything turning a propeller.
+    var inletType: UAVInletType?
+
     init(
         id: String,
         name: String,
@@ -89,8 +117,14 @@ struct WorkbenchFrameSpec: Codable, Hashable, Identifiable {
         fcBay: CodableVector3D,
         cameraMount: CodableVector3D,
         massKg: Double,
-        sizeMeters: CodableVector3D
+        sizeMeters: CodableVector3D,
+        fixedWingPlanform: FixedWingFamily? = nil,
+        skinMaterial: UAVSkinMaterial? = nil,
+        inletType: UAVInletType? = nil
     ) {
+        self.fixedWingPlanform = fixedWingPlanform
+        self.skinMaterial = skinMaterial
+        self.inletType = inletType
         self.id = id
         self.name = name
         self.frameClass = frameClass
@@ -120,6 +154,7 @@ struct WorkbenchFrameSpec: Codable, Hashable, Identifiable {
         case propulsionAxes, liftMotorCount, servoMounts, wingAreaM2
         case armLengthM, propMaxInch, motorStatorMaxMm
         case batteryTray, fcBay, cameraMount, massKg, sizeMeters
+        case fixedWingPlanform, skinMaterial, inletType
     }
 
     init(from decoder: Decoder) throws {
@@ -163,6 +198,13 @@ struct WorkbenchFrameSpec: Codable, Hashable, Identifiable {
         massKg = max(try c.decodeIfPresent(Double.self, forKey: .massKg) ?? 0, 0)
         sizeMeters = try c.decodeIfPresent(CodableVector3D.self, forKey: .sizeMeters)
             ?? CodableVector3D(x: 0.1, y: 0.1, z: 0.1)
+        // Absent in every frame written before the high-speed model existed, and absent in
+        // most written after it. Left nil rather than defaulted here so that "not stated"
+        // and "stated to be the default" stay distinguishable — the synthesizer is where a
+        // missing value turns into an assumption, and it says which assumption it made.
+        fixedWingPlanform = try c.decodeIfPresent(FixedWingFamily.self, forKey: .fixedWingPlanform)
+        skinMaterial = try c.decodeIfPresent(UAVSkinMaterial.self, forKey: .skinMaterial)
+        inletType = try c.decodeIfPresent(UAVInletType.self, forKey: .inletType)
     }
 }
 
@@ -196,6 +238,11 @@ struct WorkbenchResolvedFrame: Hashable {
     /// Present for imported CADNext frames (rendered as-is); nil for library
     /// frames (procedural geometry).
     var importedMesh: WorkbenchConstruction.Mesh?
+    /// High-speed descriptors, carried through from the frame spec. See
+    /// `WorkbenchFrameSpec` for why all three are optional.
+    var fixedWingPlanform: FixedWingFamily?
+    var skinMaterial: UAVSkinMaterial?
+    var inletType: UAVInletType?
 }
 
 extension WorkbenchFrameSource {
@@ -231,7 +278,10 @@ extension WorkbenchFrameSource {
                 cameraMount: spec.cameraMount.simdFloat,
                 massKg: spec.massKg,
                 sizeMeters: spec.sizeMeters.simd,
-                importedMesh: nil)
+                importedMesh: nil,
+                fixedWingPlanform: spec.fixedWingPlanform,
+                skinMaterial: spec.skinMaterial,
+                inletType: spec.inletType)
         case let .imported(construction):
             let architecture = preferredArchitecture ?? .multicopter
             // CADNext exports Z-up coordinates; SceneKit uses Y-up. Keep one
