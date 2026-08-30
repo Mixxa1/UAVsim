@@ -2532,6 +2532,10 @@
 "settings.window_size.native" = "Текущий размер";
 "settings.render_scale" = "Масштаб рендера";
 "settings.render_scale.hint" = "Меньшие значения рендерят меньше пикселей с апскейлом — снижают нагрузку на GPU и нагрев.";
+"settings.section.audio" = "Звук";
+"settings.audio.master_volume" = "Общая громкость";
+"settings.audio.mute" = "Выключить весь звук";
+"settings.audio.hint" = "Звуки ударов, повреждений и самого аппарата позиционируются в 3D и приходят к слушателю с задержкой, соответствующей расстоянию.";
 "settings.fullscreen" = "Полный экран";
 
 "replay.title" = "Бортовой самописец";

@@ -10122,7 +10122,13 @@ final class DroneSceneController {
                     baseY: center.y - part.size.y * 0.5,
                     topY: center.y + part.size.y * 0.5,
                     planarHalfExtents: halfExtents,
-                    yawRadians: descriptor.yawRadians + part.yawRadians
+                    yawRadians: descriptor.yawRadians + part.yawRadians,
+                    // The scene knows what it placed, so the obstacle carries its material
+                    // rather than leaving the impact solver to infer one from the name.
+                    acousticSurface: AcousticSurfaceMaterial.resolve(
+                        source: part.source,
+                        kind: descriptor.kind
+                    )
                 )
             }
     }
@@ -10177,7 +10183,11 @@ final class DroneSceneController {
                 topY: maximum.y,
                 planarHalfExtents: nil,
                 yawRadians: 0.0,
-                meshTriangles: triangles
+                meshTriangles: triangles,
+                acousticSurface: AcousticSurfaceMaterial.resolve(
+                    source: part.source,
+                    kind: descriptor.kind
+                )
             )
         }
     }
@@ -10193,7 +10203,11 @@ final class DroneSceneController {
             radius: proxy.analysisRadius,
             source: proxy.source,
             baseY: descriptor.position.y + proxy.baseY,
-            topY: descriptor.position.y + proxy.topY
+            topY: descriptor.position.y + proxy.topY,
+            acousticSurface: AcousticSurfaceMaterial.resolve(
+                source: proxy.source,
+                kind: descriptor.kind
+            )
         )
     }
 

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "sampleRate": 48000,
+  "channels": 1,
+  "assets": [
+    { "id": "fpv_electronics_boot", "category": "vehicle", "path": "Vehicle/Electric/fpv_electronics_boot", "variants": 1, "loop": false, "durationSeconds": 5.200, "defaultGainDb": -6.0 },
+    { "id": "uav_small_spinup", "category": "vehicle", "path": "Vehicle/Electric/uav_small_spinup", "variants": 1, "loop": false, "durationSeconds": 4.500, "defaultGainDb": -8.0 },
+    { "id": "uav_small_hover", "category": "vehicle", "path": "Vehicle/Electric/uav_small_hover", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -9.0 },
+    { "id": "uav_heavy_hover_loop", "category": "vehicle", "path": "Vehicle/Electric/uav_heavy_hover_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -8.0 },
+    { "id": "uav_hex_flight", "category": "vehicle", "path": "Vehicle/Electric/uav_hex_flight", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -9.0 },
+    { "id": "fpv_flight_loop", "category": "vehicle", "path": "Vehicle/Electric/fpv_flight_loop", "variants": 1, "loop": true, "durationSeconds": 5.000, "defaultGainDb": -8.0 },
+    { "id": "fpv_flyby_bank", "category": "vehicle", "path": "Vehicle/Electric/fpv_flyby_bank", "variants": 3, "loop": false, "durationSeconds": 6.000, "defaultGainDb": -8.0 },
+    { "id": "impact_mechanical_short", "category": "impact", "path": "Impact/Metal/impact_mechanical_short", "variants": 1, "loop": false, "durationSeconds": 0.300, "defaultGainDb": -4.0 },
+    { "id": "impact_metal_heavy", "category": "impact", "path": "Impact/Metal/impact_metal_heavy", "variants": 1, "loop": false, "durationSeconds": 2.200, "defaultGainDb": -2.0 },
+    { "id": "concrete_hit", "category": "impact", "path": "Impact/Concrete/concrete_hit", "variants": 1, "loop": false, "durationSeconds": 0.950, "defaultGainDb": -3.0 },
+    { "id": "scrape_metal_concrete", "category": "impact", "path": "Impact/Concrete/scrape_metal_concrete", "variants": 1, "loop": true, "durationSeconds": 1.800, "defaultGainDb": -10.0 },
+    { "id": "tree_trunk_impact", "category": "impact", "path": "Impact/Wood/tree_trunk_impact", "variants": 5, "loop": false, "durationSeconds": 1.407, "defaultGainDb": -4.0 },
+    { "id": "foliage_branch_impact", "category": "impact", "path": "Impact/Wood/foliage_branch_impact", "variants": 5, "loop": false, "durationSeconds": 1.416, "defaultGainDb": -12.0 },
+    { "id": "ground_dirt_thud", "category": "impact", "path": "Impact/Dirt/ground_dirt_thud", "variants": 1, "loop": false, "durationSeconds": 0.749, "defaultGainDb": -5.0 },
+    { "id": "glass_shatter", "category": "impact", "path": "Impact/Glass/glass_shatter", "variants": 1, "loop": false, "durationSeconds": 1.400, "defaultGainDb": -3.0 },
+    { "id": "water_impact", "category": "impact", "path": "Impact/Water/water_impact", "variants": 1, "loop": false, "durationSeconds": 2.150, "defaultGainDb": -4.0 },
+    { "id": "tree_wood_crack", "category": "damage", "path": "Damage/Crack/tree_wood_crack", "variants": 1, "loop": false, "durationSeconds": 1.600, "defaultGainDb": -6.0 },
+    { "id": "building_debris", "category": "damage", "path": "Damage/Debris/building_debris", "variants": 1, "loop": false, "durationSeconds": 3.900, "defaultGainDb": -6.0 },
+    { "id": "damage_metal_bend", "category": "damage", "path": "Damage/Bend/damage_metal_bend", "variants": 1, "loop": false, "durationSeconds": 1.430, "defaultGainDb": -5.0 },
+    { "id": "damage_stone_crash", "category": "damage", "path": "Damage/Debris/damage_stone_crash", "variants": 1, "loop": false, "durationSeconds": 2.500, "defaultGainDb": -4.0 },
+    { "id": "damage_composite_break", "category": "damage", "path": "Damage/Crack/damage_composite_break", "variants": 1, "loop": false, "durationSeconds": 2.450, "defaultGainDb": -5.0 },
+    { "id": "piston_engine_loop", "category": "vehicle", "path": "Vehicle/Piston/piston_engine_loop", "variants": 1, "loop": true, "durationSeconds": 4.000, "defaultGainDb": -8.0 },
+    { "id": "piston_engine_start", "category": "vehicle", "path": "Vehicle/Piston/piston_engine_start", "variants": 1, "loop": false, "durationSeconds": 8.000, "defaultGainDb": -6.0 },
+    { "id": "turboprop_loop", "category": "vehicle", "path": "Vehicle/Turboprop/turboprop_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -8.0 },
+    { "id": "turboprop_start", "category": "vehicle", "path": "Vehicle/Turboprop/turboprop_start", "variants": 1, "loop": false, "durationSeconds": 14.000, "defaultGainDb": -7.0 },
+    { "id": "turbojet_loop", "category": "vehicle", "path": "Vehicle/Turbojet/turbojet_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -7.0 },
+    { "id": "turbojet_start", "category": "vehicle", "path": "Vehicle/Turbojet/turbojet_start", "variants": 1, "loop": false, "durationSeconds": 10.000, "defaultGainDb": -7.0 },
+    { "id": "mechanism_servo", "category": "vehicle", "path": "Vehicle/Electric/mechanism_servo", "variants": 4, "loop": false, "durationSeconds": 1.500, "defaultGainDb": -16.0 }
+  ],
+  "unavailable": [
+    { "id": "damage_metal_creak", "category": "damage", "reason": "No CC0 structural creak selected yet; a bend is not a creak and the pack does not pretend otherwise" },
+    { "id": "light_shell_impact", "category": "impact", "reason": "Light plastic/fairing contact — no CC0 source selected; see the composite note in the audio plan" },
+    { "id": "fixedwing_electric_loop", "category": "vehicle", "reason": "Electric fixed wings currently fly on the FPV motor loop as a stand-in; a dedicated single-propeller recording is still wanted" }
+  ]
+}

@@ -261,6 +261,240 @@
       "licenseName": "Creative Commons Attribution",
       "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
       "changes": "Imported as USDZ, scaled to the real aircraft's length and re-oriented, and used as the carrier aeroplane for the air-launched HiMAT in DroneUAVDemo."
+    },
+    {
+      "id": "audio_uav_boot_qubodup",
+      "title": "UAV Drone Boot/Connection Sounds",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/854647/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz, trimmed and peak-normalised into the runtime audio pack as the electronics boot / link cue."
+    },
+    {
+      "id": "audio_mavic_mini_2_sadiquecat",
+      "title": "DJI Mavic Mini 2 — hover and propeller start-up",
+      "author": "sadiquecat",
+      "sourceURL": "https://freesound.org/people/sadiquecat/sounds/683298/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono and resampled to 48 kHz; the hover recording (683298) was cut to a six-second window and crossfaded into a seamless loop, and the propeller start-up (683299) trimmed to a one-shot spin-up cue."
+    },
+    {
+      "id": "audio_heavy_drone_hover_qubodup",
+      "title": "Big Slow Heavy Drone Hovering Idle Loop",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/854382/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless loop for the heavy multirotor class."
+    },
+    {
+      "id": "audio_hexacopter_flight_torror",
+      "title": "Hexacopter drone flight",
+      "author": "torror",
+      "sourceURL": "https://freesound.org/people/torror/sounds/264853/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz, and a six-second window crossfaded into a seamless industrial-multirotor flight loop."
+    },
+    {
+      "id": "audio_fpv_flight_qubodup",
+      "title": "FPV Drone Flight 3",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/854466/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless FPV flight loop."
+    },
+    {
+      "id": "audio_quadcopter_flyby_5demayo",
+      "title": "Quadcopter Flyby (Multiple)",
+      "author": "5demayo",
+      "sourceURL": "https://freesound.org/people/5demayo/sounds/524331/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into three fly-by variants."
+    },
+    {
+      "id": "audio_fast_collision_qubodup",
+      "title": "Fast Collision",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/332056/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Resampled to 48 kHz and peak-normalised as the short universal airframe/part contact."
+    },
+    {
+      "id": "audio_metallic_crash_behansean",
+      "title": "metallic crash",
+      "author": "BehanSean",
+      "sourceURL": "https://freesound.org/people/BehanSean/sounds/422438/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the heavy metal-structure impact."
+    },
+    {
+      "id": "audio_concrete_hit_dslrguide",
+      "title": "Concrete Hit",
+      "author": "dslrguide",
+      "sourceURL": "https://freesound.org/people/dslrguide/sounds/321477/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the hard concrete/masonry contact."
+    },
+    {
+      "id": "audio_metal_scrape_rvgerxini",
+      "title": "Metal scrape on concrete",
+      "author": "Rvgerxini",
+      "sourceURL": "https://freesound.org/people/Rvgerxini/sounds/488901/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless loop for sliding contact along concrete."
+    },
+    {
+      "id": "audio_tree_trunk_impact_profispiesser",
+      "title": "Tree Trunk Impact Ground Forest (5 variants)",
+      "author": "Profispiesser",
+      "sourceURL": "https://freesound.org/people/Profispiesser/sounds/550918/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into five separate trunk-impact variants."
+    },
+    {
+      "id": "audio_branch_impact_shatterstars",
+      "title": "Branch Impact",
+      "author": "shatterstars",
+      "sourceURL": "https://freesound.org/people/shatterstars/sounds/651319/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into five canopy/foliage contact variants."
+    },
+    {
+      "id": "audio_wood_crack_utsuru",
+      "title": "Wood Crack 1",
+      "author": "utsuru",
+      "sourceURL": "https://freesound.org/people/utsuru/sounds/183453/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the wood fracture layer."
+    },
+    {
+      "id": "audio_fall_debris_xkeril",
+      "title": "Fall debris (crash)",
+      "author": "xkeril",
+      "sourceURL": "https://freesound.org/people/xkeril/sounds/703248/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the structural debris layer."
+    },
+    {
+      "id": "audio_glass_shattering_c_rogers",
+      "title": "glass-shattering_01",
+      "author": "C_Rogers",
+      "sourceURL": "https://freesound.org/people/C_Rogers/sounds/203375/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Decoded from Ogg Vorbis, downmixed to mono, resampled to 48 kHz and peak-normalised as the glazing failure layer."
+    },
+    {
+      "id": "audio_metal_thud_7of9designs",
+      "title": "Heavy Metal Thud on Ground",
+      "author": "7of9Designs",
+      "sourceURL": "https://freesound.org/people/7of9Designs/sounds/640204/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Decoded from MP3, downmixed to mono, resampled to 48 kHz and peak-normalised as the soil/ground impact."
+    },
+    {
+      "id": "audio_water_splash_qubodup",
+      "title": "Big Water Splash",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/442773/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the water entry layer."
+    },
+    {
+      "id": "audio_hard_metal_impact_ronnyver",
+      "title": "Hard metal impact",
+      "author": "ronnyver",
+      "sourceURL": "https://freesound.org/people/ronnyver/sounds/488589/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the metal structural-damage layer in DroneUAVDemo."
+    },
+    {
+      "id": "audio_stone_crash_discofield",
+      "title": "Stone crash",
+      "author": "discofield",
+      "sourceURL": "https://freesound.org/people/discofield/sounds/711657/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and peak-normalised as the masonry/concrete failure layer in DroneUAVDemo."
+    },
+    {
+      "id": "audio_composite_break_sumianvoice",
+      "title": "explosion_composite_0",
+      "author": "sumianvoice",
+      "sourceURL": "https://freesound.org/people/sumianvoice/sounds/768318/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Decoded from FLAC, downmixed to mono, resampled to 48 kHz and peak-normalised as the composite structural-failure layer in DroneUAVDemo."
+    },
+    {
+      "id": "audio_propeller_loop_modusmogulus",
+      "title": "Airplane propeller loop",
+      "author": "ModusMogulus",
+      "sourceURL": "https://freesound.org/people/ModusMogulus/sounds/789390/",
+      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless loop for piston-engined fixed-wing aircraft in DroneUAVDemo."
+    },
+    {
+      "id": "audio_propeller_start_zerono1",
+      "title": "Airplane start propeller",
+      "author": "Zerono1",
+      "sourceURL": "https://freesound.org/people/Zerono1/sounds/568127/",
+      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and trimmed to the start sequence for piston-engined fixed-wing aircraft in DroneUAVDemo."
+    },
+    {
+      "id": "audio_turboprop_fokker50_pack489",
+      "title": "Fokker 50 turboprop aircraft taxi and takeoff",
+      "author": "pack489",
+      "sourceURL": "https://freesound.org/people/pack489/sounds/457131/",
+      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Decoded from MP3, downmixed to mono, resampled to 48 kHz, and a settled six-second window crossfaded into a seamless turboprop cruise loop in DroneUAVDemo."
+    },
+    {
+      "id": "audio_jet_start_cart_cv",
+      "title": "Jet engine start cart",
+      "author": "C-V",
+      "sourceURL": "https://freesound.org/people/C-V/sounds/704945/",
+      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and windowed twice — once for the turboprop start and once for the turbojet start — in DroneUAVDemo."
+    },
+    {
+      "id": "audio_jet_turbine_noise_qubodup",
+      "title": "Jet turbine noise",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/205581/",
+      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless turbojet cruise loop in DroneUAVDemo."
+    },
+    {
+      "id": "audio_servo_motor_pryanic",
+      "title": "MOTRSRVO electric servo motor",
+      "author": "Pryanic",
+      "sourceURL": "https://freesound.org/people/Pryanic/sounds/776274/",
+      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into four control-surface servo movement variants in DroneUAVDemo."
     }
   ]
 }

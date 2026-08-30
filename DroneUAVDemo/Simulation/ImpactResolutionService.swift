@@ -47,8 +47,20 @@ struct ImpactReport {
     let obstacleID: UUID
     let obstacleSource: String?
     let material: ImpactSurfaceMaterial
+    /// What was struck, acoustically. Separate from `material`, which describes behaviour
+    /// rather than sound — see `AcousticSurfaceMaterial`.
+    let acousticSurface: AcousticSurfaceMaterial
+    /// What struck it. The same wall is a different noise against a plastic cover and a steel
+    /// motor, and a resolver given only one side of the contact cannot say which.
+    let vehicleMaterial: VehicleAcousticMaterial
     let impactEnergyJ: Float
     let normalClosingSpeed: Float
+    /// Sliding speed in the contact plane, m/s.
+    ///
+    /// The solver has always computed this — it is what the friction impulse is built from —
+    /// and never published it, which is why nothing downstream could tell a hit from a hit
+    /// that turns into a slide. A scrape needs exactly this number.
+    let tangentialSpeed: Float
     let tier: ImpactOutcomeTier
     let damage: [VehicleComponentGraph.ImpactDamageEntry]
     let connectionDamage: [VehicleComponentGraph.ConnectionDamageEntry]
@@ -140,6 +152,64 @@ final class ImpactResolutionService {
         return .generic
     }
 
+    /// What the struck surface sounds like.
+    ///
+    /// The obstacle's own declaration wins, because whoever built it knew. Only when nothing
+    /// was declared does this fall back — first to the physical material the collision solver
+    /// already resolved, which is a better guess than a second independent keyword match, and
+    /// then to the provenance string.
+    ///
+    /// The tree case is the one place the two resolutions must agree rather than merely
+    /// coexist: `material(forObstacleSource:)` decides trunk-versus-canopy from where on the
+    /// cylinder the contact landed, and an acoustic classifier that re-derived that from the
+    /// name alone would put a canopy brush and a trunk strike in the same bucket.
+    static func acousticSurface(
+        for obstacle: CollisionObstacle,
+        contactPoint: SIMD3<Float>,
+        physicalMaterial: ImpactSurfaceMaterial
+    ) -> AcousticSurfaceMaterial {
+        if let declared = obstacle.acousticSurface { return declared }
+
+        switch physicalMaterial {
+        case .foliage:
+            return .foliage
+        case .woodTrunk:
+            return .treeTrunk
+        case .glass:
+            return .glass
+        case .asphalt:
+            return .asphalt
+        case .metalVehicle:
+            return .metal
+        case .water:
+            return .water
+        case .snow:
+            return .snow
+        case .sand, .soil:
+            // Sand and soil differ in how much they absorb, which the physics cares about,
+            // and hardly at all in the dull thump they make.
+            return .soil
+        case .hardStructure, .generic:
+            // A hard structure could be masonry, a shipping container or a crate. This is
+            // where the name is genuinely the only evidence.
+            return AcousticSurfaceMaterial.fromObstacleSource(obstacle.source)
+        default:
+            return AcousticSurfaceMaterial.fromObstacleSource(obstacle.source)
+        }
+    }
+
+    /// What the part that made contact is made of.
+    static func vehicleMaterial(
+        componentID: String,
+        graph: VehicleComponentGraph,
+        skin: UAVSkinMaterial
+    ) -> VehicleAcousticMaterial {
+        guard let component = graph.component(id: componentID) else {
+            return VehicleAcousticMaterial.fromSkin(skin)
+        }
+        return VehicleAcousticMaterial.resolve(componentKind: component.kind, skin: skin)
+    }
+
     // MARK: Impact resolution
 
     /// Resolves a swept contact in place: applies the contact impulse (and
@@ -158,18 +228,28 @@ final class ImpactResolutionService {
         rotorsSpinning: Bool,
         deltaTime: Float,
         applyDamage: Bool = true,
-        restingSpeedThreshold: Float = 0.01
+        restingSpeedThreshold: Float = 0.01,
+        /// What the airframe's structure is made of. Defaulted so callers that do not care
+        /// about sound — the headless contact probes — are unaffected.
+        skinMaterial: UAVSkinMaterial = .aluminium
     ) -> ImpactReport {
         let material = Self.material(
             forObstacleSource: contact.obstacle.source,
             obstacle: contact.obstacle,
             contactPoint: contact.contactPoint
         )
+        let acousticSurface = Self.acousticSurface(
+            for: contact.obstacle,
+            contactPoint: contact.contactPoint,
+            physicalMaterial: material
+        )
 
         if material.isFoliage {
             return resolveFoliageContact(
                 contact: contact,
                 material: material,
+                acousticSurface: acousticSurface,
+                skinMaterial: skinMaterial,
                 state: &state,
                 graph: &graph,
                 rotorsSpinning: rotorsSpinning,
@@ -217,13 +297,25 @@ final class ImpactResolutionService {
             if contact.hitFraction <= 0.001, simd_length(state.velocity) > 0.1 {
                 state.position += normal * min(0.004, max(0.001, contact.sphereRadius * 0.02))
             }
+            // A contact with no approach speed is very often a *slide* — a wreck skidding
+            // along a runway, a gear leg dragging across a roof — so the tangential speed is
+            // reported here too. Returning zero would silence exactly the case scrape exists
+            // for.
+            let restingTangentialSpeed = simd_length(contactVelocity + normal * normalClosingSpeed)
             return ImpactReport(
                 componentID: contact.componentID,
                 obstacleID: contact.obstacle.id,
                 obstacleSource: contact.obstacle.source,
                 material: material,
+                acousticSurface: acousticSurface,
+                vehicleMaterial: Self.vehicleMaterial(
+                    componentID: contact.componentID,
+                    graph: graph,
+                    skin: skinMaterial
+                ),
                 impactEnergyJ: 0.0,
                 normalClosingSpeed: max(0.0, normalClosingSpeed),
+                tangentialSpeed: restingTangentialSpeed,
                 tier: .lightTouch,
                 damage: [],
                 connectionDamage: [],
@@ -462,8 +554,15 @@ final class ImpactResolutionService {
             obstacleID: contact.obstacle.id,
             obstacleSource: contact.obstacle.source,
             material: material,
+            acousticSurface: acousticSurface,
+            vehicleMaterial: Self.vehicleMaterial(
+                componentID: resolvedComponentID,
+                graph: graph,
+                skin: skinMaterial
+            ),
             impactEnergyJ: impactEnergy,
             normalClosingSpeed: normalClosingSpeed,
+            tangentialSpeed: tangentialSpeed,
             tier: tier,
             damage: damage,
             connectionDamage: connectionDamage,
@@ -493,7 +592,8 @@ final class ImpactResolutionService {
         rotorsSpinning: Bool,
         deltaTime: Float,
         applyDamage: Bool = true,
-        restingSpeedThreshold: Float = 0.01
+        restingSpeedThreshold: Float = 0.01,
+        skinMaterial: UAVSkinMaterial = .aluminium
     ) -> ImpactReport {
         let normal = simd_normalize(contactNormal)
         state.position += normal * (max(0.0, penetrationDepth) + max(0.005, sphereRadius * 0.04))
@@ -519,7 +619,8 @@ final class ImpactResolutionService {
             rotorsSpinning: rotorsSpinning,
             deltaTime: deltaTime,
             applyDamage: applyDamage,
-            restingSpeedThreshold: restingSpeedThreshold
+            restingSpeedThreshold: restingSpeedThreshold,
+            skinMaterial: skinMaterial
         )
     }
 
@@ -544,6 +645,8 @@ final class ImpactResolutionService {
     private func resolveFoliageContact(
         contact: VehicleSweptContact,
         material: ImpactSurfaceMaterial,
+        acousticSurface: AcousticSurfaceMaterial,
+        skinMaterial: UAVSkinMaterial,
         state: inout DroneState,
         graph: inout VehicleComponentGraph,
         rotorsSpinning: Bool,
@@ -577,8 +680,16 @@ final class ImpactResolutionService {
             obstacleID: contact.obstacle.id,
             obstacleSource: contact.obstacle.source,
             material: material,
+            acousticSurface: acousticSurface,
+            vehicleMaterial: Self.vehicleMaterial(
+                componentID: contact.componentID,
+                graph: graph,
+                skin: skinMaterial
+            ),
             impactEnergyJ: branchEnergyJ,
             normalClosingSpeed: speed,
+            // Brushing through a canopy is not a slide against anything: the branches move.
+            tangentialSpeed: 0.0,
             tier: .lightTouch,
             damage: damage,
             connectionDamage: [],

@@ -39,6 +39,13 @@
 		10000000000000000000FE91 /* CarrierAircraftLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE90 /* CarrierAircraftLoader.swift */; };
 		10000000000000000000FE61 /* SonicBoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE60 /* SonicBoomModel.swift */; };
 		10000000000000000000FE71 /* SimulationAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE70 /* SimulationAudioService.swift */; };
+		A0D1000000000000000000B2 /* VehicleAudioProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000B1 /* VehicleAudioProfile.swift */; };
+		A0D1000000000000000000D2 /* ImpactAudioResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000D1 /* ImpactAudioResolver.swift */; };
+		A0D1000000000000000000B4 /* VehicleAudioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000B3 /* VehicleAudioRuntime.swift */; };
+		A0D1000000000000000000C2 /* AcousticMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000C1 /* AcousticMaterials.swift */; };
+		A0D1000000000000000000A2 /* AudioAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000A1 /* AudioAssetCatalog.swift */; };
+		A0D1000000000000000000A4 /* AppAudioSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000A3 /* AppAudioSettings.swift */; };
+		A0D1000000000000000000A6 /* Audio in Resources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000A5 /* Audio */; };
 		10000000000000000000FE41 /* FlightEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE40 /* FlightEnvelope.swift */; };
 		10000000000000000000FF23 /* AeroTableCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF22 /* AeroTableCodec.swift */; };
 		10000000000000000000FF13 /* MachCoefficientDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF12 /* MachCoefficientDatabase.swift */; };
@@ -480,6 +487,13 @@
 		10000000000000000000FE90 /* CarrierAircraftLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierAircraftLoader.swift; sourceTree = "<group>"; };
 		10000000000000000000FE60 /* SonicBoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonicBoomModel.swift; sourceTree = "<group>"; };
 		10000000000000000000FE70 /* SimulationAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationAudioService.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000B1 /* VehicleAudioProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleAudioProfile.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000D1 /* ImpactAudioResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImpactAudioResolver.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000B3 /* VehicleAudioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleAudioRuntime.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000C1 /* AcousticMaterials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcousticMaterials.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000A1 /* AudioAssetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAssetCatalog.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000A3 /* AppAudioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioSettings.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000A5 /* Audio */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Audio; sourceTree = "<group>"; };
 		10000000000000000000FE40 /* FlightEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightEnvelope.swift; sourceTree = "<group>"; };
 		10000000000000000000FF22 /* AeroTableCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroTableCodec.swift; sourceTree = "<group>"; };
 		10000000000000000000FF12 /* MachCoefficientDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachCoefficientDatabase.swift; sourceTree = "<group>"; };
@@ -953,6 +967,10 @@
 				100000000000000000000380 /* OnlineTrials */,
 				100000000000000000000121 /* AppLanguage.swift */,
 				100000000000000000000A12 /* AppGraphicsSettings.swift */,
+				A0D1000000000000000000A3 /* AppAudioSettings.swift */,
+				A0D1000000000000000000A1 /* AudioAssetCatalog.swift */,
+				A0D1000000000000000000C1 /* AcousticMaterials.swift */,
+				A0D1000000000000000000B1 /* VehicleAudioProfile.swift */,
 				1000000000000000000003A1 /* L10n.swift */,
 				1000000000000000000002A6 /* AirframeArchitecture.swift */,
 				100000000000000000000115 /* BatteryState.swift */,
@@ -1088,6 +1106,8 @@
 				10000000000000000000FC20 /* FuelSystemRuntime.swift */,
 				100000000000000000000118 /* CollisionAnalysisService.swift */,
 				10000000000000000000F007 /* ImpactResolutionService.swift */,
+				A0D1000000000000000000B3 /* VehicleAudioRuntime.swift */,
+				A0D1000000000000000000D1 /* ImpactAudioResolver.swift */,
 				10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */,
 				10000000000000000000F105 /* ComponentFailureRuntime.swift */,
 				10000000000000000000F107 /* UAVDamageRuntime.swift */,
@@ -1341,6 +1361,7 @@
 				100000000000000000000126 /* Localizable.strings */,
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
 				10000000000000000000040D /* ThirdPartyAssets.json */,
+				A0D1000000000000000000A5 /* Audio */,
 				C0DE10000000000000000002 /* Workbench.usdz */,
 				C0DE10000000000000000004 /* Brick_Material.usdz */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
@@ -1580,6 +1601,7 @@
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
+				A0D1000000000000000000A6 /* Audio in Resources */,
 				C0DE10000000000000000001 /* Workbench.usdz in Resources */,
 				C0DE10000000000000000003 /* Brick_Material.usdz in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
@@ -1783,6 +1805,12 @@
 				100000000000000000000220 /* DroneSceneViewRepresentable.swift in Sources */,
 				100000000000000000000221 /* AppLanguage.swift in Sources */,
 				100000000000000000000A11 /* AppGraphicsSettings.swift in Sources */,
+				A0D1000000000000000000A4 /* AppAudioSettings.swift in Sources */,
+				A0D1000000000000000000A2 /* AudioAssetCatalog.swift in Sources */,
+				A0D1000000000000000000C2 /* AcousticMaterials.swift in Sources */,
+				A0D1000000000000000000B2 /* VehicleAudioProfile.swift in Sources */,
+				A0D1000000000000000000B4 /* VehicleAudioRuntime.swift in Sources */,
+				A0D1000000000000000000D2 /* ImpactAudioResolver.swift in Sources */,
 				1000000000000000000003A2 /* L10n.swift in Sources */,
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
 				10000000000000000000024F /* AutoNavigationController.swift in Sources */,

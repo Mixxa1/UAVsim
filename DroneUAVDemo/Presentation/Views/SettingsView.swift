@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage(AppGraphicsSettings.renderScaleKey) private var renderScale: Double = 0.0
     @AppStorage(AppGraphicsSettings.windowSizeKey) private var windowSizeRaw: String = WindowSizePreset.native.rawValue
     @AppStorage("app.language") private var languageRaw: String = AppLanguage.system.rawValue
+    @AppStorage(AppAudioSettings.masterVolumeKey) private var masterVolume: Double = AppAudioSettings.defaultMasterVolume
+    @AppStorage(AppAudioSettings.mutedKey) private var isAudioMuted: Bool = false
 
     private var quality: GraphicsQualityPreset {
         GraphicsQualityPreset(rawValue: qualityRaw) ?? .high
@@ -55,6 +57,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     videoSection
                     resolutionSection
+                    audioSection
                     languageSection
                     creditsSection
                 }
@@ -170,6 +173,44 @@ struct SettingsView: View {
                     .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// Master level for everything the simulation plays.
+    ///
+    /// One control rather than a per-category mixer: the pack is authored with its relative
+    /// levels already decided (see `AudioAssetDescriptor.defaultGainDb`), and handing the
+    /// operator sliders that undo that is how a simulation ends up with a rotor louder than
+    /// the crash it flew into.
+    private var audioSection: some View {
+        sectionCard(titleKey: "settings.section.audio") {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("settings.audio.master_volume")
+                            .font(.caption).foregroundStyle(.white.opacity(0.8))
+                        Spacer()
+                        Text(String(format: "%.0f%%", masterVolume * 100))
+                            .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                    }
+                    Slider(value: $masterVolume, in: 0.0...1.0, step: 0.05)
+                        .disabled(isAudioMuted)
+                        .opacity(isAudioMuted ? 0.45 : 1.0)
+                }
+
+                Toggle(isOn: $isAudioMuted) {
+                    Text("settings.audio.mute")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+                .toggleStyle(.switch)
+                .tint(.white.opacity(0.65))
+
+                Text("settings.audio.hint")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

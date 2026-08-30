@@ -50,6 +50,17 @@ struct CollisionObstacle {
     /// within it, so an aircraft that gets past the wall is reported as being in clear air.
     let planarFootprint: [SIMD2<Float>]?
 
+    /// What this obstacle is made of, when whoever built it knew.
+    ///
+    /// Optional because most obstacles predate the question, and `nil` falls back to reading
+    /// the provenance string. That fallback is the *only* mechanism this project had, and it
+    /// is why five of eleven materials were unreachable: no source string in the whole project
+    /// ever contained "water", "glass" or "asphalt", so those branches could not fire. A
+    /// building collider knows perfectly well that a part is glazing, and a world runtime
+    /// knows its triangle is water — this is where that knowledge travels instead of being
+    /// re-guessed from a name downstream.
+    let acousticSurface: AcousticSurfaceMaterial?
+
     init(
         id: UUID,
         center: SIMD3<Float>,
@@ -60,7 +71,8 @@ struct CollisionObstacle {
         planarHalfExtents: SIMD2<Float>? = nil,
         yawRadians: Float = 0.0,
         meshTriangles: [CollisionMeshTriangle]? = nil,
-        planarFootprint: [SIMD2<Float>]? = nil
+        planarFootprint: [SIMD2<Float>]? = nil,
+        acousticSurface: AcousticSurfaceMaterial? = nil
     ) {
         self.id = id
         self.center = center
@@ -84,6 +96,12 @@ struct CollisionObstacle {
         self.yawRadians = yawRadians
         self.meshTriangles = meshTriangles
         self.planarFootprint = planarFootprint
+        self.acousticSurface = acousticSurface
+    }
+
+    /// The obstacle's acoustic material: what it was built as, or what its name suggests.
+    var resolvedAcousticSurface: AcousticSurfaceMaterial {
+        acousticSurface ?? AcousticSurfaceMaterial.fromObstacleSource(source)
     }
 
     var planarCenter: SIMD2<Float> {

@@ -2537,6 +2537,10 @@
 "settings.window_size.native" = "Current size";
 "settings.render_scale" = "Render scale";
 "settings.render_scale.hint" = "Lower values render fewer pixels and upscale — reduces GPU load and heat.";
+"settings.section.audio" = "Audio";
+"settings.audio.master_volume" = "Master volume";
+"settings.audio.mute" = "Mute all sound";
+"settings.audio.hint" = "Impact, damage and vehicle sounds are positioned in 3D and reach the listener with the delay their distance implies.";
 "settings.fullscreen" = "Toggle full screen";
 
 "replay.title" = "Flight Recorder";

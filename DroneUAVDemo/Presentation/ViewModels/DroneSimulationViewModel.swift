@@ -1351,6 +1351,27 @@ final class DroneSimulationViewModel: ObservableObject {
     /// The simulation's audio output. Lazily started, and only ever by a sound that is
     /// actually going to play — the entire subsonic fleet never touches it.
     private let simulationAudio = SimulationAudioService()
+    /// Whether the sound pack has been read off disk yet. See `advanceAudioListener`.
+    private var isAudioPackPrepared = false
+    private let vehicleAudioRuntime = VehicleAudioRuntime()
+    /// Loop voices currently held by the aircraft, so a plan that keeps a layer updates it
+    /// instead of starting a second copy of it.
+    private var vehicleAudioLoopHandles: [AudioAssetID: AudioLoopHandle] = [:]
+    /// Previous listener position, for the listener's own velocity — a chase camera moves
+    /// with the aircraft, and without this the Doppler shift of the thing it is chasing would
+    /// be computed as if the operator stood still.
+    private var previousListenerPosition: SIMD3<Float>?
+    /// The scrape loop, while something is sliding.
+    private var scrapeLoopHandle: AudioLoopHandle?
+    /// How long since a sliding contact last reported. The contact solver resolves one
+    /// contact per tick and keeps no notion of a contact persisting, so "still scraping" is
+    /// reconstructed here: contacts arriving is scraping, contacts stopping is not.
+    private var scrapeSilenceSeconds: Float = 0.0
+    /// Whether the airframe was touching water on the previous tick, so entry can be told
+    /// from floating.
+    private var wasTouchingWater = false
+    /// Previous aileron/elevator/rudder deflections, for the servo movement rate.
+    private var previousControlDeflections: SIMD3<Float>?
     private let impactResolutionService = ImpactResolutionService()
     private let structuralLoadSolver = UAVStructuralLoadSolver()
     private let damageEventRecorder = UAVDamageEventRecorder()
@@ -2712,6 +2733,10 @@ final class DroneSimulationViewModel: ObservableObject {
         simulationTimer?.invalidate()
         simulationTimer = nil
         keyboardInputService.stop()
+        // Loops in particular: without this a hover left running would outlive the flight it
+        // belongs to and keep sounding over the menu.
+        resetVehicleAudio()
+        simulationAudio.stop()
         inputManager.reset()
         sceneController.configureOnlineTrialPlaceholders(nil)
         onlineFleetState = nil
@@ -3578,6 +3603,7 @@ final class DroneSimulationViewModel: ObservableObject {
         damageState = .pristine
         clearCarrier()
         sonicBoomTracker.reset()
+        resetVehicleAudio()
         // Staged here rather than on the first tick, because `homePosition` and the initial
         // aircraft placement are both resolved further down this same reset — and they ask
         // `currentSpawnPoint()`, which now answers with the pylon.
@@ -7205,7 +7231,8 @@ final class DroneSimulationViewModel: ObservableObject {
                     rotorsSpinning: state.throttle > 0.05 && isArmed,
                     deltaTime: dt,
                     applyDamage: collisionCooldown <= 0.0,
-                    restingSpeedThreshold: crashResolutionRestingSpeedThreshold
+                    restingSpeedThreshold: crashResolutionRestingSpeedThreshold,
+                    skinMaterial: selectedDroneProfile.skinMaterial
                 )
                 impactReport = report
                 postPhysicsCollisionAnalysis = CollisionAnalysisSnapshot(
@@ -7309,6 +7336,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         advanceCarrier(deltaTime: dt)
+        advanceAudioListener()
+        advanceVehicleAudio(deltaTime: dt)
         advanceSonicBoom(deltaTime: dt)
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         if let launchDynamics = activeFixedWingLaunchDynamics,
@@ -7582,6 +7611,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// actually took out the radio/flight controller
     /// (`evaluateImpactInternalFailures`).
     private func applyImpactConsequences(_ report: ImpactReport) {
+        applyImpactAudio(report)
         let wasAlreadyDamaged = recordedPhysicalImpactCount > 0
         lastCollisionSource = report.obstacleSource ?? lastCollisionSource
         lastCollisionDetail = String(
@@ -7819,7 +7849,8 @@ final class DroneSimulationViewModel: ObservableObject {
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: deltaTime,
             applyDamage: true,
-            restingSpeedThreshold: crashResolutionRestingSpeedThreshold
+            restingSpeedThreshold: crashResolutionRestingSpeedThreshold,
+            skinMaterial: selectedDroneProfile.skinMaterial
         )
         groundImpactCooldown = report.tier == .lightTouch ? 0.05 : 0.16
         return report
@@ -7947,6 +7978,29 @@ final class DroneSimulationViewModel: ObservableObject {
         let source = elevatedStructure
             ? "ground.structure"
             : "ground.\(terrain.preset.rawValue.lowercased())"
+        // What the aircraft is actually landing on.
+        //
+        // Everything here used to arrive at the impact solver as the string `ground.field`,
+        // which its keyword table read as plain soil — so a touchdown on grass, on fresh snow
+        // and on a concrete apron were the same event with the same sound. The biome and the
+        // weather are both known right here, and a raised support surface is a structure
+        // rather than terrain, so all three are said explicitly.
+        //
+        // Paved surfaces are not detected: the runway is a support surface like any other and
+        // its provenance does not travel through this path, so a runway landing still reads
+        // as its surrounding biome. Fixing that means giving the support-surface query a
+        // material, which is a change to the ground query rather than to this call.
+        let groundSurface: AcousticSurfaceMaterial = elevatedStructure
+            ? .concrete
+            : AcousticSurfaceMaterial.fromTerrain(
+                preset: terrain.preset,
+                isSnowCovered: weather.preset == .snow,
+                isOverWater: sceneController.meshWater?.isWater(
+                    x: state.position.x,
+                    z: state.position.z
+                ) ?? false,
+                isPavedSurface: false
+            )
         let obstacle = CollisionObstacle(
             id: UUID(),
             center: SIMD3<Float>(state.position.x, supportY - 0.25, state.position.z),
@@ -7954,7 +8008,8 @@ final class DroneSimulationViewModel: ObservableObject {
             source: source,
             baseY: supportY - 0.5,
             topY: supportY,
-            planarHalfExtents: SIMD2<Float>(repeating: 500.0)
+            planarHalfExtents: SIMD2<Float>(repeating: 500.0),
+            acousticSurface: groundSurface
         )
         let contactPoint = SIMD3<Float>(currentLowest.point.x, supportY, currentLowest.point.z)
         let syntheticContact = VehicleSweptContact(
@@ -7978,7 +8033,8 @@ final class DroneSimulationViewModel: ObservableObject {
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: deltaTime,
             applyDamage: true,
-            restingSpeedThreshold: crashResolutionRestingSpeedThreshold
+            restingSpeedThreshold: crashResolutionRestingSpeedThreshold,
+            skinMaterial: selectedDroneProfile.skinMaterial
         )
         groundImpactCooldown = report.tier == .lightTouch ? 0.05 : 0.16
         return report
@@ -8160,6 +8216,389 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         carrierState = nil
         sceneController.syncCarrier(nil, deltaTime: 0.0)
+    }
+
+    /// Keeps the audio listener on the active camera, and loads the sound pack once.
+    ///
+    /// The listener is the camera rather than the aircraft because that is where the operator
+    /// is: in a chase view a wing striking a wall should come from the direction the wall is
+    /// on screen, and in an onboard view it should be all around. The sonic boom is the
+    /// deliberate exception — it is placed at the ground station, for reasons given at
+    /// `advanceSonicBoom`.
+    ///
+    /// `simdWorldTransform`, never `presentation`: the presentation transform is owned by the
+    /// render thread and reading it from the tick takes a lock that has cost this project
+    /// whole frames before. The model transform is what the scene controller has already
+    /// written this tick, which is exactly the pose the operator is about to see.
+    ///
+    /// The pack loads on the first tick rather than in `init` so that constructing a view
+    /// model — which several code paths do without ever flying it — costs nothing.
+    private func advanceAudioListener() {
+        if !isAudioPackPrepared {
+            isAudioPackPrepared = true
+            simulationAudio.prepare()
+        }
+        simulationAudio.refreshMasterVolume()
+
+        let transform = activeCameraNode.simdWorldTransform
+        let position = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        // SceneKit cameras look down their own −Z with +Y up.
+        let forward = -SIMD3<Float>(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        let up = SIMD3<Float>(transform.columns.1.x, transform.columns.1.y, transform.columns.1.z)
+        simulationAudio.updateListener(position: position, forward: forward, up: up)
+    }
+
+    /// Plays one contact.
+    ///
+    /// Called from `applyImpactConsequences`, after the physics and the damage model have
+    /// both had their say — which is the plan's ordering rule: audio is handed the result of
+    /// a structural decision, it never makes one.
+    ///
+    /// The seed is the damage recorder's sequence number. It is deterministic for a given
+    /// simulation, which is what makes a replay of a flight sound like the flight rather than
+    /// like a different take of it.
+    private func applyImpactAudio(_ report: ImpactReport) {
+        // How much this contact actually broke, straight from the damage entries.
+        let damageSeverity = report.damage.reduce(Float(0.0)) { worst, entry in
+            max(worst, entry.integrityBefore - entry.integrityAfter)
+        }
+        let event = ImpactAudioEvent(
+            worldPosition: report.contactPoint,
+            surface: report.acousticSurface,
+            vehicleMaterial: report.vehicleMaterial,
+            normalImpulse: report.appliedImpulse,
+            normalSpeed: report.normalClosingSpeed,
+            tangentialSpeed: report.tangentialSpeed,
+            damageSeverity: damageSeverity,
+            brokeSurface: ImpactAudioResolver.surfaceFails(
+                surface: report.acousticSurface,
+                normalImpulseNs: report.appliedImpulse,
+                normalSpeedMps: report.normalClosingSpeed
+            ),
+            isDetachedPart: false,
+            seed: damageEventRecorder.nextSequenceNumber
+        )
+
+        let speedOfSound = currentAtmosphere().state(worldY: state.position.y).speedOfSoundMps
+        let propagation = simulationAudio.propagationDelay(
+            from: report.contactPoint,
+            speedOfSoundMps: speedOfSound
+        )
+        for request in ImpactAudioResolver.resolve(event) {
+            simulationAudio.playOneShot(
+                request.id,
+                at: report.contactPoint,
+                gainDb: request.gainDb,
+                pitchRatio: request.pitchRatio,
+                variant: request.variant,
+                // The layer's own offset rides on top of the flight time, so a distant
+                // collision keeps its internal order while arriving late as a whole.
+                delaySeconds: propagation + request.delaySeconds
+            )
+        }
+
+        updateScrapeLoop(
+            surface: report.acousticSurface,
+            normalImpulseNs: report.appliedImpulse,
+            tangentialSpeedMps: report.tangentialSpeed,
+            at: report.contactPoint
+        )
+    }
+
+    /// Voices the canonical damage-event stream.
+    ///
+    /// Hooked here, at the point every damage event already passes through on its way to
+    /// replay, telemetry and the LAN adapters, rather than at the physics call sites. Two
+    /// things follow from that and neither is incidental: the sound is driven by the same
+    /// events a recording contains, and the event's own sequence number is available as the
+    /// seed — so a replayed flight picks the same takes as the flight did.
+    ///
+    /// Contact damage is skipped here because `applyImpactAudio` has already voiced it as part
+    /// of the collision's layers; what is left is damage with no collider behind it, which is
+    /// the structurally interesting case — a joint weakened earlier that finally lets go in a
+    /// manoeuvre, with nothing touching the aircraft at all.
+    private func applyDamageEventAudio(_ events: [UAVDamageEvent]) {
+        let skin = selectedDroneProfile.skinMaterial
+        let speedOfSound = currentAtmosphere().state(worldY: state.position.y).speedOfSoundMps
+
+        for event in events {
+            // A part that has come off makes its own contacts against the world, and those
+            // are real impacts rather than damage — resolved with the collider's material,
+            // not the airframe's.
+            if event.type == .secondaryImpact, event.reason.hasPrefix("detached_part_impact:") {
+                playDetachedPartImpactAudio(event, speedOfSound: speedOfSound)
+                continue
+            }
+            guard event.colliderID == nil else { continue }
+
+            let material = event.componentID.map {
+                ImpactResolutionService.vehicleMaterial(
+                    componentID: $0,
+                    graph: componentGraph,
+                    skin: skin
+                )
+            } ?? VehicleAcousticMaterial.fromSkin(skin)
+
+            let severity: Float
+            if let before = event.integrityBefore, let after = event.integrityAfter {
+                severity = max(0.0, before - after)
+            } else if let before = event.residualStrengthBefore, let after = event.residualStrengthAfter {
+                severity = max(0.0, before - after)
+            } else {
+                severity = 0.5
+            }
+
+            let position = event.worldPoint ?? (state.position + vehicleBodyOriginWorldOffset)
+            let requests = ImpactAudioResolver.resolveDamage(
+                type: event.type,
+                material: material,
+                severity: severity,
+                seed: event.sequenceNumber
+            )
+            guard !requests.isEmpty else { continue }
+            let propagation = simulationAudio.propagationDelay(
+                from: position,
+                speedOfSoundMps: speedOfSound
+            )
+            for request in requests {
+                simulationAudio.playOneShot(
+                    request.id,
+                    at: position,
+                    gainDb: request.gainDb,
+                    pitchRatio: request.pitchRatio,
+                    variant: request.variant,
+                    delaySeconds: propagation + request.delaySeconds
+                )
+            }
+        }
+    }
+
+    /// A shed component hitting something.
+    ///
+    /// The plan asks for this explicitly: once a part has separated it is its own object and
+    /// its collisions are independent of the aircraft's. The scene already runs that physics
+    /// and reports the contacts; this gives them a voice, using the material of whatever the
+    /// piece landed on.
+    private func playDetachedPartImpactAudio(_ event: UAVDamageEvent, speedOfSound: Float) {
+        guard let position = event.worldPoint else { return }
+        let colliderSource = String(event.reason.dropFirst("detached_part_impact:".count))
+        let surface = AcousticSurfaceMaterial.fromObstacleSource(colliderSource)
+        let material = event.componentID.map {
+            ImpactResolutionService.vehicleMaterial(
+                componentID: $0,
+                graph: componentGraph,
+                skin: selectedDroneProfile.skinMaterial
+            )
+        } ?? VehicleAcousticMaterial.fromSkin(selectedDroneProfile.skinMaterial)
+        let impulse = event.impulseNs ?? 0.0
+
+        let audioEvent = ImpactAudioEvent(
+            worldPosition: position,
+            surface: surface,
+            vehicleMaterial: material,
+            normalImpulse: impulse,
+            normalSpeed: 0.0,
+            tangentialSpeed: 0.0,
+            // A loose part is not taking structural damage in any sense the model tracks.
+            damageSeverity: 0.0,
+            brokeSurface: ImpactAudioResolver.surfaceFails(
+                surface: surface,
+                normalImpulseNs: impulse,
+                normalSpeedMps: 0.0
+            ),
+            isDetachedPart: true,
+            seed: event.sequenceNumber
+        )
+        let propagation = simulationAudio.propagationDelay(from: position, speedOfSoundMps: speedOfSound)
+        for request in ImpactAudioResolver.resolve(audioEvent) {
+            simulationAudio.playOneShot(
+                request.id,
+                at: position,
+                // Lighter than the aircraft's own arrival: this is a shed panel, not the
+                // airframe.
+                gainDb: request.gainDb - 5.0,
+                pitchRatio: request.pitchRatio * 1.08,
+                variant: request.variant,
+                delaySeconds: propagation + request.delaySeconds
+            )
+        }
+    }
+
+    /// Starts, follows or leaves alone the sliding sound for a contact.
+    private func updateScrapeLoop(
+        surface: AcousticSurfaceMaterial,
+        normalImpulseNs: Float,
+        tangentialSpeedMps: Float,
+        at worldPosition: SIMD3<Float>
+    ) {
+        guard let request = ImpactAudioResolver.scrape(
+            surface: surface,
+            normalImpulseNs: normalImpulseNs,
+            tangentialSpeedMps: tangentialSpeedMps
+        ) else {
+            return
+        }
+        scrapeSilenceSeconds = 0.0
+        if let handle = scrapeLoopHandle {
+            simulationAudio.updateLoop(
+                handle,
+                at: worldPosition,
+                gainDb: request.gainDb,
+                pitchRatio: request.pitchRatio
+            )
+        } else {
+            scrapeLoopHandle = simulationAudio.startLoop(
+                request.id,
+                at: worldPosition,
+                gainDb: request.gainDb,
+                pitchRatio: request.pitchRatio
+            )
+        }
+    }
+
+    /// Ends a scrape once the contacts feeding it stop arriving.
+    ///
+    /// A short grace period rather than an immediate stop: the swept solver reports one
+    /// contact per tick and a sliding airframe does not necessarily produce one every single
+    /// tick, so cutting the loop the first time a tick passes without one would chop a
+    /// continuous skid into fragments.
+    private func advanceScrapeDecay(deltaTime: Float) {
+        guard let handle = scrapeLoopHandle else { return }
+        scrapeSilenceSeconds += deltaTime
+        guard scrapeSilenceSeconds > 0.15 else { return }
+        simulationAudio.stopLoop(handle)
+        scrapeLoopHandle = nil
+        scrapeSilenceSeconds = 0.0
+    }
+
+    /// Silences the aircraft and rearms its acoustic life cycle.
+    ///
+    /// Called on reset and on exit. Without it a reset would leave the rotors of the previous
+    /// flight looping, and the electronics-boot cue — which fires once per session — would
+    /// never fire again.
+    private func resetVehicleAudio() {
+        for handle in vehicleAudioLoopHandles.values {
+            simulationAudio.stopLoop(handle)
+        }
+        vehicleAudioLoopHandles.removeAll(keepingCapacity: true)
+        if let handle = scrapeLoopHandle {
+            simulationAudio.stopLoop(handle)
+            scrapeLoopHandle = nil
+        }
+        scrapeSilenceSeconds = 0.0
+        wasTouchingWater = false
+        previousControlDeflections = nil
+        vehicleAudioRuntime.reset()
+        previousListenerPosition = nil
+    }
+
+    /// The aircraft's own continuous sound.
+    ///
+    /// The acoustic model itself lives in `VehicleAudioRuntime`, which is pure and knows
+    /// nothing about audio APIs; this is the adapter that feeds it the tick's mechanical
+    /// state and applies the plan it returns. The split is deliberate — the interesting
+    /// mistakes here are a pitch that does not track RPM and a Doppler shift with the wrong
+    /// sign, and both can be caught in a headless probe rather than by listening.
+    private func advanceVehicleAudio(deltaTime: Float) {
+        let listenerPosition = simulationAudio.currentListenerPosition
+        let listenerVelocity: SIMD3<Float>
+        if let previous = previousListenerPosition, deltaTime > 0.0001 {
+            listenerVelocity = (listenerPosition - previous) / deltaTime
+        } else {
+            listenerVelocity = .zero
+        }
+        previousListenerPosition = listenerPosition
+
+        let atmosphere = currentAtmosphere().state(worldY: state.position.y)
+        let powerplant = activeUAVProfile?.powerplant
+        let profile = VehicleAudioProfile.resolve(
+            airframeClass: selectedDroneProfile.airframeClass,
+            engineType: powerplant?.engineType,
+            rotorCount: max(1, vehicleRotorModel.rotors.count),
+            takeoffMassKg: selectedDroneProfile.takeoffMassKg,
+            maxHorizontalSpeedMps: selectedDroneProfile.maxHorizontalSpeedMps,
+            ratedShaftRPM: powerplant?.ratedShaftRPM,
+            propellerBladeCount: powerplant?.propellerBladeCount ?? 2
+        )
+
+        var input = VehicleAudioInput()
+        input.isSessionRunning = !isAwaitingImportedWorld
+        input.isArmed = isArmed
+        input.physicalState = physicalState
+        input.rotorSpeedsRadPerSec = state.rotorAngularSpeed
+        input.engineRunState = state.engineRuntime?.runState
+        // The engine reports rev/min and everything downstream is rad/s. Converted here, once.
+        input.engineShaftSpeedRadPerSec = (state.engineRuntime?.shaftRPM ?? 0.0) * Float.pi / 30.0
+        input.motorThrottle = state.motorThrottle
+        input.forwardAirspeedMps = state.forwardAirspeed
+        input.airDensityKgPerM3 = atmosphere.airDensity
+        input.speedOfSoundMps = atmosphere.speedOfSoundMps
+        input.rotorThrustFactor = vehicleRotorModel.totalThrustFactor
+        input.rotorVibration = vehicleRotorModel.vibrationLevel
+        input.vtolWingborneBlend = state.vtolWingborneBlend
+        input.worldPosition = state.position + vehicleBodyOriginWorldOffset
+        input.worldVelocity = state.velocity
+        input.listenerPosition = listenerPosition
+        input.listenerVelocity = listenerVelocity
+        input.simulationTime = simulationTime
+        input.deltaTime = deltaTime
+
+        // Servo movement is a rate, not a position: a surface held at full deflection is
+        // silent, and the same surface sweeping there is not.
+        let deflections = SIMD3<Float>(
+            state.aileronDeflection,
+            state.elevatorDeflection,
+            state.rudderDeflection
+        )
+        if let previous = previousControlDeflections, deltaTime > 0.0001 {
+            input.controlSurfaceRate = simd_reduce_max(simd_abs(deflections - previous)) / deltaTime
+        }
+        previousControlDeflections = deflections
+
+        advanceScrapeDecay(deltaTime: deltaTime)
+
+        let plan = vehicleAudioRuntime.update(profile: profile, input: input)
+
+        for cue in plan.cues {
+            let jitter = AudioAssetCatalog.jitter(seed: cue.seed)
+            simulationAudio.playOneShot(
+                cue.id,
+                at: cue.worldPosition,
+                gainDb: cue.gainDb + jitter.gainDb,
+                pitchRatio: jitter.pitchRatio,
+                delaySeconds: simulationAudio.propagationDelay(
+                    from: cue.worldPosition,
+                    speedOfSoundMps: atmosphere.speedOfSoundMps
+                )
+            )
+        }
+
+        // Diff the plan against what is already running: keep and update, start what is new,
+        // stop what the plan dropped. Restarting a loop every tick would be a machine-gun of
+        // buffer starts rather than a continuous sound.
+        var survivingLoops: Set<AudioAssetID> = []
+        for layer in plan.layers {
+            survivingLoops.insert(layer.id)
+            if let handle = vehicleAudioLoopHandles[layer.id] {
+                simulationAudio.updateLoop(
+                    handle,
+                    at: layer.worldPosition,
+                    gainDb: layer.gainDb,
+                    pitchRatio: layer.pitchRatio
+                )
+            } else if let handle = simulationAudio.startLoop(
+                layer.id,
+                at: layer.worldPosition,
+                gainDb: layer.gainDb,
+                pitchRatio: layer.pitchRatio
+            ) {
+                vehicleAudioLoopHandles[layer.id] = handle
+            }
+        }
+        for (assetID, handle) in vehicleAudioLoopHandles where !survivingLoops.contains(assetID) {
+            simulationAudio.stopLoop(handle)
+            vehicleAudioLoopHandles.removeValue(forKey: assetID)
+        }
     }
 
     /// Decides whether the operator hears a boom this tick, and plays it if so.
@@ -8420,6 +8859,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if recentDamageEvents.count > 32 {
             recentDamageEvents.removeFirst(recentDamageEvents.count - 32)
         }
+        applyDamageEventAudio(events)
         for event in events {
             let replayType: MissionReplayEventType
             switch event.type {
@@ -8674,7 +9114,8 @@ final class DroneSimulationViewModel: ObservableObject {
             rotorsSpinning: state.throttle > 0.05 && isArmed,
             deltaTime: 1.0 / 60.0,
             applyDamage: collisionCooldown <= 0.0,
-            restingSpeedThreshold: crashResolutionRestingSpeedThreshold
+            restingSpeedThreshold: crashResolutionRestingSpeedThreshold,
+            skinMaterial: selectedDroneProfile.skinMaterial
         )
         applyImpactConsequences(report)
         if report.tier != .lightTouch, collisionCooldown <= 0.0 {
@@ -27196,7 +27637,27 @@ final class DroneSimulationViewModel: ObservableObject {
 
         guard depth > -0.15 else {
             waterContactSeconds = 0.0
+            wasTouchingWater = false
             return
+        }
+
+        // Water entry is its own event and does not come through the impact solver at all:
+        // the surface under the aircraft is a support surface, and drowning is decided by
+        // this separate path. Without a hook here, hitting the sea would be silent — the one
+        // outcome in the whole simulation with no sound at the moment it happens.
+        if !wasTouchingWater {
+            wasTouchingWater = true
+            let entrySpeed = max(0.0, -state.velocity.y)
+            if entrySpeed > 0.8 {
+                let speedFraction = min(1.0, entrySpeed / 18.0)
+                simulationAudio.playOneShot(
+                    .waterImpact,
+                    at: state.position,
+                    gainDb: -24.0 + 24.0 * speedFraction,
+                    pitchRatio: 1.15 - 0.25 * speedFraction,
+                    delaySeconds: simulationAudio.propagationDelay(from: state.position)
+                )
+            }
         }
 
         let protection = selectedDroneProfile.waterProtection
