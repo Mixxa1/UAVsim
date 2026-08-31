@@ -4,12 +4,17 @@
   "channels": 1,
   "assets": [
     { "id": "fpv_electronics_boot", "category": "vehicle", "path": "Vehicle/Electric/fpv_electronics_boot", "variants": 1, "loop": false, "durationSeconds": 5.200, "defaultGainDb": -6.0 },
+    { "id": "uav_heavy_spinup", "category": "vehicle", "path": "Vehicle/Electric/uav_heavy_spinup", "variants": 1, "loop": false, "durationSeconds": 7.000, "defaultGainDb": -6.0 },
+    { "id": "helicopter_rotor_loop", "category": "vehicle", "path": "Vehicle/Rotorcraft/helicopter_rotor_loop", "variants": 1, "loop": true, "durationSeconds": 5.000, "defaultGainDb": -7.0 },
+    { "id": "fpv_spinup", "category": "vehicle", "path": "Vehicle/Electric/fpv_spinup", "variants": 1, "loop": false, "durationSeconds": 1.410, "defaultGainDb": -6.0 },
+    { "id": "fixedwing_electric_motor", "category": "vehicle", "path": "Vehicle/Electric/fixedwing_electric_motor", "variants": 1, "loop": true, "durationSeconds": 4.500, "defaultGainDb": -10.0 },
+    { "id": "fixedwing_propeller_loop", "category": "vehicle", "path": "Vehicle/Electric/fixedwing_propeller_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -9.0 },
+    { "id": "airflow_loop", "category": "aero", "path": "Aero/Airflow/airflow_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -6.0 },
     { "id": "uav_small_spinup", "category": "vehicle", "path": "Vehicle/Electric/uav_small_spinup", "variants": 1, "loop": false, "durationSeconds": 4.500, "defaultGainDb": -8.0 },
     { "id": "uav_small_hover", "category": "vehicle", "path": "Vehicle/Electric/uav_small_hover", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -9.0 },
     { "id": "uav_heavy_hover_loop", "category": "vehicle", "path": "Vehicle/Electric/uav_heavy_hover_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -8.0 },
     { "id": "uav_hex_flight", "category": "vehicle", "path": "Vehicle/Electric/uav_hex_flight", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -9.0 },
     { "id": "fpv_flight_loop", "category": "vehicle", "path": "Vehicle/Electric/fpv_flight_loop", "variants": 1, "loop": true, "durationSeconds": 5.000, "defaultGainDb": -8.0 },
-    { "id": "fpv_flyby_bank", "category": "vehicle", "path": "Vehicle/Electric/fpv_flyby_bank", "variants": 3, "loop": false, "durationSeconds": 6.000, "defaultGainDb": -8.0 },
     { "id": "impact_mechanical_short", "category": "impact", "path": "Impact/Metal/impact_mechanical_short", "variants": 1, "loop": false, "durationSeconds": 0.300, "defaultGainDb": -4.0 },
     { "id": "impact_metal_heavy", "category": "impact", "path": "Impact/Metal/impact_metal_heavy", "variants": 1, "loop": false, "durationSeconds": 2.200, "defaultGainDb": -2.0 },
     { "id": "concrete_hit", "category": "impact", "path": "Impact/Concrete/concrete_hit", "variants": 1, "loop": false, "durationSeconds": 0.950, "defaultGainDb": -3.0 },
@@ -30,11 +35,9 @@
     { "id": "turboprop_start", "category": "vehicle", "path": "Vehicle/Turboprop/turboprop_start", "variants": 1, "loop": false, "durationSeconds": 14.000, "defaultGainDb": -7.0 },
     { "id": "turbojet_loop", "category": "vehicle", "path": "Vehicle/Turbojet/turbojet_loop", "variants": 1, "loop": true, "durationSeconds": 6.000, "defaultGainDb": -7.0 },
     { "id": "turbojet_start", "category": "vehicle", "path": "Vehicle/Turbojet/turbojet_start", "variants": 1, "loop": false, "durationSeconds": 10.000, "defaultGainDb": -7.0 },
-    { "id": "mechanism_servo", "category": "vehicle", "path": "Vehicle/Electric/mechanism_servo", "variants": 4, "loop": false, "durationSeconds": 1.500, "defaultGainDb": -16.0 }
+    { "id": "mechanism_servo", "category": "vehicle", "path": "Vehicle/Mechanism/mechanism_servo", "variants": 6, "loop": false, "durationSeconds": 1.200, "defaultGainDb": -16.0 }
   ],
   "unavailable": [
-    { "id": "damage_metal_creak", "category": "damage", "reason": "No CC0 structural creak selected yet; a bend is not a creak and the pack does not pretend otherwise" },
-    { "id": "light_shell_impact", "category": "impact", "reason": "Light plastic/fairing contact — no CC0 source selected; see the composite note in the audio plan" },
-    { "id": "fixedwing_electric_loop", "category": "vehicle", "reason": "Electric fixed wings currently fly on the FPV motor loop as a stand-in; a dedicated single-propeller recording is still wanted" }
+
   ]
 }

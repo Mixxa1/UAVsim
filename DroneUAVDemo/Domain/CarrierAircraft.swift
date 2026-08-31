@@ -38,6 +38,41 @@ enum CarrierAircraftKind: String, CaseIterable, Hashable {
         }
     }
 
+    /// What the carrier sounds like.
+    ///
+    /// A C-130 is four turboprops and a B-52 is eight turbojets, so each borrows the loop its
+    /// own engine class already has in the pack. Not a separate recording per aircraft: what
+    /// distinguishes them acoustically at the distance the operator hears them is the kind of
+    /// engine, not the airframe wrapped around it.
+    var audioLoop: AudioAssetID {
+        switch self {
+        case .c130: return .turbopropLoop
+        case .b52: return .turbojetLoop
+        }
+    }
+
+    /// Level relative to the asset's authored gain. Eight jets are louder than four
+    /// turboprops, and both are far louder than anything else in this simulation — which the
+    /// distance law then takes most of back, because a carrier is never close.
+    var audioTrimDb: Float {
+        switch self {
+        case .c130: return 3.0
+        case .b52: return 6.0
+        }
+    }
+
+    /// Playback rate for the loop.
+    ///
+    /// A four-engine turboprop transport runs its propellers slower than the airliner the
+    /// recording came from, and a B-52's engines are much larger than the turbine that was
+    /// recorded. Neither is a measurement; both are the direction the tone should move.
+    var audioPitchRatio: Float {
+        switch self {
+        case .c130: return 0.88
+        case .b52: return 0.78
+        }
+    }
+
     /// Does it have propellers to spin?
     ///
     /// None of them, now. The C-130 had four drawn in, because its asset's own propellers are

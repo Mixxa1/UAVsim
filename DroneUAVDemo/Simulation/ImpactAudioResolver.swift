@@ -294,7 +294,11 @@ enum ImpactAudioResolver {
         case .wood:
             return AssetChoice(id: .treeWoodCrack, trimDb: -3.0)
         case .plastic:
-            return AssetChoice(id: .lightShellImpact, trimDb: -4.0)
+            // A moulded plastic fairing and a composite one fail the same way — a polymer
+            // shell cracking — so plastic borrows the composite break rather than asking for
+            // a recording nobody has. Higher and shorter, because a plain plastic cover has
+            // no fibre in it to hold the crack together.
+            return AssetChoice(id: .damageCompositeBreak, trimDb: -6.0, pitchScale: 1.15)
         case .rubber:
             return nil
         }
@@ -428,7 +432,7 @@ enum ImpactAudioResolver {
         case .wood:
             return AssetChoice(id: .treeWoodCrack)
         case .plastic:
-            return AssetChoice(id: .lightShellImpact)
+            return AssetChoice(id: .damageCompositeBreak, trimDb: -2.0, pitchScale: 1.15)
         case .rubber:
             return nil
         }

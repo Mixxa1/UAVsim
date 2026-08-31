@@ -1372,6 +1372,10 @@ final class DroneSimulationViewModel: ObservableObject {
     private var wasTouchingWater = false
     /// Previous aileron/elevator/rudder deflections, for the servo movement rate.
     private var previousControlDeflections: SIMD3<Float>?
+    /// The carrier aircraft's engine loop, held apart from the vehicle's own loops — see
+    /// `advanceCarrierAudio`.
+    private var carrierLoopHandle: AudioLoopHandle?
+    private var carrierLoopAsset: AudioAssetID?
     private let impactResolutionService = ImpactResolutionService()
     private let structuralLoadSolver = UAVStructuralLoadSolver()
     private let damageEventRecorder = UAVDamageEventRecorder()
@@ -8471,6 +8475,62 @@ final class DroneSimulationViewModel: ObservableObject {
         scrapeSilenceSeconds = 0.0
     }
 
+    /// The carrier aircraft's own engines.
+    ///
+    /// A C-130 with a Firebee under the wing is a four-engine transport a few tens of metres
+    /// from the operator's aircraft, and it was silent: nothing in the audio path knew the
+    /// carrier existed. It flies, it carries, it releases and it departs, and the whole
+    /// sequence had no sound but the UAV's own.
+    ///
+    /// Kept in its own handle rather than in the vehicle's loop table because both can want
+    /// the same asset at once — a turbojet UAV released from a B-52 is two turbojets — and a
+    /// table keyed by asset id would have them fight over one voice.
+    private func advanceCarrierAudio(deltaTime: Float) {
+        guard let carrier = carrierState, carrier.isVisible else {
+            if let handle = carrierLoopHandle {
+                simulationAudio.stopLoop(handle)
+                carrierLoopHandle = nil
+            }
+            return
+        }
+
+        let asset = carrier.kind.audioLoop
+        let doppler = VehicleAudioRuntime.dopplerRatio(
+            sourcePosition: carrier.position,
+            sourceVelocity: carrier.velocity,
+            listenerPosition: simulationAudio.currentListenerPosition,
+            listenerVelocity: carrierListenerVelocity(deltaTime: deltaTime),
+            speedOfSoundMps: currentAtmosphere().state(worldY: carrier.position.y).speedOfSoundMps
+        )
+        let pitch = carrier.kind.audioPitchRatio * doppler
+
+        if let handle = carrierLoopHandle, carrierLoopAsset == asset {
+            simulationAudio.updateLoop(
+                handle,
+                at: carrier.position,
+                gainDb: carrier.kind.audioTrimDb,
+                pitchRatio: pitch
+            )
+        } else {
+            if let handle = carrierLoopHandle {
+                simulationAudio.stopLoop(handle)
+            }
+            carrierLoopHandle = simulationAudio.startLoop(
+                asset,
+                at: carrier.position,
+                gainDb: carrier.kind.audioTrimDb,
+                pitchRatio: pitch
+            )
+            carrierLoopAsset = asset
+        }
+    }
+
+    /// The listener's own velocity, reused by the carrier's Doppler.
+    private func carrierListenerVelocity(deltaTime: Float) -> SIMD3<Float> {
+        guard let previous = previousListenerPosition, deltaTime > 0.0001 else { return .zero }
+        return (simulationAudio.currentListenerPosition - previous) / deltaTime
+    }
+
     /// Silences the aircraft and rearms its acoustic life cycle.
     ///
     /// Called on reset and on exit. Without it a reset would leave the rotors of the previous
@@ -8488,6 +8548,11 @@ final class DroneSimulationViewModel: ObservableObject {
         scrapeSilenceSeconds = 0.0
         wasTouchingWater = false
         previousControlDeflections = nil
+        if let handle = carrierLoopHandle {
+            simulationAudio.stopLoop(handle)
+            carrierLoopHandle = nil
+        }
+        carrierLoopAsset = nil
         vehicleAudioRuntime.reset()
         previousListenerPosition = nil
     }
@@ -8518,7 +8583,12 @@ final class DroneSimulationViewModel: ObservableObject {
             takeoffMassKg: selectedDroneProfile.takeoffMassKg,
             maxHorizontalSpeedMps: selectedDroneProfile.maxHorizontalSpeedMps,
             ratedShaftRPM: powerplant?.ratedShaftRPM,
-            propellerBladeCount: powerplant?.propellerBladeCount ?? 2
+            propellerBladeCount: powerplant?.propellerBladeCount ?? 2,
+            // The runtime profile cannot say "helicopter" — `AirframeClass` files rotorcraft
+            // under `.multirotor` and `AirframeStyle` has no case for one — so the catalogue
+            // entry is the only place that knows. An aircraft without one falls back to the
+            // mass and rotor-count rules, which is the pre-existing behaviour.
+            vehicleType: activeUAVProfile?.vehicleType
         )
 
         var input = VehicleAudioInput()
@@ -8556,6 +8626,7 @@ final class DroneSimulationViewModel: ObservableObject {
         previousControlDeflections = deflections
 
         advanceScrapeDecay(deltaTime: deltaTime)
+        advanceCarrierAudio(deltaTime: deltaTime)
 
         let plan = vehicleAudioRuntime.update(profile: profile, input: input)
 

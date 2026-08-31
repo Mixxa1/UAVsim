@@ -19,6 +19,10 @@
 # per asset instead, so relative loudness is a stated design decision rather than an
 # accident of how each contributor recorded their sample.
 #
+# Sources live in `.audio-sources/` (gitignored). Downloads the pack does not reference are
+# kept in `.audio-sources/unused/` — the script only looks in the top level, so anything moved
+# there stops being built without being lost. Reinstating one is a `mv` and a table row.
+#
 # Usage:  Tools/audio-pack.sh [--sources DIR] [--out DIR]
 # Requires ffmpeg (brew install ffmpeg).
 
@@ -53,24 +57,33 @@ trap 'rm -rf "$TMP"' EXIT
 #
 # id | category | subdirectory | source file | mode | parameters | defaultGainDb
 #
-# The source field may be a glob. Freesound's filenames carry a slug after the numeric id
-# and the slug is not something to depend on, so `488589__*` is both shorter and safer than
-# transcribing whatever the download happened to be called.
+# The source field may be a glob, and for `slice` it may be a comma-separated list of them.
+# Freesound's filenames carry a slug after the numeric id and the slug is not something to
+# depend on, so `488589__*` is both shorter and safer than transcribing whatever the download
+# happened to be called. Slicing across several sources is how one id gets variants that are
+# genuinely different recordings rather than four cuts of the same one.
 #
 # modes:
 #   oneshot START DUR    one clip, from START for DUR seconds
 #   slice   N MIN MAX    auto-split on silence, keep up to N segments as id_1..id_N
 #   loop    START LEN X  window of LEN seconds from START, crossfaded over X so it repeats
 #                        without a seam
+#   pitched START DUR R  one clip played at rate R — below 1 it is slower *and* lower, which
+#                        is what a bigger, heavier machine sounds like
 # ---------------------------------------------------------------------------
 read -r -d '' ASSETS <<'TABLE' || true
 fpv_electronics_boot|vehicle|Vehicle/Electric|854647__qubodup__uav-drone-bootconnection-sounds.wav|oneshot|0.00 5.20|-6.0
+uav_heavy_spinup|vehicle|Vehicle/Electric|329543__*|pitched|1.20 5.60 0.80|-6.0
+helicopter_rotor_loop|vehicle|Vehicle/Rotorcraft|187681__*|loop|0.30 5.00 0.35|-7.0
+fpv_spinup|vehicle|Vehicle/Electric|741030__*|oneshot|0.00 1.41|-6.0
+fixedwing_electric_motor|vehicle|Vehicle/Electric|418013__*|loop|0.50 4.50 0.30|-10.0
+fixedwing_propeller_loop|vehicle|Vehicle/Electric|457013__*|loop|2.00 6.00 0.35|-9.0
+airflow_loop|aero|Aero/Airflow|20108__*|loop|2.00 6.00 0.35|-6.0
 uav_small_spinup|vehicle|Vehicle/Electric|683299__sadiquecat__dji-mavic-mini-2-propeller-start-up-no-takeoff-close-take.wav|oneshot|1.20 4.50|-8.0
 uav_small_hover|vehicle|Vehicle/Electric|683298__sadiquecat__dji-mavic-mini-2-hover-above-ground-up-down-xy-mic-placement-zoom-h5.wav|loop|8.00 6.00 0.35|-9.0
 uav_heavy_hover_loop|vehicle|Vehicle/Electric|854382__qubodup__big-slow-heavy-drone-hovering-idle-loop.wav|loop|0.40 6.00 0.35|-8.0
 uav_hex_flight|vehicle|Vehicle/Electric|264853__torror__hexacopter-drone-flight.wav|loop|18.00 6.00 0.35|-9.0
 fpv_flight_loop|vehicle|Vehicle/Electric|854466__qubodup__fpv-drone-flight-3.wav|loop|3.00 5.00 0.30|-8.0
-fpv_flyby_bank|vehicle|Vehicle/Electric|524331__5demayo__quadcopter-flyby-multiple.mp3|slice|3 0.80 6.00|-8.0
 impact_mechanical_short|impact|Impact/Metal|332056__qubodup__fast-collision.flac|oneshot|0.00 0.30|-4.0
 impact_metal_heavy|impact|Impact/Metal|422438__behansean__metallic-crash.wav|oneshot|0.00 2.20|-2.0
 concrete_hit|impact|Impact/Concrete|321477__dslrguide__concrete-hit.wav|oneshot|0.00 0.95|-3.0
@@ -91,7 +104,7 @@ turboprop_loop|vehicle|Vehicle/Turboprop|457131__*|loop|100.00 6.00 0.35|-8.0
 turboprop_start|vehicle|Vehicle/Turboprop|704945__*|oneshot|9.00 14.00|-7.0
 turbojet_loop|vehicle|Vehicle/Turbojet|205581__*|loop|10.00 6.00 0.35|-7.0
 turbojet_start|vehicle|Vehicle/Turbojet|704945__*|oneshot|12.00 10.00|-7.0
-mechanism_servo|vehicle|Vehicle/Electric|776274__*|slice|4 0.25 1.50|-16.0
+mechanism_servo|vehicle|Vehicle/Mechanism|824121__*,520514__*,322021__*|slice|6 0.15 1.20|-16.0
 TABLE
 
 # Windows above are chosen from measured level profiles rather than guessed:
@@ -99,18 +112,34 @@ TABLE
 #   205581 settles by 2 s and holds −8…−10 dB, so the window starts at 10 s;
 #   457131 is 146 s of taxi and take-off — quiet until 3 s, taxi to about 100 s, then power
 #     coming up; the window sits in the settled stretch;
-#   704945 is silent until 9.5 s, spools to a peak around 17 s and decays after 105 s.
+#   704945 is silent until 9.5 s, spools to a peak around 17 s and decays after 105 s;
+#   20108 is dead flat at −13.5 dB for all 20 s, which is what an airflow bed needs;
+#   418013 holds −36 dB for its first 8 s and then winds down, so the window stops at 5 s;
+#   457013 is flat at −13.5 dB throughout — a steady propeller rather than a pass;
+#   187681 holds −21…−22 dB across its six seconds — already a rotor loop by intent;
+#   329543 rises out of the noise at 1.2 s and holds through 10 s, so the spin-up window
+#     starts there; at 0.8x it comes out seven seconds long, which is a launch rather
+#     than a chirp.
+#
+# The propeller layer is 457013 and not the flyover (71692) that was suggested for it. A
+# flyover recording has the approach and the recession baked in: its level swings 40 dB across
+# the pass and the pitch sweeps with the aircraft's own Doppler. Looped, it repeats that pass
+# every few seconds, and the simulation then applies its *own* Doppler on top of the recorded
+# one. 71692 remains the better source for a fly-by one-shot, which nothing plays yet.
 # The turboprop and turbojet starts come from that one recording at different windows. It is
 # a compromise and named as one: a turboprop start carries its propeller and a small turbojet
 # does not, and no separate CC0 recording of either has been chosen yet.
 
-# Assets the plan asks for that no CC0 source in this project covers yet. Recorded in the
-# manifest so the runtime can say "not in the pack" instead of silently mapping something
-# else onto them.
+# Assets the plan asks for that this project cannot supply yet. Recorded in the manifest so
+# the runtime can say "not in the pack" instead of silently mapping something else onto them.
+#
+# Empty, and that is the current state rather than a disabled feature: every id the code can
+# ask for, the pack supplies. Three entries lived here and were resolved rather than filled —
+# the fly-by bank because a propulsion loop with Doppler already is a fly-by, the plastic
+# shell because a moulded polymer cracking is the composite break at a higher pitch, and the
+# metal creak because it needs a mechanic this project does not have: a creak is a structure
+# under *held* load, and the damage model reports discrete events.
 read -r -d '' MISSING <<'TABLE' || true
-damage_metal_creak|damage|No CC0 structural creak selected yet; a bend is not a creak and the pack does not pretend otherwise
-light_shell_impact|impact|Light plastic/fairing contact — no CC0 source selected; see the composite note in the audio plan
-fixedwing_electric_loop|vehicle|Electric fixed wings currently fly on the FPV motor loop as a stand-in; a dedicated single-propeller recording is still wanted
 TABLE
 
 # ---------------------------------------------------------------------------
@@ -147,6 +176,23 @@ emit_oneshot() {  # emit_oneshot SRC DST START DUR
   peak_normalise "$dst"
 }
 
+# Slows (or speeds) a clip by resampling. Rate and pitch move together, which is the honest
+# transform: a larger rotor is both slower and lower, and separating the two — holding pitch
+# while stretching time — is a studio effect rather than a physical one.
+emit_pitched() {  # emit_pitched SRC DST START DUR RATE
+  local src="$1" dst="$2" start="$3" dur="$4" rate="$5"
+  local outDur
+  outDur="$(awk -v d="$dur" -v r="$rate" 'BEGIN { printf "%.4f", d / r }')"
+  local fadeOut
+  fadeOut="$(awk -v d="$outDur" -v f="$FADE" 'BEGIN { printf "%.4f", d - f }')"
+  local newRate
+  newRate="$(awk -v sr="$SAMPLE_RATE" -v r="$rate" 'BEGIN { printf "%d", sr * r }')"
+  ffmpeg -hide_banner -loglevel error -y -ss "$start" -t "$dur" -i "$src" \
+    -af "aresample=$SAMPLE_RATE,aformat=channel_layouts=mono,asetrate=$newRate,aresample=$SAMPLE_RATE,afade=t=in:st=0:d=$FADE,afade=t=out:st=$fadeOut:d=$FADE" \
+    -c:a pcm_s16le "$dst"
+  peak_normalise "$dst"
+}
+
 # A loop has to arrive back at its own first sample. The window is taken LEN + X long; the
 # extra X seconds — the material that *would* have played next — is faded into the first X
 # seconds of the clip, so the end of the loop and its beginning are the same signal and the
@@ -176,8 +222,8 @@ emit_loop() {  # emit_loop SRC DST START LEN XFADE
 # Splits a multi-take recording on its own silences. Contributors record five swings of a
 # log or twenty snapping branches into one file; those are variants, and variants are what
 # stop a repeated contact sounding like a machine gun.
-emit_slices() {  # emit_slices SRC DST_DIR ID COUNT MIN MAX  -> echoes the number written
-  local src="$1" dir="$2" id="$3" count="$4" minDur="$5" maxDur="$6"
+emit_slices() {  # emit_slices SRC DST_DIR ID COUNT MIN MAX START_INDEX -> echoes total written
+  local src="$1" dir="$2" id="$3" count="$4" minDur="$5" maxDur="$6" startIndex="${7:-0}"
   mono "$src" "$TMP/full.wav"
   local total
   total="$(duration_of "$TMP/full.wav")"
@@ -193,7 +239,7 @@ emit_slices() {  # emit_slices SRC DST_DIR ID COUNT MIN MAX  -> echoes the numbe
     END { if (open && total > start) print start, total }
   ' "$TMP/marks.txt" > "$TMP/segments.txt"
 
-  local written=0
+  local written=$startIndex
   while read -r segStart segEnd; do
     [[ -z "${segStart:-}" ]] && continue
     local segDur
@@ -230,12 +276,18 @@ missingSources=()
 
 while IFS='|' read -r id category subdir sourceFile mode params gainDb; do
   [[ -z "${id:-}" ]] && continue
-  # Globs allowed — see the note on the asset table.
-  src="$(compgen -G "$SOURCES/$sourceFile" | head -1 || true)"
-  if [[ -z "$src" || ! -f "$src" ]]; then
+  # Globs allowed, comma-separated for slice — see the note on the asset table.
+  IFS=',' read -r -a sourcePatterns <<< "$sourceFile"
+  resolvedSources=()
+  for pattern in "${sourcePatterns[@]}"; do
+    candidate="$(compgen -G "$SOURCES/$pattern" | head -1 || true)"
+    [[ -n "$candidate" && -f "$candidate" ]] && resolvedSources+=("$candidate")
+  done
+  if [[ ${#resolvedSources[@]} -eq 0 ]]; then
     missingSources+=("$id ($sourceFile)")
     continue
   fi
+  src="${resolvedSources[0]}"
   dir="$OUT/$subdir"
   mkdir -p "$dir"
 
@@ -253,11 +305,21 @@ while IFS='|' read -r id category subdir sourceFile mode params gainDb; do
       ;;
     slice)
       read -r count minDur maxDur <<< "$params"
-      variants="$(emit_slices "$src" "$dir" "$id" "$count" "$minDur" "$maxDur")"
+      # Each listed source contributes variants until the count is reached, so a bank can be
+      # built from several independent recordings rather than several cuts of one.
+      variants=0
+      for source in "${resolvedSources[@]}"; do
+        [[ "$variants" -ge "$count" ]] && break
+        variants="$(emit_slices "$source" "$dir" "$id" "$count" "$minDur" "$maxDur" "$variants")"
+      done
       if [[ "$variants" -eq 0 ]]; then
         echo "audio-pack: $id produced no slices from $sourceFile" >&2
         continue
       fi
+      ;;
+    pitched)
+      read -r start dur rate <<< "$params"
+      emit_pitched "$src" "$dir/$id.wav" "$start" "$dur" "$rate"
       ;;
     *)
       echo "audio-pack: unknown mode '$mode' for $id" >&2

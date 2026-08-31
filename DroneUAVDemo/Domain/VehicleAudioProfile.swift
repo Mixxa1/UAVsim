@@ -16,6 +16,10 @@ enum VehicleAudioClass: String, CaseIterable, Hashable {
     /// in common. Its blades change speed several times a second, which is most of what the
     /// class sounds like.
     case fpvQuad
+    /// Rotorcraft: one or two large rotors rather than many small ones. The catalogue holds a
+    /// single example — a tandem-rotor cargo machine — and it flew on a heavy multirotor's
+    /// voice until this class existed.
+    case helicopter
     case electricFixedWing
     case pistonFixedWing
     case turbopropFixedWing
@@ -56,6 +60,16 @@ struct VehicleAudioProfile: Hashable {
     var liftRotorLoop: AudioAssetID? = nil
     var liftRotorReferenceSpeedRadPerSec: Float = 430.0
     var liftRotorTrimDb: Float = 0.0
+
+    /// The propeller in front of the motor, when the two are worth hearing separately.
+    ///
+    /// The plan describes an electric fixed wing as "motor whine + propeller + airflow", and
+    /// those are three things rather than one: the motor's tone is electrical and tied to the
+    /// shaft, the propeller's is aerodynamic. Kept as its own layer so each can be driven and
+    /// trimmed separately. `nil` wherever the pack has one recording of the whole powerplant,
+    /// which is every fuel engine here.
+    var propellerLoop: AudioAssetID? = nil
+    var propellerTrimDb: Float = 0.0
 
     /// Whether the propulsion sound comes from a fuel engine's own shaft.
     ///
@@ -103,8 +117,24 @@ struct VehicleAudioProfile: Hashable {
         takeoffMassKg: Float,
         maxHorizontalSpeedMps: Float,
         ratedShaftRPM: Float?,
-        propellerBladeCount: Int
+        propellerBladeCount: Int,
+        /// What the catalogue calls this aircraft.
+        ///
+        /// Needed because `AirframeClass` cannot express it: a helicopter is filed under
+        /// `.multirotor` there — correctly, since the flight model treats both as rotor-borne —
+        /// and nothing else on the runtime profile distinguishes them. Without this a 57 kg
+        /// tandem-rotor machine resolves to "heavy multirotor" and flies on a recording of
+        /// small fast propellers. `nil` for an aircraft with no catalogue entry, which falls
+        /// back to the rotor-count and mass rules.
+        vehicleType: UAVVehicleType? = nil
     ) -> VehicleAudioProfile {
+        if vehicleType == .helicopter {
+            return helicopterProfile(
+                takeoffMassKg: takeoffMassKg,
+                rotorCount: rotorCount,
+                propellerBladeCount: propellerBladeCount
+            )
+        }
         switch airframeClass {
         case .multirotor:
             return multirotorProfile(
@@ -141,6 +171,39 @@ struct VehicleAudioProfile: Hashable {
         }
     }
 
+    /// A rotorcraft's voice.
+    ///
+    /// The distinction that matters is blade-pass frequency. A heavy multirotor's props turn
+    /// at several thousand rpm; a helicopter's main rotor turns at a few hundred, with more
+    /// blades, and the tone that comes out is an order of magnitude lower. Playing one for the
+    /// other is the same class of error as putting a rotor loop under a piston engine.
+    private static func helicopterProfile(
+        takeoffMassKg: Float,
+        rotorCount: Int,
+        propellerBladeCount: Int
+    ) -> VehicleAudioProfile {
+        VehicleAudioProfile(
+            audioClass: .helicopter,
+            propulsionLoop: .helicopterRotorLoop,
+            // A large rotor spinning up is closer to a heavy multirotor's launch than to
+            // anything else in the pack. Approximate, and the nearest thing there is.
+            spinUpCue: .uavHeavySpinup,
+            engineStartCue: nil,
+            electronicsBootCue: .fpvElectronicsBoot,
+            // Collective and cyclic are the controls, and both are servo-driven.
+            mechanismCue: .mechanismServo,
+            // The flight model drives rotorcraft through the same multirotor lanes, so the
+            // reference is that solver's hover point rather than a real rotor speed. The
+            // recording is of a real rotor; the ratio is what moves it.
+            referenceShaftSpeedRadPerSec: 430.0,
+            bladeCount: max(2, propellerBladeCount),
+            referenceAirspeedMps: 16.0,
+            // A 57 kg machine is loud.
+            propulsionTrimDb: 3.0,
+            airflowTrimDb: -14.0
+        )
+    }
+
     private static func multirotorProfile(
         rotorCount: Int,
         takeoffMassKg: Float,
@@ -155,7 +218,8 @@ struct VehicleAudioProfile: Hashable {
             return VehicleAudioProfile(
                 audioClass: .fpvQuad,
                 propulsionLoop: .fpvFlightLoop,
-                spinUpCue: .uavSmallSpinup,
+                // A racing quad revs; it does not wind up the way a camera drone does.
+                spinUpCue: .fpvSpinup,
                 engineStartCue: nil,
                 electronicsBootCue: .fpvElectronicsBoot,
                 mechanismCue: nil,
@@ -176,7 +240,9 @@ struct VehicleAudioProfile: Hashable {
                 // Six rotors and four rotors are not the same sound at any level: the
                 // blade-pass tones beat against each other differently.
                 propulsionLoop: rotorCount >= 6 ? .uavHexFlight : .uavHeavyHoverLoop,
-                spinUpCue: .uavSmallSpinup,
+                // Its own launch recording, slowed. Borrowing the small one made a 25 kg
+                // machine start up like a 249 g one.
+                spinUpCue: .uavHeavySpinup,
                 engineStartCue: nil,
                 electronicsBootCue: .fpvElectronicsBoot,
                 mechanismCue: nil,
@@ -266,33 +332,27 @@ struct VehicleAudioProfile: Hashable {
         case .electricMotor, .none:
             return VehicleAudioProfile(
                 audioClass: .electricFixedWing,
-                // The FPV loop stands in until a single-propeller recording exists. This is a
-                // substitution the plan's own rule allows and the fuel engines below do not:
-                // it is the same mechanism and the same materials — a brushless motor turning
-                // a small plastic propeller — differing in how many of them there are, which
-                // the pitch and level laws already express. Putting a rotor recording under a
-                // piston engine would be a different claim entirely, and is not made.
-                propulsionLoop: .fpvFlightLoop,
+                // Two layers rather than a borrowed quadcopter: a recording of a small
+                // electric motor, and a steady propeller over it. This is what the plan asks
+                // for — "motor whine + propeller + airflow" — and it is why an electric
+                // aeroplane no longer sounds like a racing quad with the pitch pulled down.
+                propulsionLoop: .fixedWingElectricMotor,
                 spinUpCue: .uavSmallSpinup,
                 engineStartCue: nil,
                 electronicsBootCue: .fpvElectronicsBoot,
                 mechanismCue: .mechanismServo,
-                // Deliberately well above the speed the aircraft actually cruises at — the
-                // fixed-wing solver runs its single lane at 60 + 540·throttle rad/s, so
-                // cruise sits near 350 and this reference makes the ratio about 0.7.
-                //
-                // That is the point. With the reference set to the real cruise speed the
-                // stand-in clip played at its recorded pitch, which meant an electric
-                // aeroplane and a 5-inch racing quad were the same sound. A fixed wing turns
-                // one large propeller slowly where a quad turns four small ones fast, and
-                // pitching the clip down by roughly a third is what that difference sounds
-                // like. It is a stand-in either way; this makes it a stand-in for the right
-                // aircraft.
-                referenceShaftSpeedRadPerSec: 520.0,
+                propellerLoop: .fixedWingPropellerLoop,
+                propellerTrimDb: 1.0,
+                // Back to the speed the aircraft actually cruises at — the fixed-wing solver
+                // runs its single lane at 60 + 540·throttle rad/s, so cruise sits near 350 and
+                // both recordings play at their own pitch there. This reference was
+                // deliberately wrong for a while, pushed to 520 so a borrowed quadcopter clip
+                // would at least come out a third lower than the quadcopter's. With real motor
+                // and propeller recordings there is nothing left to disguise.
+                referenceShaftSpeedRadPerSec: 350.0,
                 bladeCount: blades,
                 referenceAirspeedMps: referenceAirspeed,
-                // Restores the level the lower speed ratio takes off.
-                propulsionTrimDb: 2.5,
+                propulsionTrimDb: 0.0,
                 airflowTrimDb: -10.0
             )
         }

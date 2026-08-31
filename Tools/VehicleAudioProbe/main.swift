@@ -58,6 +58,7 @@ struct ProfileCase {
     let massKg: Float
     let speed: Float
     let expected: VehicleAudioClass
+    var vehicle: UAVVehicleType? = nil
 }
 
 let profileCases: [ProfileCase] = [
@@ -69,7 +70,12 @@ let profileCases: [ProfileCase] = [
     .init(label: "two-stroke fixed wing", airframe: .fixedWing, engine: .pistonTwoStroke, rotors: 1, massKg: 22.0, speed: 45.0, expected: .pistonFixedWing),
     .init(label: "turboprop UAV", airframe: .fixedWing, engine: .turboprop, rotors: 1, massKg: 2_200.0, speed: 130.0, expected: .turbopropFixedWing),
     .init(label: "turbojet UAV", airframe: .fixedWing, engine: .turbojet, rotors: 1, massKg: 1_100.0, speed: 300.0, expected: .turbojetFixedWing),
-    .init(label: "battery VTOL", airframe: .hybridVTOL, engine: nil, rotors: 5, massKg: 5.5, speed: 26.0, expected: .electricFixedWing)
+    .init(label: "battery VTOL", airframe: .hybridVTOL, engine: nil, rotors: 5, massKg: 5.5, speed: 26.0, expected: .electricFixedWing),
+    // The catalogue's one rotorcraft: a 57 kg tandem-rotor cargo machine. It is filed under
+    // `.multirotor` like every other rotor-borne airframe, so without the vehicle type it
+    // resolves to "heavy multirotor" and flies on small fast propellers.
+    .init(label: "tandem-rotor cargo helicopter", airframe: .multirotor, engine: nil, rotors: 2,
+          massKg: 57.0, speed: 19.0, expected: .helicopter, vehicle: .helicopter)
 ]
 
 print(pad("aircraft", 28) + pad("expected", 24) + pad("resolved", 24))
@@ -81,7 +87,8 @@ for testCase in profileCases {
         takeoffMassKg: testCase.massKg,
         maxHorizontalSpeedMps: testCase.speed,
         ratedShaftRPM: testCase.engine == .turboprop ? 1_591.0 : nil,
-        propellerBladeCount: 2
+        propellerBladeCount: 2,
+        vehicleType: testCase.vehicle
     )
     let ok = profile.audioClass == testCase.expected
     print(pad(testCase.label, 28) + pad(testCase.expected.rawValue, 24)
@@ -289,7 +296,7 @@ for airspeed in stride(from: Float(4.0), through: Float(40.0), by: 6.0) {
     input.rotorSpeedsRadPerSec = SIMD4<Float>(400.0, 0, 0, 0)
     input.forwardAirspeedMps = airspeed
     let plan = runtime.update(profile: wingProfile, input: input)
-    if let airflow = plan.layers.first(where: { $0.id == .airflowSynthetic }) {
+    if let airflow = plan.layers.first(where: { $0.id == .airflowLoop }) {
         print(String(format: "%10.0f %12.1f %10.3f", airspeed, airflow.gainDb, airflow.pitchRatio))
         if airflow.gainDb < previousAirflowGain { airflowMonotonic = false }
         previousAirflowGain = airflow.gainDb
@@ -309,7 +316,7 @@ do {
     input.forwardAirspeedMps = 30.0
     let plan = runtime.update(profile: wingProfile, input: input)
     check(
-        !plan.layers.contains { $0.id == .airflowSynthetic },
+        !plan.layers.contains { $0.id == .airflowLoop },
         "an aircraft sitting on the ground produced airflow noise"
     )
     print("\nno airflow while on the ground, whatever the airspeed reads: ok")
@@ -326,7 +333,7 @@ do {
         input.forwardAirspeedMps = 30.0
         input.airDensityKgPerM3 = density
         return runtime.update(profile: wingProfile, input: input)
-            .layers.first { $0.id == .airflowSynthetic }?.gainDb ?? 0.0
+            .layers.first { $0.id == .airflowLoop }?.gainDb ?? 0.0
     }
     let seaLevel = airflowGain(density: AtmosphereModel.seaLevelDensity)
     let highAltitude = airflowGain(density: AtmosphereModel.seaLevelDensity * 0.3)
@@ -382,7 +389,8 @@ for testCase in profileCases {
         takeoffMassKg: testCase.massKg,
         maxHorizontalSpeedMps: testCase.speed,
         ratedShaftRPM: testCase.engine == .turboprop ? 1_591.0 : nil,
-        propellerBladeCount: 2
+        propellerBladeCount: 2,
+        vehicleType: testCase.vehicle
     )
     loopsByClass[profile.audioClass] = profile.propulsionLoop
     let loop = profile.propulsionLoop?.rawValue ?? "— none —"
@@ -462,7 +470,9 @@ func cruiseLayers(_ profile: VehicleAudioProfile, wingborneBlend: Float = 1.0) -
     return runtime.update(profile: profile, input: input).layers.map(\.id)
 }
 
-let electricLoops: Set<AudioAssetID> = [.uavSmallHover, .uavHeavyHoverLoop, .uavHexFlight, .fpvFlightLoop]
+let rotorLoops: Set<AudioAssetID> = [.uavSmallHover, .uavHeavyHoverLoop, .uavHexFlight,
+                                    .fpvFlightLoop, .helicopterRotorLoop]
+let electricLoops: Set<AudioAssetID> = rotorLoops.union([.fixedWingElectricMotor, .fixedWingPropellerLoop])
 let fuelLoops: Set<AudioAssetID> = [.pistonEngineLoop, .turbopropLoop, .turbojetLoop]
 
 for testCase in profileCases {
@@ -473,7 +483,8 @@ for testCase in profileCases {
         takeoffMassKg: testCase.massKg,
         maxHorizontalSpeedMps: testCase.speed,
         ratedShaftRPM: testCase.engine == .turboprop ? 1_591.0 : nil,
-        propellerBladeCount: 2
+        propellerBladeCount: 2,
+        vehicleType: testCase.vehicle
     )
     let layers = cruiseLayers(profile)
     print(pad(testCase.label, 28) + layers.map(\.rawValue).joined(separator: " + "))
@@ -488,9 +499,12 @@ for testCase in profileCases {
         let stray = layers.filter { fuelLoops.contains($0) }
         check(stray.isEmpty, "\(testCase.label) plays fuel engine loops: \(stray.map(\.rawValue))")
     }
-    // Whatever it is, it has exactly one propulsion voice.
-    let propulsionCount = layers.filter { electricLoops.contains($0) || fuelLoops.contains($0) }.count
-    check(propulsionCount <= 1, "\(testCase.label) runs \(propulsionCount) propulsion loops at once")
+    // One powerplant, whatever it is made of. An electric wing is allowed its motor and its
+    // propeller as separate layers; nothing is allowed two powerplants.
+    let rotorCount = layers.filter { rotorLoops.contains($0) }.count
+    let fuelCount = layers.filter { fuelLoops.contains($0) }.count
+    check(rotorCount <= 1, "\(testCase.label) runs \(rotorCount) rotor loops at once")
+    check(fuelCount <= 1, "\(testCase.label) runs \(fuelCount) engine loops at once")
 }
 
 // A genuine VTOL is the one aircraft allowed two, and only while it is still on its rotors.
@@ -506,32 +520,65 @@ check(vtolProfile.liftRotorLoop != nil, "a hybrid VTOL has no lift-rotor voice")
 check(hovering.contains { $0 == vtolProfile.liftRotorLoop }, "a hovering VTOL has no rotor sound")
 check(!cruising.contains { $0 == vtolProfile.liftRotorLoop }, "a wingborne VTOL still runs its lift rotors")
 
-// Two classes sharing a stand-in clip must at least not be the same sound. An electric
-// aeroplane turns one big propeller slowly; a racing quad turns four small ones fast.
+// An electric aeroplane and a quadcopter must not be the same recording. They shared one for
+// a while — the aeroplane borrowed the FPV loop — and the only thing separating them was a
+// deliberately wrong reference speed. Now each has its own.
 do {
-    func cruisePitch(_ profile: VehicleAudioProfile, laneSpeed: Float) -> Float {
-        let runtime = VehicleAudioRuntime()
-        var input = baseInput()
-        input.isArmed = true
-        input.physicalState = .airborne
-        input.rotorSpeedsRadPerSec = SIMD4<Float>(repeating: laneSpeed)
-        return runtime.update(profile: profile, input: input)
-            .layers.first { $0.id == profile.propulsionLoop }?.pitchRatio ?? 0.0
-    }
     let planeProfile = VehicleAudioProfile.resolve(
         airframeClass: .fixedWing, engineType: .electricMotor, rotorCount: 1,
         takeoffMassKg: 3.5, maxHorizontalSpeedMps: 28.0, ratedShaftRPM: nil, propellerBladeCount: 2
     )
-    // Each at its own cruise: the fixed-wing lane runs 60 + 540·throttle, the quad lanes
-    // 120 + 640·thrustFraction.
-    let planePitch = cruisePitch(planeProfile, laneSpeed: 357.0)
-    let quadPitch = cruisePitch(quadProfile, laneSpeed: 440.0)
-    print(String(format: "\nsame stand-in clip: electric aeroplane at pitch %.2f, camera quad at %.2f",
-                 planePitch, quadPitch))
-    check(
-        abs(planePitch - quadPitch) > 0.15,
-        "an electric aeroplane and a quadcopter play the shared clip at the same pitch"
+    let fpvProfile = VehicleAudioProfile.resolve(
+        airframeClass: .multirotor, engineType: nil, rotorCount: 4,
+        takeoffMassKg: 0.72, maxHorizontalSpeedMps: 32.0, ratedShaftRPM: nil, propellerBladeCount: 2
     )
+    print("\nelectric aeroplane: "
+          + [planeProfile.propulsionLoop, planeProfile.propellerLoop]
+              .compactMap { $0?.rawValue }.joined(separator: " + "))
+    print("racing quad:        " + (fpvProfile.propulsionLoop?.rawValue ?? "—"))
+    check(planeProfile.propulsionLoop != fpvProfile.propulsionLoop,
+          "an electric aeroplane and a racing quad still share a propulsion recording")
+    check(planeProfile.propulsionLoop != quadProfile.propulsionLoop,
+          "an electric aeroplane and a camera quad still share a propulsion recording")
+    check(planeProfile.propellerLoop != nil,
+          "an electric aeroplane has no propeller layer")
+    // Every size of multirotor starts up differently, and each fuel class starts its own way.
+    let heavyProfile = VehicleAudioProfile.resolve(
+        airframeClass: .multirotor, engineType: nil, rotorCount: 6,
+        takeoffMassKg: 12.0, maxHorizontalSpeedMps: 18.0, ratedShaftRPM: nil, propellerBladeCount: 2
+    )
+    let spinUps = Set([quadProfile.spinUpCue, fpvProfile.spinUpCue, heavyProfile.spinUpCue].compactMap { $0 })
+    print("spin-up cues across camera quad, racing quad and heavy lifter: "
+          + spinUps.map(\.rawValue).sorted().joined(separator: ", "))
+    check(spinUps.count == 3, "two multirotor sizes share a spin-up cue")
+}
+
+// A helicopter must not be issued a multirotor's recording, and vice versa.
+do {
+    let heli = VehicleAudioProfile.resolve(
+        airframeClass: .multirotor, engineType: nil, rotorCount: 2,
+        takeoffMassKg: 57.0, maxHorizontalSpeedMps: 19.0, ratedShaftRPM: nil,
+        propellerBladeCount: 3, vehicleType: .helicopter
+    )
+    let heavyQuad = VehicleAudioProfile.resolve(
+        airframeClass: .multirotor, engineType: nil, rotorCount: 4,
+        takeoffMassKg: 24.0, maxHorizontalSpeedMps: 18.0, ratedShaftRPM: nil,
+        propellerBladeCount: 2, vehicleType: .multicopter
+    )
+    print("\nhelicopter:         " + (heli.propulsionLoop?.rawValue ?? "—"))
+    print("heavy multirotor:   " + (heavyQuad.propulsionLoop?.rawValue ?? "—"))
+    check(heli.audioClass == .helicopter, "a helicopter did not resolve to the rotorcraft class")
+    check(heli.propulsionLoop != heavyQuad.propulsionLoop,
+          "a helicopter and a heavy multirotor share a propulsion recording")
+    // Without a catalogue entry it has to degrade to something, and that something is the
+    // mass rule — stated here so the fallback is a decision rather than a surprise.
+    let unknown = VehicleAudioProfile.resolve(
+        airframeClass: .multirotor, engineType: nil, rotorCount: 2,
+        takeoffMassKg: 57.0, maxHorizontalSpeedMps: 19.0, ratedShaftRPM: nil,
+        propellerBladeCount: 3, vehicleType: nil
+    )
+    check(unknown.audioClass == .heavyMultirotor,
+          "an aircraft with no catalogue entry no longer falls back to the mass rule")
 }
 
 // A plain aeroplane must never have one, whatever its powerplant.
@@ -562,6 +609,26 @@ do {
         !layers.contains(.pistonEngineLoop),
         "a stopped engine kept running because the throttle was open"
     )
+}
+
+// MARK: - 7c. The carrier aircraft is not silent
+
+print()
+print("Carrier aircraft")
+print(String(repeating: "-", count: 92))
+for kind in CarrierAircraftKind.allCases {
+    print(pad(kind.rawValue, 10) + pad(kind.audioLoop.rawValue, 22)
+          + String(format: "trim %+.1f dB, pitch %.2f", kind.audioTrimDb, kind.audioPitchRatio))
+}
+// Four turboprops and eight turbojets are not the same sound, and neither is silence.
+check(CarrierAircraftKind.c130.audioLoop != CarrierAircraftKind.b52.audioLoop,
+      "both carriers share one engine recording")
+check(CarrierAircraftKind.b52.audioTrimDb > CarrierAircraftKind.c130.audioTrimDb,
+      "a B-52 is not louder than a C-130")
+// Both carrier loops must be things the pack can actually supply.
+for kind in CarrierAircraftKind.allCases {
+    check([AudioAssetID.turbopropLoop, .turbojetLoop].contains(kind.audioLoop),
+          "\(kind.rawValue) asks for an engine loop outside the packed set")
 }
 
 // MARK: - 8. Servos move, they do not hum

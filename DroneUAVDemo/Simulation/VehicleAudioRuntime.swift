@@ -191,6 +191,26 @@ final class VehicleAudioRuntime {
             layers.append(propulsion)
         }
 
+        // The propeller, when it is its own recording rather than part of the engine's.
+        //
+        // Driven off the same shaft — a direct-drive propeller turns with its motor — but
+        // trimmed separately, because how loud the blades are relative to the motor is a
+        // property of the aircraft rather than of the shaft speed.
+        if let propellerAsset = profile.propellerLoop,
+           shaftSpeed > Self.spinningThresholdRadPerSec {
+            let reference = max(1.0, profile.referenceShaftSpeedRadPerSec)
+            let speedRatio = shaftSpeed / reference
+            var gain = profile.propellerTrimDb
+            gain += VehicleAudioProfile.speedToLevelExponent * log10(max(0.08, speedRatio))
+            gain += 6.0 * log10(max(0.15, input.rotorThrustFactor))
+            layers.append(VehicleAudioLayer(
+                id: propellerAsset,
+                gainDb: min(6.0, gain),
+                pitchRatio: pow(max(0.05, speedRatio), 0.7) * doppler,
+                worldPosition: input.worldPosition
+            ))
+        }
+
         // A hybrid VTOL hanging on its lift rotors gets the rotor voice as well, faded out as
         // the wing takes over. Crossfaded rather than switched: the transition is continuous
         // in the flight model and has to be continuous here too.
@@ -296,7 +316,7 @@ final class VehicleAudioRuntime {
             + 10.0 * log10(densityRatio)
 
         return VehicleAudioLayer(
-            id: .airflowSynthetic,
+            id: .airflowLoop,
             // Capped, but not at the asset's own level: a clamp at zero saturates the wind
             // well before the fastest aircraft in the catalogue reaches its own top speed,
             // and the last third of the speed range then has no audible consequence at all.

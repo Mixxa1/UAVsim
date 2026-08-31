@@ -647,9 +647,17 @@ final class SimulationAudioService {
         resolveDescriptor(id) != nil && buffers[Self.bufferKey(id.rawValue, 1)] != nil
     }
 
+    /// Registers the generated airflow bed, unless the pack ships a real one.
+    ///
+    /// Called before the manifest is read, so the check happens the other way round: the
+    /// synthetic is registered first and the pack overwrites it, because `resolveDescriptor`
+    /// consults the manifest before the synthetic table and `prepare` loads pack clips into
+    /// the same buffer map afterwards. A recording of air over a microphone is better than a
+    /// filtered noise generator; the generator is what keeps a build with no pack from flying
+    /// in silence.
     private func registerAirflowLoop() {
         guard let buffer = Self.makeAirflowLoop() else { return }
-        registerSynthetic(.airflowSynthetic, buffer: buffer, defaultGainDb: -6.0, loop: true)
+        registerSynthetic(.airflowLoop, buffer: buffer, defaultGainDb: -6.0, loop: true)
     }
 
     /// Builds the airflow loop.

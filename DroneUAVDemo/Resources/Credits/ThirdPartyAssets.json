@@ -273,12 +273,21 @@
     },
     {
       "id": "audio_mavic_mini_2_sadiquecat",
-      "title": "DJI Mavic Mini 2 — hover and propeller start-up",
+      "title": "DJI Mavic Mini 2 — hover above ground",
       "author": "sadiquecat",
       "sourceURL": "https://freesound.org/people/sadiquecat/sounds/683298/",
       "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
-      "changes": "Downmixed to mono and resampled to 48 kHz; the hover recording (683298) was cut to a six-second window and crossfaded into a seamless loop, and the propeller start-up (683299) trimmed to a one-shot spin-up cue."
+      "changes": "Downmixed to mono, resampled to 48 kHz, cut to a six-second window and crossfaded into a seamless small-multirotor hover loop in DroneUAVDemo."
+    },
+    {
+      "id": "audio_mavic_mini_2_spinup_sadiquecat",
+      "title": "DJI Mavic Mini 2 — propeller start-up, no takeoff",
+      "author": "sadiquecat",
+      "sourceURL": "https://freesound.org/people/sadiquecat/sounds/683299/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and trimmed to a spin-up cue for small multirotors in DroneUAVDemo."
     },
     {
       "id": "audio_heavy_drone_hover_qubodup",
@@ -306,15 +315,6 @@
       "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless FPV flight loop."
-    },
-    {
-      "id": "audio_quadcopter_flyby_5demayo",
-      "title": "Quadcopter Flyby (Multiple)",
-      "author": "5demayo",
-      "sourceURL": "https://freesound.org/people/5demayo/sounds/524331/",
-      "licenseName": "Creative Commons 0",
-      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
-      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into three fly-by variants."
     },
     {
       "id": "audio_fast_collision_qubodup",
@@ -445,9 +445,9 @@
     {
       "id": "audio_propeller_loop_modusmogulus",
       "title": "Airplane propeller loop",
-      "author": "ModusMogulus",
-      "sourceURL": "https://freesound.org/people/ModusMogulus/sounds/789390/",
-      "licenseName": "Creative Commons 0 — pending verification",
+      "author": "modusmogulus",
+      "sourceURL": "https://freesound.org/people/modusmogulus/sounds/789390/",
+      "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless loop for piston-engined fixed-wing aircraft in DroneUAVDemo."
     },
@@ -456,16 +456,16 @@
       "title": "Airplane start propeller",
       "author": "Zerono1",
       "sourceURL": "https://freesound.org/people/Zerono1/sounds/568127/",
-      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Downmixed to mono, resampled to 48 kHz and trimmed to the start sequence for piston-engined fixed-wing aircraft in DroneUAVDemo."
     },
     {
       "id": "audio_turboprop_fokker50_pack489",
       "title": "Fokker 50 turboprop aircraft taxi and takeoff",
-      "author": "pack489",
-      "sourceURL": "https://freesound.org/people/pack489/sounds/457131/",
-      "licenseName": "Creative Commons 0 — pending verification",
+      "author": "Pack489",
+      "sourceURL": "https://freesound.org/people/Pack489/sounds/457131/",
+      "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Decoded from MP3, downmixed to mono, resampled to 48 kHz, and a settled six-second window crossfaded into a seamless turboprop cruise loop in DroneUAVDemo."
     },
@@ -474,7 +474,7 @@
       "title": "Jet engine start cart",
       "author": "C-V",
       "sourceURL": "https://freesound.org/people/C-V/sounds/704945/",
-      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Downmixed to mono, resampled to 48 kHz and windowed twice — once for the turboprop start and once for the turbojet start — in DroneUAVDemo."
     },
@@ -483,18 +483,90 @@
       "title": "Jet turbine noise",
       "author": "qubodup",
       "sourceURL": "https://freesound.org/people/qubodup/sounds/205581/",
-      "licenseName": "Creative Commons 0 — pending verification",
+      "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless turbojet cruise loop in DroneUAVDemo."
     },
     {
-      "id": "audio_servo_motor_pryanic",
-      "title": "MOTRSRVO electric servo motor",
-      "author": "Pryanic",
-      "sourceURL": "https://freesound.org/people/Pryanic/sounds/776274/",
-      "licenseName": "Creative Commons 0 — pending verification",
+      "id": "audio_air_over_mic_cognito",
+      "title": "Air over mic",
+      "author": "cognito perceptu",
+      "sourceURL": "https://freesound.org/people/cognito%20perceptu/sounds/20108/",
+      "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
-      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into four control-surface servo movement variants in DroneUAVDemo."
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless airflow bed in DroneUAVDemo, replacing a synthesised noise generator."
+    },
+    {
+      "id": "audio_small_electronic_motor_derjuli",
+      "title": "Small electronic motor",
+      "author": "derjuli",
+      "sourceURL": "https://freesound.org/people/derjuli/sounds/418013/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless motor loop for electric fixed-wing aircraft in DroneUAVDemo."
+    },
+    {
+      "id": "audio_propeller_dylanthefish",
+      "title": "Propeller",
+      "author": "DylanTheFish",
+      "sourceURL": "https://freesound.org/people/DylanTheFish/sounds/457013/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless propeller loop layered over the electric motor in DroneUAVDemo."
+    },
+    {
+      "id": "audio_quadcopter_launch_ludwigmueller",
+      "title": "FXLM drone quadrocopter launch far T02",
+      "author": "LudwigMueller",
+      "sourceURL": "https://freesound.org/people/LudwigMueller/sounds/329543/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Resampled to 48 kHz, windowed and slowed to 0.8x so it reads as a heavy multirotor spinning up in DroneUAVDemo."
+    },
+    {
+      "id": "audio_drone_revving_qubodup",
+      "title": "Electronic Flight Drone Revving",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/741030/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and used as the FPV quad's spin-up rev in DroneUAVDemo."
+    },
+    {
+      "id": "audio_servomotor_derjuli",
+      "title": "ServoMotor",
+      "author": "derjuli",
+      "sourceURL": "https://freesound.org/people/derjuli/sounds/824121/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and split on its own silences into control-surface servo variants in DroneUAVDemo."
+    },
+    {
+      "id": "audio_small_servo_gpag1",
+      "title": "Small servo (arduino)",
+      "author": "gpag1",
+      "sourceURL": "https://freesound.org/people/gpag1/sounds/520514/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Resampled to 48 kHz and split on its own silences into control-surface servo variants in DroneUAVDemo."
+    },
+    {
+      "id": "audio_servo_sweep_burningmonkey",
+      "title": "Servo motor",
+      "author": "Burningmonkey",
+      "sourceURL": "https://freesound.org/people/Burningmonkey/sounds/322021/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and split into control-surface servo variants in DroneUAVDemo."
+    },
+    {
+      "id": "audio_helicopter_rotor_qubodup",
+      "title": "Helicopter rotor loop",
+      "author": "qubodup",
+      "sourceURL": "https://freesound.org/people/qubodup/sounds/187681/",
+      "licenseName": "Creative Commons 0",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless main-rotor loop for the rotorcraft class in DroneUAVDemo."
     }
   ]
 }

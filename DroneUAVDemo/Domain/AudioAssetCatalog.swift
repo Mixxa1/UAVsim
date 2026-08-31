@@ -15,9 +15,20 @@ enum AudioAssetID: String, CaseIterable, Hashable {
     case uavHeavyHoverLoop = "uav_heavy_hover_loop"
     case uavHexFlight = "uav_hex_flight"
     case fpvFlightLoop = "fpv_flight_loop"
-    case fpvFlybyBank = "fpv_flyby_bank"
     case fpvElectronicsBoot = "fpv_electronics_boot"
-    case fixedWingElectricLoop = "fixedwing_electric_loop"
+    /// A heavy multirotor starting up. Its own recording, slowed — a 25 kg machine does not
+    /// spin up like a 249 g one.
+    case uavHeavySpinup = "uav_heavy_spinup"
+    /// An FPV quad's rev — sharp and short, where a camera drone's is a slow rise.
+    case fpvSpinup = "fpv_spinup"
+    /// The electric fixed wing's two halves: the motor itself, and the propeller in front of
+    /// it. Kept apart because they do not move together — the plan asks for "motor whine +
+    /// propeller + airflow" and a single recording of all three cannot be driven separately.
+    case fixedWingElectricMotor = "fixedwing_electric_motor"
+    case fixedWingPropellerLoop = "fixedwing_propeller_loop"
+    /// A helicopter's main rotor. Large, slow and multi-bladed — a different sound from any
+    /// number of small fast propellers, which is why it cannot be a multirotor loop.
+    case helicopterRotorLoop = "helicopter_rotor_loop"
     case pistonEngineLoop = "piston_engine_loop"
     case pistonEngineStart = "piston_engine_start"
     case turbopropLoop = "turboprop_loop"
@@ -28,11 +39,13 @@ enum AudioAssetID: String, CaseIterable, Hashable {
     /// moves, which is what a control surface actually makes — a step, not a drone.
     case mechanismServo = "mechanism_servo"
 
-    /// Airflow over the airframe. Generated rather than recorded — see
-    /// `SimulationAudioService.makeAirflowLoop`. It is never in the pack manifest, and asking
-    /// the catalogue for it correctly reports it as absent; the service resolves it from its
-    /// own synthetic table.
-    case airflowSynthetic = "airflow_synthetic"
+    /// Airflow over the airframe.
+    ///
+    /// Supplied by the pack when it has a recording, and generated when it does not — the
+    /// service registers a synthesised bed under this same id only if the manifest has no
+    /// entry for it. Either way the runtime asks for one thing, and a build with a missing
+    /// pack still has wind.
+    case airflowLoop = "airflow_loop"
 
     // Impact — the first contact, by what was struck.
     case impactMechanicalShort = "impact_mechanical_short"
@@ -44,11 +57,9 @@ enum AudioAssetID: String, CaseIterable, Hashable {
     case groundDirtThud = "ground_dirt_thud"
     case glassShatter = "glass_shatter"
     case waterImpact = "water_impact"
-    case lightShellImpact = "light_shell_impact"
 
     // Damage — what the structure does after the contact.
     case damageMetalBend = "damage_metal_bend"
-    case damageMetalCreak = "damage_metal_creak"
     case treeWoodCrack = "tree_wood_crack"
     case buildingDebris = "building_debris"
     case damageStoneCrash = "damage_stone_crash"
