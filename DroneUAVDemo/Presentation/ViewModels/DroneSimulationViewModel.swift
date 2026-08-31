@@ -1357,6 +1357,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Loop voices currently held by the aircraft, so a plan that keeps a layer updates it
     /// instead of starting a second copy of it.
     private var vehicleAudioLoopHandles: [AudioAssetID: AudioLoopHandle] = [:]
+    /// The listener's velocity this tick, computed once in `advanceVehicleAudio` and read by
+    /// everything that needs Doppler afterwards.
+    private var currentListenerVelocity: SIMD3<Float> = .zero
     /// Previous listener position, for the listener's own velocity — a chase camera moves
     /// with the aircraft, and without this the Doppler shift of the thing it is chasing would
     /// be computed as if the operator stood still.
@@ -1376,6 +1379,17 @@ final class DroneSimulationViewModel: ObservableObject {
     /// `advanceCarrierAudio`.
     private var carrierLoopHandle: AudioLoopHandle?
     private var carrierLoopAsset: AudioAssetID?
+    /// One loop per other aircraft that is close enough to hear — see `RemoteVehicleAudio`.
+    private var remoteAudioLoopHandles: [UUID: (handle: AudioLoopHandle, asset: AudioAssetID)] = [:]
+    /// Catalogue id → acoustic profile, so a networked participant's aircraft is resolved once
+    /// rather than on every tick.
+    private var remoteAudioProfileCache: [String: VehicleAudioProfile] = [:]
+    /// Catalogue id → what that airframe is made of, for its damage sounds.
+    private var remoteSkinMaterialCache: [String: UAVSkinMaterial] = [:]
+    /// Vehicle → the highest damage-event sequence number already heard from it. Snapshots
+    /// redeliver the same events, and a participant coming into range carries its whole
+    /// history; this is what stops both from being played.
+    private var remoteDamageCursors: [UUID: UInt64] = [:]
     private let impactResolutionService = ImpactResolutionService()
     private let structuralLoadSolver = UAVStructuralLoadSolver()
     private let damageEventRecorder = UAVDamageEventRecorder()
@@ -8475,6 +8489,308 @@ final class DroneSimulationViewModel: ObservableObject {
         scrapeSilenceSeconds = 0.0
     }
 
+    /// Every other aircraft in the air.
+    ///
+    /// Formation wingmen and LAN participants were both silent: the audio path only ever knew
+    /// about the aircraft the operator is flying. A five-ship formation made one aircraft's
+    /// worth of noise, and a networked opponent flying past made none at all.
+    ///
+    /// The two are not equally well known, and the difference is respected rather than papered
+    /// over. A wingman is the operator's own aircraft duplicated — the scene draws it with the
+    /// same model and spins its rotors from the same throttle — so it gets the same audio
+    /// profile and the same shaft speed. A LAN participant's snapshot carries a pose, a
+    /// velocity, an armed flag and a profile id; the profile id gives the right voice, and the
+    /// shaft speed has to be inferred from airspeed, which `RemoteVehicleAudio` does and says
+    /// it is doing.
+    private func advanceRemoteVehicleAudio(deltaTime: Float) {
+        let listenerPosition = simulationAudio.currentListenerPosition
+        var sources: [RemoteVehicleAudioSource] = []
+
+        if !wingmen.isEmpty {
+            let localProfile = currentVehicleAudioProfile()
+            // The formation flies what the operator flies, at the throttle the operator holds.
+            let localShaftSpeed = meanLiveRotorSpeed()
+            for wingman in wingmen {
+                sources.append(RemoteVehicleAudioSource(
+                    id: wingman.id,
+                    profile: localProfile,
+                    worldPosition: wingman.position,
+                    worldVelocity: wingman.velocity,
+                    isRunning: isArmed && localShaftSpeed > 45.0,
+                    shaftSpeedRadPerSec: localShaftSpeed
+                ))
+            }
+        }
+
+        for remote in onlineInterpolatedRemoteStates {
+            // A snapshot that stopped arriving is an aircraft that is no longer there. Sounding
+            // a frozen replica is worse than silence: it is a machine hovering in place with a
+            // steady engine because the network went quiet.
+            guard remote.sourceSnapshotAge < 1.0 else { continue }
+            applyRemoteDamageAudio(remote)
+            let position = SIMD3<Float>(
+                Float(remote.pose.positionX),
+                Float(remote.pose.positionY),
+                Float(remote.pose.positionZ)
+            )
+            let velocity = SIMD3<Float>(
+                Float(remote.kinematics.velocityX),
+                Float(remote.kinematics.velocityY),
+                Float(remote.kinematics.velocityZ)
+            )
+            sources.append(RemoteVehicleAudioSource(
+                id: remote.vehicleID,
+                profile: remoteAudioProfile(forVehicleID: remote.vehicleID),
+                worldPosition: position,
+                worldVelocity: velocity,
+                isRunning: remote.isArmed,
+                shaftSpeedRadPerSec: nil
+            ))
+        }
+
+        let selected = RemoteVehicleAudio.select(sources, listenerPosition: listenerPosition)
+        let listenerVelocity = currentListenerVelocity
+        let speedOfSound = currentAtmosphere().state(worldY: state.position.y).speedOfSoundMps
+
+        var surviving: Set<UUID> = []
+        for source in selected {
+            guard let layer = RemoteVehicleAudio.layer(
+                for: source,
+                listenerPosition: listenerPosition,
+                listenerVelocity: listenerVelocity,
+                speedOfSoundMps: speedOfSound
+            ) else { continue }
+            surviving.insert(source.id)
+
+            if let existing = remoteAudioLoopHandles[source.id], existing.asset == layer.id {
+                simulationAudio.updateLoop(
+                    existing.handle,
+                    at: layer.worldPosition,
+                    gainDb: layer.gainDb,
+                    pitchRatio: layer.pitchRatio
+                )
+            } else {
+                if let existing = remoteAudioLoopHandles[source.id] {
+                    simulationAudio.stopLoop(existing.handle)
+                }
+                if let handle = simulationAudio.startLoop(
+                    layer.id,
+                    at: layer.worldPosition,
+                    gainDb: layer.gainDb,
+                    pitchRatio: layer.pitchRatio
+                ) {
+                    remoteAudioLoopHandles[source.id] = (handle: handle, asset: layer.id)
+                } else {
+                    remoteAudioLoopHandles.removeValue(forKey: source.id)
+                    surviving.remove(source.id)
+                }
+            }
+        }
+        for (id, entry) in remoteAudioLoopHandles where !surviving.contains(id) {
+            simulationAudio.stopLoop(entry.handle)
+            remoteAudioLoopHandles.removeValue(forKey: id)
+        }
+    }
+
+    /// The operator's own aircraft, acoustically.
+    ///
+    /// Shared with the formation, which flies the same machine, so the two cannot drift apart.
+    private func currentVehicleAudioProfile() -> VehicleAudioProfile {
+        let powerplant = activeUAVProfile?.powerplant
+        return VehicleAudioProfile.resolve(
+            airframeClass: selectedDroneProfile.airframeClass,
+            engineType: powerplant?.engineType,
+            rotorCount: max(1, vehicleRotorModel.rotors.count),
+            takeoffMassKg: selectedDroneProfile.takeoffMassKg,
+            maxHorizontalSpeedMps: selectedDroneProfile.maxHorizontalSpeedMps,
+            ratedShaftRPM: powerplant?.ratedShaftRPM,
+            propellerBladeCount: powerplant?.propellerBladeCount ?? 2,
+            // The runtime profile cannot say "helicopter" — `AirframeClass` files rotorcraft
+            // under `.multirotor` and `AirframeStyle` has no case for one — so the catalogue
+            // entry is the only place that knows. An aircraft without one falls back to the
+            // mass and rotor-count rules, which is the pre-existing behaviour.
+            vehicleType: activeUAVProfile?.vehicleType
+        )
+    }
+
+    /// Voices what happened to somebody else's aircraft.
+    ///
+    /// The snapshot carries the sending machine's own damage events — type, world point,
+    /// impulse, reason, and the sequence number the sender assigned them — so these go through
+    /// exactly the resolvers the local aircraft uses. Two consequences worth having: a remote
+    /// collision picks its surface material from the same `reason` string the local one does,
+    /// and the seed is the *sender's* sequence number, so both machines pick the same take of
+    /// the same sound for the same event.
+    ///
+    /// What is not available is the remote's component graph, so the part's own material is
+    /// unknown; the airframe's skin is used instead and the layer that would have depended on
+    /// which part it was comes out as "this aircraft's structure" rather than "that leg".
+    private func applyRemoteDamageAudio(_ remote: OnlineVehicleInterpolatedState) {
+        let events = remote.damageEvents.sorted { $0.sequenceNumber < $1.sequenceNumber }
+
+        guard let alreadyHeard = remoteDamageCursors[remote.vehicleID] else {
+            // First sight: catch up silently, to the sender's own counter rather than to what
+            // happens to be in this snapshot. See `RemoteVehicleAudio.shouldPlayOnFirstSight`.
+            remoteDamageCursors[remote.vehicleID] = max(
+                remote.damageEventSequence,
+                events.last?.sequenceNumber ?? 0
+            )
+            return
+        }
+
+        // The cursor only ever advances past events actually seen. Advancing it to the
+        // sender's counter would be wrong: that counter is what the sender has *assigned*,
+        // and the event list is a recent window of it, so a snapshot that arrives with an
+        // empty window would silently swallow whatever was still in flight behind it.
+        guard let newest = events.last?.sequenceNumber else { return }
+        defer { remoteDamageCursors[remote.vehicleID] = max(alreadyHeard, newest) }
+
+        let skin = remoteSkinMaterial(forVehicleID: remote.vehicleID)
+        let material = VehicleAcousticMaterial.fromSkin(skin)
+        let speedOfSound = currentAtmosphere().state(worldY: state.position.y).speedOfSoundMps
+
+        for event in events where event.sequenceNumber > alreadyHeard {
+            guard let type = UAVDamageEventType(rawValue: event.type) else { continue }
+            let position = remoteEventPosition(event, fallback: remote)
+            let propagation = simulationAudio.propagationDelay(
+                from: position,
+                speedOfSoundMps: speedOfSound
+            )
+
+            let requests: [ImpactAudioRequest]
+            switch type {
+            case .impact, .secondaryImpact:
+                // `reason` is the obstacle's provenance on the sending machine — the same
+                // string the local impact path writes — so the surface resolves identically.
+                let surface = AcousticSurfaceMaterial.fromObstacleSource(event.reason)
+                let impulse = event.impulseNs ?? 0.0
+                requests = ImpactAudioResolver.resolve(
+                    ImpactAudioEvent(
+                        worldPosition: position,
+                        surface: surface,
+                        vehicleMaterial: material,
+                        normalImpulse: impulse,
+                        normalSpeed: 0.0,
+                        tangentialSpeed: 0.0,
+                        damageSeverity: RemoteVehicleAudio.severity(
+                            integrity: event.integrity,
+                            residualStrength: event.residualStrength
+                        ),
+                        brokeSurface: ImpactAudioResolver.surfaceFails(
+                            surface: surface,
+                            normalImpulseNs: impulse,
+                            normalSpeedMps: 0.0
+                        ),
+                        isDetachedPart: type == .secondaryImpact,
+                        seed: event.sequenceNumber
+                    )
+                )
+            default:
+                requests = ImpactAudioResolver.resolveDamage(
+                    type: type,
+                    material: material,
+                    severity: RemoteVehicleAudio.severity(
+                        integrity: event.integrity,
+                        residualStrength: event.residualStrength
+                    ),
+                    seed: event.sequenceNumber
+                )
+            }
+
+            for request in requests {
+                simulationAudio.playOneShot(
+                    request.id,
+                    at: position,
+                    // Another aircraft's misfortune, heard from outside it.
+                    gainDb: request.gainDb - 3.0,
+                    pitchRatio: request.pitchRatio,
+                    variant: request.variant,
+                    delaySeconds: propagation + request.delaySeconds
+                )
+            }
+        }
+    }
+
+    /// Where a networked damage event happened: its own world point when it has one, and the
+    /// aircraft itself when it does not — a subsystem failure has no contact point.
+    private func remoteEventPosition(
+        _ event: OnlineVehicleDamageEventSnapshot,
+        fallback remote: OnlineVehicleInterpolatedState
+    ) -> SIMD3<Float> {
+        if let x = event.worldPointX, let y = event.worldPointY, let z = event.worldPointZ {
+            return SIMD3<Float>(x, y, z)
+        }
+        return SIMD3<Float>(
+            Float(remote.pose.positionX),
+            Float(remote.pose.positionY),
+            Float(remote.pose.positionZ)
+        )
+    }
+
+    /// What a networked participant's airframe is made of.
+    private func remoteSkinMaterial(forVehicleID vehicleID: UUID) -> UAVSkinMaterial {
+        guard let profileID = onlineFleetState?.vehicles
+            .first(where: { $0.vehicleID == vehicleID })?.vehicleProfileID else {
+            return selectedDroneProfile.skinMaterial
+        }
+        if let cached = remoteSkinMaterialCache[profileID] { return cached }
+        guard let uav = UAVReferenceCatalog.realProfiles.first(where: { $0.id == profileID }) else {
+            let fallback = selectedDroneProfile.skinMaterial
+            remoteSkinMaterialCache[profileID] = fallback
+            return fallback
+        }
+        let skin = LIPODroneModelRepository.runtimeProfile(from: uav).skinMaterial
+        remoteSkinMaterialCache[profileID] = skin
+        return skin
+    }
+
+    /// Mean speed of the rotors that are still turning, rad/s — the same figure the acoustic
+    /// runtime derives for the local aircraft, reused for the formation that copies it.
+    private func meanLiveRotorSpeed() -> Float {
+        var total: Float = 0.0
+        var count: Float = 0.0
+        for lane in 0..<4 where state.rotorAngularSpeed[lane] > 1.0 {
+            total += state.rotorAngularSpeed[lane]
+            count += 1.0
+        }
+        return count > 0.0 ? total / count : 0.0
+    }
+
+    /// The acoustic profile of a networked participant's aircraft.
+    ///
+    /// Resolved from the profile id the fleet state carries — the same id the scene builds the
+    /// replica's visual from, so what is heard and what is seen are the same aircraft. Cached
+    /// by id: this runs per remote per tick, and rebuilding a runtime profile from the
+    /// catalogue that often would be absurd. An id the catalogue does not know — a workbench
+    /// build another machine assembled — falls back to the operator's own profile, which is a
+    /// guess, and a better one than silence.
+    private func remoteAudioProfile(forVehicleID vehicleID: UUID) -> VehicleAudioProfile {
+        guard let profileID = onlineFleetState?.vehicles
+            .first(where: { $0.vehicleID == vehicleID })?.vehicleProfileID else {
+            return currentVehicleAudioProfile()
+        }
+        if let cached = remoteAudioProfileCache[profileID] { return cached }
+
+        guard let uav = UAVReferenceCatalog.realProfiles.first(where: { $0.id == profileID }) else {
+            let fallback = currentVehicleAudioProfile()
+            remoteAudioProfileCache[profileID] = fallback
+            return fallback
+        }
+        let runtime = LIPODroneModelRepository.runtimeProfile(from: uav)
+        let resolved = VehicleAudioProfile.resolve(
+            airframeClass: runtime.airframeClass,
+            engineType: uav.powerplant?.engineType,
+            rotorCount: max(1, uav.powerplant?.engineCount ?? 4),
+            takeoffMassKg: runtime.takeoffMassKg,
+            maxHorizontalSpeedMps: runtime.maxHorizontalSpeedMps,
+            ratedShaftRPM: uav.powerplant?.ratedShaftRPM,
+            propellerBladeCount: uav.powerplant?.propellerBladeCount ?? 2,
+            vehicleType: uav.vehicleType
+        )
+        remoteAudioProfileCache[profileID] = resolved
+        return resolved
+    }
+
     /// The carrier aircraft's own engines.
     ///
     /// A C-130 with a Firebee under the wing is a four-engine transport a few tens of metres
@@ -8499,7 +8815,7 @@ final class DroneSimulationViewModel: ObservableObject {
             sourcePosition: carrier.position,
             sourceVelocity: carrier.velocity,
             listenerPosition: simulationAudio.currentListenerPosition,
-            listenerVelocity: carrierListenerVelocity(deltaTime: deltaTime),
+            listenerVelocity: currentListenerVelocity,
             speedOfSoundMps: currentAtmosphere().state(worldY: carrier.position.y).speedOfSoundMps
         )
         let pitch = carrier.kind.audioPitchRatio * doppler
@@ -8525,12 +8841,6 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    /// The listener's own velocity, reused by the carrier's Doppler.
-    private func carrierListenerVelocity(deltaTime: Float) -> SIMD3<Float> {
-        guard let previous = previousListenerPosition, deltaTime > 0.0001 else { return .zero }
-        return (simulationAudio.currentListenerPosition - previous) / deltaTime
-    }
-
     /// Silences the aircraft and rearms its acoustic life cycle.
     ///
     /// Called on reset and on exit. Without it a reset would leave the rotors of the previous
@@ -8548,11 +8858,19 @@ final class DroneSimulationViewModel: ObservableObject {
         scrapeSilenceSeconds = 0.0
         wasTouchingWater = false
         previousControlDeflections = nil
+        currentListenerVelocity = .zero
         if let handle = carrierLoopHandle {
             simulationAudio.stopLoop(handle)
             carrierLoopHandle = nil
         }
         carrierLoopAsset = nil
+        for entry in remoteAudioLoopHandles.values {
+            simulationAudio.stopLoop(entry.handle)
+        }
+        remoteAudioLoopHandles.removeAll(keepingCapacity: true)
+        // Cursors go too: after a reset the next snapshot is a first sight again, and its
+        // backlog must stay silent.
+        remoteDamageCursors.removeAll(keepingCapacity: true)
         vehicleAudioRuntime.reset()
         previousListenerPosition = nil
     }
@@ -8573,23 +8891,15 @@ final class DroneSimulationViewModel: ObservableObject {
             listenerVelocity = .zero
         }
         previousListenerPosition = listenerPosition
+        // Held for the rest of the tick. The carrier and the other aircraft need it too, and
+        // they run *after* `previousListenerPosition` has been advanced — recomputing it there
+        // subtracted the current position from itself and produced exactly zero, so a carrier
+        // the operator was flying alongside was Doppler-shifted as though the operator were
+        // standing still. In a chase view, which is most of the time, that is the whole error.
+        currentListenerVelocity = listenerVelocity
 
         let atmosphere = currentAtmosphere().state(worldY: state.position.y)
-        let powerplant = activeUAVProfile?.powerplant
-        let profile = VehicleAudioProfile.resolve(
-            airframeClass: selectedDroneProfile.airframeClass,
-            engineType: powerplant?.engineType,
-            rotorCount: max(1, vehicleRotorModel.rotors.count),
-            takeoffMassKg: selectedDroneProfile.takeoffMassKg,
-            maxHorizontalSpeedMps: selectedDroneProfile.maxHorizontalSpeedMps,
-            ratedShaftRPM: powerplant?.ratedShaftRPM,
-            propellerBladeCount: powerplant?.propellerBladeCount ?? 2,
-            // The runtime profile cannot say "helicopter" — `AirframeClass` files rotorcraft
-            // under `.multirotor` and `AirframeStyle` has no case for one — so the catalogue
-            // entry is the only place that knows. An aircraft without one falls back to the
-            // mass and rotor-count rules, which is the pre-existing behaviour.
-            vehicleType: activeUAVProfile?.vehicleType
-        )
+        let profile = currentVehicleAudioProfile()
 
         var input = VehicleAudioInput()
         input.isSessionRunning = !isAwaitingImportedWorld
@@ -8627,6 +8937,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         advanceScrapeDecay(deltaTime: deltaTime)
         advanceCarrierAudio(deltaTime: deltaTime)
+        advanceRemoteVehicleAudio(deltaTime: deltaTime)
 
         let plan = vehicleAudioRuntime.update(profile: profile, input: input)
 

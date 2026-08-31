@@ -67,7 +67,13 @@ final class SimulationAudioService {
     /// Voice budget. The plan asks explicitly that simultaneous destruction not produce audio
     /// spam; this is the ceiling that makes that a property of the system rather than of luck.
     private static let oneShotVoiceCount = 16
-    private static let loopVoiceCount = 6
+    /// Loop voices.
+    ///
+    /// Sized against the worst case rather than guessed: the operator's own aircraft can hold
+    /// four at once (motor, propeller, lift rotors, airflow), a scrape and a carrier take one
+    /// each, and up to four other aircraft take one each — see `RemoteVehicleAudio`. Twelve
+    /// covers that with two to spare; it was six, which the local aircraft alone could fill.
+    private static let loopVoiceCount = 12
     /// Beyond this a contact is not dropped for being quiet — it is dropped for being
     /// inaudible. At 3 km even a heavy crash is below the noise floor of anywhere a ground
     /// station actually stands.

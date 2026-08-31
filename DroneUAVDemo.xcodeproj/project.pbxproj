@@ -40,6 +40,7 @@
 		10000000000000000000FE61 /* SonicBoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE60 /* SonicBoomModel.swift */; };
 		10000000000000000000FE71 /* SimulationAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE70 /* SimulationAudioService.swift */; };
 		A0D1000000000000000000B2 /* VehicleAudioProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000B1 /* VehicleAudioProfile.swift */; };
+		A0D1000000000000000000E2 /* RemoteVehicleAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000E1 /* RemoteVehicleAudio.swift */; };
 		A0D1000000000000000000D2 /* ImpactAudioResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000D1 /* ImpactAudioResolver.swift */; };
 		A0D1000000000000000000B4 /* VehicleAudioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000B3 /* VehicleAudioRuntime.swift */; };
 		A0D1000000000000000000C2 /* AcousticMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000C1 /* AcousticMaterials.swift */; };
@@ -488,6 +489,7 @@
 		10000000000000000000FE60 /* SonicBoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonicBoomModel.swift; sourceTree = "<group>"; };
 		10000000000000000000FE70 /* SimulationAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationAudioService.swift; sourceTree = "<group>"; };
 		A0D1000000000000000000B1 /* VehicleAudioProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleAudioProfile.swift; sourceTree = "<group>"; };
+		A0D1000000000000000000E1 /* RemoteVehicleAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteVehicleAudio.swift; sourceTree = "<group>"; };
 		A0D1000000000000000000D1 /* ImpactAudioResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImpactAudioResolver.swift; sourceTree = "<group>"; };
 		A0D1000000000000000000B3 /* VehicleAudioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehicleAudioRuntime.swift; sourceTree = "<group>"; };
 		A0D1000000000000000000C1 /* AcousticMaterials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcousticMaterials.swift; sourceTree = "<group>"; };
@@ -1108,6 +1110,7 @@
 				10000000000000000000F007 /* ImpactResolutionService.swift */,
 				A0D1000000000000000000B3 /* VehicleAudioRuntime.swift */,
 				A0D1000000000000000000D1 /* ImpactAudioResolver.swift */,
+				A0D1000000000000000000E1 /* RemoteVehicleAudio.swift */,
 				10000000000000000000F005 /* VehicleComponentGraphBuilder.swift */,
 				10000000000000000000F105 /* ComponentFailureRuntime.swift */,
 				10000000000000000000F107 /* UAVDamageRuntime.swift */,
@@ -1811,6 +1814,7 @@
 				A0D1000000000000000000B2 /* VehicleAudioProfile.swift in Sources */,
 				A0D1000000000000000000B4 /* VehicleAudioRuntime.swift in Sources */,
 				A0D1000000000000000000D2 /* ImpactAudioResolver.swift in Sources */,
+				A0D1000000000000000000E2 /* RemoteVehicleAudio.swift in Sources */,
 				1000000000000000000003A2 /* L10n.swift in Sources */,
 				100000000000000000000222 /* AutoPathPlannerService.swift in Sources */,
 				10000000000000000000024F /* AutoNavigationController.swift in Sources */,

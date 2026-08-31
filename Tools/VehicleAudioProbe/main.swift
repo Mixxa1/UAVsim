@@ -631,6 +631,130 @@ for kind in CarrierAircraftKind.allCases {
           "\(kind.rawValue) asks for an engine loop outside the packed set")
 }
 
+// MARK: - 7d. Other aircraft in the air
+
+print()
+print("Other aircraft — wingmen and networked participants")
+print(String(repeating: "-", count: 92))
+
+let listenerHere = SIMD3<Float>(0, 2, 0)
+
+func remoteSource(id: Int, distance: Float, running: Bool = true,
+                  profile: VehicleAudioProfile? = nil,
+                  shaft: Float? = nil,
+                  velocity: SIMD3<Float> = .zero) -> RemoteVehicleAudioSource {
+    RemoteVehicleAudioSource(
+        id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", id))!,
+        profile: profile ?? quadProfile,
+        worldPosition: SIMD3<Float>(0, 2, -distance),
+        worldVelocity: velocity,
+        isRunning: running,
+        shaftSpeedRadPerSec: shaft
+    )
+}
+
+// Nearest first, disarmed dropped, far-away dropped, and never more than the budget.
+let crowd = [
+    remoteSource(id: 1, distance: 400),
+    remoteSource(id: 2, distance: 40),
+    remoteSource(id: 3, distance: 5_000),          // beyond hearing
+    remoteSource(id: 4, distance: 90),
+    remoteSource(id: 5, distance: 15, running: false),  // parked and disarmed
+    remoteSource(id: 6, distance: 200),
+    remoteSource(id: 7, distance: 250)
+]
+let chosen = RemoteVehicleAudio.select(crowd, listenerPosition: listenerHere)
+print("seven aircraft nearby, chosen: "
+      + chosen.map { String(format: "%.0f m", simd_distance($0.worldPosition, listenerHere)) }
+              .joined(separator: ", "))
+check(chosen.count <= RemoteVehicleAudio.maximumVoices, "more aircraft sounded than the voice budget allows")
+check(!chosen.contains { !$0.isRunning }, "a disarmed aircraft was given a voice")
+check(!chosen.contains { simd_distance($0.worldPosition, listenerHere) > RemoteVehicleAudio.maximumAudibleDistance },
+      "an inaudibly distant aircraft was given a voice")
+let distances = chosen.map { simd_distance($0.worldPosition, listenerHere) }
+check(distances == distances.sorted(), "the nearest aircraft were not the ones chosen")
+
+// Selection must be stable — a flickering choice is worse than a missing one.
+let again = RemoteVehicleAudio.select(crowd.reversed(), listenerPosition: listenerHere)
+check(chosen.map(\.id) == again.map(\.id), "the same crowd in a different order chose different aircraft")
+
+// One voice each, never the local aircraft's full stack.
+if let layer = RemoteVehicleAudio.layer(for: remoteSource(id: 2, distance: 40),
+                                        listenerPosition: listenerHere,
+                                        listenerVelocity: .zero, speedOfSoundMps: 343.0) {
+    print(String(format: "one aircraft at 40 m: %@ at %.1f dB", layer.id.rawValue, layer.gainDb))
+    check(layer.gainDb <= 0.0, "another aircraft asked for more than unity gain")
+} else {
+    check(false, "a running aircraft 40 m away produced no sound")
+}
+
+// A wingman's shaft speed is known exactly; a networked aircraft's is inferred and must stay
+// inside a believable band rather than swinging with whatever speed arrives.
+let inferredSlow = RemoteVehicleAudio.inferredShaftSpeed(profile: quadProfile, speedMps: 0.0)
+let inferredFast = RemoteVehicleAudio.inferredShaftSpeed(profile: quadProfile, speedMps: 60.0)
+print(String(format: "inferred shaft speed: %.0f rad/s hovering, %.0f rad/s at 60 m/s (reference %.0f)",
+             inferredSlow, inferredFast, quadProfile.referenceShaftSpeedRadPerSec))
+check(inferredFast > inferredSlow, "a faster aircraft is not working harder")
+check(inferredSlow > quadProfile.referenceShaftSpeedRadPerSec * 0.5,
+      "an airborne aircraft was inferred to be barely turning")
+check(inferredFast < quadProfile.referenceShaftSpeedRadPerSec * 1.5,
+      "the inferred speed swings further than a proxy should")
+
+// Doppler still applies to other aircraft: one coming at the listener is sharper.
+let approachingRemote = RemoteVehicleAudio.layer(
+    for: remoteSource(id: 8, distance: 100, velocity: SIMD3<Float>(0, 0, 40)),
+    listenerPosition: listenerHere, listenerVelocity: .zero, speedOfSoundMps: 343.0)
+let recedingRemote = RemoteVehicleAudio.layer(
+    for: remoteSource(id: 9, distance: 100, velocity: SIMD3<Float>(0, 0, -40)),
+    listenerPosition: listenerHere, listenerVelocity: .zero, speedOfSoundMps: 343.0)
+print(String(format: "another aircraft approaching: pitch %.2f, receding: %.2f",
+             approachingRemote?.pitchRatio ?? 0, recedingRemote?.pitchRatio ?? 0))
+check((approachingRemote?.pitchRatio ?? 0) > (recedingRemote?.pitchRatio ?? 0),
+      "Doppler is not applied to other aircraft")
+
+// MARK: - 7e. Somebody else's aircraft breaking
+
+print()
+print("Networked damage")
+print(String(repeating: "-", count: 92))
+
+// Severity has to come from what the wire actually carries. The local model reports a pair
+// and subtracts; the snapshot carries only the value after.
+let brokenSeverity = RemoteVehicleAudio.severity(integrity: 0.1, residualStrength: nil)
+let scratchedSeverity = RemoteVehicleAudio.severity(integrity: 0.9, residualStrength: nil)
+let jointSeverity = RemoteVehicleAudio.severity(integrity: nil, residualStrength: 0.2)
+let silentSeverity = RemoteVehicleAudio.severity(integrity: nil, residualStrength: nil)
+print(String(format: "integrity 0.1 → %.2f, integrity 0.9 → %.2f, residual 0.2 → %.2f, nothing → %.2f",
+             brokenSeverity, scratchedSeverity, jointSeverity, silentSeverity))
+check(brokenSeverity > scratchedSeverity, "a nearly destroyed part is not louder than a scratched one")
+check(jointSeverity > 0.5, "a joint down to a fifth of its strength reads as minor")
+check(silentSeverity > 0.0 && silentSeverity < 1.0, "an event with no numbers is not mid-scale")
+
+// A remote impact resolves its surface from the same provenance string a local one does, so
+// the two machines describe the same collision the same way.
+for reason in ["world.building", "ground.field", "tree.canopy", "container.wall.left"] {
+    let surface = AcousticSurfaceMaterial.fromObstacleSource(reason)
+    let layers = ImpactAudioResolver.resolve(ImpactAudioEvent(
+        worldPosition: .zero, surface: surface, vehicleMaterial: .aluminum,
+        normalImpulse: 40.0, normalSpeed: 0.0, tangentialSpeed: 0.0,
+        damageSeverity: 0.4, brokeSurface: false, isDetachedPart: false, seed: 77))
+    print(pad(reason, 24) + pad("→ " + surface.rawValue, 14)
+          + layers.map(\.id.rawValue).joined(separator: " + "))
+    check(!layers.isEmpty, "a remote impact against \(reason) made no sound")
+}
+
+// The seed is the sender's sequence number, so both machines pick the same take.
+let here = ImpactAudioResolver.resolveDamage(type: .componentDetached, material: .composite,
+                                             severity: 0.8, seed: 4_242)
+let there = ImpactAudioResolver.resolveDamage(type: .componentDetached, material: .composite,
+                                              severity: 0.8, seed: 4_242)
+check(here == there, "the same networked event resolves differently on two machines")
+print("\nsame event id on two machines resolves identically: ok")
+
+// A newly seen participant must not replay its history.
+check(!RemoteVehicleAudio.shouldPlayOnFirstSight(),
+      "an aircraft coming into range would replay its whole damage history")
+
 // MARK: - 8. Servos move, they do not hum
 
 print()
