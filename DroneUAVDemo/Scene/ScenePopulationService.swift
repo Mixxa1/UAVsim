@@ -13,6 +13,13 @@ final class ScenePopulationService {
     private let containerNode = SCNNode()
     private let treeVisualsNode = SCNNode()
     private var storedTreeDescriptors: [EnvironmentObjectDescriptor] = []
+    /// Ground scenery must stay off — a crop field, for instance.
+    ///
+    /// Held by the service rather than applied by the caller because the service keeps its own
+    /// copy of the tree descriptors and rebuilds every tree from it on a weather change. Filtering
+    /// the caller's side alone removed the trees exactly until the next `refreshTreeVisuals`, and
+    /// then they grew back in the middle of the wheat.
+    var sceneryExclusion: ((SIMD3<Float>) -> Bool)?
     private var lastVisualQuality: EnvironmentVisualQuality = .detailed
 
     init(rootNode: SCNNode) {
@@ -112,7 +119,15 @@ final class ScenePopulationService {
             terrain: terrain,
             generator: &generator
         )
-        let allDescriptors = collidableDescriptors + decorativeDescriptors + beltDescriptors
+        var allDescriptors = collidableDescriptors + decorativeDescriptors + beltDescriptors
+        if let sceneryExclusion {
+            let before = allDescriptors.count
+            allDescriptors.removeAll { sceneryExclusion($0.position) }
+            let removed = before - allDescriptors.count
+            if removed > 0 {
+                print("[Environment] scenery exclusion kept \(removed) objects off reserved ground")
+            }
+        }
 
         // Re-establish treeVisualsNode after clearing containerNode children
         containerNode.addChildNode(treeVisualsNode)
@@ -141,10 +156,22 @@ final class ScenePopulationService {
         containerNode.addChildNode(treeVisualsNode)
     }
 
+    /// Drops stored scenery that now falls inside an exclusion zone, so a field spawned into an
+    /// already-generated world stays clear through every later rebuild.
+    func pruneStoredScenery() {
+        guard let sceneryExclusion else { return }
+        let before = storedTreeDescriptors.count
+        storedTreeDescriptors.removeAll { sceneryExclusion($0.position) }
+        if storedTreeDescriptors.count != before {
+            print("[Environment] scenery exclusion pruned \(before - storedTreeDescriptors.count) stored trees")
+        }
+    }
+
     func refreshTreeVisuals(snowWeatherActive: Bool) {
         EnvironmentObjectFactory.snowWeatherActive = snowWeatherActive
         treeVisualsNode.childNodes.forEach { $0.removeFromParentNode() }
         EnvironmentObjectFactory.resetDiagnostics()
+        pruneStoredScenery()
         for descriptor in storedTreeDescriptors {
             let node = EnvironmentObjectFactory.makeNode(for: descriptor, quality: lastVisualQuality)
             treeVisualsNode.addChildNode(node)

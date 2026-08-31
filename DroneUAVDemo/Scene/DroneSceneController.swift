@@ -9114,6 +9114,21 @@ final class DroneSceneController {
     ) -> SIMD3<Float> {
         clearMissionScenario()
         installedAgriField = placement
+        // The populator keeps its own copy of the scenery and regrows every tree from it on a
+        // weather change, so the field has to be a rule it knows about — not something removed
+        // behind its back.
+        scenePopulationService.sceneryExclusion = { [placement] position in
+            let planar = SIMD2<Float>(position.x, position.z)
+            let local = placement.worldToFieldLocal(planar)
+            let half = placement.fieldHalfExtent + 3.0
+            if abs(local.x) <= half, abs(local.y) <= half {
+                return true
+            }
+            return simd_distance(planar, placement.stationPosition)
+                <= AgriSprayTuning.refillRadiusMeters + 4.0
+        }
+        scenePopulationService.pruneStoredScenery()
+        scenePopulationService.refreshTreeVisuals(snowWeatherActive: currentWeather.preset == .snow)
         clearEnvironmentInsideAgriField(placement)
         return agriFieldLayer.build(
             placement: placement,
@@ -9122,9 +9137,11 @@ final class DroneSceneController {
         )
     }
 
-    /// Repaints the treated-rows decal from the runtime's dose grid.
-    func updateAgriCoverage(doseFractions: [Float]) {
-        agriFieldLayer.updateCoverage(doseFractions: doseFractions)
+    /// Repaints the treated-rows decal from the runtime's dose grid. Returns true while the soil
+    /// is still visually catching up with the dose.
+    @discardableResult
+    func updateAgriCoverage(doseFractions: [Float], deltaTime: TimeInterval) -> Bool {
+        agriFieldLayer.updateCoverage(doseFractions: doseFractions, deltaTime: deltaTime)
     }
 
     /// Whether a world position stands on the crop field, or close enough to it to matter.
@@ -9332,6 +9349,9 @@ final class DroneSceneController {
 
     func clearMissionScenario() {
         agriFieldLayer.detach()
+        if installedAgriField != nil {
+            scenePopulationService.sceneryExclusion = nil
+        }
         installedAgriField = nil
         installedRaceTrack = nil
         clearRaceTrackObstacles()

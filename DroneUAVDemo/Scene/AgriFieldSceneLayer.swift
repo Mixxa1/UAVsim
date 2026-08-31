@@ -25,6 +25,10 @@ final class AgriFieldSceneLayer {
     private var coverageNode: SCNNode?
     private var coverageMaterial: SCNMaterial?
     private var coveragePixels: [UInt8] = []
+    /// What the decal is *showing*, as opposed to what the runtime has dosed. Soil does not turn
+    /// dark the instant it is hit — and a cell that goes from dry to fully wet in one repaint
+    /// reads as a hard-edged stain snapping into existence behind the aircraft.
+    private var displayedWetness: [Float] = []
     private var coverageSide = 0
     private var isAttached = false
 
@@ -58,6 +62,7 @@ final class AgriFieldSceneLayer {
         coverageNode = nil
         coverageMaterial = nil
         coveragePixels = []
+        displayedWetness = []
         coverageSide = 0
     }
 
@@ -279,6 +284,7 @@ final class AgriFieldSceneLayer {
     private func buildCoverageDecal(placement: AgriFieldPlacement) {
         coverageSide = placement.cellsPerSide
         coveragePixels = [UInt8](repeating: 0, count: coverageSide * coverageSide * 4)
+        displayedWetness = [Float](repeating: 0.0, count: coverageSide * coverageSide)
 
         let side = CGFloat(placement.fieldHalfExtent * 2.0)
         let plane = SCNPlane(width: side, height: side)
@@ -307,25 +313,59 @@ final class AgriFieldSceneLayer {
         coverageMaterial = material
     }
 
-    /// Repaints the wet-soil decal from the runtime's dose grid. Cheap enough to call several
-    /// times a second: the texture is one pixel per coverage cell (at most 80×80).
-    func updateCoverage(doseFractions: [Float]) {
+    /// How fast a cell can visually darken, in fractions of full wetness per second. A pass wets
+    /// the ground under the boom in a moment as far as the *dose* is concerned; the soil takes
+    /// about a second to show it, which is what makes the patch spread behind the aircraft
+    /// instead of appearing under it.
+    private static let wetnessRisePerSecond: Float = 0.85
+    /// Wet earth, not shadow. The first version tinted towards navy and read as a cloud passing
+    /// over the field rather than as a treated strip.
+    private static let wetColour = SIMD3<Float>(58.0, 44.0, 31.0)
+    private static let wetMaxAlpha: Float = 152.0
+
+    /// Repaints the wet-soil decal from the runtime's dose grid, easing each cell towards its
+    /// dose rather than snapping to it. Returns whether any cell is still catching up, so the
+    /// caller knows to keep repainting after the dosing itself has stopped changing.
+    ///
+    /// Cheap enough to call several times a second: the texture is one pixel per coverage cell
+    /// (at most 80×80).
+    @discardableResult
+    func updateCoverage(doseFractions: [Float], deltaTime: TimeInterval) -> Bool {
         guard coverageSide > 0,
               doseFractions.count == coverageSide * coverageSide,
+              displayedWetness.count == doseFractions.count,
               let material = coverageMaterial else {
-            return
+            return false
         }
+
+        let step = Self.wetnessRisePerSecond * Float(max(0.0, deltaTime))
+        var stillRising = false
         for index in 0..<doseFractions.count {
-            let dose = max(0.0, min(1.0, doseFractions[index]))
+            let target = max(0.0, min(1.0, doseFractions[index]))
+            var shown = displayedWetness[index]
+            if shown < target {
+                shown = step > 0.0 ? min(target, shown + step) : target
+                if shown < target {
+                    stillRising = true
+                }
+                displayedWetness[index] = shown
+            } else if shown > target {
+                // Only ever happens on a reset; snap rather than linger on a stale stain.
+                shown = target
+                displayedWetness[index] = shown
+            }
+
             let base = index * 4
-            // Wet soil: darker and slightly cooler than dry, fading in with the dose so a
-            // half-treated strip is visibly half-treated rather than binary.
-            coveragePixels[base] = UInt8(28.0 + 10.0 * (1.0 - dose))
-            coveragePixels[base + 1] = UInt8(38.0 + 12.0 * (1.0 - dose))
-            coveragePixels[base + 2] = UInt8(52.0 + 14.0 * (1.0 - dose))
-            coveragePixels[base + 3] = UInt8(min(215.0, 215.0 * dose))
+            coveragePixels[base] = UInt8(Self.wetColour.x)
+            coveragePixels[base + 1] = UInt8(Self.wetColour.y)
+            coveragePixels[base + 2] = UInt8(Self.wetColour.z)
+            // Eased on top of the linear ramp: the last of the darkening arrives slowly, which is
+            // what stops a finished cell from popping to its final tone.
+            let eased = shown * shown * (3.0 - 2.0 * shown)
+            coveragePixels[base + 3] = UInt8(min(Self.wetMaxAlpha, Self.wetMaxAlpha * eased))
         }
         material.diffuse.contents = makeCoverageImage()
+        return stillRising
     }
 
     private func makeCoverageImage() -> CGImage? {

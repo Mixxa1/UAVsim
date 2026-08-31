@@ -1481,6 +1481,7 @@ struct TerrainMapCanvas: View {
             if let dropZone {
                 drawDropZone(dropZone, in: &context, projection: projection)
             }
+            drawAgriField(in: &context, projection: projection)
             drawMissionRoute(in: &context, projection: projection)
             drawActiveLeg(in: &context, projection: projection)
             drawPredictedPath(in: &context, projection: projection)
@@ -1833,6 +1834,66 @@ struct TerrainMapCanvas: View {
             path,
             with: .color(GroundControlPalette.warning.opacity(0.82)),
             style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [4, 3])
+        )
+    }
+
+    /// The crop field and its refill station: the two things an agricultural mission is flown
+    /// between, and until now the map showed neither.
+    private func drawAgriField(
+        in context: inout GraphicsContext,
+        projection: TerrainMapProjection
+    ) {
+        guard let field = snapshot.agriField, field.corners.count == 4 else { return }
+
+        let projected = field.corners.map(projection.project)
+        var path = Path()
+        path.move(to: projected[0])
+        for point in projected.dropFirst() {
+            path.addLine(to: point)
+        }
+        path.closeSubpath()
+
+        // Ploughed earth under a wheat crop, not a green zone: the sector is a *place* on the
+        // map, and painting it in the same green as every other overlay said only "something is
+        // marked here".
+        let soil = Color(red: 0.30, green: 0.22, blue: 0.13)
+        let crop = Color(red: 0.76, green: 0.60, blue: 0.26)
+        context.fill(path, with: .color(soil.opacity(0.85)))
+
+        // A few furrows along the crop rows — the direction the field is actually worked in.
+        context.drawLayer { layer in
+            layer.clip(to: path)
+            let rows = 12
+            for index in 1..<rows {
+                let t = CGFloat(index) / CGFloat(rows)
+                let start = CGPoint(
+                    x: projected[0].x + (projected[3].x - projected[0].x) * t,
+                    y: projected[0].y + (projected[3].y - projected[0].y) * t
+                )
+                let end = CGPoint(
+                    x: projected[1].x + (projected[2].x - projected[1].x) * t,
+                    y: projected[1].y + (projected[2].y - projected[1].y) * t
+                )
+                var furrow = Path()
+                furrow.move(to: start)
+                furrow.addLine(to: end)
+                layer.stroke(furrow, with: .color(crop.opacity(0.22)), lineWidth: 1.0)
+            }
+        }
+        context.stroke(path, with: .color(crop.opacity(0.9)), lineWidth: 1.6)
+
+        let station = projection.project(field.station)
+        let radius = projection.projectedRadiusSize(for: field.stationRadius)
+        let collar = CGRect(
+            x: station.x - max(3.0, radius.width),
+            y: station.y - max(3.0, radius.height),
+            width: max(6.0, radius.width * 2.0),
+            height: max(6.0, radius.height * 2.0)
+        )
+        context.stroke(Path(ellipseIn: collar), with: .color(GroundControlPalette.accent.opacity(0.9)), lineWidth: 1.4)
+        context.fill(
+            Path(ellipseIn: CGRect(x: station.x - 2.5, y: station.y - 2.5, width: 5.0, height: 5.0)),
+            with: .color(GroundControlPalette.accent)
         )
     }
 

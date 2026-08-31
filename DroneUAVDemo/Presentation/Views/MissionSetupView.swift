@@ -379,6 +379,11 @@ struct MissionSetupView: View {
                     .foregroundStyle(GroundControlPalette.accent)
                 Text(String(
                     format: NSLocalizedString("mission.setup.agri.briefing", comment: ""),
+                    // The field is square, so its side goes in twice. Passing it once left the
+                    // format reading the *next* argument as the second dimension and shifting
+                    // everything after it — which is how a 2.56 ha field announced itself as
+                    // "160×3 m — 140.80 ha … −318565456 full tanks".
+                    difficulty.agriFieldSideMeters,
                     difficulty.agriFieldSideMeters,
                     difficulty.agriFieldAreaHectares,
                     difficulty.agriRequiredLiters,

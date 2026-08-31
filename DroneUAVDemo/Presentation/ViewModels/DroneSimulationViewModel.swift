@@ -478,6 +478,15 @@ extension DroneSimulationViewModel {
         let footprint: SIMD2<Float>
     }
 
+    /// The crop field of an agricultural mission, as the map needs it: the four corners in world
+    /// space (already turned to the crop rows, so the map never re-derives the heading) and the
+    /// refill station.
+    struct TerrainMapAgriField: Equatable {
+        let corners: [SIMD2<Float>]
+        let station: SIMD2<Float>
+        let stationRadius: Float
+    }
+
     enum TerrainMapBasemapStyle: String, Equatable, Hashable, Sendable {
         case standard
         case satellite
@@ -517,6 +526,8 @@ extension DroneSimulationViewModel {
         let payloadImpact: TerrainMapPayloadImpact?
         let trail: [SIMD2<Float>]
         let objects: [TerrainMapObject]
+        /// Set only during an agricultural mission.
+        let agriField: TerrainMapAgriField?
         /// How many objects the world registry holds, whether or not the map draws them itself —
         /// on a MapKit-backed world `objects` is empty while the registry is at its fullest, and
         /// the HUD readout means "what the aircraft knows about", not "what is painted here".
@@ -550,6 +561,7 @@ extension DroneSimulationViewModel {
             payloadImpact: nil,
             trail: [],
             objects: [],
+            agriField: nil,
             registeredObjectCount: 0
         )
     }
@@ -1502,6 +1514,8 @@ final class DroneSimulationViewModel: ObservableObject {
     /// need to.
     private var agriCoverageRepaintAccumulator: TimeInterval = 0.0
     private var agriCoveragePublishedRevision: UInt64 = 0
+    /// Set while the field decal is still fading in behind the aircraft.
+    private var agriCoverageIsStillDarkening = false
     /// Litres the sprayer drained during the current tick, handed from the payload refresh to the
     /// agricultural runtime (both run in the same tick, payload first).
     private var lastAgriDrainedLiters: Float = 0.0
@@ -6863,6 +6877,7 @@ final class DroneSimulationViewModel: ObservableObject {
         if result.litersRefilled > 0.0 {
             applyAgriRefill(liters: Double(result.litersRefilled))
         }
+        remountAgriSprayerIfAtStation(refillState: runtime.refillState)
 
         agriCoverageRepaintAccumulator += deltaTime
         refreshAgriCoverageDecal(force: false)
@@ -6871,6 +6886,34 @@ final class DroneSimulationViewModel: ObservableObject {
         if let outcome = runtime.outcome {
             handleAgriSprayOutcome(outcome)
         }
+    }
+
+    /// Re-rigs the sprayer at the station after it has been dropped.
+    ///
+    /// Releasing the payload in flight is a real thing a pilot can do (and will do by accident),
+    /// and without this the mission would be unwinnable from that moment with nothing saying so.
+    /// The station is a supply point: it holds the equipment as well as the water, so flying back
+    /// to it under the same conditions that refill the tank also puts a fresh rig on the aircraft.
+    private func remountAgriSprayerIfAtStation(refillState: AgriRefillState) {
+        guard activeMissionScenarioKind == .agriculturalSpraying,
+              !isMountedAgriculturalSprayerAvailable else {
+            return
+        }
+        // The same "close, low and stopped" rule the refill uses — not merely being nearby.
+        switch refillState {
+        case .filling, .full:
+            break
+        case .away, .inRangeUnstable:
+            return
+        }
+
+        setPayloadType(.agriculturalSprayer)
+        payloadDraftConfiguration.agriculturalSprayerTankLiters = AgriculturalSprayerTuning.tankCapacityLiters
+        payloadDraftConfiguration.payloadMass = AgriculturalSprayerTuning.massForFullTank()
+        attachPayload()
+        guard isMountedAgriculturalSprayerAvailable else { return }
+        refreshAgriculturalSprayerStatus()
+        print("[AgriSpray] sprayer re-rigged at the refill station")
     }
 
     /// Puts water back in the tank and the matching mass back on the airframe.
@@ -6893,7 +6936,11 @@ final class DroneSimulationViewModel: ObservableObject {
     private func refreshAgriCoverageDecal(force: Bool) {
         guard let runtime = agriSprayRuntime else { return }
         let hasNewCoverage = runtime.coverageRevision != agriCoveragePublishedRevision
-        guard force || (hasNewCoverage && agriCoverageRepaintAccumulator >= 0.2) else { return }
+        // Keep repainting while the soil is still darkening, even after the dosing itself has
+        // stopped changing — otherwise the last of the fade would freeze part-way.
+        let wantsRepaint = hasNewCoverage || agriCoverageIsStillDarkening
+        guard force || (wantsRepaint && agriCoverageRepaintAccumulator >= 0.12) else { return }
+        let elapsed = agriCoverageRepaintAccumulator
         agriCoverageRepaintAccumulator = 0.0
         agriCoveragePublishedRevision = runtime.coverageRevision
 
@@ -6904,7 +6951,28 @@ final class DroneSimulationViewModel: ObservableObject {
                 fractions[y * side + x] = runtime.doseFraction(x: x, y: y)
             }
         }
-        sceneController.updateAgriCoverage(doseFractions: fractions)
+        agriCoverageIsStillDarkening = sceneController.updateAgriCoverage(
+            doseFractions: fractions,
+            deltaTime: force ? 1.0 : TimeInterval(elapsed)
+        )
+    }
+
+    /// The field as the map draws it. Corners come from the placement's own frame, so the map
+    /// and the ground agree by construction rather than by both getting the rotation right.
+    private func currentAgriFieldMapOverlay() -> TerrainMapAgriField? {
+        guard let placement = agriSprayRuntime?.placement else { return nil }
+        let half = placement.fieldHalfExtent
+        let corners = [
+            SIMD2<Float>(-half, -half),
+            SIMD2<Float>(half, -half),
+            SIMD2<Float>(half, half),
+            SIMD2<Float>(-half, half)
+        ].map(placement.fieldLocalToWorld)
+        return TerrainMapAgriField(
+            corners: corners,
+            station: placement.stationPosition,
+            stationRadius: AgriSprayTuning.refillRadiusMeters
+        )
     }
 
     private func publishAgriSprayState() {
@@ -26002,6 +26070,7 @@ final class DroneSimulationViewModel: ObservableObject {
             payloadImpact: lastPayloadImpact,
             trail: terrainMapTrail,
             objects: staticOverlay.objects,
+            agriField: currentAgriFieldMapOverlay(),
             registeredObjectCount: sceneController.environmentMapDescriptors.count
         )
 
