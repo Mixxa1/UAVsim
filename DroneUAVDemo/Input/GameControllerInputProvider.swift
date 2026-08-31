@@ -581,6 +581,24 @@ private extension InputAction {
             return 43
         case .launchAircraft:
             return 44
+        // Track-builder actions are keyboard-only: building a course is a mouse-and-keyboard job,
+        // and a gamepad has nothing to aim the ghost with.
+        case .toggleRaceBuilder:
+            return 45
+        case .raceBuilderPlace:
+            return 46
+        case .raceBuilderDelete:
+            return 47
+        case .raceBuilderNextElement:
+            return 48
+        case .raceBuilderPreviousElement:
+            return 49
+        case .raceBuilderRaise:
+            return 50
+        case .raceBuilderLower:
+            return 51
+        case .raceBuilderCyclePassage:
+            return 52
         }
     }
 }

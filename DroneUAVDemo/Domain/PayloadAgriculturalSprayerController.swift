@@ -29,6 +29,18 @@ final class PayloadAgriculturalSprayerController {
         state.isSpraying = enabled
     }
 
+    /// Transfers water back into the tank at a refill station. Returns the litres actually taken,
+    /// so the caller can turn that straight into the matching mass delta — the tank's liquid mass
+    /// has to come back exactly the way `drain` took it away, or the airframe would keep the
+    /// agility of an empty tank while flying a full one.
+    @discardableResult
+    func refill(liters: Double) -> Double {
+        guard state.isAvailable, liters > 0.0 else { return 0.0 }
+        let accepted = min(liters, max(0.0, state.tankCapacityLiters - state.tankRemainingLiters))
+        state.tankRemainingLiters += accepted
+        return accepted
+    }
+
     /// Returns the liters actually drained this tick (0 when not spraying), so the caller can
     /// convert it straight into a mass delta without recomputing the drain rate itself.
     @discardableResult

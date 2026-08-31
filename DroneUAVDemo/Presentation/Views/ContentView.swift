@@ -1666,6 +1666,15 @@ struct ContentView: View {
                                     .allowsHitTesting(false)
                             }
 
+                            if viewModel.isRaceBuilderActive {
+                                HStack {
+                                    Spacer()
+                                    RaceBuilderPanelView(viewModel: viewModel)
+                                        .padding(.trailing, 16)
+                                        .padding(.top, 12)
+                                }
+                            }
+
                             // The generic gimbal slider drives the camera/rangefinder gimbal; LiDAR
                             // has its own pitch control on its panel, so hide the slider for it.
                             if viewModel.cameraConfiguration.mode == .payloadOptics,

@@ -464,6 +464,185 @@ enum UAVReferenceCatalog {
             notes: "DJI official support materials list 1,216 g aircraft weight with battery and propellers and a 350 mm diagonal size. Battery-separated base mass and maximum payload figures are intentionally left unset.",
             missionRole: "Consumer aerial imaging"
         ),
+        // MARK: FPV racing class
+        //
+        // Seven class entries rather than seven products: racing quads are built, not bought, and
+        // what a pilot means by "a five-inch" is a set of rules about size, mass and power, not a
+        // model number. The figures below are representative of each class as flown, and the
+        // classes are what the racing missions are balanced against.
+        //
+        // These are also the lightest and most agile aircraft in the catalogue by a wide margin,
+        // and the flight model needs nothing special told to it for that: inertia follows from
+        // real mass and real span, so a 35 g whoop changes angular rate almost instantly while a
+        // gust that a Matrice ignores moves it several metres.
+        UAVProfile(
+            id: "fpv-tiny-whoop-65",
+            displayName: "Tiny Whoop 65",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .nano,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 0.026,
+            batteryMass: 0.009,
+            maxPayloadMass: 0.005,
+            maxTakeoffMass: 0.035,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 98, y: 98, z: 42)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.012, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "65 mm ducted indoor micro quad on a single cell — the smallest thing in the catalogue that can be raced.",
+            notes: "Representative of the 65 mm ducted whoop class rather than one product: roughly 35 g all-up on a 1S 450 mAh pack, three to four minutes of flying, and a top speed low enough that a doorway is a real gate.",
+            missionRole: "Indoor and micro-course racing",
+            nominalFlightTimeSec: 220,
+            nominalCruiseSpeedMps: 5.0
+        ),
+        UAVProfile(
+            id: "fpv-micro-racer-25",
+            displayName: "Micro Racer 2.5\"",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .nano,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 0.085,
+            batteryMass: 0.040,
+            maxPayloadMass: 0.020,
+            maxTakeoffMass: 0.145,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 145, y: 145, z: 46)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.016, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "2.5-inch toothpick-class racer: a real racing airframe shrunk to something that fits a small course.",
+            notes: "Representative of the 2.5-inch micro class — about 145 g on a 3S pack, four to five minutes of flying, and enough speed to make a tight course genuinely demanding.",
+            missionRole: "Small-course and park racing",
+            nominalFlightTimeSec: 270,
+            nominalCruiseSpeedMps: 12.0
+        ),
+        UAVProfile(
+            id: "fpv-racer-5",
+            displayName: "Racer 5-inch",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .micro,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 0.430,
+            batteryMass: 0.245,
+            maxPayloadMass: 0.120,
+            maxTakeoffMass: 0.680,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 250, y: 250, z: 62)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.020, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "220 mm five-inch freestyle and race quad on 6S — the standard against which every other class is described.",
+            notes: "Representative of the open five-inch class: about 680 g ready to fly on a 6S 1300 mAh pack, four to five minutes of racing, and a thrust-to-weight ratio near ten to one.",
+            missionRole: "Open-class drone racing",
+            nominalFlightTimeSec: 280,
+            nominalCruiseSpeedMps: 22.0
+        ),
+        UAVProfile(
+            id: "fpv-spec-5",
+            displayName: "Spec 5-inch",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .micro,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 0.480,
+            batteryMass: 0.250,
+            maxPayloadMass: 0.120,
+            maxTakeoffMass: 0.740,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 250, y: 250, z: 62)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.020, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "Spec-class five-inch: the same airframe as the open racer, held to a control motor, prop and pack so the racing is between pilots.",
+            notes: "Representative of a spec/control racing class — deliberately a little heavier and a little slower than the open five-inch, with the performance ceiling set by the rules rather than by the builder's budget.",
+            missionRole: "Spec-class drone racing",
+            nominalFlightTimeSec: 250,
+            nominalCruiseSpeedMps: 20.0
+        ),
+        UAVProfile(
+            id: "fpv-long-range-7",
+            displayName: "Long Range 7-inch",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .micro,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 0.700,
+            batteryMass: 0.450,
+            maxPayloadMass: 0.250,
+            maxTakeoffMass: 1.150,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 340, y: 340, z: 78)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.026, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "Seven-inch long-range quad: efficient props and a big pack trade the racer's snap for real endurance.",
+            notes: "Representative of the 7-inch long-range class — around 1.15 kg on a 6S 4000-6000 mAh pack, fifteen to twenty minutes of cruising, noticeably steadier in wind than a five-inch and correspondingly slower to change direction.",
+            missionRole: "Long-range cruising and open courses",
+            nominalFlightTimeSec: 1020,
+            nominalCruiseSpeedMps: 18.0
+        ),
+        UAVProfile(
+            id: "fpv-open-class",
+            displayName: "Open Class 10-inch",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .micro,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 1.700,
+            batteryMass: 0.900,
+            maxPayloadMass: 0.400,
+            maxTakeoffMass: 2.600,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 480, y: 480, z: 115)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.034, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "Unlimited-class racing machine on 12S: everything a five-inch does, with roughly four times the mass behind it.",
+            notes: "Representative of the X/open racing class — about 2.6 kg on 12S, six minutes of flying, and the highest straight-line speed of any multirotor here. The mass that buys the speed also has to be flown: it neither stops nor turns like a five-inch.",
+            missionRole: "Unlimited-class drone racing",
+            nominalFlightTimeSec: 360,
+            nominalCruiseSpeedMps: 28.0
+        ),
+        UAVProfile(
+            id: "fpv-cinewhoop-3",
+            displayName: "Cinewhoop 3-inch",
+            manufacturer: "FPV Class",
+            countryOfOrigin: nil,
+            vehicleType: .multicopter,
+            massCategory: .nano,
+            specConfidence: .partial,
+            payloadCapabilityMode: .sensor,
+            baseMass: 0.330,
+            batteryMass: 0.180,
+            maxPayloadMass: 0.150,
+            maxTakeoffMass: 0.550,
+            dimensions: UAVDimensions(
+                unfoldedMillimeters: DroneDimensionsMM(x: 195, y: 195, z: 72)
+            ),
+            payloadMountOffset: SIMD3<Float>(0.0, -0.022, 0.0),
+            visualPreset: .fpvRacingQuad,
+            shortDescription: "Ducted three-inch cinewhoop: slower and heavier than a racer on purpose, and safe to fly close to things.",
+            notes: "Representative of the cinewhoop class — around 550 g with prop ducts, four to five minutes of flying, deliberately damped handling for camera work. The ducts cost speed and add a great deal of side area for wind to push on.",
+            missionRole: "Close-quarters cinematic flying",
+            nominalFlightTimeSec: 280,
+            nominalCruiseSpeedMps: 9.0
+        ),
         UAVProfile(
             id: "freefly-alta-x",
             displayName: "Freefly Alta X",

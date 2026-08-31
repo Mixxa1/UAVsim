@@ -39,6 +39,10 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
     case rockwellHiMAT
     case hermeusQuarterhorse
     case northAmericanX10
+    /// One shared airframe for the whole FPV class. Racing quads differ from each other mostly
+    /// in size and in what is bolted to the frame, not in shape, so the seven class entries take
+    /// this model at their own scale rather than each carrying a near-identical duplicate.
+    case fpvRacingQuad
 
     var title: String {
         switch self {
@@ -106,6 +110,8 @@ enum UAVVisualPreset: String, CaseIterable, Hashable {
             return "NASA / Rockwell HiMAT"
         case .hermeusQuarterhorse:
             return "Hermeus Quarterhorse Mk 2.1"
+        case .fpvRacingQuad:
+            return "FPV Racing Quad"
         case .northAmericanX10:
             return "North American X-10"
         }

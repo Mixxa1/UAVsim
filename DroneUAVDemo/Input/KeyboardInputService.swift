@@ -402,6 +402,16 @@ enum InputAction: Equatable, Hashable {
     case uiFocusDown
     case uiFocusLeft
     case uiFocusRight
+    // Race track builder. Only ever emitted while a racing mission has switched the shortcuts on
+    // — see `setRaceBuilderShortcutsEnabled` — so these keys stay free everywhere else.
+    case toggleRaceBuilder
+    case raceBuilderPlace
+    case raceBuilderDelete
+    case raceBuilderNextElement
+    case raceBuilderPreviousElement
+    case raceBuilderRaise
+    case raceBuilderLower
+    case raceBuilderCyclePassage
 }
 
 protocol KeyboardInputProviding {
@@ -419,6 +429,7 @@ protocol KeyboardInputProviding {
     func currentBindingConflicts() -> [String]
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String)
     func resetBindingsToDefault()
+    func setRaceBuilderShortcutsEnabled(_ enabled: Bool)
 }
 
 final class KeyboardInputService: KeyboardInputProviding {
@@ -437,6 +448,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     private var pendingActions: [InputAction] = []
 
     private var processingMode: InputProcessingMode = .flight
+    /// Racing missions claim B / Return / Tab / Delete / Page keys for the track builder. Off by
+    /// default so no other mission loses those keys to a feature it does not have.
+    private var raceBuilderShortcutsEnabled = false
     private var profile: KeyBindingProfile
     private let userDefaults: UserDefaults
 
@@ -663,7 +677,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             return event
         }
 
-        if !event.isARepeat, handleDirectUIShortcut(for: event.keyCode) {
+        if !event.isARepeat, handleDirectUIShortcut(for: event) {
             return nil
         }
 
@@ -916,8 +930,11 @@ final class KeyboardInputService: KeyboardInputProviding {
         return event.charactersIgnoringModifiers == "."
     }
 
-    private func handleDirectUIShortcut(for keyCode: UInt16) -> Bool {
-        switch keyCode {
+    private func handleDirectUIShortcut(for event: NSEvent) -> Bool {
+        if raceBuilderShortcutsEnabled, handleRaceBuilderShortcut(for: event) {
+            return true
+        }
+        switch event.keyCode {
         case Self.parametersPanelToggleKeyCode:
             enqueueAction(.toggleControlPanel)
             return true
@@ -927,6 +944,36 @@ final class KeyboardInputService: KeyboardInputProviding {
         default:
             return false
         }
+    }
+
+    private func handleRaceBuilderShortcut(for event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 11: // B
+            enqueueAction(.toggleRaceBuilder)
+        case 36, 76: // Return / keypad Enter
+            enqueueAction(.raceBuilderPlace)
+        case 51, 117: // Delete / forward delete
+            enqueueAction(.raceBuilderDelete)
+        case 48: // Tab
+            enqueueAction(
+                event.modifierFlags.contains(.shift)
+                    ? .raceBuilderPreviousElement
+                    : .raceBuilderNextElement
+            )
+        case 35: // P
+            enqueueAction(.raceBuilderCyclePassage)
+        case 116: // Page Up
+            enqueueAction(.raceBuilderRaise)
+        case 121: // Page Down
+            enqueueAction(.raceBuilderLower)
+        default:
+            return false
+        }
+        return true
+    }
+
+    func setRaceBuilderShortcutsEnabled(_ enabled: Bool) {
+        raceBuilderShortcutsEnabled = enabled
     }
 
     private func enqueueAction(_ action: InputAction) {

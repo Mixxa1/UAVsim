@@ -258,6 +258,24 @@ final class DroneSceneController {
     // Mission scenarios (SAR etc.): root for spawned scenario entities + the active target.
     private let missionScenarioRootNode = SCNNode()
     private var missionTargetNode: SCNNode?
+    // Agricultural spraying scenario: soil patch, crop, refill station and the wet-coverage decal
+    // all live in their own layer object, which owns the coverage texture buffer.
+    private let agriFieldLayer = AgriFieldSceneLayer()
+    // Drone racing: gates, flags and start pad, plus their live highlight state.
+    private let raceTrackLayer = RaceTrackSceneLayer()
+    /// Collision proxies belonging to the current race track, so a rebuilt track replaces them
+    /// instead of stacking a second set of solid gates on top of the first.
+    private var raceObstacleIDs: Set<UUID> = []
+    /// The track currently in the world, kept so its obstacles can be restored after an
+    /// environment rebuild throws the obstacle list away.
+    private var installedRaceTrack: RaceTrack?
+    /// The crop field currently in the world. Scenery is kept off it — a pine standing in the
+    /// wheat is both wrong to look at and a hazard on a 3 m spraying pass.
+    private var installedAgriField: AgriFieldPlacement?
+    /// Last installed scenery, so objects can be taken off a field that is spawned after the
+    /// world was generated (the mission bootstrap does exactly that).
+    private var installedEnvironmentNodes: [UUID: SCNNode] = [:]
+    private var installedEnvironmentDescriptors: [EnvironmentObjectDescriptor] = []
     // Fire-response scenario: dedicated tree nodes + real flame/smoke VFX, kept entirely outside
     // ScenePopulationService's ambient forest (see FireResponseScenario plan) so charring a tree
     // never interacts with weather-driven forest visual refreshes.
@@ -4602,7 +4620,7 @@ final class DroneSceneController {
     }
 
     private func installEnvironment(
-        descriptors: [EnvironmentObjectDescriptor],
+        descriptors incomingDescriptors: [EnvironmentObjectDescriptor],
         nodesByID: [UUID: SCNNode],
         terrain: TerrainConfiguration,
         printProceduralDiagnostics: Bool
@@ -4610,6 +4628,26 @@ final class DroneSceneController {
         // The dock and support surface may move when a new world is installed. Recreate the
         // sandbox hose truck on the next payload refresh so it cannot remain at the old origin.
         removeFreeFlightFireTruck()
+
+        // Scenery yields to a crop field. Filtering here rather than deleting afterwards means
+        // every regeneration keeps the field clear on its own, including the debounced one the
+        // mission bootstrap schedules after the field has already been spawned.
+        var descriptors = incomingDescriptors
+        if let field = installedAgriField {
+            let doomed = descriptors.filter { isInsideAgriField($0.position, field) }
+            if !doomed.isEmpty {
+                for descriptor in doomed {
+                    nodesByID[descriptor.id]?.removeFromParentNode()
+                }
+                let doomedIDs = Set(doomed.map(\.id))
+                descriptors.removeAll { doomedIDs.contains($0.id) }
+                print("[Agri] scenery kept off the field: \(doomed.count) objects removed at generation")
+            }
+        }
+        installedEnvironmentDescriptors = descriptors
+        installedEnvironmentNodes = nodesByID.filter { key, _ in
+            descriptors.contains { $0.id == key }
+        }
         environmentMapDescriptors = descriptors.filter(\.isCollidable)
         supportSurfaces = environmentMapDescriptors.flatMap(supportSurfaceDescriptors(for:))
 
@@ -4693,6 +4731,14 @@ final class DroneSceneController {
         }
         if terrain.preset == .city {
             printCityGenerationDiagnostics(descriptors: descriptors)
+        }
+
+        // A race track's gates are obstacles too, and this method replaces the obstacle list
+        // wholesale — so anything a scenario registered before the (debounced) regeneration ran is
+        // gone by now. That is exactly how the gates ended up passable: the racing bootstrap
+        // changes the map scale, which schedules this rebuild for *after* the track was spawned.
+        if let installedRaceTrack {
+            registerRaceTrackObstacles(installedRaceTrack)
         }
 
         // Environment was rebuilt — thermal proxies are stale.
@@ -9059,7 +9105,237 @@ final class DroneSceneController {
         return SIMD3<Float>(placement.targetPosition.x, groundY + 1.0, placement.targetPosition.y)
     }
 
+    /// Spawns the agricultural spraying field: soil, crop, boundary, refill station and the
+    /// coverage decal. Returns the refill station's world position.
+    @discardableResult
+    func spawnAgriSprayScenario(
+        placement: AgriFieldPlacement,
+        difficulty: MissionDifficulty
+    ) -> SIMD3<Float> {
+        clearMissionScenario()
+        installedAgriField = placement
+        clearEnvironmentInsideAgriField(placement)
+        return agriFieldLayer.build(
+            placement: placement,
+            difficulty: difficulty,
+            into: missionScenarioRootNode
+        )
+    }
+
+    /// Repaints the treated-rows decal from the runtime's dose grid.
+    func updateAgriCoverage(doseFractions: [Float]) {
+        agriFieldLayer.updateCoverage(doseFractions: doseFractions)
+    }
+
+    /// Whether a world position stands on the crop field, or close enough to it to matter.
+    ///
+    /// The margin covers both the headland the aircraft turns over and the refill station's own
+    /// apron: a tree inside either is in the way of the mission rather than scenery.
+    private func isInsideAgriField(_ position: SIMD3<Float>, _ placement: AgriFieldPlacement) -> Bool {
+        let planar = SIMD2<Float>(position.x, position.z)
+        let local = placement.worldToFieldLocal(planar)
+        let half = placement.fieldHalfExtent + 3.0
+        if abs(local.x) <= half, abs(local.y) <= half {
+            return true
+        }
+        return simd_distance(planar, placement.stationPosition)
+            <= AgriSprayTuning.refillRadiusMeters + 4.0
+    }
+
+    /// Takes scenery off a field that was spawned into an already-generated world.
+    private func clearEnvironmentInsideAgriField(_ placement: AgriFieldPlacement) {
+        let doomed = installedEnvironmentDescriptors.filter { isInsideAgriField($0.position, placement) }
+        guard !doomed.isEmpty else { return }
+        let doomedIDs = Set(doomed.map(\.id))
+
+        var doomedNodes: Set<ObjectIdentifier> = []
+        for id in doomedIDs {
+            guard let node = installedEnvironmentNodes[id] else { continue }
+            doomedNodes.insert(ObjectIdentifier(node))
+            node.removeFromParentNode()
+        }
+        // Obstacles are per collision part and several share one node; dropping a tree's trunk
+        // while leaving its canopy behind would leave an invisible obstacle standing in the crop.
+        let doomedObstacleIDs = Set(
+            obstacleMap
+                .filter { doomedNodes.contains(ObjectIdentifier($0.value)) }
+                .map(\.key)
+        )
+
+        installedEnvironmentNodes = installedEnvironmentNodes.filter { !doomedIDs.contains($0.key) }
+        installedEnvironmentDescriptors.removeAll { doomedIDs.contains($0.id) }
+        environmentMapDescriptors.removeAll { doomedIDs.contains($0.id) }
+        supportSurfaces = environmentMapDescriptors.flatMap(supportSurfaceDescriptors(for:))
+
+        if !doomedObstacleIDs.isEmpty {
+            environmentObstacles.removeAll { doomedObstacleIDs.contains($0.id) }
+            obstacleMap = obstacleMap.filter { !doomedObstacleIDs.contains($0.key) }
+            obstacleSourceByID = obstacleSourceByID.filter { !doomedObstacleIDs.contains($0.key) }
+            environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+            environmentRevision &+= 1
+        }
+        print("[Agri] scenery cleared off the field: \(doomed.count) objects, \(doomedObstacleIDs.count) obstacles")
+    }
+
+    // MARK: - Drone racing
+
+    /// Spawns a race track's equipment. Unlike the other scenarios this does not clear the
+    /// mission root first: the track builder rebuilds tracks live, and a full teardown would take
+    /// the rest of the scenario with it.
+    func spawnRaceTrack(_ track: RaceTrack, showsGateNumbers: Bool) {
+        raceTrackLayer.build(
+            track: track,
+            into: missionScenarioRootNode,
+            showsGateNumbers: showsGateNumbers
+        )
+        installedRaceTrack = track
+        registerRaceTrackObstacles(track)
+    }
+
+    /// Makes the equipment solid: a gate's frame can be hit, its opening cannot.
+    ///
+    /// Registered as ordinary environment obstacles (the same list trees and crates live in), so
+    /// collision, damage and the map overlay all treat a gate post like any other thing in the
+    /// world. Rebuilt wholesale whenever the track changes, which is also what the in-scene
+    /// builder does on every edit.
+    private func registerRaceTrackObstacles(_ track: RaceTrack) {
+        clearRaceTrackObstacles()
+
+        var newObstacles: [CollisionObstacle] = []
+        for element in track.elements {
+            guard let descriptor = element.descriptor else { continue }
+            let boxes = element.collisionBoxes(
+                from: RacingEquipmentAssetLoader.shared.collisionBoxes(for: descriptor)
+            )
+            guard !boxes.isEmpty else { continue }
+            let scale = max(0.05, element.scale)
+            let size = descriptor.sizeMeters * scale
+            let descriptorModel = EnvironmentObjectDescriptor(
+                id: UUID(),
+                kind: descriptor.role == .decor ? .pole : .marker,
+                biome: .field,
+                position: element.position,
+                yawRadians: element.yawRadians,
+                size: size,
+                boundingRadius: max(size.x, size.z) * 0.56,
+                isCollidable: true,
+                collisionParts: boxes.map { box in
+                    EnvironmentCollisionPart(
+                        localCenter: box.localCenter,
+                        size: box.size,
+                        source: "race_" + descriptor.id,
+                        supportsLanding: false
+                    )
+                }
+            )
+            let node = raceTrackLayer.node(for: element.id)
+            let obstacles = configureObstacleCollisionProxies(
+                for: node ?? missionScenarioRootNode,
+                descriptor: descriptorModel
+            )
+            for obstacle in obstacles {
+                if let node {
+                    obstacleMap[obstacle.id] = node
+                }
+                obstacleSourceByID[obstacle.id] = obstacle.source
+                raceObstacleIDs.insert(obstacle.id)
+            }
+            newObstacles.append(contentsOf: obstacles)
+        }
+
+        guard !newObstacles.isEmpty else { return }
+        environmentObstacles.append(contentsOf: newObstacles)
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+        environmentRevision &+= 1
+        print("[Race] track obstacles registered: \(newObstacles.count) boxes over \(track.elements.count) elements")
+    }
+
+    private func clearRaceTrackObstacles() {
+        guard !raceObstacleIDs.isEmpty else { return }
+        environmentObstacles.removeAll { raceObstacleIDs.contains($0.id) }
+        obstacleMap = obstacleMap.filter { !raceObstacleIDs.contains($0.key) }
+        obstacleSourceByID = obstacleSourceByID.filter { !raceObstacleIDs.contains($0.key) }
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
+        raceObstacleIDs.removeAll(keepingCapacity: false)
+        // Same reason the fire scenario announces its own removals: everything that caches on the
+        // obstacle revision would otherwise keep colliding with gates that are no longer there.
+        environmentRevision &+= 1
+    }
+
+    func applyRaceGateStates(_ states: [UUID: RaceGateVisualState]) {
+        raceTrackLayer.applyGateStates(states)
+    }
+
+    func updateRaceGhost(_ element: RaceTrackElement) {
+        raceTrackLayer.attach(to: missionScenarioRootNode)
+        raceTrackLayer.updateGhost(element: element)
+    }
+
+    func clearRaceGhost() {
+        raceTrackLayer.clearGhost()
+    }
+
+    func nearestRaceElement(to point: SIMD3<Float>, within radius: Float) -> UUID? {
+        raceTrackLayer.nearestElement(to: point, within: radius)
+    }
+
+    // MARK: - Free camera (track builder)
+
+    /// Flies the free camera under its own power: the builder needs to get around the world the
+    /// way a spectator does, not orbit a paused aircraft.
+    func moveFreeCamera(forward: Float, strafe: Float, vertical: Float, deltaTime: Float, speed: Float) {
+        guard deltaTime > 0.0 else { return }
+        let orientation = freeCameraNode.simdOrientation
+        let forwardVector = simd_normalize(simd_act(orientation, SIMD3<Float>(0.0, 0.0, -1.0)))
+        let rightVector = simd_normalize(simd_act(orientation, SIMD3<Float>(1.0, 0.0, 0.0)))
+        // Vertical stays world-up rather than camera-up: pitching the view down should not turn
+        // "go up" into "go backwards".
+        var motion = forwardVector * forward + rightVector * strafe
+        motion.y += vertical
+        let length = simd_length(motion)
+        guard length > 0.001 else { return }
+        freeCameraNode.simdPosition += (motion / length) * max(0.0, speed) * deltaTime
+        // Never let the builder camera sink through the ground; the track is built from above it.
+        freeCameraNode.simdPosition.y = max(0.6, freeCameraNode.simdPosition.y)
+    }
+
+    var freeCameraWorldPosition: SIMD3<Float> {
+        freeCameraNode.simdPosition
+    }
+
+    /// Where the free camera is pointing, on the ground. Falls back to a fixed distance ahead
+    /// when the camera is level or looking up, so the builder always has somewhere to put things.
+    func freeCameraGroundAimPoint(fallbackDistance: Float = 30.0) -> SIMD3<Float> {
+        let origin = freeCameraNode.simdPosition
+        let forward = simd_normalize(simd_act(freeCameraNode.simdOrientation, SIMD3<Float>(0.0, 0.0, -1.0)))
+        if forward.y < -0.05 {
+            let distance = min(400.0, origin.y / -forward.y)
+            let hit = origin + forward * distance
+            return SIMD3<Float>(hit.x, 0.0, hit.z)
+        }
+        let ahead = origin + forward * fallbackDistance
+        return SIMD3<Float>(ahead.x, 0.0, ahead.z)
+    }
+
+    /// Puts the builder camera somewhere useful when it is switched on: behind and above the
+    /// aircraft, looking at it.
+    func placeFreeCameraForBuilder(near position: SIMD3<Float>, yaw: Float) {
+        let back = SIMD3<Float>(-sin(yaw), 0, -cos(yaw)) * 12.0
+        freeCameraNode.simdPosition = SIMD3<Float>(
+            position.x + back.x,
+            max(6.0, position.y + 6.0),
+            position.z + back.z
+        )
+        freeLookAngles = SIMD2<Float>(yaw, -0.35)
+        freeCameraNode.eulerAngles = SCNVector3(CGFloat(-0.35), CGFloat(yaw), 0)
+    }
+
     func clearMissionScenario() {
+        agriFieldLayer.detach()
+        installedAgriField = nil
+        installedRaceTrack = nil
+        clearRaceTrackObstacles()
+        raceTrackLayer.detach()
         missionScenarioRootNode.childNodes.forEach { $0.removeFromParentNode() }
         missionTargetNode = nil
         thermalRenderer?.setMissionTarget(nil)

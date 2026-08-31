@@ -42,6 +42,7 @@ struct SceneViewportView: View {
                 activityState: viewModel.performancePolicy.activityState,
                 wantsWeatherDepthOfField: viewModel.wantsWeatherDepthOfField,
                 isHandLaunchPOV: viewModel.isHandLaunchPOVActive,
+                usesBuilderMouseLook: viewModel.isRaceBuilderActive,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },

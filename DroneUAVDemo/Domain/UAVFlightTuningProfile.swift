@@ -82,6 +82,22 @@ struct UAVFlightTuningProfile: Hashable {
         let source: UAVFlightTuningSource = specConfidence == .custom ? .custom : .estimated
 
         switch visualPreset {
+        case .fpvRacingQuad:
+            // A racing quad hovers at roughly a fifth of its throttle and has the rest in
+            // reserve: thrust-to-weight near ten to one is the defining number of the class, and
+            // it is what makes the stick feel like a rate command rather than a request. The
+            // penalty for hanging anything off it is correspondingly steep — these airframes are
+            // built with no margin to spare for payload.
+            return multicopter(
+                referenceMass: referenceMass,
+                hoverThrottleBaseline: 0.24,
+                stabilizationThrustBaseline: 3.40,
+                verticalResponseFactor: 2.20,
+                throttleAuthority: 1.60,
+                maneuverPenaltyFactor: 0.10,
+                payloadThrustCompensationFactor: 0.70,
+                source: source
+            )
         case .djiNeo:
             return multicopter(
                 referenceMass: referenceMass,

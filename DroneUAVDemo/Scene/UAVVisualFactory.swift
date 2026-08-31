@@ -140,6 +140,54 @@ enum UAVVisualFactory {
                 name: "uavRoot.iaiHarpyNG",
                 scale: 1.04
             )
+        // The FPV class: one airframe, seven sizes. Scale is measured against the five-inch model
+        // the geometry was authored at, by motor-to-motor span — a 65 mm whoop really is under a
+        // third of a 220 mm racer, and an open-class machine really is twice it.
+        case "fpv-tiny-whoop-65":
+            return visualVariant(
+                buildFPVRacingQuad(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fpvTinyWhoop",
+                scale: 0.30,
+                accents: [.indoorGuardCage(color: NSColor(calibratedWhite: 0.14, alpha: 1.0))]
+            )
+        case "fpv-micro-racer-25":
+            return visualVariant(
+                buildFPVRacingQuad(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fpvMicroRacer",
+                scale: 0.52
+            )
+        case "fpv-cinewhoop-3":
+            return visualVariant(
+                buildFPVRacingQuad(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fpvCinewhoop",
+                scale: 0.68,
+                accents: [.indoorGuardCage(color: NSColor(calibratedWhite: 0.18, alpha: 1.0))]
+            )
+        case "fpv-spec-5":
+            return visualVariant(
+                buildFPVRacingQuad(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fpvSpec5",
+                scale: 1.0,
+                accents: [
+                    .topPanel(
+                        color: NSColor(calibratedRed: 0.86, green: 0.72, blue: 0.10, alpha: 1.0),
+                        size: SIMD3<Float>(0.040, 0.004, 0.030),
+                        position: SIMD3<Float>(0.0, 0.056, -0.012)
+                    )
+                ]
+            )
+        case "fpv-long-range-7":
+            return visualVariant(
+                buildFPVRacingQuad(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fpvLongRange7",
+                scale: 1.38
+            )
+        case "fpv-open-class":
+            return visualVariant(
+                buildFPVRacingQuad(payloadMountOffset: profile.payloadMountOffset),
+                name: "uavRoot.fpvOpenClass",
+                scale: 1.95
+            )
         default:
             break
         }
@@ -215,7 +263,127 @@ enum UAVVisualFactory {
             return buildQuarterhorse(payloadMountOffset: payloadMountOffset)
         case .northAmericanX10:
             return buildX10(payloadMountOffset: payloadMountOffset)
+        case .fpvRacingQuad:
+            return buildFPVRacingQuad(payloadMountOffset: payloadMountOffset)
         }
+    }
+
+    /// The FPV class airframe, authored at five-inch size: a true X frame of carbon plates, four
+    /// unguarded motors on stubby arms, a pack strapped on top and a camera wedged in the nose.
+    ///
+    /// Deliberately one model for all seven class entries. A whoop, a five-inch racer and an open
+    /// class machine are the same shape at different sizes — what separates them is mass, prop
+    /// diameter and power, all of which live in the catalogue and the flight tuning, not in the
+    /// geometry. The two ducted classes add their guards through the existing accent mechanism.
+    private static func buildFPVRacingQuad(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {
+        let root = SCNNode()
+        root.name = "uavRoot.fpvRacingQuad"
+
+        let carbonMaterial = material(diffuse: NSColor(calibratedWhite: 0.10, alpha: 1.0), roughness: 0.38, metalness: 0.30)
+        let motorMaterial = material(diffuse: NSColor(calibratedRed: 0.62, green: 0.16, blue: 0.14, alpha: 1.0), roughness: 0.30, metalness: 0.62)
+        let packMaterial = material(diffuse: NSColor(calibratedRed: 0.12, green: 0.32, blue: 0.16, alpha: 1.0), roughness: 0.44, metalness: 0.10)
+        let podMaterial = material(diffuse: NSColor(calibratedRed: 0.15, green: 0.16, blue: 0.19, alpha: 1.0), roughness: 0.26, metalness: 0.48)
+        let rotorMaterial = material(diffuse: NSColor(calibratedRed: 0.92, green: 0.42, blue: 0.10, alpha: 0.86), roughness: 0.26, metalness: 0.06)
+
+        var componentNodes: [DamageComponent: [SCNNode]] = [:]
+
+        // Bottom plate carries the arms; the stack sits between the plates.
+        let bottomPlate = boxNode(size: SIMD3<Float>(0.062, 0.004, 0.098), chamfer: 0.004, material: carbonMaterial)
+        bottomPlate.position = SCNVector3(0.0, -0.004, 0.0)
+        root.addChildNode(bottomPlate)
+        append(bottomPlate, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let stack = boxNode(size: SIMD3<Float>(0.036, 0.020, 0.036), chamfer: 0.003, material: podMaterial)
+        stack.position = SCNVector3(0.0, 0.010, -0.004)
+        root.addChildNode(stack)
+        append(stack, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        let topPlate = boxNode(size: SIMD3<Float>(0.052, 0.003, 0.082), chamfer: 0.004, material: carbonMaterial)
+        topPlate.position = SCNVector3(0.0, 0.024, 0.0)
+        root.addChildNode(topPlate)
+        append(topPlate, to: .flightControllerCore, componentNodes: &componentNodes)
+
+        // Lipo strapped on top, tail-heavy the way a racer is actually packed.
+        let pack = boxNode(size: SIMD3<Float>(0.038, 0.026, 0.072), chamfer: 0.004, material: packMaterial)
+        pack.position = SCNVector3(0.0, 0.040, -0.012)
+        pack.eulerAngles = SCNVector3(-0.06, 0.0, 0.0)
+        root.addChildNode(pack)
+        append(pack, to: .battery, componentNodes: &componentNodes)
+
+        // Camera pod in the nose, tilted back the way an FPV camera is mounted to look ahead in
+        // a nose-down attitude.
+        let cameraPod = boxNode(size: SIMD3<Float>(0.026, 0.024, 0.026), chamfer: 0.005, material: podMaterial)
+        cameraPod.position = SCNVector3(0.0, 0.014, 0.046)
+        cameraPod.eulerAngles = SCNVector3(0.42, 0.0, 0.0)
+        root.addChildNode(cameraPod)
+        append(cameraPod, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let lens = cylinderNode(radius: 0.007, height: 0.010, material: material(diffuse: NSColor(calibratedWhite: 0.05, alpha: 1.0), roughness: 0.10, metalness: 0.70))
+        lens.eulerAngles = SCNVector3(Float.pi / 2 + 0.42, 0.0, 0.0)
+        lens.position = SCNVector3(0.0, 0.019, 0.058)
+        root.addChildNode(lens)
+        append(lens, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        let fpvAnchor = SCNNode()
+        fpvAnchor.name = "fpvCameraAnchor"
+        fpvAnchor.position = SCNVector3(0.0, 0.020, 0.062)
+        root.addChildNode(fpvAnchor)
+        append(fpvAnchor, to: .frontCameraGimbal, componentNodes: &componentNodes)
+
+        // Video transmitter antenna, swept back over the pack.
+        let antenna = beamNode(
+            start: SIMD3<Float>(0.0, 0.040, -0.046),
+            end: SIMD3<Float>(0.0, 0.082, -0.070),
+            radius: 0.0025,
+            material: podMaterial
+        )
+        root.addChildNode(antenna)
+        append(antenna, to: .battery, componentNodes: &componentNodes)
+
+        // True X: motors on the diagonals, arms as short as the frame allows.
+        let armPositions: [(DamageComponent, DamageComponent, DamageComponent, SIMD3<Float>)] = [
+            (.armFL, .motorFL, .propellerFL, SIMD3<Float>(-0.079, 0.0, 0.079)),
+            (.armFR, .motorFR, .propellerFR, SIMD3<Float>(0.079, 0.0, 0.079)),
+            (.armRL, .motorRL, .propellerRL, SIMD3<Float>(-0.079, 0.0, -0.079)),
+            (.armRR, .motorRR, .propellerRR, SIMD3<Float>(0.079, 0.0, -0.079))
+        ]
+
+        var propellers: [SCNNode] = []
+        for (index, arm) in armPositions.enumerated() {
+            let beam = beamNode(
+                start: SIMD3<Float>(arm.3.x * 0.28, -0.004, arm.3.z * 0.28),
+                end: SIMD3<Float>(arm.3.x, -0.004, arm.3.z),
+                radius: 0.007,
+                material: carbonMaterial
+            )
+            root.addChildNode(beam)
+            append(beam, to: arm.0, componentNodes: &componentNodes)
+
+            let motor = cylinderNode(radius: 0.0145, height: 0.016, material: motorMaterial)
+            motor.position = SCNVector3(arm.3.x, 0.004, arm.3.z)
+            root.addChildNode(motor)
+            append(motor, to: arm.1, componentNodes: &componentNodes)
+
+            // Five inches across, which is what makes this a five-inch quad.
+            let propeller = topPropellerNode(material: rotorMaterial, radius: 0.0635)
+            propeller.position = SCNVector3(arm.3.x, 0.014, arm.3.z)
+            propeller.name = "propeller.fpv.\(index)"
+            root.addChildNode(propeller)
+            propellers.append(propeller)
+            append(propeller, to: arm.2, componentNodes: &componentNodes)
+        }
+
+        let payloadMountNode = makePayloadMountNode(offset: payloadMountOffset)
+        root.addChildNode(payloadMountNode)
+
+        return DroneVisualModel(
+            rootNode: root,
+            propellerNodes: propellers,
+            propellerSpinDirections: [1.0, -1.0, -1.0, 1.0],
+            componentNodes: componentNodes,
+            fpvAnchorNode: fpvAnchor,
+            payloadMountNode: payloadMountNode
+        )
     }
 
     private static func buildDJIMatrice350RTK(payloadMountOffset: SIMD3<Float>) -> DroneVisualModel {

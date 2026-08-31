@@ -299,6 +299,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     /// model even though the underlying camera mode stays e.g. `.follow`
     /// while the POV camera temporarily overrides the viewpoint.
     var isHandLaunchPOV: Bool = false
+    /// The race track builder aims with the mouse itself — moved, not dragged — so it takes the
+    /// same captured-cursor look the spectator camera uses.
+    var usesBuilderMouseLook: Bool = false
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -315,9 +318,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.renderPolicy = policy
         view.backgroundColor = .black
         view.delegate = context.coordinator
-        view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV) ? onLookDelta : nil
+        view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV || usesBuilderMouseLook) ? onLookDelta : nil
         view.capturesMouseOnEntry = cameraMode == .spectator
-        view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV)
+        view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV || usesBuilderMouseLook)
         // DOF post-process honors both the weather request and the graphics tier (low disables it).
         view.technique = (wantsWeatherDepthOfField && quality.weatherDepthOfFieldEnabled)
             ? WeatherDepthOfFieldTechnique.shared : nil
@@ -356,9 +359,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         let policy = renderPolicyOverride ?? SceneRenderPolicy.policy(for: activityState)
         if let view = view as? FocusableSCNView {
             view.renderPolicy = policy
-            view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV) ? onLookDelta : nil
+            view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV || usesBuilderMouseLook) ? onLookDelta : nil
             view.capturesMouseOnEntry = cameraMode == .spectator
-            view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV)
+            view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV || usesBuilderMouseLook)
         } else {
             if view.preferredFramesPerSecond != policy.preferredFPS {
                 view.preferredFramesPerSecond = policy.preferredFPS

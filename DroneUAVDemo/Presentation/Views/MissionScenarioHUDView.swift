@@ -6,12 +6,22 @@ struct MissionScenarioHUDView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
 
     private var isFireResponse: Bool { viewModel.activeMissionScenarioKind == .fireResponse }
+    private var isAgriSpraying: Bool { viewModel.activeMissionScenarioKind == .agriculturalSpraying }
+    private var isRacing: Bool { viewModel.activeMissionScenarioKind == .droneRacing }
 
     var body: some View {
         if viewModel.hasMissionScenario {
             VStack(spacing: 8) {
                 header
-                if isFireResponse {
+                if isRacing {
+                    raceObjectiveRow
+                } else if isAgriSpraying {
+                    if let outcome = viewModel.agriSprayOutcome {
+                        agriOutcomeBanner(outcome)
+                    } else {
+                        agriObjectiveRow
+                    }
+                } else if isFireResponse {
                     if let outcome = viewModel.fireResponseOutcome {
                         fireOutcomeBanner(outcome)
                     } else {
@@ -43,9 +53,256 @@ struct MissionScenarioHUDView: View {
                     .foregroundStyle(.white)
             }
             Spacer()
-            Text(timeString(isFireResponse ? viewModel.fireResponseRemainingSeconds : viewModel.missionScenarioRemainingSeconds))
+            Text(timeString(remainingSeconds))
                 .font(.callout.weight(.bold).monospacedDigit())
                 .foregroundStyle(timerColor)
+        }
+    }
+
+    private var remainingSeconds: Double {
+        // Racing counts up, not down: the header shows the running lap instead of a budget.
+        if isRacing { return viewModel.raceCurrentLapSeconds }
+        if isAgriSpraying { return viewModel.agriSprayRemainingSeconds }
+        if isFireResponse { return viewModel.fireResponseRemainingSeconds }
+        return viewModel.missionScenarioRemainingSeconds
+    }
+
+    // MARK: - Drone racing
+
+    /// What a racing pilot needs at 30 m/s and nothing else: which gate is next and how far, the
+    /// lap, and the times. Gate *state* is shown on the gates themselves, not here.
+    private var raceObjectiveRow: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if viewModel.raceGateTotal == 0 {
+                Text("race.hud.no_track")
+                    .font(.caption2)
+                    .foregroundStyle(GroundControlPalette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let outcome = raceFinishSummary {
+                Text(outcome)
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(GroundControlPalette.success)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack {
+                    if let gate = viewModel.raceNextGateNumber {
+                        Label {
+                            Text(String(
+                                format: NSLocalizedString("race.hud.next_gate", comment: ""),
+                                gate,
+                                viewModel.raceNextGateDistanceMeters
+                            ))
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                        } icon: {
+                            Image(systemName: "arrow.forward.circle.fill")
+                        }
+                        .foregroundStyle(GroundControlPalette.accent)
+                    } else {
+                        Text("race.hud.free_flight")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                if viewModel.raceLapCount > 0, viewModel.raceCurrentLap > 0 {
+                    HStack {
+                        Text(String(
+                            format: NSLocalizedString("race.hud.lap", comment: ""),
+                            viewModel.raceCurrentLap,
+                            viewModel.raceLapCount
+                        ))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.75))
+                        Spacer()
+                        Text(String(
+                            format: NSLocalizedString("race.hud.gates", comment: ""),
+                            viewModel.raceGatesTaken,
+                            viewModel.raceGateTotal
+                        ))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.6))
+                    }
+                } else if viewModel.raceObjectiveState == .armed {
+                    Text("race.hud.armed")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let best = viewModel.raceBestLapSeconds {
+                    Text(String(
+                        format: NSLocalizedString("race.hud.best_lap", comment: ""),
+                        best
+                    ))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(GroundControlPalette.success)
+                }
+            }
+
+            if viewModel.raceWrongWayFlashSeconds > 0.0 {
+                Label {
+                    Text("race.hud.wrong_way")
+                        .font(.caption2.weight(.bold))
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(GroundControlPalette.danger)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var raceFinishSummary: String? {
+        guard viewModel.raceObjectiveState == .finished,
+              let best = viewModel.raceBestLapSeconds else {
+            return nil
+        }
+        return String(
+            format: NSLocalizedString("race.hud.finished", comment: ""),
+            viewModel.raceTotalSeconds,
+            best
+        )
+    }
+
+    // MARK: - Agricultural spraying
+
+    /// Coverage first, then the one thing keeping the spray from landing, then the refill state.
+    /// Deliberately not a second tank gauge — the sprayer payload already carries its own
+    /// (`AgriculturalSprayerStatusHUDView`), and two disagreeing gauges are worse than one.
+    private var agriObjectiveRow: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("mission.hud.objective.agri_spraying")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.8))
+                Spacer()
+                Text(String(format: "%.0f%%", viewModel.agriSprayCoverageFraction * 100.0))
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(coverageTint)
+            }
+
+            ProgressView(value: Double(min(1.0, viewModel.agriSprayCoverageFraction)))
+                .tint(coverageTint)
+
+            if let inhibitorKey = agriInhibitorKey {
+                Label {
+                    Text(LocalizedStringKey(inhibitorKey))
+                        .font(.caption2.weight(.semibold))
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(GroundControlPalette.warning)
+            } else if viewModel.agriSpraySwathMeters > 0.001 {
+                Text(String(
+                    format: NSLocalizedString("mission.hud.agri.swath", comment: ""),
+                    viewModel.agriSpraySwathMeters
+                ))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.65))
+            }
+
+            agriRefillRow
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var agriRefillRow: some View {
+        switch viewModel.agriSprayRefillState {
+        case .away:
+            Text(String(
+                format: NSLocalizedString("mission.hud.agri.station_distance", comment: ""),
+                viewModel.agriSprayStationDistanceMeters
+            ))
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.white.opacity(0.55))
+        case .inRangeUnstable:
+            Text("mission.hud.agri.refill_hold_still")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.warning)
+        case let .filling(progress):
+            VStack(alignment: .leading, spacing: 3) {
+                Text("mission.hud.agri.refilling")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(GroundControlPalette.accent)
+                ProgressView(value: Double(progress))
+                    .tint(GroundControlPalette.accent)
+            }
+        case .full:
+            Text("mission.hud.agri.tank_full")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.success)
+        }
+    }
+
+    private var agriInhibitorKey: String? {
+        switch viewModel.agriSprayInhibitor {
+        case .none: return nil
+        case .offField: return "mission.hud.agri.inhibitor.off_field"
+        case .tooHigh: return "mission.hud.agri.inhibitor.too_high"
+        case .tooLow: return "mission.hud.agri.inhibitor.too_low"
+        case .tooFast: return "mission.hud.agri.inhibitor.too_fast"
+        case .windy: return "mission.hud.agri.inhibitor.windy"
+        case .tankEmpty: return "mission.hud.agri.inhibitor.tank_empty"
+        }
+    }
+
+    private var coverageTint: Color {
+        viewModel.agriSprayCoverageFraction >= AgriSprayTuning.successCoverageFraction
+            ? GroundControlPalette.success
+            : GroundControlPalette.accent
+    }
+
+    private func agriOutcomeBanner(_ outcome: AgriSprayOutcome) -> some View {
+        let (titleKey, tint, detail): (String, Color, String?) = {
+            switch outcome {
+            case let .success(_, coverage, used, wasted):
+                return (
+                    "mission.hud.outcome.success",
+                    GroundControlPalette.success,
+                    String(
+                        format: NSLocalizedString("mission.hud.agri.result", comment: ""),
+                        coverage * 100.0, used, wasted
+                    )
+                )
+            case let .failureTimeout(coverage):
+                return (
+                    "mission.hud.outcome.failure",
+                    GroundControlPalette.danger,
+                    String(format: "%.0f%%", coverage * 100.0)
+                )
+            case .aborted:
+                return ("mission.hud.outcome.aborted", GroundControlPalette.textSecondary, nil)
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: agriOutcomeIcon(outcome))
+                    .foregroundStyle(tint)
+                Text(LocalizedStringKey(titleKey))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+            if let detail {
+                Text(detail)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func agriOutcomeIcon(_ outcome: AgriSprayOutcome) -> String {
+        switch outcome {
+        case .success: return "checkmark.seal.fill"
+        case .failureTimeout: return "xmark.octagon.fill"
+        case .aborted: return "minus.circle.fill"
         }
     }
 
@@ -169,6 +426,13 @@ struct MissionScenarioHUDView: View {
     }
 
     private var timerColor: Color {
+        if isRacing {
+            return viewModel.raceObjectiveState == .finished ? GroundControlPalette.success : .white
+        }
+        if isAgriSpraying {
+            if viewModel.agriSprayOutcome != nil { return .white.opacity(0.7) }
+            return viewModel.agriSprayRemainingSeconds <= 60 ? GroundControlPalette.danger : .white
+        }
         if isFireResponse {
             if viewModel.fireResponseOutcome != nil { return .white.opacity(0.7) }
             return viewModel.fireResponseRemainingSeconds <= 30 ? GroundControlPalette.danger : .white

@@ -1054,6 +1054,37 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 collisionRadiusMeters: 0.12,
                 structuralQualityFactor: 0.65
             )
+        case .fpvRacingQuad:
+            // The five-inch open racer, which is what the airframe is modelled at; the other six
+            // classes override this per aircraft below.
+            return RuntimeTuning(
+                fallbackTakeoffMass: 0.680,
+                fallbackDimensions: DroneDimensionsMM(x: 250, y: 250, z: 62),
+                maxHorizontalSpeedMps: 38.0,
+                maxAscentSpeedMps: 16.0,
+                maxDescentSpeedMps: 14.0,
+                maxFlightTimeMin: 4.6,
+                maxHoverTimeMin: 5.5,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 28.9,
+                cameraLayoutKey: "drone.camera.fpv",
+                visualClass: .miniCompact,
+                operationalCategory: .multirotor,
+                airframeClass: .multirotor,
+                airframeStyle: .multirotorQuad,
+                fixedWingParameters: nil,
+                launchMethod: .vertical,
+                landingMethod: .vertical,
+                // Racing quads are flown on rate, not on assistance: full stick is a demand for
+                // angular rate and the airframe delivers it almost immediately. There is nothing
+                // to soften here.
+                controlResponsiveness: 1.0,
+                hoverThrottle: 0.22,
+                cameraPreset: DroneCameraPreset(fpvFov: 108.0, followDistance: 3.4, followHeight: 1.0),
+                collisionRadiusMeters: 0.16,
+                // Carbon plates and exposed props: light, stiff, and entirely willing to break.
+                structuralQualityFactor: 0.55
+            )
         case .djiPhantom3Standard:
             return RuntimeTuning(
                 fallbackTakeoffMass: 1.216,
@@ -2222,6 +2253,109 @@ struct LIPODroneModelRepository: DroneModelRepository {
         for uavProfile: UAVProfile
     ) -> RuntimeTuning? {
         switch uavProfile.id {
+        // The FPV class shares one airframe model; everything that separates a whoop from an
+        // open-class machine is here rather than in the geometry.
+        case "fpv-tiny-whoop-65":
+            return fpvClassTuning(
+                takeoffMass: 0.035,
+                dimensions: DroneDimensionsMM(x: 98, y: 98, z: 42),
+                maxHorizontalSpeedMps: 13.0,
+                maxAscentSpeedMps: 6.0,
+                maxDescentSpeedMps: 5.0,
+                maxFlightTimeMin: 3.6,
+                maxWindResistanceMps: 4.0,
+                batteryEnergyWh: 1.7,
+                controlResponsiveness: 1.0,
+                hoverThrottle: 0.30,
+                fpvFov: 100.0,
+                collisionRadiusMeters: 0.055,
+                structuralQualityFactor: 0.45
+            )
+        case "fpv-micro-racer-25":
+            return fpvClassTuning(
+                takeoffMass: 0.145,
+                dimensions: DroneDimensionsMM(x: 145, y: 145, z: 46),
+                maxHorizontalSpeedMps: 26.0,
+                maxAscentSpeedMps: 12.0,
+                maxDescentSpeedMps: 10.0,
+                maxFlightTimeMin: 4.4,
+                maxWindResistanceMps: 7.0,
+                batteryEnergyWh: 8.4,
+                controlResponsiveness: 1.0,
+                hoverThrottle: 0.25,
+                fpvFov: 104.0,
+                collisionRadiusMeters: 0.09,
+                structuralQualityFactor: 0.50
+            )
+        case "fpv-spec-5":
+            return fpvClassTuning(
+                takeoffMass: 0.740,
+                dimensions: DroneDimensionsMM(x: 250, y: 250, z: 62),
+                // Spec class exists to cap exactly this number: same airframe, rule-limited motor
+                // and prop, so the racing is decided by the pilot.
+                maxHorizontalSpeedMps: 32.0,
+                maxAscentSpeedMps: 13.0,
+                maxDescentSpeedMps: 12.0,
+                maxFlightTimeMin: 4.2,
+                maxWindResistanceMps: 12.0,
+                batteryEnergyWh: 24.4,
+                controlResponsiveness: 0.98,
+                hoverThrottle: 0.26,
+                fpvFov: 106.0,
+                collisionRadiusMeters: 0.16,
+                structuralQualityFactor: 0.58
+            )
+        case "fpv-long-range-7":
+            return fpvClassTuning(
+                takeoffMass: 1.150,
+                dimensions: DroneDimensionsMM(x: 340, y: 340, z: 78),
+                maxHorizontalSpeedMps: 30.0,
+                maxAscentSpeedMps: 10.0,
+                maxDescentSpeedMps: 9.0,
+                maxFlightTimeMin: 17.0,
+                maxWindResistanceMps: 13.0,
+                batteryEnergyWh: 88.8,
+                controlResponsiveness: 0.94,
+                hoverThrottle: 0.30,
+                fpvFov: 100.0,
+                collisionRadiusMeters: 0.21,
+                structuralQualityFactor: 0.62
+            )
+        case "fpv-open-class":
+            return fpvClassTuning(
+                takeoffMass: 2.600,
+                dimensions: DroneDimensionsMM(x: 480, y: 480, z: 115),
+                maxHorizontalSpeedMps: 48.0,
+                maxAscentSpeedMps: 18.0,
+                maxDescentSpeedMps: 15.0,
+                maxFlightTimeMin: 6.0,
+                maxWindResistanceMps: 15.0,
+                batteryEnergyWh: 178.0,
+                // Still a rate machine, but four times the mass of a five-inch has to be turned.
+                controlResponsiveness: 0.92,
+                hoverThrottle: 0.30,
+                fpvFov: 104.0,
+                collisionRadiusMeters: 0.30,
+                structuralQualityFactor: 0.72
+            )
+        case "fpv-cinewhoop-3":
+            return fpvClassTuning(
+                takeoffMass: 0.550,
+                dimensions: DroneDimensionsMM(x: 195, y: 195, z: 72),
+                maxHorizontalSpeedMps: 19.0,
+                maxAscentSpeedMps: 8.0,
+                maxDescentSpeedMps: 7.0,
+                maxFlightTimeMin: 4.5,
+                // Ducts are sail area. A cinewhoop is heavier than a racer and still gets pushed
+                // around more, which is exactly the trade its pilots make for flying indoors.
+                maxWindResistanceMps: 8.0,
+                batteryEnergyWh: 28.9,
+                controlResponsiveness: 0.88,
+                hoverThrottle: 0.34,
+                fpvFov: 96.0,
+                collisionRadiusMeters: 0.13,
+                structuralQualityFactor: 0.60
+            )
         // MQ-9A shares MQ-9B's visual preset (same airframe lineage) but is a
         // lighter, shorter-winged and faster aircraft, so it cannot inherit the
         // MQ-9B tuning wholesale.
@@ -2916,6 +3050,54 @@ struct LIPODroneModelRepository: DroneModelRepository {
             sourceURL: nil
         )
     }
+}
+
+/// One shape for every FPV class entry: they differ in mass, size, speed and how hard they hit,
+/// never in what kind of aircraft they are.
+private func fpvClassTuning(
+    takeoffMass: Float,
+    dimensions: DroneDimensionsMM,
+    maxHorizontalSpeedMps: Float,
+    maxAscentSpeedMps: Float,
+    maxDescentSpeedMps: Float,
+    maxFlightTimeMin: Float,
+    maxWindResistanceMps: Float,
+    batteryEnergyWh: Float,
+    controlResponsiveness: Float,
+    hoverThrottle: Float,
+    fpvFov: Float,
+    collisionRadiusMeters: Float,
+    structuralQualityFactor: Float
+) -> RuntimeTuning {
+    RuntimeTuning(
+        fallbackTakeoffMass: takeoffMass,
+        fallbackDimensions: dimensions,
+        maxHorizontalSpeedMps: maxHorizontalSpeedMps,
+        maxAscentSpeedMps: maxAscentSpeedMps,
+        maxDescentSpeedMps: maxDescentSpeedMps,
+        maxFlightTimeMin: maxFlightTimeMin,
+        // Hovering is the cheapest thing a racing quad ever does, and nobody buys one to do it.
+        maxHoverTimeMin: maxFlightTimeMin * 1.2,
+        maxWindResistanceMps: maxWindResistanceMps,
+        batteryEnergyWh: batteryEnergyWh,
+        cameraLayoutKey: "drone.camera.fpv",
+        visualClass: .miniCompact,
+        operationalCategory: .multirotor,
+        airframeClass: .multirotor,
+        airframeStyle: .multirotorQuad,
+        fixedWingParameters: nil,
+        launchMethod: .vertical,
+        landingMethod: .vertical,
+        controlResponsiveness: controlResponsiveness,
+        hoverThrottle: hoverThrottle,
+        cameraPreset: DroneCameraPreset(
+            fpvFov: fpvFov,
+            followDistance: max(2.2, dimensions.x / 1000.0 * 12.0),
+            followHeight: max(0.7, dimensions.x / 1000.0 * 3.4)
+        ),
+        collisionRadiusMeters: collisionRadiusMeters,
+        structuralQualityFactor: structuralQualityFactor
+    )
 }
 
 private struct RuntimeTuning {

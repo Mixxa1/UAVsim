@@ -21,6 +21,31 @@ struct MissionSetupView: View {
     @State private var hoseLengthMeters: Double = 30.0
     @State private var capsuleSize: FireCapsuleSize = .medium
     @State private var capsuleCount: Int = 2
+    @State private var raceMode: RaceMode = .timed
+    @State private var raceLaps: Int = 3
+    @State private var raceTrackSource: RaceTrackSource = .generated
+    @State private var raceLibrary: [RaceTrackStore.Summary] = []
+    @State private var selectedRaceTrackID: UUID?
+
+    /// Where the track for a racing mission comes from.
+    private enum RaceTrackSource: String, CaseIterable, Identifiable {
+        /// Laid out from the mission seed, sized by difficulty.
+        case generated
+        /// One the pilot built and saved earlier.
+        case library
+        /// Nothing at all: fly into an empty world and build the track there.
+        case empty
+
+        var id: String { rawValue }
+
+        var titleKey: String {
+            switch self {
+            case .generated: return "race.setup.source.generated"
+            case .library: return "race.setup.source.library"
+            case .empty: return "race.setup.source.empty"
+            }
+        }
+    }
 
     /// UAV profiles that can actually carry `payload`'s mass (and stay within max takeoff mass) —
     /// without this, picking a heavy payload (e.g. the fire hose) against the default/first
@@ -29,6 +54,9 @@ struct MissionSetupView: View {
     /// class) is what matters, not the flat default — so the picker narrows live as the operator
     /// drags the length slider.
     private var compatibleProfiles: [DroneModelProfile] {
+        // Racing mounts nothing, so no aircraft is excluded for being unable to carry it — the
+        // pilot may fly a whoop, a Matrice or their own Workbench build through the gates.
+        guard kind.requiresPayload else { return availableProfiles }
         var configuration = PayloadConfiguration(payloadType: payload)
         if payload == .fireHose {
             configuration.payloadMass = hoseDiameterClass.massForLength(Float(hoseLengthMeters))
@@ -85,7 +113,20 @@ struct MissionSetupView: View {
             return "mission.setup.payload.hint"
         case .fireResponse:
             return "mission.setup.payload.hint.fire_response"
+        case .agriculturalSpraying:
+            return "mission.setup.payload.hint.agricultural_spraying"
+        case .droneRacing:
+            return "mission.setup.payload.hint.drone_racing"
         }
+    }
+
+    /// Time budget for the selected scenario at the selected difficulty. Agricultural spraying is
+    /// paced by water logistics — several tank loads plus the trips back to the canisters — so it
+    /// gets its own, much longer default than the search/fire scenarios.
+    private func defaultTimeLimit(for kind: MissionScenarioKind, difficulty: MissionDifficulty) -> Int {
+        kind == .agriculturalSpraying
+            ? difficulty.agriDefaultTimeLimitMinutes
+            : difficulty.defaultTimeLimitMinutes
     }
 
     var body: some View {
@@ -133,6 +174,24 @@ struct MissionSetupView: View {
             if newValue == .fireResponse {
                 terrainDensity = .medium
             }
+            // A crop field is open ground by definition: the ambient forest is scenery on the
+            // horizon here, and trees standing *in* the field would be both wrong to look at and
+            // a genuine hazard on the 2-5 m passes this mission is flown at.
+            if newValue == .agriculturalSpraying {
+                terrain = .field
+                terrainDensity = .sparse
+            }
+            // A race course needs clear air between the gates: the ambient forest is scenery on
+            // the horizon here, not something to thread a quad through at 30 m/s.
+            if newValue == .droneRacing {
+                terrain = .field
+                terrainDensity = .sparse
+                raceLibrary = RaceTrackStore.list()
+                if selectedRaceTrackID == nil {
+                    selectedRaceTrackID = raceLibrary.first?.id
+                }
+            }
+            timeLimitMinutes = defaultTimeLimit(for: newValue, difficulty: difficulty)
         }
         .onChange(of: payload) { _, _ in
             if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
@@ -232,8 +291,16 @@ struct MissionSetupView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .onChange(of: difficulty) { _, newValue in
-                    timeLimitMinutes = newValue.defaultTimeLimitMinutes
+                    timeLimitMinutes = defaultTimeLimit(for: kind, difficulty: newValue)
                 }
+            }
+
+            if kind == .agriculturalSpraying {
+                agriBriefingRow
+            }
+
+            if kind == .droneRacing {
+                raceFields
             }
 
             labeledRow("mission.setup.time_of_day") {
@@ -301,6 +368,148 @@ struct MissionSetupView: View {
         }
     }
 
+    /// What the chosen difficulty actually costs in water, spelled out before launch: the field's
+    /// size, the water it needs at the reference dose, and how many tank loads that is. The
+    /// mission's real difficulty knob is the number of trips back to the canisters, and it would
+    /// otherwise be invisible until the operator is already airborne with an empty tank.
+    private var agriBriefingRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "drop.fill")
+                    .foregroundStyle(GroundControlPalette.accent)
+                Text(String(
+                    format: NSLocalizedString("mission.setup.agri.briefing", comment: ""),
+                    difficulty.agriFieldSideMeters,
+                    difficulty.agriFieldAreaHectares,
+                    difficulty.agriRequiredLiters,
+                    difficulty.agriTankLoads
+                ))
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            Text(String(
+                format: NSLocalizedString("mission.setup.agri.window", comment: ""),
+                AgriSprayTuning.idealAltitudeRange.lowerBound,
+                AgriSprayTuning.idealAltitudeRange.upperBound,
+                AgriSprayTuning.idealMaxGroundSpeed,
+                AgriSprayTuning.successCoverageFraction * 100.0
+            ))
+            .font(.caption2)
+            .foregroundStyle(.white.opacity(0.6))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Racing setup: how the run is scored, how many laps, and where the track comes from.
+    @ViewBuilder
+    private var raceFields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            labeledRow("race.setup.mode") {
+                Picker("", selection: $raceMode) {
+                    ForEach(RaceMode.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            Text(LocalizedStringKey(raceMode.subtitleKey))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if raceMode == .timed {
+                Stepper(value: $raceLaps, in: 1...10) {
+                    HStack {
+                        Text("race.setup.laps")
+                            .font(.caption).foregroundStyle(.white.opacity(0.8))
+                        Spacer()
+                        Text("\(raceLaps)")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.white)
+                    }
+                }
+            }
+
+            labeledRow("race.setup.source") {
+                Picker("", selection: $raceTrackSource) {
+                    ForEach(RaceTrackSource.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            switch raceTrackSource {
+            case .generated:
+                Text("race.setup.source.generated.hint")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            case .empty:
+                Text("race.setup.source.empty.hint")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            case .library:
+                if raceLibrary.isEmpty {
+                    Text("race.setup.source.library.empty")
+                        .font(.caption2)
+                        .foregroundStyle(GroundControlPalette.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    VStack(spacing: 6) {
+                        ForEach(raceLibrary) { summary in
+                            Button {
+                                selectedRaceTrackID = summary.id
+                            } label: {
+                                raceLibraryRow(summary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func raceLibraryRow(_ summary: RaceTrackStore.Summary) -> some View {
+        let isSelected = summary.id == selectedRaceTrackID
+        return HStack(spacing: 10) {
+            Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(isSelected ? GroundControlPalette.accent : .white.opacity(0.4))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(summary.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(String(
+                    format: NSLocalizedString("race.setup.library.detail", comment: ""),
+                    summary.gateCount,
+                    summary.lapLengthMeters,
+                    summary.laps
+                ))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.6))
+            }
+            Spacer(minLength: 0)
+            if let best = summary.bestLapSeconds {
+                Text(String(format: "%.2f s", best))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(GroundControlPalette.success)
+            }
+        }
+        .padding(8)
+        .background(
+            Color.white.opacity(isSelected ? 0.10 : 0.04),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
     private var platformSection: some View {
         sectionCard(titleKey: "mission.setup.section.platform") {
             VStack(alignment: .leading, spacing: 14) {
@@ -336,15 +545,17 @@ struct MissionSetupView: View {
                     }
                 }
 
-                labeledRow("mission.setup.payload") {
-                    Picker("", selection: $payload) {
-                        ForEach(compatiblePayloads) { type in
-                            Text(LocalizedStringKey(payloadTitleKey(type))).tag(type)
+                if kind.requiresPayload {
+                    labeledRow("mission.setup.payload") {
+                        Picker("", selection: $payload) {
+                            ForEach(compatiblePayloads) { type in
+                                Text(LocalizedStringKey(payloadTitleKey(type))).tag(type)
+                            }
                         }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .tint(.white)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .tint(.white)
                 }
 
                 Text(LocalizedStringKey(payloadHintKey))
@@ -484,9 +695,39 @@ struct MissionSetupView: View {
             fireHoseDiameterClass: hoseDiameterClass,
             fireHoseLengthMeters: Float(hoseLengthMeters),
             fireCapsuleSize: capsuleSize,
-            fireCapsuleCount: capsuleCount
+            fireCapsuleCount: capsuleCount,
+            raceTrack: resolvedRaceTrack(parameters: parameters),
+            raceMode: raceMode
         )
         onStart(config)
+    }
+
+    /// The track a racing mission launches with. Nil is a real answer, not a failure: it means
+    /// the pilot asked for an empty world and will build the course in it.
+    private func resolvedRaceTrack(parameters: MissionScenarioParameters) -> RaceTrack? {
+        guard kind == .droneRacing else { return nil }
+        switch raceTrackSource {
+        case .empty:
+            return nil
+        case .library:
+            guard let id = selectedRaceTrackID,
+                  let summary = raceLibrary.first(where: { $0.id == id }),
+                  var track = try? RaceTrackStore.load(from: summary.url) else {
+                return nil
+            }
+            track.laps = raceMode == .timed ? raceLaps : track.laps
+            return track
+        case .generated:
+            var track = RaceTrackGenerator.generate(
+                parameters: RaceTrackGenerator.Parameters.forDifficulty(
+                    difficulty,
+                    seed: parameters.seed
+                ),
+                worldHalfExtent: parameters.difficulty.recommendedMapScale.worldHalfExtentMeters
+            )
+            track.laps = raceLaps
+            return track
+        }
     }
 
     private func payloadTitleKey(_ type: PayloadType) -> String {

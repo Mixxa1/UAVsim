@@ -322,7 +322,40 @@
 		100000000000000000000404 /* EnvironmentDebugOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000405 /* EnvironmentDebugOptions.swift */; };
 		100000000000000000000406 /* CreditsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000407 /* CreditsView.swift */; };
 		100000000000000000000408 /* Pine_Tree.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000409 /* Pine_Tree.usdz */; };
+		AC9100000000000000000001 /* Wheat.usdz in Resources */ = {isa = PBXBuildFile; fileRef = AC9100000000000000000002 /* Wheat.usdz */; };
+		AC9200000000000000000001 /* Water_Gallon.usdz in Resources */ = {isa = PBXBuildFile; fileRef = AC9200000000000000000002 /* Water_Gallon.usdz */; };
+		AC9300000000000000000001 /* Dirt_2.usdz in Resources */ = {isa = PBXBuildFile; fileRef = AC9300000000000000000002 /* Dirt_2.usdz */; };
+		ACA000000000000000000001 /* Gate_Hexagon.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA000000000000000000002 /* Gate_Hexagon.usdz */; };
+		ACA100000000000000000001 /* Gate_Square_Banner.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA100000000000000000002 /* Gate_Square_Banner.usdz */; };
+		ACA200000000000000000001 /* Gate_Pentagon_Cluster.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA200000000000000000002 /* Gate_Pentagon_Cluster.usdz */; };
+		ACA300000000000000000001 /* Gate_Slalom_Wall.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA300000000000000000002 /* Gate_Slalom_Wall.usdz */; };
+		ACA400000000000000000001 /* Gate_Square_Large.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA400000000000000000002 /* Gate_Square_Large.usdz */; };
+		ACA500000000000000000001 /* Gate_Arch.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA500000000000000000002 /* Gate_Arch.usdz */; };
+		ACA600000000000000000001 /* Gate_Tower.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA600000000000000000002 /* Gate_Tower.usdz */; };
+		ACA700000000000000000001 /* Gate_Square.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA700000000000000000002 /* Gate_Square.usdz */; };
+		ACA800000000000000000001 /* Gate_Arch_Base.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA800000000000000000002 /* Gate_Arch_Base.usdz */; };
+		ACA900000000000000000001 /* Pad_Start.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACA900000000000000000002 /* Pad_Start.usdz */; };
+		ACAA00000000000000000001 /* Flag_Feather.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAA00000000000000000002 /* Flag_Feather.usdz */; };
+		ACAB00000000000000000001 /* Gate_Cube.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAB00000000000000000002 /* Gate_Cube.usdz */; };
+		ACAC00000000000000000001 /* Gate_Pentagon.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAC00000000000000000002 /* Gate_Pentagon.usdz */; };
+		ACAD00000000000000000001 /* Flag_Drop.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAD00000000000000000002 /* Flag_Drop.usdz */; };
+		ACAE00000000000000000001 /* Flag_Sail.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAE00000000000000000002 /* Flag_Sail.usdz */; };
+		ACAF00000000000000000001 /* Flag_Blade.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAF00000000000000000002 /* Flag_Blade.usdz */; };
 		100000000000000000000A01 /* ManAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A02 /* ManAssetLoader.swift */; };
+		AD5000000000000000000000 /* RaceBuilderPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5000000000000000000001 /* RaceBuilderPanelView.swift */; };
+		AD4000000000000000000000 /* RaceTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000001 /* RaceTrack.swift */; };
+		AD4000000000000000000002 /* RaceTrackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000003 /* RaceTrackStore.swift */; };
+		AD4000000000000000000004 /* RaceTrackGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000005 /* RaceTrackGenerator.swift */; };
+		AD4000000000000000000006 /* RaceRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000007 /* RaceRuntime.swift */; };
+		AD4000000000000000000008 /* RaceTrackSceneLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000009 /* RaceTrackSceneLayer.swift */; };
+		AD3000000000000000000000 /* AgriFieldSceneLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD3000000000000000000001 /* AgriFieldSceneLayer.swift */; };
+		AD2000000000000000000000 /* AgriSprayScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD2000000000000000000001 /* AgriSprayScenario.swift */; };
+		AD2000000000000000000002 /* AgriSprayRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD2000000000000000000003 /* AgriSprayRuntime.swift */; };
+		AD1000000000000000000000 /* WheatFieldAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1000000000000000000001 /* WheatFieldAssetLoader.swift */; };
+		AD1000000000000000000002 /* WaterStationAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1000000000000000000003 /* WaterStationAssetLoader.swift */; };
+		AD1000000000000000000004 /* FieldSoilMaterialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1000000000000000000005 /* FieldSoilMaterialLoader.swift */; };
+		AD1000000000000000000006 /* RacingEquipmentAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1000000000000000000007 /* RacingEquipmentAssetLoader.swift */; };
+		AD1000000000000000000008 /* RacingElementCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1000000000000000000009 /* RacingElementCatalog.swift */; };
 		100000000000000000000A05 /* MissionScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A06 /* MissionScenario.swift */; };
 		100000000000000000000C71 /* WorldClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000C72 /* WorldClock.swift */; };
 		100000000000000000000A07 /* MissionScenarioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A08 /* MissionScenarioRuntime.swift */; };
@@ -775,7 +808,40 @@
 		100000000000000000000405 /* EnvironmentDebugOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentDebugOptions.swift; sourceTree = "<group>"; };
 		100000000000000000000407 /* CreditsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditsView.swift; sourceTree = "<group>"; };
 		100000000000000000000409 /* Pine_Tree.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Pine_Tree.usdz"; sourceTree = "<group>"; };
+		AC9100000000000000000002 /* Wheat.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Agri/Wheat.usdz"; sourceTree = "<group>"; };
+		AC9200000000000000000002 /* Water_Gallon.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Agri/Water_Gallon.usdz"; sourceTree = "<group>"; };
+		AC9300000000000000000002 /* Dirt_2.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Dirt_2.usdz"; sourceTree = "<group>"; };
+		ACA000000000000000000002 /* Gate_Hexagon.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Hexagon.usdz"; sourceTree = "<group>"; };
+		ACA100000000000000000002 /* Gate_Square_Banner.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Square_Banner.usdz"; sourceTree = "<group>"; };
+		ACA200000000000000000002 /* Gate_Pentagon_Cluster.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Pentagon_Cluster.usdz"; sourceTree = "<group>"; };
+		ACA300000000000000000002 /* Gate_Slalom_Wall.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Slalom_Wall.usdz"; sourceTree = "<group>"; };
+		ACA400000000000000000002 /* Gate_Square_Large.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Square_Large.usdz"; sourceTree = "<group>"; };
+		ACA500000000000000000002 /* Gate_Arch.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Arch.usdz"; sourceTree = "<group>"; };
+		ACA600000000000000000002 /* Gate_Tower.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Tower.usdz"; sourceTree = "<group>"; };
+		ACA700000000000000000002 /* Gate_Square.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Square.usdz"; sourceTree = "<group>"; };
+		ACA800000000000000000002 /* Gate_Arch_Base.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Arch_Base.usdz"; sourceTree = "<group>"; };
+		ACA900000000000000000002 /* Pad_Start.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Pad_Start.usdz"; sourceTree = "<group>"; };
+		ACAA00000000000000000002 /* Flag_Feather.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Flag_Feather.usdz"; sourceTree = "<group>"; };
+		ACAB00000000000000000002 /* Gate_Cube.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Cube.usdz"; sourceTree = "<group>"; };
+		ACAC00000000000000000002 /* Gate_Pentagon.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Gate_Pentagon.usdz"; sourceTree = "<group>"; };
+		ACAD00000000000000000002 /* Flag_Drop.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Flag_Drop.usdz"; sourceTree = "<group>"; };
+		ACAE00000000000000000002 /* Flag_Sail.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Flag_Sail.usdz"; sourceTree = "<group>"; };
+		ACAF00000000000000000002 /* Flag_Blade.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Flag_Blade.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A02 /* ManAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManAssetLoader.swift; sourceTree = "<group>"; };
+		AD5000000000000000000001 /* RaceBuilderPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceBuilderPanelView.swift; sourceTree = "<group>"; };
+		AD4000000000000000000001 /* RaceTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrack.swift; sourceTree = "<group>"; };
+		AD4000000000000000000003 /* RaceTrackStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackStore.swift; sourceTree = "<group>"; };
+		AD4000000000000000000005 /* RaceTrackGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackGenerator.swift; sourceTree = "<group>"; };
+		AD4000000000000000000007 /* RaceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceRuntime.swift; sourceTree = "<group>"; };
+		AD4000000000000000000009 /* RaceTrackSceneLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackSceneLayer.swift; sourceTree = "<group>"; };
+		AD3000000000000000000001 /* AgriFieldSceneLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgriFieldSceneLayer.swift; sourceTree = "<group>"; };
+		AD2000000000000000000001 /* AgriSprayScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgriSprayScenario.swift; sourceTree = "<group>"; };
+		AD2000000000000000000003 /* AgriSprayRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgriSprayRuntime.swift; sourceTree = "<group>"; };
+		AD1000000000000000000001 /* WheatFieldAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WheatFieldAssetLoader.swift; sourceTree = "<group>"; };
+		AD1000000000000000000003 /* WaterStationAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterStationAssetLoader.swift; sourceTree = "<group>"; };
+		AD1000000000000000000005 /* FieldSoilMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FieldSoilMaterialLoader.swift; sourceTree = "<group>"; };
+		AD1000000000000000000007 /* RacingEquipmentAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RacingEquipmentAssetLoader.swift; sourceTree = "<group>"; };
+		AD1000000000000000000009 /* RacingElementCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RacingElementCatalog.swift; sourceTree = "<group>"; };
 		100000000000000000000A06 /* MissionScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenario.swift; sourceTree = "<group>"; };
 		100000000000000000000C72 /* WorldClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldClock.swift; sourceTree = "<group>"; };
 		100000000000000000000A08 /* MissionScenarioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionScenarioRuntime.swift; sourceTree = "<group>"; };
@@ -1022,6 +1088,11 @@
 				1000000000000000000002A7 /* MissionLeg.swift */,
 				100000000000000000000179 /* MissionPlan.swift */,
 				100000000000000000000A06 /* MissionScenario.swift */,
+				AD4000000000000000000001 /* RaceTrack.swift */,
+				AD4000000000000000000003 /* RaceTrackStore.swift */,
+				AD4000000000000000000005 /* RaceTrackGenerator.swift */,
+				AD2000000000000000000001 /* AgriSprayScenario.swift */,
+				AD1000000000000000000009 /* RacingElementCatalog.swift */,
 				100000000000000000000C72 /* WorldClock.swift */,
 				100000000000000000000A14 /* FireResponseScenario.swift */,
 				100000000000000000000175 /* MissionPlanStatus.swift */,
@@ -1134,6 +1205,8 @@
 				10000000000000000000017E /* MissionProgressTracker.swift */,
 				10000000000000000000016D /* MissionPreviewBuilder.swift */,
 				100000000000000000000A08 /* MissionScenarioRuntime.swift */,
+				AD4000000000000000000007 /* RaceRuntime.swift */,
+				AD2000000000000000000003 /* AgriSprayRuntime.swift */,
 				100000000000000000000A16 /* FireResponseRuntime.swift */,
 				100000000000000000000186 /* MissionAuthorityGuard.swift */,
 				1000000000000000000002BC /* MissionGuidanceTargetResolver.swift */,
@@ -1179,6 +1252,12 @@
 				10000000000000000000F009 /* RunwayAssetLoader.swift */,
 				100000000000000000000A22 /* FireVisualAssetLoader.swift */,
 				100000000000000000000A02 /* ManAssetLoader.swift */,
+				AD4000000000000000000009 /* RaceTrackSceneLayer.swift */,
+				AD3000000000000000000001 /* AgriFieldSceneLayer.swift */,
+				AD1000000000000000000001 /* WheatFieldAssetLoader.swift */,
+				AD1000000000000000000003 /* WaterStationAssetLoader.swift */,
+				AD1000000000000000000005 /* FieldSoilMaterialLoader.swift */,
+				AD1000000000000000000007 /* RacingEquipmentAssetLoader.swift */,
 				100000000000000000000403 /* GenericGrassMaterialLoader.swift */,
 				B20400000000000000000002 /* AsphaltMaterialLoader.swift */,
 				B20400000000000000000001 /* CargoContainerAssetLoader.swift */,
@@ -1244,6 +1323,7 @@
 				10000000000000000000014F /* ScenarioModuleView.swift */,
 				100000000000000000000A0A /* MissionSetupView.swift */,
 				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
+				AD5000000000000000000001 /* RaceBuilderPanelView.swift */,
 				100000000000000000000A0E /* PayloadGimbalSliderControls.swift */,
 				100000000000000000000A10 /* SettingsView.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
@@ -1368,6 +1448,25 @@
 				C0DE10000000000000000002 /* Workbench.usdz */,
 				C0DE10000000000000000004 /* Brick_Material.usdz */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
+				AC9100000000000000000002 /* Wheat.usdz */,
+				AC9200000000000000000002 /* Water_Gallon.usdz */,
+				AC9300000000000000000002 /* Dirt_2.usdz */,
+				ACA000000000000000000002 /* Gate_Hexagon.usdz */,
+				ACA100000000000000000002 /* Gate_Square_Banner.usdz */,
+				ACA200000000000000000002 /* Gate_Pentagon_Cluster.usdz */,
+				ACA300000000000000000002 /* Gate_Slalom_Wall.usdz */,
+				ACA400000000000000000002 /* Gate_Square_Large.usdz */,
+				ACA500000000000000000002 /* Gate_Arch.usdz */,
+				ACA600000000000000000002 /* Gate_Tower.usdz */,
+				ACA700000000000000000002 /* Gate_Square.usdz */,
+				ACA800000000000000000002 /* Gate_Arch_Base.usdz */,
+				ACA900000000000000000002 /* Pad_Start.usdz */,
+				ACAA00000000000000000002 /* Flag_Feather.usdz */,
+				ACAB00000000000000000002 /* Gate_Cube.usdz */,
+				ACAC00000000000000000002 /* Gate_Pentagon.usdz */,
+				ACAD00000000000000000002 /* Flag_Drop.usdz */,
+				ACAE00000000000000000002 /* Flag_Sail.usdz */,
+				ACAF00000000000000000002 /* Flag_Blade.usdz */,
 				100000000000000000000A04 /* Man.usdz */,
 				100000000000000000000A1C /* Fire_Truck.usdz */,
 				10000000000000000000F011 /* Runway.usdz */,
@@ -1608,6 +1707,25 @@
 				C0DE10000000000000000001 /* Workbench.usdz in Resources */,
 				C0DE10000000000000000003 /* Brick_Material.usdz in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
+				AC9100000000000000000001 /* Wheat.usdz in Resources */,
+				AC9200000000000000000001 /* Water_Gallon.usdz in Resources */,
+				AC9300000000000000000001 /* Dirt_2.usdz in Resources */,
+				ACA000000000000000000001 /* Gate_Hexagon.usdz in Resources */,
+				ACA100000000000000000001 /* Gate_Square_Banner.usdz in Resources */,
+				ACA200000000000000000001 /* Gate_Pentagon_Cluster.usdz in Resources */,
+				ACA300000000000000000001 /* Gate_Slalom_Wall.usdz in Resources */,
+				ACA400000000000000000001 /* Gate_Square_Large.usdz in Resources */,
+				ACA500000000000000000001 /* Gate_Arch.usdz in Resources */,
+				ACA600000000000000000001 /* Gate_Tower.usdz in Resources */,
+				ACA700000000000000000001 /* Gate_Square.usdz in Resources */,
+				ACA800000000000000000001 /* Gate_Arch_Base.usdz in Resources */,
+				ACA900000000000000000001 /* Pad_Start.usdz in Resources */,
+				ACAA00000000000000000001 /* Flag_Feather.usdz in Resources */,
+				ACAB00000000000000000001 /* Gate_Cube.usdz in Resources */,
+				ACAC00000000000000000001 /* Gate_Pentagon.usdz in Resources */,
+				ACAD00000000000000000001 /* Flag_Drop.usdz in Resources */,
+				ACAE00000000000000000001 /* Flag_Sail.usdz in Resources */,
+				ACAF00000000000000000001 /* Flag_Blade.usdz in Resources */,
 				100000000000000000000A03 /* Man.usdz in Resources */,
 				100000000000000000000A1B /* Fire_Truck.usdz in Resources */,
 				10000000000000000000F010 /* Runway.usdz in Resources */,
@@ -1786,6 +1904,20 @@
 				10000000000000000000F008 /* RunwayAssetLoader.swift in Sources */,
 				100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */,
 				100000000000000000000A01 /* ManAssetLoader.swift in Sources */,
+				AD5000000000000000000000 /* RaceBuilderPanelView.swift in Sources */,
+				AD4000000000000000000000 /* RaceTrack.swift in Sources */,
+				AD4000000000000000000002 /* RaceTrackStore.swift in Sources */,
+				AD4000000000000000000004 /* RaceTrackGenerator.swift in Sources */,
+				AD4000000000000000000006 /* RaceRuntime.swift in Sources */,
+				AD4000000000000000000008 /* RaceTrackSceneLayer.swift in Sources */,
+				AD3000000000000000000000 /* AgriFieldSceneLayer.swift in Sources */,
+				AD2000000000000000000000 /* AgriSprayScenario.swift in Sources */,
+				AD2000000000000000000002 /* AgriSprayRuntime.swift in Sources */,
+				AD1000000000000000000000 /* WheatFieldAssetLoader.swift in Sources */,
+				AD1000000000000000000002 /* WaterStationAssetLoader.swift in Sources */,
+				AD1000000000000000000004 /* FieldSoilMaterialLoader.swift in Sources */,
+				AD1000000000000000000006 /* RacingEquipmentAssetLoader.swift in Sources */,
+				AD1000000000000000000008 /* RacingElementCatalog.swift in Sources */,
 				100000000000000000000402 /* GenericGrassMaterialLoader.swift in Sources */,
 				B20410000000000000000002 /* AsphaltMaterialLoader.swift in Sources */,
 				B20410000000000000000001 /* CargoContainerAssetLoader.swift in Sources */,

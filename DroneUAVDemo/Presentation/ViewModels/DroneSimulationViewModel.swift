@@ -844,6 +844,41 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var fireResponseBurningCount: Int = 0
     @Published private(set) var fireResponseTotalCount: Int = 0
     @Published private(set) var fireResponseOutcome: FireResponseOutcome?
+    // Agricultural spraying runtime state, surfaced for the in-sim HUD.
+    @Published private(set) var agriSprayObjectiveState: AgriSprayObjectiveState?
+    @Published private(set) var agriSprayRemainingSeconds: Double = 0.0
+    @Published private(set) var agriSprayCoverageFraction: Float = 0.0
+    @Published private(set) var agriSprayInhibitor: AgriSprayInhibitor = .none
+    @Published private(set) var agriSprayRefillState: AgriRefillState = .away
+    @Published private(set) var agriSprayLitersWasted: Float = 0.0
+    @Published private(set) var agriSpraySwathMeters: Float = 0.0
+    @Published private(set) var agriSprayEfficiency: Float = 0.0
+    @Published private(set) var agriSprayFieldAreaHectares: Float = 0.0
+    @Published private(set) var agriSprayStationDistanceMeters: Float = 0.0
+    @Published private(set) var agriSprayOutcome: AgriSprayOutcome?
+    // Drone racing runtime state, surfaced for the race HUD.
+    @Published private(set) var raceTrack: RaceTrack?
+    @Published private(set) var raceObjectiveState: RaceObjectiveState?
+    @Published private(set) var raceCurrentLap: Int = 0
+    @Published private(set) var raceLapCount: Int = 0
+    @Published private(set) var raceTotalSeconds: Double = 0.0
+    @Published private(set) var raceCurrentLapSeconds: Double = 0.0
+    @Published private(set) var raceBestLapSeconds: Double?
+    @Published private(set) var raceLastLapSeconds: Double?
+    @Published private(set) var raceNextGateNumber: Int?
+    @Published private(set) var raceNextGateDistanceMeters: Float = 0.0
+    @Published private(set) var raceGatesTaken: Int = 0
+    @Published private(set) var raceGateTotal: Int = 0
+    @Published private(set) var raceWrongWayFlashSeconds: Double = 0.0
+    // In-scene track builder.
+    @Published private(set) var isRaceBuilderActive: Bool = false
+    @Published private(set) var raceBuilderElementIndex: Int = 0
+    @Published private(set) var raceBuilderScale: Float = 1.0
+    @Published private(set) var raceBuilderYawDegrees: Float = 0.0
+    @Published private(set) var raceBuilderHeightMeters: Float = 0.0
+    /// Which opening of the selected piece the next placement will use.
+    @Published private(set) var raceBuilderApertureIndex: Int = 0
+    @Published private(set) var raceBuilderStatusKey: String?
     @Published private(set) var missionScenarioOutcome: MissionScenarioOutcome?
     @Published private(set) var mountedCADPayload: MountedCADPayload?
     @Published private(set) var lastPayloadImpact: TerrainMapPayloadImpact?
@@ -1458,6 +1493,23 @@ final class DroneSimulationViewModel: ObservableObject {
     private var didReportMissionScenarioOutcome = false
     private var fireResponseRuntime: FireResponseRuntime?
     private var didReportFireResponseOutcome = false
+    private var agriSprayRuntime: AgriSprayRuntime?
+    private var didReportAgriSprayOutcome = false
+    /// Previous tick's position, so coverage is integrated along the flown segment rather than
+    /// sampled at a point (a frame hitch at spraying speed would otherwise leave a bald stripe).
+    private var agriSprayPreviousPosition: SIMD3<Float>?
+    /// Throttles the field decal rebuild; the dose grid changes every tick, the picture does not
+    /// need to.
+    private var agriCoverageRepaintAccumulator: TimeInterval = 0.0
+    private var agriCoveragePublishedRevision: UInt64 = 0
+    /// Litres the sprayer drained during the current tick, handed from the payload refresh to the
+    /// agricultural runtime (both run in the same tick, payload first).
+    private var lastAgriDrainedLiters: Float = 0.0
+    private var raceRuntime: RaceRuntime?
+    private var racePreviousPosition: SIMD3<Float>?
+    private var didReportRaceOutcome = false
+    private var raceBuilderWasSimulationRunning = true
+    private var raceBuilderPreviousCameraMode: CameraMode = .follow
     private let missionAutopilotAdapter = MissionAutopilotAdapter()
     private let missionGuidanceTargetResolver = MissionGuidanceTargetResolver()
     private let fixedWingFlyableRouteBuilder = FixedWingFlyableRouteBuilder()
@@ -5447,6 +5499,19 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        // The track builder aims with the mouse, and it aims the *free* camera — which this
+        // guard, written when only FPV had a pointer to look with, would have refused.
+        if isRaceBuilderActive, cameraConfiguration.mode == .free {
+            sceneController.applyCameraNudge(
+                mode: .free,
+                yawDeltaDeg: deltaX * 0.08 * cameraConfiguration.effectiveLookSensitivity,
+                pitchDeltaDeg: deltaY * 0.08 * cameraConfiguration.effectiveLookSensitivity,
+                invertX: cameraConfiguration.invertLookX,
+                invertY: cameraConfiguration.invertLookY
+            )
+            return
+        }
+
         guard cameraConfiguration.mode == .fpv, !signalState.isInteractionBlocking else {
             return
         }
@@ -6206,19 +6271,23 @@ final class DroneSimulationViewModel: ObservableObject {
         // takes it as its start hour and runs from there.
         resetWorldClock(to: params.timeOfDay)
 
-        setPayloadType(config.payloadType)
-        if config.payloadType == .fireHose {
-            setFireHoseRigging(
-                diameterClass: config.fireHoseDiameterClass,
-                lengthMeters: Double(config.fireHoseLengthMeters)
-            )
-        } else if config.payloadType == .fireCapsuleLauncher {
-            setFireCapsuleRigging(
-                size: config.fireCapsuleSize,
-                count: config.fireCapsuleCount
-            )
+        // Racing carries nothing: a five-inch quad has no spare grams, and the camera it is flown
+        // on belongs to the airframe rather than to a mount.
+        if params.kind.requiresPayload {
+            setPayloadType(config.payloadType)
+            if config.payloadType == .fireHose {
+                setFireHoseRigging(
+                    diameterClass: config.fireHoseDiameterClass,
+                    lengthMeters: Double(config.fireHoseLengthMeters)
+                )
+            } else if config.payloadType == .fireCapsuleLauncher {
+                setFireCapsuleRigging(
+                    size: config.fireCapsuleSize,
+                    count: config.fireCapsuleCount
+                )
+            }
+            attachPayload()
         }
-        attachPayload()
 
         let dock = sceneController.currentDockSpawnPoint()
         // Concentrate forest generation around the sector/zone instead of the whole map — set
@@ -6270,6 +6339,384 @@ final class DroneSimulationViewModel: ObservableObject {
             sceneController.spawnFireResponseScenario(placement: placement)
             fireResponseRuntime = FireResponseRuntime(configuration: config, placement: placement)
             publishFireResponseState()
+        case .agriculturalSpraying:
+            // Like Fire Response, deliberately NOT setting `terrain.missionSearchSectorCenter` —
+            // the sector-bias exists to concentrate a *search* forest, and concentrating ambient
+            // trees onto a crop field would be both wrong to look at and a hazard on the low
+            // passes the mission is flown at.
+            let placement = AgriFieldPlacement.generate(
+                parameters: params,
+                worldHalfExtent: terrain.worldHalfExtent,
+                dockPosition: SIMD2<Float>(dock.x, dock.z)
+            )
+            sceneController.spawnAgriSprayScenario(
+                placement: placement,
+                difficulty: params.difficulty
+            )
+            agriSprayRuntime = AgriSprayRuntime(configuration: config, placement: placement)
+            agriSprayPreviousPosition = nil
+            agriSprayFieldAreaHectares = placement.areaHectares
+            refreshAgriCoverageDecal(force: true)
+            publishAgriSprayState()
+        case .droneRacing:
+            // A track chosen in Mission Setup — generated or from the library. No track is a real
+            // choice, not a missing one: the pilot asked for an empty world and will build the
+            // course in it, so nothing is generated behind their back.
+            let track = config.raceTrack ?? RaceTrack(
+                name: NSLocalizedString("race.builder.new_track", comment: ""),
+                laps: 3
+            )
+            installRaceTrack(track, mode: config.raceMode)
+            keyboardInputService.setRaceBuilderShortcutsEnabled(true)
+            // Launching into an empty world *is* the request to build a course, so the builder
+            // opens with the mission rather than waiting to be discovered behind a key.
+            if !track.isFlyable {
+                setRaceTrackBuilder(active: true)
+            }
+        }
+    }
+
+    // MARK: - Mission scenario (Drone racing)
+
+    /// Puts a track into the world and arms the runtime against it. Also used by the in-scene
+    /// builder every time the track is edited, so it must be safe to call repeatedly.
+    func installRaceTrack(_ track: RaceTrack, mode: RaceMode) {
+        raceTrack = track
+        sceneController.spawnRaceTrack(track, showsGateNumbers: true)
+        didReportRaceOutcome = false
+        racePreviousPosition = nil
+        let gates = track.gateGeometry
+        guard !gates.isEmpty else {
+            raceRuntime = nil
+            raceObjectiveState = nil
+            raceGateTotal = 0
+            return
+        }
+        raceRuntime = RaceRuntime(mode: mode, lapCount: track.laps, gates: gates)
+        publishRaceState()
+        if let states = raceRuntime?.gateStates {
+            sceneController.applyRaceGateStates(states)
+        }
+    }
+
+    private func updateRaceRuntime(deltaTime: TimeInterval) {
+        guard var runtime = raceRuntime, !runtime.isFinished else { return }
+
+        let position = finiteVector(state.position, fallback: lastFiniteState.position)
+        let previous = racePreviousPosition ?? position
+        racePreviousPosition = position
+
+        runtime.tick(deltaTime: deltaTime, previousPosition: previous, currentPosition: position)
+        let events = runtime.drainEvents()
+        raceRuntime = runtime
+
+        if !events.isEmpty {
+            sceneController.applyRaceGateStates(runtime.gateStates)
+            handleRaceEvents(events)
+        }
+        if raceWrongWayFlashSeconds > 0.0 {
+            raceWrongWayFlashSeconds = max(0.0, raceWrongWayFlashSeconds - deltaTime)
+        }
+        publishRaceState()
+    }
+
+    private func handleRaceEvents(_ events: [RaceEvent]) {
+        for event in events {
+            switch event {
+            case .started:
+                print("[Race] clock started on gate 1")
+            case let .gatePassed(order, elapsed):
+                print(String(format: "[Race] gate %d at %.2fs", order + 1, elapsed))
+            case let .gateWrongWay(order):
+                raceWrongWayFlashSeconds = 1.2
+                print("[Race] gate \(order + 1) taken the wrong way")
+            case let .lapCompleted(lap, seconds, isBest):
+                raceLastLapSeconds = seconds
+                print(String(format: "[Race] lap %d in %.2fs%@", lap, seconds, isBest ? " (best)" : ""))
+            case let .raceFinished(total, best):
+                guard !didReportRaceOutcome else { break }
+                didReportRaceOutcome = true
+                print(String(format: "[Race] finished: %.2fs total, best lap %.2fs", total, best))
+                if let trackID = raceTrack?.id {
+                    RaceTrackStore.recordResult(
+                        trackID: trackID,
+                        totalSeconds: total,
+                        bestLapSeconds: best
+                    )
+                }
+            case .countdownTick:
+                break
+            }
+        }
+    }
+
+    // MARK: - Race track builder
+
+    /// The palette the builder cycles through: gates first, then the start pad, then scenery —
+    /// the order a track is actually laid out in.
+    var raceBuilderPalette: [RacingElementDescriptor] {
+        RacingElementCatalog.gates
+            + (RacingElementCatalog.startPad.map { [$0] } ?? [])
+            + RacingElementCatalog.decorations
+    }
+
+    var raceBuilderSelectedDescriptor: RacingElementDescriptor? {
+        let palette = raceBuilderPalette
+        guard !palette.isEmpty else { return nil }
+        return palette[min(max(0, raceBuilderElementIndex), palette.count - 1)]
+    }
+
+    /// Enters or leaves the builder.
+    ///
+    /// Building pauses the simulation. A racing quad left hovering while its pilot places gates
+    /// would be on the ground — or through a gate — long before the first one was positioned, and
+    /// a paused world is also what makes it safe to give the camera the movement keys.
+    func toggleRaceTrackBuilder() {
+        setRaceTrackBuilder(active: !isRaceBuilderActive)
+    }
+
+    func setRaceTrackBuilder(active: Bool) {
+        guard active != isRaceBuilderActive else { return }
+        isRaceBuilderActive = active
+        if active {
+            raceBuilderWasSimulationRunning = isSimulationRunning
+            isSimulationRunning = false
+            raceBuilderPreviousCameraMode = cameraConfiguration.mode
+            let previousMode = cameraConfiguration.mode
+            cameraConfiguration.mode = .free
+            sceneController.placeFreeCameraForBuilder(
+                near: finiteVector(state.position, fallback: lastFiniteState.position),
+                // `orientation` is (roll, pitch, yaw) — the third component, not the second.
+                yaw: state.orientation.z
+            )
+            syncCameraSystem(from: previousMode)
+            refreshRaceBuilderGhost()
+            raceBuilderStatusKey = "race.builder.status.active"
+        } else {
+            sceneController.clearRaceGhost()
+            let previousMode = cameraConfiguration.mode
+            cameraConfiguration.mode = raceBuilderPreviousCameraMode
+            syncCameraSystem(from: previousMode)
+            isSimulationRunning = raceBuilderWasSimulationRunning
+            raceBuilderStatusKey = nil
+        }
+    }
+
+    func cycleRaceBuilderElement(by delta: Int) {
+        let palette = raceBuilderPalette
+        guard !palette.isEmpty else { return }
+        let count = palette.count
+        raceBuilderElementIndex = ((raceBuilderElementIndex + delta) % count + count) % count
+        // A different piece has different openings; carrying an index across would silently pick
+        // an opening the pilot never chose.
+        raceBuilderApertureIndex = 0
+        refreshRaceBuilderGhost()
+    }
+
+    func selectRaceBuilderElement(catalogID: String) {
+        guard let index = raceBuilderPalette.firstIndex(where: { $0.id == catalogID }) else { return }
+        raceBuilderElementIndex = index
+        raceBuilderApertureIndex = 0
+        refreshRaceBuilderGhost()
+    }
+
+    /// Steps to the next way through the selected piece — the cube's other axis, the tower's
+    /// windows, another pentagon of the cluster. Most pieces have exactly one, and then this does
+    /// nothing rather than pretending otherwise.
+    func cycleRaceBuilderPassage() {
+        guard let descriptor = raceBuilderSelectedDescriptor else { return }
+        let count = descriptor.apertures.count
+        guard count > 1 else {
+            raceBuilderStatusKey = "race.builder.status.single_passage"
+            return
+        }
+        raceBuilderApertureIndex = (raceBuilderApertureIndex + 1) % count
+        raceBuilderStatusKey = "race.builder.status.passage_changed"
+        refreshRaceBuilderGhost()
+    }
+
+    /// Name of the opening currently chosen, for the builder panel.
+    var raceBuilderPassageTitleKey: String? {
+        guard let descriptor = raceBuilderSelectedDescriptor else { return nil }
+        return descriptor.aperture(at: raceBuilderApertureIndex).titleKey
+    }
+
+    var raceBuilderPassageCount: Int {
+        raceBuilderSelectedDescriptor?.apertures.count ?? 1
+    }
+
+    func nudgeRaceBuilderYaw(degrees: Float) {
+        raceBuilderYawDegrees = (raceBuilderYawDegrees + degrees).truncatingRemainder(dividingBy: 360.0)
+        refreshRaceBuilderGhost()
+    }
+
+    func nudgeRaceBuilderScale(by delta: Float) {
+        raceBuilderScale = min(3.0, max(0.4, raceBuilderScale + delta))
+        refreshRaceBuilderGhost()
+    }
+
+    func nudgeRaceBuilderHeight(by delta: Float) {
+        raceBuilderHeightMeters = min(60.0, max(0.0, raceBuilderHeightMeters + delta))
+        refreshRaceBuilderGhost()
+    }
+
+    /// Commits the ghost where it stands.
+    func placeRaceBuilderElement() {
+        guard isRaceBuilderActive, let descriptor = raceBuilderSelectedDescriptor else { return }
+        var track = raceTrack ?? RaceTrack(name: NSLocalizedString("race.builder.new_track", comment: ""))
+        let nextOrder = descriptor.role.isScorable
+            ? (track.elements.compactMap(\.gateOrder).max().map { $0 + 1 } ?? 0)
+            : nil
+        let element = RaceTrackElement(
+            catalogID: descriptor.id,
+            position: currentRaceBuilderAimPoint(),
+            yawRadians: raceBuilderYawDegrees * .pi / 180.0,
+            scale: raceBuilderScale,
+            gateOrder: nextOrder,
+            apertureIndex: raceBuilderApertureIndex
+        )
+        track.elements.append(element)
+        applyEditedRaceTrack(track)
+        raceBuilderStatusKey = descriptor.role.isScorable
+            ? "race.builder.status.gate_placed"
+            : "race.builder.status.prop_placed"
+    }
+
+    /// Removes whatever the builder is looking at.
+    func deleteRaceBuilderElementUnderAim() {
+        guard isRaceBuilderActive, var track = raceTrack else { return }
+        let aim = currentRaceBuilderAimPoint()
+        guard let id = sceneController.nearestRaceElement(to: aim, within: 12.0) else {
+            raceBuilderStatusKey = "race.builder.status.nothing_to_delete"
+            return
+        }
+        track.elements.removeAll { $0.id == id }
+        applyEditedRaceTrack(track)
+        raceBuilderStatusKey = "race.builder.status.deleted"
+    }
+
+    func clearRaceBuilderTrack() {
+        guard isRaceBuilderActive else { return }
+        var track = raceTrack ?? RaceTrack(name: NSLocalizedString("race.builder.new_track", comment: ""))
+        track.elements.removeAll()
+        applyEditedRaceTrack(track)
+        raceBuilderStatusKey = "race.builder.status.cleared"
+    }
+
+    func generateRaceBuilderTrack() {
+        guard isRaceBuilderActive else { return }
+        let difficulty = missionScenarioConfiguration?.parameters.difficulty ?? .medium
+        var track = RaceTrackGenerator.generate(
+            parameters: RaceTrackGenerator.Parameters.forDifficulty(
+                difficulty,
+                seed: UInt64.random(in: 1...UInt64.max)
+            ),
+            worldHalfExtent: terrain.worldHalfExtent
+        )
+        track.laps = raceTrack?.laps ?? track.laps
+        applyEditedRaceTrack(track)
+        raceBuilderStatusKey = "race.builder.status.generated"
+    }
+
+    func setRaceBuilderLaps(_ laps: Int) {
+        guard var track = raceTrack else { return }
+        track.laps = max(1, min(10, laps))
+        applyEditedRaceTrack(track)
+    }
+
+    /// Saves the current track to the library so it can be flown again from Mission Setup.
+    func saveRaceBuilderTrack(name: String) {
+        guard var track = raceTrack, track.isFlyable else {
+            raceBuilderStatusKey = "race.builder.status.needs_two_gates"
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            track.name = trimmed
+        }
+        track.isGenerated = false
+        do {
+            _ = try RaceTrackStore.save(track)
+            raceTrack = track
+            raceBuilderStatusKey = "race.builder.status.saved"
+        } catch {
+            print("[Race] track save failed: \\(error)")
+            raceBuilderStatusKey = "race.builder.status.save_failed"
+        }
+    }
+
+    /// Re-installs an edited track: the scene, the runtime and the published state all follow
+    /// from the same call, so a half-applied edit is not representable.
+    private func applyEditedRaceTrack(_ track: RaceTrack) {
+        installRaceTrack(track, mode: missionScenarioConfiguration?.raceMode ?? .timed)
+    }
+
+    private func currentRaceBuilderAimPoint() -> SIMD3<Float> {
+        var point = sceneController.freeCameraGroundAimPoint()
+        point.y = raceBuilderHeightMeters
+        return point
+    }
+
+    private func refreshRaceBuilderGhost() {
+        guard isRaceBuilderActive, let descriptor = raceBuilderSelectedDescriptor else { return }
+        sceneController.updateRaceGhost(
+            RaceTrackElement(
+                catalogID: descriptor.id,
+                position: currentRaceBuilderAimPoint(),
+                yawRadians: raceBuilderYawDegrees * .pi / 180.0,
+                scale: raceBuilderScale,
+                apertureIndex: raceBuilderApertureIndex
+            )
+        )
+    }
+
+    /// Flies the builder camera and keeps the ghost under the aim point. Runs whether or not the
+    /// simulation is stepping, because the builder's whole point is that it works while paused.
+    private func updateRaceBuilder(deltaTime: Float) {
+        guard isRaceBuilderActive else { return }
+        let snapshot = keyboardInputService.currentInputSnapshot()
+        let axis = snapshot.axisInput
+        let speedMultiplier: Float = axis.speedBoost ? 3.0 : 1.0
+        sceneController.moveFreeCamera(
+            forward: axis.forward,
+            strafe: axis.strafe,
+            vertical: axis.vertical,
+            deltaTime: deltaTime,
+            speed: max(6.0, cameraConfiguration.free.moveSpeed) * speedMultiplier
+        )
+        // Yaw keys turn the piece being placed, not the camera — the camera is aimed with the
+        // mouse, and a builder that made both do the same thing would have no way to face a gate.
+        let boost: Float = snapshot.yawInput.speedBoost || snapshot.lookInput.speedBoost ? 2.6 : 1.0
+        // Arrow keys do the same two jobs as J/L and Page Up/Down. They are idle in the free
+        // camera, and on a laptop Page Up/Down is a two-handed chord — a builder whose only turn
+        // key is one the pilot has to hunt for is a builder that "does not rotate".
+        let turnIntent = snapshot.yawInput.intent - snapshot.lookInput.yaw
+        if abs(turnIntent) > 0.001 {
+            nudgeRaceBuilderYaw(degrees: turnIntent * 70.0 * boost * deltaTime)
+        }
+        // Look-pitch is positive downwards, so raising the piece is the negative direction.
+        if abs(snapshot.lookInput.pitch) > 0.001 {
+            nudgeRaceBuilderHeight(by: -snapshot.lookInput.pitch * 1.6 * boost * deltaTime)
+        }
+        refreshRaceBuilderGhost()
+    }
+
+    private func publishRaceState() {
+        guard let runtime = raceRuntime else { return }
+        raceObjectiveState = runtime.objectiveState
+        raceCurrentLap = runtime.currentLap
+        raceLapCount = runtime.lapCount
+        raceTotalSeconds = runtime.totalElapsedSeconds
+        raceCurrentLapSeconds = runtime.currentLapSeconds
+        raceBestLapSeconds = runtime.bestLapSeconds
+        raceGatesTaken = runtime.gatesTakenThisLap
+        raceGateTotal = runtime.totalGateCount
+        raceNextGateNumber = runtime.nextGateOrder.map { $0 + 1 }
+        if let gate = runtime.nextGate {
+            let position = finiteVector(state.position, fallback: lastFiniteState.position)
+            raceNextGateDistanceMeters = simd_distance(position, gate.centre)
+        } else {
+            raceNextGateDistanceMeters = 0.0
         }
     }
 
@@ -6372,6 +6819,122 @@ final class DroneSimulationViewModel: ObservableObject {
             print("[FireResponse] failed — time limit reached")
         case .aborted:
             print("[FireResponse] aborted")
+        }
+    }
+
+    // MARK: - Mission scenario (Agricultural spraying)
+
+    /// Advances crop coverage and the refill station.
+    ///
+    /// Runs immediately after `refreshPayloadCameraStatus`, which is where the sprayer's tank is
+    /// drained, so `lastAgriDrainedLiters` is this tick's real consumption. Water is the mission's
+    /// only currency: every litre that leaves the tank is accounted for here as either delivered
+    /// dose or waste, and waste is what turns into another trip back to the canisters.
+    private func updateAgriSprayRuntime(deltaTime: TimeInterval) {
+        guard var runtime = agriSprayRuntime, runtime.isActive else { return }
+
+        let position = finiteVector(state.position, fallback: lastFiniteState.position)
+        let previous = agriSprayPreviousPosition ?? position
+        agriSprayPreviousPosition = position
+
+        let supportY = supportSurfaceY(for: position)
+        let altitudeAGL = position.y - supportY
+        let velocity = finiteVector(state.velocity, fallback: .zero)
+        let groundSpeed = simd_length(SIMD2<Float>(velocity.x, velocity.z))
+
+        let tankRemaining = Float(agriculturalSprayerState.tankRemainingLiters)
+        let tankCapacity = Float(agriculturalSprayerState.tankCapacityLiters)
+
+        let result = runtime.tick(
+            deltaTime: deltaTime,
+            previousPosition: previous,
+            currentPosition: position,
+            groundSpeed: groundSpeed,
+            altitudeAGL: altitudeAGL,
+            windXZ: SIMD2<Float>(weather.windVector.x, weather.windVector.z),
+            isSpraying: agriculturalSprayerState.isSpraying,
+            drainedLiters: lastAgriDrainedLiters,
+            tankRemainingLiters: tankRemaining,
+            tankCapacityLiters: tankCapacity
+        )
+        lastAgriDrainedLiters = 0.0
+        agriSprayRuntime = runtime
+
+        if result.litersRefilled > 0.0 {
+            applyAgriRefill(liters: Double(result.litersRefilled))
+        }
+
+        agriCoverageRepaintAccumulator += deltaTime
+        refreshAgriCoverageDecal(force: false)
+        publishAgriSprayState()
+
+        if let outcome = runtime.outcome {
+            handleAgriSprayOutcome(outcome)
+        }
+    }
+
+    /// Puts water back in the tank and the matching mass back on the airframe.
+    private func applyAgriRefill(liters: Double) {
+        let accepted = agriculturalSprayerController.refill(liters: liters)
+        guard accepted > 0.0 else { return }
+        agriculturalSprayerState = agriculturalSprayerController.state
+        guard installedPayloadConfiguration?.payloadType == .agriculturalSprayer,
+              let currentMass = installedPayloadConfiguration?.payloadMass else {
+            return
+        }
+        let addedMassKg = Float(accepted) * AgriculturalSprayerTuning.liquidDensityKgPerLiter
+        let fullMass = AgriculturalSprayerTuning.massForFullTank()
+        installedPayloadConfiguration?.payloadMass = min(fullMass, currentMass + addedMassKg)
+        refreshPayloadRuntimeState()
+    }
+
+    /// Repaints the treated-rows decal. Throttled: the dose grid changes every tick, but a
+    /// texture upload per frame buys nothing the operator can see.
+    private func refreshAgriCoverageDecal(force: Bool) {
+        guard let runtime = agriSprayRuntime else { return }
+        let hasNewCoverage = runtime.coverageRevision != agriCoveragePublishedRevision
+        guard force || (hasNewCoverage && agriCoverageRepaintAccumulator >= 0.2) else { return }
+        agriCoverageRepaintAccumulator = 0.0
+        agriCoveragePublishedRevision = runtime.coverageRevision
+
+        let side = runtime.placement.cellsPerSide
+        var fractions = [Float](repeating: 0.0, count: side * side)
+        for y in 0..<side {
+            for x in 0..<side {
+                fractions[y * side + x] = runtime.doseFraction(x: x, y: y)
+            }
+        }
+        sceneController.updateAgriCoverage(doseFractions: fractions)
+    }
+
+    private func publishAgriSprayState() {
+        guard let runtime = agriSprayRuntime else { return }
+        agriSprayObjectiveState = runtime.objectiveState
+        agriSprayRemainingSeconds = runtime.remainingClampedSeconds
+        agriSprayCoverageFraction = runtime.coverageFraction
+        agriSprayInhibitor = runtime.inhibitor
+        agriSprayRefillState = runtime.refillState
+        agriSprayLitersWasted = runtime.litersWasted
+        agriSpraySwathMeters = runtime.currentSwathMeters
+        agriSprayEfficiency = runtime.currentEfficiency
+        agriSprayOutcome = runtime.outcome
+        let planar = currentPlanarPosition()
+        agriSprayStationDistanceMeters = simd_distance(planar, runtime.placement.stationPosition)
+    }
+
+    private func handleAgriSprayOutcome(_ outcome: AgriSprayOutcome) {
+        guard !didReportAgriSprayOutcome else { return }
+        didReportAgriSprayOutcome = true
+        switch outcome {
+        case let .success(elapsed, coverage, used, wasted):
+            print(String(
+                format: "[AgriSpray] field treated in %.1fs — coverage %.1f%%, %.1f L used, %.1f L wasted",
+                elapsed, coverage * 100.0, used, wasted
+            ))
+        case let .failureTimeout(coverage):
+            print(String(format: "[AgriSpray] failed — time limit reached at %.1f%% coverage", coverage * 100.0))
+        case .aborted:
+            print("[AgriSpray] aborted")
         }
     }
 
@@ -6602,6 +7165,9 @@ final class DroneSimulationViewModel: ObservableObject {
         guard !isAwaitingImportedWorld, isSimulationRunning else {
             syncMissionDeliveryState(triggerAutoRelease: false)
             refreshFlightControlDiagnostics()
+            // The track builder runs on the *paused* side of this guard on purpose: building is
+            // done with the world stopped, and the builder camera still has to fly.
+            updateRaceBuilder(deltaTime: dt)
             if shouldPresentThisStep {
                 sceneController.update(
                     with: state,
@@ -7493,6 +8059,12 @@ final class DroneSimulationViewModel: ObservableObject {
         syncPayloadLifecycleEvents()
         updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
         updateFireResponseRuntime(deltaTime: TimeInterval(dt))
+        updateAgriSprayRuntime(deltaTime: TimeInterval(dt))
+        updateRaceRuntime(deltaTime: TimeInterval(dt))
+        // Also on the running side: the builder normally pauses the world, but the operator can
+        // resume it by hand, and a builder camera that silently stopped answering the keys would
+        // look like the application had hung.
+        updateRaceBuilder(deltaTime: dt)
         recordDetachedVehiclePartImpactEvents()
         // Make secondary debris impacts visible to the outgoing LAN event
         // tail in this publish cycle. The end-of-tick flush remains in place
@@ -10348,9 +10920,19 @@ final class DroneSimulationViewModel: ObservableObject {
             case .toggleTelemetryHUD:
                 toggleCompactTelemetryHUD()
             case .zoomInCamera:
-                adjustCameraZoom(inward: true)
+                // While building, the zoom keys size the piece being placed. There is nothing to
+                // zoom towards on a paused world, and scale is the control the builder needs most.
+                if isRaceBuilderActive {
+                    nudgeRaceBuilderScale(by: 0.05)
+                } else {
+                    adjustCameraZoom(inward: true)
+                }
             case .zoomOutCamera:
-                adjustCameraZoom(inward: false)
+                if isRaceBuilderActive {
+                    nudgeRaceBuilderScale(by: -0.05)
+                } else {
+                    adjustCameraZoom(inward: false)
+                }
             case .resetCameraOrientation:
                 if isExternalHoseAimActive {
                     resetHoseGimbalOrientation()
@@ -10363,6 +10945,22 @@ final class DroneSimulationViewModel: ObservableObject {
                 pauseMissionExecution()
             case .resumeMission:
                 resumeMissionExecution()
+            case .toggleRaceBuilder:
+                toggleRaceTrackBuilder()
+            case .raceBuilderPlace:
+                placeRaceBuilderElement()
+            case .raceBuilderDelete:
+                deleteRaceBuilderElementUnderAim()
+            case .raceBuilderNextElement:
+                cycleRaceBuilderElement(by: 1)
+            case .raceBuilderPreviousElement:
+                cycleRaceBuilderElement(by: -1)
+            case .raceBuilderRaise:
+                nudgeRaceBuilderHeight(by: 0.5)
+            case .raceBuilderLower:
+                nudgeRaceBuilderHeight(by: -0.5)
+            case .raceBuilderCyclePassage:
+                cycleRaceBuilderPassage()
             case .toggleControllerCursor, .openControllerHub,
                  .uiSectionPrevious, .uiSectionNext,
                  .uiPrimary, .uiSecondary,
@@ -10575,6 +11173,14 @@ final class DroneSimulationViewModel: ObservableObject {
         let zoomInActive = keyboardSnapshot.activeContinuousCommands.contains(.zoomIn)
         let zoomOutActive = keyboardSnapshot.activeContinuousCommands.contains(.zoomOut)
         guard zoomInActive != zoomOutActive else {
+            return
+        }
+
+        // In the track builder the zoom keys size the piece being placed. Without this they fall
+        // through to the free camera's dolly below — which is why holding "+" moved the camera
+        // instead of the gate.
+        if isRaceBuilderActive {
+            nudgeRaceBuilderScale(by: (zoomInActive ? 0.6 : -0.6) * Float(deltaTime))
             return
         }
 
@@ -16975,6 +17581,10 @@ final class DroneSimulationViewModel: ObservableObject {
             configuredTankLiters: Double(payloadDraftConfiguration.agriculturalSprayerTankLiters)
         )
         let drainedLiters = agriculturalSprayerController.drain(deltaTime: Float(deltaTime))
+        // Handed to `updateAgriSprayRuntime`, which runs later in this same tick: coverage is
+        // paid for out of the water that actually left the tank, never recomputed from the drain
+        // rate, so the two can never disagree about how much was sprayed.
+        lastAgriDrainedLiters = Float(drainedLiters)
         if drainedLiters > 0.0, let currentMass = installedPayloadConfiguration?.payloadMass,
            installedPayloadConfiguration?.payloadType == .agriculturalSprayer {
             let drainedMassKg = Float(drainedLiters) * AgriculturalSprayerTuning.liquidDensityKgPerLiter
@@ -18514,6 +19124,21 @@ final class DroneSimulationViewModel: ObservableObject {
                 // capsule launcher, which has no physical truck tether unlike the hose) should be
                 // held rather than left to wander unattended.
                 configuredAction: .hold
+            )
+        }
+        if let runtime = agriSprayRuntime, runtime.isActive {
+            let placement = runtime.placement
+            // Wide enough to hold the field, the refill station just off its edge, and the
+            // headland turns a spraying pattern needs — this is an operational-area reminder,
+            // not a leash, so it only warns.
+            let reach = max(
+                placement.fieldHalfExtent * 1.8,
+                simd_distance(placement.stationPosition, placement.fieldCenter) + 60.0
+            )
+            return MissionGeofenceConfiguration(
+                center: placement.fieldCenter,
+                radiusMeters: reach,
+                configuredAction: .warningOnly
             )
         }
         return nil

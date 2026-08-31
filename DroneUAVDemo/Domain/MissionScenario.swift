@@ -7,6 +7,8 @@ import simd
 enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
     case searchAndRescue
     case fireResponse
+    case agriculturalSpraying
+    case droneRacing
 
     var id: String { rawValue }
 
@@ -16,6 +18,10 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "mission.scenario.search_and_rescue.title"
         case .fireResponse:
             return "mission.scenario.fire_response.title"
+        case .agriculturalSpraying:
+            return "mission.scenario.agricultural_spraying.title"
+        case .droneRacing:
+            return "mission.scenario.drone_racing.title"
         }
     }
 
@@ -25,6 +31,10 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "mission.scenario.search_and_rescue.subtitle"
         case .fireResponse:
             return "mission.scenario.fire_response.subtitle"
+        case .agriculturalSpraying:
+            return "mission.scenario.agricultural_spraying.subtitle"
+        case .droneRacing:
+            return "mission.scenario.drone_racing.subtitle"
         }
     }
 
@@ -34,6 +44,10 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "figure.wave"
         case .fireResponse:
             return "flame.fill"
+        case .agriculturalSpraying:
+            return "leaf.fill"
+        case .droneRacing:
+            return "flag.checkered.2.crossed"
         }
     }
 
@@ -44,8 +58,18 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return [.thermalCamera, .cameraGimbal]
         case .fireResponse:
             return [.fireHose, .fireCapsuleLauncher]
+        case .agriculturalSpraying:
+            return [.agriculturalSprayer]
+        case .droneRacing:
+            // Nothing is carried. A racing quad's camera is part of the airframe, not a payload,
+            // and every gram of anything else is a gram it cannot spare.
+            return []
         }
     }
+
+    /// Whether the scenario is flown with something mounted. Racing is the one that is not, and
+    /// the setup screen hides the payload choice entirely rather than offering an empty picker.
+    var requiresPayload: Bool { !compatiblePayloads.isEmpty }
 }
 
 // MARK: - Time of day
@@ -342,6 +366,10 @@ struct MissionScenarioConfiguration: Equatable {
     /// Only meaningful when `payloadType == .fireCapsuleLauncher` — the rigging chosen at Mission Setup.
     var fireCapsuleSize: FireCapsuleSize = .medium
     var fireCapsuleCount: Int = 2
+    /// Only meaningful when `kind == .droneRacing`. A nil track means "start with an empty world
+    /// and build one", which is a legitimate way to enter the racing scenario.
+    var raceTrack: RaceTrack?
+    var raceMode: RaceMode = .timed
 }
 
 // MARK: - Derived placement (computed at launch from parameters + world)

@@ -567,6 +567,42 @@
       "licenseName": "Creative Commons 0",
       "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
       "changes": "Downmixed to mono, resampled to 48 kHz and crossfaded into a seamless main-rotor loop for the rotorcraft class in DroneUAVDemo."
+    },
+    {
+      "id": "wheat_ljungman",
+      "title": "Wheat",
+      "author": "ljungman",
+      "sourceURL": "https://skfb.ly/6yxSO",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and instanced as the crop billboard of the agricultural spraying mission's wheat field in DroneUAVDemo."
+    },
+    {
+      "id": "gallon_of_water_mex_guillen",
+      "title": "gallon of water",
+      "author": "Mex Guillen",
+      "sourceURL": "https://skfb.ly/oPByq",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ and used as the water refill station prop of the agricultural spraying mission in DroneUAVDemo."
+    },
+    {
+      "id": "dirt_2_sharetextures",
+      "title": "Dirt 2",
+      "author": "sharetextures",
+      "sourceURL": "https://skfb.ly/6DKYu",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ; its textures are extracted and tiled as the field soil material of the agricultural spraying mission in DroneUAVDemo."
+    },
+    {
+      "id": "drone_racing_equipment_cityon360",
+      "title": "Drone racing equipment",
+      "author": "cityon360",
+      "sourceURL": "https://skfb.ly/o68Xs",
+      "licenseName": "Creative Commons Attribution",
+      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
+      "changes": "Imported as USDZ, split into individually placeable gates, flags and a start pad, and re-materialled for run-time highlighting in DroneUAVDemo's drone racing missions."
     }
   ]
 }
