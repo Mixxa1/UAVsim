@@ -70,6 +70,12 @@ final class MissionReplayRecorder {
         didReachFrameLimit = false
     }
 
+    func updateRFArtifacts(_ artifacts: MissionReplayRFArtifacts) {
+        guard var session = currentSession else { return }
+        session.rfArtifacts = artifacts
+        currentSession = session
+    }
+
     func recordFrame(_ frame: MissionReplayFrame) {
         guard var session = currentSession else { return }
 

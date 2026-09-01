@@ -603,6 +603,24 @@
       "licenseName": "Creative Commons Attribution",
       "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
       "changes": "Imported as USDZ, split into individually placeable gates, flags and a start pad, and re-materialled for run-time highlighting in DroneUAVDemo's drone racing missions."
+    },
+    {
+      "id": "betaflight_max7456_osd_font",
+      "title": "Betaflight MAX7456 OSD font",
+      "author": "Betaflight contributors",
+      "sourceURL": "https://github.com/betaflight/betaflight-configurator/blob/master/resources/osd/2/betaflight.mcm",
+      "licenseName": "GNU General Public License v3.0",
+      "licenseURL": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "changes": "Bundled in its original MCM representation and decoded at runtime into a nearest-filtered SpriteKit texture atlas for the analog FPV OSD."
+    },
+    {
+      "id": "clarity_max7456_osd_font",
+      "title": "Clarity MAX7456 OSD font",
+      "author": "tigert",
+      "sourceURL": "https://github.com/tigert/betaflight-fonts/blob/master/clarity.mcm",
+      "licenseName": "GNU General Public License v3.0",
+      "licenseURL": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "changes": "Bundled in its original MCM representation as the alternate runtime-selectable analog FPV OSD font preset."
     }
   ]
 }

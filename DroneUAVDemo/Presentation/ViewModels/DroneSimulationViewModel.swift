@@ -896,6 +896,25 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var lastPayloadImpact: TerrainMapPayloadImpact?
     @Published private(set) var signalState: UAVSignalState
     @Published private(set) var signalCountdownSecondsRemaining: Int
+    /// The migration is complete. Legacy enum values remain decodable for old replay snapshots,
+    /// but live radio authority always comes from the physical RF core.
+    @Published private(set) var rfRolloutMode: RFSystemRolloutMode = .physicalRFCore
+    @Published private(set) var rfLinkEvaluations: [LogicalLinkKind: RFLinkEvaluation] = [:]
+    @Published private(set) var rfPacketDeliveryStates: [LogicalLinkKind: RFPacketDeliveryState] = [:]
+    @Published private(set) var rfControlAvailability: RFControlLinkAvailability = .nominal
+    @Published private(set) var rfShadowComparisonStatistics: RFShadowComparisonStatistics = .initial
+    @Published private(set) var rfEnvironmentContext: RFEnvironmentContext = .clear
+    @Published private(set) var rfCalibrationBuckets: [RFCalibrationBucket] = []
+    @Published private(set) var rfAcceptanceResults: [RFAcceptanceResult] = []
+    @Published private(set) var rfPerformanceResults: [RFPerformanceBudgetResult] = []
+    @Published private(set) var rfSharedChannelStatistics: [RFSharedChannelStatistics] = []
+    @Published private(set) var rfVideoPresentationState: RFVideoPresentationState?
+    @Published private(set) var fpvOSDState: FPVOSDState = .unavailable
+    @Published private(set) var fpvFontPreset: FPVFontPreset = {
+        let saved = UserDefaults.standard.string(forKey: "fpvOSD.fontPreset")
+        return saved.flatMap(FPVFontPreset.init(rawValue:)) ?? .betaflight
+    }()
+    @Published private(set) var rfConfigurationIssues: [RFConfigurationIssue] = []
     @Published private(set) var isTerrainMapVisible: Bool
     @Published private(set) var isMissionMapVisible: Bool
     @Published private(set) var missionMapMode: MissionMapMode
@@ -1377,6 +1396,99 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
 
+    var rfControlCommandAgeSeconds: Double {
+        rfPacketDeliveryStates[.control]?.secondsSinceLastDelivery ?? 0
+    }
+
+    /// Kept as a compatibility API for callers compiled during migration. Non-physical modes are
+    /// intentionally normalized instead of re-enabling the removed range cascade.
+    func setRFRolloutMode(_ mode: RFSystemRolloutMode) {
+        guard !isArmed else { return }
+        let configuration = resolvedRFConfiguration()
+        let issues = RFSystemConfigurationValidator().validate(configuration)
+        rfConfigurationIssues = issues
+        guard !issues.contains(where: { $0.severity == .error }) else { return }
+        rfRolloutMode = .physicalRFCore
+        rfSystemManager = nil
+        rfLinkEvaluations = [:]
+        rfPacketDeliveryStates = [:]
+        rfControlAvailability = .nominal
+        rfShadowComparisonStatistics = .initial
+        rfEnvironmentContext = .clear
+        rfAcceptanceResults = []
+        rfPerformanceResults = []
+        rfSharedChannelStatistics = []
+        rfVideoPresentationState = nil
+        resetFPVOSDState()
+        rfUpdateAccumulator = 0
+        clearSignalLossState(restoringInputMode: false)
+    }
+
+    func resetRFCalibrationBaseline() {
+        rfShadowBaselineAccumulator.reset()
+        rfCalibrationBuckets = []
+        rfShadowComparisonStatistics = .initial
+    }
+
+    func makeRFCalibrationReportData() -> Data? {
+        let report = makeRFCalibrationReport()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try? encoder.encode(report)
+    }
+
+    private func makeRFCalibrationReport() -> RFCalibrationReport {
+        RFCalibrationReport(
+            schemaVersion: 1,
+            simulationTimeSeconds: Double(simulationTime),
+            activeTerrainSeed: terrain.seed,
+            buckets: rfCalibrationBuckets
+        )
+    }
+
+    var canRunRFAcceptanceSuite: Bool { !isArmed }
+
+    func runRFAcceptanceSuite() {
+        guard canRunRFAcceptanceSuite else { return }
+        let configuration = resolvedRFConfiguration()
+        let issues = RFSystemConfigurationValidator().validate(configuration)
+        rfConfigurationIssues = issues
+        guard !issues.contains(where: { $0.severity == .error }) else {
+            rfAcceptanceResults = []
+            rfPerformanceResults = []
+            return
+        }
+        let manager = RFSystemManager(configuration: configuration)
+        let runner = RFAcceptanceScenarioRunner()
+        rfAcceptanceResults = RFAcceptanceScenarioRunner.defaultControlSuite(seed: terrain.seed)
+            .map { runner.run($0, manager: manager) }
+        rfPerformanceResults = RFPerformanceBudgetRunner().run(manager: manager)
+    }
+
+    var activeRFConfigurationOrigin: RFSystemConfigurationOrigin {
+        (rfSystemManager?.configuration ?? resolvedRFConfiguration()).origin
+    }
+
+    var activeRFConfigurationVersion: Int {
+        (rfSystemManager?.configuration ?? resolvedRFConfiguration()).version
+    }
+
+    var activeFPVVideoMode: RFVideoTransmissionMode {
+        (rfSystemManager?.configuration ?? resolvedRFConfiguration())
+            .logicalLinks.video?.videoMode ?? .digital
+    }
+
+    func setFPVFontPreset(_ preset: FPVFontPreset) {
+        guard fpvFontPreset != preset else { return }
+        fpvFontPreset = preset
+        UserDefaults.standard.set(preset.rawValue, forKey: "fpvOSD.fontPreset")
+    }
+
+    private func resolvedRFConfiguration() -> RFSystemConfiguration {
+        selectedDroneProfile.workbenchBuild?.rfSystem
+            ?? RFCompatibilityPreset.make(for: selectedDroneProfile)
+    }
+
     private let physicsEngine: DronePhysicsEngine
     private let sceneController: DroneSceneController
     private let keyboardInputService: KeyboardInputProviding
@@ -1549,6 +1661,13 @@ final class DroneSimulationViewModel: ObservableObject {
     private var simulationTimer: Timer?
     private var lastTimestamp: CFTimeInterval?
     private var simulationTime: Float = 0.0
+    private var rfSystemManager: RFSystemManager?
+    private var rfUpdateAccumulator: Float = 0.0
+    private let rfControlAvailabilityPolicy = RFControlLinkAvailabilityPolicy()
+    private var rfShadowBaselineAccumulator = RFShadowBaselineAccumulator()
+    private let rfSharedChannelScheduler = RFSharedChannelScheduler()
+    private let rfAnalogVideoQualityModel = AnalogVideoQualityModel()
+    private var fpvOSDStateResolver = FPVOSDStateResolver()
     /// Now, on the clock the *aircraft* lives on.
     ///
     /// Anything whose duration is really a distance — how far the aircraft flies while a hold
@@ -3519,10 +3638,7 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
         if activeControlLinkType == .radio {
-            let operationalStatus = currentMissionOperationalStatus(
-                missionDistanceEstimate: currentMissionDistanceEstimate()
-            )
-            if operationalStatus.isInWarningLinkZone {
+            if rfControlAvailability != .nominal {
                 return ArmAuthorization(isAllowed: false, reason: .radioLinkUnavailable)
             }
         }
@@ -3651,6 +3767,19 @@ final class DroneSimulationViewModel: ObservableObject {
         setFlightMode(.manual, reason: "reset")
         flightControlMode = .stabilized
         clearSignalLossState(restoringInputMode: false)
+        rfSystemManager = nil
+        rfLinkEvaluations = [:]
+        rfPacketDeliveryStates = [:]
+        rfControlAvailability = .nominal
+        rfShadowComparisonStatistics = .initial
+        rfEnvironmentContext = .clear
+        rfAcceptanceResults = []
+        rfPerformanceResults = []
+        rfSharedChannelStatistics = []
+        rfVideoPresentationState = nil
+        resetFPVOSDState()
+        rfConfigurationIssues = []
+        rfUpdateAccumulator = 0
         // A full reset is a clean slate for a new attempt with the same equipment loadout — any
         // fiber break/radio-lost latch from the previous attempt must not carry over and leave
         // `resolveArmAuthorization()` still refusing to arm the freshly-respawned aircraft. A
@@ -8015,6 +8144,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         handleModeTransitions()
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
+        updateRFSystemRuntime(deltaTime: dt)
         updateSignalLossSequence(deltaTime: dt)
         updateFiberOpticTether(deltaTime: dt)
         updateControlLinkFailsafeSequence(deltaTime: dt)
@@ -18078,6 +18208,18 @@ final class DroneSimulationViewModel: ObservableObject {
             ?? LIPODroneModelRepository.canonicalModelID(snapshot.selectedDroneModelID)
         if let profile = availableDroneProfiles.first(where: { $0.id == selectedModelID }) {
             selectedDroneProfile = profile
+            rfSystemManager = nil
+            rfLinkEvaluations = [:]
+            rfPacketDeliveryStates = [:]
+            rfControlAvailability = .nominal
+            rfShadowComparisonStatistics = .initial
+            rfEnvironmentContext = .clear
+            rfAcceptanceResults = []
+            rfPerformanceResults = []
+            rfSharedChannelStatistics = []
+            rfVideoPresentationState = nil
+            resetFPVOSDState()
+            rfConfigurationIssues = []
             activeUAVProfile = Self.resolveActiveUAVProfile(for: profile, abstractParameters: abstract)
             sceneController.setDroneProfile(profile)
             resetPayloadForProfileSwitch()
@@ -19081,8 +19223,8 @@ final class DroneSimulationViewModel: ObservableObject {
             return localToHome.y >= 0.0 ? .north : .south
         }()
         // Purely a visual-detail concept (distance to the authored/detailed map's edge) — crossing
-        // `.outside` is a benign notice, not a comms or mission event. See `updateSignalLossSequence`
-        // below, which now drives off the radio link-quality zones instead of this.
+        // `.outside` is a benign notice, not a comms or mission event. Radio authority is driven
+        // independently by the physical CONTROL evaluation and packet-delivery age.
         let worldDetailBoundaryState: WorldDetailBoundaryState = {
             let criticalBand = boundaryHalfExtentM * 0.05
             let warningBand = boundaryHalfExtentM * 0.15
@@ -19114,31 +19256,24 @@ final class DroneSimulationViewModel: ObservableObject {
                 boundaryHalfExtentM * 0.96
             )
         )
-        let linkQualityRadiusM = max(
-            18.0,
-            min(
-                operationalProfile.nominalLinkRangeM * 0.62,
-                boundaryHalfExtentM * 0.70
-            )
-        )
-        let degradedLinkRadiusM = max(
-            linkQualityRadiusM + 6.0,
-            min(
-                operationalProfile.nominalLinkRangeM * 0.82,
-                boundaryHalfExtentM * 0.84
-            )
-        )
-        let lostLinkRadiusM = max(
-            degradedLinkRadiusM + 4.0,
-            min(operationalProfile.nominalLinkRangeM, boundaryHalfExtentM * 0.96)
-        )
-        let currentLinkQuality = linkQuality(
-            distanceToHome: distanceToHomeM,
-            warningRadius: linkQualityRadiusM,
-            criticalRadius: degradedLinkRadiusM,
-            lostRadius: lostLinkRadiusM,
-            weatherPenalty: weather.effectiveFactors.sensorNoiseMultiplier
-        )
+        // A non-radial RF field cannot be represented honestly by concentric map circles. The
+        // legacy radii remain zero only for backward-compatible view models; status and quality
+        // below come exclusively from the physical CONTROL stream.
+        let linkQualityRadiusM: Float = 0
+        let degradedLinkRadiusM: Float = 0
+        let lostLinkRadiusM: Float = 0
+        let currentLinkQuality: Float = {
+            guard let evaluation = rfLinkEvaluations[.control] else {
+                return rfControlAvailability == .lost ? 0 : 1
+            }
+            let packetQuality = Float(max(0, min(1, 1 - evaluation.quality.packetErrorRate)))
+            let deliveryQuality = Float(rfPacketDeliveryStates[.control]?.deliveryRatio ?? 1)
+            return min(packetQuality, deliveryQuality)
+        }()
+        let isInWarningLinkZone = rfControlAvailability != .nominal
+        let isInCriticalLinkZone = rfControlAvailability == .critical
+            || rfControlAvailability == .lost
+        let isLinkLost = rfControlAvailability == .lost
 
         return MissionOperationalStatus(
             estimatedRemainingTimeSec: estimatedRemainingTimeSec,
@@ -19153,9 +19288,9 @@ final class DroneSimulationViewModel: ObservableObject {
             canReachHomeSafely: distanceToHomeM <= estimatedSafeReturnRangeM + 0.05,
             canCompleteMissionSafely: missionBudget <= estimatedSafeReturnRangeM + 0.05,
             currentLinkQuality: currentLinkQuality,
-            isInWarningLinkZone: distanceToHomeM > linkQualityRadiusM + 0.05,
-            isInCriticalLinkZone: distanceToHomeM > degradedLinkRadiusM + 0.05,
-            isLinkLost: distanceToHomeM > lostLinkRadiusM + 0.05 || currentLinkQuality <= 0.01,
+            isInWarningLinkZone: isInWarningLinkZone,
+            isInCriticalLinkZone: isInCriticalLinkZone,
+            isLinkLost: isLinkLost,
             mapScaleSuitability: mapRecommendation.currentSuitability,
             recommendedMapScaleMin: mapRecommendation.recommendedMapScaleMin,
             recommendedMapScaleMax: mapRecommendation.recommendedMapScaleMax,
@@ -19256,31 +19391,6 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         return multiplier
-    }
-
-    private func linkQuality(
-        distanceToHome: Float,
-        warningRadius: Float,
-        criticalRadius: Float,
-        lostRadius: Float,
-        weatherPenalty: Float
-    ) -> Float {
-        let rawQuality: Float
-        switch distanceToHome {
-        case ..<warningRadius:
-            rawQuality = 1.0 - (distanceToHome / max(warningRadius, 0.1)) * 0.18
-        case ..<criticalRadius:
-            let t = (distanceToHome - warningRadius) / max(criticalRadius - warningRadius, 0.1)
-            rawQuality = 0.82 - t * 0.38
-        case ..<lostRadius:
-            let t = (distanceToHome - criticalRadius) / max(lostRadius - criticalRadius, 0.1)
-            rawQuality = 0.44 - t * 0.38
-        default:
-            rawQuality = 0.0
-        }
-
-        let sensorPenalty = max(0.64, 1.0 - max(0.0, weatherPenalty - 1.0) * 0.22)
-        return (rawQuality * sensorPenalty).clamped(to: 0.0...1.0)
     }
 
     private func shortestAngleRadians(_ angle: Float) -> Float {
@@ -27251,6 +27361,7 @@ final class DroneSimulationViewModel: ObservableObject {
             estimatedSafeReturnRangeM: operationalStatus.estimatedSafeReturnRangeM,
             canReachHomeSafely: operationalStatus.canReachHomeSafely,
             currentLinkQuality: operationalStatus.currentLinkQuality,
+            controlLinkAvailability: rfControlAvailability,
             currentMapSuitability: operationalStatus.mapScaleSuitability,
             recommendedMapScaleMin: operationalStatus.recommendedMapScaleMin,
             recommendedMapScaleMax: operationalStatus.recommendedMapScaleMax,
@@ -27868,9 +27979,275 @@ final class DroneSimulationViewModel: ObservableObject {
         releasePayload()
     }
 
-    /// Local, cascade-only mirror of the radio link-quality zones — kept separate from
-    /// `WorldDetailBoundaryState` (which is a map-edge/visual-detail concept) since this drives
-    /// signal behavior purely from distance-to-home vs. the aircraft's nominal radio range.
+    /// Authoritative physical RF runtime for ordinary radio control. Fiber-optic control remains
+    /// a separate medium and bypasses this path in its own consumer/failsafe implementation.
+    private func updateRFSystemRuntime(deltaTime: Float) {
+        rfUpdateAccumulator += max(0, deltaTime)
+        let updateInterval: Float = 1.0 / 20.0
+        guard rfUpdateAccumulator >= updateInterval else { return }
+        let elapsedRFTime = floor(rfUpdateAccumulator / updateInterval) * updateInterval
+        rfUpdateAccumulator.formTruncatingRemainder(dividingBy: updateInterval)
+
+        if rfSystemManager == nil {
+            let configuration = resolvedRFConfiguration()
+            rfConfigurationIssues = RFSystemConfigurationValidator().validate(configuration)
+            guard !rfConfigurationIssues.contains(where: { $0.severity == .error }) else {
+                rfControlAvailability = .lost
+                updateFPVOSDState(
+                    controlEvaluation: nil,
+                    controlDelivery: nil,
+                    timestamp: simulatedNow
+                )
+                return
+            }
+            rfSystemManager = RFSystemManager(configuration: configuration)
+        }
+        guard let manager = rfSystemManager else { return }
+
+        let radiansToDegrees = 180.0 / Double.pi
+        let aircraftPose = RFEndpointPose(
+            positionM: RFVector3D(
+                x: Double(state.position.x),
+                y: Double(state.position.y),
+                z: Double(state.position.z)
+            ),
+            orientation: RFOrientation(
+                yawDegrees: Double(state.orientation.z) * radiansToDegrees,
+                pitchDegrees: Double(state.orientation.y) * radiansToDegrees,
+                rollDegrees: Double(state.orientation.x) * radiansToDegrees
+            )
+        )
+        let groundPose = RFEndpointPose(positionM: RFVector3D(
+            x: Double(homePosition.x),
+            y: Double(homePosition.y),
+            z: Double(homePosition.z)
+        ))
+        var endpointPoses: [String: RFEndpointPose] = [:]
+        for device in manager.configuration.devices {
+            switch device.endpoint {
+            case .airborne:
+                endpointPoses[device.id] = aircraftPose
+            case .ground, .relay:
+                let placement = manager.configuration.endpointPlacement(for: device.id)
+                endpointPoses[device.id] = RFEndpointPose(
+                    positionM: groundPose.positionM + placement.offsetFromHomeM,
+                    orientation: placement.orientation
+                )
+            }
+        }
+
+        let environmentContext = currentRFEnvironmentContext()
+        if rfEnvironmentContext != environmentContext {
+            rfEnvironmentContext = environmentContext
+        }
+        let results = manager.evaluateAvailableLinks(
+            endpointPosesM: endpointPoses,
+            environment: environmentContext,
+            timestamp: TimeInterval(simulationTime),
+            pathContextResolver: { [sceneController] query in
+                sceneController.rfPathContext(for: query, aircraftPose: aircraftPose)
+            }
+        )
+        var evaluations: [LogicalLinkKind: RFLinkEvaluation] = [:]
+        for (kind, result) in results {
+            if case let .success(evaluation) = result {
+                evaluations[kind] = evaluation
+            }
+        }
+        rfLinkEvaluations = evaluations
+
+        var packetStates = rfPacketDeliveryStates
+        var sharedChannelStatistics: [RFSharedChannelStatistics] = []
+        let qos = manager.configuration.qos ?? .migrationDefault
+        let linksByTransmitter = Dictionary(
+            grouping: manager.configuration.logicalLinks.all,
+            by: \.transmitterDeviceID
+        )
+        for (transmitterDeviceID, links) in linksByTransmitter {
+            let inputs = links.compactMap { link -> RFSharedChannelInput? in
+                guard let evaluation = evaluations[link.kind] else { return nil }
+                return RFSharedChannelInput(
+                    linkID: link.id,
+                    linkKind: link.kind,
+                    state: packetStates[link.kind] ?? .initial,
+                    evaluation: evaluation,
+                    traffic: qos.trafficProfile(for: link.kind)
+                )
+            }
+            guard !inputs.isEmpty else { continue }
+            let channelCapacityBPS = links.map(\.qualityProfile.nominalBitrateBps).max() ?? 0
+            let output = rfSharedChannelScheduler.advance(
+                transmitterDeviceID: transmitterDeviceID,
+                inputs: inputs,
+                channelCapacityBPS: channelCapacityBPS,
+                qos: qos,
+                deltaTime: Double(elapsedRFTime)
+            )
+            for (kind, state) in output.states {
+                packetStates[kind] = state
+            }
+            sharedChannelStatistics.append(output.statistics)
+        }
+        rfPacketDeliveryStates = packetStates
+        rfSharedChannelStatistics = sharedChannelStatistics.sorted { $0.id < $1.id }
+        if let videoEvaluation = evaluations[.video],
+           let videoLink = manager.configuration.logicalLinks.video {
+            let mode = videoLink.videoMode ?? .digital
+            switch mode {
+            case .analog:
+                rfVideoPresentationState = rfAnalogVideoQualityModel.presentationState(
+                    for: videoEvaluation
+                )
+            case .digital:
+                let delivery = packetStates[.video]
+                let queueFraction = delivery.map {
+                    Double($0.queueDepth) / Double(max(1, $0.queueCapacity))
+                } ?? 0
+                let artifacts = min(
+                    1,
+                    max(videoEvaluation.quality.packetErrorRate, queueFraction * 0.7)
+                )
+                rfVideoPresentationState = RFVideoPresentationState(
+                    mode: .digital,
+                    health: videoEvaluation.quality.health,
+                    analogNoiseIntensity: 0,
+                    digitalArtifactIntensity: artifacts,
+                    isFrozen: videoEvaluation.quality.health == .lost
+                        || (delivery?.secondsSinceLastDelivery ?? .infinity) > 0.35,
+                    effectiveBitrateBPS: delivery?.effectiveThroughputBPS
+                        ?? videoEvaluation.quality.effectiveBitrateBps,
+                    latencyMS: videoEvaluation.quality.latencyMS
+                        + (delivery?.meanQueueDelaySeconds ?? 0) * 1_000
+                )
+            }
+        } else {
+            rfVideoPresentationState = nil
+        }
+        if let controlEvaluation = evaluations[.control],
+           let controlDelivery = packetStates[.control] {
+            rfControlAvailability = rfControlAvailabilityPolicy.evaluate(
+                delivery: controlDelivery,
+                link: controlEvaluation
+            )
+        } else {
+            rfControlAvailability = .lost
+        }
+        updateFPVOSDState(
+            controlEvaluation: evaluations[.control],
+            controlDelivery: packetStates[.control],
+            timestamp: simulatedNow
+        )
+
+        if isArmed,
+           let controlEvaluation = evaluations[.control],
+           controlEvaluation.rf.distanceM >= 10,
+           let controlDelivery = packetStates[.control] {
+            rfShadowBaselineAccumulator.record(
+                context: environmentContext,
+                evaluation: controlEvaluation,
+                delivery: controlDelivery,
+                legacy: rfControlAvailability,
+                physical: rfControlAvailability
+            )
+            rfCalibrationBuckets = rfShadowBaselineAccumulator.buckets
+        }
+    }
+
+    private func updateFPVOSDState(
+        controlEvaluation: RFLinkEvaluation?,
+        controlDelivery: RFPacketDeliveryState?,
+        timestamp: TimeInterval
+    ) {
+        let fpvMode: FPVFlightMode
+        switch flightControlMode {
+        case .stabilized: fpvMode = .angle
+        case .acro: fpvMode = .acro
+        case .hoverAssist: fpvMode = .hover
+        }
+        let localTelemetry = FPVLocalTelemetrySample(
+            voltage: telemetry.batteryVoltage,
+            batteryPercent: telemetry.batteryPercent,
+            altitude: telemetry.y,
+            speed: telemetry.speed,
+            // UAVsim currently has no authoritative GNSS constellation count. Showing `---`
+            // is intentionally more honest than synthesizing a decorative satellite number.
+            satellites: nil,
+            armed: isArmed,
+            flightMode: fpvMode,
+            rollDegrees: telemetry.roll,
+            pitchDegrees: telemetry.pitch
+        )
+
+        let radio: FPVRadioLinkSample?
+        if let evaluation = controlEvaluation, let delivery = controlDelivery {
+            let severity: FPVControlLinkSeverity
+            switch rfControlAvailability {
+            case .nominal: severity = .nominal
+            case .warning: severity = .warning
+            case .critical: severity = .critical
+            case .lost: severity = .lost
+            }
+            radio = FPVRadioLinkSample(
+                rssiDBm: evaluation.rf.receivedPowerDBm,
+                snrDB: evaluation.rf.snrDB,
+                packetErrorRate: evaluation.quality.packetErrorRate,
+                smoothedPacketLoss: delivery.smoothedPacketLoss,
+                secondsSinceLastDelivery: delivery.secondsSinceLastDelivery,
+                severity: severity
+            )
+        } else {
+            radio = nil
+        }
+
+        let nextState = fpvOSDStateResolver.resolve(
+            telemetry: localTelemetry,
+            radio: radio,
+            timestamp: timestamp
+        )
+        if nextState != fpvOSDState {
+            fpvOSDState = nextState
+        }
+    }
+
+    private func resetFPVOSDState() {
+        fpvOSDStateResolver.reset()
+        fpvOSDState = .unavailable
+    }
+
+    private func currentRFEnvironmentContext() -> RFEnvironmentContext {
+        let scene: RFEnvironmentScene
+        switch terrain.preset {
+        case .gridDemo: scene = .testGrid
+        case .field: scene = .openField
+        case .forest: scene = .forest
+        case .cargoYard: scene = .industrial
+        case .city: scene = .urban
+        }
+
+        let weatherCondition: RFWeatherCondition
+        switch weather.preset {
+        case .normal: weatherCondition = .clear
+        case .wind: weatherCondition = .wind
+        case .rain: weatherCondition = .rain
+        case .snow: weatherCondition = .snow
+        case .fog: weatherCondition = .fog
+        case .smog: weatherCondition = .smog
+        case .thunderstorm: weatherCondition = .thunderstorm
+        }
+
+        return RFEnvironmentContext(
+            effectsEnabled: true,
+            scene: scene,
+            density: Double(terrain.density),
+            weather: weatherCondition,
+            weatherIntensity: Double(weather.normalizedIntensity),
+            relativeHumidity: Double(weather.relativeHumidity),
+            windSpeedMPS: Double(weather.windSpeedMps),
+            deterministicSeed: terrain.seed
+        )
+    }
+
+    /// Consumer-facing severity used by the existing signal/failsafe state machine.
     private enum RadioLinkZone {
         case nominal
         case warning
@@ -27897,16 +28274,14 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let operationalStatus = currentMissionOperationalStatus(
-            missionDistanceEstimate: currentMissionDistanceEstimate()
-        )
         let linkLossPolicy = selectedDroneProfile.operationalProfile.linkLossPolicy
-        let radioZone: RadioLinkZone = {
-            if operationalStatus.isLinkLost { return .lost }
-            if operationalStatus.isInCriticalLinkZone { return .critical }
-            if operationalStatus.isInWarningLinkZone { return .warning }
-            return .nominal
-        }()
+        let radioZone: RadioLinkZone
+        switch rfControlAvailability {
+        case .nominal: radioZone = .nominal
+        case .warning: radioZone = .warning
+        case .critical: radioZone = .critical
+        case .lost: radioZone = .lost
+        }
 
         // A genuine radio-range failsafe reaction is a function of equipment, not of the world's
         // detail boundary — an aircraft with an autopilot doesn't need to freeze/go dark just
@@ -28544,10 +28919,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
-        let operationalStatus = currentMissionOperationalStatus(
-            missionDistanceEstimate: currentMissionDistanceEstimate()
-        )
-        guard !operationalStatus.isInWarningLinkZone else {
+        guard rfControlAvailability == .nominal else {
             stableRadioReconnectionSeconds = 0.0
             return
         }
@@ -29899,6 +30271,7 @@ private extension DroneSimulationViewModel {
            stableGroundAccumulator >= 0.45,
            missionReplayRecorder.isRecording {
             let ts = missionReplayTimestamp()
+            missionReplayRecorder.updateRFArtifacts(makeMissionReplayRFArtifacts())
             missionReplayRecorder.stopSession(timestamp: ts)
             lastMissionReplaySession = missionReplayRecorder.lastCompletedSession
             if let session = missionReplayRecorder.lastCompletedSession {
@@ -29947,9 +30320,50 @@ private extension DroneSimulationViewModel {
             loadFactor: Double(state.loadFactor),
             skinTemperatureK: Double(state.aeroThermal.hottestK),
             envelopeLimitKey: state.flightEnvelope.bindingLimit.localizationKey,
-            envelopeWorstFraction: Double(state.flightEnvelope.worstFraction)
+            envelopeWorstFraction: Double(state.flightEnvelope.worstFraction),
+            rfSnapshot: makeMissionReplayRFSnapshot()
         )
         missionReplayRecorder.recordFrame(frame)
+    }
+
+    func makeMissionReplayRFSnapshot() -> MissionReplayRFSnapshot {
+        let control = rfLinkEvaluations[.control]
+        let delivery = rfPacketDeliveryStates[.control]
+        let sharedChannel = rfSharedChannelStatistics.first {
+            $0.allocatedBitrateBPS[.control] != nil
+        }
+        return MissionReplayRFSnapshot(
+            rolloutModeRawValue: rfRolloutMode.rawValue,
+            controlAvailabilityRawValue: rfControlAvailability.rawValue,
+            rssiDBm: control?.rf.receivedPowerDBm,
+            sinrDB: control?.rf.sinrDB,
+            linkMarginDB: control?.rf.linkMarginDB,
+            packetErrorRate: control?.quality.packetErrorRate,
+            commandAgeSeconds: rfControlCommandAgeSeconds,
+            deliveryRatio: delivery?.deliveryRatio,
+            mcsRawValue: delivery?.selectedMCS.rawValue,
+            queueDepth: delivery?.queueDepth,
+            throughputBPS: delivery?.effectiveThroughputBPS,
+            retryAttempts: delivery?.retryAttempts,
+            expiredPackets: delivery?.packetsExpired,
+            sharedChannelUtilization: sharedChannel?.utilizationRatio,
+            backpressuredLinkRawValues: sharedChannel?.backpressuredLinks
+                .map(\.rawValue)
+                .sorted() ?? []
+        )
+    }
+
+    func makeMissionReplayRFArtifacts() -> MissionReplayRFArtifacts {
+        let calibrationReport = rfCalibrationBuckets.isEmpty
+            ? nil
+            : makeRFCalibrationReport()
+        return MissionReplayRFArtifacts(
+            schemaVersion: 1,
+            calibrationReport: calibrationReport,
+            acceptanceResults: rfAcceptanceResults,
+            qosConfiguration: rfSystemManager?.configuration.qos ?? .migrationDefault,
+            performanceResults: rfPerformanceResults
+        )
     }
 
     func recordMissionReplayWarningsIfNeeded() {

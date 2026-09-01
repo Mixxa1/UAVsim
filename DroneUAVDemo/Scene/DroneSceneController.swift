@@ -3146,6 +3146,132 @@ final class DroneSceneController {
         return hasHit ? (bestDistance, bestObstacleID) : nil
     }
 
+    /// RF geometry adapter. It deliberately uses the scene's analytic collision world rather
+    /// than SceneKit render-mesh hit testing: this is the same geometry flight can collide with,
+    /// includes imported mesh worlds, and is cheap enough for the RF scheduler's 20 Hz cadence.
+    func rfPathContext(
+        for query: RFPathQuery,
+        aircraftPose: RFEndpointPose
+    ) -> RFPathContext {
+        let start = SIMD3<Float>(
+            Float(query.transmitterPhaseCenterM.x),
+            Float(query.transmitterPhaseCenterM.y),
+            Float(query.transmitterPhaseCenterM.z)
+        )
+        let end = SIMD3<Float>(
+            Float(query.receiverPhaseCenterM.x),
+            Float(query.receiverPhaseCenterM.y),
+            Float(query.receiverPhaseCenterM.z)
+        )
+        let delta = end - start
+        let distance = simd_length(delta)
+        var context = RFPathContext.clear
+
+        if distance > 0.01,
+           let hit = analyticEnvironmentRayHit(
+               origin: start,
+               direction: delta / distance,
+               maxDistance: max(0.0, distance - 0.025)
+           ) {
+            let obstruction: RFPathObstruction
+            if let obstacleID = hit.obstacleID,
+               let obstacle = obstacle(for: obstacleID) {
+                let classification = rfClassification(for: obstacle.resolvedAcousticSurface)
+                obstruction = RFPathObstruction(
+                    id: "scene.\(obstacleID.uuidString)",
+                    kind: classification.kind,
+                    material: classification.material,
+                    distanceFromTransmitterM: Double(hit.distance)
+                )
+            } else {
+                // A nil id is either the procedural ground plane or the installed world's exact
+                // mesh. The latter can contain mixed materials, so generic structure is the
+                // honest baseline until triangle material metadata is exported by MeshCollision.
+                obstruction = RFPathObstruction(
+                    id: meshCollision == nil ? "scene.ground" : "scene.mesh",
+                    kind: meshCollision == nil ? .terrain : .structure,
+                    material: meshCollision == nil ? .soil : .generic,
+                    distanceFromTransmitterM: Double(hit.distance)
+                )
+            }
+            context = RFPathContext(hasLineOfSight: false, obstructions: [obstruction])
+        }
+
+        let bodyCenterLocal = RFVector3D(
+            x: Double(visualBoundsCenter.x),
+            y: Double(visualBoundsCenter.y + vehicleGroundRestLift),
+            z: Double(visualBoundsCenter.z)
+        )
+        let body = RFBodyVolume(
+            id: "active-airframe",
+            centerM: aircraftPose.positionM
+                + aircraftPose.orientation.rotatingLocalVectorToWorld(bodyCenterLocal),
+            radiiM: RFVector3D(
+                x: Double(max(0.04, visualBoundsSize.x * 0.5)),
+                y: Double(max(0.04, visualBoundsSize.y * 0.5)),
+                z: Double(max(0.04, visualBoundsSize.z * 0.5))
+            ),
+            orientation: aircraftPose.orientation,
+            material: activeProfile.skinMaterial == .composite ? .composite : .metal
+        )
+        var bodyObstructions: [RFPathObstruction] = []
+        if query.transmitterEndpoint == .airborne,
+           body.shadows(
+               antennaPositionM: query.transmitterPhaseCenterM,
+               remotePositionM: query.receiverPhaseCenterM
+           ) {
+            bodyObstructions.append(RFPathObstruction(
+                id: "\(body.id).tx",
+                kind: .airframe,
+                material: body.material,
+                distanceFromTransmitterM: 0
+            ))
+        }
+        if query.receiverEndpoint == .airborne,
+           body.shadows(
+               antennaPositionM: query.receiverPhaseCenterM,
+               remotePositionM: query.transmitterPhaseCenterM
+           ) {
+            bodyObstructions.append(RFPathObstruction(
+                id: "\(body.id).rx",
+                kind: .airframe,
+                material: body.material,
+                distanceFromTransmitterM: Double(distance)
+            ))
+        }
+        return context.merging(RFPathContext(
+            hasLineOfSight: true,
+            obstructions: bodyObstructions
+        ))
+    }
+
+    private func rfClassification(
+        for surface: AcousticSurfaceMaterial
+    ) -> (kind: RFPathObstructionKind, material: RFMaterialClass) {
+        switch surface {
+        case .foliage:
+            return (.vegetation, .foliage)
+        case .treeTrunk, .grass:
+            return (.vegetation, surface == .treeTrunk ? .wood : .foliage)
+        case .concrete, .asphalt:
+            return (.structure, .concrete)
+        case .metal:
+            return (.structure, .metal)
+        case .glass:
+            return (.structure, .glass)
+        case .wood:
+            return (.structure, .wood)
+        case .soil, .snow, .ice:
+            return (.terrain, .soil)
+        case .rock:
+            return (.terrain, .rock)
+        case .water:
+            return (.terrain, .water)
+        case .generic:
+            return (.generic, .generic)
+        }
+    }
+
     /// Slab test against an upright yaw-rotated box (rotation convention matches
     /// `CollisionObstacle.rotate`/`rotatePlanar`). Returns entry distance, or nil when the ray
     /// misses or starts inside (no meaningful "distance to" reading from inside a proxy).

@@ -5,6 +5,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
     case overview
     case blueprints
     case frame
+    case radio
     case slot(WorkbenchComponentKind)
 
     var id: String {
@@ -12,6 +13,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
         case .overview: return "overview"
         case .blueprints: return "blueprints"
         case .frame: return "frame"
+        case .radio: return "radio"
         case let .slot(kind): return "slot.\(kind.rawValue)"
         }
     }
@@ -21,6 +23,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
         case .overview: return "Сборка"
         case .blueprints: return "Пользовательские"
         case .frame: return "Рама"
+        case .radio: return "RF-система"
         case let .slot(kind): return kind.shortName
         }
     }
@@ -30,6 +33,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
         case .overview: return "list.bullet.rectangle"
         case .blueprints: return "square.stack.3d.up.fill"
         case .frame: return "square.on.square.intersection.dashed"
+        case .radio: return "antenna.radiowaves.left.and.right"
         case let .slot(kind): return kind.symbolName
         }
     }
@@ -73,6 +77,7 @@ final class WorkbenchViewModel: ObservableObject {
     @Published private(set) var blueprints: [WorkbenchBlueprintSummary] = []
     @Published private(set) var cameraResetToken = 0
     @Published var pendingImport: WorkbenchConstructionImport?
+    @Published var selectedRFLinkKind: LogicalLinkKind = .control
 
     private var undoStack: [Data] = []
     private let undoDepth = 50
@@ -99,6 +104,50 @@ final class WorkbenchViewModel: ObservableObject {
 
     var canUndo: Bool { !undoStack.isEmpty }
 
+    var rfConfigurationIssues: [RFConfigurationIssue] {
+        RFSystemConfigurationValidator().validate(build.rfSystem)
+    }
+
+    var selectedRFLink: RFLinkConfiguration? {
+        build.rfSystem.logicalLinks.link(for: selectedRFLinkKind)
+    }
+
+    var activeRFQoS: RFQoSConfiguration {
+        build.rfSystem.qos ?? .migrationDefault
+    }
+
+    func rfDevice(id: String) -> RFDeviceInstance? {
+        build.rfSystem.devices.first(where: { $0.id == id })
+    }
+
+    func rfAntenna(id: String) -> RFAntennaInstance? {
+        build.rfSystem.antennas.first(where: { $0.id == id })
+    }
+
+    func groundRFDevice(for kind: LogicalLinkKind) -> RFDeviceInstance? {
+        guard let link = build.rfSystem.logicalLinks.link(for: kind) else { return nil }
+        return [link.transmitterDeviceID, link.receiverDeviceID]
+            .compactMap { rfDevice(id: $0) }
+            .first(where: { $0.endpoint == .ground || $0.endpoint == .relay })
+    }
+
+    func rfSupportedBandwidths(for kind: LogicalLinkKind) -> [Double] {
+        guard let link = build.rfSystem.logicalLinks.link(for: kind),
+              let transmitter = rfDevice(id: link.transmitterDeviceID),
+              let receiver = rfDevice(id: link.receiverDeviceID) else { return [] }
+        if transmitter.profile.supportedBandwidthsHz.isEmpty {
+            return receiver.profile.supportedBandwidthsHz.sorted()
+        }
+        if receiver.profile.supportedBandwidthsHz.isEmpty {
+            return transmitter.profile.supportedBandwidthsHz.sorted()
+        }
+        return transmitter.profile.supportedBandwidthsHz.filter { bandwidth in
+            receiver.profile.supportedBandwidthsHz.contains(where: {
+                abs($0 - bandwidth) <= max(1, bandwidth * 0.001)
+            })
+        }.sorted()
+    }
+
     func components(for kind: WorkbenchComponentKind) -> [WorkbenchComponentSpec] {
         build.availableComponents(for: kind)
     }
@@ -116,6 +165,228 @@ final class WorkbenchViewModel: ObservableObject {
     }
 
     // MARK: Mutations
+
+    func selectRFLink(_ kind: LogicalLinkKind) {
+        selectedRFLinkKind = kind
+        statusMessage = "Выбран RF-канал \(kind.rawValue.uppercased())."
+    }
+
+    func resetRFCompatibilityPreset() {
+        pushUndo()
+        build.rfSystem = RFCompatibilityPreset.make(for: build)
+        build.revision += 1
+        recompute()
+        statusMessage = "RF-система восстановлена из compatibility preset."
+    }
+
+    func setRFFrequencyMHz(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("Частота \(kind.rawValue.uppercased()) обновлена.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            let frequencyHz = max(0, value) * 1_000_000
+            for id in [link.transmitterDeviceID, link.receiverDeviceID] {
+                guard let index = configuration.devices.firstIndex(where: { $0.id == id }) else { continue }
+                configuration.devices[index].centerFrequencyHz = frequencyHz
+            }
+        }
+    }
+
+    func setRFBandwidthHz(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("Полоса \(kind.rawValue.uppercased()) обновлена.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            for id in [link.transmitterDeviceID, link.receiverDeviceID] {
+                guard let index = configuration.devices.firstIndex(where: { $0.id == id }) else { continue }
+                configuration.devices[index].bandwidthHz = max(1, value)
+            }
+        }
+    }
+
+    func setRFTxPowerDBm(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("Мощность TX \(kind.rawValue.uppercased()) обновлена.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind),
+                  let index = configuration.devices.firstIndex(where: {
+                      $0.id == link.transmitterDeviceID
+                  }) else { return }
+            let maximum = configuration.devices[index].profile.maxTxPowerDBm ?? value
+            configuration.devices[index].txPowerDBm = min(maximum, value)
+        }
+    }
+
+    func setRFNominalBitrateBPS(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("Bitrate \(kind.rawValue.uppercased()) обновлён.") { configuration in
+            configuration.mutateLink(kind) { link in
+                link.qualityProfile.nominalBitrateBps = max(1, value)
+            }
+        }
+    }
+
+    func setRFRequiredSINRDB(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("SINR threshold \(kind.rawValue.uppercased()) обновлён.") { configuration in
+            configuration.mutateLink(kind) { link in
+                link.qualityProfile.requiredSINRDB = value
+            }
+        }
+    }
+
+    func setRFVideoMode(_ mode: RFVideoTransmissionMode) {
+        mutateRF("Режим видеолинка обновлён: \(mode.rawValue).") { configuration in
+            configuration.mutateLink(.video) { $0.videoMode = mode }
+        }
+    }
+
+    func setRFAntennaGainDBi(
+        _ value: Double,
+        for kind: LogicalLinkKind,
+        transmitter: Bool
+    ) {
+        mutateRF("Усиление антенны обновлено.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            let id = transmitter ? link.transmitterAntennaID : link.receiverAntennaID
+            guard let index = configuration.antennas.firstIndex(where: { $0.id == id }) else { return }
+            configuration.antennas[index].profile.peakGainDBi = value
+        }
+    }
+
+    func setRFAntennaPolarization(
+        _ value: RFPolarization,
+        for kind: LogicalLinkKind,
+        transmitter: Bool
+    ) {
+        mutateRF("Поляризация антенны обновлена.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            let id = transmitter ? link.transmitterAntennaID : link.receiverAntennaID
+            guard let index = configuration.antennas.firstIndex(where: { $0.id == id }) else { return }
+            configuration.antennas[index].profile.polarization = value
+        }
+    }
+
+    func setRFAntennaDamage(
+        _ value: Double,
+        for kind: LogicalLinkKind,
+        transmitter: Bool
+    ) {
+        mutateRF("Состояние антенны обновлено.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            let id = transmitter ? link.transmitterAntennaID : link.receiverAntennaID
+            guard let index = configuration.antennas.firstIndex(where: { $0.id == id }) else { return }
+            configuration.antennas[index].damageFraction = min(1, max(0, value))
+        }
+    }
+
+    func setRFAntennaTransform(
+        x: Double? = nil,
+        y: Double? = nil,
+        z: Double? = nil,
+        yawDegrees: Double? = nil,
+        pitchDegrees: Double? = nil,
+        rollDegrees: Double? = nil,
+        for kind: LogicalLinkKind,
+        transmitter: Bool
+    ) {
+        mutateRF("Физический transform антенны обновлён.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            let id = transmitter ? link.transmitterAntennaID : link.receiverAntennaID
+            guard let index = configuration.antennas.firstIndex(where: { $0.id == id }) else { return }
+            if let x { configuration.antennas[index].mountPositionM.x = x }
+            if let y { configuration.antennas[index].mountPositionM.y = y }
+            if let z { configuration.antennas[index].mountPositionM.z = z }
+            if let yawDegrees { configuration.antennas[index].orientation.yawDegrees = yawDegrees }
+            if let pitchDegrees { configuration.antennas[index].orientation.pitchDegrees = pitchDegrees }
+            if let rollDegrees { configuration.antennas[index].orientation.rollDegrees = rollDegrees }
+        }
+    }
+
+    func setRFQoSDynamicReservation(_ enabled: Bool) {
+        mutateRF("Динамическое QoS-резервирование обновлено.") { configuration in
+            var qos = configuration.qos ?? .migrationDefault
+            qos.dynamicReservationEnabled = enabled
+            configuration.qos = qos
+        }
+    }
+
+    func setRFQoSBorrowing(_ enabled: Bool) {
+        mutateRF("QoS borrowing обновлён.") { configuration in
+            var qos = configuration.qos ?? .migrationDefault
+            qos.reservationBorrowingEnabled = enabled
+            configuration.qos = qos
+        }
+    }
+
+    func setRFQoSControlBoostAge(_ seconds: Double) {
+        mutateRF("Порог CONTROL boost обновлён.") { configuration in
+            var qos = configuration.qos ?? .migrationDefault
+            qos.controlBoostCommandAgeSeconds = max(0, seconds)
+            configuration.qos = qos
+        }
+    }
+
+    func setRFQoSControlBoostMultiplier(_ multiplier: Double) {
+        mutateRF("Множитель CONTROL boost обновлён.") { configuration in
+            var qos = configuration.qos ?? .migrationDefault
+            qos.controlBoostMultiplier = max(1, multiplier)
+            configuration.qos = qos
+        }
+    }
+
+    func setRFQoSPriority(_ priority: Int, for kind: LogicalLinkKind) {
+        mutateRF("QoS priority \(kind.rawValue.uppercased()) обновлён.") { configuration in
+            configuration.mutateQoSPolicy(kind) { $0.priority = max(0, priority) }
+        }
+    }
+
+    func setRFQoSReserveBPS(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("QoS reserve \(kind.rawValue.uppercased()) обновлён.") { configuration in
+            configuration.mutateQoSPolicy(kind) {
+                $0.minimumReservedBitrateBPS = max(0, value)
+            }
+        }
+    }
+
+    func setRFQoSMaximumShare(_ value: Double, for kind: LogicalLinkKind) {
+        mutateRF("QoS share \(kind.rawValue.uppercased()) обновлён.") { configuration in
+            configuration.mutateQoSPolicy(kind) {
+                $0.maximumShareFraction = min(1, max(0, value))
+            }
+        }
+    }
+
+    func setRFGroundPlacement(
+        x: Double? = nil,
+        y: Double? = nil,
+        z: Double? = nil,
+        yawDegrees: Double? = nil,
+        for kind: LogicalLinkKind
+    ) {
+        mutateRF("Положение наземной RF-станции обновлено.") { configuration in
+            guard let link = configuration.logicalLinks.link(for: kind) else { return }
+            let deviceID = [link.transmitterDeviceID, link.receiverDeviceID]
+                .compactMap { id in configuration.devices.first(where: { $0.id == id }) }
+                .first(where: { $0.endpoint == .ground || $0.endpoint == .relay })?.id
+            guard let deviceID else { return }
+            var placements = configuration.endpointPlacements ?? [:]
+            var placement = placements[deviceID] ?? .atHome
+            if let x { placement.offsetFromHomeM.x = x }
+            if let y { placement.offsetFromHomeM.y = max(0, y) }
+            if let z { placement.offsetFromHomeM.z = z }
+            if let yawDegrees { placement.orientation.yawDegrees = yawDegrees }
+            placements[deviceID] = placement
+            configuration.endpointPlacements = placements
+        }
+    }
+
+    private func mutateRF(
+        _ message: String,
+        mutation: (inout RFSystemConfiguration) -> Void
+    ) {
+        pushUndo()
+        var configuration = build.rfSystem
+        mutation(&configuration)
+        configuration.origin = .authored
+        if configuration.qos == nil { configuration.qos = .migrationDefault }
+        build.rfSystem = configuration
+        build.revision += 1
+        recompute()
+        statusMessage = message
+    }
 
     func selectLibraryFrame(_ id: String) {
         guard selectedLibraryFrameID != id else { return }
@@ -352,5 +623,46 @@ final class WorkbenchViewModel: ObservableObject {
         } catch {
             statusMessage = "Не удалось открыть чертёж: \(error.localizedDescription)"
         }
+    }
+}
+
+private extension RFSystemConfiguration {
+    mutating func mutateLink(
+        _ kind: LogicalLinkKind,
+        mutation: (inout RFLinkConfiguration) -> Void
+    ) {
+        switch kind {
+        case .control:
+            guard var link = logicalLinks.control else { return }
+            mutation(&link)
+            logicalLinks.control = link
+        case .video:
+            guard var link = logicalLinks.video else { return }
+            mutation(&link)
+            logicalLinks.video = link
+        case .telemetry:
+            guard var link = logicalLinks.telemetry else { return }
+            mutation(&link)
+            logicalLinks.telemetry = link
+        case .payloadData:
+            guard var link = logicalLinks.payloadData else { return }
+            mutation(&link)
+            logicalLinks.payloadData = link
+        }
+    }
+
+    mutating func mutateQoSPolicy(
+        _ kind: LogicalLinkKind,
+        mutation: (inout RFQoSLinkPolicy) -> Void
+    ) {
+        var updatedQoS = qos ?? .migrationDefault
+        if let index = updatedQoS.linkPolicies.firstIndex(where: { $0.kind == kind }) {
+            mutation(&updatedQoS.linkPolicies[index])
+        } else {
+            var policy = updatedQoS.policy(for: kind)
+            mutation(&policy)
+            updatedQoS.linkPolicies.append(policy)
+        }
+        qos = updatedQoS
     }
 }

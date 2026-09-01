@@ -20,7 +20,14 @@ struct ReplayTrimmer {
                     activeWaypointIndex: frame.activeWaypointIndex,
                     batteryPercent: frame.batteryPercent,
                     payloadStatusDescription: frame.payloadStatusDescription,
-                    warningCount: frame.warningCount
+                    warningCount: frame.warningCount,
+                    machNumber: frame.machNumber,
+                    dynamicPressurePa: frame.dynamicPressurePa,
+                    loadFactor: frame.loadFactor,
+                    skinTemperatureK: frame.skinTemperatureK,
+                    envelopeLimitKey: frame.envelopeLimitKey,
+                    envelopeWorstFraction: frame.envelopeWorstFraction,
+                    rfSnapshot: frame.rfSnapshot
                 )
             }
 
@@ -44,7 +51,8 @@ struct ReplayTrimmer {
             endedAt: startedAt.addingTimeInterval(clampedRange.duration),
             frames: trimmedFrames,
             events: trimmedEvents,
-            context: session.context
+            context: session.context,
+            rfArtifacts: session.rfArtifacts
         )
     }
 }

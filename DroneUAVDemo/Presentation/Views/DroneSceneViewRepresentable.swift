@@ -1,11 +1,16 @@
 import AppKit
 import CoreGraphics
 import SceneKit
+import SpriteKit
 import SwiftUI
 
 final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate {
     var cameraMode: CameraMode
     var onRenderFrame: (TimeInterval, CameraMode) -> Void
+    let fpvOSDRenderer = FPVOSDRenderer()
+    var fpvFontPreset: FPVFontPreset?
+    var fpvFontAtlas: FPVFontAtlas?
+    var failedFPVFontPreset: FPVFontPreset?
 
     init(
         cameraMode: CameraMode,
@@ -302,6 +307,10 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     /// The race track builder aims with the mouse itself — moved, not dragged — so it takes the
     /// same captured-cursor look the spectator camera uses.
     var usesBuilderMouseLook: Bool = false
+    /// Non-nil only for the analog FPV feed. Keeping the OSD inside SceneKit's SpriteKit overlay
+    /// lets the later video-link degradation layer corrupt the camera and glyphs together.
+    var analogFPVOSDState: FPVOSDState? = nil
+    var fpvFontPreset: FPVFontPreset = .betaflight
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -327,6 +336,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         applyRenderScale(to: view)
 
         configureCameraControl(on: view)
+        configureAnalogFPVOSD(on: view, coordinator: context.coordinator)
 
         if isInteractive {
             DispatchQueue.main.async {
@@ -370,6 +380,45 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
             view.rendersContinuously = policy.rendersContinuously
         }
         configureCameraControl(on: view)
+        configureAnalogFPVOSD(on: view, coordinator: context.coordinator)
+    }
+
+    private func configureAnalogFPVOSD(
+        on view: SCNView,
+        coordinator: SceneRenderCoordinator
+    ) {
+        guard let state = analogFPVOSDState else {
+            if view.overlaySKScene === coordinator.fpvOSDRenderer.scene {
+                view.overlaySKScene = nil
+            }
+            return
+        }
+
+        do {
+            if coordinator.fpvFontPreset != fpvFontPreset || coordinator.fpvFontAtlas == nil {
+                coordinator.fpvFontAtlas = try FPVFontAtlasStore.shared.atlas(for: fpvFontPreset)
+                coordinator.fpvFontPreset = fpvFontPreset
+                coordinator.failedFPVFontPreset = nil
+            }
+            guard let atlas = coordinator.fpvFontAtlas else { return }
+            coordinator.fpvOSDRenderer.render(
+                state: state,
+                fontAtlas: atlas,
+                layout: .analog30x16,
+                viewportSize: view.bounds.size
+            )
+            if view.overlaySKScene !== coordinator.fpvOSDRenderer.scene {
+                view.overlaySKScene = coordinator.fpvOSDRenderer.scene
+            }
+        } catch {
+            view.overlaySKScene = nil
+            if coordinator.failedFPVFontPreset != fpvFontPreset {
+                coordinator.failedFPVFontPreset = fpvFontPreset
+                #if DEBUG
+                print("[FPV OSD] Could not load \(fpvFontPreset.resourceName).mcm: \(error)")
+                #endif
+            }
+        }
     }
 
     /// Best-effort internal render scale: drops the backing layer's contentsScale below the

@@ -1,9 +1,12 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DiagnosticsModuleView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
     @Binding var appLanguage: AppLanguage
     @State private var activePanel: DiagnosticsDetailPanel = .overview
+    @State private var rfExportStatusKey: String?
 
     private static let distanceFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -39,6 +42,8 @@ struct DiagnosticsModuleView: View {
             overviewPanel
         case .telemetry:
             telemetryPanel
+        case .radio:
+            rfPanel
         case .aerodynamics:
             AeroDiagnosticsPanelView(
                 profile: viewModel.selectedDroneProfile,
@@ -208,6 +213,376 @@ struct DiagnosticsModuleView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var rfPanel: some View {
+        Group {
+            ModuleSection(
+                titleKey: "module.diagnostics.rf",
+                subtitleKey: "module.diagnostics.rf.subtitle"
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("diagnostic.rf.physical_authoritative_hint")
+                        .font(.caption2)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ModuleMetricGrid {
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.rollout",
+                            value: "PHYSICAL RF CORE",
+                            tint: GroundControlPalette.success
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.configuration_origin",
+                            value: viewModel.activeRFConfigurationOrigin.rawValue
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.configuration_version",
+                            value: "v\(viewModel.activeRFConfigurationVersion)"
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.physical_state",
+                            value: viewModel.rfControlAvailability.rawValue.uppercased(),
+                            tint: rfAvailabilityTint(viewModel.rfControlAvailability)
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.command_age",
+                            value: String(format: "%.3f s", viewModel.rfControlCommandAgeSeconds)
+                        )
+                    }
+
+                    if viewModel.rfConfigurationIssues.isEmpty {
+                        Text("diagnostic.rf.configuration_valid")
+                            .font(.caption)
+                            .foregroundStyle(GroundControlPalette.success)
+                    } else {
+                        ForEach(Array(viewModel.rfConfigurationIssues.enumerated()), id: \.offset) { _, issue in
+                            Text("\(issue.code): \(issue.detail)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(issue.severity == .error
+                                    ? GroundControlPalette.danger
+                                    : GroundControlPalette.warning)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+
+            ModuleSection(
+                titleKey: "diagnostic.rf.baseline",
+                subtitleKey: "diagnostic.rf.baseline.subtitle"
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ModuleMetricGrid {
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.environment",
+                            value: viewModel.rfEnvironmentContext.scene.rawValue
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.weather",
+                            value: viewModel.rfEnvironmentContext.weather.rawValue
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.environment_density",
+                            value: String(format: "%.0f %%", viewModel.rfEnvironmentContext.density * 100)
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.seed",
+                            value: "\(viewModel.rfEnvironmentContext.deterministicSeed)"
+                        )
+                    }
+
+                    HStack(spacing: 8) {
+                        OperationalActionButton(
+                            titleKey: "diagnostic.rf.export_baseline",
+                            systemImage: "square.and.arrow.up"
+                        ) {
+                            exportRFCalibrationBaseline()
+                        }
+                        .disabled(viewModel.rfCalibrationBuckets.isEmpty)
+
+                        OperationalActionButton(
+                            titleKey: "diagnostic.rf.reset_baseline",
+                            systemImage: "arrow.counterclockwise",
+                            tint: GroundControlPalette.warning
+                        ) {
+                            viewModel.resetRFCalibrationBaseline()
+                            rfExportStatusKey = nil
+                        }
+                        .disabled(viewModel.rfCalibrationBuckets.isEmpty)
+                    }
+
+                    if let rfExportStatusKey {
+                        Text(LocalizedStringKey(rfExportStatusKey))
+                            .font(.caption2)
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                    }
+
+                    ForEach(viewModel.rfCalibrationBuckets) { bucket in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(
+                                "\(bucket.key.scene.rawValue) · "
+                                    + "\(bucket.key.weather.rawValue) · #\(bucket.key.deterministicSeed)"
+                            )
+                            .font(.caption.monospaced().weight(.bold))
+                            .foregroundStyle(GroundControlPalette.textPrimary)
+                            ModuleMetricGrid {
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.baseline_samples",
+                                    value: "\(bucket.sampleCount)"
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.mean_rssi",
+                                    value: String(format: "%.1f dBm", bucket.meanRSSIDBm)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.rssi_sigma",
+                                    value: String(format: "%.2f dB", bucket.rssiStandardDeviationDB)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.mean_margin",
+                                    value: String(format: "%.1f dB", bucket.meanMarginDB)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.mean_per",
+                                    value: String(format: "%.2f %%", bucket.meanPacketErrorRate * 100)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.nlos_ratio",
+                                    value: String(format: "%.1f %%", bucket.nlosRatio * 100)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.bucket_agreement",
+                                    value: String(format: "%.1f %%", bucket.stateAgreementRatio * 100)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.mean_command_age",
+                                    value: String(format: "%.3f s", bucket.meanCommandAgeSeconds)
+                                )
+                            }
+                        }
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(GroundControlPalette.inset)
+                        )
+                    }
+                }
+            }
+
+            ModuleSection(
+                titleKey: "diagnostic.rf.acceptance",
+                subtitleKey: "diagnostic.rf.acceptance.subtitle"
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    OperationalActionButton(
+                        titleKey: "diagnostic.rf.run_acceptance",
+                        systemImage: "checkmark.seal"
+                    ) {
+                        viewModel.runRFAcceptanceSuite()
+                    }
+                    .disabled(!viewModel.canRunRFAcceptanceSuite)
+
+                    ForEach(viewModel.rfAcceptanceResults) { result in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(result.scenarioID)
+                                    .font(.caption.monospaced().weight(.bold))
+                                Spacer()
+                                Text(result.passed ? "PASS" : "FAIL")
+                                    .font(.caption.monospaced().weight(.bold))
+                                    .foregroundStyle(result.passed
+                                        ? GroundControlPalette.success
+                                        : GroundControlPalette.danger)
+                            }
+                            ModuleMetricGrid {
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.packet_delivery",
+                                    value: String(format: "%.2f %%", result.deliveryRatio * 100)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.max_command_age",
+                                    value: String(format: "%.3f s", result.maximumCommandAgeSeconds)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.min_margin",
+                                    value: String(format: "%.1f dB", result.minimumLinkMarginDB)
+                                )
+                                ModuleMetricCell(
+                                    labelKey: "diagnostic.rf.retry_recovered",
+                                    value: "\(result.retryRecoveredPackets)"
+                                )
+                            }
+                            if !result.failureCodes.isEmpty {
+                                Text(result.failureCodes.joined(separator: ", "))
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(GroundControlPalette.danger)
+                            }
+                        }
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(GroundControlPalette.inset)
+                        )
+                    }
+
+                    if !viewModel.rfPerformanceResults.isEmpty {
+                        Text("diagnostic.rf.performance_gate")
+                            .font(.caption.monospaced().weight(.bold))
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+
+                        ForEach(viewModel.rfPerformanceResults) { result in
+                            HStack(spacing: 8) {
+                                Text("\(result.activeEndpointCount) UAV")
+                                    .font(.caption.monospaced().weight(.bold))
+                                Text("\(result.evaluatedLinkCount) LINKS")
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(GroundControlPalette.textSecondary)
+                                Spacer()
+                                Text(String(
+                                    format: "%.2f / %.2f ms",
+                                    result.elapsedMilliseconds,
+                                    result.budgetMilliseconds
+                                ))
+                                .font(.caption2.monospaced())
+                                Text(result.passed ? "PASS" : "FAIL")
+                                    .font(.caption.monospaced().weight(.bold))
+                                    .foregroundStyle(result.passed
+                                        ? GroundControlPalette.success
+                                        : GroundControlPalette.danger)
+                            }
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(GroundControlPalette.inset)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if !viewModel.rfSharedChannelStatistics.isEmpty {
+                ModuleSection(
+                    titleKey: "diagnostic.rf.shared_channels",
+                    subtitleKey: "diagnostic.rf.shared_channels.subtitle"
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(viewModel.rfSharedChannelStatistics) { channel in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(channel.transmitterDeviceID)
+                                    .font(.caption.monospaced().weight(.bold))
+                                    .foregroundStyle(GroundControlPalette.textPrimary)
+                                ModuleMetricGrid {
+                                    ModuleMetricCell(
+                                        labelKey: "diagnostic.rf.channel_capacity",
+                                        value: String(format: "%.1f kbit/s", channel.capacityBPS / 1_000)
+                                    )
+                                    ModuleMetricCell(
+                                        labelKey: "diagnostic.rf.channel_utilization",
+                                        value: String(format: "%.1f %%", channel.utilizationRatio * 100)
+                                    )
+                                    ModuleMetricCell(
+                                        labelKey: "diagnostic.rf.qos_state",
+                                        value: channel.dynamicControlBoostActive
+                                            ? L10n.s("diagnostic.rf.qos_boost_active")
+                                            : L10n.s("diagnostic.rf.qos_nominal")
+                                    )
+                                    ModuleMetricCell(
+                                        labelKey: "diagnostic.rf.borrowing",
+                                        value: channel.reservationBorrowingEnabled
+                                            ? L10n.s("diagnostic.rf.enabled")
+                                            : L10n.s("diagnostic.rf.disabled")
+                                    )
+                                    ModuleMetricCell(
+                                        labelKey: "diagnostic.rf.backpressure",
+                                        value: channel.backpressuredLinks.isEmpty
+                                            ? "—"
+                                            : channel.backpressuredLinks
+                                                .map(\.rawValue)
+                                                .sorted()
+                                                .joined(separator: ", ")
+                                    )
+                                }
+                                ForEach(LogicalLinkKind.allCases, id: \.self) { kind in
+                                    if let allocated = channel.allocatedBitrateBPS[kind] {
+                                        HStack {
+                                            Text(kind.rawValue.uppercased())
+                                            Spacer()
+                                            VStack(alignment: .trailing, spacing: 1) {
+                                                Text(String(format: "%.1f kbit/s", allocated / 1_000))
+                                                Text(String(
+                                                    format: "RES %.1f · BORROW %.1f",
+                                                    (channel.reservedBitrateBPS[kind] ?? 0) / 1_000,
+                                                    (channel.borrowedBitrateBPS[kind] ?? 0) / 1_000
+                                                ))
+                                                .foregroundStyle(GroundControlPalette.textSecondary)
+                                            }
+                                        }
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(channel.backpressuredLinks.contains(kind)
+                                            ? GroundControlPalette.warning
+                                            : GroundControlPalette.textSecondary)
+                                    }
+                                }
+                            }
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(GroundControlPalette.inset)
+                            )
+                        }
+                    }
+                }
+            }
+
+            ForEach(LogicalLinkKind.allCases, id: \.self) { kind in
+                if let evaluation = viewModel.rfLinkEvaluations[kind] {
+                    RFLinkBudgetCard(
+                        kind: kind,
+                        evaluation: evaluation,
+                        delivery: viewModel.rfPacketDeliveryStates[kind],
+                        videoPresentation: kind == .video
+                            ? viewModel.rfVideoPresentationState
+                            : nil
+                    )
+                }
+            }
+
+            if viewModel.rfLinkEvaluations.isEmpty {
+                ModuleSection(titleKey: "diagnostic.rf.links") {
+                    Text("diagnostic.rf.no_data")
+                        .font(.caption)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+            }
+        }
+    }
+
+    private func rfAvailabilityTint(_ availability: RFControlLinkAvailability) -> Color {
+        switch availability {
+        case .nominal: return GroundControlPalette.success
+        case .warning: return GroundControlPalette.warning
+        case .critical, .lost: return GroundControlPalette.danger
+        }
+    }
+
+    private func exportRFCalibrationBaseline() {
+        guard let data = viewModel.makeRFCalibrationReportData() else {
+            rfExportStatusKey = "diagnostic.rf.export_failed"
+            return
+        }
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "uavsim-rf-shadow-baseline.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+            rfExportStatusKey = "diagnostic.rf.export_complete"
+        } catch {
+            rfExportStatusKey = "diagnostic.rf.export_failed"
         }
     }
 
@@ -436,6 +811,63 @@ private struct BlackBoxReportView: View {
                 )
             }
 
+            if let rf = report.summary.rf {
+                ModuleMetricGrid {
+                    ModuleMetricCell(
+                        labelKey: "blackbox.rf.min_rssi",
+                        value: rf.minimumRSSIDBm.map { String(format: "%.1f dBm", $0) } ?? "n/a"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "blackbox.rf.min_sinr",
+                        value: rf.minimumSINRDB.map { String(format: "%.1f dB", $0) } ?? "n/a"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "blackbox.rf.max_age",
+                        value: String(format: "%.3f s", rf.maximumCommandAgeSeconds)
+                    )
+                    ModuleMetricCell(
+                        labelKey: "blackbox.rf.delivery",
+                        value: rf.averageDeliveryRatio.map {
+                            String(format: "%.2f %%", $0 * 100)
+                        } ?? "n/a"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "blackbox.rf.retries",
+                        value: "\(rf.retryAttempts)"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "blackbox.rf.backpressure",
+                        value: "\(rf.backpressureSampleCount)"
+                    )
+                    if let bucketCount = rf.baselineBucketCount {
+                        ModuleMetricCell(
+                            labelKey: "blackbox.rf.baseline_buckets",
+                            value: "\(bucketCount)"
+                        )
+                    }
+                    if let scenarioCount = rf.acceptanceScenarioCount,
+                       let passedCount = rf.acceptancePassedCount {
+                        ModuleMetricCell(
+                            labelKey: "blackbox.rf.acceptance",
+                            value: "\(passedCount)/\(scenarioCount)"
+                        )
+                    }
+                    if let policyCount = rf.qosPolicyCount {
+                        ModuleMetricCell(
+                            labelKey: "blackbox.rf.qos_policies",
+                            value: "\(policyCount)"
+                        )
+                    }
+                    if let gateCount = rf.performanceGateCount,
+                       let passedCount = rf.performanceGatePassedCount {
+                        ModuleMetricCell(
+                            labelKey: "blackbox.rf.performance_gates",
+                            value: "\(passedCount)/\(gateCount)"
+                        )
+                    }
+                }
+            }
+
             ScrollView(.vertical, showsIndicators: true) {
                 Text(report.textSummary)
                     .font(.system(size: 10, design: .monospaced))
@@ -456,9 +888,152 @@ private struct BlackBoxReportView: View {
     }
 }
 
+private struct RFLinkBudgetCard: View {
+    let kind: LogicalLinkKind
+    let evaluation: RFLinkEvaluation
+    let delivery: RFPacketDeliveryState?
+    let videoPresentation: RFVideoPresentationState?
+
+    private var rf: RFLinkState { evaluation.rf }
+
+    var body: some View {
+        ModuleSection(
+            titleKey: "RF \(kind.rawValue.uppercased())",
+            subtitleKey: "diagnostic.rf.link.subtitle"
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    StatusBadge(
+                        titleKey: evaluation.quality.health.rawValue.uppercased(),
+                        tint: healthTint
+                    )
+                    Spacer()
+                    Text(rf.hasLineOfSight ? "LOS" : "NLOS")
+                        .font(.caption.monospaced().weight(.bold))
+                        .foregroundStyle(rf.hasLineOfSight
+                            ? GroundControlPalette.success
+                            : GroundControlPalette.warning)
+                }
+
+                ModuleMetricGrid {
+                    metric("diagnostic.rf.rssi", rf.receivedPowerDBm, "dBm")
+                    metric("diagnostic.rf.sinr", rf.sinrDB, "dB")
+                    metric("diagnostic.rf.margin", rf.linkMarginDB, "dB")
+                    metric("diagnostic.rf.distance", rf.distanceM, "m", decimals: 1)
+                    metric("diagnostic.rf.fspl", rf.freeSpaceLossDB, "dB")
+                    metric("diagnostic.rf.antenna_gain", rf.txGainDBi + rf.rxGainDBi, "dBi")
+                    metric("diagnostic.rf.material_loss", rf.materialLossDB, "dB")
+                    metric("diagnostic.rf.clutter_loss", rf.clutterLossDB, "dB")
+                    metric("diagnostic.rf.body_loss", rf.bodyShadowLossDB, "dB")
+                    metric("diagnostic.rf.polarization_loss", rf.polarizationLossDB, "dB")
+                    metric("diagnostic.rf.cable_loss", rf.cableLossDB, "dB")
+                    metric("diagnostic.rf.atmospheric_loss", rf.atmosphericLossDB, "dB", decimals: 3)
+                    metric("diagnostic.rf.weather_loss", rf.weatherLossDB, "dB", decimals: 3)
+                    metric("diagnostic.rf.fading", rf.fadingAdjustmentDB, "dB")
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.interference",
+                        value: rf.interferenceDBm.map { String(format: "%.1f dBm", $0) } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.per",
+                        value: String(format: "%.2f %%", evaluation.quality.packetErrorRate * 100)
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.packet_delivery",
+                        value: delivery.map { String(format: "%.2f %%", $0.deliveryRatio * 100) } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.packet_age",
+                        value: delivery.map { String(format: "%.3f s", $0.secondsSinceLastDelivery) } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.mcs",
+                        value: delivery?.selectedMCS.rawValue ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.queue",
+                        value: delivery.map { "\($0.queueDepth) / \($0.queueCapacity)" } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.throughput",
+                        value: delivery.map {
+                            String(format: "%.1f kbit/s", $0.effectiveThroughputBPS / 1_000)
+                        } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.retries",
+                        value: delivery.map { "\($0.retryAttempts)" } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.retry_recovered",
+                        value: delivery.map { "\($0.packetsRecoveredByRetry)" } ?? "—"
+                    )
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.expired",
+                        value: delivery.map { "\($0.packetsExpired)" } ?? "—"
+                    )
+                    if let videoPresentation {
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.video_mode",
+                            value: videoPresentation.mode.rawValue.uppercased()
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.video_state",
+                            value: videoPresentation.isFrozen ? "FROZEN" : "LIVE"
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.video_degradation",
+                            value: String(
+                                format: "%.1f %%",
+                                (videoPresentation.mode == .analog
+                                    ? videoPresentation.analogNoiseIntensity
+                                    : videoPresentation.digitalArtifactIntensity) * 100
+                            )
+                        )
+                        ModuleMetricCell(
+                            labelKey: "diagnostic.rf.video_bitrate",
+                            value: String(
+                                format: "%.1f kbit/s",
+                                videoPresentation.effectiveBitrateBPS / 1_000
+                            )
+                        )
+                    }
+                    ModuleMetricCell(
+                        labelKey: "diagnostic.rf.queue_delay",
+                        value: delivery.map {
+                            String(format: "%.3f s", $0.meanQueueDelaySeconds)
+                        } ?? "—"
+                    )
+                }
+            }
+        }
+    }
+
+    private var healthTint: Color {
+        switch evaluation.quality.health {
+        case .healthy: return GroundControlPalette.success
+        case .degraded: return GroundControlPalette.warning
+        case .critical, .lost: return GroundControlPalette.danger
+        }
+    }
+
+    private func metric(
+        _ labelKey: String,
+        _ value: Double,
+        _ unit: String,
+        decimals: Int = 1
+    ) -> ModuleMetricCell {
+        ModuleMetricCell(
+            labelKey: labelKey,
+            value: String(format: "%.*f %@", decimals, value, unit)
+        )
+    }
+}
+
 private enum DiagnosticsDetailPanel: String, CaseIterable, Identifiable {
     case overview
     case telemetry
+    case radio
     case aerodynamics
     case fleet
     case service
@@ -471,6 +1046,8 @@ private enum DiagnosticsDetailPanel: String, CaseIterable, Identifiable {
             return "module.diagnostics.panel.overview"
         case .telemetry:
             return "module.diagnostics.panel.telemetry"
+        case .radio:
+            return "module.diagnostics.panel.rf"
         case .aerodynamics:
             return "module.diagnostics.panel.aero"
         case .fleet:

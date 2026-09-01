@@ -366,7 +366,8 @@ final class ReplayVideoExportService: ObservableObject {
             activeWaypointIndex: chosen.activeWaypointIndex,
             batteryPercent: lerpOptional(start.batteryPercent, end.batteryPercent, t),
             payloadStatusDescription: chosen.payloadStatusDescription,
-            warningCount: max(start.warningCount, end.warningCount)
+            warningCount: max(start.warningCount, end.warningCount),
+            rfSnapshot: chosen.rfSnapshot
         )
     }
 

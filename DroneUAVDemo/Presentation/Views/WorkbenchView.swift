@@ -52,7 +52,7 @@ struct WorkbenchView: View {
     // MARK: Top rail
 
     private var categories: [WorkbenchCategory] {
-        [.overview, .blueprints, .frame]
+        [.overview, .blueprints, .frame, .radio]
             + WorkbenchBuild.slotKinds.map { .slot($0) }
     }
 
@@ -195,6 +195,11 @@ struct WorkbenchView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .tint(.white.opacity(0.7))
+                } else if viewModel.selectedCategory == .radio {
+                    Button("Сбросить RF preset") { viewModel.resetRFCompatibilityPreset() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.orange)
                 }
             }
             .padding(.horizontal, 18)
@@ -210,6 +215,8 @@ struct WorkbenchView: View {
                     blueprintsShelf
                 case .frame:
                     frameShelf
+                case .radio:
+                    radioShelf
                 case let .slot(kind):
                     componentsShelf(kind)
                 }
@@ -230,6 +237,7 @@ struct WorkbenchView: View {
         case .overview: return "Полная комплектация и быстрые действия"
         case .blueprints: return "Сохранённые удачные сборки"
         case .frame: return "Выберите базовую геометрию аппарата"
+        case .radio: return "Физические CONTROL / VIDEO / TELEMETRY и QoS"
         case let .slot(kind): return "Каждая карточка — отдельная 3D-модель · \(kind.displayName)"
         }
     }
@@ -325,6 +333,51 @@ struct WorkbenchView: View {
             }
             importCard(kind: kind)
         }
+    }
+
+    private var radioShelf: some View {
+        horizontalCards {
+            ForEach(viewModel.build.rfSystem.logicalLinks.all) { link in
+                radioLinkCard(link)
+            }
+        }
+    }
+
+    private func radioLinkCard(_ link: RFLinkConfiguration) -> some View {
+        let selected = viewModel.selectedRFLinkKind == link.kind
+        let transmitter = viewModel.rfDevice(id: link.transmitterDeviceID)
+        let policy = viewModel.activeRFQoS.policy(for: link.kind)
+        let hasError = viewModel.rfConfigurationIssues.contains {
+            $0.severity == .error && ($0.linkKind == nil || $0.linkKind == link.kind)
+        }
+        return Button { viewModel.selectRFLink(link.kind) } label: {
+            partCardShell(selected: selected, hasError: hasError) {
+                VStack(spacing: 7) {
+                    Image(systemName: link.kind == .control
+                        ? "dot.radiowaves.left.and.right"
+                        : link.kind == .video
+                            ? "video.fill"
+                            : "waveform.path.ecg")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(accent)
+                    Text(String(
+                        format: "%.3f GHz · %.0f dBm",
+                        (transmitter?.centerFrequencyHz ?? 0) / 1_000_000_000,
+                        transmitter?.txPowerDBm ?? 0
+                    ))
+                    .font(.system(size: 9, design: .monospaced))
+                }
+            } title: {
+                Text(link.kind.rawValue.uppercased())
+            } detail: {
+                Text(String(
+                    format: "QoS P%d · reserve %.0f kbit/s",
+                    policy.priority,
+                    policy.minimumReservedBitrateBPS / 1_000
+                ))
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func horizontalCards<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -508,6 +561,8 @@ struct WorkbenchView: View {
                     buildInspector
                 case .frame:
                     frameInspector
+                case .radio:
+                    radioInspector
                 case .slot:
                     componentInspector
                 }
@@ -593,6 +648,338 @@ struct WorkbenchView: View {
                 Label("3D-геометрия CADNext встроена в Blueprint", systemImage: "cube.fill")
                     .font(.system(size: 10, weight: .semibold)).foregroundStyle(accent)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var radioInspector: some View {
+        let configuration = viewModel.build.rfSystem
+        inspectorSection("RF-конфигурация", icon: "antenna.radiowaves.left.and.right") {
+            statRow("Источник", configuration.origin.rawValue)
+            statRow("Версия", "RF v\(configuration.version) · QoS v\(viewModel.activeRFQoS.version)")
+            statRow("Устройства", "\(configuration.devices.count)")
+            statRow("Антенны", "\(configuration.antennas.count)")
+
+            Picker("Логический канал", selection: Binding(
+                get: { viewModel.selectedRFLinkKind },
+                set: { viewModel.selectRFLink($0) }
+            )) {
+                ForEach(configuration.logicalLinks.all) { link in
+                    Text(link.kind.rawValue.uppercased()).tag(link.kind)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+
+        if let link = viewModel.selectedRFLink,
+           let transmitter = viewModel.rfDevice(id: link.transmitterDeviceID),
+           let receiver = viewModel.rfDevice(id: link.receiverDeviceID) {
+            let bandwidths = viewModel.rfSupportedBandwidths(for: link.kind)
+            inspectorSection("\(link.kind.rawValue.uppercased()) PHY", icon: "wave.3.right") {
+                rfNumberField(
+                    "Частота",
+                    value: Binding(
+                        get: { transmitter.centerFrequencyHz / 1_000_000 },
+                        set: { viewModel.setRFFrequencyMHz($0, for: link.kind) }
+                    ),
+                    suffix: "MHz",
+                    fractionDigits: 3
+                )
+                if !bandwidths.isEmpty {
+                    Picker("Полоса", selection: Binding(
+                        get: { transmitter.bandwidthHz },
+                        set: { viewModel.setRFBandwidthHz($0, for: link.kind) }
+                    )) {
+                        ForEach(bandwidths, id: \.self) { bandwidth in
+                            Text(String(format: "%.3f MHz", bandwidth / 1_000_000))
+                                .tag(bandwidth)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                } else {
+                    statRow("Полоса", String(format: "%.3f MHz", transmitter.bandwidthHz / 1_000_000))
+                }
+                rfNumberField(
+                    "TX power",
+                    value: Binding(
+                        get: { transmitter.txPowerDBm ?? 0 },
+                        set: { viewModel.setRFTxPowerDBm($0, for: link.kind) }
+                    ),
+                    suffix: "dBm"
+                )
+                rfNumberField(
+                    "Nominal bitrate",
+                    value: Binding(
+                        get: { link.qualityProfile.nominalBitrateBps / 1_000 },
+                        set: { viewModel.setRFNominalBitrateBPS($0 * 1_000, for: link.kind) }
+                    ),
+                    suffix: "kbit/s"
+                )
+                rfNumberField(
+                    "Required SINR",
+                    value: Binding(
+                        get: { link.qualityProfile.requiredSINRDB },
+                        set: { viewModel.setRFRequiredSINRDB($0, for: link.kind) }
+                    ),
+                    suffix: "dB"
+                )
+                if link.kind == .video {
+                    Picker("Тип видеолинка", selection: Binding(
+                        get: { link.videoMode ?? .digital },
+                        set: { viewModel.setRFVideoMode($0) }
+                    )) {
+                        Text("Analog · плавный шум").tag(RFVideoTransmissionMode.analog)
+                        Text("Digital · artifacts/freeze").tag(RFVideoTransmissionMode.digital)
+                    }
+                    .pickerStyle(.menu)
+                }
+                statRow("TX", "\(transmitter.id) · \(transmitter.endpoint.rawValue)")
+                statRow("RX", "\(receiver.id) · \(receiver.endpoint.rawValue)")
+            }
+
+            rfAntennaEditor(
+                title: "TX-антенна",
+                antennaID: link.transmitterAntennaID,
+                kind: link.kind,
+                transmitter: true
+            )
+            rfAntennaEditor(
+                title: "RX-антенна",
+                antennaID: link.receiverAntennaID,
+                kind: link.kind,
+                transmitter: false
+            )
+
+            if let groundDevice = viewModel.groundRFDevice(for: link.kind) {
+                let placement = configuration.endpointPlacement(for: groundDevice.id)
+                inspectorSection("Наземная станция", icon: "mappin.and.ellipse") {
+                    Text("Offset задаётся относительно home/dock и напрямую участвует в RF geometry path.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                    rfNumberField("X", value: Binding(
+                        get: { placement.offsetFromHomeM.x },
+                        set: { viewModel.setRFGroundPlacement(x: $0, for: link.kind) }
+                    ), suffix: "m")
+                    rfNumberField("Высота", value: Binding(
+                        get: { placement.offsetFromHomeM.y },
+                        set: { viewModel.setRFGroundPlacement(y: $0, for: link.kind) }
+                    ), suffix: "m")
+                    rfNumberField("Z", value: Binding(
+                        get: { placement.offsetFromHomeM.z },
+                        set: { viewModel.setRFGroundPlacement(z: $0, for: link.kind) }
+                    ), suffix: "m")
+                    rfNumberField("Yaw", value: Binding(
+                        get: { placement.orientation.yawDegrees },
+                        set: { viewModel.setRFGroundPlacement(yawDegrees: $0, for: link.kind) }
+                    ), suffix: "°")
+                }
+            }
+
+            let qos = viewModel.activeRFQoS
+            let policy = qos.policy(for: link.kind)
+            let sharedTransmitterLinks = configuration.logicalLinks.all.filter {
+                $0.transmitterDeviceID == link.transmitterDeviceID
+            }
+            let reservedBitrate = sharedTransmitterLinks.reduce(0.0) {
+                $0 + qos.policy(for: $1.kind).minimumReservedBitrateBPS
+            }
+            let channelCapacity = sharedTransmitterLinks
+                .map(\.qualityProfile.nominalBitrateBps)
+                .max() ?? 0
+            inspectorSection("QoS", icon: "point.3.connected.trianglepath.dotted") {
+                Toggle("Динамический CONTROL reserve", isOn: Binding(
+                    get: { qos.dynamicReservationEnabled },
+                    set: { viewModel.setRFQoSDynamicReservation($0) }
+                ))
+                Toggle("Заимствование свободных резервов", isOn: Binding(
+                    get: { qos.reservationBorrowingEnabled },
+                    set: { viewModel.setRFQoSBorrowing($0) }
+                ))
+                Stepper("Приоритет: \(policy.priority)", value: Binding(
+                    get: { policy.priority },
+                    set: { viewModel.setRFQoSPriority($0, for: link.kind) }
+                ), in: 0...20)
+                rfNumberField("Минимальный reserve", value: Binding(
+                    get: { policy.minimumReservedBitrateBPS / 1_000 },
+                    set: { viewModel.setRFQoSReserveBPS($0 * 1_000, for: link.kind) }
+                ), suffix: "kbit/s")
+                HStack {
+                    Text("Σ reserve / channel")
+                    Spacer()
+                    Text(String(
+                        format: "%.0f / %.0f kbit/s",
+                        reservedBitrate / 1_000,
+                        channelCapacity / 1_000
+                    ))
+                    .foregroundStyle(reservedBitrate <= channelCapacity
+                        ? GroundControlPalette.success
+                        : GroundControlPalette.danger)
+                }
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: "Максимальная доля: %.0f %%", policy.maximumShareFraction * 100))
+                        .font(.system(size: 10, weight: .semibold))
+                    Slider(value: Binding(
+                        get: { policy.maximumShareFraction },
+                        set: { viewModel.setRFQoSMaximumShare($0, for: link.kind) }
+                    ), in: 0...1, step: 0.05)
+                }
+                if link.kind == .control {
+                    rfNumberField("Boost age", value: Binding(
+                        get: { qos.controlBoostCommandAgeSeconds },
+                        set: { viewModel.setRFQoSControlBoostAge($0) }
+                    ), suffix: "s", fractionDigits: 3)
+                    rfNumberField("Boost multiplier", value: Binding(
+                        get: { qos.controlBoostMultiplier },
+                        set: { viewModel.setRFQoSControlBoostMultiplier($0) }
+                    ), suffix: "×", fractionDigits: 1)
+                }
+            }
+        }
+
+        inspectorSection("RF preflight", icon: "checkmark.shield") {
+            if viewModel.rfConfigurationIssues.isEmpty {
+                issueRow("RF-конфигурация валидна", icon: "checkmark.seal.fill", color: .green)
+            } else {
+                ForEach(Array(viewModel.rfConfigurationIssues.enumerated()), id: \.offset) { _, issue in
+                    issueRow(
+                        "\(issue.code): \(issue.detail)",
+                        icon: issue.severity == .error
+                            ? "xmark.octagon.fill"
+                            : "exclamationmark.triangle.fill",
+                        color: issue.severity == .error ? .red : .orange
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rfAntennaEditor(
+        title: String,
+        antennaID: String,
+        kind: LogicalLinkKind,
+        transmitter: Bool
+    ) -> some View {
+        if let antenna = viewModel.rfAntenna(id: antennaID) {
+            inspectorSection(title, icon: "antenna.radiowaves.left.and.right") {
+                statRow("ID", antenna.id)
+                rfNumberField("Peak gain", value: Binding(
+                    get: { antenna.profile.peakGainDBi },
+                    set: {
+                        viewModel.setRFAntennaGainDBi(
+                            $0,
+                            for: kind,
+                            transmitter: transmitter
+                        )
+                    }
+                ), suffix: "dBi")
+                Picker("Поляризация", selection: Binding(
+                    get: { antenna.profile.polarization },
+                    set: {
+                        viewModel.setRFAntennaPolarization(
+                            $0,
+                            for: kind,
+                            transmitter: transmitter
+                        )
+                    }
+                )) {
+                    ForEach([
+                        RFPolarization.linearVertical,
+                        .linearHorizontal,
+                        .lhcp,
+                        .rhcp,
+                        .custom,
+                    ], id: \.self) { polarization in
+                        Text(polarization.rawValue).tag(polarization)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text("Фазовый центр / mount transform")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                rfNumberField("Mount X", value: Binding(
+                    get: { antenna.mountPositionM.x },
+                    set: {
+                        viewModel.setRFAntennaTransform(
+                            x: $0, for: kind, transmitter: transmitter
+                        )
+                    }
+                ), suffix: "m", fractionDigits: 3)
+                rfNumberField("Mount Y", value: Binding(
+                    get: { antenna.mountPositionM.y },
+                    set: {
+                        viewModel.setRFAntennaTransform(
+                            y: $0, for: kind, transmitter: transmitter
+                        )
+                    }
+                ), suffix: "m", fractionDigits: 3)
+                rfNumberField("Mount Z", value: Binding(
+                    get: { antenna.mountPositionM.z },
+                    set: {
+                        viewModel.setRFAntennaTransform(
+                            z: $0, for: kind, transmitter: transmitter
+                        )
+                    }
+                ), suffix: "m", fractionDigits: 3)
+                rfNumberField("Yaw", value: Binding(
+                    get: { antenna.orientation.yawDegrees },
+                    set: {
+                        viewModel.setRFAntennaTransform(
+                            yawDegrees: $0, for: kind, transmitter: transmitter
+                        )
+                    }
+                ), suffix: "°")
+                rfNumberField("Pitch", value: Binding(
+                    get: { antenna.orientation.pitchDegrees },
+                    set: {
+                        viewModel.setRFAntennaTransform(
+                            pitchDegrees: $0, for: kind, transmitter: transmitter
+                        )
+                    }
+                ), suffix: "°")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: "Повреждение: %.0f %%", antenna.damageFraction * 100))
+                        .font(.system(size: 10, weight: .semibold))
+                    Slider(value: Binding(
+                        get: { antenna.damageFraction },
+                        set: {
+                            viewModel.setRFAntennaDamage(
+                                $0,
+                                for: kind,
+                                transmitter: transmitter
+                            )
+                        }
+                    ), in: 0...1, step: 0.05)
+                }
+            }
+        }
+    }
+
+    private func rfNumberField(
+        _ title: String,
+        value: Binding<Double>,
+        suffix: String,
+        fractionDigits: Int = 2
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title)
+                .font(.system(size: 10))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            Spacer(minLength: 6)
+            TextField(
+                title,
+                value: value,
+                format: .number.precision(.fractionLength(0...fractionDigits))
+            )
+            .multilineTextAlignment(.trailing)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 104)
+            Text(suffix)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .frame(width: 42, alignment: .leading)
         }
     }
 

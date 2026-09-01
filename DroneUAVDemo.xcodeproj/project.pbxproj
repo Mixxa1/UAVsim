@@ -7,6 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A9A000000000000000000101 /* FPVOSDModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000002 /* FPVOSDModels.swift */; };
+		A9A000000000000000000102 /* MCMFontLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000003 /* MCMFontLoader.swift */; };
+		A9A000000000000000000103 /* FPVOSDRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000004 /* FPVOSDRenderer.swift */; };
+		A9A000000000000000000104 /* betaflight.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000005 /* betaflight.mcm */; };
+		A9A000000000000000000105 /* clarity.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000006 /* clarity.mcm */; };
+		A9F000000000000000000101 /* RFModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000002 /* RFModels.swift */; };
+		A9F000000000000000000102 /* RFPropagationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000003 /* RFPropagationEngine.swift */; };
+		A9F000000000000000000103 /* RFSystemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000004 /* RFSystemManager.swift */; };
+		A9F000000000000000000104 /* RFCompatibilityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000005 /* RFCompatibilityPreset.swift */; };
+		A9F000000000000000000105 /* RFSpatialModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000006 /* RFSpatialModel.swift */; };
+		A9F000000000000000000106 /* RFPacketRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000007 /* RFPacketRuntime.swift */; };
+		A9F000000000000000000107 /* RFEnvironmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000008 /* RFEnvironmentModel.swift */; };
+		A9F000000000000000000108 /* RFAcceptanceRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000009 /* RFAcceptanceRuntime.swift */; };
+		A9F000000000000000000109 /* RFSharedChannelScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000010 /* RFSharedChannelScheduler.swift */; };
 		100000000000000000000200 /* DroneUAVDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000100 /* DroneUAVDemoApp.swift */; };
 		100000000000000000000201 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000101 /* ContentView.swift */; };
 		100000000000000000000202 /* ControlPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000102 /* ControlPanelView.swift */; };
@@ -486,6 +500,20 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A9A000000000000000000002 /* FPVOSDModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDModels.swift; sourceTree = "<group>"; };
+		A9A000000000000000000003 /* MCMFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCMFontLoader.swift; sourceTree = "<group>"; };
+		A9A000000000000000000004 /* FPVOSDRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDRenderer.swift; sourceTree = "<group>"; };
+		A9A000000000000000000005 /* betaflight.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = betaflight.mcm; sourceTree = "<group>"; };
+		A9A000000000000000000006 /* clarity.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = clarity.mcm; sourceTree = "<group>"; };
+		A9F000000000000000000002 /* RFModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFModels.swift; sourceTree = "<group>"; };
+		A9F000000000000000000003 /* RFPropagationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFPropagationEngine.swift; sourceTree = "<group>"; };
+		A9F000000000000000000004 /* RFSystemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSystemManager.swift; sourceTree = "<group>"; };
+		A9F000000000000000000005 /* RFCompatibilityPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCompatibilityPreset.swift; sourceTree = "<group>"; };
+		A9F000000000000000000006 /* RFSpatialModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSpatialModel.swift; sourceTree = "<group>"; };
+		A9F000000000000000000007 /* RFPacketRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFPacketRuntime.swift; sourceTree = "<group>"; };
+		A9F000000000000000000008 /* RFEnvironmentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFEnvironmentModel.swift; sourceTree = "<group>"; };
+		A9F000000000000000000009 /* RFAcceptanceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFAcceptanceRuntime.swift; sourceTree = "<group>"; };
+		A9F000000000000000000010 /* RFSharedChannelScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSharedChannelScheduler.swift; sourceTree = "<group>"; };
 		100000000000000000000005 /* DroneUAVDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DroneUAVDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000100 /* DroneUAVDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneUAVDemoApp.swift; sourceTree = "<group>"; };
 		100000000000000000000101 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -1015,6 +1043,8 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				A9A000000000000000000001 /* FPV */,
+				A9F000000000000000000001 /* RF */,
 				40157DEA5897B2156CC14FC3 /* LidarFoliageIndex.swift */,
 				98E36D74AF6EB000928EFE17 /* LidarSurfaceClass.swift */,
 				FB5C6688094BBBF71539EC91 /* PayloadLidarController.swift */,
@@ -1166,6 +1196,32 @@
 				1000000000000000000002FC /* ReplayExportBitratePreset.swift */,
 			);
 			path = Domain;
+			sourceTree = "<group>";
+		};
+		A9A000000000000000000001 /* FPV */ = {
+			isa = PBXGroup;
+			children = (
+				A9A000000000000000000002 /* FPVOSDModels.swift */,
+				A9A000000000000000000003 /* MCMFontLoader.swift */,
+				A9A000000000000000000004 /* FPVOSDRenderer.swift */,
+			);
+			path = FPV;
+			sourceTree = "<group>";
+		};
+		A9F000000000000000000001 /* RF */ = {
+			isa = PBXGroup;
+			children = (
+				A9F000000000000000000002 /* RFModels.swift */,
+				A9F000000000000000000003 /* RFPropagationEngine.swift */,
+				A9F000000000000000000004 /* RFSystemManager.swift */,
+				A9F000000000000000000005 /* RFCompatibilityPreset.swift */,
+				A9F000000000000000000006 /* RFSpatialModel.swift */,
+				A9F000000000000000000007 /* RFPacketRuntime.swift */,
+				A9F000000000000000000008 /* RFEnvironmentModel.swift */,
+				A9F000000000000000000009 /* RFAcceptanceRuntime.swift */,
+				A9F000000000000000000010 /* RFSharedChannelScheduler.swift */,
+			);
+			path = RF;
 			sourceTree = "<group>";
 		};
 		100000000000000000000012 /* Simulation */ = {
@@ -1440,6 +1496,7 @@
 		100000000000000000000125 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				A9A000000000000000000007 /* FPVFonts */,
 				10000000000000000000012B /* Assets.xcassets */,
 				100000000000000000000126 /* Localizable.strings */,
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
@@ -1502,6 +1559,15 @@
 				100000000000000000000366 /* Info.plist */,
 			);
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		A9A000000000000000000007 /* FPVFonts */ = {
+			isa = PBXGroup;
+			children = (
+				A9A000000000000000000005 /* betaflight.mcm */,
+				A9A000000000000000000006 /* clarity.mcm */,
+			);
+			path = FPVFonts;
 			sourceTree = "<group>";
 		};
 		10000000000000000000035E /* CADBridge */ = {
@@ -1699,6 +1765,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A9A000000000000000000104 /* betaflight.mcm in Resources */,
+				A9A000000000000000000105 /* clarity.mcm in Resources */,
 				100000000000000000000225 /* Localizable.strings in Resources */,
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
@@ -1768,6 +1836,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A9A000000000000000000101 /* FPVOSDModels.swift in Sources */,
+				A9A000000000000000000102 /* MCMFontLoader.swift in Sources */,
+				A9A000000000000000000103 /* FPVOSDRenderer.swift in Sources */,
+				A9F000000000000000000101 /* RFModels.swift in Sources */,
+				A9F000000000000000000102 /* RFPropagationEngine.swift in Sources */,
+				A9F000000000000000000103 /* RFSystemManager.swift in Sources */,
+				A9F000000000000000000104 /* RFCompatibilityPreset.swift in Sources */,
+				A9F000000000000000000105 /* RFSpatialModel.swift in Sources */,
+				A9F000000000000000000106 /* RFPacketRuntime.swift in Sources */,
+				A9F000000000000000000107 /* RFEnvironmentModel.swift in Sources */,
+				A9F000000000000000000108 /* RFAcceptanceRuntime.swift in Sources */,
+				A9F000000000000000000109 /* RFSharedChannelScheduler.swift in Sources */,
 				CF5A7FA2F1F316ECBD696373 /* LidarRawStreamWriter.swift in Sources */,
 				2EC6C01263C7D050CDD47CA1 /* LidarFoliageIndex.swift in Sources */,
 				E4DA452F20BA177F7709D69F /* LidarSurfaceClass.swift in Sources */,

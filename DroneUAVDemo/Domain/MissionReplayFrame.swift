@@ -6,6 +6,26 @@ struct MissionAttitudeSnapshot: Codable, Equatable {
     let yawRadians: Double
 }
 
+/// Compact RF state sampled with replay kinematics. Raw enum values and optional measurements
+/// keep old recordings decodable and avoid coupling stored sessions to runtime-only RF structs.
+struct MissionReplayRFSnapshot: Codable, Equatable {
+    let rolloutModeRawValue: String
+    let controlAvailabilityRawValue: String
+    let rssiDBm: Double?
+    let sinrDB: Double?
+    let linkMarginDB: Double?
+    let packetErrorRate: Double?
+    let commandAgeSeconds: Double
+    let deliveryRatio: Double?
+    let mcsRawValue: String?
+    let queueDepth: Int?
+    let throughputBPS: Double?
+    let retryAttempts: UInt64?
+    let expiredPackets: UInt64?
+    let sharedChannelUtilization: Double?
+    let backpressuredLinkRawValues: [String]
+}
+
 struct MissionReplayFrame: Identifiable, Codable, Equatable {
     let id: UUID
     let timestamp: TimeInterval
@@ -35,6 +55,7 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
     let skinTemperatureK: Double?
     let envelopeLimitKey: String?
     let envelopeWorstFraction: Double?
+    let rfSnapshot: MissionReplayRFSnapshot?
 
     init(
         id: UUID,
@@ -53,7 +74,8 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
         loadFactor: Double? = nil,
         skinTemperatureK: Double? = nil,
         envelopeLimitKey: String? = nil,
-        envelopeWorstFraction: Double? = nil
+        envelopeWorstFraction: Double? = nil,
+        rfSnapshot: MissionReplayRFSnapshot? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -72,5 +94,6 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
         self.skinTemperatureK = skinTemperatureK
         self.envelopeLimitKey = envelopeLimitKey
         self.envelopeWorstFraction = envelopeWorstFraction
+        self.rfSnapshot = rfSnapshot
     }
 }

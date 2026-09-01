@@ -18,18 +18,21 @@ struct SceneViewportView: View {
         let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && rangefinderOpticsState.isAvailable
         let hoseOpticsState = viewModel.hoseOpticsState
         let hoseOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && hoseOpticsState.isAvailable
-        // Aircraft-camera "digital viewfinder" OSD replaces the default instrument HUD + PFD compass
-        // while the pilot is looking through the FPV camera, so the feed reads like a camera feed.
+        // FPV replaces the default instrument HUD + PFD compass. Analog glyphs are injected into
+        // SceneKit below; the existing SwiftUI viewfinder remains only for a digital video link.
         let fpvHUDActive = viewModel.cameraConfiguration.mode == .fpv && !viewModel.isSpectatorMode && !payloadOpticsActive
+        let analogFPVOSDActive = fpvHUDActive && viewModel.activeFPVVideoMode == .analog
         let capsuleState = viewModel.capsuleState
         let capsuleOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && !hoseOpticsState.isAvailable && capsuleState.isAvailable
-        // Visual counterpart to the radio link-quality HUD — fiber isn't a radio concern at all
-        // (bypasses `updateSignalLossSequence` entirely), so this only ever applies to `.radio`.
-        let radioStaticIntensity: Double = {
-            guard viewModel.activeControlLinkType == .radio else { return 0.0 }
-            let status = viewModel.missionStatusSnapshot.operationalStatus
-            guard status.isInWarningLinkZone else { return 0.0 }
-            return Double(min(max(1.0 - status.currentLinkQuality, 0.0), 1.0))
+        // FPV degradation follows the independent VIDEO link, never the CONTROL link. Analog
+        // produces continuous snow/sync noise; digital produces macroblocks and stale-frame freeze.
+        let videoDegradation: (state: RFVideoPresentationState, intensity: Double)? = {
+            guard fpvHUDActive, let state = viewModel.rfVideoPresentationState else { return nil }
+            let intensity = state.mode == .analog
+                ? state.analogNoiseIntensity
+                : state.digitalArtifactIntensity
+            guard intensity > 0.02 || state.isFrozen else { return nil }
+            return (state, intensity)
         }()
 
         ZStack(alignment: .topLeading) {
@@ -43,6 +46,8 @@ struct SceneViewportView: View {
                 wantsWeatherDepthOfField: viewModel.wantsWeatherDepthOfField,
                 isHandLaunchPOV: viewModel.isHandLaunchPOVActive,
                 usesBuilderMouseLook: viewModel.isRaceBuilderActive,
+                analogFPVOSDState: analogFPVOSDActive ? viewModel.fpvOSDState : nil,
+                fpvFontPreset: viewModel.fpvFontPreset,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },
@@ -53,8 +58,12 @@ struct SceneViewportView: View {
             .blur(radius: payloadOpticsActive ? min(max(payloadOpticsState.blurRadius, 0.0), 8.0) : 0.0)
             .ignoresSafeArea()
 
-            if radioStaticIntensity > 0.02 {
-                RadioLinkStaticOverlayView(intensity: radioStaticIntensity)
+            if let videoDegradation {
+                RadioLinkStaticOverlayView(
+                    intensity: videoDegradation.intensity,
+                    mode: videoDegradation.state.mode,
+                    isFrozen: videoDegradation.state.isFrozen
+                )
             }
 
             if payloadOpticsActive, payloadOpticsState.isAvailable {
@@ -185,7 +194,7 @@ struct SceneViewportView: View {
 
             if viewModel.isSpectatorMode || payloadOpticsActive {
                 EmptyView()
-            } else if fpvHUDActive {
+            } else if fpvHUDActive, !analogFPVOSDActive {
                 FPVViewportOverlayView(
                     telemetry: viewModel.telemetry,
                     flightControlMode: viewModel.flightControlMode,
@@ -897,57 +906,117 @@ private struct StaticNoiseTickGenerator: RandomNumberGenerator {
     }
 }
 
-/// Visual counterpart to the radio link-quality HUD text — a lightweight, SwiftUI-only static/
-/// interference effect over the camera feed. Deliberately not a second `SCNTechnique`:
+/// Lightweight analog-snow / digital-macroblock presentation driven by the independent VIDEO
+/// link. Deliberately not a second `SCNTechnique`:
 /// `SCNView.technique` only holds one technique at a time and that slot is already claimed by
 /// `WeatherDepthOfFieldTechnique`, so layering a real shader-based effect on top would require
-/// merging passes into that technique rather than adding an independent one. `intensity` is
-/// `(1 - currentLinkQuality)`, already thresholded by the caller to only appear at/above the
-/// radio link's warning zone.
+/// merging passes into that technique rather than adding an independent one.
 private struct RadioLinkStaticOverlayView: View {
     let intensity: Double
+    let mode: RFVideoTransmissionMode
+    let isFrozen: Bool
 
     var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                guard intensity > 0.01 else { return }
-                let time = timeline.date.timeIntervalSinceReferenceDate
-
-                let flicker = 0.05 + 0.03 * sin(time * 37.0)
-                context.fill(
-                    Path(CGRect(origin: .zero, size: size)),
-                    with: .color(Color.white.opacity(intensity * flicker))
-                )
-
-                // Re-seeded ~12 times a second so the snow reads as flickering static, not a
-                // continuously-drifting pattern.
-                var rng = StaticNoiseTickGenerator(tick: Int(time * 12.0))
-                let lineCount = Int(6.0 + intensity * 26.0)
-                for _ in 0..<lineCount {
-                    let y = CGFloat(Double.random(in: 0...Double(size.height), using: &rng))
-                    let lineWidth = CGFloat(Double.random(in: Double(size.width) * 0.05...Double(size.width) * 0.4, using: &rng))
-                    let x = CGFloat(Double.random(in: 0...Double(size.width - lineWidth), using: &rng))
-                    let alpha = Double.random(in: 0.06...0.22, using: &rng) * intensity
-                    context.fill(
-                        Path(CGRect(x: x, y: y, width: lineWidth, height: 1.4)),
-                        with: .color(Color.white.opacity(alpha))
-                    )
+        ZStack {
+            TimelineView(.animation) { timeline in
+                Canvas { context, size in
+                    guard intensity > 0.01 else { return }
+                    let time = timeline.date.timeIntervalSinceReferenceDate
+                    var rng = StaticNoiseTickGenerator(tick: Int(time * 12.0))
+                    if mode == .analog {
+                        drawAnalogNoise(
+                            context: &context,
+                            size: size,
+                            time: time,
+                            rng: &rng
+                        )
+                    } else {
+                        drawDigitalArtifacts(context: &context, size: size, rng: &rng)
+                    }
                 }
+            }
 
-                // Occasional full-width dropout band, only once the link is genuinely bad — reads
-                // as a signal glitch rather than just grain.
-                if intensity > 0.55, Double.random(in: 0...1, using: &rng) < 0.12 {
-                    let bandHeight = CGFloat(Double.random(in: 6...22, using: &rng))
-                    let y = CGFloat(Double.random(in: 0...Double(size.height) - bandHeight, using: &rng))
-                    context.fill(
-                        Path(CGRect(x: 0, y: y, width: size.width, height: bandHeight)),
-                        with: .color(Color.black.opacity(0.35))
-                    )
-                }
+            if isFrozen {
+                Color.black.opacity(0.42)
+                Label("VIDEO LINK FROZEN", systemImage: "snowflake")
+                    .font(.caption.bold().monospaced())
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.72), in: Capsule())
             }
         }
         .allowsHitTesting(false)
         .ignoresSafeArea()
+    }
+
+    private func drawAnalogNoise(
+        context: inout GraphicsContext,
+        size: CGSize,
+        time: TimeInterval,
+        rng: inout StaticNoiseTickGenerator
+    ) {
+        let flicker = 0.05 + 0.03 * sin(time * 37.0)
+        context.fill(
+            Path(CGRect(origin: .zero, size: size)),
+            with: .color(Color.white.opacity(intensity * flicker))
+        )
+
+        // Re-seeded ~12 times a second so analog snow flickers instead of drifting.
+        let lineCount = Int(6.0 + intensity * 26.0)
+        for _ in 0..<lineCount {
+            let y = CGFloat(Double.random(in: 0...Double(size.height), using: &rng))
+            let lineWidth = CGFloat(Double.random(
+                in: Double(size.width) * 0.05...Double(size.width) * 0.4,
+                using: &rng
+            ))
+            let maximumX = max(0, Double(size.width - lineWidth))
+            let x = CGFloat(Double.random(in: 0...maximumX, using: &rng))
+            let alpha = Double.random(in: 0.06...0.22, using: &rng) * intensity
+            context.fill(
+                Path(CGRect(x: x, y: y, width: lineWidth, height: 1.4)),
+                with: .color(Color.white.opacity(alpha))
+            )
+        }
+
+        if intensity > 0.55, Double.random(in: 0...1, using: &rng) < 0.12 {
+            let bandHeight = CGFloat(Double.random(in: 6...22, using: &rng))
+            let maximumY = max(0, Double(size.height - bandHeight))
+            let y = CGFloat(Double.random(in: 0...maximumY, using: &rng))
+            context.fill(
+                Path(CGRect(x: 0, y: y, width: size.width, height: bandHeight)),
+                with: .color(Color.black.opacity(0.35))
+            )
+        }
+    }
+
+    private func drawDigitalArtifacts(
+        context: inout GraphicsContext,
+        size: CGSize,
+        rng: inout StaticNoiseTickGenerator
+    ) {
+        let blockCount = Int(3.0 + intensity * 32.0)
+        for _ in 0..<blockCount {
+            let blockWidth = CGFloat(Double.random(in: 12...72, using: &rng))
+            let blockHeight = CGFloat(Double.random(in: 8...42, using: &rng))
+            let maximumX = max(0, Double(size.width - blockWidth))
+            let maximumY = max(0, Double(size.height - blockHeight))
+            let x = CGFloat(Double.random(in: 0...maximumX, using: &rng))
+            let y = CGFloat(Double.random(in: 0...maximumY, using: &rng))
+            let tint = Double.random(in: 0...1, using: &rng)
+            let color: Color
+            if tint < 0.33 {
+                color = .cyan
+            } else if tint < 0.66 {
+                color = .pink
+            } else {
+                color = .black
+            }
+            context.fill(
+                Path(CGRect(x: x, y: y, width: blockWidth, height: blockHeight)),
+                with: .color(color.opacity(0.08 + intensity * 0.22))
+            )
+        }
     }
 }
 

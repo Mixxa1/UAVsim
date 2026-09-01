@@ -571,6 +571,22 @@ struct CameraModuleView: View {
     private var fpvAdvancedBlock: some View {
         ModuleSection(titleKey: "module.camera.fpv_stack") {
             VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("camera.fpv.osd_font", selection: Binding(
+                        get: { viewModel.fpvFontPreset },
+                        set: { viewModel.setFPVFontPreset($0) }
+                    )) {
+                        ForEach(FPVFontPreset.allCases) { preset in
+                            Text(LocalizedStringKey(preset.titleKey)).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("camera.fpv.osd_font.hint")
+                        .font(.caption2)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+
                 ModuleSliderRow(
                     titleKey: "camera.fpv_yaw_limit",
                     value: Binding(

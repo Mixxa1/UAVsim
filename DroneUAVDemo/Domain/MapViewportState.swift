@@ -4,8 +4,8 @@ import simd
 /// Distance to the edge of the *authored/detailed* map — a purely visual-detail concept. Crossing
 /// `.outside` is a benign notice (the procedural outer belt continues the world); it does not
 /// mean radio signal is lost and does not mean a mission geofence has been breached — those are
-/// separate, independent concepts (see the radio link-quality zones on `MissionOperationalStatus`
-/// and `MissionGeofenceConfiguration`).
+/// separate, independent concepts. Radio state comes from physical RF delivery/command age, while
+/// mission limits come from `MissionGeofenceConfiguration`.
 enum WorldDetailBoundaryState: String, Equatable {
     case nominal
     case warning
@@ -52,6 +52,7 @@ struct MapViewportState: Equatable {
     var estimatedSafeReturnRangeM: Float
     var canReachHomeSafely: Bool
     var currentLinkQuality: Float
+    var controlLinkAvailability: RFControlLinkAvailability
     var currentMapSuitability: MapScaleSuitability
     var recommendedMapScaleMin: MapScale
     var recommendedMapScaleMax: MapScale
@@ -82,6 +83,7 @@ struct MapViewportState: Equatable {
         estimatedSafeReturnRangeM: 0.0,
         canReachHomeSafely: false,
         currentLinkQuality: 1.0,
+        controlLinkAvailability: .nominal,
         currentMapSuitability: .acceptable,
         recommendedMapScaleMin: .x16,
         recommendedMapScaleMax: .x32,
@@ -112,15 +114,15 @@ struct MapViewportState: Equatable {
     }
 
     var isInWarningLinkZone: Bool {
-        distanceToHome > linkQualityRadius + 0.05
+        controlLinkAvailability != .nominal
     }
 
     var isInCriticalLinkZone: Bool {
-        distanceToHome > degradedLinkRadius + 0.05
+        controlLinkAvailability == .critical || controlLinkAvailability == .lost
     }
 
     var isLinkLost: Bool {
-        distanceToHome > lostLinkRadius + 0.05 || currentLinkQuality <= 0.01
+        controlLinkAvailability == .lost
     }
 
     var distanceToHome: Float {

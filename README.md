@@ -56,6 +56,14 @@ DroneUAVDemo сам по себе покрывает физику полёта �
 - **Дебрифинг миссии**: итоговый вердикт, метрики выполнения (дистанция/время/высота/скорость), сводка по энергии (батарея на старте/финише/расход, срабатывания unsafe-battery), сводка по полезной нагрузке, журнал предупреждений/критических событий (`MissionDebriefService.swift`, `MissionDebriefView.swift`, `MissionFailureView.swift`).
 - **Хранение**: файловый архив записей с настраиваемой политикой хранения (`MissionReplayStorageService.swift`, `MissionReplaySettingsStore.swift`).
 
+### Физическая RF-система
+
+- **Авторитетная физика линии**: обычная радиосвязь рассчитывается через FSPL, antenna gain/pattern/orientation, polarization, cable/body/material/vegetation/diffraction/clutter/weather losses, RSSI, SNR, SINR и link margin — без скрытого порога дальности.
+- **Независимые каналы**: CONTROL, VIDEO, TELEMETRY и PAYLOAD DATA имеют собственные PHY/quality/packet states; общий передатчик распределяет bitrate через versioned QoS с reserve, borrowing и динамическим CONTROL boost.
+- **Различное видео**: analog VIDEO плавно покрывается шумом без frame freeze; digital VIDEO получает macroblocks и замораживание кадра по PER и возрасту доставки.
+- **Workbench и placement**: RF-редактор настраивает устройства, полосу, мощность, антенны с физическими transform, наземную станцию относительно home/dock и QoS; preflight блокирует некорректные сборки.
+- **Приёмка и воспроизводимость**: Diagnostics запускает детерминированные field/forest/urban сценарии и performance gates на 10/50/100 БПЛА; RF snapshots, calibration, QoS и результаты попадают в replay и mission report. Подробности — [`Domain/RF/README.md`](DroneUAVDemo/Domain/RF/README.md).
+
 ### Полезная нагрузка и интеграция с CAD
 
 - **Типы полезной нагрузки**: грузовой контейнер, камера на гимбале, тепловизор, LiDAR, спасательный набор, датчик, радиорелей и кастомный тип (`PayloadType.swift`).
@@ -159,6 +167,10 @@ Qt6 Widgets desktop-приложение: дерево проекта (Bodies/Sk
 ---
 
 ## Сборка
+
+### Analog FPV OSD
+
+FPV-сборки с аналоговой камерой используют живую character-grid OSD, а не набор картинок состояний. `MCMFontLoader` декодирует все 256 символов MAX7456 из `betaflight.mcm` или `clarity.mcm` в atlas 16×16 glyph'ов; `FPVOSDRenderer` строит сетку 30×16 как `SCNView.overlaySKScene` с nearest-фильтрацией. Artificial horizon повторяет Betaflight character-grid алгоритм: девять MCM bar-glyph'ов реагируют на roll/pitch, а трёхсимвольная aircraft reference остаётся закреплена в центре. Значения RSSI/LQ/SNR приходят из физического CONTROL link, проходят через `FPVOSDState` (`live` / `stale` / `unavailable`) и только затем попадают в HUD. Analog noise VIDEO link накладывается после SceneKit+SpriteKit feed, поэтому помеха одновременно разрушает камеру и OSD. FPV-камера включается клавишей `4`, preset шрифта выбирается в расширенных настройках камеры.
 
 ### DroneUAVDemo
 

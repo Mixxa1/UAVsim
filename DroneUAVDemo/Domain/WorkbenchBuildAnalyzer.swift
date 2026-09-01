@@ -162,6 +162,14 @@ enum WorkbenchBuildAnalyzer {
             case .warning: stats.warnings.append(issue.message)
             }
         }
+        for issue in RFSystemConfigurationValidator().validate(build.rfSystem) {
+            let prefix = issue.linkKind.map { "RF \($0.rawValue.uppercased()): " } ?? "RF: "
+            let message = prefix + issue.detail
+            switch issue.severity {
+            case .error: stats.errors.append(message)
+            case .warning: stats.warnings.append(message)
+            }
+        }
         if frame.architecture != .fixedWing,
            stats.totalMaxThrustN > 0, stats.thrustToWeight < 1.0 {
             stats.errors.append(String(
