@@ -54,7 +54,7 @@ struct RFPerformanceBudgetRunner {
     var budgetMillisecondsPerEndpoint = 0.75
 
     func run(manager: RFSystemManager) -> [RFPerformanceBudgetResult] {
-        let linkCount = manager.configuration.logicalLinks.all.count
+        let linkCount = manager.configuration.logicalLinks.all.filter(\.usesRFPropagation).count
         return activeEndpointCounts.map { endpointCount in
             let start = ProcessInfo.processInfo.systemUptime
             var evaluatedLinks = 0

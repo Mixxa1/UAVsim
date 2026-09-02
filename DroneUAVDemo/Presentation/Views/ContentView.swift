@@ -856,11 +856,11 @@ private struct SignalInterferenceOverlayView: View {
                             .opacity(0.55 + abs(sin(time * 4.2)) * 0.18)
                     }
 
-                    SignalInterferenceCanvas(
-                        state: presentation.state,
-                        intensity: presentation.intensity,
-                        time: time
-                    )
+                    // Video degradation is a property of the VIDEO link, rendered by
+                    // `AnalogNTSCProcessor`/`DigitalVideoProcessor` on the FPV feed itself. The
+                    // procedural bands/blocks that used to be painted here predated that system
+                    // and drew over the top of it. What is left of this overlay is the warning
+                    // card and the recovery affordance, which are information, not interference.
 
                     VStack(spacing: 24) {
                         HStack {
@@ -982,153 +982,6 @@ private struct SignalInterferenceOverlayView: View {
         )
         .shadow(color: Color.black.opacity(0.32), radius: 18, y: 10)
     }
-}
-
-private struct SignalInterferenceCanvas: View {
-    let state: UAVSignalState
-    let intensity: Double
-    let time: TimeInterval
-
-    var body: some View {
-        Canvas(rendersAsynchronously: true) { context, size in
-            let clampedIntensity = max(0.0, min(1.0, intensity))
-            switch state {
-            case .normal:
-                break
-            case .outOfBoundsWarning, .signalDegrading, .boundaryCountdown:
-                let bandCount = state == .outOfBoundsWarning ? 4 : state == .signalDegrading ? 8 : 11
-                for index in 0..<bandCount {
-                    let seed = time * 5.4 + Double(index) * 17.0
-                    let width = size.width * CGFloat(0.16 + Self.noise(seed + 2.6) * 0.24)
-                    let height = size.height * CGFloat(0.006 + Self.noise(seed + 1.3) * 0.024)
-                    let x = (size.width - width) * CGFloat(Self.noise(seed + 3.8))
-                    let y = (size.height - height) * CGFloat(Self.noise(seed + 0.9))
-                    context.fill(
-                        Path(CGRect(x: x, y: y, width: width, height: height)),
-                        with: .color(Self.paletteColor(seed: seed + 5.0, isSignalLost: false).opacity(0.08 + clampedIntensity * 0.16))
-                    )
-                }
-
-                let blockCount = state == .outOfBoundsWarning ? 18 : state == .signalDegrading ? 34 : 52
-                let timeBucket = floor(time * 9.0)
-                for index in 0..<blockCount {
-                    let seed = timeBucket + Double(index) * 11.3
-                    let width = max(4.0, size.width * CGFloat(0.006 + Self.noise(seed + 1.1) * 0.026))
-                    let height = max(3.0, size.height * CGFloat(0.004 + Self.noise(seed + 2.7) * 0.018))
-                    let x = (size.width - width) * CGFloat(Self.noise(seed + 4.4))
-                    let y = (size.height - height) * CGFloat(Self.noise(seed + 5.9))
-                    context.fill(
-                        Path(CGRect(x: x, y: y, width: width, height: height)),
-                        with: .color(Self.paletteColor(seed: seed + 7.2, isSignalLost: false).opacity((0.04 + clampedIntensity * 0.14) * Self.noise(seed + 8.5)))
-                    )
-                }
-
-                let sweepCount = state == .outOfBoundsWarning ? 1 : 2
-                for index in 0..<sweepCount {
-                    let seed = time * (0.6 + Double(index) * 0.18)
-                    let width = size.width * CGFloat(0.18 + Self.noise(seed + 1.7) * 0.12)
-                    let x = (size.width - width) * CGFloat(Self.noise(seed + 2.4))
-                    let opacity = (state == .outOfBoundsWarning ? 0.02 : 0.035) + clampedIntensity * 0.05
-                    context.fill(
-                        Path(CGRect(x: x, y: 0.0, width: width, height: size.height)),
-                        with: .color(Self.paletteColor(seed: seed + 3.3, isSignalLost: false).opacity(opacity))
-                    )
-                }
-            case .signalLost, .recoveryPending:
-                let spacing = max(2.0, 7.0 - clampedIntensity * 3.5)
-                let scanAlpha = 0.04 + clampedIntensity * 0.16
-
-                for y in stride(from: 0.0, through: size.height, by: spacing) {
-                    let rect = CGRect(x: 0.0, y: y, width: size.width, height: 1.0)
-                    context.fill(
-                        Path(rect),
-                        with: .color(Self.paletteColor(seed: y * 0.17, isSignalLost: true).opacity(scanAlpha))
-                    )
-                }
-
-                for index in 0..<18 {
-                    let seed = time * 7.1 + Double(index) * 19.37
-                    let y = size.height * Self.noise(seed)
-                    let height = size.height * CGFloat(0.03 + Self.noise(seed + 1.7) * 0.16)
-                    let widthScale = CGFloat(0.62 + Self.noise(seed + 3.3) * 0.38)
-                    let xOffset = size.width * CGFloat((Self.noise(seed + 5.1) - 0.5) * clampedIntensity * 0.22)
-                    let rect = CGRect(x: xOffset, y: y, width: size.width * widthScale, height: height)
-                    context.fill(
-                        Path(rect),
-                        with: .color(Self.paletteColor(seed: seed + 9.4, isSignalLost: true).opacity(0.05 + clampedIntensity * 0.28))
-                    )
-                }
-
-                let timeBucket = floor(time * 18.0)
-                for index in 0..<180 {
-                    let seed = timeBucket + Double(index) * 13.11
-                    let x = size.width * Self.noise(seed)
-                    let y = size.height * Self.noise(seed + 2.4)
-                    let width = max(1.0, size.width * CGFloat(0.002 + Self.noise(seed + 4.2) * 0.012))
-                    let height = max(1.0, size.height * CGFloat(0.002 + Self.noise(seed + 6.8) * 0.018))
-                    let opacity = (0.03 + clampedIntensity * 0.42) * Self.noise(seed + 8.5)
-                    context.fill(
-                        Path(CGRect(x: x, y: y, width: width, height: height)),
-                        with: .color(Self.paletteColor(seed: seed + 11.0, isSignalLost: true).opacity(opacity))
-                    )
-                }
-
-                for index in 0..<4 {
-                    let seed = time * 2.8 + Double(index) * 11.0
-                    let x = size.width * Self.noise(seed + 0.7)
-                    let width = size.width * CGFloat(0.10 + Self.noise(seed + 1.9) * 0.20)
-                    let opacity = (0.04 + clampedIntensity * 0.20) * abs(sin(time * (2.0 + Double(index))))
-                    context.fill(
-                        Path(CGRect(x: x, y: 0.0, width: width, height: size.height)),
-                        with: .color(Self.paletteColor(seed: seed + 14.0, isSignalLost: true).opacity(opacity))
-                    )
-                }
-
-                for index in 0..<12 {
-                    let seed = time * 5.3 + Double(index) * 8.7
-                    let y = size.height * Self.noise(seed + 0.8)
-                    let height = size.height * CGFloat(0.008 + Self.noise(seed + 2.1) * 0.04)
-                    let shift = size.width * CGFloat((Self.noise(seed + 3.7) - 0.5) * 0.08)
-                    let baseRect = CGRect(x: 0.0, y: y, width: size.width, height: height)
-                    for offsetIndex in 0..<3 {
-                        let channelRect = baseRect.offsetBy(dx: shift * CGFloat(offsetIndex - 1), dy: 0.0)
-                        context.fill(
-                            Path(channelRect),
-                            with: .color(Self.signalLossChannelColor(offsetIndex).opacity(0.08 + clampedIntensity * 0.10))
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private static func noise(_ input: Double) -> Double {
-        let value = sin(input * 12.9898) * 43758.5453
-        return value - floor(value)
-    }
-
-    private static func paletteColor(seed: Double, isSignalLost: Bool) -> Color {
-        let palette = isSignalLost ? signalLossPalette : interferencePalette
-        let index = Int(floor(noise(seed) * Double(palette.count))) % palette.count
-        return palette[max(0, index)]
-    }
-
-    private static func signalLossChannelColor(_ index: Int) -> Color {
-        signalLossPalette[index % signalLossPalette.count]
-    }
-
-    private static let interferencePalette: [Color] = [
-        Color.white,
-        Color(red: 0.78, green: 0.92, blue: 1.0),
-        Color(red: 0.96, green: 0.88, blue: 0.74)
-    ]
-
-    private static let signalLossPalette: [Color] = [
-        Color(red: 0.44, green: 0.92, blue: 1.0),
-        Color(red: 1.0, green: 0.38, blue: 0.78),
-        Color(red: 0.84, green: 1.0, blue: 0.28),
-        Color(red: 1.0, green: 0.72, blue: 0.26)
-    ]
 }
 
 private struct SimulationToolstripView: View {

@@ -39,12 +39,48 @@ struct FPVFontAtlas {
     let sourceName: String
     let symbolMap: FPVOSDSymbolMap
     let glyphBitmaps: [FPVGlyphBitmap]
+    /// Slots this font leaves fully transparent, so the composer can substitute a text label
+    /// instead of writing an invisible cell.
+    let blankGlyphs: Set<UInt8>
+    /// CPU-side atlas used by the analog-video compositor. Keeping the same image as the
+    /// SpriteKit textures guarantees preset switching cannot select a different glyph source.
+    let atlasImage: CGImage
     let atlasTexture: SKTexture
     let glyphTextures: [SKTexture]
     let pixelSize: CGSize
 
     func texture(for glyph: UInt8) -> SKTexture {
         glyphTextures[Int(glyph)]
+    }
+
+    /// Crops one glyph out of the atlas for AppKit/SwiftUI. The OSD editor draws the same pixels
+    /// the analog compositor does, so a preview can never disagree with the flown frame.
+    func glyphImage(for glyph: UInt8) -> CGImage? {
+        let index = Int(glyph)
+        let glyphWidth = atlasImage.width / Self.columns
+        let glyphHeight = atlasImage.height / Self.rows
+        guard glyphWidth > 0, glyphHeight > 0 else { return nil }
+        return atlasImage.cropping(to: CGRect(
+            x: (index % Self.columns) * glyphWidth,
+            y: (index / Self.columns) * glyphHeight,
+            width: glyphWidth,
+            height: glyphHeight
+        ))
+    }
+
+    /// True when the font leaves this slot entirely transparent. Community MCM fonts do not all
+    /// fill the same semantic slots — several bundled ones have no crosshair halves — and the
+    /// editor warns about that instead of silently drawing nothing.
+    func isGlyphBlank(_ glyph: UInt8) -> Bool {
+        let index = Int(glyph)
+        guard index < glyphBitmaps.count else { return true }
+        let pixels = glyphBitmaps[index].rgbaPixels
+        var offset = 3
+        while offset < pixels.count {
+            if pixels[offset] != 0 { return false }
+            offset += 4
+        }
+        return true
     }
 }
 
@@ -74,7 +110,11 @@ struct MCMFontLoader {
 
         let payloadLines = Array(lines.dropFirst())
         let expectedByteCount = FPVFontAtlas.glyphCount * Self.bytesPerGlyph
-        guard payloadLines.count == expectedByteCount else {
+        // MAX7456 exposes 256 addressable character slots. Some community "full" files append
+        // a second complete 256-glyph bank for other tooling; UAVsim intentionally loads the
+        // first hardware bank while still rejecting truncated or non-glyph-aligned payloads.
+        guard payloadLines.count >= expectedByteCount,
+              payloadLines.count.isMultiple(of: Self.bytesPerGlyph) else {
             throw MCMFontLoaderError.invalidByteCount(
                 expected: expectedByteCount,
                 actual: payloadLines.count
@@ -82,7 +122,7 @@ struct MCMFontLoader {
         }
 
         var bytes: [UInt8] = []
-        bytes.reserveCapacity(expectedByteCount)
+        bytes.reserveCapacity(payloadLines.count)
         for (index, line) in payloadLines.enumerated() {
             guard line.count == 8,
                   line.allSatisfy({ $0 == "0" || $0 == "1" }),
@@ -199,10 +239,26 @@ struct MCMFontLoader {
             textures.append(texture)
         }
 
+        var blankGlyphs: Set<UInt8> = []
+        for glyph in glyphs {
+            let pixels = glyph.rgbaPixels
+            var offset = pixels.startIndex + 3
+            var isBlank = true
+            while offset < pixels.endIndex {
+                if pixels[offset] != 0 {
+                    isBlank = false
+                    break
+                }
+                offset += 4
+            }
+            if isBlank { blankGlyphs.insert(glyph.glyph) }
+        }
         return FPVFontAtlas(
             sourceName: sourceName,
             symbolMap: .forFont(named: sourceName),
             glyphBitmaps: glyphs,
+            blankGlyphs: blankGlyphs,
+            atlasImage: image,
             atlasTexture: atlasTexture,
             glyphTextures: textures,
             pixelSize: CGSize(width: atlasWidth, height: atlasHeight)

@@ -52,6 +52,11 @@ enum FPVFlightMode: String, Codable, CaseIterable, Equatable, Sendable {
 enum FPVFontPreset: String, Codable, CaseIterable, Identifiable, Equatable, Sendable {
     case betaflight
     case clarity
+    case mainframe
+    case axisfont
+    case cleanfont
+    case impact
+    case xanderFullV3 = "Xander_Full_v3"
 
     var id: String { rawValue }
     var resourceName: String { rawValue }
@@ -60,19 +65,57 @@ enum FPVFontPreset: String, Codable, CaseIterable, Identifiable, Equatable, Send
         switch self {
         case .betaflight: return "camera.fpv.osd_font.betaflight"
         case .clarity: return "camera.fpv.osd_font.clarity"
+        case .mainframe: return "camera.fpv.osd_font.mainframe"
+        case .axisfont: return "camera.fpv.osd_font.axisfont"
+        case .cleanfont: return "camera.fpv.osd_font.cleanfont"
+        case .impact: return "camera.fpv.osd_font.impact"
+        case .xanderFullV3: return "camera.fpv.osd_font.xander_full_v3"
         }
     }
 }
 
 /// Semantic MAX7456 glyph locations are not identical across every historical MCM font.
-/// In particular, Clarity uses the legacy three-glyph crosshair slots while retaining the
-/// standard nine artificial-horizon bar slots.
+/// In particular, Clarity and the bundled Impact variant use the legacy three-glyph crosshair
+/// slots while retaining the standard nine artificial-horizon bar slots. Xander is a generic
+/// character font rather than a Betaflight semantic font, so it receives an ASCII-safe fallback.
 struct FPVOSDSymbolMap: Equatable, Sendable {
     let artificialHorizonCenterLine: UInt8
     let artificialHorizonCenter: UInt8
     let artificialHorizonCenterLineRight: UInt8
     let artificialHorizonBarStart: UInt8
     let artificialHorizonSymbolCount: Int
+    /// Betaflight's artificial-horizon sidebars: a ladder of ticks either side of centre with a
+    /// level arrow on each. These slots are filled in every bundled font; UAVsim simply never
+    /// drew them, which is why its horizon read as sparser than a real MAX7456 one.
+    var sidebarLeftArrow: UInt8 = 0x02
+    var sidebarRightArrow: UInt8 = 0x03
+    var sidebarTick: UInt8 = 0x13
+    /// Betaflight's alternative "aircraft" crosshair: swept wings either side of the centre.
+    /// Fonts that carry no such art point these back at their own centre-line glyphs, so the
+    /// style stays selectable everywhere and simply looks the same as the default there.
+    var aircraftWingLeft: UInt8 = 0x77
+    var aircraftWingRight: UInt8 = 0x78
+
+    /// Betaflight's semantic label and unit pictograms. Every bundled font fills all of these —
+    /// verified by decoding all seven MCM files — which is what lets one layout keep the icon
+    /// look while each font draws it in its own style. Where a font ever leaves one blank, the
+    /// composer falls back to a plain text label rather than an invisible cell.
+    var rssiIcon: UInt8 = 0x01
+    var throttleIcon: UInt8 = 0x04
+    var voltIcon: UInt8 = 0x06
+    var metreIcon: UInt8 = 0x0C
+    var homeIcon: UInt8 = 0x11
+    var satelliteLeftIcon: UInt8 = 0x1E
+    var satelliteRightIcon: UInt8 = 0x1F
+    /// Sixteen headings, 22.5° apart. Index 8 points straight ahead, index 0 straight back.
+    var directionArrowStart: UInt8 = 0x60
+    var linkQualityIcon: UInt8 = 0x7B
+    var altitudeIcon: UInt8 = 0x7F
+    /// Seven fill levels, full first.
+    var batteryLevelStart: UInt8 = 0x90
+    var batteryLevelCount: Int = 7
+    var flightTimerIcon: UInt8 = 0x9C
+    var metresPerSecondIcon: UInt8 = 0x9F
 
     static let betaflight = FPVOSDSymbolMap(
         artificialHorizonCenterLine: 0x72,
@@ -82,18 +125,39 @@ struct FPVOSDSymbolMap: Equatable, Sendable {
         artificialHorizonSymbolCount: 9
     )
 
+    // Clarity and Impact keep unrelated art at 0x77/0x78, so their aircraft wings fall back to
+    // their own centre-line halves rather than drawing an arrow where a wing belongs.
     static let clarity = FPVOSDSymbolMap(
         artificialHorizonCenterLine: 0x26,
         artificialHorizonCenter: 0x7E,
         artificialHorizonCenterLineRight: 0x27,
         artificialHorizonBarStart: 0x80,
-        artificialHorizonSymbolCount: 9
+        artificialHorizonSymbolCount: 9,
+        aircraftWingLeft: 0x26,
+        aircraftWingRight: 0x27
+    )
+
+    static let asciiFallback = FPVOSDSymbolMap(
+        artificialHorizonCenterLine: 0x2D,       // -
+        artificialHorizonCenter: 0x2B,           // +
+        artificialHorizonCenterLineRight: 0x2D,  // -
+        artificialHorizonBarStart: 0x2D,
+        artificialHorizonSymbolCount: 1,
+        aircraftWingLeft: 0x3E,                  // >
+        aircraftWingRight: 0x3C                  // <
     )
 
     static func forFont(named sourceName: String) -> FPVOSDSymbolMap {
-        sourceName.caseInsensitiveCompare(FPVFontPreset.clarity.resourceName) == .orderedSame
-            ? .clarity
-            : .betaflight
+        let normalized = sourceName.lowercased()
+        switch normalized {
+        case FPVFontPreset.clarity.resourceName.lowercased(),
+             FPVFontPreset.impact.resourceName.lowercased():
+            return .clarity
+        case FPVFontPreset.xanderFullV3.resourceName.lowercased():
+            return .asciiFallback
+        default:
+            return .betaflight
+        }
     }
 
     var artificialHorizonGlyphs: [UInt8] {
@@ -120,6 +184,14 @@ struct FPVOSDState: Equatable, Sendable {
     var satellites: TelemetryValue<Int>
     var rollDegrees: TelemetryValue<Double> = .unavailable
     var pitchDegrees: TelemetryValue<Double> = .unavailable
+    var headingDegrees: TelemetryValue<Double> = .unavailable
+    var throttlePercent: TelemetryValue<Double> = .unavailable
+    /// Straight-line range back to the launch point, and the path actually flown since arming.
+    var distanceToHome: TelemetryValue<Double> = .unavailable
+    /// Where home is relative to the nose, clockwise, so the OSD can point an arrow at it.
+    var homeBearingDegrees: TelemetryValue<Double> = .unavailable
+    var flightDistance: TelemetryValue<Double> = .unavailable
+    var flightSeconds: TelemetryValue<Double> = .unavailable
 
     var armed: Bool
     var flightMode: FPVFlightMode
@@ -152,6 +224,12 @@ struct FPVOSDState: Equatable, Sendable {
             || satellites.isStale
             || rollDegrees.isStale
             || pitchDegrees.isStale
+            || headingDegrees.isStale
+            || throttlePercent.isStale
+            || distanceToHome.isStale
+            || homeBearingDegrees.isStale
+            || flightDistance.isStale
+            || flightSeconds.isStale
     }
 }
 
@@ -165,6 +243,12 @@ struct FPVLocalTelemetrySample: Equatable, Sendable {
     var flightMode: FPVFlightMode
     var rollDegrees: Double = 0
     var pitchDegrees: Double = 0
+    var headingDegrees: Double = 0
+    var throttlePercent: Double = 0
+    var distanceToHome: Double = 0
+    var homeBearingDegrees: Double = 0
+    var flightDistance: Double = 0
+    var flightSeconds: Double = 0
 }
 
 /// A UI-independent projection of the physical CONTROL stream. The application maps RF core
@@ -227,6 +311,12 @@ struct FPVOSDStateResolver: Sendable {
             satellites: telemetry.satellites.map(TelemetryValue.live) ?? .unavailable,
             rollDegrees: .live(telemetry.rollDegrees),
             pitchDegrees: .live(telemetry.pitchDegrees),
+            headingDegrees: .live(telemetry.headingDegrees),
+            throttlePercent: .live(telemetry.throttlePercent),
+            distanceToHome: .live(telemetry.distanceToHome),
+            homeBearingDegrees: .live(telemetry.homeBearingDegrees),
+            flightDistance: .live(telemetry.flightDistance),
+            flightSeconds: .live(telemetry.flightSeconds),
             armed: telemetry.armed,
             flightMode: telemetry.flightMode,
             linkState: Self.linkState(lq: lq, severity: radio.severity)
@@ -273,6 +363,12 @@ struct FPVOSDStateResolver: Sendable {
             satellites: held.satellites.map(TelemetryValue.stale) ?? .unavailable,
             rollDegrees: .stale(held.rollDegrees),
             pitchDegrees: .stale(held.pitchDegrees),
+            headingDegrees: .stale(held.headingDegrees),
+            throttlePercent: .stale(held.throttlePercent),
+            distanceToHome: .stale(held.distanceToHome),
+            homeBearingDegrees: .stale(held.homeBearingDegrees),
+            flightDistance: .stale(held.flightDistance),
+            flightSeconds: .stale(held.flightSeconds),
             armed: telemetry.armed,
             flightMode: telemetry.flightMode,
             linkState: .lost
@@ -317,11 +413,28 @@ struct OSDGrid: Equatable, Sendable {
     }
 
     mutating func write(_ text: String, x: Int, y: Int, width: Int? = nil, rightAligned: Bool = false) {
+        write(
+            glyphs: text.utf8.map { $0 < 128 ? $0 : 63 },
+            x: x,
+            y: y,
+            width: width,
+            rightAligned: rightAligned
+        )
+    }
+
+    /// Writes an explicit glyph run, so a label can be a single MAX7456 pictogram rather than
+    /// spelled-out ASCII.
+    mutating func write(
+        glyphs run: [UInt8],
+        x: Int,
+        y: Int,
+        width: Int? = nil,
+        rightAligned: Bool = false
+    ) {
         guard y >= 0, y < rows else { return }
-        let ascii = text.utf8.map { $0 < 128 ? $0 : 63 }
-        let availableWidth = max(0, min(width ?? ascii.count, columns - max(0, x)))
+        let availableWidth = max(0, min(width ?? run.count, columns - max(0, x)))
         guard availableWidth > 0 else { return }
-        let clipped = Array(ascii.prefix(availableWidth))
+        let clipped = Array(run.prefix(availableWidth))
         let startX = rightAligned ? x + max(0, availableWidth - clipped.count) : x
         for (offset, glyph) in clipped.enumerated() {
             self[startX + offset, y] = glyph
@@ -344,36 +457,4 @@ struct OSDPosition: Equatable, Sendable {
     var y: Int
     var width: Int
     var rightAligned: Bool = false
-}
-
-struct OSDLayout: Equatable, Sendable {
-    var columns: Int
-    var rows: Int
-    var battery: OSDPosition
-    var batteryPercent: OSDPosition
-    var linkQuality: OSDPosition
-    var radioDetail: OSDPosition
-    var reticle: OSDPosition
-    var linkWarning: OSDPosition
-    var staleWarning: OSDPosition
-    var altitude: OSDPosition
-    var speed: OSDPosition
-    var satellites: OSDPosition
-    var flightMode: OSDPosition
-
-    static let analog30x16 = OSDLayout(
-        columns: 30,
-        rows: 16,
-        battery: OSDPosition(x: 1, y: 1, width: 12),
-        batteryPercent: OSDPosition(x: 1, y: 2, width: 10),
-        linkQuality: OSDPosition(x: 19, y: 1, width: 10, rightAligned: true),
-        radioDetail: OSDPosition(x: 14, y: 2, width: 15, rightAligned: true),
-        reticle: OSDPosition(x: 13, y: 7, width: 3),
-        linkWarning: OSDPosition(x: 9, y: 9, width: 12),
-        staleWarning: OSDPosition(x: 9, y: 10, width: 12),
-        altitude: OSDPosition(x: 1, y: 13, width: 12),
-        speed: OSDPosition(x: 1, y: 14, width: 12),
-        satellites: OSDPosition(x: 19, y: 13, width: 10, rightAligned: true),
-        flightMode: OSDPosition(x: 18, y: 14, width: 11, rightAligned: true)
-    )
 }

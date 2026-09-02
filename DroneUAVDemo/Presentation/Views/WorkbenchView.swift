@@ -730,6 +730,7 @@ struct WorkbenchView: View {
                     )) {
                         Text("Analog · плавный шум").tag(RFVideoTransmissionMode.analog)
                         Text("Digital · artifacts/freeze").tag(RFVideoTransmissionMode.digital)
+                        Text("Fiber / tether · clean/dropout").tag(RFVideoTransmissionMode.fiber)
                     }
                     .pickerStyle(.menu)
                 }
@@ -778,7 +779,7 @@ struct WorkbenchView: View {
             let qos = viewModel.activeRFQoS
             let policy = qos.policy(for: link.kind)
             let sharedTransmitterLinks = configuration.logicalLinks.all.filter {
-                $0.transmitterDeviceID == link.transmitterDeviceID
+                $0.usesRFPropagation && $0.transmitterDeviceID == link.transmitterDeviceID
             }
             let reservedBitrate = sharedTransmitterLinks.reduce(0.0) {
                 $0 + qos.policy(for: $1.kind).minimumReservedBitrateBPS

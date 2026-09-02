@@ -4,6 +4,7 @@ struct CameraModuleView: View {
     @ObservedObject var viewModel: DroneSimulationViewModel
 
     @State private var showAdvancedControls = false
+    @State private var showOSDEditor = false
 
     private static let coordinateFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -580,11 +581,19 @@ struct CameraModuleView: View {
                             Text(LocalizedStringKey(preset.titleKey)).tag(preset)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
 
                     Text("camera.fpv.osd_font.hint")
                         .font(.caption2)
                         .foregroundStyle(GroundControlPalette.textSecondary)
+
+                    Button {
+                        showOSDEditor = true
+                    } label: {
+                        Label("camera.fpv.osd_editor", systemImage: "square.grid.3x3.topleft.filled")
+                            .font(.caption)
+                    }
+                    .padding(.top, 2)
                 }
 
                 ModuleSliderRow(
@@ -665,6 +674,9 @@ struct CameraModuleView: View {
                 .toggleStyle(.switch)
                 .foregroundStyle(GroundControlPalette.textPrimary)
             }
+        }
+        .sheet(isPresented: $showOSDEditor) {
+            FPVOSDEditorView(viewModel: viewModel)
         }
     }
 

@@ -671,6 +671,12 @@ struct DroneModelProfile: Identifiable, Hashable {
     let batteryEnergyWh: Float
 
     let cameraLayoutKey: String
+    /// Used only to author the built-in profile's compatibility RF configuration. Runtime
+    /// rendering always reads `logicalLinks.video.videoMode` from the installed configuration.
+    let defaultVideoMode: RFVideoTransmissionMode
+    /// Seeds the installed compatibility VIDEO link. Runtime rendering reads the copied preset
+    /// from `RFLinkConfiguration`, so changing cameras cannot silently change link behavior.
+    let defaultVideoLinkPreset: RFVideoLinkPreset
     let visualClass: DroneVisualClass
     let operationalCategory: DroneOperationalCategory
     let airframeClass: AirframeClass
@@ -728,6 +734,8 @@ struct DroneModelProfile: Identifiable, Hashable {
         batteryCapacitymAh: Float,
         batteryEnergyWh: Float,
         cameraLayoutKey: String,
+        defaultVideoMode: RFVideoTransmissionMode = .digital,
+        defaultVideoLinkPreset: RFVideoLinkPreset = .genericDigital,
         visualClass: DroneVisualClass,
         operationalCategory: DroneOperationalCategory,
         airframeClass: AirframeClass,
@@ -762,6 +770,8 @@ struct DroneModelProfile: Identifiable, Hashable {
         self.batteryCapacitymAh = batteryCapacitymAh
         self.batteryEnergyWh = batteryEnergyWh
         self.cameraLayoutKey = cameraLayoutKey
+        self.defaultVideoMode = defaultVideoMode
+        self.defaultVideoLinkPreset = defaultVideoLinkPreset
         self.visualClass = visualClass
         self.operationalCategory = operationalCategory
         self.airframeClass = airframeClass
@@ -928,6 +938,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             batteryCapacitymAh: max(1000.0, tuning.batteryEnergyWh * 22.0),
             batteryEnergyWh: tuning.batteryEnergyWh,
             cameraLayoutKey: tuning.cameraLayoutKey,
+            defaultVideoMode: UAVReferenceCatalog.defaultVideoMode(for: uavProfile.id),
+            defaultVideoLinkPreset: UAVReferenceCatalog.defaultVideoLinkPreset(for: uavProfile.id),
             visualClass: tuning.visualClass,
             operationalCategory: tuning.operationalCategory,
             airframeClass: tuning.airframeClass,

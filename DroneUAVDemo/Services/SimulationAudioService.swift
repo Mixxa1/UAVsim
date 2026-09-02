@@ -501,7 +501,11 @@ final class SimulationAudioService {
 
         // Pan from the component of the source direction along the listener's right.
         let right = simd_cross(listenerForward, listenerUp)
-        let lateral = simd_length_squared(right) > 0.000001
+        // In FPV the listener can sit almost exactly on the aircraft audio source. Normalizing
+        // that zero vector produces NaN pan values, which AVAudioEngine can expose as a torn or
+        // unstable loop. A coincident source is simply centered.
+        let lateral = simd_length_squared(toSource) > 0.000001
+            && simd_length_squared(right) > 0.000001
             ? simd_dot(simd_normalize(toSource), simd_normalize(right))
             : 0.0
         loopVoices[index].mixer.pan = min(1.0, max(-1.0, lateral))

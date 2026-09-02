@@ -2,6 +2,7 @@ import Foundation
 
 enum RFSystemEvaluationError: Error, Equatable {
     case missingLink(LogicalLinkKind)
+    case nonRFTransport(LogicalLinkKind)
     case missingDevice(String)
     case missingAntenna(String)
     case disabledDevice(String)
@@ -142,7 +143,7 @@ struct RFSystemConfigurationValidator {
         into issues: inout [RFConfigurationIssue]
     ) {
         let groups = Dictionary(
-            grouping: configuration.logicalLinks.all,
+            grouping: configuration.logicalLinks.all.filter(\.usesRFPropagation),
             by: \.transmitterDeviceID
         )
         for (transmitterID, links) in groups {
@@ -420,6 +421,9 @@ struct RFSystemManager {
         guard let link = configuration.logicalLinks.link(for: linkKind) else {
             throw RFSystemEvaluationError.missingLink(linkKind)
         }
+        guard link.usesRFPropagation else {
+            throw RFSystemEvaluationError.nonRFTransport(linkKind)
+        }
         guard let transmitter = configuration.devices.first(where: { $0.id == link.transmitterDeviceID }) else {
             throw RFSystemEvaluationError.missingDevice(link.transmitterDeviceID)
         }
@@ -472,7 +476,7 @@ struct RFSystemManager {
         timestamp: TimeInterval = 0
     ) -> [LogicalLinkKind: Result<RFLinkEvaluation, RFSystemEvaluationError>] {
         var result: [LogicalLinkKind: Result<RFLinkEvaluation, RFSystemEvaluationError>] = [:]
-        for link in configuration.logicalLinks.all {
+        for link in configuration.logicalLinks.all where link.usesRFPropagation {
             do {
                 result[link.kind] = .success(try evaluate(
                     linkKind: link.kind,
@@ -496,7 +500,7 @@ struct RFSystemManager {
         pathContextResolver: (RFPathQuery) -> RFPathContext
     ) -> [LogicalLinkKind: Result<RFLinkEvaluation, RFSystemEvaluationError>] {
         var result: [LogicalLinkKind: Result<RFLinkEvaluation, RFSystemEvaluationError>] = [:]
-        for link in configuration.logicalLinks.all {
+        for link in configuration.logicalLinks.all where link.usesRFPropagation {
             do {
                 guard let transmitter = configuration.devices.first(where: {
                     $0.id == link.transmitterDeviceID
@@ -568,7 +572,8 @@ struct RFSystemManager {
         pathContextResolver: (RFPathQuery) -> RFPathContext
     ) -> [Double] {
         var powers: [Double] = []
-        for interfererLink in configuration.logicalLinks.all where interfererLink.id != desiredLink.id {
+        for interfererLink in configuration.logicalLinks.all
+        where interfererLink.id != desiredLink.id && interfererLink.usesRFPropagation {
             guard let interferer = configuration.devices.first(where: {
                 $0.id == interfererLink.transmitterDeviceID
             }), interferer.enabled, interferer.txPowerDBm != nil,

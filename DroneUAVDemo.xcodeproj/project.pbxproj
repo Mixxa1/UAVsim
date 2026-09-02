@@ -10,8 +10,14 @@
 		A9A000000000000000000101 /* FPVOSDModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000002 /* FPVOSDModels.swift */; };
 		A9A000000000000000000102 /* MCMFontLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000003 /* MCMFontLoader.swift */; };
 		A9A000000000000000000103 /* FPVOSDRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000004 /* FPVOSDRenderer.swift */; };
+		A9A000000000000000000111 /* OSDLayoutConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000D /* OSDLayoutConfiguration.swift */; };
 		A9A000000000000000000104 /* betaflight.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000005 /* betaflight.mcm */; };
 		A9A000000000000000000105 /* clarity.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000006 /* clarity.mcm */; };
+		A9A000000000000000000106 /* Xander_Full_v3.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000008 /* Xander_Full_v3.mcm */; };
+		A9A000000000000000000107 /* axisfont.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000009 /* axisfont.mcm */; };
+		A9A000000000000000000108 /* cleanfont.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000A /* cleanfont.mcm */; };
+		A9A000000000000000000109 /* impact.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000B /* impact.mcm */; };
+		A9A000000000000000000110 /* mainframe.mcm in Resources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000C /* mainframe.mcm */; };
 		A9F000000000000000000101 /* RFModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000002 /* RFModels.swift */; };
 		A9F000000000000000000102 /* RFPropagationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000003 /* RFPropagationEngine.swift */; };
 		A9F000000000000000000103 /* RFSystemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000004 /* RFSystemManager.swift */; };
@@ -21,6 +27,18 @@
 		A9F000000000000000000107 /* RFEnvironmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000008 /* RFEnvironmentModel.swift */; };
 		A9F000000000000000000108 /* RFAcceptanceRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000009 /* RFAcceptanceRuntime.swift */; };
 		A9F000000000000000000109 /* RFSharedChannelScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000010 /* RFSharedChannelScheduler.swift */; };
+		A9F000000000000000000110 /* AnalogVideoRFMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000011 /* AnalogVideoRFMapper.swift */; };
+		A9F000000000000000000111 /* DigitalVideoRFMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000012 /* DigitalVideoRFMapper.swift */; };
+		A9N000000000000000000102 /* AnalogNTSCProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9N000000000000000000002 /* AnalogNTSCProcessor.swift */; };
+		A9N000000000000000000103 /* DigitalVideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9N000000000000000000003 /* DigitalVideoProcessor.swift */; };
+		A9N000000000000000000106 /* Analog-NTSC-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A9N000000000000000000006 /* Analog-NTSC-LICENSE.txt */; };
+		A9C000000000000000000101 /* AnalogNTSCNativeBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000001 /* AnalogNTSCNativeBridge.mm */; };
+		A9C000000000000000000102 /* ntsc_decoder.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000012 /* ntsc_decoder.cpp */; };
+		A9C000000000000000000103 /* ntsc_effects.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000013 /* ntsc_effects.cpp */; };
+		A9C000000000000000000104 /* ntsc_encoder.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000014 /* ntsc_encoder.cpp */; };
+		A9C000000000000000000105 /* ntsc_params.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000015 /* ntsc_params.cpp */; };
+		A9C000000000000000000106 /* ntsc_processor.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000016 /* ntsc_processor.cpp */; };
+		A9C000000000000000000107 /* ntsc_signal.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A9C000000000000000000017 /* ntsc_signal.cpp */; };
 		100000000000000000000200 /* DroneUAVDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000100 /* DroneUAVDemoApp.swift */; };
 		100000000000000000000201 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000101 /* ContentView.swift */; };
 		100000000000000000000202 /* ControlPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000102 /* ControlPanelView.swift */; };
@@ -154,6 +172,7 @@
 		100000000000000000000249 /* FlightOpsModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014C /* FlightOpsModuleView.swift */; };
 		10000000000000000000024A /* UAVCatalogModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014D /* UAVCatalogModuleView.swift */; };
 		10000000000000000000024B /* CameraModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014E /* CameraModuleView.swift */; };
+		A9A000000000000000000112 /* FPVOSDEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000E /* FPVOSDEditorView.swift */; };
 		10000000000000000000024C /* ScenarioModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014F /* ScenarioModuleView.swift */; };
 		10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000150 /* DiagnosticsModuleView.swift */; };
 		10000000000000000000FF33 /* AeroDiagnosticsPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */; };
@@ -503,8 +522,14 @@
 		A9A000000000000000000002 /* FPVOSDModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDModels.swift; sourceTree = "<group>"; };
 		A9A000000000000000000003 /* MCMFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCMFontLoader.swift; sourceTree = "<group>"; };
 		A9A000000000000000000004 /* FPVOSDRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDRenderer.swift; sourceTree = "<group>"; };
+		A9A00000000000000000000D /* OSDLayoutConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSDLayoutConfiguration.swift; sourceTree = "<group>"; };
 		A9A000000000000000000005 /* betaflight.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = betaflight.mcm; sourceTree = "<group>"; };
 		A9A000000000000000000006 /* clarity.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = clarity.mcm; sourceTree = "<group>"; };
+		A9A000000000000000000008 /* Xander_Full_v3.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = Xander_Full_v3.mcm; sourceTree = "<group>"; };
+		A9A000000000000000000009 /* axisfont.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = axisfont.mcm; sourceTree = "<group>"; };
+		A9A00000000000000000000A /* cleanfont.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = cleanfont.mcm; sourceTree = "<group>"; };
+		A9A00000000000000000000B /* impact.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = impact.mcm; sourceTree = "<group>"; };
+		A9A00000000000000000000C /* mainframe.mcm */ = {isa = PBXFileReference; lastKnownFileType = text; path = mainframe.mcm; sourceTree = "<group>"; };
 		A9F000000000000000000002 /* RFModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFModels.swift; sourceTree = "<group>"; };
 		A9F000000000000000000003 /* RFPropagationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFPropagationEngine.swift; sourceTree = "<group>"; };
 		A9F000000000000000000004 /* RFSystemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSystemManager.swift; sourceTree = "<group>"; };
@@ -514,6 +539,27 @@
 		A9F000000000000000000008 /* RFEnvironmentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFEnvironmentModel.swift; sourceTree = "<group>"; };
 		A9F000000000000000000009 /* RFAcceptanceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFAcceptanceRuntime.swift; sourceTree = "<group>"; };
 		A9F000000000000000000010 /* RFSharedChannelScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSharedChannelScheduler.swift; sourceTree = "<group>"; };
+		A9F000000000000000000011 /* AnalogVideoRFMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalogVideoRFMapper.swift; sourceTree = "<group>"; };
+		A9F000000000000000000012 /* DigitalVideoRFMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitalVideoRFMapper.swift; sourceTree = "<group>"; };
+		A9N000000000000000000002 /* AnalogNTSCProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalogNTSCProcessor.swift; sourceTree = "<group>"; };
+		A9N000000000000000000003 /* DigitalVideoProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DigitalVideoProcessor.swift; sourceTree = "<group>"; };
+		A9N000000000000000000006 /* Analog-NTSC-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Legal/Analog-NTSC-LICENSE.txt"; sourceTree = "<group>"; };
+		A9C000000000000000000001 /* AnalogNTSCNativeBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = AnalogNTSCNativeBridge.mm; sourceTree = "<group>"; };
+		A9C000000000000000000002 /* AnalogNTSCNativeBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AnalogNTSCNativeBridge.h; sourceTree = "<group>"; };
+		A9C000000000000000000003 /* DroneUAVDemo-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "DroneUAVDemo-Bridging-Header.h"; sourceTree = "<group>"; };
+		A9C000000000000000000008 /* ntsc_decode.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_decode.h; sourceTree = "<group>"; };
+		A9C000000000000000000009 /* ntsc_decoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_decoder.h; sourceTree = "<group>"; };
+		A9C00000000000000000000A /* ntsc_effects.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_effects.h; sourceTree = "<group>"; };
+		A9C00000000000000000000B /* ntsc_encoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_encoder.h; sourceTree = "<group>"; };
+		A9C00000000000000000000C /* ntsc_params.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_params.h; sourceTree = "<group>"; };
+		A9C00000000000000000000D /* ntsc_processor.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_processor.h; sourceTree = "<group>"; };
+		A9C00000000000000000000E /* ntsc_signal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = include/rf2/ntsc_signal.h; sourceTree = "<group>"; };
+		A9C000000000000000000012 /* ntsc_decoder.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = src/ntsc_decoder.cpp; sourceTree = "<group>"; };
+		A9C000000000000000000013 /* ntsc_effects.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = src/ntsc_effects.cpp; sourceTree = "<group>"; };
+		A9C000000000000000000014 /* ntsc_encoder.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = src/ntsc_encoder.cpp; sourceTree = "<group>"; };
+		A9C000000000000000000015 /* ntsc_params.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = src/ntsc_params.cpp; sourceTree = "<group>"; };
+		A9C000000000000000000016 /* ntsc_processor.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = src/ntsc_processor.cpp; sourceTree = "<group>"; };
+		A9C000000000000000000017 /* ntsc_signal.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = src/ntsc_signal.cpp; sourceTree = "<group>"; };
 		100000000000000000000005 /* DroneUAVDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DroneUAVDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000100 /* DroneUAVDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneUAVDemoApp.swift; sourceTree = "<group>"; };
 		100000000000000000000101 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -650,6 +696,7 @@
 		10000000000000000000014C /* FlightOpsModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightOpsModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000014D /* UAVCatalogModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVCatalogModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000014E /* CameraModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModuleView.swift; sourceTree = "<group>"; };
+		A9A00000000000000000000E /* FPVOSDEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDEditorView.swift; sourceTree = "<group>"; };
 		10000000000000000000014F /* ScenarioModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioModuleView.swift; sourceTree = "<group>"; };
 		100000000000000000000150 /* DiagnosticsModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroDiagnosticsPanelView.swift; sourceTree = "<group>"; };
@@ -1028,9 +1075,11 @@
 			isa = PBXGroup;
 			children = (
 				100000000000000000000100 /* DroneUAVDemoApp.swift */,
+				A9C000000000000000000003 /* DroneUAVDemo-Bridging-Header.h */,
 				100000000000000000000011 /* Domain */,
 				100000000000000000000012 /* Simulation */,
 				100000000000000000000013 /* Scene */,
+				A9C000000000000000000020 /* AnalogNTSC Vendor */,
 				100000000000000000000014 /* Presentation */,
 				100000000000000000000017 /* Input */,
 				100000000000000000000019 /* Remote */,
@@ -1204,6 +1253,9 @@
 				A9A000000000000000000002 /* FPVOSDModels.swift */,
 				A9A000000000000000000003 /* MCMFontLoader.swift */,
 				A9A000000000000000000004 /* FPVOSDRenderer.swift */,
+				A9A00000000000000000000D /* OSDLayoutConfiguration.swift */,
+				A9F000000000000000000011 /* AnalogVideoRFMapper.swift */,
+				A9F000000000000000000012 /* DigitalVideoRFMapper.swift */,
 			);
 			path = FPV;
 			sourceTree = "<group>";
@@ -1321,6 +1373,10 @@
 				D70E00000000000000000001 /* WeatherCloudAssetLoader.swift */,
 				E80F00000000000000000001 /* WeatherDepthOfFieldTechnique.swift */,
 				E80F00000000000000000003 /* WeatherDepthOfField.metal */,
+				A9N000000000000000000002 /* AnalogNTSCProcessor.swift */,
+				A9N000000000000000000003 /* DigitalVideoProcessor.swift */,
+				A9C000000000000000000002 /* AnalogNTSCNativeBridge.h */,
+				A9C000000000000000000001 /* AnalogNTSCNativeBridge.mm */,
 				100000000000000000000410 /* SeasonalTreeAssetLoader.swift */,
 				100000000000000000000412 /* SnowPatchAssetLoader.swift */,
 				100000000000000000000414 /* SnowFootstepAssetLoader.swift */,
@@ -1343,6 +1399,27 @@
 				7C0F000000000000000000F0 /* Thermal */,
 			);
 			path = Scene;
+			sourceTree = "<group>";
+		};
+		A9C000000000000000000020 /* AnalogNTSC Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				A9C000000000000000000008 /* ntsc_decode.h */,
+				A9C000000000000000000009 /* ntsc_decoder.h */,
+				A9C00000000000000000000A /* ntsc_effects.h */,
+				A9C00000000000000000000B /* ntsc_encoder.h */,
+				A9C00000000000000000000C /* ntsc_params.h */,
+				A9C00000000000000000000D /* ntsc_processor.h */,
+				A9C00000000000000000000E /* ntsc_signal.h */,
+				A9C000000000000000000012 /* ntsc_decoder.cpp */,
+				A9C000000000000000000013 /* ntsc_effects.cpp */,
+				A9C000000000000000000014 /* ntsc_encoder.cpp */,
+				A9C000000000000000000015 /* ntsc_params.cpp */,
+				A9C000000000000000000016 /* ntsc_processor.cpp */,
+				A9C000000000000000000017 /* ntsc_signal.cpp */,
+			);
+			name = "AnalogNTSC Vendor";
+			path = Vendor/AnalogNTSC;
 			sourceTree = "<group>";
 		};
 		100000000000000000000014 /* Presentation */ = {
@@ -1376,6 +1453,7 @@
 				10000000000000000000014B /* SidebarModuleHostView.swift */,
 				10000000000000000000014C /* FlightOpsModuleView.swift */,
 				10000000000000000000014E /* CameraModuleView.swift */,
+				A9A00000000000000000000E /* FPVOSDEditorView.swift */,
 				10000000000000000000014F /* ScenarioModuleView.swift */,
 				100000000000000000000A0A /* MissionSetupView.swift */,
 				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
@@ -1500,6 +1578,7 @@
 				10000000000000000000012B /* Assets.xcassets */,
 				100000000000000000000126 /* Localizable.strings */,
 				100000000000000000000355 /* Legal/LegalDocuments.json */,
+				A9N000000000000000000006 /* Analog-NTSC-LICENSE.txt */,
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				A0D1000000000000000000A5 /* Audio */,
 				C0DE10000000000000000002 /* Workbench.usdz */,
@@ -1566,6 +1645,11 @@
 			children = (
 				A9A000000000000000000005 /* betaflight.mcm */,
 				A9A000000000000000000006 /* clarity.mcm */,
+				A9A000000000000000000008 /* Xander_Full_v3.mcm */,
+				A9A000000000000000000009 /* axisfont.mcm */,
+				A9A00000000000000000000A /* cleanfont.mcm */,
+				A9A00000000000000000000B /* impact.mcm */,
+				A9A00000000000000000000C /* mainframe.mcm */,
 			);
 			path = FPVFonts;
 			sourceTree = "<group>";
@@ -1767,9 +1851,15 @@
 			files = (
 				A9A000000000000000000104 /* betaflight.mcm in Resources */,
 				A9A000000000000000000105 /* clarity.mcm in Resources */,
+				A9A000000000000000000106 /* Xander_Full_v3.mcm in Resources */,
+				A9A000000000000000000107 /* axisfont.mcm in Resources */,
+				A9A000000000000000000108 /* cleanfont.mcm in Resources */,
+				A9A000000000000000000109 /* impact.mcm in Resources */,
+				A9A000000000000000000110 /* mainframe.mcm in Resources */,
 				100000000000000000000225 /* Localizable.strings in Resources */,
 				100000000000000000000228 /* Assets.xcassets in Resources */,
 				100000000000000000000354 /* Legal/LegalDocuments.json in Resources */,
+				A9N000000000000000000106 /* Analog-NTSC-LICENSE.txt in Resources */,
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
 				A0D1000000000000000000A6 /* Audio in Resources */,
 				C0DE10000000000000000001 /* Workbench.usdz in Resources */,
@@ -1839,6 +1929,7 @@
 				A9A000000000000000000101 /* FPVOSDModels.swift in Sources */,
 				A9A000000000000000000102 /* MCMFontLoader.swift in Sources */,
 				A9A000000000000000000103 /* FPVOSDRenderer.swift in Sources */,
+				A9A000000000000000000111 /* OSDLayoutConfiguration.swift in Sources */,
 				A9F000000000000000000101 /* RFModels.swift in Sources */,
 				A9F000000000000000000102 /* RFPropagationEngine.swift in Sources */,
 				A9F000000000000000000103 /* RFSystemManager.swift in Sources */,
@@ -1848,6 +1939,17 @@
 				A9F000000000000000000107 /* RFEnvironmentModel.swift in Sources */,
 				A9F000000000000000000108 /* RFAcceptanceRuntime.swift in Sources */,
 				A9F000000000000000000109 /* RFSharedChannelScheduler.swift in Sources */,
+				A9F000000000000000000110 /* AnalogVideoRFMapper.swift in Sources */,
+				A9F000000000000000000111 /* DigitalVideoRFMapper.swift in Sources */,
+				A9N000000000000000000102 /* AnalogNTSCProcessor.swift in Sources */,
+				A9N000000000000000000103 /* DigitalVideoProcessor.swift in Sources */,
+				A9C000000000000000000101 /* AnalogNTSCNativeBridge.mm in Sources */,
+				A9C000000000000000000102 /* ntsc_decoder.cpp in Sources */,
+				A9C000000000000000000103 /* ntsc_effects.cpp in Sources */,
+				A9C000000000000000000104 /* ntsc_encoder.cpp in Sources */,
+				A9C000000000000000000105 /* ntsc_params.cpp in Sources */,
+				A9C000000000000000000106 /* ntsc_processor.cpp in Sources */,
+				A9C000000000000000000107 /* ntsc_signal.cpp in Sources */,
 				CF5A7FA2F1F316ECBD696373 /* LidarRawStreamWriter.swift in Sources */,
 				2EC6C01263C7D050CDD47CA1 /* LidarFoliageIndex.swift in Sources */,
 				E4DA452F20BA177F7709D69F /* LidarSurfaceClass.swift in Sources */,
@@ -2140,6 +2242,7 @@
 				100000000000000000000249 /* FlightOpsModuleView.swift in Sources */,
 				10000000000000000000024A /* UAVCatalogModuleView.swift in Sources */,
 				10000000000000000000024B /* CameraModuleView.swift in Sources */,
+				A9A000000000000000000112 /* FPVOSDEditorView.swift in Sources */,
 				10000000000000000000024C /* ScenarioModuleView.swift in Sources */,
 				100000000000000000000A09 /* MissionSetupView.swift in Sources */,
 				100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */,
@@ -2306,10 +2409,12 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DroneUAVDemo/Resources/Info.plist;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/DroneUAVDemo/Vendor/AnalogNTSC/include";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -2318,6 +2423,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.DroneUAVDemo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "DroneUAVDemo/DroneUAVDemo-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -2327,10 +2433,12 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 4;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = DroneUAVDemo/Resources/Info.plist;
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/DroneUAVDemo/Vendor/AnalogNTSC/include";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -2339,6 +2447,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.example.DroneUAVDemo;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "DroneUAVDemo/DroneUAVDemo-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 			};

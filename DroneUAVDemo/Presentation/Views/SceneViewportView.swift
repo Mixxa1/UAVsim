@@ -18,23 +18,13 @@ struct SceneViewportView: View {
         let rangefinderOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && rangefinderOpticsState.isAvailable
         let hoseOpticsState = viewModel.hoseOpticsState
         let hoseOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && hoseOpticsState.isAvailable
-        // FPV replaces the default instrument HUD + PFD compass. Analog glyphs are injected into
-        // SceneKit below; the existing SwiftUI viewfinder remains only for a digital video link.
+        // FPV replaces the default instrument HUD + PFD compass. The installed VIDEO logical link,
+        // not the aircraft or camera mode, selects analog/digital/fiber presentation.
         let fpvHUDActive = viewModel.cameraConfiguration.mode == .fpv && !viewModel.isSpectatorMode && !payloadOpticsActive
-        let analogFPVOSDActive = fpvHUDActive && viewModel.activeFPVVideoMode == .analog
+        let fpvVideoMode = viewModel.activeFPVVideoMode
+        let analogFPVOSDActive = fpvHUDActive && fpvVideoMode == .analog
         let capsuleState = viewModel.capsuleState
         let capsuleOpticsActive = payloadOpticsActive && !payloadOpticsState.isAvailable && !rangefinderOpticsState.isAvailable && !hoseOpticsState.isAvailable && capsuleState.isAvailable
-        // FPV degradation follows the independent VIDEO link, never the CONTROL link. Analog
-        // produces continuous snow/sync noise; digital produces macroblocks and stale-frame freeze.
-        let videoDegradation: (state: RFVideoPresentationState, intensity: Double)? = {
-            guard fpvHUDActive, let state = viewModel.rfVideoPresentationState else { return nil }
-            let intensity = state.mode == .analog
-                ? state.analogNoiseIntensity
-                : state.digitalArtifactIntensity
-            guard intensity > 0.02 || state.isFrozen else { return nil }
-            return (state, intensity)
-        }()
-
         ZStack(alignment: .topLeading) {
             DroneSceneViewRepresentable(
                 scene: viewModel.scene,
@@ -46,8 +36,21 @@ struct SceneViewportView: View {
                 wantsWeatherDepthOfField: viewModel.wantsWeatherDepthOfField,
                 isHandLaunchPOV: viewModel.isHandLaunchPOVActive,
                 usesBuilderMouseLook: viewModel.isRaceBuilderActive,
+                fpvVideoMode: fpvHUDActive ? fpvVideoMode : nil,
+                fpvVideoPresentationState: fpvHUDActive
+                    ? viewModel.activeVideoPresentationState
+                    : nil,
                 analogFPVOSDState: analogFPVOSDActive ? viewModel.fpvOSDState : nil,
+                analogNTSCParameters: analogFPVOSDActive ? viewModel.analogNTSCParameters : nil,
+                digitalVideoParameters: fpvVideoMode == .digital
+                    ? viewModel.digitalVideoParameters
+                    : .clean,
+                fiberVideoParameters: fpvVideoMode == .fiber
+                    ? viewModel.fiberVideoParameters
+                    : .clean,
                 fpvFontPreset: viewModel.fpvFontPreset,
+                osdLayout: viewModel.osdLayout,
+                osdAvailability: viewModel.osdElementAvailability,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },
@@ -57,14 +60,6 @@ struct SceneViewportView: View {
             )
             .blur(radius: payloadOpticsActive ? min(max(payloadOpticsState.blurRadius, 0.0), 8.0) : 0.0)
             .ignoresSafeArea()
-
-            if let videoDegradation {
-                RadioLinkStaticOverlayView(
-                    intensity: videoDegradation.intensity,
-                    mode: videoDegradation.state.mode,
-                    isFrozen: videoDegradation.state.isFrozen
-                )
-            }
 
             if payloadOpticsActive, payloadOpticsState.isAvailable {
                 PayloadOpticsViewportOverlayView(
@@ -192,7 +187,7 @@ struct SceneViewportView: View {
                     .allowsHitTesting(false)
             }
 
-            if viewModel.isSpectatorMode || payloadOpticsActive {
+            if viewModel.isSpectatorMode || payloadOpticsActive || analogFPVOSDActive {
                 EmptyView()
             } else if fpvHUDActive, !analogFPVOSDActive {
                 FPVViewportOverlayView(
@@ -250,12 +245,14 @@ struct SceneViewportView: View {
         }
         .overlay(alignment: .topTrailing) {
             VStack(alignment: .trailing, spacing: 10) {
-                WorldClockChipView(
-                    time: viewModel.worldClockText,
-                    phase: viewModel.worldDayPhase,
-                    timeScale: viewModel.timeScale,
-                    achieved: viewModel.achievedTimeScale
-                )
+                if !fpvHUDActive {
+                    WorldClockChipView(
+                        time: viewModel.worldClockText,
+                        phase: viewModel.worldDayPhase,
+                        timeScale: viewModel.timeScale,
+                        achieved: viewModel.achievedTimeScale
+                    )
+                }
 
                 if !viewModel.isSpectatorMode, viewModel.isCompassVisible, !payloadOpticsActive, !fpvHUDActive {
                     CompassOverlayView(
@@ -886,137 +883,6 @@ private struct FiberOpticTetherStatusHUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(GroundControlPalette.borderStrong, lineWidth: 1)
         )
-    }
-}
-
-/// Deterministic per-frame "tick" generator for the radio-static overlay below — reseeded from a
-/// coarse time bucket (not the shared gameplay RNG) so the noise reads as flickering static at a
-/// fixed rate rather than a smooth animation, without needing to store any state across frames.
-private struct StaticNoiseTickGenerator: RandomNumberGenerator {
-    private var state: UInt64
-
-    init(tick: Int) {
-        let seeded = UInt64(bitPattern: Int64(tick)) &* 2862933555777941757 &+ 3037000493
-        state = seeded == 0 ? 0xDEAD_BEEF : seeded
-    }
-
-    mutating func next() -> UInt64 {
-        state = 2862933555777941757 &* state &+ 3037000493
-        return state
-    }
-}
-
-/// Lightweight analog-snow / digital-macroblock presentation driven by the independent VIDEO
-/// link. Deliberately not a second `SCNTechnique`:
-/// `SCNView.technique` only holds one technique at a time and that slot is already claimed by
-/// `WeatherDepthOfFieldTechnique`, so layering a real shader-based effect on top would require
-/// merging passes into that technique rather than adding an independent one.
-private struct RadioLinkStaticOverlayView: View {
-    let intensity: Double
-    let mode: RFVideoTransmissionMode
-    let isFrozen: Bool
-
-    var body: some View {
-        ZStack {
-            TimelineView(.animation) { timeline in
-                Canvas { context, size in
-                    guard intensity > 0.01 else { return }
-                    let time = timeline.date.timeIntervalSinceReferenceDate
-                    var rng = StaticNoiseTickGenerator(tick: Int(time * 12.0))
-                    if mode == .analog {
-                        drawAnalogNoise(
-                            context: &context,
-                            size: size,
-                            time: time,
-                            rng: &rng
-                        )
-                    } else {
-                        drawDigitalArtifacts(context: &context, size: size, rng: &rng)
-                    }
-                }
-            }
-
-            if isFrozen {
-                Color.black.opacity(0.42)
-                Label("VIDEO LINK FROZEN", systemImage: "snowflake")
-                    .font(.caption.bold().monospaced())
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.72), in: Capsule())
-            }
-        }
-        .allowsHitTesting(false)
-        .ignoresSafeArea()
-    }
-
-    private func drawAnalogNoise(
-        context: inout GraphicsContext,
-        size: CGSize,
-        time: TimeInterval,
-        rng: inout StaticNoiseTickGenerator
-    ) {
-        let flicker = 0.05 + 0.03 * sin(time * 37.0)
-        context.fill(
-            Path(CGRect(origin: .zero, size: size)),
-            with: .color(Color.white.opacity(intensity * flicker))
-        )
-
-        // Re-seeded ~12 times a second so analog snow flickers instead of drifting.
-        let lineCount = Int(6.0 + intensity * 26.0)
-        for _ in 0..<lineCount {
-            let y = CGFloat(Double.random(in: 0...Double(size.height), using: &rng))
-            let lineWidth = CGFloat(Double.random(
-                in: Double(size.width) * 0.05...Double(size.width) * 0.4,
-                using: &rng
-            ))
-            let maximumX = max(0, Double(size.width - lineWidth))
-            let x = CGFloat(Double.random(in: 0...maximumX, using: &rng))
-            let alpha = Double.random(in: 0.06...0.22, using: &rng) * intensity
-            context.fill(
-                Path(CGRect(x: x, y: y, width: lineWidth, height: 1.4)),
-                with: .color(Color.white.opacity(alpha))
-            )
-        }
-
-        if intensity > 0.55, Double.random(in: 0...1, using: &rng) < 0.12 {
-            let bandHeight = CGFloat(Double.random(in: 6...22, using: &rng))
-            let maximumY = max(0, Double(size.height - bandHeight))
-            let y = CGFloat(Double.random(in: 0...maximumY, using: &rng))
-            context.fill(
-                Path(CGRect(x: 0, y: y, width: size.width, height: bandHeight)),
-                with: .color(Color.black.opacity(0.35))
-            )
-        }
-    }
-
-    private func drawDigitalArtifacts(
-        context: inout GraphicsContext,
-        size: CGSize,
-        rng: inout StaticNoiseTickGenerator
-    ) {
-        let blockCount = Int(3.0 + intensity * 32.0)
-        for _ in 0..<blockCount {
-            let blockWidth = CGFloat(Double.random(in: 12...72, using: &rng))
-            let blockHeight = CGFloat(Double.random(in: 8...42, using: &rng))
-            let maximumX = max(0, Double(size.width - blockWidth))
-            let maximumY = max(0, Double(size.height - blockHeight))
-            let x = CGFloat(Double.random(in: 0...maximumX, using: &rng))
-            let y = CGFloat(Double.random(in: 0...maximumY, using: &rng))
-            let tint = Double.random(in: 0...1, using: &rng)
-            let color: Color
-            if tint < 0.33 {
-                color = .cyan
-            } else if tint < 0.66 {
-                color = .pink
-            } else {
-                color = .black
-            }
-            context.fill(
-                Path(CGRect(x: x, y: y, width: blockWidth, height: blockHeight)),
-                with: .color(color.opacity(0.08 + intensity * 0.22))
-            )
-        }
     }
 }
 

@@ -375,7 +375,14 @@ private struct PayloadProximityEffectModel {
 }
 
 private enum SignalLossConfiguration {
-    static let countdownDuration = 8
+    static let fallbackCountdownDuration = 8
+
+    static func countdownDuration(for profileID: String) -> Int {
+        // Matrice 350 RTK User Manual v1.2: Failsafe RTH is enabled after the remote-controller
+        // signal has been lost for more than six seconds. Other aircraft retain the simulator's
+        // conservative legacy grace period until their own primary documentation is authored.
+        profileID == "dji-matrice-350-rtk" ? 6 : fallbackCountdownDuration
+    }
     /// How long the radio link must sit continuously in the nominal zone before
     /// `controlLinkFailsafeLatched` clears — a momentary blip crossing back into range shouldn't
     /// immediately re-authorize arming.
@@ -910,9 +917,37 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var rfSharedChannelStatistics: [RFSharedChannelStatistics] = []
     @Published private(set) var rfVideoPresentationState: RFVideoPresentationState?
     @Published private(set) var fpvOSDState: FPVOSDState = .unavailable
+    /// Render-only projection of the physical VIDEO link. Reading it cannot mutate or feed back
+    /// into RF Core; the view observes `rfLinkEvaluations` and receives a fresh NTSC control set.
+    var analogNTSCParameters: AnalogNTSCParameters {
+        guard let evaluation = rfLinkEvaluations[.video] else { return .clean }
+        return AnalogVideoRFMapper().parameters(for: evaluation)
+    }
+    var digitalVideoParameters: DigitalVideoParameters {
+        guard let state = rfVideoPresentationState, state.mode == .digital else { return .clean }
+        return DigitalVideoRFMapper().parameters(
+            for: state,
+            nominalBitrateBPS: activeVideoNominalBitrateBPS,
+            linkPreset: activeVideoLinkPreset
+        )
+    }
+    var fiberVideoParameters: FiberVideoParameters {
+        guard let state = rfVideoPresentationState, state.mode == .fiber else { return .clean }
+        return FiberVideoRFMapper().parameters(for: state)
+    }
     @Published private(set) var fpvFontPreset: FPVFontPreset = {
         let saved = UserDefaults.standard.string(forKey: "fpvOSD.fontPreset")
         return saved.flatMap(FPVFontPreset.init(rawValue:)) ?? .betaflight
+    }()
+    /// Operator-authored OSD layout. A ground-station preference rather than a property of the
+    /// aircraft: the same pilot keeps their arrangement across builds, while which elements are
+    /// *allowed* on screen still comes from the installed equipment (`osdElementAvailability`).
+    @Published private(set) var osdLayout: OSDLayoutConfiguration = {
+        guard let data = UserDefaults.standard.data(forKey: DroneSimulationViewModel.osdLayoutKey),
+              let decoded = try? JSONDecoder().decode(OSDLayoutConfiguration.self, from: data) else {
+            return .corners
+        }
+        return decoded.normalized()
     }()
     @Published private(set) var rfConfigurationIssues: [RFConfigurationIssue] = []
     @Published private(set) var isTerrainMapVisible: Bool
@@ -1333,8 +1368,9 @@ final class DroneSimulationViewModel: ObservableObject {
         case .signalDegrading:
             intensity = 0.34
         case .boundaryCountdown:
-            let elapsed = Double(SignalLossConfiguration.countdownDuration - max(0, signalCountdownSecondsRemaining))
-            let progress = elapsed / Double(SignalLossConfiguration.countdownDuration)
+            let duration = SignalLossConfiguration.countdownDuration(for: selectedDroneProfile.id)
+            let elapsed = Double(duration - max(0, signalCountdownSecondsRemaining))
+            let progress = elapsed / Double(duration)
             intensity = min(0.62, 0.40 + progress * 0.20)
         case .signalLost, .recoveryPending:
             intensity = 1.0
@@ -1478,10 +1514,92 @@ final class DroneSimulationViewModel: ObservableObject {
             .logicalLinks.video?.videoMode ?? .digital
     }
 
+    var activeVideoNominalBitrateBPS: Double {
+        (rfSystemManager?.configuration ?? resolvedRFConfiguration())
+            .logicalLinks.video?.qualityProfile.nominalBitrateBps ?? 25_000_000
+    }
+
+    var activeVideoLinkPreset: RFVideoLinkPreset {
+        let configuration = rfSystemManager?.configuration ?? resolvedRFConfiguration()
+        let mode = configuration.logicalLinks.video?.videoMode ?? .digital
+        return configuration.logicalLinks.video?.videoLinkPreset
+            ?? .fallback(for: mode)
+    }
+
+    var activeVideoPresentationState: RFVideoPresentationState {
+        if let state = rfVideoPresentationState, state.mode == activeFPVVideoMode {
+            return state
+        }
+        return .clean(
+            mode: activeFPVVideoMode,
+            nominalBitrateBPS: activeVideoNominalBitrateBPS
+        )
+    }
+
     func setFPVFontPreset(_ preset: FPVFontPreset) {
         guard fpvFontPreset != preset else { return }
         fpvFontPreset = preset
         UserDefaults.standard.set(preset.rawValue, forKey: "fpvOSD.fontPreset")
+    }
+
+    static let osdLayoutKey = "fpvOSD.layout"
+
+    /// What the selected aircraft and its radio system can actually feed the OSD. An element the
+    /// hardware cannot supply is never drawn, so the viewfinder describes this build rather than
+    /// a generic one.
+    var osdElementAvailability: OSDElementAvailability {
+        OSDElementAvailability(
+            // Fibre-guided aircraft have no radio link budget at all; RSSI/LQ/SNR would be
+            // decoration. The fibre tether reports its own state through its own HUD.
+            hasRadioLink: activeControlLinkType == .radio,
+            // A workbench build lists its navigation module explicitly. Catalogue aircraft carry
+            // no component list and are all GNSS-equipped airframes, so the element stays
+            // available there instead of being hidden on absent data.
+            hasSatelliteNavigation: selectedDroneProfile.workbenchBuild
+                .map { $0.gpsSpecID != nil } ?? true
+        )
+    }
+
+    func setOSDLayout(_ layout: OSDLayoutConfiguration) {
+        let normalized = layout.normalized()
+        guard osdLayout != normalized else { return }
+        osdLayout = normalized
+        persistOSDLayout()
+    }
+
+    func applyOSDPreset(_ preset: OSDLayoutPreset) {
+        setOSDLayout(preset.configuration)
+    }
+
+    func setOSDElementEnabled(_ isEnabled: Bool, for element: OSDElement) {
+        var layout = osdLayout
+        layout.setEnabled(isEnabled, for: element)
+        setOSDLayout(layout)
+    }
+
+    func moveOSDElement(_ element: OSDElement, toX x: Int, y: Int) {
+        var layout = osdLayout
+        layout.move(element, toX: x, y: y)
+        setOSDLayout(layout)
+    }
+
+    func setOSDCrosshairStyle(_ style: OSDCrosshairStyle) {
+        var layout = osdLayout
+        layout.crosshairStyle = style
+        setOSDLayout(layout)
+    }
+
+    func setOSDElementRightAligned(_ rightAligned: Bool, for element: OSDElement) {
+        var layout = osdLayout
+        var placement = layout.placement(for: element)
+        placement.rightAligned = rightAligned
+        layout.setPlacement(placement, for: element)
+        setOSDLayout(layout)
+    }
+
+    private func persistOSDLayout() {
+        guard let data = try? JSONEncoder().encode(osdLayout) else { return }
+        UserDefaults.standard.set(data, forKey: Self.osdLayoutKey)
     }
 
     private func resolvedRFConfiguration() -> RFSystemConfiguration {
@@ -1523,6 +1641,15 @@ final class DroneSimulationViewModel: ObservableObject {
     /// with the aircraft, and without this the Doppler shift of the thing it is chasing would
     /// be computed as if the operator stood still.
     private var previousListenerPosition: SIMD3<Float>?
+    /// Set when the camera — and with it the listening point — jumps somewhere else. The next
+    /// audio tick re-anchors the finite difference on the new point instead of differentiating
+    /// the jump. See `advanceVehicleAudio`.
+    private var listenerDidTeleport = false
+    /// Time constant for the listener's velocity. The listening point is a camera, and a camera
+    /// can legitimately change velocity in one step (a parked free camera to an aircraft doing
+    /// 30 m/s). Doppler follows that change over a few frames rather than in one, so the switch
+    /// is a slide rather than a click.
+    private let listenerVelocitySmoothingSeconds: Float = 0.12
     /// The scrape loop, while something is sliding.
     private var scrapeLoopHandle: AudioLoopHandle?
     /// How long since a sliding contact last reported. The contact solver resolves one
@@ -1668,6 +1795,62 @@ final class DroneSimulationViewModel: ObservableObject {
     private let rfSharedChannelScheduler = RFSharedChannelScheduler()
     private let rfAnalogVideoQualityModel = AnalogVideoQualityModel()
     private var fpvOSDStateResolver = FPVOSDStateResolver()
+    /// Flight time and path length for the OSD, integrated from real motion while armed rather
+    /// than read off the wall clock — the world clock runs at up to 64x and would report a
+    /// four-minute flight as an hour.
+    private var fpvFlightLog = FPVFlightLog()
+
+    private struct FPVFlightLog {
+        var elapsedSeconds: Double = 0
+        var distanceMeters: Double = 0
+        private var lastPosition: SIMD3<Float>?
+
+        mutating func advance(position: SIMD3<Float>, deltaTime: Float, isArmed: Bool) {
+            guard isArmed else {
+                // Disarming ends the leg but keeps the totals on screen; arming again resets.
+                lastPosition = nil
+                return
+            }
+            guard deltaTime.isFinite, deltaTime > 0 else { return }
+            elapsedSeconds += Double(deltaTime)
+            if let lastPosition {
+                distanceMeters += Double(simd_distance(position, lastPosition))
+            }
+            self.lastPosition = position
+        }
+
+        mutating func reset() {
+            self = FPVFlightLog()
+        }
+    }
+
+    private var fpvFlightLogWasArmed = false
+
+    /// Where home sits relative to the nose, clockwise, for the OSD's home arrow. Uses the same
+    /// `atan2(-dx, dz)` convention as `TargetMarkerState.bearingRadians`, so the arrow agrees
+    /// with the tactical map rather than being off by a quadrant.
+    private func relativeHomeBearingDegrees() -> Float {
+        let delta = homePosition - state.position
+        let planar = SIMD2<Float>(delta.x, delta.z)
+        guard simd_length_squared(planar) > 0.0001 else { return 0 }
+        let bearing = normalizedCompassDegrees(atan2(-planar.x, planar.y) * 180.0 / .pi)
+        let heading = bodyHeadingDegrees(fromYawRadians: state.orientation.z)
+        return normalizedCompassDegrees(bearing - heading)
+    }
+
+    private func advanceFPVFlightLog(deltaTime: Float) {
+        // Arming starts a new leg; the previous totals stay on screen until then, the way an OSD
+        // timer holds the last flight's value on the bench.
+        if isArmed, !fpvFlightLogWasArmed {
+            fpvFlightLog.reset()
+        }
+        fpvFlightLogWasArmed = isArmed
+        fpvFlightLog.advance(
+            position: state.position,
+            deltaTime: deltaTime,
+            isArmed: isArmed
+        )
+    }
     /// Now, on the clock the *aircraft* lives on.
     ///
     /// Anything whose duration is really a distance — how far the aircraft flies while a hold
@@ -2852,7 +3035,9 @@ final class DroneSimulationViewModel: ObservableObject {
         self.payloadStatusMessageKey = initialPayloadStatusMessageKey
         self.lastPayloadImpact = nil
         self.signalState = .normal
-        self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+        self.signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration(
+            for: selectedProfile.id
+        )
         self.isTerrainMapVisible = false
         self.isMissionMapVisible = false
         self.missionMapMode = .navigation
@@ -8145,6 +8330,7 @@ final class DroneSimulationViewModel: ObservableObject {
         handleModeTransitions()
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
         updateRFSystemRuntime(deltaTime: dt)
+        advanceFPVFlightLog(deltaTime: dt)
         updateSignalLossSequence(deltaTime: dt)
         updateFiberOpticTether(deltaTime: dt)
         updateControlLinkFailsafeSequence(deltaTime: dt)
@@ -9643,6 +9829,9 @@ final class DroneSimulationViewModel: ObservableObject {
         remoteDamageCursors.removeAll(keepingCapacity: true)
         vehicleAudioRuntime.reset()
         previousListenerPosition = nil
+        // A full reset really does start the listener from rest, so a pending teleport from
+        // before it must not carry a stale velocity across.
+        listenerDidTeleport = false
     }
 
     /// The aircraft's own continuous sound.
@@ -9654,13 +9843,23 @@ final class DroneSimulationViewModel: ObservableObject {
     /// sign, and both can be caught in a headless probe rather than by listening.
     private func advanceVehicleAudio(deltaTime: Float) {
         let listenerPosition = simulationAudio.currentListenerPosition
-        let listenerVelocity: SIMD3<Float>
-        if let previous = previousListenerPosition, deltaTime > 0.0001 {
-            listenerVelocity = (listenerPosition - previous) / deltaTime
+        let measuredListenerVelocity: SIMD3<Float>
+        if listenerDidTeleport {
+            // The camera moved the listening point without the operator travelling: re-anchor on
+            // where it landed and carry the velocity across the cut untouched.
+            measuredListenerVelocity = currentListenerVelocity
+            listenerDidTeleport = false
+        } else if let previous = previousListenerPosition, deltaTime > 0.0001 {
+            measuredListenerVelocity = (listenerPosition - previous) / deltaTime
         } else {
-            listenerVelocity = .zero
+            measuredListenerVelocity = .zero
         }
         previousListenerPosition = listenerPosition
+        let velocityBlend = deltaTime > 0.0001
+            ? 1.0 - exp(-deltaTime / listenerVelocitySmoothingSeconds)
+            : 1.0
+        let listenerVelocity = currentListenerVelocity
+            + (measuredListenerVelocity - currentListenerVelocity) * velocityBlend
         // Held for the rest of the tick. The carrier and the other aircraft need it too, and
         // they run *after* `previousListenerPosition` has been advanced — recomputing it there
         // subtracted the current position from itself and produced exactly zero, so a carrier
@@ -11346,6 +11545,16 @@ final class DroneSimulationViewModel: ObservableObject {
     private func syncCameraSystem(from previousMode: CameraMode? = nil, resetOrientation: Bool = false) {
         if let previousMode {
             sceneController.syncCameraTransition(from: previousMode, to: cameraConfiguration.mode)
+            if previousMode != cameraConfiguration.mode {
+                // A camera change moves the listening point instantly. That is a teleport, not
+                // motion: differentiating it produced a one-frame Doppler ratio large enough to
+                // tear the motor loops after pressing 4. What has to be skipped is the jump, not
+                // the effect — zeroing the velocity here also silenced the Doppler of the carrier
+                // and of every other aircraft, which are genuinely moving relative to the
+                // operator. The new listening point is only known once the camera has been
+                // advanced, so the re-anchor happens on the next audio tick.
+                listenerDidTeleport = true
+            }
         }
 
         if resetOrientation {
@@ -28060,7 +28269,7 @@ final class DroneSimulationViewModel: ObservableObject {
         var sharedChannelStatistics: [RFSharedChannelStatistics] = []
         let qos = manager.configuration.qos ?? .migrationDefault
         let linksByTransmitter = Dictionary(
-            grouping: manager.configuration.logicalLinks.all,
+            grouping: manager.configuration.logicalLinks.all.filter(\.usesRFPropagation),
             by: \.transmitterDeviceID
         )
         for (transmitterDeviceID, links) in linksByTransmitter {
@@ -28090,35 +28299,89 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         rfPacketDeliveryStates = packetStates
         rfSharedChannelStatistics = sharedChannelStatistics.sorted { $0.id < $1.id }
-        if let videoEvaluation = evaluations[.video],
-           let videoLink = manager.configuration.logicalLinks.video {
+        if let videoLink = manager.configuration.logicalLinks.video {
             let mode = videoLink.videoMode ?? .digital
             switch mode {
             case .analog:
-                rfVideoPresentationState = rfAnalogVideoQualityModel.presentationState(
-                    for: videoEvaluation
-                )
+                if let videoEvaluation = evaluations[.video] {
+                    rfVideoPresentationState = rfAnalogVideoQualityModel.presentationState(
+                        for: videoEvaluation
+                    )
+                } else {
+                    rfVideoPresentationState = .unavailable(mode: .analog)
+                }
             case .digital:
-                let delivery = packetStates[.video]
-                let queueFraction = delivery.map {
-                    Double($0.queueDepth) / Double(max(1, $0.queueCapacity))
-                } ?? 0
-                let artifacts = min(
-                    1,
-                    max(videoEvaluation.quality.packetErrorRate, queueFraction * 0.7)
-                )
-                rfVideoPresentationState = RFVideoPresentationState(
-                    mode: .digital,
-                    health: videoEvaluation.quality.health,
-                    analogNoiseIntensity: 0,
-                    digitalArtifactIntensity: artifacts,
-                    isFrozen: videoEvaluation.quality.health == .lost
-                        || (delivery?.secondsSinceLastDelivery ?? .infinity) > 0.35,
-                    effectiveBitrateBPS: delivery?.effectiveThroughputBPS
-                        ?? videoEvaluation.quality.effectiveBitrateBps,
-                    latencyMS: videoEvaluation.quality.latencyMS
-                        + (delivery?.meanQueueDelaySeconds ?? 0) * 1_000
-                )
+                if let videoEvaluation = evaluations[.video] {
+                    let delivery = packetStates[.video]
+                    let queueFraction = delivery.map {
+                        Double($0.queueDepth) / Double(max(1, $0.queueCapacity))
+                    } ?? 0
+                    let deliveryLoss = delivery?.smoothedPacketLoss ?? 0
+                    let artifacts = min(
+                        1,
+                        max(
+                            videoEvaluation.quality.packetErrorRate,
+                            deliveryLoss,
+                            queueFraction * 0.7
+                        )
+                    )
+                    // `RFPacketDeliveryState.effectiveThroughputBPS` measures only the compact
+                    // simulation probe traffic (60 × 1200-byte packets), not the encoded video
+                    // stream. Comparing that ~0.6 Mbit/s counter to a 25 Mbit/s codec target made
+                    // a perfect digital link permanently look bandwidth-starved. RF Core's link
+                    // quality owns the available video bitrate; delivery/queue loss reduces it.
+                    let deliveryEfficiency = max(
+                        0,
+                        1 - deliveryLoss - queueFraction * 0.65
+                    )
+                    let effectiveVideoBitrate = videoEvaluation.quality.effectiveBitrateBps
+                        * deliveryEfficiency
+                    rfVideoPresentationState = RFVideoPresentationState(
+                        mode: .digital,
+                        health: videoEvaluation.quality.health,
+                        analogNoiseIntensity: 0,
+                        digitalArtifactIntensity: artifacts,
+                        isFrozen: videoEvaluation.quality.health == .lost
+                            || (delivery?.secondsSinceLastDelivery ?? .infinity)
+                                > (videoLink.videoLinkPreset ?? .genericDigital)
+                                    .freezeAfterNoDeliverySeconds,
+                        effectiveBitrateBPS: effectiveVideoBitrate,
+                        latencyMS: videoEvaluation.quality.latencyMS
+                            + (delivery?.meanQueueDelaySeconds ?? 0) * 1_000
+                    )
+                } else {
+                    rfVideoPresentationState = .unavailable(mode: .digital)
+                }
+            case .fiber:
+                let nominalBitrate = videoLink.qualityProfile.nominalBitrateBps
+                let baseLatency = videoLink.qualityProfile.baseLatencyMS
+                let linkStatus: FiberLinkStatus = isFiberSpoolAttached
+                    ? fiberLinkState.status
+                    : .connected
+                switch linkStatus {
+                case .connected:
+                    rfVideoPresentationState = RFVideoPresentationState(
+                        mode: .fiber,
+                        health: .healthy,
+                        analogNoiseIntensity: 0,
+                        digitalArtifactIntensity: 0,
+                        isFrozen: false,
+                        effectiveBitrateBPS: nominalBitrate,
+                        latencyMS: baseLatency
+                    )
+                case .degraded:
+                    rfVideoPresentationState = RFVideoPresentationState(
+                        mode: .fiber,
+                        health: .degraded,
+                        analogNoiseIntensity: 0,
+                        digitalArtifactIntensity: 0,
+                        isFrozen: false,
+                        effectiveBitrateBPS: nominalBitrate * 0.98,
+                        latencyMS: baseLatency + 1
+                    )
+                case .broken:
+                    rfVideoPresentationState = .unavailable(mode: .fiber)
+                }
             }
         } else {
             rfVideoPresentationState = nil
@@ -28175,7 +28438,13 @@ final class DroneSimulationViewModel: ObservableObject {
             armed: isArmed,
             flightMode: fpvMode,
             rollDegrees: telemetry.roll,
-            pitchDegrees: telemetry.pitch
+            pitchDegrees: telemetry.pitch,
+            headingDegrees: Double(bodyHeadingDegrees(fromYawRadians: state.orientation.z)),
+            throttlePercent: telemetry.throttle * 100.0,
+            distanceToHome: Double(simd_distance(state.position, homePosition)),
+            homeBearingDegrees: Double(relativeHomeBearingDegrees()),
+            flightDistance: fpvFlightLog.distanceMeters,
+            flightSeconds: fpvFlightLog.elapsedSeconds
         )
 
         let radio: FPVRadioLinkSample?
@@ -28318,7 +28587,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 signalState = .signalDegrading
             case .lost:
                 signalState = .boundaryCountdown
-                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration(
+                    for: selectedDroneProfile.id
+                )
                 signalLossSecondAccumulator = 0.0
             case .nominal:
                 break
@@ -28331,12 +28602,16 @@ final class DroneSimulationViewModel: ObservableObject {
                 return
             case .warning:
                 signalState = .outOfBoundsWarning
-                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration(
+                    for: selectedDroneProfile.id
+                )
                 signalLossSecondAccumulator = 0.0
                 return
             case .critical:
                 signalState = .signalDegrading
-                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+                signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration(
+                    for: selectedDroneProfile.id
+                )
                 signalLossSecondAccumulator = 0.0
                 return
             case .lost:
@@ -28401,7 +28676,9 @@ final class DroneSimulationViewModel: ObservableObject {
         let hadBlockingState = signalState.isInteractionBlocking
         signalState = .normal
         signalLossCause = nil
-        signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration
+        signalCountdownSecondsRemaining = SignalLossConfiguration.countdownDuration(
+            for: selectedDroneProfile.id
+        )
         signalLossSecondAccumulator = 0.0
 
         if restoringInputMode && hadBlockingState {
@@ -28749,6 +29026,18 @@ final class DroneSimulationViewModel: ObservableObject {
                 setFlightMode(.returnHome, reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost")
                 controlLinkFailsafeStage = .returnedHome
             }
+            return
+        }
+
+        if selectedDroneProfile.operationalProfile.linkLossPolicy == .returnHome {
+            // The control link—not a video decoder freeze—is authoritative for RTH. Aircraft
+            // equipped with a return-home policy enter the existing autopilot immediately even
+            // outside a mission; video-only packet loss never calls this function.
+            setFlightMode(
+                .returnHome,
+                reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost"
+            )
+            controlLinkFailsafeStage = .returnedHome
             return
         }
 

@@ -32,6 +32,102 @@ enum LogicalLinkKind: String, Codable, CaseIterable, Hashable, Sendable {
 enum RFVideoTransmissionMode: String, Codable, CaseIterable, Hashable, Sendable {
     case analog
     case digital
+    /// A physically tethered transport (normally fiber, but also a vendor-integrated data
+    /// tether). It bypasses RF picture damage and only exhibits delivery stalls or a hard loss.
+    case fiber
+}
+
+/// Installed video-link/decoder family. `videoMode` selects the visual language (analog,
+/// packet video or tether); this preset describes how a particular link trades detail and
+/// cadence for continuity inside that language. It deliberately lives on the VIDEO link rather
+/// than on the camera or renderer.
+enum RFVideoLinkPreset: String, Codable, CaseIterable, Hashable, Sendable {
+    case analogNTSC
+    case djiO3Enterprise
+    case djiO4Enterprise
+    case djiO4Consumer
+    case djiLegacy
+    case skydioEnterprise
+    case publicSafetyAdaptive
+    case industrialAdaptive
+    case bvlosAdaptive
+    case tacticalAdaptive
+    case researchDigital
+    case genericDigital
+    case tetheredFiber
+
+    var nominalFrameRateFPS: Double {
+        switch self {
+        case .analogNTSC: return 29.97
+        case .djiO3Enterprise, .djiO4Enterprise, .djiLegacy,
+             .publicSafetyAdaptive, .industrialAdaptive, .bvlosAdaptive,
+             .tacticalAdaptive:
+            return 30
+        case .djiO4Consumer, .skydioEnterprise, .researchDigital,
+             .genericDigital, .tetheredFiber:
+            return 60
+        }
+    }
+
+    var minimumAdaptiveFrameRateFPS: Double {
+        switch self {
+        case .analogNTSC: return 29.97
+        case .djiO3Enterprise, .publicSafetyAdaptive, .industrialAdaptive: return 15
+        case .djiO4Enterprise: return 18
+        case .djiO4Consumer, .skydioEnterprise: return 24
+        case .djiLegacy: return 10
+        case .bvlosAdaptive, .tacticalAdaptive: return 12
+        case .researchDigital, .genericDigital: return 15
+        case .tetheredFiber: return 30
+        }
+    }
+
+    /// Higher values defer visible packet damage in favor of detail/cadence adaptation.
+    var continuityBias: Double {
+        switch self {
+        case .djiO3Enterprise, .djiO4Enterprise, .publicSafetyAdaptive,
+             .industrialAdaptive, .bvlosAdaptive:
+            return 0.90
+        case .djiO4Consumer, .skydioEnterprise, .tacticalAdaptive: return 0.78
+        case .djiLegacy: return 0.58
+        case .researchDigital, .genericDigital: return 0.65
+        case .analogNTSC, .tetheredFiber: return 1
+        }
+    }
+
+    var minimumDetailScale: Double {
+        switch self {
+        case .djiO3Enterprise, .djiO4Enterprise, .publicSafetyAdaptive,
+             .industrialAdaptive, .bvlosAdaptive:
+            return 0.42
+        case .djiO4Consumer, .skydioEnterprise: return 0.50
+        case .djiLegacy: return 0.30
+        case .tacticalAdaptive: return 0.36
+        case .researchDigital, .genericDigital: return 0.32
+        case .analogNTSC, .tetheredFiber: return 1
+        }
+    }
+
+    var freezeAfterNoDeliverySeconds: Double {
+        switch self {
+        case .djiO3Enterprise, .djiO4Enterprise, .publicSafetyAdaptive: return 0.75
+        case .industrialAdaptive: return 0.65
+        case .djiO4Consumer, .skydioEnterprise: return 0.55
+        case .djiLegacy: return 0.40
+        case .bvlosAdaptive, .tacticalAdaptive: return 1.0
+        case .researchDigital, .genericDigital: return 0.45
+        case .analogNTSC: return .infinity
+        case .tetheredFiber: return 0.85
+        }
+    }
+
+    static func fallback(for mode: RFVideoTransmissionMode) -> RFVideoLinkPreset {
+        switch mode {
+        case .analog: return .analogNTSC
+        case .digital: return .genericDigital
+        case .fiber: return .tetheredFiber
+        }
+    }
 }
 
 enum RFQoSSchema {
@@ -276,6 +372,15 @@ struct RFLinkConfiguration: Codable, Hashable, Identifiable, Sendable {
     var qualityProfile: RFLinkQualityProfile
     /// Only meaningful for `.video`; nil decodes legacy configurations as digital video.
     var videoMode: RFVideoTransmissionMode? = nil
+    /// Optional so authored RF schema-v1 files remain decodable. New compatibility profiles set
+    /// this explicitly; legacy files receive a conservative mode-specific fallback at runtime.
+    var videoLinkPreset: RFVideoLinkPreset? = nil
+
+    /// Tethered video remains a logical delivery link, but it does not radiate, consume RF
+    /// channel capacity or participate in propagation/interference calculations.
+    var usesRFPropagation: Bool {
+        !(kind == .video && videoMode == .fiber)
+    }
 }
 
 struct RFLogicalLinksConfiguration: Codable, Hashable, Sendable {
@@ -403,4 +508,31 @@ struct RFVideoPresentationState: Equatable, Sendable {
         effectiveBitrateBPS: 0,
         latencyMS: 0
     )
+
+    static func clean(
+        mode: RFVideoTransmissionMode,
+        nominalBitrateBPS: Double
+    ) -> RFVideoPresentationState {
+        RFVideoPresentationState(
+            mode: mode,
+            health: .healthy,
+            analogNoiseIntensity: 0,
+            digitalArtifactIntensity: 0,
+            isFrozen: false,
+            effectiveBitrateBPS: nominalBitrateBPS,
+            latencyMS: 0
+        )
+    }
+
+    static func unavailable(mode: RFVideoTransmissionMode) -> RFVideoPresentationState {
+        RFVideoPresentationState(
+            mode: mode,
+            health: .lost,
+            analogNoiseIntensity: mode == .analog ? 1 : 0,
+            digitalArtifactIntensity: mode == .digital ? 1 : 0,
+            isFrozen: mode != .analog,
+            effectiveBitrateBPS: 0,
+            latencyMS: 0
+        )
+    }
 }

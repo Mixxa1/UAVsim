@@ -11,18 +11,22 @@ enum RFCompatibilityPreset {
         return make(
             receiver: build.spec(for: .receiver),
             hasVideo: camera != nil,
-            videoMode: videoMode
+            videoMode: videoMode,
+            videoLinkPreset: .fallback(for: videoMode)
         )
     }
 
     static func make(for profile: DroneModelProfile) -> RFSystemConfiguration {
         if let build = profile.workbenchBuild {
-            return make(for: build)
+            // A Workbench build already owns an installed RF system. Re-deriving it here from a
+            // camera ID would let the camera silently override an explicitly selected VIDEO mode.
+            return build.rfSystem
         }
         return make(
             receiver: nil,
             hasVideo: true,
-            videoMode: profile.cameraLayoutKey == "drone.camera.fpv" ? .analog : .digital,
+            videoMode: profile.defaultVideoMode,
+            videoLinkPreset: profile.defaultVideoLinkPreset,
             fallbackControlFrequencyHz: 2_400_000_000,
             fallbackLegacyRangeM: Double(profile.operationalProfile.nominalLinkRangeM)
         )
@@ -32,9 +36,11 @@ enum RFCompatibilityPreset {
         receiver: WorkbenchComponentSpec?,
         hasVideo: Bool,
         videoMode: RFVideoTransmissionMode = .digital,
+        videoLinkPreset: RFVideoLinkPreset? = nil,
         fallbackControlFrequencyHz: Double = 2_400_000_000,
         fallbackLegacyRangeM: Double = 12_000
     ) -> RFSystemConfiguration {
+        let resolvedVideoLinkPreset = videoLinkPreset ?? .fallback(for: videoMode)
         let receiverFrequencyMHz = receiver?.param(
             WorkbenchComponentSpec.ParamKey.receiverFrequencyMHz
         ) ?? fallbackControlFrequencyHz / 1_000_000
@@ -249,9 +255,12 @@ enum RFCompatibilityPreset {
 
         var videoLink: RFLinkConfiguration?
         if hasVideo {
-            let videoModulation = videoMode == .analog
-                ? "compat-analog-video"
-                : "compat-digital-video"
+            let videoModulation: String
+            switch videoMode {
+            case .analog: videoModulation = "compat-analog-video"
+            case .digital: videoModulation = "compat-digital-video"
+            case .fiber: videoModulation = "compat-fiber-video"
+            }
             let videoFrequencyHz = 5_800_000_000.0
             let videoBandwidthHz = 20_000_000.0
             let videoAir = device(
@@ -304,10 +313,15 @@ enum RFCompatibilityPreset {
                     modulationProfile: videoModulation,
                     requiredRxLevelDBm: -90,
                     requiredSINRDB: videoMode == .analog ? 4 : 10,
-                    nominalBitrateBps: videoMode == .analog ? 8_000_000 : 25_000_000,
-                    baseLatencyMS: videoMode == .analog ? 5 : 28
+                    nominalBitrateBps: videoMode == .analog
+                        ? 8_000_000
+                        : (videoMode == .fiber ? 100_000_000 : 25_000_000),
+                    baseLatencyMS: videoMode == .analog
+                        ? 5
+                        : (videoMode == .fiber ? 2 : 28)
                 ),
-                videoMode: videoMode
+                videoMode: videoMode,
+                videoLinkPreset: resolvedVideoLinkPreset
             )
         }
 

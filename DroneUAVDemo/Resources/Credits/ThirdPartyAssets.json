@@ -611,7 +611,7 @@
       "sourceURL": "https://github.com/betaflight/betaflight-configurator/blob/master/resources/osd/2/betaflight.mcm",
       "licenseName": "GNU General Public License v3.0",
       "licenseURL": "https://www.gnu.org/licenses/gpl-3.0.html",
-      "changes": "Bundled in its original MCM representation and decoded at runtime into a nearest-filtered SpriteKit texture atlas for the analog FPV OSD."
+      "changes": "Bundled in its original MCM representation and decoded at runtime into a nearest-filtered texture atlas composed into the live analog FPV framebuffer."
     },
     {
       "id": "clarity_max7456_osd_font",
@@ -621,6 +621,24 @@
       "licenseName": "GNU General Public License v3.0",
       "licenseURL": "https://www.gnu.org/licenses/gpl-3.0.html",
       "changes": "Bundled in its original MCM representation as the alternate runtime-selectable analog FPV OSD font preset."
+    },
+    {
+      "id": "axis_clean_max7456_osd_fonts",
+      "title": "Axisfont and Cleanfont MAX7456 OSD fonts",
+      "author": "treeoftriangles",
+      "sourceURL": "https://github.com/treeoftriangles/custom-Betaflight-fonts",
+      "licenseName": "GNU General Public License v3.0",
+      "licenseURL": "https://github.com/treeoftriangles/custom-Betaflight-fonts/blob/main/LICENSE",
+      "changes": "Bundled in their original MCM representation as runtime-selectable analog FPV OSD font presets; semantic Betaflight glyph slots are preserved."
+    },
+    {
+      "id": "analog_ntsc_kdkd",
+      "title": "Analog-NTSC",
+      "author": "Kevin Day",
+      "sourceURL": "https://github.com/kdkd/Analog-NTSC",
+      "licenseName": "BSD 2-Clause License",
+      "licenseURL": "https://github.com/kdkd/Analog-NTSC/blob/master/LICENSE.txt",
+      "changes": "Vendored the upstream C++ RGB/YIQ composite-signal processor and connected its noise, multipath, burst and sync controls to UAVsim RF state through an Objective-C++ bridge."
     }
   ]
 }

@@ -522,6 +522,11 @@
 "camera.fpv.osd_font.hint" = "Switches the live MAX7456 character atlas; it does not replace the OSD with a picture.";
 "camera.fpv.osd_font.betaflight" = "Betaflight";
 "camera.fpv.osd_font.clarity" = "Clarity";
+"camera.fpv.osd_font.mainframe" = "Mainframe";
+"camera.fpv.osd_font.axisfont" = "Axis";
+"camera.fpv.osd_font.cleanfont" = "Clean";
+"camera.fpv.osd_font.impact" = "Impact";
+"camera.fpv.osd_font.xander_full_v3" = "Xander Full v3";
 
 "keybind.section.title" = "Key bindings";
 "keybind.open" = "Bindings";
@@ -3195,3 +3200,60 @@
 "race.aperture.window_high_side" = "Upper side window";
 "race.aperture.lower_left" = "Lower left";
 "race.aperture.lower_right" = "Lower right";
+
+"camera.fpv.osd_editor" = "OSD editor…";
+
+"osd.editor.title" = "FPV OSD editor";
+"osd.editor.subtitle" = "Font, elements and their place on the 30x16 character grid";
+"osd.editor.done" = "Done";
+"osd.editor.section.font" = "Font";
+"osd.editor.section.grid" = "Grid";
+"osd.editor.section.presets" = "Presets";
+"osd.editor.section.elements" = "Elements";
+"osd.editor.grid_hint" = "Drag an element to move it. The preview shows sample values with a degraded link, so the warnings are visible while you place them.";
+"osd.editor.no_selection" = "Select an element on the grid to move or hide it.";
+"osd.editor.right_aligned" = "Right aligned";
+"osd.editor.hide_element" = "Hide";
+"osd.editor.font_loading" = "Loading…";
+"osd.editor.font_failed" = "Font failed to load";
+"osd.editor.font_missing_glyphs" = "This font has no glyph for this element at all.";
+
+"osd.group.power" = "Power";
+"osd.group.link" = "Link";
+"osd.group.navigation" = "Navigation";
+"osd.group.flight" = "Flight";
+
+"osd.element.batteryVoltage" = "Battery voltage";
+"osd.element.batteryCapacity" = "Remaining capacity";
+"osd.element.linkQuality" = "Link quality (LQ)";
+"osd.element.rssi" = "RSSI";
+"osd.element.snr" = "SNR";
+"osd.element.altitude" = "Altitude";
+"osd.element.speed" = "Speed";
+"osd.element.satellites" = "Satellites";
+"osd.element.flightMode" = "Arm state and flight mode";
+"osd.element.artificialHorizon" = "Artificial horizon";
+"osd.element.aircraftReference" = "Aircraft reference";
+"osd.element.linkWarning" = "Link warning";
+"osd.element.staleWarning" = "Stale data warning";
+
+"osd.preset.corners" = "Corners";
+"osd.preset.classic" = "Classic";
+"osd.preset.minimal" = "Minimal";
+"osd.preset.racing" = "Racing";
+
+"osd.requirement.radio_link" = "No radio link on this aircraft — control runs over fibre.";
+"osd.requirement.satellite_navigation" = "No GNSS module in this build.";
+
+"osd.element.artificialHorizonSidebars" = "Horizon sidebars";
+"osd.element.compassRibbon" = "Compass ribbon";
+"osd.element.heading" = "Heading";
+"osd.element.throttle" = "Throttle";
+"osd.element.distanceToHome" = "Distance to home";
+"osd.element.flightDistance" = "Distance flown";
+"osd.element.flightTimer" = "Flight timer";
+
+"osd.editor.section.crosshair" = "Crosshair";
+"osd.editor.crosshair_hint" = "Fonts without dedicated wing artwork draw both styles the same way.";
+"osd.crosshair.standard" = "Standard";
+"osd.crosshair.aircraft" = "Aircraft";

@@ -1757,9 +1757,179 @@ enum UAVReferenceCatalog {
         )
     ]
 
-    static let allProfiles = realProfiles
     static let defaultProfileID = "dji-matrice-350-rtk"
     static let abstractProfileID = "abstract-uav"
+
+    private static let analogVideoProfileIDs: Set<String> = [
+        "fpv-tiny-whoop-65",
+        "fpv-micro-racer-25",
+        "fpv-racer-5",
+        "fpv-spec-5",
+        "fpv-long-range-7",
+        "fpv-open-class",
+        "fpv-cinewhoop-3"
+    ]
+
+    private static let tetheredVideoProfileIDs: Set<String> = [
+        "fotokite-sigma"
+    ]
+
+    /// Explicit rather than a default branch: adding a built-in aircraft requires a conscious
+    /// video-link decision instead of accidentally inheriting an analog or digital visual style.
+    private static let digitalVideoProfileIDs: Set<String> = [
+        "dji-matrice-350-rtk",
+        "dji-flycart-30",
+        "dji-mavic-3t",
+        "dji-matrice-4t",
+        "dji-matrice-30t",
+        "dji-matrice-400",
+        "everdrone-first-on-scene",
+        "zipline-platform-1",
+        "wingcopter-198",
+        "matternet-m2",
+        "skydio-x10",
+        "dji-matrice-4td-dock-3",
+        "brinc-lemur-2",
+        "dji-mavic-4-pro",
+        "dji-neo",
+        "dji-phantom-3-standard",
+        "freefly-alta-x",
+        "griff-30",
+        "griff-60",
+        "wildfire-ember-40",
+        "pyrolift-talon-60",
+        "colossus-ca8-vulcan",
+        "colossus-ca12-atlas",
+        "agrowing-titan-at40",
+        "avidrone-490tl",
+        "wingtraone-gen-ii",
+        "quantum-systems-trinity-pro",
+        "mq-9b-skyguardian",
+        "hermes-900",
+        "ft5-los",
+        "sensefly-ebee-tac",
+        "rq-21-integrator",
+        "aerosonde-mk-4-7",
+        "rq-7b-shadow",
+        "mq-9a-reaper",
+        "iai-harpy",
+        "iai-harop",
+        "iai-harpy-ng",
+        "epfl-delta-wing-uav",
+        "ncstate-bwb-delta",
+        "hesa-karrar",
+        "ryan-bqm-34f-firebee-ii",
+        "northrop-aqm-35a",
+        "northrop-aqm-35b",
+        "rockwell-himat",
+        "hermeus-quarterhorse-mk21",
+        "north-american-x-10"
+    ]
+
+    private static let auditedVideoProfileIDs = analogVideoProfileIDs
+        .union(tetheredVideoProfileIDs)
+        .union(digitalVideoProfileIDs)
+
+    static let allProfiles: [UAVProfile] = {
+        #if DEBUG
+        let catalogIDs = Set(realProfiles.map(\.id))
+        assert(
+            catalogIDs == auditedVideoProfileIDs,
+            "Every built-in UAV must have an explicit installed video-link classification."
+        )
+        for profileID in catalogIDs {
+            _ = defaultVideoLinkPreset(for: profileID)
+        }
+        #endif
+        return realProfiles
+    }()
+
+    /// Default *installed video-link equipment* used when a built-in aircraft is converted into
+    /// its compatibility RF configuration. This is not consulted by the renderer: once the RF
+    /// configuration exists, `logicalLinks.video.videoMode` is the sole runtime authority.
+    ///
+    /// The catalogue audit is intentionally conservative: the seven generic racing-class builds
+    /// explicitly carry a representative 5.8 GHz analog VTX, Fotokite uses its physical tether,
+    /// and every other currently catalogued profile has an explicitly audited digital default.
+    /// Authored Workbench RF configurations can replace any of these installed defaults.
+    static func defaultVideoMode(for profileID: String) -> RFVideoTransmissionMode {
+        if analogVideoProfileIDs.contains(profileID) {
+            return .analog
+        }
+        if tetheredVideoProfileIDs.contains(profileID) {
+            return .fiber
+        }
+        if digitalVideoProfileIDs.contains(profileID) || profileID == abstractProfileID {
+            return .digital
+        }
+        assertionFailure("Unaudited video-link equipment for UAV profile: \(profileID)")
+        return .digital
+    }
+
+    /// Per-aircraft installed decoder/link behavior. Every catalogue id is deliberately named in
+    /// this switch: adding an aircraft without deciding how its real video delivery behaves is a
+    /// debug-time failure instead of silently inheriting the look of another UAV.
+    static func defaultVideoLinkPreset(for profileID: String) -> RFVideoLinkPreset {
+        switch profileID {
+        case "fpv-tiny-whoop-65", "fpv-micro-racer-25", "fpv-racer-5",
+             "fpv-spec-5", "fpv-long-range-7", "fpv-open-class", "fpv-cinewhoop-3":
+            return .analogNTSC
+
+        case "fotokite-sigma":
+            return .tetheredFiber
+
+        // DJI O3 Enterprise-generation aircraft: clean 1080p/30 live view at nominal link,
+        // continuity-first adaptation, then decoder stalls/freeze near loss.
+        case "dji-matrice-350-rtk", "dji-flycart-30", "dji-mavic-3t",
+             "dji-matrice-30t":
+            return .djiO3Enterprise
+
+        // Current DJI enterprise transmission generation. The aircraft FPV/live feed is still
+        // authored at its documented 30 fps; the controller display refresh is not substituted
+        // for camera frame rate.
+        case "dji-matrice-4t", "dji-matrice-400", "dji-matrice-4td-dock-3":
+            return .djiO4Enterprise
+
+        case "dji-mavic-4-pro", "dji-neo":
+            return .djiO4Consumer
+
+        case "dji-phantom-3-standard":
+            return .djiLegacy
+
+        case "skydio-x10":
+            return .skydioEnterprise
+
+        case "everdrone-first-on-scene", "brinc-lemur-2":
+            return .publicSafetyAdaptive
+
+        case "freefly-alta-x", "griff-30", "griff-60", "wildfire-ember-40",
+             "pyrolift-talon-60", "colossus-ca8-vulcan", "colossus-ca12-atlas",
+             "agrowing-titan-at40", "avidrone-490tl":
+            return .industrialAdaptive
+
+        case "zipline-platform-1", "wingcopter-198", "matternet-m2",
+             "wingtraone-gen-ii", "quantum-systems-trinity-pro":
+            return .bvlosAdaptive
+
+        case "mq-9b-skyguardian", "hermes-900", "ft5-los", "sensefly-ebee-tac",
+             "rq-21-integrator", "aerosonde-mk-4-7", "rq-7b-shadow",
+             "mq-9a-reaper", "iai-harpy", "iai-harop", "iai-harpy-ng",
+             "hesa-karrar":
+            return .tacticalAdaptive
+
+        case "epfl-delta-wing-uav", "ncstate-bwb-delta",
+             "ryan-bqm-34f-firebee-ii", "northrop-aqm-35a", "northrop-aqm-35b",
+             "rockwell-himat", "hermeus-quarterhorse-mk21", "north-american-x-10":
+            return .researchDigital
+
+        case abstractProfileID:
+            return .genericDigital
+
+        default:
+            assertionFailure("Unaudited video-link presentation preset for UAV profile: \(profileID)")
+            return .genericDigital
+        }
+    }
 
     static func abstractProfile(from parameters: AbstractDroneParameters = .default) -> UAVProfile {
         UAVProfile(

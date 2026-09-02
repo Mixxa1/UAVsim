@@ -1,16 +1,38 @@
 import AppKit
 import CoreGraphics
 import SceneKit
-import SpriteKit
 import SwiftUI
 
-final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate {
+/// SceneKit owns delegate callbacks; view mutation is dispatched to main and all video processing
+/// runs on one serial queue, so stateful stale-frame/decoder behavior remains ordered.
+final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @unchecked Sendable {
     var cameraMode: CameraMode
     var onRenderFrame: (TimeInterval, CameraMode) -> Void
-    let fpvOSDRenderer = FPVOSDRenderer()
     var fpvFontPreset: FPVFontPreset?
     var fpvFontAtlas: FPVFontAtlas?
     var failedFPVFontPreset: FPVFontPreset?
+
+    private let analogNTSCProcessor = AnalogNTSCProcessor()
+    private let digitalVideoProcessor = DigitalVideoProcessor()
+    private let fiberVideoProcessor = FiberVideoProcessor()
+    private let videoProcessingQueue = DispatchQueue(
+        label: "com.uavsim.video-postprocess",
+        qos: .userInitiated
+    )
+    private weak var sceneView: FocusableSCNView?
+    private var fpvPipelineActive = false
+    private var postProcessingRequired = false
+    private var pipelineRevision: UInt64 = 0
+    private var fpvVideoMode: RFVideoTransmissionMode?
+    private var videoPresentationState: RFVideoPresentationState?
+    private var fpvOSDState: FPVOSDState?
+    private var osdLayout: OSDLayoutConfiguration = .corners
+    private var osdAvailability: OSDElementAvailability = .all
+    private var analogParameters: AnalogNTSCParameters?
+    private var digitalParameters: DigitalVideoParameters = .clean
+    private var fiberParameters: FiberVideoParameters = .clean
+    private var isProcessingFrame = false
+    private var lastCaptureTime: TimeInterval = -.infinity
 
     init(
         cameraMode: CameraMode,
@@ -23,9 +45,218 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate {
     func renderer(_ renderer: any SCNSceneRenderer, updateAtTime time: TimeInterval) {
         onRenderFrame(time, cameraMode)
     }
+
+    func renderer(
+        _ renderer: any SCNSceneRenderer,
+        didRenderScene scene: SCNScene,
+        atTime time: TimeInterval
+    ) {
+        // SceneKit may invoke its delegate on a render thread. Snapshotting and AppKit view
+        // mutation stay on main; expensive RGB/composite processing stays on one serial worker.
+        DispatchQueue.main.async { [weak self] in
+            self?.captureFPVFrameIfNeeded(atTime: time)
+        }
+    }
+
+    @MainActor
+    fileprivate func attach(to view: FocusableSCNView) {
+        sceneView = view
+    }
+
+    @MainActor
+    fileprivate func configureFPVPipeline(
+        mode: RFVideoTransmissionMode,
+        presentationState: RFVideoPresentationState,
+        osdState: FPVOSDState?,
+        osdLayout: OSDLayoutConfiguration,
+        osdAvailability: OSDElementAvailability,
+        analogParameters: AnalogNTSCParameters?,
+        digitalParameters: DigitalVideoParameters,
+        fiberParameters: FiberVideoParameters
+    ) {
+        let nextPostProcessingRequired: Bool
+        switch mode {
+        case .analog:
+            nextPostProcessingRequired = true
+        case .digital:
+            nextPostProcessingRequired = digitalParameters.requiresPostProcessing
+        case .fiber:
+            nextPostProcessingRequired = fiberParameters.requiresPostProcessing
+        }
+        let pipelineChanged = fpvVideoMode != mode
+            || postProcessingRequired != nextPostProcessingRequired
+        if pipelineChanged {
+            pipelineRevision &+= 1
+            sceneView?.processedFPVImageView.image = nil
+            sceneView?.processedFPVImageView.isHidden = true
+            lastCaptureTime = -.infinity
+            let analog = analogNTSCProcessor
+            let digital = digitalVideoProcessor
+            let fiber = fiberVideoProcessor
+            videoProcessingQueue.async {
+                analog.reset()
+                digital.reset()
+                fiber.reset()
+            }
+        }
+        fpvPipelineActive = true
+        postProcessingRequired = nextPostProcessingRequired
+        fpvVideoMode = mode
+        videoPresentationState = presentationState
+        fpvOSDState = osdState
+        self.osdLayout = osdLayout
+        self.osdAvailability = osdAvailability
+        self.analogParameters = analogParameters
+        self.digitalParameters = digitalParameters
+        self.fiberParameters = fiberParameters
+        switch mode {
+        case .analog:
+            sceneView?.videoFrameRateOverrideFPS = 30
+        case .digital:
+            sceneView?.videoFrameRateOverrideFPS = max(
+                1,
+                Int(digitalParameters.targetFrameRateFPS.rounded())
+            )
+        case .fiber:
+            sceneView?.videoFrameRateOverrideFPS = 60
+        }
+    }
+
+    @MainActor
+    fileprivate func deactivateFPVPipeline() {
+        guard fpvPipelineActive || sceneView?.processedFPVImageView.image != nil else { return }
+        fpvPipelineActive = false
+        postProcessingRequired = false
+        pipelineRevision &+= 1
+        fpvVideoMode = nil
+        videoPresentationState = nil
+        fpvOSDState = nil
+        analogParameters = nil
+        digitalParameters = .clean
+        fiberParameters = .clean
+        lastCaptureTime = -.infinity
+        sceneView?.processedFPVImageView.image = nil
+        sceneView?.processedFPVImageView.isHidden = true
+        sceneView?.videoFrameRateOverrideFPS = nil
+        let analog = analogNTSCProcessor
+        let digital = digitalVideoProcessor
+        let fiber = fiberVideoProcessor
+        videoProcessingQueue.async {
+            analog.reset()
+            digital.reset()
+            fiber.reset()
+        }
+    }
+
+    @MainActor
+    private func captureFPVFrameIfNeeded(atTime time: TimeInterval) {
+        guard fpvPipelineActive,
+              postProcessingRequired,
+              !isProcessingFrame,
+              let mode = fpvVideoMode,
+              let presentationState = videoPresentationState,
+              time - lastCaptureTime >= minimumCaptureInterval(for: mode),
+              let view = sceneView,
+              view.window != nil,
+              view.bounds.width > 1,
+              view.bounds.height > 1 else {
+            return
+        }
+
+        // Digital/fiber loss retains the last complete frame. Analog never enters this branch: its
+        // lost state continues producing noise/sync damage rather than freezing a packet frame.
+        if presentationState.isFrozen, view.processedFPVImageView.image != nil {
+            return
+        }
+
+        var proposedRect = view.bounds
+        let snapshot = view.snapshot()
+        guard let sourceImage = snapshot.cgImage(
+            forProposedRect: &proposedRect,
+            context: nil,
+            hints: [.interpolation: NSImageInterpolation.high]
+        ) else {
+            return
+        }
+
+        lastCaptureTime = time
+        isProcessingFrame = true
+        let analog = analogNTSCProcessor
+        let digital = digitalVideoProcessor
+        let fiber = fiberVideoProcessor
+        let osdState = fpvOSDState
+        let layout = osdLayout
+        let availability = osdAvailability
+        let analogControls = analogParameters
+        let digitalControls = digitalParameters
+        let fiberControls = fiberParameters
+        let atlas = fpvFontAtlas
+        let revision = pipelineRevision
+        videoProcessingQueue.async {
+            autoreleasepool {
+                let output: CGImage?
+                switch mode {
+                case .analog:
+                    if let osdState, let analogControls, let atlas {
+                        output = analog.process(
+                            sourceImage: sourceImage,
+                            state: osdState,
+                            fontAtlas: atlas,
+                            layout: layout,
+                            availability: availability,
+                            parameters: analogControls
+                        )
+                    } else {
+                        output = nil
+                    }
+                case .digital:
+                    output = digital.process(
+                        sourceImage: sourceImage,
+                        parameters: digitalControls
+                    )
+                case .fiber:
+                    output = fiber.process(
+                        sourceImage: sourceImage,
+                        parameters: fiberControls
+                    )
+                }
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self else { return }
+                    defer { self.isProcessingFrame = false }
+                    guard self.fpvPipelineActive,
+                          self.postProcessingRequired,
+                          self.fpvVideoMode == mode,
+                          self.pipelineRevision == revision,
+                          let view,
+                          let output else {
+                        return
+                    }
+                    view.processedFPVImageView.image = NSImage(
+                        cgImage: output,
+                        size: view.bounds.size
+                    )
+                    view.processedFPVImageView.isHidden = false
+                }
+            }
+        }
+    }
+
+    private func minimumCaptureInterval(for mode: RFVideoTransmissionMode) -> TimeInterval {
+        switch mode {
+        case .analog: return 1.0 / 29.97
+        case .digital: return 1.0 / max(1, digitalParameters.targetFrameRateFPS)
+        case .fiber: return 1.0 / 60.0
+        }
+    }
+}
+
+/// Visual-only child: all keyboard and mouse events continue to hit `FocusableSCNView`.
+private final class FPVProcessedFrameImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 private final class FocusableSCNView: SCNView {
+    let processedFPVImageView = FPVProcessedFrameImageView()
     var onLookDelta: ((Float, Float) -> Void)?
     var usesUnboundedMouseLook: Bool = false {
         didSet {
@@ -48,6 +279,9 @@ private final class FocusableSCNView: SCNView {
             applyRenderPolicy()
         }
     }
+    var videoFrameRateOverrideFPS: Int? {
+        didSet { applyRenderPolicy() }
+    }
 
     private var lastDragPoint: NSPoint?
     private var trackingArea: NSTrackingArea?
@@ -63,6 +297,24 @@ private final class FocusableSCNView: SCNView {
     private var deminiaturizeObserver: Any?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override init(frame frameRect: NSRect, options: [String: Any]? = nil) {
+        super.init(frame: frameRect, options: options)
+        configureProcessedFrameView()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureProcessedFrameView()
+    }
+
+    private func configureProcessedFrameView() {
+        processedFPVImageView.frame = bounds
+        processedFPVImageView.autoresizingMask = [.width, .height]
+        processedFPVImageView.imageScaling = .scaleAxesIndependently
+        processedFPVImageView.isHidden = true
+        addSubview(processedFPVImageView)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -106,7 +358,17 @@ private final class FocusableSCNView: SCNView {
     }
 
     private func applyRenderPolicy() {
-        preferredFramesPerSecond = renderPolicy.preferredFPS
+        if let videoFrameRateOverrideFPS, renderPolicy.preferredFPS >= 30 {
+            // An active FPV decoder owns cadence. `activeIdle` is a UI-idleness policy, not a
+            // reason to force a documented 60-fps video link down to 30. Background/minimized
+            // policies still cap it below this branch.
+            preferredFramesPerSecond = videoFrameRateOverrideFPS
+        } else {
+            preferredFramesPerSecond = min(
+                renderPolicy.preferredFPS,
+                videoFrameRateOverrideFPS ?? renderPolicy.preferredFPS
+            )
+        }
         isPlaying = renderPolicy.isPlaying
         rendersContinuously = renderPolicy.rendersContinuously
     }
@@ -307,10 +569,18 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     /// The race track builder aims with the mouse itself — moved, not dragged — so it takes the
     /// same captured-cursor look the spectator camera uses.
     var usesBuilderMouseLook: Bool = false
-    /// Non-nil only for the analog FPV feed. Keeping the OSD inside SceneKit's SpriteKit overlay
-    /// lets the later video-link degradation layer corrupt the camera and glyphs together.
+    /// The installed VIDEO logical link is the sole selector for the presentation processor.
+    var fpvVideoMode: RFVideoTransmissionMode? = nil
+    var fpvVideoPresentationState: RFVideoPresentationState? = nil
+    /// Non-nil only for analog. The glyph grid is composited into the NTSC processor's RGB input.
     var analogFPVOSDState: FPVOSDState? = nil
+    var analogNTSCParameters: AnalogNTSCParameters? = nil
+    var digitalVideoParameters: DigitalVideoParameters = .clean
+    var fiberVideoParameters: FiberVideoParameters = .clean
     var fpvFontPreset: FPVFontPreset = .betaflight
+    /// Operator-authored OSD layout and what the installed equipment can actually feed it.
+    var osdLayout: OSDLayoutConfiguration = .corners
+    var osdAvailability: OSDElementAvailability = .all
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -319,7 +589,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> SCNView {
-        let view = FocusableSCNView()
+        let view = FocusableSCNView(frame: .zero)
         let quality = AppGraphicsSettings.quality
         view.scene = scene
         view.antialiasingMode = quality.antialiasingMode
@@ -327,16 +597,14 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         view.renderPolicy = policy
         view.backgroundColor = .black
         view.delegate = context.coordinator
+        context.coordinator.attach(to: view)
         view.onLookDelta = isInteractive && (cameraMode == .fpv || cameraMode == .spectator || isHandLaunchPOV || usesBuilderMouseLook) ? onLookDelta : nil
         view.capturesMouseOnEntry = cameraMode == .spectator
         view.usesUnboundedMouseLook = isInteractive && (cameraMode == .spectator || isHandLaunchPOV || usesBuilderMouseLook)
-        // DOF post-process honors both the weather request and the graphics tier (low disables it).
-        view.technique = (wantsWeatherDepthOfField && quality.weatherDepthOfFieldEnabled)
-            ? WeatherDepthOfFieldTechnique.shared : nil
         applyRenderScale(to: view)
 
         configureCameraControl(on: view)
-        configureAnalogFPVOSD(on: view, coordinator: context.coordinator)
+        configurePostProcessing(on: view, coordinator: context.coordinator)
 
         if isInteractive {
             DispatchQueue.main.async {
@@ -349,10 +617,6 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
 
     func updateNSView(_ view: SCNView, context: Context) {
         let quality = AppGraphicsSettings.quality
-        let wantsTechnique = wantsWeatherDepthOfField && quality.weatherDepthOfFieldEnabled
-        if wantsTechnique != (view.technique != nil) {
-            view.technique = wantsTechnique ? WeatherDepthOfFieldTechnique.shared : nil
-        }
         if view.antialiasingMode != quality.antialiasingMode {
             view.antialiasingMode = quality.antialiasingMode
         }
@@ -364,6 +628,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
 
         context.coordinator.cameraMode = cameraMode
         context.coordinator.onRenderFrame = onRenderFrame
+        if let focusableView = view as? FocusableSCNView {
+            context.coordinator.attach(to: focusableView)
+        }
         view.pointOfView = pointOfView
 
         let policy = renderPolicyOverride ?? SceneRenderPolicy.policy(for: activityState)
@@ -380,38 +647,61 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
             view.rendersContinuously = policy.rendersContinuously
         }
         configureCameraControl(on: view)
-        configureAnalogFPVOSD(on: view, coordinator: context.coordinator)
+        configurePostProcessing(on: view, coordinator: context.coordinator)
     }
 
-    private func configureAnalogFPVOSD(
+    private func configurePostProcessing(
         on view: SCNView,
         coordinator: SceneRenderCoordinator
     ) {
-        guard let state = analogFPVOSDState else {
-            if view.overlaySKScene === coordinator.fpvOSDRenderer.scene {
-                view.overlaySKScene = nil
+        let wantsWeatherDOF = wantsWeatherDepthOfField
+            && AppGraphicsSettings.quality.weatherDepthOfFieldEnabled
+        guard let mode = fpvVideoMode,
+              let presentationState = fpvVideoPresentationState else {
+            coordinator.deactivateFPVPipeline()
+            let desiredTechnique = wantsWeatherDOF ? WeatherDepthOfFieldTechnique.shared : nil
+            if view.technique !== desiredTechnique {
+                view.technique = desiredTechnique
             }
             return
         }
 
         do {
-            if coordinator.fpvFontPreset != fpvFontPreset || coordinator.fpvFontAtlas == nil {
-                coordinator.fpvFontAtlas = try FPVFontAtlasStore.shared.atlas(for: fpvFontPreset)
-                coordinator.fpvFontPreset = fpvFontPreset
-                coordinator.failedFPVFontPreset = nil
+            if mode == .analog {
+                guard analogFPVOSDState != nil, analogNTSCParameters != nil else {
+                    coordinator.deactivateFPVPipeline()
+                    return
+                }
+                if coordinator.fpvFontPreset != fpvFontPreset || coordinator.fpvFontAtlas == nil {
+                    coordinator.fpvFontAtlas = try FPVFontAtlasStore.shared.atlas(for: fpvFontPreset)
+                    coordinator.fpvFontPreset = fpvFontPreset
+                    coordinator.failedFPVFontPreset = nil
+                }
+                guard coordinator.fpvFontAtlas != nil else { return }
             }
-            guard let atlas = coordinator.fpvFontAtlas else { return }
-            coordinator.fpvOSDRenderer.render(
-                state: state,
-                fontAtlas: atlas,
-                layout: .analog30x16,
-                viewportSize: view.bounds.size
+            coordinator.configureFPVPipeline(
+                mode: mode,
+                presentationState: presentationState,
+                osdState: analogFPVOSDState,
+                osdLayout: osdLayout,
+                osdAvailability: osdAvailability,
+                analogParameters: analogNTSCParameters,
+                digitalParameters: digitalVideoParameters,
+                fiberParameters: fiberVideoParameters
             )
-            if view.overlaySKScene !== coordinator.fpvOSDRenderer.scene {
-                view.overlaySKScene = coordinator.fpvOSDRenderer.scene
+            // The native processor owns the displayed FPV frame. The SceneKit technique slot is
+            // left available for weather capture, and no clean SpriteKit overlay is attached.
+            view.overlaySKScene = nil
+            let desiredTechnique = wantsWeatherDOF ? WeatherDepthOfFieldTechnique.shared : nil
+            if view.technique !== desiredTechnique {
+                view.technique = desiredTechnique
             }
         } catch {
-            view.overlaySKScene = nil
+            coordinator.deactivateFPVPipeline()
+            let fallback = wantsWeatherDOF ? WeatherDepthOfFieldTechnique.shared : nil
+            if view.technique !== fallback {
+                view.technique = fallback
+            }
             if coordinator.failedFPVFontPreset != fpvFontPreset {
                 coordinator.failedFPVFontPreset = fpvFontPreset
                 #if DEBUG

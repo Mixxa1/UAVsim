@@ -519,6 +519,11 @@
 "camera.fpv.osd_font.hint" = "Переключает живой atlas символов MAX7456, не подменяя OSD картинкой.";
 "camera.fpv.osd_font.betaflight" = "Betaflight";
 "camera.fpv.osd_font.clarity" = "Clarity";
+"camera.fpv.osd_font.mainframe" = "Mainframe";
+"camera.fpv.osd_font.axisfont" = "Axis";
+"camera.fpv.osd_font.cleanfont" = "Clean";
+"camera.fpv.osd_font.impact" = "Impact";
+"camera.fpv.osd_font.xander_full_v3" = "Xander Full v3";
 
 "keybind.section.title" = "Назначения клавиш";
 "keybind.open" = "Горячие клавиши";
@@ -3190,3 +3195,60 @@
 "race.aperture.window_high_side" = "Верхнее окно сбоку";
 "race.aperture.lower_left" = "Нижний левый";
 "race.aperture.lower_right" = "Нижний правый";
+
+"camera.fpv.osd_editor" = "Редактор OSD…";
+
+"osd.editor.title" = "Редактор FPV OSD";
+"osd.editor.subtitle" = "Шрифт, элементы и их место на сетке 30x16";
+"osd.editor.done" = "Готово";
+"osd.editor.section.font" = "Шрифт";
+"osd.editor.section.grid" = "Сетка";
+"osd.editor.section.presets" = "Пресеты";
+"osd.editor.section.elements" = "Элементы";
+"osd.editor.grid_hint" = "Перетащите элемент, чтобы переместить его. В превью показаны образцовые значения с ухудшенным каналом, чтобы предупреждения были видны при расстановке.";
+"osd.editor.no_selection" = "Выберите элемент на сетке, чтобы переместить или скрыть его.";
+"osd.editor.right_aligned" = "Выравнивание вправо";
+"osd.editor.hide_element" = "Скрыть";
+"osd.editor.font_loading" = "Загрузка…";
+"osd.editor.font_failed" = "Шрифт не загрузился";
+"osd.editor.font_missing_glyphs" = "В этом шрифте для элемента вообще нет глифа.";
+
+"osd.group.power" = "Питание";
+"osd.group.link" = "Канал";
+"osd.group.navigation" = "Навигация";
+"osd.group.flight" = "Полёт";
+
+"osd.element.batteryVoltage" = "Напряжение батареи";
+"osd.element.batteryCapacity" = "Остаток ёмкости";
+"osd.element.linkQuality" = "Качество канала (LQ)";
+"osd.element.rssi" = "RSSI";
+"osd.element.snr" = "SNR";
+"osd.element.altitude" = "Высота";
+"osd.element.speed" = "Скорость";
+"osd.element.satellites" = "Спутники";
+"osd.element.flightMode" = "Взведение и режим полёта";
+"osd.element.artificialHorizon" = "Искусственный горизонт";
+"osd.element.aircraftReference" = "Метка аппарата";
+"osd.element.linkWarning" = "Предупреждение о канале";
+"osd.element.staleWarning" = "Предупреждение об устаревших данных";
+
+"osd.preset.corners" = "По углам";
+"osd.preset.classic" = "Классический";
+"osd.preset.minimal" = "Минимальный";
+"osd.preset.racing" = "Гоночный";
+
+"osd.requirement.radio_link" = "У аппарата нет радиоканала — управление идёт по оптоволокну.";
+"osd.requirement.satellite_navigation" = "В сборке нет GNSS-модуля.";
+
+"osd.element.artificialHorizonSidebars" = "Боковины горизонта";
+"osd.element.compassRibbon" = "Лента компаса";
+"osd.element.heading" = "Курс";
+"osd.element.throttle" = "Газ";
+"osd.element.distanceToHome" = "Дистанция до дома";
+"osd.element.flightDistance" = "Пройденная дистанция";
+"osd.element.flightTimer" = "Таймер полёта";
+
+"osd.editor.section.crosshair" = "Прицел";
+"osd.editor.crosshair_hint" = "Шрифты без собственной графики крыльев рисуют оба стиля одинаково.";
+"osd.crosshair.standard" = "Стандартный";
+"osd.crosshair.aircraft" = "Самолёт";
