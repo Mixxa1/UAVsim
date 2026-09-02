@@ -26,6 +26,9 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
     private var fpvVideoMode: RFVideoTransmissionMode?
     private var videoPresentationState: RFVideoPresentationState?
     private var fpvOSDState: FPVOSDState?
+    private let fisheyeLensProcessor = FisheyeLensProcessor()
+    private var lensStrength: Double = 0
+    private var lensHalfAngleDegrees: Double = 50
     private var osdLayout: OSDLayoutConfiguration = .corners
     private var osdAvailability: OSDElementAvailability = .all
     private var analogParameters: AnalogNTSCParameters?
@@ -68,20 +71,25 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         mode: RFVideoTransmissionMode,
         presentationState: RFVideoPresentationState,
         osdState: FPVOSDState?,
+        lensStrength: Double,
+        lensHalfAngleDegrees: Double,
         osdLayout: OSDLayoutConfiguration,
         osdAvailability: OSDElementAvailability,
         analogParameters: AnalogNTSCParameters?,
         digitalParameters: DigitalVideoParameters,
         fiberParameters: FiberVideoParameters
     ) {
+        // The lens alone is reason enough to run the pipeline: on a clean digital or fibre link
+        // there would otherwise be nothing to post-process and the frame would stay rectilinear.
+        let lensActive = lensStrength > 0.001
         let nextPostProcessingRequired: Bool
         switch mode {
         case .analog:
             nextPostProcessingRequired = true
         case .digital:
-            nextPostProcessingRequired = digitalParameters.requiresPostProcessing
+            nextPostProcessingRequired = digitalParameters.requiresPostProcessing || lensActive
         case .fiber:
-            nextPostProcessingRequired = fiberParameters.requiresPostProcessing
+            nextPostProcessingRequired = fiberParameters.requiresPostProcessing || lensActive
         }
         let pipelineChanged = fpvVideoMode != mode
             || postProcessingRequired != nextPostProcessingRequired
@@ -93,10 +101,12 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
             let analog = analogNTSCProcessor
             let digital = digitalVideoProcessor
             let fiber = fiberVideoProcessor
+            let lens = fisheyeLensProcessor
             videoProcessingQueue.async {
                 analog.reset()
                 digital.reset()
                 fiber.reset()
+                lens.reset()
             }
         }
         fpvPipelineActive = true
@@ -104,6 +114,8 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         fpvVideoMode = mode
         videoPresentationState = presentationState
         fpvOSDState = osdState
+        self.lensStrength = lensStrength
+        self.lensHalfAngleDegrees = lensHalfAngleDegrees
         self.osdLayout = osdLayout
         self.osdAvailability = osdAvailability
         self.analogParameters = analogParameters
@@ -141,10 +153,12 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         let analog = analogNTSCProcessor
         let digital = digitalVideoProcessor
         let fiber = fiberVideoProcessor
+        let lens = fisheyeLensProcessor
         videoProcessingQueue.async {
             analog.reset()
             digital.reset()
             fiber.reset()
+            lens.reset()
         }
     }
 
@@ -184,6 +198,9 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         let analog = analogNTSCProcessor
         let digital = digitalVideoProcessor
         let fiber = fiberVideoProcessor
+        let lens = fisheyeLensProcessor
+        let lensStrength = self.lensStrength
+        let lensHalfAngle = self.lensHalfAngleDegrees
         let osdState = fpvOSDState
         let layout = osdLayout
         let availability = osdAvailability
@@ -194,6 +211,16 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         let revision = pipelineRevision
         videoProcessingQueue.async {
             autoreleasepool {
+                // The lens belongs to the camera, so it runs once on the captured frame and
+                // before any link-specific processing — and, for analog, before the OSD is
+                // composited, exactly as a real lens sits ahead of the character generator.
+                let sourceImage = lensStrength > 0.001
+                    ? (lens.process(
+                        sourceImage: sourceImage,
+                        strength: lensStrength,
+                        halfAngleDegrees: lensHalfAngle
+                    ) ?? sourceImage)
+                    : sourceImage
                 let output: CGImage?
                 switch mode {
                 case .analog:
@@ -580,6 +607,9 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     var fpvFontPreset: FPVFontPreset = .betaflight
     /// Operator-authored OSD layout and what the installed equipment can actually feed it.
     var osdLayout: OSDLayoutConfiguration = .corners
+    /// Wide-angle lens applied to the camera frame before anything is composited onto it.
+    var fpvLensStrength: Double = 0
+    var fpvLensHalfAngleDegrees: Double = 50
     var osdAvailability: OSDElementAvailability = .all
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
@@ -683,6 +713,8 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
                 mode: mode,
                 presentationState: presentationState,
                 osdState: analogFPVOSDState,
+                lensStrength: fpvLensStrength,
+                lensHalfAngleDegrees: fpvLensHalfAngleDegrees,
                 osdLayout: osdLayout,
                 osdAvailability: osdAvailability,
                 analogParameters: analogNTSCParameters,

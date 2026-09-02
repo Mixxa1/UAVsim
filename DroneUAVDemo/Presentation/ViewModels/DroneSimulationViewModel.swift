@@ -5651,6 +5651,20 @@ final class DroneSimulationViewModel: ObservableObject {
     func setFollowOffsetY(_ value: Double) { cameraConfiguration.follow.height = Float(value) }
     func setFollowOffsetZ(_ value: Double) { cameraConfiguration.follow.distance = Float(value).clamped(to: cameraConfiguration.follow.minDistance...cameraConfiguration.follow.maxDistance) }
     func setFPVStabilization(_ value: Double) { cameraConfiguration.fpv.stabilization = Float(value).clamped(to: 0.0...1.0) }
+
+    /// ⌥C. The wide-angle lens is a property of the camera, so it applies to whatever video link
+    /// is carrying the feed rather than to one transmission mode.
+    func toggleFPVLens() {
+        cameraConfiguration.fpv.lensEnabled.toggle()
+    }
+
+    func setFPVLensEnabled(_ enabled: Bool) {
+        cameraConfiguration.fpv.lensEnabled = enabled
+    }
+
+    func setFPVLensDistortion(_ value: Double) {
+        cameraConfiguration.fpv.lensDistortion = Float(value).clamped(to: 0.0...1.0)
+    }
     func setFPVShake(_ value: Double) { cameraConfiguration.fpv.shake = Float(value).clamped(to: 0.0...0.4) }
     func setFPVYawLimit(_ value: Double) { cameraConfiguration.fpv.yawLimitDeg = Float(value).clamped(to: 2.0...60.0) }
     func setFPVPitchLimit(_ value: Double) { cameraConfiguration.fpv.pitchLimitDeg = Float(value).clamped(to: 2.0...45.0) }
@@ -11250,6 +11264,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 arm()
             case .disarmAircraft:
                 disarm()
+            case .toggleFPVLens:
+                toggleFPVLens()
             case .launchAircraft:
                 // ⌘E: hand-throw / catapult release for assisted-launch
                 // fixed wings. Arms the airframe first if needed, so the

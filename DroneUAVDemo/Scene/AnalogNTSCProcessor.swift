@@ -107,16 +107,9 @@ final class AnalogNTSCProcessor: @unchecked Sendable {
             context.interpolationQuality = .none
 
             for cell in grid.cells where cell.glyph != 32 {
-                let glyphIndex = Int(cell.glyph)
-                let column = glyphIndex % FPVFontAtlas.columns
-                let row = glyphIndex / FPVFontAtlas.columns
-                let sourceRect = CGRect(
-                    x: column * FPVGlyphBitmap.width,
-                    y: row * FPVGlyphBitmap.height,
-                    width: FPVGlyphBitmap.width,
-                    height: FPVGlyphBitmap.height
-                )
-                guard let glyphImage = fontAtlas.atlasImage.cropping(to: sourceRect) else {
+                // Crop through the atlas itself so a two-bank INAV font, whose atlas is twice as
+                // tall, addresses the same way a single-bank Betaflight one does.
+                guard let glyphImage = fontAtlas.glyphImage(for: cell.glyph) else {
                     continue
                 }
                 let destinationRect = CGRect(

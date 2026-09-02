@@ -166,6 +166,15 @@ struct OrbitCameraState {
 }
 
 struct FPVCameraState {
+    /// Wide-angle FPV lens. A real FPV camera is a very short focal length with pronounced
+    /// barrel distortion; the render stays rectilinear until this is switched on.
+    var lensEnabled: Bool = false
+    /// How far to blend from the rectilinear render toward an equidistant fisheye projection.
+    var lensDistortion: Float = 0.75
+
+    /// Retained so projects saved before the FPV camera became a rigid mount still decode. It no
+    /// longer drives anything: a camera bolted to the airframe cannot level itself, and any
+    /// fraction of levelling stopped a roll in acro from coming all the way round.
     var stabilization: Float
     var shake: Float
     var yawLimitDeg: Float
@@ -318,7 +327,7 @@ struct CameraConfiguration {
             fov = 86.0
             sensitivity = 1.1
             smoothing = 0.58
-            fpv.stabilization = 0.30
+            fpv.stabilization = 0.0
             fpv.nearClip = 0.02
             fpv.yawLimitDeg = 28.0
             fpv.pitchLimitDeg = 22.0
@@ -363,7 +372,8 @@ struct CameraConfiguration {
             maxDistance: 28.0
         ),
         fpv: FPVCameraState(
-            stabilization: 0.45,
+            // Rigid mount by default: the camera turns with the airframe and nothing else.
+            stabilization: 0.0,
             shake: 0.07,
             yawLimitDeg: 24.0,
             pitchLimitDeg: 18.0,

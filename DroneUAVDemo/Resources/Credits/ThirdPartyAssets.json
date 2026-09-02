@@ -639,6 +639,33 @@
       "licenseName": "BSD 2-Clause License",
       "licenseURL": "https://github.com/kdkd/Analog-NTSC/blob/master/LICENSE.txt",
       "changes": "Vendored the upstream C++ RGB/YIQ composite-signal processor and connected its noise, multipath, burst and sync controls to UAVsim RF state through an Objective-C++ bridge."
+    },
+    {
+      "id": "mainframe_max7456_osd_font",
+      "title": "Mainframe MAX7456 OSD font",
+      "author": "dukeflipchart",
+      "sourceURL": "https://github.com/dukeflipchart/mainframe-font",
+      "licenseName": "No licence stated by the author",
+      "licenseURL": "https://github.com/dukeflipchart/mainframe-font",
+      "changes": "Bundled in its original MCM representation as a runtime-selectable analog FPV OSD font preset. The upstream repository states no licence; it is included pending confirmation of redistribution terms."
+    },
+    {
+      "id": "impact_max7456_osd_font",
+      "title": "Impact MAX7456 OSD font",
+      "author": "Unknown",
+      "sourceURL": "",
+      "licenseName": "No licence stated; provenance unconfirmed",
+      "licenseURL": "",
+      "changes": "Bundled in its original MCM representation as a runtime-selectable analog FPV OSD font preset. Neither an upstream source nor a licence has been confirmed for this file."
+    },
+    {
+      "id": "xander_inav_osd_fonts",
+      "title": "Xander INAV OSD fonts (Xanderz, Xander Full v3)",
+      "author": "FRPProject",
+      "sourceURL": "https://github.com/iNavFlight/inav-configurator/discussions/1573",
+      "licenseName": "No licence stated by the author",
+      "licenseURL": "https://github.com/iNavFlight/inav-configurator/discussions/1573",
+      "changes": "Bundled in their original MCM representation as runtime-selectable FPV OSD font presets. Published by the author in an INAV configurator discussion with no stated licence or redistribution terms."
     }
   ]
 }

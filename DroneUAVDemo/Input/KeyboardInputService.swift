@@ -363,6 +363,7 @@ enum InputAction: Equatable, Hashable {
     case armAircraft
     case disarmAircraft
     case launchAircraft
+    case toggleFPVLens
     case selectFreeCamera
     case selectChaseCamera
     case selectOrbitCamera
@@ -662,6 +663,16 @@ final class KeyboardInputService: KeyboardInputProviding {
            event.modifierFlags.intersection([.command, .control, .option]) == [.command],
            processingMode == .flight {
             enqueueAction(.launchAircraft)
+            return nil
+        }
+
+        // ⌥C toggles the wide-angle FPV lens. C on its own already cycles camera modes, so the
+        // lens rides the same key with Option rather than claiming another one.
+        if !event.isARepeat,
+           event.keyCode == 8, // C
+           event.modifierFlags.intersection([.command, .control, .option]) == [.option],
+           processingMode == .flight || processingMode == .spectator {
+            enqueueAction(.toggleFPVLens)
             return nil
         }
 

@@ -7,7 +7,7 @@ struct FPVOSDComposer {
         layout: OSDLayoutConfiguration,
         availability: OSDElementAvailability = .all,
         symbolMap: FPVOSDSymbolMap = .betaflight,
-        blankGlyphs: Set<UInt8> = []
+        blankGlyphs: Set<OSDGlyphIndex> = []
     ) -> OSDGrid {
         var grid = OSDGrid(columns: layout.columns, rows: layout.rows)
         for entry in layout.orderedPlacements(availability: availability) {
@@ -60,10 +60,11 @@ struct FPVOSDComposer {
         for element: OSDElement,
         state: FPVOSDState,
         symbols: FPVOSDSymbolMap,
-        blankGlyphs: Set<UInt8>
-    ) -> [UInt8]? {
-        func icon(_ glyph: UInt8, fallback: String) -> [UInt8] {
-            blankGlyphs.contains(glyph) ? ascii(fallback) : [glyph]
+        blankGlyphs: Set<OSDGlyphIndex>
+    ) -> [OSDGlyphIndex]? {
+        func icon(_ glyph: OSDGlyphIndex?, fallback: String) -> [OSDGlyphIndex] {
+            guard let glyph, !blankGlyphs.contains(glyph) else { return ascii(fallback) }
+            return [glyph]
         }
 
         switch element {
@@ -83,9 +84,14 @@ struct FPVOSDComposer {
         case .snr:
             return ascii("SNR \(integer(state.snr))")
         case .altitude:
+            // Some fonts spell the unit inside the label pictogram; appending another would
+            // print the unit twice.
+            let altitudeUnit = symbols.altitudeIconIncludesUnit
+                ? []
+                : icon(symbols.metreIcon, fallback: "M")
             return icon(symbols.altitudeIcon, fallback: "ALT ")
                 + ascii(integer(state.altitude))
-                + icon(symbols.metreIcon, fallback: "M")
+                + altitudeUnit
         case .speed:
             return ascii(number(state.speed, decimals: 1))
                 + icon(symbols.metresPerSecondIcon, fallback: " M/S")
@@ -138,19 +144,22 @@ struct FPVOSDComposer {
         symbols: FPVOSDSymbolMap,
         in grid: inout OSDGrid
     ) {
+        guard let tick = symbols.sidebarTick else { return }
         let centerX = position.x + position.width / 2
         let centerY = position.y
         let columnOffset = 7
         let halfHeight = 3
         for row in (centerY - halfHeight)...(centerY + halfHeight) {
-            grid[centerX - columnOffset, row] = symbols.sidebarTick
-            grid[centerX + columnOffset, row] = symbols.sidebarTick
+            grid[centerX - columnOffset, row] = tick
+            grid[centerX + columnOffset, row] = tick
         }
+        guard let leftArrow = symbols.sidebarLeftArrow,
+              let rightArrow = symbols.sidebarRightArrow else { return }
         // Arrows point inward, toward the horizon. Betaflight's own naming reads the other way
         // round (SYM_AH_LEFT on the left sidebar), but that glyph is the one whose apex faces
         // left, which puts both arrows pointing away from the aircraft reference.
-        grid[centerX - columnOffset, centerY] = symbols.sidebarRightArrow
-        grid[centerX + columnOffset, centerY] = symbols.sidebarLeftArrow
+        grid[centerX - columnOffset, centerY] = rightArrow
+        grid[centerX + columnOffset, centerY] = leftArrow
     }
 
     /// Heading ribbon. Cardinal letters land on the cell whose bearing they fall in, and the
@@ -165,7 +174,7 @@ struct FPVOSDComposer {
         let width = max(1, position.width)
         let visibleSpanDegrees = 180.0
         let degreesPerCell = visibleSpanDegrees / Double(width)
-        let cardinals: [(bearing: Double, glyph: UInt8)] = [
+        let cardinals: [(bearing: Double, glyph: OSDGlyphIndex)] = [
             (0, 78),    // N
             (90, 69),   // E
             (180, 83),  // S
@@ -176,7 +185,7 @@ struct FPVOSDComposer {
             let bearing = heading + offsetFraction * visibleSpanDegrees
             let normalized = (bearing.truncatingRemainder(dividingBy: 360) + 360)
                 .truncatingRemainder(dividingBy: 360)
-            var glyph: UInt8 = column.isMultiple(of: 2) ? 46 : 32
+            var glyph: OSDGlyphIndex = column.isMultiple(of: 2) ? 46 : 32
             for cardinal in cardinals {
                 var delta = abs(normalized - cardinal.bearing)
                 if delta > 180 { delta = 360 - delta }
@@ -219,7 +228,7 @@ struct FPVOSDComposer {
             let row = anchorY + y / symbols.artificialHorizonSymbolCount
             guard row >= 0, row < grid.rows else { continue }
             grid[centerX + xOffset, row] = symbols.artificialHorizonBarStart
-                + UInt8(y % symbols.artificialHorizonSymbolCount)
+                + OSDGlyphIndex(y % symbols.artificialHorizonSymbolCount)
         }
     }
 
@@ -230,16 +239,27 @@ struct FPVOSDComposer {
         in grid: inout OSDGrid
     ) {
         let centerX = position.x + position.width / 2
-        let sides: (left: UInt8, right: UInt8)
+        let standard = (
+            left: symbols.artificialHorizonCenterLine,
+            centre: symbols.artificialHorizonCenter,
+            right: symbols.artificialHorizonCenterLineRight
+        )
+        let marker: (left: OSDGlyphIndex, centre: OSDGlyphIndex, right: OSDGlyphIndex)
         switch style {
         case .standard:
-            sides = (symbols.artificialHorizonCenterLine, symbols.artificialHorizonCenterLineRight)
+            marker = standard
         case .aircraft:
-            sides = (symbols.aircraftWingLeft, symbols.aircraftWingRight)
+            // A font without wing art keeps the default marker rather than drawing whatever
+            // happens to sit at another family's slot.
+            if let left = symbols.aircraftWingLeft, let right = symbols.aircraftWingRight {
+                marker = (left, symbols.aircraftCentre ?? standard.centre, right)
+            } else {
+                marker = standard
+            }
         }
-        grid[centerX - 1, position.y] = sides.left
-        grid[centerX, position.y] = symbols.artificialHorizonCenter
-        grid[centerX + 1, position.y] = sides.right
+        grid[centerX - 1, position.y] = marker.left
+        grid[centerX, position.y] = marker.centre
+        grid[centerX + 1, position.y] = marker.right
     }
 
     private func number(_ value: TelemetryValue<Double>, decimals: Int) -> String {
@@ -256,8 +276,8 @@ struct FPVOSDComposer {
         value.value.map(String.init) ?? "---"
     }
 
-    private func ascii(_ text: String) -> [UInt8] {
-        text.utf8.map { $0 < 128 ? $0 : 63 }
+    private func ascii(_ text: String) -> [OSDGlyphIndex] {
+        text.utf8.map { OSDGlyphIndex($0 < 128 ? $0 : 63) }
     }
 
     /// Battery pictogram chosen by remaining capacity, full first — the same seven-step ramp
@@ -265,19 +285,25 @@ struct FPVOSDComposer {
     private func batteryIcon(
         state: FPVOSDState,
         symbols: FPVOSDSymbolMap,
-        blankGlyphs: Set<UInt8>
-    ) -> [UInt8] {
+        blankGlyphs: Set<OSDGlyphIndex>
+    ) -> [OSDGlyphIndex] {
         guard symbols.batteryLevelCount > 0,
-              !blankGlyphs.contains(symbols.batteryLevelStart) else {
+              let start = symbols.batteryLevelStart,
+              !blankGlyphs.contains(start) else {
             return ascii("BAT ")
         }
         let steps = symbols.batteryLevelCount
-        guard let percent = state.batteryPercent.value, percent.isFinite else {
-            return [symbols.batteryLevelStart + UInt8(steps - 1)]
+        // Betaflight orders the ramp full first, INAV empty first, so charge maps to opposite
+        // ends of the run depending on the font family.
+        let fraction: Double
+        if let percent = state.batteryPercent.value, percent.isFinite {
+            fraction = min(1, max(0, percent / 100))
+        } else {
+            fraction = 0
         }
-        let fraction = min(1, max(0, percent / 100))
-        let index = Int(((1 - fraction) * Double(steps - 1)).rounded())
-        return [symbols.batteryLevelStart + UInt8(min(steps - 1, max(0, index)))]
+        let charged = symbols.batteryLevelsAscendWithCharge ? fraction : 1 - fraction
+        let index = Int((charged * Double(steps - 1)).rounded())
+        return [start + OSDGlyphIndex(min(steps - 1, max(0, index)))]
     }
 
     /// One of sixteen arrows pointing at home, relative to the nose. Index 8 is straight ahead
@@ -285,18 +311,19 @@ struct FPVOSDComposer {
     private func homeArrowIcon(
         state: FPVOSDState,
         symbols: FPVOSDSymbolMap,
-        blankGlyphs: Set<UInt8>
-    ) -> [UInt8] {
+        blankGlyphs: Set<OSDGlyphIndex>
+    ) -> [OSDGlyphIndex] {
         guard let bearing = state.homeBearingDegrees.value, bearing.isFinite,
-              !blankGlyphs.contains(symbols.directionArrowStart) else {
+              let start = symbols.directionArrowStart,
+              !blankGlyphs.contains(start) else {
             return []
         }
         let step = (bearing / 22.5).rounded()
         let index = (8 - Int(step)) & 15
-        return [symbols.directionArrowStart + UInt8(index)]
+        return [start + OSDGlyphIndex(index)]
     }
 
-    private func place(_ run: [UInt8], at position: OSDPosition, in grid: inout OSDGrid) {
+    private func place(_ run: [OSDGlyphIndex], at position: OSDPosition, in grid: inout OSDGrid) {
         grid.write(
             glyphs: run,
             x: position.x,
@@ -306,7 +333,7 @@ struct FPVOSDComposer {
         )
     }
 
-    private func placeCentered(_ run: [UInt8], at position: OSDPosition, in grid: inout OSDGrid) {
+    private func placeCentered(_ run: [OSDGlyphIndex], at position: OSDPosition, in grid: inout OSDGrid) {
         let clippedCount = min(position.width, run.count)
         let centeredX = position.x + max(0, (position.width - clippedCount) / 2)
         grid.write(glyphs: run, x: centeredX, y: position.y, width: clippedCount)

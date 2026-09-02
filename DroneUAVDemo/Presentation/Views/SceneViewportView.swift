@@ -50,6 +50,10 @@ struct SceneViewportView: View {
                     : .clean,
                 fpvFontPreset: viewModel.fpvFontPreset,
                 osdLayout: viewModel.osdLayout,
+                fpvLensStrength: viewModel.cameraConfiguration.fpv.lensEnabled
+                    ? Double(viewModel.cameraConfiguration.fpv.lensDistortion)
+                    : 0,
+                fpvLensHalfAngleDegrees: Double(viewModel.cameraConfiguration.fov) / 2,
                 osdAvailability: viewModel.osdElementAvailability,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)

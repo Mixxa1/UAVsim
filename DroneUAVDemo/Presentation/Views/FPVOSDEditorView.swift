@@ -129,7 +129,7 @@ struct FPVOSDEditorView: View {
 
     /// A single line of real glyphs from the given font.
     private func glyphStrip(text: String, atlas: FPVFontAtlas, cellHeight: CGFloat) -> some View {
-        let glyphs = text.utf8.map { $0 < 128 ? $0 : UInt8(63) }
+        let glyphs = text.utf8.map { OSDGlyphIndex($0 < 128 ? $0 : 63) }
         let cellWidth = cellHeight * CGFloat(FPVGlyphBitmap.width) / CGFloat(FPVGlyphBitmap.height)
         return HStack(spacing: 0) {
             ForEach(Array(glyphs.enumerated()), id: \.offset) { _, glyph in
@@ -446,7 +446,7 @@ struct FPVOSDEditorView: View {
             return atlas.isGlyphBlank(atlas.symbolMap.artificialHorizonCenter)
         case .artificialHorizon:
             return (0..<atlas.symbolMap.artificialHorizonSymbolCount).allSatisfy {
-                atlas.isGlyphBlank(atlas.symbolMap.artificialHorizonBarStart + UInt8($0))
+                atlas.isGlyphBlank(atlas.symbolMap.artificialHorizonBarStart + OSDGlyphIndex($0))
             }
         default:
             return false

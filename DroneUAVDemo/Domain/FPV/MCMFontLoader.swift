@@ -14,7 +14,7 @@ struct FPVGlyphBitmap: Equatable, Sendable {
     static let width = 12
     static let height = 18
 
-    let glyph: UInt8
+    let glyph: OSDGlyphIndex
     /// RGBA8, top row first. Opaque black/white and transparent are preserved from MAX7456.
     let rgbaPixels: Data
 
@@ -32,16 +32,21 @@ struct FPVGlyphBitmap: Equatable, Sendable {
 }
 
 struct FPVFontAtlas {
-    static let glyphCount = 256
+    /// A MAX7456 bank. Betaflight fonts ship one; INAV fonts ship two.
+    static let glyphsPerBank = 256
     static let columns = 16
-    static let rows = 16
+
+    /// How many slots this particular font actually carries — 256 or 512.
+    let glyphCount: Int
+    /// Atlas rows follow the glyph count, so a two-bank font is simply twice as tall.
+    var rows: Int { max(1, glyphCount / Self.columns) }
 
     let sourceName: String
     let symbolMap: FPVOSDSymbolMap
     let glyphBitmaps: [FPVGlyphBitmap]
     /// Slots this font leaves fully transparent, so the composer can substitute a text label
     /// instead of writing an invisible cell.
-    let blankGlyphs: Set<UInt8>
+    let blankGlyphs: Set<OSDGlyphIndex>
     /// CPU-side atlas used by the analog-video compositor. Keeping the same image as the
     /// SpriteKit textures guarantees preset switching cannot select a different glyph source.
     let atlasImage: CGImage
@@ -49,16 +54,17 @@ struct FPVFontAtlas {
     let glyphTextures: [SKTexture]
     let pixelSize: CGSize
 
-    func texture(for glyph: UInt8) -> SKTexture {
-        glyphTextures[Int(glyph)]
+    func texture(for glyph: OSDGlyphIndex) -> SKTexture {
+        glyphTextures[min(glyphTextures.count - 1, Int(glyph))]
     }
 
     /// Crops one glyph out of the atlas for AppKit/SwiftUI. The OSD editor draws the same pixels
     /// the analog compositor does, so a preview can never disagree with the flown frame.
-    func glyphImage(for glyph: UInt8) -> CGImage? {
+    func glyphImage(for glyph: OSDGlyphIndex) -> CGImage? {
         let index = Int(glyph)
+        guard index < glyphCount else { return nil }
         let glyphWidth = atlasImage.width / Self.columns
-        let glyphHeight = atlasImage.height / Self.rows
+        let glyphHeight = atlasImage.height / rows
         guard glyphWidth > 0, glyphHeight > 0 else { return nil }
         return atlasImage.cropping(to: CGRect(
             x: (index % Self.columns) * glyphWidth,
@@ -71,7 +77,7 @@ struct FPVFontAtlas {
     /// True when the font leaves this slot entirely transparent. Community MCM fonts do not all
     /// fill the same semantic slots — several bundled ones have no crosshair halves — and the
     /// editor warns about that instead of silently drawing nothing.
-    func isGlyphBlank(_ glyph: UInt8) -> Bool {
+    func isGlyphBlank(_ glyph: OSDGlyphIndex) -> Bool {
         let index = Int(glyph)
         guard index < glyphBitmaps.count else { return true }
         let pixels = glyphBitmaps[index].rgbaPixels
@@ -109,10 +115,9 @@ struct MCMFontLoader {
         }
 
         let payloadLines = Array(lines.dropFirst())
-        let expectedByteCount = FPVFontAtlas.glyphCount * Self.bytesPerGlyph
-        // MAX7456 exposes 256 addressable character slots. Some community "full" files append
-        // a second complete 256-glyph bank for other tooling; UAVsim intentionally loads the
-        // first hardware bank while still rejecting truncated or non-glyph-aligned payloads.
+        let expectedByteCount = FPVFontAtlas.glyphsPerBank * Self.bytesPerGlyph
+        // At least one full bank, and a whole number of glyphs. INAV "full" fonts carry a second
+        // bank of 256 on top, which is loaded as well rather than discarded.
         guard payloadLines.count >= expectedByteCount,
               payloadLines.count.isMultiple(of: Self.bytesPerGlyph) else {
             throw MCMFontLoaderError.invalidByteCount(
@@ -132,9 +137,12 @@ struct MCMFontLoader {
             bytes.append(byte)
         }
 
-        let glyphs = (0..<FPVFontAtlas.glyphCount).map { glyphIndex in
+        // Every bank the file carries, not just the first: INAV fonts keep their crosshairs,
+        // radar and unit pictograms in the second one, and dropping it left those unreachable.
+        let glyphCount = payloadLines.count / Self.bytesPerGlyph
+        let glyphs = (0..<glyphCount).map { glyphIndex in
             decodeGlyph(
-                UInt8(glyphIndex),
+                OSDGlyphIndex(glyphIndex),
                 bytes: bytes,
                 byteOffset: glyphIndex * Self.bytesPerGlyph
             )
@@ -143,7 +151,7 @@ struct MCMFontLoader {
     }
 
     private func decodeGlyph(
-        _ glyph: UInt8,
+        _ glyph: OSDGlyphIndex,
         bytes: [UInt8],
         byteOffset: Int
     ) -> FPVGlyphBitmap {
@@ -183,8 +191,10 @@ struct MCMFontLoader {
         sourceName: String,
         glyphs: [FPVGlyphBitmap]
     ) throws -> FPVFontAtlas {
-        let atlasWidth = FPVFontAtlas.columns * FPVGlyphBitmap.width
-        let atlasHeight = FPVFontAtlas.rows * FPVGlyphBitmap.height
+        let atlasColumns = FPVFontAtlas.columns
+        let atlasRows = max(1, glyphs.count / atlasColumns)
+        let atlasWidth = atlasColumns * FPVGlyphBitmap.width
+        let atlasHeight = atlasRows * FPVGlyphBitmap.height
         let rowByteCount = atlasWidth * 4
         var atlasPixels = Data(repeating: 0, count: atlasHeight * rowByteCount)
 
@@ -223,23 +233,23 @@ struct MCMFontLoader {
         let atlasTexture = SKTexture(cgImage: image)
         atlasTexture.filteringMode = .nearest
         var textures: [SKTexture] = []
-        textures.reserveCapacity(FPVFontAtlas.glyphCount)
-        for glyphIndex in 0..<FPVFontAtlas.glyphCount {
+        textures.reserveCapacity(glyphs.count)
+        for glyphIndex in 0..<glyphs.count {
             let column = glyphIndex % FPVFontAtlas.columns
             let topDownRow = glyphIndex / FPVFontAtlas.columns
-            let bottomUpRow = FPVFontAtlas.rows - topDownRow - 1
+            let bottomUpRow = atlasRows - topDownRow - 1
             let rect = CGRect(
-                x: CGFloat(column) / CGFloat(FPVFontAtlas.columns),
-                y: CGFloat(bottomUpRow) / CGFloat(FPVFontAtlas.rows),
-                width: 1 / CGFloat(FPVFontAtlas.columns),
-                height: 1 / CGFloat(FPVFontAtlas.rows)
+                x: CGFloat(column) / CGFloat(atlasColumns),
+                y: CGFloat(bottomUpRow) / CGFloat(atlasRows),
+                width: 1 / CGFloat(atlasColumns),
+                height: 1 / CGFloat(atlasRows)
             )
             let texture = SKTexture(rect: rect, in: atlasTexture)
             texture.filteringMode = .nearest
             textures.append(texture)
         }
 
-        var blankGlyphs: Set<UInt8> = []
+        var blankGlyphs: Set<OSDGlyphIndex> = []
         for glyph in glyphs {
             let pixels = glyph.rgbaPixels
             var offset = pixels.startIndex + 3
@@ -254,6 +264,7 @@ struct MCMFontLoader {
             if isBlank { blankGlyphs.insert(glyph.glyph) }
         }
         return FPVFontAtlas(
+            glyphCount: glyphs.count,
             sourceName: sourceName,
             symbolMap: .forFont(named: sourceName),
             glyphBitmaps: glyphs,

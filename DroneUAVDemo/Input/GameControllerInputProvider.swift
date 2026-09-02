@@ -581,6 +581,10 @@ private extension InputAction {
             return 43
         case .launchAircraft:
             return 44
+        // Keyboard-only (⌥C): the lens is a viewing preference, not something to spend a
+        // gamepad binding on.
+        case .toggleFPVLens:
+            return 1_000
         // Track-builder actions are keyboard-only: building a course is a mouse-and-keyboard job,
         // and a gamepad has nothing to aim the ghost with.
         case .toggleRaceBuilder:

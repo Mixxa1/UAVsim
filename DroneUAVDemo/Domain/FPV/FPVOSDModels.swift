@@ -1,5 +1,10 @@
 import Foundation
 
+/// A character-generator slot. MAX7456 hardware addresses 256 of them and INAV fonts ship 512 in
+/// two banks; UAVsim renders the grid in software, so it is not bound by the hardware's page
+/// limit and indexes the whole font directly.
+typealias OSDGlyphIndex = UInt16
+
 enum TelemetryValue<Value: Equatable & Sendable>: Equatable, Sendable {
     case live(Value)
     case stale(Value)
@@ -79,43 +84,52 @@ enum FPVFontPreset: String, Codable, CaseIterable, Identifiable, Equatable, Send
 /// slots while retaining the standard nine artificial-horizon bar slots. Xander is a generic
 /// character font rather than a Betaflight semantic font, so it receives an ASCII-safe fallback.
 struct FPVOSDSymbolMap: Equatable, Sendable {
-    let artificialHorizonCenterLine: UInt8
-    let artificialHorizonCenter: UInt8
-    let artificialHorizonCenterLineRight: UInt8
-    let artificialHorizonBarStart: UInt8
+    let artificialHorizonCenterLine: OSDGlyphIndex
+    let artificialHorizonCenter: OSDGlyphIndex
+    let artificialHorizonCenterLineRight: OSDGlyphIndex
+    let artificialHorizonBarStart: OSDGlyphIndex
     let artificialHorizonSymbolCount: Int
     /// Betaflight's artificial-horizon sidebars: a ladder of ticks either side of centre with a
     /// level arrow on each. These slots are filled in every bundled font; UAVsim simply never
     /// drew them, which is why its horizon read as sparser than a real MAX7456 one.
-    var sidebarLeftArrow: UInt8 = 0x02
-    var sidebarRightArrow: UInt8 = 0x03
-    var sidebarTick: UInt8 = 0x13
+    /// Nil where the font family keeps something else at these slots; the sidebars are then
+    /// simply not drawn rather than painting an unrelated pictogram down each side.
+    var sidebarLeftArrow: OSDGlyphIndex? = 0x02
+    var sidebarRightArrow: OSDGlyphIndex? = 0x03
+    var sidebarTick: OSDGlyphIndex? = 0x13
     /// Betaflight's alternative "aircraft" crosshair: swept wings either side of the centre.
-    /// Fonts that carry no such art point these back at their own centre-line glyphs, so the
-    /// style stays selectable everywhere and simply looks the same as the default there.
-    var aircraftWingLeft: UInt8 = 0x77
-    var aircraftWingRight: UInt8 = 0x78
+    /// Nil where a font has no such art, in which case the style falls back to the default one.
+    var aircraftWingLeft: OSDGlyphIndex? = 0x77
+    var aircraftWingRight: OSDGlyphIndex? = 0x78
+    /// Some fonts draw the aircraft body in its own slot rather than reusing the horizon centre.
+    var aircraftCentre: OSDGlyphIndex? = nil
 
-    /// Betaflight's semantic label and unit pictograms. Every bundled font fills all of these —
-    /// verified by decoding all seven MCM files — which is what lets one layout keep the icon
-    /// look while each font draws it in its own style. Where a font ever leaves one blank, the
-    /// composer falls back to a plain text label rather than an invisible cell.
-    var rssiIcon: UInt8 = 0x01
-    var throttleIcon: UInt8 = 0x04
-    var voltIcon: UInt8 = 0x06
-    var metreIcon: UInt8 = 0x0C
-    var homeIcon: UInt8 = 0x11
-    var satelliteLeftIcon: UInt8 = 0x1E
-    var satelliteRightIcon: UInt8 = 0x1F
+    /// Semantic label and unit pictograms.
+    ///
+    /// Optional on purpose: a slot index is only meaningful within the font family it was
+    /// authored for, and reusing a Betaflight index on an INAV font would draw confidently wrong
+    /// artwork rather than nothing. Nil means "this font has no pictogram for it", and the
+    /// composer writes a plain text label instead.
+    var rssiIcon: OSDGlyphIndex? = 0x01
+    var throttleIcon: OSDGlyphIndex? = 0x04
+    var voltIcon: OSDGlyphIndex? = 0x06
+    var metreIcon: OSDGlyphIndex? = 0x0C
+    var homeIcon: OSDGlyphIndex? = 0x11
+    var satelliteLeftIcon: OSDGlyphIndex? = 0x1E
+    var satelliteRightIcon: OSDGlyphIndex? = 0x1F
     /// Sixteen headings, 22.5° apart. Index 8 points straight ahead, index 0 straight back.
-    var directionArrowStart: UInt8 = 0x60
-    var linkQualityIcon: UInt8 = 0x7B
-    var altitudeIcon: UInt8 = 0x7F
-    /// Seven fill levels, full first.
-    var batteryLevelStart: UInt8 = 0x90
+    var directionArrowStart: OSDGlyphIndex? = 0x60
+    var linkQualityIcon: OSDGlyphIndex? = 0x7B
+    var altitudeIcon: OSDGlyphIndex? = 0x7F
+    /// True where the altitude pictogram already spells its unit, so no unit glyph is appended.
+    var altitudeIconIncludesUnit: Bool = false
+    /// Seven fill levels.
+    var batteryLevelStart: OSDGlyphIndex? = 0x90
     var batteryLevelCount: Int = 7
-    var flightTimerIcon: UInt8 = 0x9C
-    var metresPerSecondIcon: UInt8 = 0x9F
+    /// Betaflight orders them full first; INAV orders them empty first.
+    var batteryLevelsAscendWithCharge: Bool = false
+    var flightTimerIcon: OSDGlyphIndex? = 0x9C
+    var metresPerSecondIcon: OSDGlyphIndex? = 0x9F
 
     static let betaflight = FPVOSDSymbolMap(
         artificialHorizonCenterLine: 0x72,
@@ -147,6 +161,41 @@ struct FPVOSDSymbolMap: Equatable, Sendable {
         aircraftWingRight: 0x3C                  // <
     )
 
+    /// INAV fonts use a completely different character map from Betaflight's, and the Xander
+    /// family ships two banks. Only slots confirmed by decoding the font are filled in; the rest
+    /// stay nil and render as text rather than as another font's artwork.
+    static let inav = FPVOSDSymbolMap(
+        artificialHorizonCenterLine: 0x2D,       // -
+        artificialHorizonCenter: 0x2B,           // +
+        artificialHorizonCenterLineRight: 0x2D,  // -
+        artificialHorizonBarStart: 0x2D,
+        artificialHorizonSymbolCount: 1,
+        // INAV keeps dB/LQ labels at Betaflight's sidebar slots, and its own sidebar art has not
+        // been identified, so the ladder stays off for this family.
+        sidebarLeftArrow: nil,
+        sidebarRightArrow: nil,
+        sidebarTick: nil,
+        aircraftWingLeft: 0x1A3,
+        aircraftWingRight: 0x1A5,
+        aircraftCentre: 0x1A4,
+        rssiIcon: 0x001,
+        throttleIcon: nil,
+        voltIcon: nil,
+        metreIcon: 0x082,
+        homeIcon: 0x010,
+        satelliteLeftIcon: 0x008,
+        satelliteRightIcon: nil,
+        directionArrowStart: nil,
+        linkQualityIcon: 0x002,
+        altitudeIcon: 0x076,
+        altitudeIconIncludesUnit: true,
+        batteryLevelStart: 0x063,
+        batteryLevelCount: 7,
+        batteryLevelsAscendWithCharge: true,
+        flightTimerIcon: 0x09F,
+        metresPerSecondIcon: 0x08F
+    )
+
     static func forFont(named sourceName: String) -> FPVOSDSymbolMap {
         let normalized = sourceName.lowercased()
         switch normalized {
@@ -154,19 +203,19 @@ struct FPVOSDSymbolMap: Equatable, Sendable {
              FPVFontPreset.impact.resourceName.lowercased():
             return .clarity
         case FPVFontPreset.xanderFullV3.resourceName.lowercased():
-            return .asciiFallback
+            return .inav
         default:
             return .betaflight
         }
     }
 
-    var artificialHorizonGlyphs: [UInt8] {
+    var artificialHorizonGlyphs: [OSDGlyphIndex] {
         [
             artificialHorizonCenterLine,
             artificialHorizonCenter,
             artificialHorizonCenterLineRight,
         ] + (0..<artificialHorizonSymbolCount).map {
-            artificialHorizonBarStart + UInt8($0)
+            artificialHorizonBarStart + OSDGlyphIndex($0)
         }
     }
 }
@@ -385,7 +434,7 @@ struct FPVOSDStateResolver: Sendable {
 }
 
 struct OSDCell: Equatable, Sendable {
-    var glyph: UInt8
+    var glyph: OSDGlyphIndex
     var x: Int
     var y: Int
 }
@@ -393,15 +442,15 @@ struct OSDCell: Equatable, Sendable {
 struct OSDGrid: Equatable, Sendable {
     let columns: Int
     let rows: Int
-    private(set) var glyphs: [UInt8]
+    private(set) var glyphs: [OSDGlyphIndex]
 
-    init(columns: Int = 30, rows: Int = 16, emptyGlyph: UInt8 = 32) {
+    init(columns: Int = 30, rows: Int = 16, emptyGlyph: OSDGlyphIndex = 32) {
         self.columns = max(1, columns)
         self.rows = max(1, rows)
         glyphs = Array(repeating: emptyGlyph, count: self.columns * self.rows)
     }
 
-    subscript(x: Int, y: Int) -> UInt8 {
+    subscript(x: Int, y: Int) -> OSDGlyphIndex {
         get {
             guard contains(x: x, y: y) else { return 32 }
             return glyphs[y * columns + x]
@@ -414,7 +463,7 @@ struct OSDGrid: Equatable, Sendable {
 
     mutating func write(_ text: String, x: Int, y: Int, width: Int? = nil, rightAligned: Bool = false) {
         write(
-            glyphs: text.utf8.map { $0 < 128 ? $0 : 63 },
+            glyphs: text.utf8.map { OSDGlyphIndex($0 < 128 ? $0 : 63) },
             x: x,
             y: y,
             width: width,
@@ -425,7 +474,7 @@ struct OSDGrid: Equatable, Sendable {
     /// Writes an explicit glyph run, so a label can be a single MAX7456 pictogram rather than
     /// spelled-out ASCII.
     mutating func write(
-        glyphs run: [UInt8],
+        glyphs run: [OSDGlyphIndex],
         x: Int,
         y: Int,
         width: Int? = nil,

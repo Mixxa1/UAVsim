@@ -626,16 +626,30 @@ struct CameraModuleView: View {
                     step: 0.005,
                     formatter: Self.scalarFormatter
                 )
+                Toggle("camera.fpv_lens", isOn: Binding(
+                    get: { viewModel.cameraConfiguration.fpv.lensEnabled },
+                    set: { viewModel.setFPVLensEnabled($0) }
+                ))
+                .toggleStyle(.switch)
+                .foregroundStyle(GroundControlPalette.textPrimary)
+
+                Text("camera.fpv_lens.hint")
+                    .font(.caption2)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 ModuleSliderRow(
-                    titleKey: "camera.fpv_stabilization",
+                    titleKey: "camera.fpv_lens_distortion",
                     value: Binding(
-                        get: { Double(viewModel.cameraConfiguration.fpvStabilization) },
-                        set: { viewModel.setFPVStabilization($0) }
+                        get: { Double(viewModel.cameraConfiguration.fpv.lensDistortion) },
+                        set: { viewModel.setFPVLensDistortion($0) }
                     ),
                     range: 0.0...1.0,
-                    step: 0.01,
+                    step: 0.05,
                     formatter: Self.scalarFormatter
                 )
+                .disabled(!viewModel.cameraConfiguration.fpv.lensEnabled)
+
                 ModuleSliderRow(
                     titleKey: "camera.fpv_mount_x",
                     value: Binding(

@@ -7961,7 +7961,7 @@ final class DroneSceneController {
             subjectScale: max(subjectScale, cachedSubjectScale)
         )
         fpvPresentationRootNode.simdWorldTransform = fpvAnchorNode.simdWorldTransform
-        let fpvLocalForward = resolvedFPVLocalForward(desiredWorldForward: forward)
+        let fpvLocalForward = fpvAnchorLocalForward()
         let mountForwardDistance = max(fpvAnchor.forwardClearance, abs(settings.fpv.mountOffset.z))
         let mountForwardOffset = fpvLocalForward * mountForwardDistance
         let mountLateralOffset = SIMD3<Float>(settings.fpv.mountOffset.x, settings.fpv.mountOffset.y, 0.0)
@@ -7972,52 +7972,48 @@ final class DroneSceneController {
         )
         fpvPitchNode.simdPosition = .zero
 
-        let planarVelocity = SIMD2<Float>(state.velocity.x, state.velocity.z)
-        let planarSpeed = simd_length(planarVelocity)
-        let velocityYaw: Float
-        if planarSpeed > 0.35 {
-            if fpvLocalForward.z < 0.0 {
-                velocityYaw = atan2(-state.velocity.x, -state.velocity.z)
-            } else {
-                velocityYaw = atan2(state.velocity.x, state.velocity.z)
-            }
-        } else {
-            velocityYaw = state.orientation.z
-        }
-
-        let relativeYaw = wrapAngle(velocityYaw - state.orientation.z).clamped(
-            to: (-settings.fpv.yawLimitDeg.degreesToRadians)...(settings.fpv.yawLimitDeg.degreesToRadians)
-        ) * 0.22
+        // An FPV camera is bolted to the airframe. It does not chase the velocity vector and it
+        // does not pitch with climb rate — both were invented camera motion with no counterpart
+        // on a real aircraft. The velocity term in particular swung the view sideways whenever
+        // the airframe crabbed, which a fixed-wing does through every turn, and read as the
+        // camera wandering on its own. Only the operator's own look input moves it now.
         let userYaw = fpvLookAngles.x.clamped(
             to: (-settings.fpv.yawLimitDeg.degreesToRadians)...(settings.fpv.yawLimitDeg.degreesToRadians)
         )
         let fpvBaseYaw = atan2(fpvLocalForward.x, -fpvLocalForward.z)
-        let targetFpvYaw = fpvBaseYaw + relativeYaw + userYaw
+        let targetFpvYaw = fpvBaseYaw + userYaw
         let currentFpvYaw = Float(fpvYawNode.eulerAngles.y)
         fpvYawNode.eulerAngles.y = CGFloat(currentFpvYaw + wrapAngle(targetFpvYaw - currentFpvYaw) * response)
 
-        let gimbalPitch = (-state.velocity.y * 0.05).clamped(
-            to: (-settings.fpv.pitchLimitDeg.degreesToRadians)...(settings.fpv.pitchLimitDeg.degreesToRadians)
-        )
-        let stabilizer = settings.fpv.stabilization.clamped(to: 0.0...1.0)
-        let localPitch = (-state.orientation.y * stabilizer * 0.30) + gimbalPitch
+        // No counter-rotation at all. A camera bolted to an airframe cannot level itself, and any
+        // fraction of levelling is visible as the view failing to come all the way round: at the
+        // 0.45 this setting used to carry, a 360 in acro finished ~49 degrees short and the same
+        // fraction was quietly subtracted from every pitch change. `FPVCameraState.stabilization`
+        // is retained only so projects saved with it still decode; it no longer drives anything.
         let userPitch = fpvLookAngles.y.clamped(
             to: (-settings.fpv.pitchLimitDeg.degreesToRadians)...(settings.fpv.pitchLimitDeg.degreesToRadians)
         )
-        let localRoll = -state.orientation.x * stabilizer * 0.30
-        let targetFpvPitch = localPitch + userPitch
         let currentFpvPitch = Float(fpvPitchNode.eulerAngles.x)
         let currentFpvRoll = Float(fpvPitchNode.eulerAngles.z)
         fpvPitchNode.eulerAngles = SCNVector3(
-            CGFloat(currentFpvPitch + (targetFpvPitch - currentFpvPitch) * response),
+            CGFloat(currentFpvPitch + (userPitch - currentFpvPitch) * response),
             0.0,
-            CGFloat(currentFpvRoll + (localRoll - currentFpvRoll) * response)
+            CGFloat(currentFpvRoll * (1.0 - response))
         )
 
         let fov = CGFloat(settings.fov.clamped(to: 30.0...110.0))
         followCameraNode.camera?.fieldOfView = fov
         orbitCameraNode.camera?.fieldOfView = fov
-        fpvCameraNode.camera?.fieldOfView = fov
+        // The lens widens what is rendered as well as bending it. Without this the barrel warp
+        // only compresses the existing frame inward, which reads as zooming in — the opposite of
+        // what a short-focal-length FPV lens does.
+        let fpvFov: CGFloat = {
+            guard settings.fpv.lensEnabled else { return fov }
+            let widened = Double(settings.fov)
+                * (1.0 + Double(settings.fpv.lensDistortion.clamped(to: 0.0...1.0)) * 0.6)
+            return CGFloat(min(150.0, max(30.0, widened)))
+        }()
+        fpvCameraNode.camera?.fieldOfView = fpvFov
         topCameraNode.camera?.fieldOfView = fov
         freeCameraNode.camera?.fieldOfView = fov
         spectatorCameraNode.camera?.fieldOfView = fov
@@ -8268,22 +8264,33 @@ final class DroneSceneController {
         return simd_normalize(yaw * pitch)
     }
 
+    /// The airframe's nose, expressed in the FPV mount's own frame.
+    ///
+    /// Derived from the *relative* rotation between the aircraft node and the mount, so the
+    /// aircraft's attitude cancels out and the answer describes how the camera is bolted on
+    /// rather than how the aircraft happens to be flying. Two earlier versions of this were both
+    /// wrong in instructive ways: deriving it from a yaw-only world vector broke every loop,
+    /// because past vertical the vector's projection onto the airframe plane collapses and the
+    /// mount snapped round; hard-coding -Z instead pointed the camera backwards on every model
+    /// whose mount is not aligned with the body axes, putting the aircraft in its own FPV feed.
+    private func fpvAnchorLocalForward() -> SIMD3<Float> {
+        let anchorRotation = simd_normalize(simd_quatf(fpvAnchorNode.simdWorldTransform))
+        let bodyRotation = simd_normalize(simd_quatf(droneNode.simdWorldTransform))
+        let anchorFromBody = simd_inverse(anchorRotation) * bodyRotation
+        let forward = simd_act(anchorFromBody, modelForwardLocal())
+        let planar = SIMD3<Float>(forward.x, 0.0, forward.z)
+        let planarLength = simd_length(planar)
+        guard planarLength > 0.0001, planarLength.isFinite else {
+            return modelForwardLocal()
+        }
+        return planar / planarLength
+    }
+
     private func modelForwardLocal() -> SIMD3<Float> {
         switch activeProfile.airframeClass {
         case .multirotor, .fixedWing, .hybridVTOL:
             return SIMD3<Float>(0.0, 0.0, -1.0)
         }
-    }
-
-    private func resolvedFPVLocalForward(desiredWorldForward: SIMD3<Float>) -> SIMD3<Float> {
-        let worldOrientation = simd_quatf(fpvPresentationRootNode.simdWorldTransform)
-        let localForward = simd_act(simd_inverse(worldOrientation), desiredWorldForward)
-        let planarForward = SIMD3<Float>(localForward.x, 0.0, localForward.z)
-        let planarLength = simd_length(SIMD2<Float>(planarForward.x, planarForward.z))
-        if planarLength < 0.0001 {
-            return modelForwardLocal()
-        }
-        return planarForward / planarLength
     }
 
     private func isDescendant(_ node: SCNNode, of ancestor: SCNNode) -> Bool {
