@@ -4,6 +4,10 @@ import simd
 final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     private enum Tuning {
         static let fixedStep: Float = 1.0 / 90.0
+        /// Thrust margin a rotor gains once it is flying fast enough to leave its own downwash —
+        /// see `multirotorInflowThrustFactor`. Shared with the drag calibration so the two agree
+        /// on what "maximum level speed" means.
+        static let saturatedTranslationalLift: Float = 1.12
         static let gravity: Float = 9.81
         static let startupDiagnosticsFrames = 8
         static let enableContinuousForceLogging = false
@@ -490,7 +494,17 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 let limit = capacity.limits[axis]
                 actualTorque[axis] = requiredTorque[axis].clamped(to: -limit...limit)
             }
-            angularAccel = actualTorque / inertiaRates
+            // Through the same rigid-body rotation the fixed wings use: `I⁻¹·(M − ω×(I·ω))`.
+            // Dividing the torque by inertia alone leaves the three axes independent, which is
+            // only true while the rates are small — and an acro machine at 850 deg/s is not that
+            // case. A multirotor's yaw inertia is roughly the sum of its roll and pitch inertias,
+            // so a fast roll with any yaw rate on genuinely produces pitch out of nowhere. That
+            // coupling is most of what makes acro feel like flying a real airframe.
+            angularAccel = rotationalAcceleration(
+                momentBody: actualTorque,
+                omegaBody: state.angularVelocity,
+                inertiaRateOrdered: inertiaRates
+            )
             // Air mode: a real flight controller answers a saturated mixer by raising the
             // collective rather than by giving up the moment, which is why a modern acro quad
             // still rolls with the throttle closed — and why it climbs slightly when it does.
@@ -520,7 +534,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 maxRotorThrust: maxRotorThrust
             )
 
-            var accel = allocation.actualTorque / inertiaRates
+            var accel = rotationalAcceleration(
+                momentBody: allocation.actualTorque,
+                omegaBody: state.angularVelocity,
+                inertiaRateOrdered: inertiaRates
+            )
             // Blade-imbalance vibration: a small oscillating disturbance
             // torque proportional to damage and rotor speed.
             let vibration = rotorModel.vibrationLevel
@@ -589,7 +607,18 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.orientation = wrappedAngles(eulerFromAttitudeQuaternion(nextQuat, fallback: state.orientation))
 
         let q = nextQuat
-        let thrustWorld = simd_act(q, thrustBody)
+        // The air the rotors are working in, in the frame the rotors live in. Both the inflow
+        // model and the anisotropic drag below need this, and it must be the same vector for both
+        // or the aircraft would be flying through two different airflows at once.
+        let airVelocityBodyForFlow = simd_act(q.conjugate, state.velocity - context.windVector)
+        let inflowThrustFactor = multirotorInflowThrustFactor(
+            profile: profile,
+            rotorModel: rotorModel,
+            airVelocityBody: airVelocityBodyForFlow,
+            weightNewtons: mass * Tuning.gravity,
+            airDensity: context.atmosphere.state(worldY: state.position.y).airDensity
+        )
+        let thrustWorld = simd_act(q, thrustBody * inflowThrustFactor)
 
         let gravityForce = SIMD3<Float>(0.0, -mass * Tuning.gravity, 0.0)
         // ⚠️ Drag is quadratic in speed, and it is what limits how fast the aircraft goes.
@@ -613,6 +642,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             baseline: baseline,
             controlMode: effectiveControl.controlMode,
             authority: authority,
+            mass: mass,
             weather: weather
         )
         // Drag acts on the speed through the *air*, which is what makes wind push an aircraft at
@@ -621,16 +651,51 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // times harder than a 36 kg sprayer, and with the wind at zero it still subtracted
         // `0.08 · v` from everything as an invisible second drag. A 5-inch quad lost about a fifth
         // of its top speed to a term that was only ever meant to model gusts.
-        let airRelativeVelocity = state.velocity - context.windVector
-        let horizontalAirVelocity = SIMD2<Float>(airRelativeVelocity.x, airRelativeVelocity.z)
-        let horizontalAirspeedNow = simd_length(horizontalAirVelocity)
-        let verticalAirspeedNow = airRelativeVelocity.y
-        let verticalDragCoefficient = verticalAirspeedNow >= 0.0 ? drag.ascent : drag.descent
-        let linearDrag = SIMD3<Float>(
-            -airRelativeVelocity.x * horizontalAirspeedNow * mass * drag.horizontal,
-            -verticalAirspeedNow * abs(verticalAirspeedNow) * mass * verticalDragCoefficient,
-            -airRelativeVelocity.z * horizontalAirspeedNow * mass * drag.horizontal
+        // ⚠️ Drag is anisotropic, and it has to be computed in *body* axes to be so.
+        //
+        // Resolving it in world axes says an airframe presents the same area however it is
+        // oriented — that a quad flying sideways, or leaned 70° into a fast pass, meets the air
+        // exactly like one flying nose-first. It does not: edge-on into the wind it is a slim
+        // frame, while the same frame flat to the flow is four rotor discs and a plate. Only the
+        // body frame knows which of those the aircraft is currently doing.
+        //
+        // The axial coefficient is taken as 2.5x the frontal one, and the pair is calibrated so
+        // that at the reference lean the *total* matches the figure the level-flight balance was
+        // built on — so catalogued top speeds are unchanged, while a steeper lean now costs more
+        // drag and a nose-down dive (frontal to the flow) costs less. That ratio is a judgement,
+        // not a measurement: it is the shape of a multirotor, not a number any datasheet gives.
+        let airVelocityBody = airVelocityBodyForFlow
+        let airspeedNow = simd_length(airVelocityBody)
+        let axialToFrontalRatio: Float = 2.5
+        let referenceLeanForDrag = drag.referenceLeanRad
+        let anisotropyNormalizer = cos(referenceLeanForDrag) * cos(referenceLeanForDrag)
+            + axialToFrontalRatio * sin(referenceLeanForDrag) * sin(referenceLeanForDrag)
+        let frontalCoefficient = drag.horizontal / max(0.2, anisotropyNormalizer)
+        // ⚠️ The disc's own resistance only applies when the flow is genuinely axial.
+        //
+        // A rotor descending vertically is a bluff body — the flow goes straight through the disc,
+        // the wake has nowhere to go, and the drag is what sets the terminal descent rate. The
+        // same rotor in a fast lean is not that object at all: the flow is mostly edgewise, the
+        // disc behaves as a lifting rotor, and its axial resistance is a fraction of the vertical
+        // case. Applying the vertical figure to any downward component made the two mutually
+        // exclusive — a 5-inch racer needs k = 0.05 to terminal at 14 m/s, and 0.05 against the
+        // 28 m/s of axial component in a 48° pass is 39 m/s² of drag, which no amount of thrust
+        // can push through. Measured with the two conflated: 13.8 m/s against a catalogued 38.
+        //
+        // So the disc figure fades in only as the flow becomes near-axial — steeper than about 64°
+        // of descent path. That is also where the vortex ring lives, and for the same reason.
+        let axialness = airspeedNow > 0.05 ? abs(airVelocityBody.y) / airspeedNow : 0.0
+        let discFlowBlend = smoothstepFloat(0.90, 1.0, axialness)
+        let bodyAxialCoefficient = frontalCoefficient * axialToFrontalRatio
+        let discCoefficient = airVelocityBody.y >= 0.0 ? drag.ascent : drag.descent
+        let axialCoefficient = bodyAxialCoefficient
+            + (max(discCoefficient, bodyAxialCoefficient) - bodyAxialCoefficient) * discFlowBlend
+        let dragBody = SIMD3<Float>(
+            -airVelocityBody.x * airspeedNow * mass * frontalCoefficient,
+            -airVelocityBody.y * airspeedNow * mass * axialCoefficient,
+            -airVelocityBody.z * airspeedNow * mass * frontalCoefficient
         )
+        let linearDrag = simd_act(q, dragBody)
         let totalForce = thrustWorld + gravityForce + linearDrag
 
         emitStartupDiagnosticsIfNeeded(
@@ -653,9 +718,32 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let acceleration = totalForce / mass
         next.velocity = state.velocity + acceleration * dt
 
-        // No speed clamp: the drag above is what holds the aircraft to its catalogued figures now.
-        // What remains is a divergence guard — an impact or a NaN can hand this loop a velocity no
-        // aerodynamic model would ever produce, and the solver must not carry it forward.
+        // The catalogued descent rate is a firmware limit, so it is enforced where firmware limits
+        // live: in the assisted modes. A rate mode hands the aircraft to the pilot and the only
+        // thing holding it back is air — which is what makes a vertical descent in acro able to
+        // reach the wake speed, and the vortex ring with it.
+        if !effectiveControl.controlMode.isRateMode {
+            let assistedDescentLimit = profile.maxDescentSpeedMps.clamped(to: 1.0...20.0)
+            if next.velocity.y < -assistedDescentLimit {
+                next.velocity.y = -assistedDescentLimit
+            }
+            // The published cruise speed, for the airframes where it is a tether or a firmware
+            // setting rather than a drag balance. For everything else the aerodynamics settle
+            // below this anyway and the cap never engages.
+            let assistedSpeedLimit = profile.maxHorizontalSpeedMps.clamped(to: 1.0...42.0)
+            let horizontal = SIMD2<Float>(next.velocity.x, next.velocity.z)
+            let horizontalSpeed = simd_length(horizontal)
+            if horizontalSpeed > assistedSpeedLimit {
+                let scale = assistedSpeedLimit / horizontalSpeed
+                next.velocity.x *= scale
+                next.velocity.z *= scale
+            }
+        }
+
+        // No horizontal speed clamp: the drag above is what holds the aircraft to its catalogued
+        // figures now. What remains is a divergence guard — an impact or a NaN can hand this loop
+        // a velocity no aerodynamic model would ever produce, and the solver must not carry it
+        // forward.
         let runawaySpeedLimit = max(80.0, profile.maxHorizontalSpeedMps * 4.0)
         if simd_length(next.velocity) > runawaySpeedLimit {
             next.velocity = simd_normalize(next.velocity) * runawaySpeedLimit
@@ -813,6 +901,75 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         )
     }
 
+    /// What the air the rotors are actually flying through does to the thrust they make.
+    ///
+    /// A rotor is not a thrust constant. It works on the air it can reach, and how much it can
+    /// reach depends on how the aircraft is moving through it. Two effects matter enough to fly:
+    ///
+    /// * **Translational lift.** Hovering, a rotor keeps re-using its own downwash and has to push
+    ///   it harder and harder; moving, it meets undisturbed air every revolution and the same
+    ///   power buys more thrust. Every helicopter pilot feels this as the airframe lightening as
+    ///   it accelerates out of a hover, and every multirotor has it too.
+    /// * **Vortex ring state.** Descend vertically at roughly the speed of your own downwash and
+    ///   the wake stops leaving — it rolls up into a torus around the disc and gets ingested
+    ///   again, so the rotor is working in its own turbulent exhaust and loses a large fraction of
+    ///   its thrust. It is the classic way to lose a multirotor: come straight down too fast, and
+    ///   adding throttle makes it worse because it feeds the ring. Moving forward breaks it,
+    ///   which is why the escape is to fly out sideways rather than to climb.
+    ///
+    /// The reference is the hover induced velocity from momentum theory, `v_h = √(T / 2ρA)`, and
+    /// both effects are expressed against it. The magnitudes (+12% saturating, down to 0.72 in the
+    /// ring) are engineering figures chosen to match the documented shape of these effects — this
+    /// is not a blade-element solution and does not claim to be.
+    private func multirotorInflowThrustFactor(
+        profile: DroneModelProfile,
+        rotorModel: VehicleRotorModel,
+        airVelocityBody: SIMD3<Float>,
+        weightNewtons: Float,
+        airDensity: Float
+    ) -> Float {
+        let footprint = profile.dimensionsUnfoldedMm.meters
+        // Rotor radius from the airframe's footprint: on a quad the discs occupy roughly a quarter
+        // of the overall width each. A 250 mm racer comes out at 62 mm against a real 5-inch
+        // (63.5 mm) propeller.
+        let rotorRadius = max(0.02, 0.25 * max(footprint.x, footprint.y))
+        let rotorCount = Float(max(4, rotorModel.rotors.count))
+        let diskArea = max(0.001, rotorCount * .pi * rotorRadius * rotorRadius)
+        // ⚠️ Hover induced velocity is defined by the aircraft's *weight*, not by the thrust it
+        // happens to be making. Using instantaneous thrust moved the reference every time the
+        // pilot touched the throttle: at full power v_h rose by half, the ring's speed band moved
+        // up with it, and the one input that is supposed to make the ring worse instead flew the
+        // aircraft out of the band the model was checking. Measured that way, no airframe in the
+        // fleet ever entered the ring at all.
+        let hoverInducedVelocity = sqrt(max(0.01, weightNewtons) / (2.0 * max(0.2, airDensity) * diskArea))
+        guard hoverInducedVelocity > 0.01 else { return 1.0 }
+
+        let edgewiseSpeed = simd_length(SIMD2<Float>(airVelocityBody.x, airVelocityBody.z))
+        let axialSpeed = airVelocityBody.y
+
+        // Effective translational lift: no benefit in a hover, saturating once the aircraft is
+        // outrunning its own downwash.
+        let edgewiseRatio = edgewiseSpeed / hoverInducedVelocity
+        let translationalLift = 1.0 + (Tuning.saturatedTranslationalLift - 1.0) * (1.0 - exp(-edgewiseRatio / 2.0))
+
+        // Vortex ring state: descending (negative axial), in the band around the downwash speed,
+        // and only while the aircraft is not flying out of its own wake.
+        var ringLoss: Float = 1.0
+        if axialSpeed < 0.0 {
+            let descentRatio = -axialSpeed / hoverInducedVelocity
+            if descentRatio > 0.5, descentRatio < 1.6 {
+                // Triangular well, deepest where the wake exactly cancels the descent.
+                let normalized = descentRatio < 1.0
+                    ? (descentRatio - 0.5) / 0.5
+                    : (1.6 - descentRatio) / 0.6
+                let breakupFade = max(0.0, 1.0 - edgewiseRatio / 1.5)
+                ringLoss = 1.0 - 0.28 * normalized.clamped(to: 0.0...1.0) * breakupFade
+            }
+        }
+
+        return (translationalLift * ringLoss).clamped(to: 0.60...1.15)
+    }
+
     /// Rough moment of inertia of a multirotor, from its own mass and footprint, in the engine's
     /// (roll, pitch, yaw) rate order.
     ///
@@ -830,9 +987,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// physical even when no component graph exists.
     private func estimatedMultirotorInertia(context: DroneSimulationContext) -> SIMD3<Float> {
         let mass = max(0.05, context.vehicleMassModel.resolvedCurrentTotalMass)
+        // ⚠️ `DroneDimensionsMM` is width/length/HEIGHT — its `z` is how tall the aircraft is, not
+        // how deep its footprint is. The engine's body frame uses z for the longitudinal axis, and
+        // taking the plan dimensions from `x`/`z` therefore measured a 250 mm quad as 250 x 62.
         let footprint = context.profile.dimensionsUnfoldedMm.meters
         let armX = max(0.03, 0.35 * footprint.x)
-        let armZ = max(0.03, 0.35 * footprint.z)
+        let armZ = max(0.03, 0.35 * footprint.y)
         // Roll about body Z (arm in X), pitch about body X (arm in Z), yaw about body Y (both).
         // Half the mass is treated as sitting out at the motors and half near the centre — a
         // multirotor's battery, avionics and payload are all on the centreline, so `m · r²` with
@@ -883,7 +1043,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // has in the app.
         if rotorModel.isEmpty {
             let footprint = profile.dimensionsUnfoldedMm.meters
-            let arm = max(0.04, 0.35 * max(footprint.x, footprint.z))
+            // Plan dimensions are x and y; z is height (see `estimatedMultirotorInertia`).
+            let arm = max(0.04, 0.35 * max(footprint.x, footprint.y))
             rotorCount = 4.0
             leverPerNewton = SIMD3<Float>(rotorCount * arm, rotorCount * arm, rotorCount * 0.02)
         } else {
@@ -929,19 +1090,37 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     ///   absolute thrust limit would have let a racing quad settle at 86 m/s.
     /// * **Climb** — full throttle leaves `(TWR − 1)·g` of spare acceleration, and the profile's
     ///   ascent rate is where that runs out.
-    /// * **Descent** — an unpowered descent is terminal velocity, so `k = g / v_descent²`. Point
-    ///   the thrust downward as well and the aircraft accelerates past it, which is precisely what
-    ///   a dive is and what the old clamp made impossible.
+    /// * **Descent** — ⚠️ NOT from the catalogued descent rate. That figure is a firmware limit,
+    ///   the speed the flight controller permits, not the speed the airframe falls at: a Mavic
+    ///   rated at 6 m/s reaches something closer to 16 m/s in free fall. Deriving drag from it
+    ///   made the limit into physics, and the aircraft could not be made to fall faster than its
+    ///   own autopilot setting even in a rate mode with the throttle shut — which also put the
+    ///   vortex ring permanently out of reach, since a ring needs a descent near the wake speed
+    ///   and the drag was holding the aircraft above it. Terminal velocity is computed from the
+    ///   airframe's own flat-plate area instead, and the catalogued rate is applied where it
+    ///   belongs, as an assisted-mode limit.
     private func multirotorQuadraticDrag(
         profile: DroneModelProfile,
         baseline: ResolvedFlightBaseline,
         controlMode: FlightControlMode,
         authority: Float,
+        mass: Float,
         weather: WeatherFactors
-    ) -> (horizontal: Float, ascent: Float, descent: Float) {
-        // Floor at 1 m/s, not 3: a tethered inspection drone is catalogued at 2 m/s, and a floor
-        // above its own figure made it 50% too fast in the only mode it flies.
-        let maxSpeed = profile.maxHorizontalSpeedMps.clamped(to: 1.0...42.0)
+    ) -> (horizontal: Float, ascent: Float, descent: Float, referenceLeanRad: Float) {
+        // ⚠️ A published top speed is only an aerodynamic limit if nothing else is holding the
+        // aircraft back — and the catalogue says when that is not the case: an airframe rated to
+        // hold station in more wind than its own top speed cannot be drag-limited at that speed,
+        // because holding station against W m/s of wind *is* flying at W m/s through the air.
+        // The Fotokite Sigma is catalogued at 2 m/s and rated for 8 m/s of wind, and it says why
+        // in its own description — it is an actively tethered platform, so the 2 m/s is the
+        // tether. Calibrating drag from it gave that airframe 138x the resistance its frame could
+        // physically produce, a terminal descent of 1.5 m/s, and an inability to hold station in
+        // more than 1.5 m/s of wind — against the 8 it is rated for.
+        //
+        // So the aerodynamic calibration uses whichever figure is larger, and the published speed
+        // is applied where a tether or a firmware limit belongs: as an assisted-mode cap.
+        let aerodynamicSpeedReference = max(profile.maxHorizontalSpeedMps, profile.maxWindResistanceMps)
+        let maxSpeed = aerodynamicSpeedReference.clamped(to: 1.0...42.0)
         let ascentSpeed = profile.maxAscentSpeedMps.clamped(to: 1.0...20.0)
         let descentSpeed = profile.maxDescentSpeedMps.clamped(to: 1.0...20.0)
         let referenceTiltDegrees: Float
@@ -958,7 +1137,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             .clamped(to: 1.05...12.0)
         let sustainableLean = acos((1.0 / thrustToWeight).clamped(to: 0.02...0.999))
         let referenceLean = min(referenceTiltDegrees.degreesToRadians, sustainableLean)
-        let levelAcceleration = Tuning.gravity * tan(referenceLean)
+        // Translational lift is saturated by the time an aircraft is at its top speed, so the
+        // thrust available there is the hover figure plus that margin — and the drag has to
+        // balance the larger number, or every airframe overshoots its catalogued speed by the
+        // square root of the lift factor. Measured without this: 6-9% high across the fleet.
+        let levelAcceleration = Tuning.gravity * tan(referenceLean) * Tuning.saturatedTranslationalLift
         let climbAcceleration = max(0.4, (thrustToWeight - 1.0) * Tuning.gravity)
 
         // Weather thickens the air for all three alike.
@@ -967,10 +1150,22 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // The ceilings bound a divergent coefficient, nothing more. They used to sit at 0.90/1.60,
         // which is below what a genuinely slow airframe needs — a drone rated at 1 m/s of descent
         // requires k = 9.81, and clamping it to 1.60 let it fall at 2.5.
+        // Free-fall terminal velocity from the airframe's own footprint: a multirotor falling flat
+        // presents its frame and four rotor discs, which fills roughly 45% of its bounding square
+        // at a bluff-body Cd of 1.2. Both are judgement figures — no datasheet publishes either —
+        // but they put the fleet between 15 and 20 m/s, which is where a dropped multirotor lands.
+        let footprint = profile.dimensionsUnfoldedMm.meters
+        let flatPlateArea = max(0.002, 0.45 * max(0.02, footprint.x) * max(0.02, footprint.y))
+        let terminalDescentSpeed = max(
+            descentSpeed,
+            sqrt(2.0 * mass * Tuning.gravity / (1.225 * 1.2 * flatPlateArea))
+        )
+
         return (
             horizontal: (levelAcceleration / (maxSpeed * maxSpeed) * weatherFactor).clamped(to: 0.002...12.0),
             ascent: (climbAcceleration / (ascentSpeed * ascentSpeed) * weatherFactor).clamped(to: 0.002...12.0),
-            descent: (Tuning.gravity / (descentSpeed * descentSpeed) * weatherFactor).clamped(to: 0.002...12.0)
+            descent: (Tuning.gravity / (terminalDescentSpeed * terminalDescentSpeed) * weatherFactor).clamped(to: 0.002...12.0),
+            referenceLeanRad: referenceLean
         )
     }
 
@@ -3230,7 +3425,20 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let sideslipCorrection = (-sideslipRad * 1.6).clamped(to: -0.45...0.45)
         let manualIntent = control.yawIntent.clamped(to: -1.6...1.6)
         if abs(manualIntent) > 0.001 {
-            return (manualIntent * 0.6 * authority + yawDamper).clamped(to: -1.0...1.0)
+            // ⚠️ A rate mode gives the pilot the whole surface. This used to scale every manual
+            // rudder input by 0.6 regardless of mode, so full pedal in acro was 60% of the fin —
+            // the same defect as the ±28° elevator envelope, in a different line. Angle modes keep
+            // the softened pedal, which is what makes assisted flight feel assisted.
+            let pedalAuthority: Float = control.controlMode.isRateMode ? 1.0 : 0.6
+            // And the yaw damper backs out as the pedal goes in, rather than opposing it. A damper
+            // that fights a deliberate input is indistinguishable from a sticky control — the
+            // aircraft resists the boot exactly when the pilot most wants it to yaw. Hands off the
+            // pedal it still has full authority, which is when it is actually damping anything.
+            let damperBlend = control.controlMode.isRateMode
+                ? max(0.0, 1.0 - abs(manualIntent))
+                : 1.0
+            return (manualIntent * pedalAuthority * authority + yawDamper * damperBlend)
+                .clamped(to: -1.0...1.0)
         }
         // Heading-error rudder gain was 0.8 — far too high. The rudder isn't
         // the primary heading actuator (bank is); a large heading-error rudder
@@ -3775,6 +3983,14 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
     private func wrappedAngles(_ angle: SIMD3<Float>) -> SIMD3<Float> {
         SIMD3<Float>(wrap(angle.x), wrap(angle.y), wrap(angle.z))
+    }
+
+    /// Hermite smoothstep, for blending one aerodynamic regime into another without a step change
+    /// in force that the integrator would see as an impulse.
+    private func smoothstepFloat(_ edge0: Float, _ edge1: Float, _ value: Float) -> Float {
+        guard edge1 > edge0 else { return value >= edge1 ? 1.0 : 0.0 }
+        let t = ((value - edge0) / (edge1 - edge0)).clamped(to: 0.0...1.0)
+        return t * t * (3.0 - 2.0 * t)
     }
 
     private func clampMagnitude(_ vector: SIMD3<Float>, limit: Float) -> SIMD3<Float> {

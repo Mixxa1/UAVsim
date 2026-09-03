@@ -417,8 +417,8 @@ print("")
 print("F. SPEED ENVELOPE — reached by the drag balance, not by a clamp")
 print("   Level speed is flown at the lean the mode allows, on the throttle that holds altitude —")
 print("   a published top speed is level flight, not a climb. The dive is nose-down at full")
-print("   throttle, which a real quad takes well past its descent rating.")
-print(pad("profile", 30) + padLeft("level", 9) + padLeft("spec", 8) + padLeft("descent", 10) + padLeft("spec", 8) + padLeft("dive", 9))
+print("   throttle. \"terminal\" is free fall in a rate mode; \"assisted\" is the firmware limit.")
+print(pad("profile", 30) + padLeft("level", 9) + padLeft("spec", 8) + padLeft("terminal", 10) + padLeft("assisted", 10) + padLeft("spec", 6) + padLeft("dive", 9))
 print(String(repeating: "-", count: 76))
 
 var speedFindings: [String] = []
@@ -460,17 +460,23 @@ for profile in multirotors {
     }
     let levelSpeed = simd_length(SIMD2<Float>(level.velocity.x, level.velocity.z))
 
-    // Unpowered descent: throttle closed, level, terminal velocity.
-    var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 4000.0)
-    for _ in 0..<Int(30.0 / Double(dt)) {
-        falling = engine.step(
-            state: falling,
-            control: acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: 0.0, state: falling),
-            context: context,
-            deltaTime: dt
-        )
+    // Unpowered descent, twice. In a rate mode nothing but air holds the aircraft back, so this is
+    // true terminal velocity; in an assisted mode the firmware limit applies and the catalogued
+    // descent rate is what should come out.
+    func unpoweredDescent(rateMode: Bool) -> Float {
+        var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 5000.0)
+        for _ in 0..<Int(30.0 / Double(dt)) {
+            var control = acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: 0.0, state: falling)
+            if !rateMode {
+                control.controlMode = .stabilized
+                control.targetOrientation = SIMD3<Float>(0, 0, falling.orientation.z)
+            }
+            falling = engine.step(state: falling, control: control, context: context, deltaTime: dt)
+        }
+        return -falling.velocity.y
     }
-    let descentSpeed = -falling.velocity.y
+    let terminalSpeed = unpoweredDescent(rateMode: true)
+    let assistedDescent = unpoweredDescent(rateMode: false)
 
     // Powered dive: nose straight down, full throttle — thrust adds to gravity.
     var diving = makeState(profile, orientation: SIMD3<Float>(0, -.pi / 2 * 0.98, 0), throttle: 1.0, altitude: 4000.0)
@@ -485,8 +491,9 @@ for profile in multirotors {
     print(pad(profile.displayName, 30)
         + padLeft(String(format: "%.1f", levelSpeed), 9)
         + padLeft(String(format: "%.0f", profile.maxHorizontalSpeedMps), 8)
-        + padLeft(String(format: "%.1f", descentSpeed), 10)
-        + padLeft(String(format: "%.0f", profile.maxDescentSpeedMps), 8)
+        + padLeft(String(format: "%.1f", terminalSpeed), 10)
+        + padLeft(String(format: "%.1f", assistedDescent), 10)
+        + padLeft(String(format: "%.0f", profile.maxDescentSpeedMps), 6)
         + padLeft(String(format: "%.1f", diveSpeed), 9))
 
     let levelError = abs(levelSpeed - profile.maxHorizontalSpeedMps) / max(1.0, profile.maxHorizontalSpeedMps)
@@ -496,11 +503,106 @@ for profile in multirotors {
             profile.displayName, levelSpeed, profile.maxHorizontalSpeedMps
         ))
     }
-    let descentError = abs(descentSpeed - profile.maxDescentSpeedMps) / max(1.0, profile.maxDescentSpeedMps)
-    if descentError > 0.25 {
+    // The assisted descent is the one that must honour the catalogue; terminal velocity is
+    // aerodynamics and only has to be sane (a multirotor falls flat somewhere in the teens).
+    let assistedError = abs(assistedDescent - profile.maxDescentSpeedMps) / max(1.0, profile.maxDescentSpeedMps)
+    if assistedError > 0.25 {
         speedFindings.append(String(
-            format: "%@ falls at %.1f m/s against a catalogued %.0f m/s",
-            profile.displayName, descentSpeed, profile.maxDescentSpeedMps
+            format: "%@ descends at %.1f m/s in an assisted mode against a catalogued %.0f m/s",
+            profile.displayName, assistedDescent, profile.maxDescentSpeedMps
+        ))
+    }
+    if terminalSpeed < profile.maxDescentSpeedMps || terminalSpeed > 30.0 {
+        speedFindings.append(String(
+            format: "%@ has a free-fall terminal velocity of %.1f m/s, which is not a multirotor falling flat",
+            profile.displayName, terminalSpeed
+        ))
+    }
+}
+
+// MARK: - G. Vortex ring state
+
+print("")
+print("G. VORTEX RING — trying to power out of your own downwash")
+print("   The real scenario: let the descent build, then firewall the throttle. Outside the ring")
+print("   full power arrests it; inside, the rotor is working in its own turbulence and full")
+print("   power does much less. Carrying forward speed breaks the ring, which is the true escape.")
+print(pad("profile", 30) + padLeft("wake speed", 13) + padLeft("sink vertical", 16) + padLeft("sink moving", 14) + padLeft("verdict", 12))
+print(String(repeating: "-", count: 84))
+
+var ringFindings: [String] = []
+for profile in multirotors {
+    let mass = VehicleMassModel.baseline(for: profile, uavProfile: profile.resolvedUAVProfile)
+    let context = makeContext(profile, mass: mass)
+    let hover = FlightBaselineResolver.resolve(
+        runtimeProfile: profile,
+        activeUAVProfile: profile.resolvedUAVProfile,
+        vehicleMassModel: mass,
+        flightMode: .manual
+    ).hoverLockThrottle
+
+    // Hover induced velocity, the speed the rotors push air down at while holding the aircraft
+    // up — the same estimate the engine makes, so the probe is asking about the right band.
+    let footprint = profile.dimensionsUnfoldedMm.meters
+    let rotorRadius = max(0.02, 0.25 * max(footprint.x, footprint.y))
+    let diskArea = max(0.001, 4.0 * Float.pi * rotorRadius * rotorRadius)
+    let weight = mass.resolvedCurrentTotalMass * 9.81
+    let hoverInducedVelocity = sqrt(weight / (2.0 * 1.225 * diskArea))
+
+    /// Terminal velocity in free fall, to tell "no ring" apart from "cannot reach the ring".
+    func unpoweredDescent(rateMode: Bool) -> Float {
+        var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 5000.0)
+        for _ in 0..<Int(25.0 / Double(dt)) {
+            falling = engine.step(
+                state: falling,
+                control: acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: 0.0, state: falling),
+                context: context,
+                deltaTime: dt
+            )
+        }
+        return -falling.velocity.y
+    }
+
+    /// Sink rate after 6 s of holding hover throttle while already descending at the wake speed.
+    /// Outside the ring that is enough thrust to arrest; inside it is not, and the aircraft keeps
+    /// going down with the throttle where it would normally hold station.
+    func sinkAfterHold(forwardSpeed: Float) -> Float {
+        var state = makeState(
+            profile,
+            orientation: .zero,
+            throttle: hover,
+            velocity: SIMD3<Float>(0, -hoverInducedVelocity, -forwardSpeed),
+            altitude: 6000.0
+        )
+        for _ in 0..<Int(6.0 / Double(dt)) {
+            state = engine.step(
+                state: state,
+                control: acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: hover, state: state),
+                context: context,
+                deltaTime: dt
+            )
+        }
+        return -state.velocity.y
+    }
+
+    // An airframe whose terminal velocity is below the bottom of the ring band can never enter it:
+    // it simply cannot fall fast enough. That is the case for a tethered platform, whose
+    // catalogued 2 m/s is the tether talking rather than its aerodynamics, and the calibration
+    // hands it drag to match. Report it as out of reach rather than as a missing effect.
+    let ringReachable = unpoweredDescent(rateMode: true) > hoverInducedVelocity * 0.5
+    let verticalSink = sinkAfterHold(forwardSpeed: 0.0)
+    let movingSink = sinkAfterHold(forwardSpeed: hoverInducedVelocity * 2.0)
+    let ringActive = verticalSink > movingSink + 0.5
+    print(pad(profile.displayName, 30)
+        + padLeft(String(format: "%.1f m/s", hoverInducedVelocity), 13)
+        + padLeft(String(format: "%.1f m/s", verticalSink), 16)
+        + padLeft(String(format: "%.1f m/s", movingSink), 14)
+        + padLeft(ringActive ? String(format: "ring +%.1f", verticalSink - movingSink)
+            : (ringReachable ? "no ring" : "unreachable"), 12))
+    if !ringActive, ringReachable {
+        ringFindings.append(String(
+            format: "%@ holds a vertical descent at its own wake speed as easily as a moving one (%.1f vs %.1f m/s) — no ring",
+            profile.displayName, verticalSink, movingSink
         ))
     }
 }
@@ -509,7 +611,7 @@ for profile in multirotors {
 
 print("")
 print(String(repeating: "=", count: 84))
-let allFindings = rateFindings + axisFindings + thrustFindings + angleFindings + surfaceFindings + speedFindings
+let allFindings = rateFindings + axisFindings + thrustFindings + angleFindings + surfaceFindings + speedFindings + ringFindings
 if allFindings.isEmpty {
     print("No findings.")
 } else {
