@@ -514,7 +514,7 @@
 "camera.fpv_mount_x" = "FPV крепление X";
 "camera.fpv_mount_y" = "FPV крепление Y";
 "camera.fpv_mount_z" = "FPV крепление Z";
-"camera.fpv_hide_obstructing" = "Скрывать мешающие части дрона в FPV";
+"camera.fpv_hide_obstructing" = "Убирать из кадра передние винты и лучи";
 "camera.fpv.osd_font" = "Шрифт analog OSD";
 "camera.fpv.osd_font.hint" = "Переключает живой atlas символов MAX7456, не подменяя OSD картинкой.";
 "camera.fpv.osd_font.betaflight" = "Betaflight";
@@ -3256,3 +3256,30 @@
 "camera.fpv_lens" = "Широкоугольный FPV-объектив (⌥C)";
 "camera.fpv_lens.hint" = "Расширяет угол рендера и выгибает картинку, как короткофокусник. Изгиб заметнее всего, когда горизонт уходит от центра кадра.";
 "camera.fpv_lens_distortion" = "Сила дисторсии";
+
+"payload.stations.title" = "Точки крепления";
+"payload.stations.subtitle" = "Куда аппарат может нести нагрузку и что установлено";
+"payload.stations.remaining" = "Остаток бюджета";
+"payload.stations.remove" = "Снять";
+"payload.stations.fit_camera" = "Установить камеру";
+"payload.stations.nothing_fits" = "В остаток бюджета ничего не влезает";
+"payload.stations.single" = "У этого аппарата одна станция; ей распоряжается редактор нагрузки выше.";
+"payload.mount.bellyForward" = "Брюхо, переднее";
+"payload.mount.bellyAft" = "Брюхо, заднее";
+"payload.mount.top" = "Верхнее крепление";
+"payload.mount.nose" = "Нос";
+"payload.mount.reject.unavailable" = "У аппарата нет такой станции.";
+"payload.mount.reject.occupied" = "Станция уже занята.";
+"payload.mount.reject.station_mass" = "Слишком тяжело для этой станции отдельно.";
+"payload.mount.reject.airframe_mass" = "Выходит за бюджет нагрузки аппарата.";
+
+"camera.channel.optical" = "EO";
+"camera.channel.thermal" = "ИК";
+"camera.channels.label" = "Каналы";
+"camera.spectrum.visibleLight" = "Видимый свет";
+"camera.spectrum.longwaveInfrared" = "Тепловизор (LWIR)";
+"camera.spectrum.multispectral" = "Мультиспектр";
+
+"payload.stations.show_feed" = "Смотреть";
+"payload.stations.on_air" = "В эфире";
+"payload.stations.feed_hint" = "Камера ПН показывает станцию, отмеченную «В эфире». Переключитесь на режим камеры ПН, чтобы увидеть изображение.";

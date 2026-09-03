@@ -13,6 +13,17 @@ struct UAVFlightTuningProfile: Hashable {
         let throttleAuthority: Float
         let maneuverPenaltyFactor: Float
         let payloadThrustCompensationFactor: Float
+        /// Full-stick body rates in a rate (acro) mode, deg/s.
+        ///
+        /// These were one hard-coded pair of constants inside the physics engine, so a 680 g
+        /// racing quad and a 36 kg agricultural machine rolled at exactly the same speed. Rate is
+        /// the single number that defines how an airframe feels on the stick, and it is a property
+        /// of the airframe — inertia, arm length, motor torque — not of the simulator.
+        ///
+        /// The `multicopter(...)` factory defaults these to the camera-platform figures the fleet
+        /// already flew at, so only airframes that genuinely differ have to state them.
+        let acroRollRateDegPerSec: Float
+        let acroYawRateDegPerSec: Float
     }
 
     struct HelicopterTuning: Hashable {
@@ -22,6 +33,10 @@ struct UAVFlightTuningProfile: Hashable {
         let throttleAuthority: Float
         let maneuverPenaltyFactor: Float
         let payloadThrustCompensationFactor: Float
+        /// See `MulticopterTuning.acroRollRateDegPerSec`. A helicopter rolls on cyclic authority
+        /// rather than on differential thrust and is the slower machine of the two.
+        let acroRollRateDegPerSec: Float
+        let acroYawRateDegPerSec: Float
     }
 
     struct FixedWingTuning: Hashable {
@@ -83,19 +98,33 @@ struct UAVFlightTuningProfile: Hashable {
 
         switch visualPreset {
         case .fpvRacingQuad:
-            // A racing quad hovers at roughly a fifth of its throttle and has the rest in
+            // A racing quad hovers at roughly a quarter of its throttle and has the rest in
             // reserve: thrust-to-weight near ten to one is the defining number of the class, and
             // it is what makes the stick feel like a rate command rather than a request. The
             // penalty for hanging anything off it is correspondingly steep — these airframes are
             // built with no margin to spare for payload.
+            //
+            // Hover throttle is not a free figure: the engine sizes full thrust as
+            // (stabilizationThrust + authority * 0.35) * weight, so hovering happens at the
+            // reciprocal of that — 1 / 3.75 = 0.267 here. It read 0.24 while the resolver was
+            // still clamping the thrust to 2.25, which is a hover at 0.24 producing 0.62 of the
+            // weight: the aircraft sank at the throttle its own profile called a hover.
             return multicopter(
                 referenceMass: referenceMass,
-                hoverThrottleBaseline: 0.24,
+                hoverThrottleBaseline: 0.267,
                 stabilizationThrustBaseline: 3.40,
                 verticalResponseFactor: 2.20,
                 throttleAuthority: 1.60,
                 maneuverPenaltyFactor: 0.10,
                 payloadThrustCompensationFactor: 0.70,
+                // What separates this class from a camera platform on the stick. A five-inch
+                // freestyle machine is flown at 800-1200 deg/s on roll and pitch and several
+                // hundred on yaw; the whole fleet used to share one 300 deg/s figure buried in the
+                // engine. Yaw stays lower than roll because it is made by motor *torque*
+                // differential rather than by thrust differential, which is the weaker lever on
+                // any multirotor — a real racing quad does yaw more slowly than it rolls.
+                acroRollRateDegPerSec: 900.0,
+                acroYawRateDegPerSec: 400.0,
                 source: source
             )
         case .djiNeo:
@@ -523,6 +552,8 @@ struct UAVFlightTuningProfile: Hashable {
         throttleAuthority: Float,
         maneuverPenaltyFactor: Float,
         payloadThrustCompensationFactor: Float,
+        acroRollRateDegPerSec: Float = 300.0,
+        acroYawRateDegPerSec: Float = 150.0,
         source: UAVFlightTuningSource
     ) -> UAVFlightTuningProfile {
         UAVFlightTuningProfile(
@@ -535,7 +566,9 @@ struct UAVFlightTuningProfile: Hashable {
                 verticalResponseFactor: verticalResponseFactor,
                 throttleAuthority: throttleAuthority,
                 maneuverPenaltyFactor: maneuverPenaltyFactor,
-                payloadThrustCompensationFactor: payloadThrustCompensationFactor
+                payloadThrustCompensationFactor: payloadThrustCompensationFactor,
+                acroRollRateDegPerSec: acroRollRateDegPerSec,
+                acroYawRateDegPerSec: acroYawRateDegPerSec
             ),
             helicopter: nil,
             fixedWing: nil,
@@ -552,6 +585,8 @@ struct UAVFlightTuningProfile: Hashable {
         throttleAuthority: Float,
         maneuverPenaltyFactor: Float,
         payloadThrustCompensationFactor: Float,
+        acroRollRateDegPerSec: Float = 220.0,
+        acroYawRateDegPerSec: Float = 140.0,
         source: UAVFlightTuningSource
     ) -> UAVFlightTuningProfile {
         UAVFlightTuningProfile(
@@ -565,7 +600,9 @@ struct UAVFlightTuningProfile: Hashable {
                 verticalResponseFactor: verticalResponseFactor,
                 throttleAuthority: throttleAuthority,
                 maneuverPenaltyFactor: maneuverPenaltyFactor,
-                payloadThrustCompensationFactor: payloadThrustCompensationFactor
+                payloadThrustCompensationFactor: payloadThrustCompensationFactor,
+                acroRollRateDegPerSec: acroRollRateDegPerSec,
+                acroYawRateDegPerSec: acroYawRateDegPerSec
             ),
             fixedWing: nil,
             hybridVTOL: nil,

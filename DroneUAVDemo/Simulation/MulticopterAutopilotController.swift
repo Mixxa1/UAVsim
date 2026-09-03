@@ -359,7 +359,7 @@ final class MulticopterAutopilotController {
         guard gimbalMargin.isFinite, gimbalMargin < 0.5 else {
             return eulerAxes
         }
-        let direction = -simd_act(state.fixedWingOrientationQuat, SIMD3<Float>(0, 1, 0))
+        let direction = -simd_act(state.attitudeQuat, SIMD3<Float>(0, 1, 0))
         let planar = SIMD2<Float>(direction.x, direction.z)
         guard planar.x.isFinite, planar.y.isFinite,
               simd_length_squared(planar) > 1e-8 else {

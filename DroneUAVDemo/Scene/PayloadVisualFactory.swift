@@ -3,7 +3,10 @@ import SceneKit
 import simd
 
 enum PayloadVisualFactory {
-    static func build(configuration: PayloadConfiguration) -> SCNNode {
+    static func build(
+        configuration: PayloadConfiguration,
+        cameraModule: CameraModule? = nil
+    ) -> SCNNode {
         let root = SCNNode()
         root.name = "payloadVisualNode"
 
@@ -123,6 +126,38 @@ enum PayloadVisualFactory {
             lensBezel.eulerAngles.x = .pi / 2
             lensBezel.position = SCNVector3(-0.009 * sizeScale, -0.058 * sizeScale, 0.041 * sizeScale)
             standardPresentation.addChildNode(lensBezel)
+
+            if let cameraModule, cameraModule.maximumOpticalZoom > 1.5 {
+                // Reach costs length: a 34x turret carries a barrel a prime lens simply does not
+                // have, so the zoom range is visible on the model rather than only in the readout.
+                let reach = Float(min(1.0, log(cameraModule.maximumOpticalZoom) / log(40.0)))
+                let barrelLength = (0.010 + 0.052 * reach) * sizeScale
+                let barrel = cylinderNode(
+                    radius: 0.0125 * sizeScale,
+                    height: barrelLength,
+                    material: darkMaterial
+                )
+                barrel.eulerAngles = SCNVector3(Float.pi / 2.0, 0.0, 0.0)
+                barrel.position = SCNVector3(
+                    -0.009 * sizeScale,
+                    -0.058 * sizeScale,
+                    0.034 * sizeScale + barrelLength * 0.5
+                )
+                standardPresentation.addChildNode(barrel)
+
+                let hood = torusNode(
+                    ringRadius: 0.0135 * sizeScale,
+                    pipeRadius: 0.0022 * sizeScale,
+                    material: shellMaterial
+                )
+                hood.eulerAngles.x = .pi / 2
+                hood.position = SCNVector3(
+                    -0.009 * sizeScale,
+                    -0.058 * sizeScale,
+                    0.034 * sizeScale + barrelLength
+                )
+                standardPresentation.addChildNode(hood)
+            }
 
             for x: Float in [-0.022, 0.022] {
                 for y: Float in [-0.015, 0.015] {

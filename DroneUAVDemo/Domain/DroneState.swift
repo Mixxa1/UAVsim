@@ -1,7 +1,7 @@
 import simd
 
 /// Identity attitude (no rotation), used as the default/reset value for
-/// `DroneState.fixedWingOrientationQuat`.
+/// `DroneState.attitudeQuat`.
 private let identityOrientationQuat = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
 
 enum DronePhysicalState: String, CaseIterable {
@@ -75,8 +75,18 @@ enum UAVControlState: String, CaseIterable, Codable {
 struct DroneState {
     var position: SIMD3<Float>
     var velocity: SIMD3<Float>
-    var orientation: SIMD3<Float> // roll, pitch, yaw in radians. Multirotor: authoritative. Fixed-wing: derived display copy of fixedWingOrientationQuat (see note below).
-    var angularVelocity: SIMD3<Float> // multirotor: Euler-rate d(orientation)/dt. Fixed-wing: unused, see bodyAngularVelocity.
+    var orientation: SIMD3<Float> // roll, pitch, yaw in radians. Derived display copy of attitudeQuat for every airframe class (see note below).
+    /// True body-frame angular rates in the engine's (roll, pitch, yaw) order — rotation about
+    /// body Z, X and Y respectively — in rad/s. Multirotor only; fixed-wing uses
+    /// `bodyAngularVelocity`.
+    ///
+    /// ⚠️ This used to hold the Euler rate `d(orientation)/dt`, which is a different quantity as
+    /// soon as the aircraft is not level: a pitch command at 90° of bank rotated the airframe
+    /// about a world axis instead of its own, off by 90°, and inverted it rotated the wrong way
+    /// entirely. `ImpactResolutionService` was already reading this field as body rates when it
+    /// converted an impact into world angular velocity, so the two halves of the simulator
+    /// disagreed about what the number meant.
+    var angularVelocity: SIMD3<Float>
     var throttle: Float
     var motorThrottle: Float
     var rotorAngularSpeed: SIMD4<Float> // rad/s for FL, FR, RL, RR (unused channels ignored by non-quad)
@@ -88,16 +98,26 @@ struct DroneState {
     var damageCondition: UAVDamageState = .nominal
     var controlState: UAVControlState = .full
 
-    // MARK: - Fixed-wing 6DOF state
+    // MARK: - 6DOF attitude state
     //
-    // Fixed-wing flight is integrated with this quaternion as the source of
+    // Every airframe class is integrated with this quaternion as the source of
     // truth (no Euler gimbal lock at pitch = ±90°, which a sustained acro loop
     // must pass through). `orientation` above is re-derived from this every
-    // fixed-wing substep purely for rendering/telemetry/autopilot call sites
-    // that still read Euler angles — it must never be fed back into the
-    // physics integration for fixed-wing aircraft.
-    var fixedWingOrientationQuat: simd_quatf = identityOrientationQuat
-    /// True body-frame angular rates (p, q, r) in rad/s. Fixed-wing only.
+    // substep purely for rendering/telemetry/autopilot call sites that still
+    // read Euler angles — it must never be fed back into the physics
+    // integration.
+    //
+    // The multirotor path used to be the exception: it integrated the Euler
+    // triple directly, which is only equivalent to rotating the body while the
+    // aircraft is close to level. It is not an approximation that degrades
+    // gracefully — at 90° of bank the pitch stick commanded an entirely
+    // different axis, and inverted it commanded the opposite of what the pilot
+    // asked for. Anything outside the physics step that forces `orientation`
+    // must call the view model's `resyncAttitudeQuaternionFromEuler()`
+    // afterward, or the next substep flies the stale attitude.
+    var attitudeQuat: simd_quatf = identityOrientationQuat
+    /// True body-frame angular rates (p, q, r) in rad/s. Fixed-wing and hybrid VTOL; the
+    /// multirotor path keeps its body rates in `angularVelocity`.
     var bodyAngularVelocity: SIMD3<Float> = .zero
     /// Live engine state for a fuel-burning aircraft — where it is in its start
     /// sequence, shaft speed, delivered power and temperature. Lives on the state
@@ -208,7 +228,7 @@ struct DroneState {
         forwardAirspeed: 0.0,
         physicalState: .disarmed,
         mode: .manual,
-        fixedWingOrientationQuat: identityOrientationQuat,
+        attitudeQuat: identityOrientationQuat,
         bodyAngularVelocity: .zero,
         angleOfAttack: 0.0,
         sideslipAngle: 0.0,

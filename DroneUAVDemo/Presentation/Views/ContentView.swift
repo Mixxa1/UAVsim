@@ -2036,6 +2036,9 @@ struct ContentView: View {
                             onRemove: viewModel.removePayload,
                             onClose: {
                                 viewModel.setPayloadPanelVisible(false)
+                            },
+                            stationsContent: {
+                                PayloadStationsView(viewModel: viewModel)
                             }
                         )
                         .disabled(viewModel.hasMissionScenario)

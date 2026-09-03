@@ -241,7 +241,7 @@ private func makeImpactState(
     var state = DroneState.initial
     state.position = position
     state.velocity = -contactNormal * 7.5 + SIMD3<Float>(0.4, -0.2, 0.7)
-    state.fixedWingOrientationQuat = orientation
+    state.attitudeQuat = orientation
     state.bodyAngularVelocity = SIMD3<Float>(0.31, -0.22, 0.17)
     state.angularVelocity = state.bodyAngularVelocity
     state.physicalState = .airborne

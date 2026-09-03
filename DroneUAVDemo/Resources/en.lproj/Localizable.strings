@@ -517,7 +517,7 @@
 "camera.fpv_mount_x" = "FPV mount X";
 "camera.fpv_mount_y" = "FPV mount Y";
 "camera.fpv_mount_z" = "FPV mount Z";
-"camera.fpv_hide_obstructing" = "Hide obstructing drone parts in FPV";
+"camera.fpv_hide_obstructing" = "Keep the forward props and arms out of frame";
 "camera.fpv.osd_font" = "Analog OSD font";
 "camera.fpv.osd_font.hint" = "Switches the live MAX7456 character atlas; it does not replace the OSD with a picture.";
 "camera.fpv.osd_font.betaflight" = "Betaflight";
@@ -3261,3 +3261,30 @@
 "camera.fpv_lens" = "Wide-angle FPV lens (⌥C)";
 "camera.fpv_lens.hint" = "Raises the rendered field of view and bends it like a short focal length. The bow shows most when the horizon is away from the centre of frame.";
 "camera.fpv_lens_distortion" = "Lens distortion";
+
+"payload.stations.title" = "Payload stations";
+"payload.stations.subtitle" = "Where the aircraft can carry, and what is fitted";
+"payload.stations.remaining" = "Budget left";
+"payload.stations.remove" = "Remove";
+"payload.stations.fit_camera" = "Fit a camera";
+"payload.stations.nothing_fits" = "Nothing fits the remaining budget";
+"payload.stations.single" = "This airframe publishes a single station; the payload editor above owns it.";
+"payload.mount.bellyForward" = "Belly, forward";
+"payload.mount.bellyAft" = "Belly, aft";
+"payload.mount.top" = "Upper mount";
+"payload.mount.nose" = "Nose";
+"payload.mount.reject.unavailable" = "This airframe has no such station.";
+"payload.mount.reject.occupied" = "The station is already taken.";
+"payload.mount.reject.station_mass" = "Too heavy for that station on its own.";
+"payload.mount.reject.airframe_mass" = "Over the aircraft's payload budget.";
+
+"camera.channel.optical" = "EO";
+"camera.channel.thermal" = "IR";
+"camera.channels.label" = "Channels";
+"camera.spectrum.visibleLight" = "Visible light";
+"camera.spectrum.longwaveInfrared" = "Thermal (LWIR)";
+"camera.spectrum.multispectral" = "Multispectral";
+
+"payload.stations.show_feed" = "Show feed";
+"payload.stations.on_air" = "On air";
+"payload.stations.feed_hint" = "The payload camera view shows the station marked on air — switch to it with the payload optics camera.";

@@ -1320,12 +1320,85 @@ final class DroneSimulationViewModel: ObservableObject {
         !simulationRunMode.isOnlineTrial && !hasMissionScenario
     }
 
+    /// Which cameras the selected airframe actually carries. Falls back to a pilot-view aircraft
+    /// for the abstract/custom profile, which has no catalogue entry to consult.
+    var activeCameraFitment: UAVCameraFitment {
+        // A Workbench build flies from the part in its camera slot — and an empty slot means there
+        // is no pilot view at all, which the catalogue rules cannot know.
+        if let build = selectedDroneProfile.workbenchBuild {
+            guard let specID = build.cameraSpecID,
+                  let module = CameraModuleCatalog.fpvCamera(workbenchSpecID: specID) else {
+                return UAVCameraFitment(navigationCamera: nil, imagingCamera: .operatorFitted)
+            }
+            return UAVCameraFitment(
+                navigationCamera: module.videoOutput == .analogComposite ? .analogFPV : .nightVisionFPV,
+                imagingCamera: .operatorFitted,
+                navigationCameraModuleID: module.id
+            )
+        }
+        guard let activeUAVProfile else {
+            return UAVCameraFitment(
+                navigationCamera: .gimbalDoublesAsPilotView,
+                imagingCamera: .operatorFitted
+            )
+        }
+        return UAVCameraFitmentCatalog.fitment(for: activeUAVProfile)
+    }
+
+    /// The camera the pilot's feed comes from.
+    var activeFPVCameraModule: CameraModule? {
+        activeCameraFitment.navigationCameraModule
+    }
+
+    /// Coverage of the pilot's view, degrees — resolved once so the render, the lens remap and the
+    /// rolling-shutter model all describe the same angle.
+    ///
+    /// The manual lens (option-C) still wins where the operator has turned it on: it is a
+    /// deliberate override, and its widening is what makes the barrel warp read as a wide lens
+    /// rather than as a zoom.
+    var fpvFieldOfViewDegrees: Double {
+        PilotViewOptics.fieldOfViewDegrees(
+            module: activeFPVCameraModule,
+            fovSetting: cameraConfiguration.fov,
+            lensEnabled: cameraConfiguration.fpv.lensEnabled,
+            lensDistortion: cameraConfiguration.fpv.lensDistortion
+        )
+    }
+
+    /// Bow applied to the pilot's frame: the fitted camera's own lens, unless the operator has
+    /// taken manual control of it.
+    var fpvLensDistortion: Double {
+        PilotViewOptics.lensDistortion(
+            module: activeFPVCameraModule,
+            lensEnabled: cameraConfiguration.fpv.lensEnabled,
+            lensDistortion: cameraConfiguration.fpv.lensDistortion
+        )
+    }
+
+    /// What the pilot's camera does to its own picture. The bow is stripped out because the FPV
+    /// chain runs the lens remap as its own step, ahead of the link processing.
+    var fpvSensorParameters: CameraSensorParameters? {
+        guard let module = activeFPVCameraModule else { return nil }
+        var parameters = module.primaryChannel.sensorParameters(
+            identity: "pilot.\(module.id)",
+            zoomLevel: 1,
+            currentFieldOfViewDegrees: fpvFieldOfViewDegrees
+        )
+        parameters.barrelDistortion = 0
+        return parameters
+    }
+
     var availableCameraModes: [CameraMode] {
         if isSpectatorMode {
             return [.spectator]
         }
 
-        var modes: [CameraMode] = [.free, .follow, .orbit, .fpv, .top]
+        // FPV needs a camera to fly from. A survey VTOL flown from a tablet, or a target drone,
+        // has none — offering the mode would show a feed from a device that is not fitted.
+        var modes: [CameraMode] = [.free, .follow, .orbit, .top]
+        if activeCameraFitment.hasPilotView {
+            modes.insert(.fpv, at: 3)
+        }
         if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || lidarOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable || cameraConfiguration.mode == .payloadOptics {
             modes.append(.payloadOptics)
         }
@@ -2260,7 +2333,29 @@ final class DroneSimulationViewModel: ObservableObject {
     /// measured pegging the main thread (confirmed via Xcode's paused-thread
     /// backtrace landing in Foundation's string search machinery).
     private var fixedWingObstacleBaseRadiusCache: [String: Float] = [:]
-    private var installedPayloadConfiguration: PayloadConfiguration?
+    /// Everything currently fitted, by station. Source of truth for the payload bay.
+    @Published private(set) var installedLoadout = PayloadLoadout()
+
+    /// The single payload the older code paths mean when they say "the payload" — the first
+    /// station. Kept as a settable bridge so the fire, agricultural and cargo flows, which mutate
+    /// the fitted payload's mass in place, carry on working untouched while stations are added
+    /// around them.
+    private var installedPayloadConfiguration: PayloadConfiguration? {
+        get { installedLoadout.primary }
+        set {
+            guard let newValue else {
+                if !installedLoadout.entries.isEmpty {
+                    installedLoadout.entries.removeFirst()
+                }
+                return
+            }
+            if installedLoadout.entries.isEmpty {
+                installedLoadout = PayloadLoadout(single: newValue)
+            } else {
+                installedLoadout.entries[0].configuration = newValue
+            }
+        }
+    }
     private var installedFiberSpoolModule: FiberSpoolModule?
     private var activePayloadReleaseID: UUID?
     private var lastSidebarModule: ControlModule = .flightOps
@@ -3020,7 +3115,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         self.payloadDraftConfiguration = initialPayloadConfiguration
         self.payloadState = initialPayloadState
-        self.installedPayloadConfiguration = initialInstalledPayloadConfiguration
+        self.installedLoadout = initialInstalledPayloadConfiguration
+            .map { PayloadLoadout(single: $0) } ?? PayloadLoadout()
         self.payloadMountState = initialActiveUAVProfile == nil ? .unavailable : .ready
         self.payloadCapabilityCheck = PayloadController.capabilityCheck(
             for: initialPayloadConfiguration,
@@ -3063,6 +3159,9 @@ final class DroneSimulationViewModel: ObservableObject {
 
         self.payloadCameraController.setAutoSwitchAfterRelease(false)
         self.sceneController.setPayloadCameraOpticsState(self.payloadCameraOpticsState)
+        self.sceneController.navigationCameraModuleProvider = { [weak self] in
+            self?.activeFPVCameraModule
+        }
         sceneController.regenerateEnvironment(terrain)
         sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
         rebuildVehicleComponentGraph()
@@ -3674,6 +3773,152 @@ final class DroneSimulationViewModel: ObservableObject {
         hasUnsavedChanges = true
     }
 
+    // MARK: - Payload stations
+
+    /// Stations the selected airframe publishes, each with what it can take on its own.
+    /// The camera whose optics the payload feed should use: whatever the operator fitted, or the
+    /// gimbal the airframe already carries when it has one bolted in.
+    var fittedCameraModule: CameraModule? {
+        if let activeCameraStation,
+           let selected = installedLoadout.entry(at: activeCameraStation)?.cameraModule {
+            return selected
+        }
+        if let fitted = installedLoadout.entries.compactMap(\.cameraModule).first {
+            return fitted
+        }
+        guard let activeUAVProfile else { return nil }
+        return UAVCameraFitmentCatalog.integratedModule(for: activeUAVProfile)
+    }
+
+    /// Payload-camera modes the fitted hardware can actually deliver.
+    ///
+    /// With no module fitted this stays permissive, because a generic camera payload still gets
+    /// both the EO and thermal presentations. `.nightStub` is never offered: it is unimplemented.
+    var availablePayloadCameraModes: [PayloadCameraMode] {
+        fittedCameraModule?.availablePayloadCameraModes ?? [.optical, .thermalStub]
+    }
+
+    /// The sensor currently selected on the fitted module. A hybrid turret's thermal core has its
+    /// own optics and its own pixel count, so this — not the module as a whole — is what the feed
+    /// is built from.
+    var activeCameraChannel: CameraChannelSpec? {
+        guard let module = fittedCameraModule else { return nil }
+        let mode = payloadCameraOpticsState.mode
+        return module.channel(forPayloadMode: mode) ?? module.primaryChannel
+    }
+
+    /// What the fitted module does to the picture at the current zoom, or nil when the payload
+    /// view is showing something other than a camera feed (rangefinder, hose, capsule).
+    ///
+    /// Without this the module choice only moved the field of view: a 640x512 thermal core, a
+    /// 42 MP full-frame and a 1.2 MP analog FPV camera all produced the same clean render.
+    var payloadSensorParameters: CameraSensorParameters? {
+        guard payloadCameraOpticsState.isAvailable,
+              let channel = activeCameraChannel else {
+            return nil
+        }
+        return channel.sensorParameters(
+            identity: "payload.\(fittedCameraModule?.id ?? "none").\(channel.channel.rawValue)",
+            zoomLevel: payloadCameraOpticsState.zoomLevel,
+            currentFieldOfViewDegrees: payloadCameraOpticsState.currentFieldOfViewDegrees
+        )
+    }
+
+    /// Station whose camera the payload view is currently showing. Nil means the first fitted
+    /// one, which is what a single-camera aircraft always wants.
+    @Published private(set) var activeCameraStation: PayloadMount?
+
+    /// Stations that actually carry a camera, in mount order — the feeds the operator can switch
+    /// between.
+    var cameraStations: [PayloadMountEntry] {
+        installedLoadout.entries.filter { $0.cameraModule != nil }
+    }
+
+    /// ⌥1/⌥2/⌥3. Selecting a feed you are not looking at would be a silent no-op, so this also
+    /// brings up the payload view — pressing "show camera 2" means wanting to see camera 2.
+    func selectCameraStation(atIndex index: Int) {
+        let stations = cameraStations
+        guard index >= 0, index < stations.count else { return }
+        selectCameraStation(stations[index].mount)
+        if cameraConfiguration.mode != .payloadOptics,
+           availableCameraModes.contains(.payloadOptics) {
+            setCameraMode(.payloadOptics)
+        }
+    }
+
+    func selectCameraStation(_ mount: PayloadMount?) {
+        guard activeCameraStation != mount else { return }
+        activeCameraStation = mount
+        refreshPayloadCameraStatus()
+    }
+
+    var payloadMountCapabilities: [PayloadMountCapability] {
+        guard let activeUAVProfile else { return [] }
+        return PayloadMountCatalog.capabilities(
+            profileID: activeUAVProfile.id,
+            maxPayloadMassKg: activeUAVProfile.payloadDataResolution.maxPayloadMass.map(Double.init),
+            capabilityMode: activeUAVProfile.payloadCapabilityMode
+        )
+    }
+
+    var airframePayloadLimitKg: Double {
+        activeUAVProfile?.payloadDataResolution.maxPayloadMass.map(Double.init) ?? 0
+    }
+
+    /// How much more can still be hung on the aircraft.
+    var remainingPayloadMassKg: Double {
+        max(0, airframePayloadLimitKg - installedLoadout.totalMassKg)
+    }
+
+    /// Fits a payload to a named station.
+    ///
+    /// Deliberately scoped to the stations beyond the first: the primary station is owned by the
+    /// existing draft/attach flow, which also drives the payload camera, the release sequence and
+    /// the mission runtime. Routing a second gimbal through that same state is what would break
+    /// those; a sibling station only has to not collide and not overload the airframe.
+    @discardableResult
+    func installPayload(
+        _ configuration: PayloadConfiguration,
+        at mount: PayloadMount,
+        cameraModuleID: String? = nil
+    ) -> PayloadLoadoutRejection? {
+        guard canControlLocalVehicle else { return .mountUnavailable }
+        if let rejection = installedLoadout.rejection(
+            forAdding: configuration,
+            at: mount,
+            capabilities: payloadMountCapabilities,
+            airframeMassLimitKg: airframePayloadLimitKg
+        ) {
+            return rejection
+        }
+        var attached = configuration
+        attached.isAttached = true
+        installedLoadout.entries.append(
+            PayloadMountEntry(mount: mount, configuration: attached, cameraModuleID: cameraModuleID)
+        )
+        sceneController.attachPayloadVisuals(installedLoadout.entries)
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+        return nil
+    }
+
+    func removePayload(at mount: PayloadMount) {
+        guard canControlLocalVehicle else { return }
+        guard installedLoadout.entry(at: mount) != nil else { return }
+        // The first station belongs to the single-payload flow, which has its own teardown.
+        guard installedLoadout.entries.first?.mount != mount else {
+            removePayload()
+            return
+        }
+        installedLoadout.entries.removeAll { $0.mount == mount }
+        if activeCameraStation == mount {
+            activeCameraStation = nil
+        }
+        sceneController.attachPayloadVisuals(installedLoadout.entries)
+        refreshPayloadRuntimeState()
+        hasUnsavedChanges = true
+    }
+
     func removePayload() {
         guard canControlLocalVehicle else { return }
         guard installedPayloadConfiguration != nil || payloadState == .attached else {
@@ -3884,7 +4129,7 @@ final class DroneSimulationViewModel: ObservableObject {
         let restOrientation = spawnOrientation(for: selectedDroneProfile)
         state.orientation.x = restOrientation.x
         state.orientation.y = restOrientation.y
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
         setFlightMode(.takeoff, reason: "tailsitter_arm_vertical_takeoff")
         transitionPhysicalState(.takeoffTransition)
         updateControlValues({ values in
@@ -5220,6 +5465,12 @@ final class DroneSimulationViewModel: ObservableObject {
         sceneController.setDroneProfile(profile)
         resetPayloadForProfileSwitch()
         resetCameraConfigurationForSelectedProfile()
+        // Switching to an airframe without a pilot camera while the FPV view is open would leave
+        // the operator looking through a device the new aircraft does not carry.
+        if cameraConfiguration.mode == .fpv, !activeCameraFitment.hasPilotView {
+            cameraConfiguration.mode = .follow
+            syncCameraSystem(from: .fpv, resetOrientation: true)
+        }
         normalizeMissionLaunchConfigurationForSelectedProfile()
         let didChangeTerrain = normalizeTerrainForSelectedDroneProfile()
 
@@ -5295,6 +5546,12 @@ final class DroneSimulationViewModel: ObservableObject {
     func setCameraMode(_ mode: CameraMode) {
         if isSpectatorMode {
             guard mode == .spectator else { return }
+        }
+        // Guarded here rather than only in `availableCameraModes`, because the keyboard reaches
+        // this directly: pressing the FPV key on an airframe with no pilot camera would otherwise
+        // open a feed from a device that is not fitted.
+        if mode == .fpv, !activeCameraFitment.hasPilotView {
+            return
         }
 
         let oldMode = cameraConfiguration.mode
@@ -5591,8 +5848,11 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Switch the payload camera between EO (`.optical`) and thermal (`.thermalStub`). Zoom /
     /// focus / autofocus / stabilization are preserved — only the sensor sub-mode changes.
     func setPayloadCameraMode(_ mode: PayloadCameraMode) {
-        // `.nightStub` is still unimplemented — ignore taps on it.
+        // `.nightStub` is still unimplemented, and a mode the fitted camera has no sensor for is
+        // not selectable either — a bare LWIR core has no visible channel, and a mapping camera
+        // has no thermal one.
         guard mode == .optical || mode == .thermalStub else { return }
+        guard availablePayloadCameraModes.contains(mode) else { return }
         guard payloadCameraController.opticsState.mode != mode else { return }
         payloadCameraController.setPayloadCameraMode(mode)
         publishPayloadCameraOpticsState()
@@ -5609,7 +5869,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Quick-select shortcut: jumps straight to the thermal sensor (if available) and applies
     /// the requested palette in one keystroke, instead of requiring a manual mode switch first.
     func activateThermalPalette(_ palette: ThermalPalette) {
-        guard isMountedThermalCapablePayload, payloadCameraOpticsState.isAvailable else { return }
+        guard isMountedThermalCapablePayload,
+              availablePayloadCameraModes.contains(.thermalStub),
+              payloadCameraOpticsState.isAvailable else { return }
         if payloadCameraController.opticsState.mode != .thermalStub {
             setPayloadCameraMode(.thermalStub)
         }
@@ -9060,7 +9322,7 @@ final class DroneSimulationViewModel: ObservableObject {
             state.velocity = carrier.velocity
             state.orientation = SIMD3<Float>(0.0, 0.0, carrier.headingRadians)
             state.forwardAirspeed = simd_length(carrier.velocity)
-            resyncFixedWingAttitudeFromEuler()
+            resyncAttitudeQuaternionFromEuler()
             lastFiniteState = state
         } else if wasAttached && carrier.hasReleased {
             // The shackle has opened. From here the aircraft is on its own, and everything
@@ -10935,17 +11197,37 @@ final class DroneSimulationViewModel: ObservableObject {
                 ? Double(max(0.0, wing.stallWarningSpeedMps - currentHorizontalSpeed))
                     * 0.018 * Double(deltaTime) * wingBorneFraction
                 : 0.0
-            let rollGain = Double((effectiveControlMode == .acro ? 58.0 : 30.0) * wing.bankResponseGain) * speedRatioDouble
-            let pitchAuthority = Double(effectiveControlMode == .acro ? 50.0 : 24.0)
+            // ⚠️ A rate mode does not command an *angle*. The physics engine reads
+            // `targetOrientation.roll/pitch` as a surface-travel fraction there (clamped to ±1 rad
+            // in `stepFixedWingAerodynamic`), so an attitude envelope applied to it is not a bank
+            // limit — it is a limit on how far the pilot may move the elevator. At the ±28° that
+            // used to apply, full aft stick reached 28° / 57.3° = 49% of elevator travel and no
+            // more, and every stick position past ~56% produced exactly the same deflection: the
+            // top half of the pitch axis was dead. The full-aft-stick acro loop the aerodynamics
+            // were tuned against could not be flown at all.
+            //
+            // In a rate mode the stick therefore maps straight to full travel, with no speed or
+            // response-gain scaling: a real elevator moves the same distance at any airspeed, and
+            // how much moment that buys is already the aerodynamics' job (it scales with q).
+            // Angle modes keep the envelope, which is what it was written for.
+            let rateFullTravelDegrees = Double(Float(1.0).radiansToDegrees)
+            // Angle-mode gains only — the acro variants of these (58 / 50) are gone because a rate
+            // mode no longer routes through them at all.
+            let rollGain = Double(30.0 * wing.bankResponseGain) * speedRatioDouble
+            let pitchAuthority = 24.0
             let pitchResponseGain = Double(effectiveAxis.forward < 0.0 ? wing.climbResponseGain : wing.descentResponseGain)
             let pitchGain = pitchAuthority * pitchResponseGain * Double(max(0.74, speedRatio))
-            let rollLimit = Double(wing.maxBankAngleDeg)
-            let pitchLimit = 28.0
+            let rollLimit = effectiveControlMode.isRateMode ? rateFullTravelDegrees : Double(wing.maxBankAngleDeg)
+            let pitchLimit = effectiveControlMode.isRateMode ? rateFullTravelDegrees : 28.0
             let throttleDelta = Double(effectiveAxis.vertical) * Double((effectiveAxis.speedBoost ? 0.54 : 0.30) * wing.throttleResponseGain) * Double(deltaTime)
             let rollCommand = tailsitterHoverControlsActive
                 ? 0.0
-                : (-Double(effectiveAxis.strafe) * rollGain).clamped(to: -rollLimit...rollLimit)
-            let pitchCommand = (-Double(effectiveAxis.forward) * pitchGain).clamped(to: -pitchLimit...pitchLimit)
+                : effectiveControlMode.isRateMode
+                    ? -Double(effectiveAxis.strafe) * rateFullTravelDegrees
+                    : (-Double(effectiveAxis.strafe) * rollGain).clamped(to: -rollLimit...rollLimit)
+            let pitchCommand = effectiveControlMode.isRateMode
+                ? -Double(effectiveAxis.forward) * rateFullTravelDegrees
+                : (-Double(effectiveAxis.forward) * pitchGain).clamped(to: -pitchLimit...pitchLimit)
             let manualThrottle = (controlValues.throttle + throttleDelta + stallBias).clamped(to: 0.0...1.0)
             let liveTurnOverride = (!tailsitterHoverControlsActive && abs(effectiveAxis.strafe) > 0.001) || hasEffectiveYawInput
             let liveAltitudeOverride = abs(effectiveAxis.forward) > 0.001 || abs(effectiveAxis.vertical) > 0.001
@@ -11209,8 +11491,15 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         let climb = effectiveAxis.vertical * (effectiveAxis.speedBoost ? 5.4 : 3.0) * deltaTime
-        let pitchScale: Float = effectiveControlMode == .acro ? 52.0 : 28.0
-        let rollScale: Float = effectiveControlMode == .acro ? 52.0 : 26.0
+        let pitchScale: Float = 28.0
+        let rollScale: Float = 26.0
+        // ⚠️ In a rate mode these control values are not angles at all: the engine reads
+        // `targetOrientation` (this, converted to radians) as a normalized stick position clamped
+        // to ±1. The old acro scale of 52 therefore meant "52° = 0.907 rad = 91% stick" — full
+        // deflection quietly delivered nine tenths of the airframe's rate, on top of the 84% the
+        // rate loop itself was losing, and the ±82 clamp beneath it could never even be reached.
+        // One radian in degrees is what full stick has to be worth for the two layers to agree.
+        let rateFullStickDegrees = Float(1.0).radiansToDegrees
 
         updateControlValues({ values in
             values.y = (values.y + Double(climb)).clamped(to: 0.0...maxAltitude)
@@ -11225,8 +11514,10 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.pitch = Double((-effectiveAxis.forward * pitchScale).clamped(to: -36.0...36.0))
                 values.roll = Double((-effectiveAxis.strafe * rollScale).clamped(to: -36.0...36.0))
             case .acro:
-                values.pitch = Double((-effectiveAxis.forward * pitchScale).clamped(to: -82.0...82.0))
-                values.roll = Double((-effectiveAxis.strafe * rollScale).clamped(to: -82.0...82.0))
+                values.pitch = Double((-effectiveAxis.forward * rateFullStickDegrees)
+                    .clamped(to: -rateFullStickDegrees...rateFullStickDegrees))
+                values.roll = Double((-effectiveAxis.strafe * rateFullStickDegrees)
+                    .clamped(to: -rateFullStickDegrees...rateFullStickDegrees))
             }
         }, markManual: false)
     }
@@ -11266,6 +11557,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 disarm()
             case .toggleFPVLens:
                 toggleFPVLens()
+            case let .selectCameraStation(index):
+                selectCameraStation(atIndex: index)
             case .launchAircraft:
                 // ⌘E: hand-throw / catapult release for assisted-launch
                 // fixed wings. Arms the airframe first if needed, so the
@@ -15211,7 +15504,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// body -Y remains horizontal and is the non-singular physical reference.
     private func tailsitterHoverHeadingRadians() -> Float {
         let transitionDirection = -simd_act(
-            state.fixedWingOrientationQuat,
+            state.attitudeQuat,
             SIMD3<Float>(0, 1, 0)
         )
         let planar = SIMD2<Float>(transitionDirection.x, transitionDirection.z)
@@ -17450,6 +17743,15 @@ final class DroneSimulationViewModel: ObservableObject {
             case .manual, .hover, .emergencyStop:
                 break
             }
+
+            // The assist controller writes bank and pitch *angles* into the same control values
+            // the pilot's stick uses. A rate mode reads those numbers as surface-travel fractions
+            // instead, so a 40° commanded bank would arrive as 70% of aileron held permanently.
+            // Whoever is flying decides what the numbers mean: while assist owns the surfaces the
+            // command is an attitude, and the engine has to be told so.
+            if fixedWingAssistState.mode != .manual {
+                return .stabilized
+            }
         }
 
         if selectedDroneProfile.airframeClass == .multirotor,
@@ -17748,6 +18050,12 @@ final class DroneSimulationViewModel: ObservableObject {
         if mountedCADPayload != nil {
             return payloadState == .attached
         }
+        // A camera fitted to any station feeds the payload view. The checks below only know about
+        // the primary payload the draft panel manages, so without this a module bolted to the
+        // upper or aft station was fitted, drawn and weighed — and produced no picture.
+        if installedLoadout.entries.contains(where: { $0.cameraModule != nil }) {
+            return true
+        }
 
         guard payloadState == .attached, payloadMountState == .occupied else {
             return false
@@ -17854,6 +18162,9 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func publishPayloadCameraOpticsState() {
         payloadCameraOpticsState = payloadCameraController.opticsState
+        sceneController.setActivePayloadCameraStation(
+            activeCameraStation ?? cameraStations.first?.mount
+        )
         sceneController.setPayloadCameraOpticsState(payloadCameraOpticsState)
         payloadThermalState.isAvailable = payloadCameraOpticsState.isAvailable
         payloadThermalState.isEnabled = payloadCameraOpticsState.isAvailable
@@ -17870,6 +18181,23 @@ final class DroneSimulationViewModel: ObservableObject {
             isPowered: isMountedPayloadCameraAvailable,
             feedLabel: payloadCameraFeedLabel
         )
+        // The fitted module decides what the feed looks like. Without this the camera choice was
+        // decorative: every module shared one default field of view and zoom range.
+        //
+        // The channel is resolved before the optics are applied, not after, so the coverage and
+        // the selected mode always describe the same sensor within one tick.
+        if let module = fittedCameraModule {
+            let modes = module.availablePayloadCameraModes
+            let mode = modes.contains(payloadCameraController.opticsState.mode)
+                ? payloadCameraController.opticsState.mode
+                : (modes.first ?? .optical)
+            let channel = module.channel(forPayloadMode: mode) ?? module.primaryChannel
+            payloadCameraController.applyCameraModule(
+                fieldOfViewDegrees: channel.horizontalFieldOfViewDegrees,
+                maximumZoom: channel.maximumOpticalZoom,
+                availableModes: modes
+            )
+        }
         let targetDistance = sceneController.payloadCameraTargetDistance(maxDistance: 500.0)
         let linearSpeed = Double(simd_length(state.velocity))
         let angularSpeed = Double(simd_length(state.angularVelocity))
@@ -25414,7 +25742,7 @@ final class DroneSimulationViewModel: ObservableObject {
         state.orientation.x = 0.0
         state.orientation.y = spawnPitch
         state.orientation.z = spawnYaw
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
         transitionPhysicalState(.takeoffTransition)
         lastFiniteState = state
         updateLegacyLaunchState(.prelaunchCheck)
@@ -25477,7 +25805,7 @@ final class DroneSimulationViewModel: ObservableObject {
         // vector starts at an angle of attack nobody commanded.
         state.orientation.y = release.releasePitchDegrees.degreesToRadians
         state.orientation.z = release.worldYawRadians
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
 
         if var engine = state.engineRuntime {
             // Warm and cleared. Not a shortcut — the alternative is an aircraft dropped
@@ -25648,7 +25976,7 @@ final class DroneSimulationViewModel: ObservableObject {
             asset.railAngleDegrees.degreesToRadians,
             asset.worldYawRadians
         )
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
         homePosition = cradlePoint
         lastFiniteState = state
         launchCradleHoldActive = true
@@ -25719,7 +26047,7 @@ final class DroneSimulationViewModel: ObservableObject {
             asset.railAngleDegrees.degreesToRadians,
             asset.worldYawRadians
         )
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
         transitionPhysicalState(isArmed ? .armedOnGround : .disarmed)
         if !isArmed {
             state.throttle = 0.0
@@ -28760,7 +29088,7 @@ final class DroneSimulationViewModel: ObservableObject {
             if !state.orientation.x.isFinite || !state.orientation.y.isFinite || !state.orientation.z.isFinite {
                 state.orientation = .zero
             }
-            resyncFixedWingAttitudeFromEuler()
+            resyncAttitudeQuaternionFromEuler()
         }
 
         if !controlValues.x.isFinite || !controlValues.y.isFinite || !controlValues.z.isFinite ||
@@ -29707,7 +30035,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private func attitudeQuaternion(of droneState: DroneState) -> simd_quatf {
         switch selectedDroneProfile.airframeClass {
         case .fixedWing, .hybridVTOL:
-            return droneState.fixedWingOrientationQuat
+            return droneState.attitudeQuat
         case .multirotor:
             let yaw = simd_quatf(angle: droneState.orientation.z, axis: SIMD3<Float>(0.0, 1.0, 0.0))
             let pitch = simd_quatf(angle: droneState.orientation.y, axis: SIMD3<Float>(1.0, 0.0, 0.0))
@@ -29817,7 +30145,7 @@ final class DroneSimulationViewModel: ObservableObject {
             state.orientation.y = restOrientation.y
         }
 
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
         lastFiniteState = state
     }
 
@@ -29881,22 +30209,25 @@ final class DroneSimulationViewModel: ObservableObject {
         return .zero
     }
 
-    /// Rebuilds `state.fixedWingOrientationQuat` from the current Euler
-    /// `state.orientation` and zeroes `state.bodyAngularVelocity`.
+    /// Rebuilds `state.attitudeQuat` from the current Euler
+    /// `state.orientation` and zeroes the body rates.
     ///
-    /// `SimpleDronePhysicsEngine`'s fixed-wing step treats the quaternion as
-    /// authoritative (Euler `orientation` is just a derived display copy) so
-    /// every place outside the physics step that forces `state.orientation`/
-    /// `state.angularVelocity` to a specific value (spawn, launch sequence,
-    /// disarm/ground settling, NaN recovery) must call this afterward.
+    /// `SimpleDronePhysicsEngine` treats the quaternion as authoritative for every airframe class
+    /// (Euler `orientation` is just a derived display copy) so every place outside the physics
+    /// step that forces `state.orientation`/`state.angularVelocity` to a specific value (spawn,
+    /// launch sequence, disarm/ground settling, NaN recovery) must call this afterward.
     /// Otherwise the quaternion is left stale from whatever attitude the
     /// aircraft (or a previously-flown different aircraft) last had, and the
     /// next physics step applies thrust along that stale nose direction
     /// instead of the visually-reset one — looks like the aircraft barely
     /// moves even at full throttle.
-    private func resyncFixedWingAttitudeFromEuler() {
-        guard selectedDroneProfile.airframeClass == .fixedWing || selectedDroneProfile.airframeClass == .hybridVTOL else { return }
-        state.fixedWingOrientationQuat = simd_quatf(angle: state.orientation.z, axis: SIMD3<Float>(0, 1, 0))
+    ///
+    /// ⚠️ This used to return early for anything that was not a fixed wing, because the multirotor
+    /// step integrated Euler angles and never read the quaternion. It does now, so a multirotor
+    /// whose attitude is reset from outside needs the same treatment — skipping it would leave a
+    /// respawned quad flying the attitude it crashed in.
+    private func resyncAttitudeQuaternionFromEuler() {
+        state.attitudeQuat = simd_quatf(angle: state.orientation.z, axis: SIMD3<Float>(0, 1, 0))
             * simd_quatf(angle: state.orientation.y, axis: SIMD3<Float>(1, 0, 0))
             * simd_quatf(angle: state.orientation.x, axis: SIMD3<Float>(0, 0, 1))
         state.bodyAngularVelocity = .zero
@@ -30001,7 +30332,7 @@ final class DroneSimulationViewModel: ObservableObject {
             let restOrientation = spawnOrientation(for: selectedDroneProfile)
             state.orientation.x = restOrientation.x
             state.orientation.y = restOrientation.y
-            resyncFixedWingAttitudeFromEuler()
+            resyncAttitudeQuaternionFromEuler()
         }
         setFlightMode(.manual, reason: "settle_disarmed_grounded")
         state.mode = mode
@@ -30090,7 +30421,7 @@ final class DroneSimulationViewModel: ObservableObject {
         //
         // The carve-out above was still not enough, because the surviving *roll* term reads an
         // Euler angle that is ill-conditioned at exactly the tailsitter's rest attitude.
-        // `eulerFromFixedWingQuaternion` falls back to the previous yaw only while the nose is
+        // `eulerFromAttitudeQuaternion` falls back to the previous yaw only while the nose is
         // within ~4.6° of vertical (`horizontalForward < 0.08`); the moment the standing aircraft
         // settles to 85° the fallback disengages, the heading moves into the yaw term and roll
         // absorbs the rest. Measured on the user's arm: a stationary WingtraOne, velocity
@@ -30464,7 +30795,7 @@ final class DroneSimulationViewModel: ObservableObject {
             if abs(state.orientation.x - restAttitude.roll) < 0.0005 { state.orientation.x = restAttitude.roll }
             if abs(state.orientation.y - restAttitude.pitch) < 0.0005 { state.orientation.y = restAttitude.pitch }
         }
-        resyncFixedWingAttitudeFromEuler()
+        resyncAttitudeQuaternionFromEuler()
     }
 
     private func approach(current: Float, target: Float, rate: Float, dt: Float) -> Float {

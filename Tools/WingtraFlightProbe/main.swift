@@ -168,7 +168,7 @@ private func initialState(yaw: Float = 0.0, pitch: Float = .pi / 2) -> DroneStat
     )
     state.armState = .armed
     state.motionState = .airborne
-    state.fixedWingOrientationQuat = orientation(yaw: yaw, pitch: pitch)
+    state.attitudeQuat = orientation(yaw: yaw, pitch: pitch)
     state.bodyAngularVelocity = .zero
     state.propulsionUnits = profile.propulsionUnitTemplate
     state.vtolTransitionProgress = 0.0
@@ -205,7 +205,7 @@ do {
     var maximumHorizontalDisplacement: Float = 0.0
     var maximumTelemetryHeadingError: Float = 0.0
     var nearVerticalTelemetrySamples = 0
-    var previousAbsoluteHeadingError = abs(wrap(target - hoverHeading(state.fixedWingOrientationQuat)))
+    var previousAbsoluteHeadingError = abs(wrap(target - hoverHeading(state.attitudeQuat)))
     var finalWindowMonotonicViolations = 0
 
     for tick in 0..<(60 * 12) {
@@ -215,26 +215,26 @@ do {
             context: context,
             deltaTime: dt
         )
-        maximumVerticalError = max(maximumVerticalError, verticalError(state.fixedWingOrientationQuat))
+        maximumVerticalError = max(maximumVerticalError, verticalError(state.attitudeQuat))
         maximumHorizontalDisplacement = max(
             maximumHorizontalDisplacement,
             simd_length(SIMD2<Float>(state.position.x, state.position.z))
         )
-        if horizontalForwardMagnitude(state.fixedWingOrientationQuat) < 0.08 {
+        if horizontalForwardMagnitude(state.attitudeQuat) < 0.08 {
             nearVerticalTelemetrySamples += 1
             maximumTelemetryHeadingError = max(
                 maximumTelemetryHeadingError,
-                abs(wrap(state.orientation.z - hoverHeading(state.fixedWingOrientationQuat)))
+                abs(wrap(state.orientation.z - hoverHeading(state.attitudeQuat)))
             )
         }
-        let error = abs(wrap(target - hoverHeading(state.fixedWingOrientationQuat)))
+        let error = abs(wrap(target - hoverHeading(state.attitudeQuat)))
         if tick >= 60 * 8, error > previousAbsoluteHeadingError + radians(0.15) {
             finalWindowMonotonicViolations += 1
         }
         previousAbsoluteHeadingError = error
     }
 
-    let headingError = abs(wrap(target - hoverHeading(state.fixedWingOrientationQuat)))
+    let headingError = abs(wrap(target - hoverHeading(state.attitudeQuat)))
     print(String(
         format: "hover: heading error %.2f deg, telemetry %.3f deg, vertical error max %.2f deg, drift %.2f m, rate %.3f rad/s",
         degrees(headingError), degrees(maximumTelemetryHeadingError),
@@ -281,12 +281,12 @@ do {
         previousTelemetryHeading = state.orientation.z
         maximumTelemetryHeadingError = max(
             maximumTelemetryHeadingError,
-            abs(wrap(state.orientation.z - hoverHeading(state.fixedWingOrientationQuat)))
+            abs(wrap(state.orientation.z - hoverHeading(state.attitudeQuat)))
         )
-        maximumVerticalError = max(maximumVerticalError, verticalError(state.fixedWingOrientationQuat))
+        maximumVerticalError = max(maximumVerticalError, verticalError(state.attitudeQuat))
     }
 
-    let finalHeadingError = abs(wrap(targetHeading - hoverHeading(state.fixedWingOrientationQuat)))
+    let finalHeadingError = abs(wrap(targetHeading - hoverHeading(state.attitudeQuat)))
     print(String(
         format: "heading wrap: travel %+.2f deg, final error %.3f deg, telemetry %.3f deg, crossed=%@",
         degrees(unwrappedTelemetryTravel), degrees(finalHeadingError),
@@ -310,7 +310,7 @@ do {
 do {
     let engine = SimpleDronePhysicsEngine()
     var state = initialState(pitch: radians(91.0))
-    let initialError = verticalError(state.fixedWingOrientationQuat)
+    let initialError = verticalError(state.attitudeQuat)
     var maximumError = initialError
 
     for _ in 0..<(60 * 4) {
@@ -320,10 +320,10 @@ do {
             context: context,
             deltaTime: dt
         )
-        maximumError = max(maximumError, verticalError(state.fixedWingOrientationQuat))
+        maximumError = max(maximumError, verticalError(state.attitudeQuat))
     }
 
-    let finalError = verticalError(state.fixedWingOrientationQuat)
+    let finalError = verticalError(state.attitudeQuat)
     print(String(
         format: "overshoot: initial %.2f deg, final %.3f deg, max %.2f deg",
         degrees(initialError), degrees(finalError), degrees(maximumError)
@@ -425,9 +425,9 @@ do {
         maximumDepartureAltitude = max(maximumDepartureAltitude, state.position.y)
         maximumVerticalErrorDuringAlignment = max(
             maximumVerticalErrorDuringAlignment,
-            verticalError(state.fixedWingOrientationQuat)
+            verticalError(state.attitudeQuat)
         )
-        let headingError = abs(wrap(targetHeading - hoverHeading(state.fixedWingOrientationQuat)))
+        let headingError = abs(wrap(targetHeading - hoverHeading(state.attitudeQuat)))
         if abs(state.position.y - departureAltitude) <= 2.25,
            abs(state.velocity.y) <= 0.45,
            headingError < radians(6.0) {
@@ -460,11 +460,11 @@ do {
     )
     let alignmentAltitudeError = state.position.y - departureAltitude
     let alignmentVerticalSpeed = state.velocity.y
-    let alignmentHeadingError = abs(wrap(targetHeading - hoverHeading(state.fixedWingOrientationQuat)))
+    let alignmentHeadingError = abs(wrap(targetHeading - hoverHeading(state.attitudeQuat)))
 
     var previousPosition = state.position
     var previousTelemetryHeading = state.orientation.z
-    var previousHorizontalForward = horizontalForwardMagnitude(state.fixedWingOrientationQuat)
+    var previousHorizontalForward = horizontalForwardMagnitude(state.attitudeQuat)
     var thresholdCrossed = false
     var crossingYawStep: Float = .infinity
     var crossingForwardHeadingError: Float = .infinity
@@ -547,26 +547,26 @@ do {
             deltaTime: dt
         )
 
-        let horizontalForward = horizontalForwardMagnitude(state.fixedWingOrientationQuat)
+        let horizontalForward = horizontalForwardMagnitude(state.attitudeQuat)
         if horizontalForward < 0.08 {
             maximumNearVerticalTelemetryError = max(
                 maximumNearVerticalTelemetryError,
-                abs(wrap(state.orientation.z - tailsitterTelemetryHeading(state.fixedWingOrientationQuat)))
+                abs(wrap(state.orientation.z - tailsitterTelemetryHeading(state.attitudeQuat)))
             )
         }
         if horizontalForward <= 0.02 {
             hoverGaugeSamples += 1
             maximumHoverGaugeError = max(
                 maximumHoverGaugeError,
-                abs(wrap(state.orientation.z - hoverHeading(state.fixedWingOrientationQuat)))
+                abs(wrap(state.orientation.z - hoverHeading(state.attitudeQuat)))
             )
         } else if horizontalForward < 0.075 {
             blendedGaugeSamples += 1
             maximumBlendedGaugeError = max(
                 maximumBlendedGaugeError,
-                abs(wrap(state.orientation.z - tailsitterTelemetryHeading(state.fixedWingOrientationQuat)))
+                abs(wrap(state.orientation.z - tailsitterTelemetryHeading(state.attitudeQuat)))
             )
-        } else if let heading = forwardHeading(state.fixedWingOrientationQuat) {
+        } else if let heading = forwardHeading(state.attitudeQuat) {
             forwardGaugeSamples += 1
             maximumForwardGaugeError = max(
                 maximumForwardGaugeError,
@@ -576,7 +576,7 @@ do {
         if !thresholdCrossed, previousHorizontalForward < 0.08, horizontalForward >= 0.08 {
             thresholdCrossed = true
             crossingYawStep = abs(wrap(state.orientation.z - previousTelemetryHeading))
-            if let heading = forwardHeading(state.fixedWingOrientationQuat) {
+            if let heading = forwardHeading(state.attitudeQuat) {
                 crossingForwardHeadingError = abs(wrap(state.orientation.z - heading))
             }
         }
@@ -588,7 +588,7 @@ do {
         maximumAttitudeError = max(
             maximumAttitudeError,
             quaternionDistance(
-                state.fixedWingOrientationQuat,
+                state.attitudeQuat,
                 orientation(
                     yaw: radians(command.yawDegrees),
                     pitch: expectedPitch,
@@ -597,11 +597,11 @@ do {
             )
         )
         maximumBodyRate = max(maximumBodyRate, simd_length(state.bodyAngularVelocity))
-        let forward = simd_act(state.fixedWingOrientationQuat, SIMD3<Float>(0, 0, -1))
+        let forward = simd_act(state.attitudeQuat, SIMD3<Float>(0, 0, -1))
         minimumForwardY = min(minimumForwardY, forward.y)
         remainedFinite = remainedFinite &&
             isFinite(state.position) && isFinite(state.velocity) &&
-            isFinite(state.bodyAngularVelocity) && isFinite(state.fixedWingOrientationQuat)
+            isFinite(state.bodyAngularVelocity) && isFinite(state.attitudeQuat)
 
         let distance = sweptPlanarDistance(from: previousPosition, to: state.position, point: waypoint)
         minimumSweptDistance = min(minimumSweptDistance, distance)
@@ -618,7 +618,7 @@ do {
         minimumAltitude = min(minimumAltitude, state.position.y)
     }
 
-    let forward = simd_act(state.fixedWingOrientationQuat, SIMD3<Float>(0, 0, -1))
+    let forward = simd_act(state.attitudeQuat, SIMD3<Float>(0, 0, -1))
     let planarForward = SIMD2<Float>(forward.x, forward.z)
     let course = atan2(-planarForward.x, -planarForward.y)
     let courseError = abs(wrap(targetHeading - course))

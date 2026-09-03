@@ -87,7 +87,7 @@ private func initialState(altitude: Float, heading: Float) -> DroneState {
     )
     state.armState = .armed
     state.motionState = .airborne
-    state.fixedWingOrientationQuat = hoverOrientation(yaw: heading)
+    state.attitudeQuat = hoverOrientation(yaw: heading)
     state.bodyAngularVelocity = .zero
     state.propulsionUnits = profile.propulsionUnitTemplate
     state.vtolTransitionProgress = 0.0
@@ -180,10 +180,10 @@ do {
         let displacement = SIMD2<Float>(state.position.x - start.x, state.position.z - start.z)
         maximumAlongTrack = max(maximumAlongTrack, simd_dot(displacement, forward))
         maximumCrossTrack = max(maximumCrossTrack, abs(simd_dot(displacement, right)))
-        maximumTilt = max(maximumTilt, thrustTilt(state.fixedWingOrientationQuat))
+        maximumTilt = max(maximumTilt, thrustTilt(state.attitudeQuat))
         minimumAltitude = min(minimumAltitude, state.position.y)
         remainedFinite = remainedFinite && isFinite(state.position) && isFinite(state.velocity) &&
-            isFinite(state.bodyAngularVelocity) && isFinite(state.fixedWingOrientationQuat)
+            isFinite(state.bodyAngularVelocity) && isFinite(state.attitudeQuat)
     }
 
     let displacement = SIMD2<Float>(state.position.x - start.x, state.position.z - start.z)
@@ -245,7 +245,7 @@ do {
             deltaTime: dt
         )
 
-        maximumTilt = max(maximumTilt, thrustTilt(state.fixedWingOrientationQuat))
+        maximumTilt = max(maximumTilt, thrustTilt(state.attitudeQuat))
         maximumDrift = max(
             maximumDrift,
             simd_length(SIMD2<Float>(state.position.x - start.x, state.position.z - start.z))
@@ -253,7 +253,7 @@ do {
         minimumAltitude = min(minimumAltitude, state.position.y)
         maximumAltitude = max(maximumAltitude, state.position.y)
         remainedFinite = remainedFinite && isFinite(state.position) && isFinite(state.velocity) &&
-            isFinite(state.bodyAngularVelocity) && isFinite(state.fixedWingOrientationQuat)
+            isFinite(state.bodyAngularVelocity) && isFinite(state.attitudeQuat)
     }
 
     print(String(

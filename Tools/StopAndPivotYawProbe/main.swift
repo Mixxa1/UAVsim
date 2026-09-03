@@ -115,7 +115,7 @@ private func initialState(altitude: Float, heading: Float) -> DroneState {
     )
     state.armState = .armed
     state.motionState = .airborne
-    state.fixedWingOrientationQuat = hoverOrientation(yaw: heading)
+    state.attitudeQuat = hoverOrientation(yaw: heading)
     state.bodyAngularVelocity = .zero
     state.propulsionUnits = profile.propulsionUnitTemplate
     state.vtolTransitionProgress = 0.0
@@ -216,7 +216,7 @@ private func runPivot(
             deltaTime: dt
         )
 
-        let heading = hoverHeading(state.fixedWingOrientationQuat)
+        let heading = hoverHeading(state.attitudeQuat)
         let error = wrapAngle(target - heading)
         // `stopAndPivotYawRate` is what the production gate reads, so read the same channel.
         let yawRate = HybridVTOLFlightPolicy.stopAndPivotYawRate(
@@ -245,7 +245,7 @@ private func runPivot(
         outcome.altitudeLossMeters = max(outcome.altitudeLossMeters, altitude - state.position.y)
         outcome.remainedFinite = outcome.remainedFinite &&
             isFinite(state.position) && isFinite(state.velocity) &&
-            isFinite(state.bodyAngularVelocity) && isFinite(state.fixedWingOrientationQuat) &&
+            isFinite(state.bodyAngularVelocity) && isFinite(state.attitudeQuat) &&
             heading.isFinite
 
         if abs(error) <= headingToleranceRadians && abs(yawRate) <= yawRateTolerance {
@@ -502,7 +502,7 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
 
     for step in 0..<maximumSteps {
         let elapsed = Float(step) * dt
-        let heading = hoverHeading(state.fixedWingOrientationQuat)
+        let heading = hoverHeading(state.attitudeQuat)
         let error = wrapAngle(commanded - heading)
         let yawRate = HybridVTOLFlightPolicy.stopAndPivotYawRate(
             isTailsitter: true,
@@ -550,7 +550,7 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
         // and whether the wing has started carrying (which takes the aircraft out of the
         // rotor-borne regime this braking law assumes).
         peakCommandedTilt = max(peakCommandedTilt, max(abs(command.rollDegrees), abs(command.pitchDegrees)))
-        peakAchievedTilt = max(peakAchievedTilt, degrees(thrustTilt(state.fixedWingOrientationQuat)))
+        peakAchievedTilt = max(peakAchievedTilt, degrees(thrustTilt(state.attitudeQuat)))
         peakWingborne = max(peakWingborne, state.vtolWingborneBlend)
         peakProgress = max(peakProgress, state.vtolTransitionProgress)
         state = engine.step(
@@ -565,7 +565,7 @@ for entrySpeed in [Float(2.0), 4.0, 8.0, 14.0] {
         }
         maximumCrossTrack = max(maximumCrossTrack, abs(simd_dot(displacement, right)))
         remainedFinite = remainedFinite && isFinite(state.position) &&
-            isFinite(state.velocity) && isFinite(state.fixedWingOrientationQuat)
+            isFinite(state.velocity) && isFinite(state.attitudeQuat)
     }
 
     print(String(
@@ -693,7 +693,7 @@ for approach in [Float(3.0), 12.0, 45.0] {
             deltaTime: dt
         )
         remainedFinite = remainedFinite && isFinite(state.position) &&
-            isFinite(state.velocity) && isFinite(state.fixedWingOrientationQuat)
+            isFinite(state.velocity) && isFinite(state.attitudeQuat)
     }
 
     let amplitude = maximumSettled - minimumSettled
@@ -764,7 +764,7 @@ do {
         let distance = simd_length(toNode)
         minimumDistance = min(minimumDistance, distance)
         let bearing = distance > 0.5 ? atan2(-toNode.x, -toNode.y) : nodeBearing
-        let heading = hoverHeading(state.fixedWingOrientationQuat)
+        let heading = hoverHeading(state.attitudeQuat)
         let error = wrapAngle(bearing - heading)
         let yawRate = HybridVTOLFlightPolicy.stopAndPivotYawRate(
             isTailsitter: true,
@@ -809,7 +809,7 @@ do {
             deltaTime: dt
         )
         remainedFinite = remainedFinite && isFinite(state.position) &&
-            isFinite(state.velocity) && isFinite(state.fixedWingOrientationQuat)
+            isFinite(state.velocity) && isFinite(state.attitudeQuat)
     }
 
     let finalDistance = simd_distance(

@@ -6,6 +6,8 @@ import SwiftUI
 /// so the catalog never drifts away from the in-flight visual.
 struct PayloadLivePreviewView: NSViewRepresentable {
     let configuration: PayloadConfiguration
+    /// Set for camera payloads so the preview shows that module's own body and barrel.
+    var cameraModule: CameraModule? = nil
     var isSpinning: Bool = false
     var allowsCameraControl: Bool = false
 
@@ -20,6 +22,7 @@ struct PayloadLivePreviewView: NSViewRepresentable {
         view.setAccessibilityLabel(configuration.resolvedName)
         context.coordinator.apply(
             configuration: configuration,
+            cameraModule: cameraModule,
             isSpinning: isSpinning,
             allowsCameraControl: allowsCameraControl,
             to: view
@@ -30,6 +33,7 @@ struct PayloadLivePreviewView: NSViewRepresentable {
     func updateNSView(_ view: SCNView, context: Context) {
         context.coordinator.apply(
             configuration: configuration,
+            cameraModule: cameraModule,
             isSpinning: isSpinning,
             allowsCameraControl: allowsCameraControl,
             to: view
@@ -44,17 +48,23 @@ struct PayloadLivePreviewView: NSViewRepresentable {
 
     final class Coordinator {
         private var loadedConfiguration: PayloadConfiguration?
+        private var loadedModuleID: String?
         private var turntableNode: SCNNode?
 
         func apply(
             configuration: PayloadConfiguration,
+            cameraModule: CameraModule?,
             isSpinning: Bool,
             allowsCameraControl: Bool,
             to view: SCNView
         ) {
-            if loadedConfiguration != configuration {
+            if loadedConfiguration != configuration || loadedModuleID != cameraModule?.id {
                 loadedConfiguration = configuration
-                let preview = PayloadPreviewSceneBuilder.makeScene(configuration: configuration)
+                loadedModuleID = cameraModule?.id
+                let preview = PayloadPreviewSceneBuilder.makeScene(
+                    configuration: configuration,
+                    cameraModule: cameraModule
+                )
                 view.scene = preview.scene
                 view.pointOfView = preview.camera
                 turntableNode = preview.turntable
@@ -86,9 +96,15 @@ private enum PayloadPreviewSceneBuilder {
         let turntable: SCNNode
     }
 
-    static func makeScene(configuration: PayloadConfiguration) -> Preview {
+    static func makeScene(
+        configuration: PayloadConfiguration,
+        cameraModule: CameraModule? = nil
+    ) -> Preview {
         let scene = SCNScene()
-        let model = PayloadVisualFactory.build(configuration: configuration)
+        let model = PayloadVisualFactory.build(
+            configuration: configuration,
+            cameraModule: cameraModule
+        )
         let turntable = SCNNode()
         turntable.name = "payloadPreviewTurntable"
         scene.rootNode.addChildNode(turntable)

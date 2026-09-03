@@ -25,6 +25,12 @@ struct ResolvedFlightBaseline: Hashable {
     let glideThrottleFactor: Float
     let payloadCruisePenaltyMultiplier: Float
 
+    /// Full-stick body rates in a rate (acro) mode, rad/s, in the engine's (roll, pitch, yaw)
+    /// order. The default is the camera-platform figure the whole fleet used to share when this
+    /// lived as a constant inside the engine — 300/300/150 deg/s — and it applies to every
+    /// airframe whose tuning does not state its own.
+    var acroRateLimitsRadPerSec: SIMD3<Float> = SIMD3<Float>(5.236, 5.236, 2.618)
+
     var hoverCapable: Bool {
         switch vehicleType {
         case .multicopter, .helicopter, .hybridVTOL, .custom:
@@ -121,7 +127,9 @@ enum FlightBaselineResolver {
                 verticalResponseFactor: multirotor.verticalResponseFactor,
                 throttleAuthority: multirotor.throttleAuthority,
                 maneuverPenaltyFactor: multirotor.maneuverPenaltyFactor,
-                payloadThrustCompensationFactor: multirotor.payloadThrustCompensationFactor
+                payloadThrustCompensationFactor: multirotor.payloadThrustCompensationFactor,
+                acroRollRateDegPerSec: multirotor.acroRollRateDegPerSec,
+                acroYawRateDegPerSec: multirotor.acroYawRateDegPerSec
             )
         case .helicopter:
             guard let helicopter = tuning.helicopter else {
@@ -141,7 +149,9 @@ enum FlightBaselineResolver {
                 verticalResponseFactor: helicopter.verticalResponseFactor,
                 throttleAuthority: helicopter.throttleAuthority,
                 maneuverPenaltyFactor: helicopter.maneuverPenaltyFactor,
-                payloadThrustCompensationFactor: helicopter.payloadThrustCompensationFactor
+                payloadThrustCompensationFactor: helicopter.payloadThrustCompensationFactor,
+                acroRollRateDegPerSec: helicopter.acroRollRateDegPerSec,
+                acroYawRateDegPerSec: helicopter.acroYawRateDegPerSec
             )
         case .fixedWing:
             guard let fixedWing = tuning.fixedWing else {
@@ -225,7 +235,14 @@ enum FlightBaselineResolver {
             }
 
             let loadDelta = max(0.0, normalizedLoadFactor - 1.0)
-            let effectiveHoverThrottle = (custom.configurableHoverThrottleBaseline * (1.0 + loadDelta * 0.44 + payloadRatio * 0.14)).clamped(to: 0.22...0.84)
+            // The declared hover throttle still sizes the thrust — that is this branch's data
+            // model, a build's hover setting standing in for a thrust figure it does not publish.
+            // But once the thrust is known, hovering happens at its reciprocal and nowhere else,
+            // and the clamps below (and the `max(0.36, …)`) mean the round trip does not return
+            // the number it started from. See the note in `resolveVerticalHoldBaseline`.
+            let declaredHoverThrottle = (custom.configurableHoverThrottleBaseline * (1.0 + loadDelta * 0.44 + payloadRatio * 0.14)).clamped(to: 0.22...0.84)
+            let effectiveStabilizationThrust = (1.0 / max(0.36, declaredHoverThrottle)).clamped(to: 1.46...2.04)
+            let effectiveHoverThrottle = (1.0 / (effectiveStabilizationThrust + 0.35)).clamped(to: 0.20...0.88)
             let effectiveCruiseThrottle = (custom.configurableCruiseThrottleBaseline * (1.0 + loadDelta * 0.20 + payloadRatio * 0.10)).clamped(to: 0.22...0.80)
             let effectiveVerticalResponseFactor = (custom.configurableVerticalResponseFactor / (0.96 + loadDelta * 0.50)).clamped(to: 0.60...1.20)
             let effectiveThrottleAuthority = (custom.configurableThrottleAuthority * (1.0 - payloadRatio * 0.10)).clamped(to: 0.58...1.08)
@@ -239,7 +256,7 @@ enum FlightBaselineResolver {
                 normalizedLoadFactor: normalizedLoadFactor,
                 payloadRatio: payloadRatio,
                 effectiveHoverThrottle: effectiveHoverThrottle,
-                effectiveStabilizationThrust: (1.0 / max(0.36, effectiveHoverThrottle)).clamped(to: 1.46...2.04),
+                effectiveStabilizationThrust: effectiveStabilizationThrust,
                 effectiveCruiseThrottle: effectiveCruiseThrottle,
                 effectiveMinimumSafeFlightThrottle: max(effectiveCruiseThrottle * 0.88, 0.24),
                 effectiveClimbThrottle: max(effectiveHoverThrottle, effectiveCruiseThrottle + 0.06).clamped(to: 0.28...0.88),
@@ -269,14 +286,42 @@ enum FlightBaselineResolver {
         verticalResponseFactor: Float,
         throttleAuthority: Float,
         maneuverPenaltyFactor: Float,
-        payloadThrustCompensationFactor: Float
+        payloadThrustCompensationFactor: Float,
+        acroRollRateDegPerSec: Float,
+        acroYawRateDegPerSec: Float
     ) -> ResolvedFlightBaseline {
         let loadDelta = max(0.0, normalizedLoadFactor - 1.0)
         let payloadBoost = payloadRatio * payloadThrustCompensationFactor
-        let effectiveHoverThrottle = (hoverThrottleBaseline * (1.0 + loadDelta * 0.52 + payloadBoost * 0.20)).clamped(to: 0.20...0.88)
-        let effectiveStabilizationThrust = (stabilizationThrustBaseline * (1.0 + loadDelta * 0.18 + payloadBoost * 0.08)).clamped(to: 1.45...2.25)
-        let effectiveVerticalResponseFactor = (verticalResponseFactor / (0.92 + loadDelta * 0.70)).clamped(to: 0.55...1.40)
-        let effectiveThrottleAuthority = (throttleAuthority * (1.0 - payloadRatio * maneuverPenaltyFactor * 0.18)).clamped(to: 0.45...1.20)
+        // ⚠️ These ceilings used to be 2.25 / 1.40 / 1.20 — below what the catalogue itself
+        // declares for the acro class, so the numbers never reached the engine. The FPV racing
+        // quad asks for 3.40 thrust-to-weight ("near ten to one is the defining number of the
+        // class", per its own tuning entry) and was flown at 2.25; it asks for 2.20 vertical
+        // response and was flown at 1.40. A clamp is meant to bound *unknown* data, not to
+        // overrule a hand-written figure, and an airframe that cannot out-thrust its own weight
+        // by more than a factor of two cannot do a punch-out or a power loop at all.
+        //
+        // Raised only as far as the acro class needs. Every other multirotor and helicopter in
+        // the catalogue sits well inside the old ceilings (highest: 1.96 thrust, 1.20 vertical
+        // response, 1.08 throttle authority), so their resolved baselines are bit-identical —
+        // this widening is reachable by the FPV quad alone.
+        let effectiveStabilizationThrust = (stabilizationThrustBaseline * (1.0 + loadDelta * 0.18 + payloadBoost * 0.08)).clamped(to: 1.45...4.00)
+        // ⚠️ Hover throttle is not an independent figure — it is the reciprocal of the thrust the
+        // airframe makes. The engine sizes full thrust as `(stabilizationThrust + authority·0.35)`
+        // times weight, so weight is carried at exactly `1 / that`, and any other number is a
+        // throttle setting the profile *calls* a hover while the aircraft climbs or sinks.
+        //
+        // The two were declared separately and disagreed across the whole fleet: measured on the
+        // catalogue, an aircraft left at its own declared hover throttle rose 3.7-11.4 m in three
+        // seconds, and its top speed came out 8-12% high because every level-flight throttle was
+        // derived from the same wrong number. `hoverThrottleBaseline` is kept in the tuning
+        // profiles as the manufacturer-facing figure but is no longer what the physics flies.
+        //
+        // Load is already in `effectiveStabilizationThrust`, so it does not need applying a second
+        // time here — the old form multiplied the throttle by load as well, which double-counted
+        // it against a thrust model that scales with the mass being carried.
+        let effectiveHoverThrottle = (1.0 / (effectiveStabilizationThrust + 0.35)).clamped(to: 0.20...0.88)
+        let effectiveVerticalResponseFactor = (verticalResponseFactor / (0.92 + loadDelta * 0.70)).clamped(to: 0.55...2.40)
+        let effectiveThrottleAuthority = (throttleAuthority * (1.0 - payloadRatio * maneuverPenaltyFactor * 0.18)).clamped(to: 0.45...1.60)
         let maneuverAuthorityMultiplier = (1.0 - loadDelta * maneuverPenaltyFactor * 0.35).clamped(to: 0.48...1.00)
         let liftPenaltyMultiplier = (1.0 - payloadBoost * 0.05).clamped(to: 0.80...1.02)
 
@@ -301,7 +346,16 @@ enum FlightBaselineResolver {
             liftPenaltyMultiplier: liftPenaltyMultiplier,
             stallProtectionBias: 0.0,
             glideThrottleFactor: 0.70,
-            payloadCruisePenaltyMultiplier: 1.0
+            payloadCruisePenaltyMultiplier: 1.0,
+            // Carrying a payload does not slow an airframe's *commanded* rate the way it eats
+            // thrust margin — `maneuverAuthorityMultiplier` already scales the control authority
+            // that has to deliver it, and applying the load twice would make a loaded aircraft
+            // feel dead on the stick rather than heavy.
+            acroRateLimitsRadPerSec: SIMD3<Float>(
+                acroRollRateDegPerSec,
+                acroRollRateDegPerSec,
+                acroYawRateDegPerSec
+            ) * (Float.pi / 180.0)
         )
     }
 
@@ -320,7 +374,8 @@ enum FlightBaselineResolver {
             totalMass: totalMass,
             normalizedLoadFactor: normalizedLoadFactor,
             payloadRatio: payloadRatio,
-            effectiveHoverThrottle: 0.54,
+            // 1 / (1.80 + 0.35): the same reciprocal contract the real branches hold to.
+            effectiveHoverThrottle: 0.465,
             effectiveStabilizationThrust: 1.80,
             effectiveCruiseThrottle: 0.48,
             effectiveMinimumSafeFlightThrottle: 0.36,

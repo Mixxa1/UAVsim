@@ -173,7 +173,12 @@
 		10000000000000000000024A /* UAVCatalogModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014D /* UAVCatalogModuleView.swift */; };
 		10000000000000000000024B /* CameraModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014E /* CameraModuleView.swift */; };
 		A9A000000000000000000112 /* FPVOSDEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000E /* FPVOSDEditorView.swift */; };
+		A9A000000000000000000117 /* PayloadStationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000013 /* PayloadStationsView.swift */; };
 		A9A000000000000000000113 /* FisheyeLensProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A00000000000000000000F /* FisheyeLensProcessor.swift */; };
+		A9A000000000000000000118 /* CameraSensorProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000014 /* CameraSensorProcessor.swift */; };
+		A9A000000000000000000114 /* CameraModuleCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000010 /* CameraModuleCatalog.swift */; };
+		A9A000000000000000000115 /* UAVCameraFitment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000011 /* UAVCameraFitment.swift */; };
+		A9A000000000000000000116 /* PayloadLoadout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000012 /* PayloadLoadout.swift */; };
 		10000000000000000000024C /* ScenarioModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000014F /* ScenarioModuleView.swift */; };
 		10000000000000000000024D /* DiagnosticsModuleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000150 /* DiagnosticsModuleView.swift */; };
 		10000000000000000000FF33 /* AeroDiagnosticsPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */; };
@@ -698,7 +703,12 @@
 		10000000000000000000014D /* UAVCatalogModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVCatalogModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000014E /* CameraModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModuleView.swift; sourceTree = "<group>"; };
 		A9A00000000000000000000E /* FPVOSDEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDEditorView.swift; sourceTree = "<group>"; };
+		A9A000000000000000000013 /* PayloadStationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadStationsView.swift; sourceTree = "<group>"; };
 		A9A00000000000000000000F /* FisheyeLensProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FisheyeLensProcessor.swift; sourceTree = "<group>"; };
+		A9A000000000000000000014 /* CameraSensorProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraSensorProcessor.swift; sourceTree = "<group>"; };
+		A9A000000000000000000010 /* CameraModuleCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraModuleCatalog.swift; sourceTree = "<group>"; };
+		A9A000000000000000000011 /* UAVCameraFitment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVCameraFitment.swift; sourceTree = "<group>"; };
+		A9A000000000000000000012 /* PayloadLoadout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadLoadout.swift; sourceTree = "<group>"; };
 		10000000000000000000014F /* ScenarioModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioModuleView.swift; sourceTree = "<group>"; };
 		100000000000000000000150 /* DiagnosticsModuleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsModuleView.swift; sourceTree = "<group>"; };
 		10000000000000000000FF32 /* AeroDiagnosticsPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroDiagnosticsPanelView.swift; sourceTree = "<group>"; };
@@ -1245,6 +1255,9 @@
 				1000000000000000000002F8 /* ReplayVideoExportMode.swift */,
 				1000000000000000000002FA /* ReplayExportResolutionPreset.swift */,
 				1000000000000000000002FC /* ReplayExportBitratePreset.swift */,
+				A9A000000000000000000010 /* CameraModuleCatalog.swift */,
+				A9A000000000000000000011 /* UAVCameraFitment.swift */,
+				A9A000000000000000000012 /* PayloadLoadout.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -1377,6 +1390,7 @@
 				E80F00000000000000000003 /* WeatherDepthOfField.metal */,
 				A9N000000000000000000002 /* AnalogNTSCProcessor.swift */,
 				A9A00000000000000000000F /* FisheyeLensProcessor.swift */,
+				A9A000000000000000000014 /* CameraSensorProcessor.swift */,
 				A9N000000000000000000003 /* DigitalVideoProcessor.swift */,
 				A9C000000000000000000002 /* AnalogNTSCNativeBridge.h */,
 				A9C000000000000000000001 /* AnalogNTSCNativeBridge.mm */,
@@ -1457,6 +1471,7 @@
 				10000000000000000000014C /* FlightOpsModuleView.swift */,
 				10000000000000000000014E /* CameraModuleView.swift */,
 				A9A00000000000000000000E /* FPVOSDEditorView.swift */,
+				A9A000000000000000000013 /* PayloadStationsView.swift */,
 				10000000000000000000014F /* ScenarioModuleView.swift */,
 				100000000000000000000A0A /* MissionSetupView.swift */,
 				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
@@ -2246,7 +2261,12 @@
 				10000000000000000000024A /* UAVCatalogModuleView.swift in Sources */,
 				10000000000000000000024B /* CameraModuleView.swift in Sources */,
 				A9A000000000000000000112 /* FPVOSDEditorView.swift in Sources */,
+				A9A000000000000000000117 /* PayloadStationsView.swift in Sources */,
 				A9A000000000000000000113 /* FisheyeLensProcessor.swift in Sources */,
+				A9A000000000000000000118 /* CameraSensorProcessor.swift in Sources */,
+				A9A000000000000000000114 /* CameraModuleCatalog.swift in Sources */,
+				A9A000000000000000000115 /* UAVCameraFitment.swift in Sources */,
+				A9A000000000000000000116 /* PayloadLoadout.swift in Sources */,
 				10000000000000000000024C /* ScenarioModuleView.swift in Sources */,
 				100000000000000000000A09 /* MissionSetupView.swift in Sources */,
 				100000000000000000000A0B /* MissionScenarioHUDView.swift in Sources */,

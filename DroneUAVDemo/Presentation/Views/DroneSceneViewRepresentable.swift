@@ -19,7 +19,18 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         label: "com.uavsim.video-postprocess",
         qos: .userInitiated
     )
+    /// Which pass currently owns the processed-frame image view. The FPV chain and the payload
+    /// sensor chain share one display surface, and without an owner the FPV teardown — which runs
+    /// on every `updateNSView` while the payload view is open — kept clearing the payload pass's
+    /// frame, so the feed blinked between the processed image and the raw render.
+    private enum ProcessedFrameOwner {
+        case none
+        case fpv
+        case payloadSensor
+    }
+
     private weak var sceneView: FocusableSCNView?
+    private var processedFrameOwner: ProcessedFrameOwner = .none
     private var fpvPipelineActive = false
     private var postProcessingRequired = false
     private var pipelineRevision: UInt64 = 0
@@ -27,6 +38,30 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
     private var videoPresentationState: RFVideoPresentationState?
     private var fpvOSDState: FPVOSDState?
     private let fisheyeLensProcessor = FisheyeLensProcessor()
+    private let cameraSensorProcessor = CameraSensorProcessor()
+    /// The pilot's camera keeps its own exposure loop: it is a different device from the payload's
+    /// and must not inherit its gain when the operator switches views.
+    private let fpvSensorProcessor = CameraSensorProcessor()
+    private var fpvSensorParameters: CameraSensorParameters?
+    private var fpvSensorFrameIndex: UInt64 = 0
+    private var lastFPVCameraYaw: Double?
+    private var smoothedFPVYawRate: Double = 0
+    /// Payload video is delivered at 30 fps, matching both real downlinked camera video and the
+    /// rate the analog FPV chain already runs at.
+    private static let payloadCaptureFrameRate: Double = 30
+    /// Sensor characteristics of the camera feeding the payload view, when one is fitted.
+    private var payloadSensorParameters: CameraSensorParameters?
+    private var payloadSensorFrameIndex: UInt64 = 0
+    private var payloadSensorActive = false
+    private var payloadSensorRevision: UInt64 = 0
+    private var lastPayloadCaptureTime: TimeInterval = -.infinity
+    /// Camera heading at the previous capture, for the rolling-shutter lean. Measured from the
+    /// node actually being rendered rather than from the airframe, because a gimbal decouples the
+    /// two and it is the sensor's own motion that skews the readout.
+    private var lastPayloadCameraYaw: Double?
+    /// The raw frame-to-frame heading difference is a noisy estimate, and feeding it straight into
+    /// the shear made the picture twitch. The lean follows a filtered rate instead.
+    private var smoothedPayloadYawRate: Double = 0
     private var lensStrength: Double = 0
     private var lensHalfAngleDegrees: Double = 50
     private var osdLayout: OSDLayoutConfiguration = .corners
@@ -58,12 +93,22 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         // mutation stay on main; expensive RGB/composite processing stays on one serial worker.
         DispatchQueue.main.async { [weak self] in
             self?.captureFPVFrameIfNeeded(atTime: time)
+            self?.capturePayloadSensorFrameIfNeeded(atTime: time)
         }
     }
 
     @MainActor
     fileprivate func attach(to view: FocusableSCNView) {
         sceneView = view
+    }
+
+    /// Clears the shared frame only when the pass asking for it is the one showing it.
+    @MainActor
+    private func clearProcessedFrame(owner: ProcessedFrameOwner) {
+        guard processedFrameOwner == owner else { return }
+        processedFrameOwner = .none
+        sceneView?.processedFPVImageView.image = nil
+        sceneView?.processedFPVImageView.isHidden = true
     }
 
     @MainActor
@@ -75,39 +120,54 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         lensHalfAngleDegrees: Double,
         osdLayout: OSDLayoutConfiguration,
         osdAvailability: OSDElementAvailability,
+        fpvSensorParameters: CameraSensorParameters?,
         analogParameters: AnalogNTSCParameters?,
         digitalParameters: DigitalVideoParameters,
         fiberParameters: FiberVideoParameters
     ) {
         // The lens alone is reason enough to run the pipeline: on a clean digital or fibre link
         // there would otherwise be nothing to post-process and the frame would stay rectilinear.
+        // So is the camera itself — a bolted-in analog FPV camera is never a clean picture.
         let lensActive = lensStrength > 0.001
+        let sensorActive = fpvSensorParameters?.requiresProcessing ?? false
         let nextPostProcessingRequired: Bool
         switch mode {
         case .analog:
             nextPostProcessingRequired = true
         case .digital:
-            nextPostProcessingRequired = digitalParameters.requiresPostProcessing || lensActive
+            nextPostProcessingRequired = digitalParameters.requiresPostProcessing || lensActive || sensorActive
         case .fiber:
-            nextPostProcessingRequired = fiberParameters.requiresPostProcessing || lensActive
+            nextPostProcessingRequired = fiberParameters.requiresPostProcessing || lensActive || sensorActive
         }
+        // Only a different camera restarts the exposure loop. Keying this on the whole parameter
+        // block meant every zoom step and every lens toggle reset the gain to 1 and let the loop
+        // converge again from scratch, which is what the second-long flashes were.
+        let cameraChanged = self.fpvSensorParameters?.cameraIdentity != fpvSensorParameters?.cameraIdentity
         let pipelineChanged = fpvVideoMode != mode
             || postProcessingRequired != nextPostProcessingRequired
         if pipelineChanged {
             pipelineRevision &+= 1
-            sceneView?.processedFPVImageView.image = nil
-            sceneView?.processedFPVImageView.isHidden = true
+            clearProcessedFrame(owner: .fpv)
             lastCaptureTime = -.infinity
             let analog = analogNTSCProcessor
             let digital = digitalVideoProcessor
             let fiber = fiberVideoProcessor
             let lens = fisheyeLensProcessor
+            lastFPVCameraYaw = nil
+            smoothedFPVYawRate = 0
+            fpvSensorFrameIndex = 0
             videoProcessingQueue.async {
                 analog.reset()
                 digital.reset()
                 fiber.reset()
                 lens.reset()
             }
+        }
+        if cameraChanged {
+            // A different camera starts its own exposure loop rather than inheriting the gain the
+            // previous one had settled on. Nothing else is torn down: the frame on screen stays.
+            let sensor = fpvSensorProcessor
+            videoProcessingQueue.async { sensor.reset() }
         }
         fpvPipelineActive = true
         postProcessingRequired = nextPostProcessingRequired
@@ -118,6 +178,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         self.lensHalfAngleDegrees = lensHalfAngleDegrees
         self.osdLayout = osdLayout
         self.osdAvailability = osdAvailability
+        self.fpvSensorParameters = fpvSensorParameters
         self.analogParameters = analogParameters
         self.digitalParameters = digitalParameters
         self.fiberParameters = fiberParameters
@@ -136,7 +197,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
 
     @MainActor
     fileprivate func deactivateFPVPipeline() {
-        guard fpvPipelineActive || sceneView?.processedFPVImageView.image != nil else { return }
+        guard fpvPipelineActive || processedFrameOwner == .fpv else { return }
         fpvPipelineActive = false
         postProcessingRequired = false
         pipelineRevision &+= 1
@@ -147,8 +208,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         digitalParameters = .clean
         fiberParameters = .clean
         lastCaptureTime = -.infinity
-        sceneView?.processedFPVImageView.image = nil
-        sceneView?.processedFPVImageView.isHidden = true
+        clearProcessedFrame(owner: .fpv)
         sceneView?.videoFrameRateOverrideFPS = nil
         let analog = analogNTSCProcessor
         let digital = digitalVideoProcessor
@@ -159,6 +219,151 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
             digital.reset()
             fiber.reset()
             lens.reset()
+        }
+    }
+
+    /// The payload view renders straight from SceneKit, so without this pass every module looked
+    /// identical apart from its field of view. Runs only when the FPV pipeline is idle: the two
+    /// share one display surface, and only one camera is ever on screen.
+    @MainActor
+    fileprivate func configurePayloadSensorPipeline(parameters: CameraSensorParameters?) {
+        let next = (parameters?.requiresProcessing ?? false) ? parameters : nil
+        // Zoom changes these values continuously, so the parameters are simply replaced. Only
+        // switching the pass on or off resets the capture clock — resetting it on every value
+        // change would defeat the frame-rate throttle for the whole duration of a zoom.
+        let cameraChanged = payloadSensorParameters?.cameraIdentity != next?.cameraIdentity
+        payloadSensorParameters = next
+        let shouldBeActive = next != nil
+        if cameraChanged, shouldBeActive, payloadSensorActive {
+            let sensor = cameraSensorProcessor
+            videoProcessingQueue.async { sensor.reset() }
+        }
+        guard shouldBeActive != payloadSensorActive else { return }
+        payloadSensorActive = shouldBeActive
+        payloadSensorRevision &+= 1
+        payloadSensorFrameIndex = 0
+        // The exposure loop carries state between frames; a new camera starts its own.
+        let sensor = cameraSensorProcessor
+        videoProcessingQueue.async { sensor.reset() }
+        lastPayloadCaptureTime = -.infinity
+        lastPayloadCameraYaw = nil
+        if !shouldBeActive {
+            clearProcessedFrame(owner: .payloadSensor)
+        }
+    }
+
+    @MainActor
+    fileprivate func deactivatePayloadSensorPipeline() {
+        guard payloadSensorActive || payloadSensorParameters != nil else { return }
+        payloadSensorActive = false
+        payloadSensorParameters = nil
+        payloadSensorRevision &+= 1
+        lastPayloadCaptureTime = -.infinity
+        lastPayloadCameraYaw = nil
+        smoothedPayloadYawRate = 0
+        clearProcessedFrame(owner: .payloadSensor)
+    }
+
+    /// Yaw rate of the rendered camera, radians per second, signed. Returns zero on the first
+    /// frame and whenever the elapsed time is not usable.
+    @MainActor
+    private func cameraYawRate(
+        elapsed: TimeInterval,
+        previous: inout Double?,
+        smoothed: inout Double
+    ) -> Double {
+        guard let node = sceneView?.pointOfView else {
+            previous = nil
+            return 0
+        }
+        let forward = node.presentation.simdWorldTransform.columns.2
+        let yaw = Double(atan2(forward.x, forward.z))
+        defer { previous = yaw }
+        guard let last = previous,
+              elapsed > 0.0001,
+              elapsed < 0.5 else {
+            return 0
+        }
+        var delta = yaw - last
+        while delta > .pi { delta -= 2 * .pi }
+        while delta < -.pi { delta += 2 * .pi }
+        smoothed += (delta / elapsed - smoothed) * 0.35
+        return smoothed
+    }
+
+    @MainActor
+    private func capturePayloadSensorFrameIfNeeded(atTime time: TimeInterval) {
+        guard payloadSensorActive,
+              !fpvPipelineActive,
+              !isProcessingFrame,
+              let parameters = payloadSensorParameters,
+              time - lastPayloadCaptureTime >= 1.0 / Self.payloadCaptureFrameRate,
+              let view = sceneView,
+              view.window != nil,
+              view.bounds.width > 1,
+              view.bounds.height > 1 else {
+            return
+        }
+
+        var proposedRect = view.bounds
+        let snapshot = view.snapshot()
+        guard let sourceImage = snapshot.cgImage(
+            forProposedRect: &proposedRect,
+            context: nil,
+            hints: [.interpolation: NSImageInterpolation.high]
+        ) else {
+            return
+        }
+
+        let elapsed = lastPayloadCaptureTime.isFinite ? time - lastPayloadCaptureTime : 0
+        let yawRate = cameraYawRate(
+            elapsed: elapsed,
+            previous: &lastPayloadCameraYaw,
+            smoothed: &smoothedPayloadYawRate
+        )
+        lastPayloadCaptureTime = time
+        isProcessingFrame = true
+        payloadSensorFrameIndex &+= 1
+        let sensor = cameraSensorProcessor
+        let lens = fisheyeLensProcessor
+        let frameIndex = payloadSensorFrameIndex
+        let revision = payloadSensorRevision
+        videoProcessingQueue.async {
+            autoreleasepool {
+                // The lens sits ahead of the sensor on a real camera, so the barrel bow is applied
+                // to the rendered frame first and the readout, resolution and noise act on what
+                // the lens delivered.
+                let lensed = parameters.requiresLensPass
+                    ? (lens.process(
+                        sourceImage: sourceImage,
+                        strength: parameters.barrelDistortion,
+                        halfAngleDegrees: parameters.lensHalfAngleDegrees
+                    ) ?? sourceImage)
+                    : sourceImage
+                let output = sensor.process(
+                    sourceImage: lensed,
+                    parameters: parameters,
+                    yawRateRadiansPerSecond: yawRate,
+                    deltaTime: elapsed,
+                    frameIndex: frameIndex
+                )
+                DispatchQueue.main.async { [weak self, weak view] in
+                    guard let self else { return }
+                    defer { self.isProcessingFrame = false }
+                    guard self.payloadSensorActive,
+                          self.payloadSensorRevision == revision,
+                          let view,
+                          let output else {
+                        return
+                    }
+                    self.processedFrameOwner = .payloadSensor
+                    view.processedFPVImageView.image = NSImage(
+                        cgImage: output,
+                        size: view.bounds.size
+                    )
+                    view.processedFPVImageView.isHidden = false
+                }
+            }
         }
     }
 
@@ -179,7 +384,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
 
         // Digital/fiber loss retains the last complete frame. Analog never enters this branch: its
         // lost state continues producing noise/sync damage rather than freezing a packet frame.
-        if presentationState.isFrozen, view.processedFPVImageView.image != nil {
+        if presentationState.isFrozen, processedFrameOwner == .fpv, view.processedFPVImageView.image != nil {
             return
         }
 
@@ -193,8 +398,18 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
             return
         }
 
+        let elapsed = lastCaptureTime.isFinite ? time - lastCaptureTime : 0
+        let yawRate = cameraYawRate(
+            elapsed: elapsed,
+            previous: &lastFPVCameraYaw,
+            smoothed: &smoothedFPVYawRate
+        )
         lastCaptureTime = time
         isProcessingFrame = true
+        fpvSensorFrameIndex &+= 1
+        let sensor = fpvSensorProcessor
+        let sensorParameters = fpvSensorParameters
+        let sensorFrameIndex = fpvSensorFrameIndex
         let analog = analogNTSCProcessor
         let digital = digitalVideoProcessor
         let fiber = fiberVideoProcessor
@@ -214,13 +429,28 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
                 // The lens belongs to the camera, so it runs once on the captured frame and
                 // before any link-specific processing — and, for analog, before the OSD is
                 // composited, exactly as a real lens sits ahead of the character generator.
-                let sourceImage = lensStrength > 0.001
+                let lensed = lensStrength > 0.001
                     ? (lens.process(
                         sourceImage: sourceImage,
                         strength: lensStrength,
                         halfAngleDegrees: lensHalfAngle
                     ) ?? sourceImage)
                     : sourceImage
+                // The pilot's camera sits between the lens and the transmitter, so its sensor and
+                // ISP act on the bent frame and the link then carries whatever they produced. The
+                // OSD is composited after all of it, by the flight controller.
+                let sourceImage: CGImage
+                if let sensorParameters, sensorParameters.requiresProcessing {
+                    sourceImage = sensor.process(
+                        sourceImage: lensed,
+                        parameters: sensorParameters,
+                        yawRateRadiansPerSecond: yawRate,
+                        deltaTime: elapsed,
+                        frameIndex: sensorFrameIndex
+                    ) ?? lensed
+                } else {
+                    sourceImage = lensed
+                }
                 let output: CGImage?
                 switch mode {
                 case .analog:
@@ -258,6 +488,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
                           let output else {
                         return
                     }
+                    self.processedFrameOwner = .fpv
                     view.processedFPVImageView.image = NSImage(
                         cgImage: output,
                         size: view.bounds.size
@@ -611,6 +842,10 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     var fpvLensStrength: Double = 0
     var fpvLensHalfAngleDegrees: Double = 50
     var osdAvailability: OSDElementAvailability = .all
+    /// Sensor characteristics of the camera the pilot flies from, when the FPV view is open.
+    var fpvSensorParameters: CameraSensorParameters? = nil
+    /// Sensor characteristics of the camera feeding the payload view, when that view is open.
+    var payloadSensorParameters: CameraSensorParameters? = nil
     let onLookDelta: (Float, Float) -> Void
     let onRenderFrame: (TimeInterval, CameraMode) -> Void
 
@@ -689,12 +924,14 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
         guard let mode = fpvVideoMode,
               let presentationState = fpvVideoPresentationState else {
             coordinator.deactivateFPVPipeline()
+            coordinator.configurePayloadSensorPipeline(parameters: payloadSensorParameters)
             let desiredTechnique = wantsWeatherDOF ? WeatherDepthOfFieldTechnique.shared : nil
             if view.technique !== desiredTechnique {
                 view.technique = desiredTechnique
             }
             return
         }
+        coordinator.deactivatePayloadSensorPipeline()
 
         do {
             if mode == .analog {
@@ -717,6 +954,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
                 lensHalfAngleDegrees: fpvLensHalfAngleDegrees,
                 osdLayout: osdLayout,
                 osdAvailability: osdAvailability,
+                fpvSensorParameters: fpvSensorParameters,
                 analogParameters: analogNTSCParameters,
                 digitalParameters: digitalVideoParameters,
                 fiberParameters: fiberVideoParameters

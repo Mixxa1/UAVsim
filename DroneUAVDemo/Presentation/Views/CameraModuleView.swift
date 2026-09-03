@@ -276,8 +276,11 @@ struct CameraModuleView: View {
             subtitleKey: "camera.mode.payload_optics"
         ) {
             VStack(alignment: .leading, spacing: 12) {
+                // Only the channels the fitted camera actually carries. Offering all three made
+                // the panel claim a thermal core on a mapping camera and a visible channel on a
+                // bare LWIR one.
                 HStack(spacing: 8) {
-                    ForEach(PayloadCameraMode.allCases) { mode in
+                    ForEach(viewModel.availablePayloadCameraModes) { mode in
                         payloadModeChip(mode: mode, isSelected: state.mode == mode)
                     }
                 }
@@ -872,7 +875,7 @@ struct CameraModuleView: View {
     }
 
     private func payloadModeChip(mode: PayloadCameraMode, isSelected: Bool) -> some View {
-        // EO + Thermal are live; Night is still unimplemented (dimmed, non-interactive).
+        // Night is still unimplemented (dimmed, non-interactive) if it ever reaches this list.
         let isEnabled = mode == .optical || mode == .thermalStub
 
         return Button {

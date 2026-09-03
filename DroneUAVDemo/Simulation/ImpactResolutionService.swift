@@ -783,7 +783,7 @@ final class ImpactResolutionService {
     private func attitudeQuaternion(state: DroneState, airframeClass: AirframeClass) -> simd_quatf {
         switch airframeClass {
         case .fixedWing, .hybridVTOL:
-            return state.fixedWingOrientationQuat
+            return state.attitudeQuat
         case .multirotor:
             return orientationQuaternion(from: state.orientation)
         }

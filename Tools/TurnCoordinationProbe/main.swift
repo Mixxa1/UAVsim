@@ -119,7 +119,7 @@ func flyTurn(
         if tick > settleTicks {
             // Sideslip exactly as the engine defines it, so the number is the one the aero
             // actually reacts to rather than a re-derivation that could disagree by a sign.
-            let bodyAirflow = simd_act(state.fixedWingOrientationQuat.conjugate, state.velocity)
+            let bodyAirflow = simd_act(state.attitudeQuat.conjugate, state.velocity)
             let airspeed = max(simd_length(bodyAirflow), 0.5)
             betaSamples.append(asin(max(-1.0, min(1.0, bodyAirflow.x / airspeed))))
             rudderSamples.append(state.rudderDeflection)

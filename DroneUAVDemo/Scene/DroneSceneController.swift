@@ -336,6 +336,11 @@ final class DroneSceneController {
     private var groundReferenceNode: SCNNode
     private var fpvAnchorNode: SCNNode
     private var payloadMountNode: SCNNode
+    /// Visual nodes for stations beyond the first. The primary station keeps `payloadVisualNode`.
+    private var secondaryPayloadNodes: [SCNNode] = []
+    /// How the FPV mount is rotated relative to the body. A property of the airframe, so it is
+    /// resolved once per visual rather than rebuilt from transforms on every frame.
+    private var cachedFPVAnchorForward: SIMD3<Float>?
     private var propellerNodes: [SCNNode]
     private var spinDirections: [Float]
     private var spinAngles: [Float]
@@ -793,6 +798,11 @@ final class DroneSceneController {
             return spectatorCameraNode
         }
     }
+
+    /// The camera the pilot flies from. Asked for rather than pushed: it changes only with the
+    /// selected aircraft, while the camera settings that combine with it arrive every frame, and a
+    /// pushed copy would go stale at whichever call site was forgotten.
+    var navigationCameraModuleProvider: (() -> CameraModule?)?
 
     func setPayloadCameraOpticsState(_ state: PayloadCameraOpticsState) {
         payloadCameraOpticsState = state
@@ -3428,14 +3438,64 @@ final class DroneSceneController {
     }
 
     func attachPayloadVisual(_ configuration: PayloadConfiguration) {
+        attachPayloadVisuals([
+            PayloadMountEntry(mount: .bellyForward, configuration: configuration, cameraModuleID: nil)
+        ])
+    }
+
+    /// Builds one node per occupied station.
+    ///
+    /// The first entry keeps the existing single-payload path — the payload camera, the release
+    /// logic and the FPV stand-in all key off `payloadVisualNode`, and giving them a different
+    /// node per station would scatter that state. Additional stations are visual-only siblings
+    /// offset to their own mount point, which is enough for them not to sit inside each other.
+    /// Where a station sits in the mount node's own space, scaled to the aircraft it is on.
+    ///
+    /// The offsets in `PayloadMount` are authored for a roughly one-metre airframe. Applied
+    /// unscaled they put every station within a few centimetres of the others, so three different
+    /// mounts on a Matrice — and on a Reaper — all read as the same place.
+    func payloadStationOffset(_ mount: PayloadMount) -> SIMD3<Float> {
+        let box = visualRootNode.boundingBox
+        let width = max(0.2, Float(box.max.x - box.min.x))
+        let length = max(0.2, Float(box.max.z - box.min.z))
+        let scale = max(0.35, min(8.0, max(width, length)))
+        var offset = mount.localOffset * scale
+        if mount.isUpward {
+            // The mount node hangs under the body, so an upward station has to clear the whole
+            // airframe rather than sit a fixed distance above the belly.
+            let mountY = Float(payloadMountNode.convertPosition(SCNVector3Zero, to: visualRootNode).y)
+            offset.y = max(offset.y, Float(box.max.y) - mountY + 0.05 * scale)
+        }
+        return offset
+    }
+
+    func attachPayloadVisuals(_ entries: [PayloadMountEntry]) {
         removePayloadVisual()
-        let node = PayloadVisualFactory.build(configuration: configuration)
+        guard let primary = entries.first else { return }
+
+        let node = PayloadVisualFactory.build(
+            configuration: primary.configuration,
+            cameraModule: primary.cameraModule
+        )
         applyCategoryBitMask(RenderCategory.mountedPayload, to: node)
+        node.simdPosition += payloadStationOffset(primary.mount)
         payloadMountNode.addChildNode(node)
         payloadVisualNode = node
-        activePayloadConfiguration = configuration
+        activePayloadConfiguration = primary.configuration
         installFPVPayloadPresentation(from: node)
         applyPayloadFPVPresentation()
+
+        for entry in entries.dropFirst() {
+            let secondary = PayloadVisualFactory.build(
+                configuration: entry.configuration,
+                cameraModule: entry.cameraModule
+            )
+            applyCategoryBitMask(RenderCategory.mountedPayload, to: secondary)
+            secondary.simdPosition += payloadStationOffset(entry.mount)
+            secondary.name = "secondaryPayload.\(entry.mount.rawValue)"
+            payloadMountNode.addChildNode(secondary)
+            secondaryPayloadNodes.append(secondary)
+        }
     }
 
     func attachMountedCADPayload(_ payload: MountedCADPayload) {
@@ -3457,6 +3517,10 @@ final class DroneSceneController {
     }
 
     func removePayloadVisual() {
+        for node in secondaryPayloadNodes {
+            node.removeFromParentNode()
+        }
+        secondaryPayloadNodes.removeAll()
         payloadVisualNode?.removeFromParentNode()
         payloadVisualNode = nil
         activePayloadConfiguration = nil
@@ -4622,6 +4686,7 @@ final class DroneSceneController {
         cameraAnchorNode = droneVisual.cameraAnchorNode
         groundReferenceNode = droneVisual.groundReferenceNode
         fpvAnchorNode = droneVisual.fpvAnchorNode
+        cachedFPVAnchorForward = nil
         payloadMountNode = droneVisual.payloadMountNode
         propellerNodes = droneVisual.propellerNodes
         spinDirections = droneVisual.propellerSpinDirections
@@ -5704,7 +5769,11 @@ final class DroneSceneController {
 
         fpvPresentationActive = camera.mode == .fpv
         fpvObstructionHidingActive = (camera.mode == .fpv) && camera.fpv.hideObstructingParts
-        visualRootNode.isHidden = fpvPresentationActive
+        // The airframe stays in its own feed. Hiding `visualRootNode` wholesale is what kept the
+        // propellers, arms and the gimbal out of every FPV frame — and it also made the selective
+        // path below dead code, since there was never anything left for it to hide. On a real
+        // FPV camera, especially behind the wide lens, the props are in shot.
+        visualRootNode.isHidden = false
         if camera.mode != .fpv {
             droneNode.isHidden = canisterRoundSealed
             droneNode.opacity = 1.0
@@ -6336,6 +6405,21 @@ final class DroneSceneController {
             payloadCameraRigNode.removeFromParentNode()
             payloadMountNode.addChildNode(payloadCameraRigNode)
         }
+        // The feed comes from a camera bolted to a particular station, so the viewpoint belongs
+        // there. Without this every station produced an identical picture and the mounts were a
+        // label rather than a place.
+        payloadCameraRigNode.simdPosition = activePayloadCameraStation
+            .map(payloadStationOffset)
+            ?? .zero
+    }
+
+    /// Station whose camera the payload view is showing. Nil means the aircraft's single mount.
+    private var activePayloadCameraStation: PayloadMount?
+
+    func setActivePayloadCameraStation(_ mount: PayloadMount?) {
+        guard activePayloadCameraStation != mount else { return }
+        activePayloadCameraStation = mount
+        ensurePayloadCameraNode()
     }
 
     func updatePayloadCamera(state: PayloadCameraOpticsState, droneState: DroneState, deltaTime: Float = 0.0) {
@@ -8004,15 +8088,17 @@ final class DroneSceneController {
         let fov = CGFloat(settings.fov.clamped(to: 30.0...110.0))
         followCameraNode.camera?.fieldOfView = fov
         orbitCameraNode.camera?.fieldOfView = fov
-        // The lens widens what is rendered as well as bending it. Without this the barrel warp
-        // only compresses the existing frame inward, which reads as zooming in — the opposite of
-        // what a short-focal-length FPV lens does.
-        let fpvFov: CGFloat = {
-            guard settings.fpv.lensEnabled else { return fov }
-            let widened = Double(settings.fov)
-                * (1.0 + Double(settings.fpv.lensDistortion.clamped(to: 0.0...1.0)) * 0.6)
-            return CGFloat(min(150.0, max(30.0, widened)))
-        }()
+        // What the pilot's camera covers is a property of that camera, and the manual lens widens
+        // what is rendered as well as bending it — without the widening, the barrel warp only
+        // compresses the existing frame inward, which reads as zooming in. Both cases are resolved
+        // in one place in the view model so that the render, the lens remap and the readout cannot
+        // disagree about the same angle.
+        let fpvFov = CGFloat(PilotViewOptics.fieldOfViewDegrees(
+            module: navigationCameraModuleProvider?(),
+            fovSetting: settings.fov,
+            lensEnabled: settings.fpv.lensEnabled,
+            lensDistortion: settings.fpv.lensDistortion
+        ))
         fpvCameraNode.camera?.fieldOfView = fpvFov
         topCameraNode.camera?.fieldOfView = fov
         freeCameraNode.camera?.fieldOfView = fov
@@ -8274,16 +8360,30 @@ final class DroneSceneController {
     /// mount snapped round; hard-coding -Z instead pointed the camera backwards on every model
     /// whose mount is not aligned with the body axes, putting the aircraft in its own FPV feed.
     private func fpvAnchorLocalForward() -> SIMD3<Float> {
-        let anchorRotation = simd_normalize(simd_quatf(fpvAnchorNode.simdWorldTransform))
-        let bodyRotation = simd_normalize(simd_quatf(droneNode.simdWorldTransform))
-        let anchorFromBody = simd_inverse(anchorRotation) * bodyRotation
-        let forward = simd_act(anchorFromBody, modelForwardLocal())
+        if let cachedFPVAnchorForward {
+            return cachedFPVAnchorForward
+        }
+        // Read from the node chain rather than the world matrices. Extracting a rotation from a
+        // world transform means extracting it from a matrix that also carries the visual's scale,
+        // and that error varies with orientation — which is why it showed up as the view lagging
+        // the airframe only while yawing, and not in level flight.
+        var rotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+        var cursor: SCNNode? = fpvAnchorNode
+        while let node = cursor, node !== droneNode {
+            rotation = simd_normalize(node.simdOrientation) * rotation
+            cursor = node.parent
+        }
+        let forward = simd_act(simd_inverse(simd_normalize(rotation)), modelForwardLocal())
         let planar = SIMD3<Float>(forward.x, 0.0, forward.z)
         let planarLength = simd_length(planar)
-        guard planarLength > 0.0001, planarLength.isFinite else {
-            return modelForwardLocal()
+        let resolved: SIMD3<Float>
+        if planarLength > 0.0001, planarLength.isFinite {
+            resolved = planar / planarLength
+        } else {
+            resolved = modelForwardLocal()
         }
-        return planar / planarLength
+        cachedFPVAnchorForward = resolved
+        return resolved
     }
 
     private func modelForwardLocal() -> SIMD3<Float> {
@@ -11146,7 +11246,10 @@ final class DroneSceneController {
     }
 
     private func applyPayloadFPVPresentation() {
-        let useFPVPresentation = fpvPresentationActive
+        // The simplified stand-in exists because the real payload used to be hidden along with the
+        // rest of the airframe. Now it is only needed when the operator asks for a clean feed;
+        // otherwise the actual gimbal is shown where it actually hangs.
+        let useFPVPresentation = fpvObstructionHidingActive
         fpvPayloadPresentationNode.isHidden = !useFPVPresentation || fpvPayloadPresentationNode.childNodes.isEmpty
 
         guard let payloadVisualNode else {

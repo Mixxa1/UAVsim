@@ -50,11 +50,16 @@ struct SceneViewportView: View {
                     : .clean,
                 fpvFontPreset: viewModel.fpvFontPreset,
                 osdLayout: viewModel.osdLayout,
-                fpvLensStrength: viewModel.cameraConfiguration.fpv.lensEnabled
-                    ? Double(viewModel.cameraConfiguration.fpv.lensDistortion)
-                    : 0,
-                fpvLensHalfAngleDegrees: Double(viewModel.cameraConfiguration.fov) / 2,
+                // The bow and the coverage both come from the fitted pilot camera unless the
+                // operator has taken manual control of the lens, and both are resolved in the view
+                // model so the render and the remap cannot disagree about the same angle.
+                fpvLensStrength: viewModel.fpvLensDistortion,
+                fpvLensHalfAngleDegrees: viewModel.fpvFieldOfViewDegrees / 2,
                 osdAvailability: viewModel.osdElementAvailability,
+                fpvSensorParameters: fpvHUDActive ? viewModel.fpvSensorParameters : nil,
+                payloadSensorParameters: payloadOpticsActive
+                    ? viewModel.payloadSensorParameters
+                    : nil,
                 onLookDelta: { dx, dy in
                     viewModel.handlePointerLook(deltaX: dx, deltaY: dy)
                 },

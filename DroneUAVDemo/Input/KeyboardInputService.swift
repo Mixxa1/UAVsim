@@ -364,6 +364,8 @@ enum InputAction: Equatable, Hashable {
     case disarmAircraft
     case launchAircraft
     case toggleFPVLens
+    /// Zero-based index of a camera-carrying payload station.
+    case selectCameraStation(index: Int)
     case selectFreeCamera
     case selectChaseCamera
     case selectOrbitCamera
@@ -437,6 +439,9 @@ final class KeyboardInputService: KeyboardInputProviding {
     private static let reservedDirectShortcutKeyCodes: Set<UInt16> = [30, 33, 34, 40] // ] / [ / I / K
     private static let parametersPanelToggleKeyCode: UInt16 = 33 // [
     private static let toolPanelToggleKeyCode: UInt16 = 30 // ]
+    /// ANSI 1/2/3. Station order matches the payload panel's list.
+    private static let cameraStationKeyCodes: [UInt16: Int] = [18: 0, 19: 1, 20: 2]
+
     private static let cameraLookKeyCodes: Set<UInt16> = [123, 124, 125, 126] // ← / → / ↓ / ↑
 
     private var localKeyDownMonitor: Any?
@@ -663,6 +668,16 @@ final class KeyboardInputService: KeyboardInputProviding {
            event.modifierFlags.intersection([.command, .control, .option]) == [.command],
            processingMode == .flight {
             enqueueAction(.launchAircraft)
+            return nil
+        }
+
+        // ⌥1/⌥2/⌥3 switch the payload view between the cameras actually fitted to stations.
+        // Option-modified so the unmodified digits keep their camera-mode bindings.
+        if !event.isARepeat,
+           event.modifierFlags.intersection([.command, .control, .option]) == [.option],
+           let stationIndex = Self.cameraStationKeyCodes[event.keyCode],
+           processingMode == .flight || processingMode == .spectator {
+            enqueueAction(.selectCameraStation(index: stationIndex))
             return nil
         }
 

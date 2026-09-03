@@ -1,6 +1,16 @@
 import SwiftUI
 
-struct PayloadView: View {
+/// Shared by `PayloadView`, which became generic over its stations slot and so can no longer
+/// hold a static stored property of its own.
+private let payloadMassFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = 2
+    formatter.maximumFractionDigits = 2
+    return formatter
+}()
+
+struct PayloadView<StationsContent: View>: View {
     let configuration: PayloadConfiguration
     let payloadState: PayloadState
     let payloadMountState: PayloadMountState
@@ -19,17 +29,13 @@ struct PayloadView: View {
     let onRelease: () -> Void
     let onRemove: () -> Void
     let onClose: (() -> Void)?
+    /// The station list, injected rather than built here: it needs the view model, and this panel
+    /// deliberately takes plain values. Rendering it inside the same shell is what keeps it from
+    /// reading as a separate, unrelated card floating under the payload window.
+    @ViewBuilder var stationsContent: () -> StationsContent
 
     @FocusState private var isMassFieldFocused: Bool
     @FocusState private var isCustomNameFieldFocused: Bool
-
-    private static let massFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return formatter
-    }()
 
     private let tileColumns = Array(
         repeating: GridItem(.flexible(minimum: 124), spacing: 10),
@@ -54,6 +60,7 @@ struct PayloadView: View {
 
             configurationConsole
             limitsConsole
+            stationsContent()
             actionConsole
         }
         .padding(16)
@@ -363,7 +370,7 @@ struct PayloadView: View {
                             get: { Double(configuration.payloadMass) },
                             set: onMassChange
                         ),
-                        formatter: Self.massFormatter
+                        formatter: payloadMassFormatter
                     )
                     .focused($isMassFieldFocused)
                     .textFieldStyle(.plain)
@@ -374,10 +381,10 @@ struct PayloadView: View {
                         id: "payload.mass.input",
                         title: String(localized: "payload.mass"),
                         currentText: {
-                            Self.massFormatter.string(from: NSNumber(value: configuration.payloadMass)) ?? ""
+                            payloadMassFormatter.string(from: NSNumber(value: configuration.payloadMass)) ?? ""
                         },
                         onCommit: { text in
-                            guard let parsed = Self.massFormatter.controllerDouble(from: text) else { return }
+                            guard let parsed = payloadMassFormatter.controllerDouble(from: text) else { return }
                             onMassChange(parsed)
                         }
                     )

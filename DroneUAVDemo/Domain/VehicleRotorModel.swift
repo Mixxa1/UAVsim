@@ -111,6 +111,24 @@ struct VehicleRotorModel: Hashable {
         let actualForceBody: SIMD3<Float>
     }
 
+    /// Sum of `|lever|` over the rotors for each axis, in the engine's (roll, pitch, yaw) rate
+    /// order: the torque produced per newton of symmetric thrust differential.
+    ///
+    /// Roll acts through the rotors' body-X offsets, pitch through their body-Z offsets, and yaw
+    /// through the blades' reaction torque — which is why yaw is the weak axis on any multirotor
+    /// (κ is a couple of percent, against arm lengths of tenths of a metre).
+    var controlLeverPerNewton: SIMD3<Float> {
+        var roll: Float = 0.0
+        var pitch: Float = 0.0
+        var yaw: Float = 0.0
+        for rotor in rotors {
+            roll += abs(rotor.offsetBody.x)
+            pitch += abs(rotor.offsetBody.z)
+            yaw += max(0.001, torqueToThrustRatio)
+        }
+        return SIMD3<Float>(roll, pitch, yaw)
+    }
+
     /// Control allocation: distribute the commanded collective thrust and
     /// body torque over the rotors, clamp each rotor to what its (possibly
     /// damaged) hardware can deliver, and report the torque/thrust actually

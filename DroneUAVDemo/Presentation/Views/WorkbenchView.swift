@@ -1273,8 +1273,28 @@ struct WorkbenchView: View {
             if let frequency = component.param(p.receiverFrequencyMHz) { result.append(("Частота", String(format: "%.0f МГц", frequency))) }
             if let range = component.param(p.receiverRangeKm) { result.append(("Дальность", String(format: "%.0f км", range))) }
         case .camera:
-            if let fov = component.param(p.cameraFovDegrees) { result.append(("Угол обзора", String(format: "%.0f°", fov))) }
-            if let resolution = component.param(p.cameraResolutionMP) { result.append(("Матрица", String(format: "%.1f Мп", resolution))) }
+            // Read off the camera module the part maps to, not off a second copy of the same
+            // figures in the part list — the picture the pilot gets is built from the module, and
+            // a card quoting anything else would be quoting a number nothing uses.
+            if let module = CameraModuleCatalog.fpvCamera(workbenchSpecID: component.id) {
+                let channel = module.primaryChannel
+                result.append(("Угол обзора", String(format: "%.0f°", module.horizontalFieldOfViewDegrees)))
+                result.append(("Матрица", String(format: "%.1f Мп · %d×%d",
+                                                 channel.megapixels,
+                                                 channel.horizontalResolution,
+                                                 channel.verticalResolution)))
+                result.append(("Экспозиция", String(format: "%.2f с · +%.1f / −%.1f EV",
+                                                    channel.autoExposure.responseSeconds,
+                                                    channel.autoExposure.gainUpStops,
+                                                    channel.autoExposure.gainDownStops)))
+                result.append(("Широта", String(format: "%.1f ст.", channel.dynamicRangeStops)))
+                result.append(("Шум", String(format: "%.2f", channel.baseNoise)))
+                result.append(("Затвор", channel.shutter == .rolling ? "Роллинг" : "Глобальный"))
+                result.append(("Видео", module.videoOutput == .analogComposite ? "Аналог" : "Цифра"))
+            } else {
+                if let fov = component.param(p.cameraFovDegrees) { result.append(("Угол обзора", String(format: "%.0f°", fov))) }
+                if let resolution = component.param(p.cameraResolutionMP) { result.append(("Матрица", String(format: "%.1f Мп", resolution))) }
+            }
         case .gps:
             if let accuracy = component.param(p.gpsAccuracyM) { result.append(("Точность", String(format: "%.2f м", accuracy))) }
             if let frequency = component.param(p.gpsUpdateHz) { result.append(("Обновление", String(format: "%.0f Гц", frequency))) }

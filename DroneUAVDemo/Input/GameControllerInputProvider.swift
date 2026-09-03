@@ -585,6 +585,8 @@ private extension InputAction {
         // gamepad binding on.
         case .toggleFPVLens:
             return 1_000
+        case .selectCameraStation:
+            return 1_001
         // Track-builder actions are keyboard-only: building a course is a mouse-and-keyboard job,
         // and a gamepad has nothing to aim the ghost with.
         case .toggleRaceBuilder:

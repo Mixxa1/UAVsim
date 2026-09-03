@@ -79,7 +79,7 @@ private func flyLevelCruise(
     )
     state.armState = .armed
     state.motionState = .airborne
-    state.fixedWingOrientationQuat = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    state.attitudeQuat = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
     state.bodyAngularVelocity = .zero
     state.propulsionUnits = profile.propulsionUnitTemplate.map { unit in
         var tilted = unit

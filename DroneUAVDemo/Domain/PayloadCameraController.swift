@@ -76,6 +76,31 @@ final class PayloadCameraController {
     private(set) var status: PayloadCameraStatus = .inactive
     private(set) var opticsState = PayloadCameraOpticsState()
 
+    /// Applies the optics of the channel actually selected on the fitted camera module.
+    ///
+    /// The field of view is that channel's own, from its sensor and focal length, and the zoom
+    /// range is what its lens can reach — so a 35 mm prime on full frame and a 34x turret behave
+    /// like the different instruments they are instead of sharing one generic default. A hybrid
+    /// turret's thermal core has its own optics too, so switching channel moves the coverage.
+    ///
+    /// `availableModes` is what the fitted hardware can actually do. A mode outside that list is
+    /// snapped back to the first one the module offers — a bare LWIR core has no visible channel
+    /// to fall back to, and a mapping camera has no thermal one to reach.
+    func applyCameraModule(
+        fieldOfViewDegrees: Double,
+        maximumZoom: Double,
+        availableModes: [PayloadCameraMode]
+    ) {
+        let base = min(max(fieldOfViewDegrees, 1.0), 170.0)
+        opticsState.baseFieldOfViewDegrees = base
+        opticsState.maxZoom = max(opticsState.minZoom, maximumZoom)
+        opticsState.zoomLevel = min(max(opticsState.zoomLevel, opticsState.minZoom), opticsState.maxZoom)
+        opticsState.currentFieldOfViewDegrees = base / max(0.001, opticsState.zoomLevel)
+        if let fallback = availableModes.first, !availableModes.contains(opticsState.mode) {
+            opticsState.mode = fallback
+        }
+    }
+
     private var pendingMissionSignals: [PayloadMissionSignal] = []
     private var lastEmittedPowerState: Bool?
     private var lastReportedTargetDistance: Double?

@@ -181,6 +181,9 @@ struct FPVCameraState {
     var pitchLimitDeg: Float
     var nearClip: Float
     var mountOffset: SIMD3<Float>
+    /// Drops only the parts that sit in front of the lens — the forward propellers, motors and
+    /// arms — for operators who want a clean feed. Off by default: a real FPV camera sees its own
+    /// propellers, and behind the wide lens they are unmistakably in shot.
     var hideObstructingParts: Bool
 }
 
@@ -379,7 +382,7 @@ struct CameraConfiguration {
             pitchLimitDeg: 18.0,
             nearClip: 0.02,
             mountOffset: SIMD3<Float>(0.0, 0.006, -0.014),
-            hideObstructingParts: true
+            hideObstructingParts: false
         ),
         top: TopCameraState(
             height: 34.0,
