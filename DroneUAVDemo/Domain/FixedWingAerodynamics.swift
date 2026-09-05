@@ -304,7 +304,11 @@ struct FixedWingAerodynamics {
         fuselageLengthM: Float,
         heightM: Float,
         turnAuthority: Float,
-        minSustainableSpeedMps: Float
+        minSustainableSpeedMps: Float,
+        /// Mass the airframe's published stall speed refers to — its maximum takeoff weight, where
+        /// the catalogue gives one. Only the wing geometry uses it; everything mass-dependent
+        /// downstream keeps using the live mass.
+        designMassKg: Float? = nil
     ) -> FixedWingAerodynamics {
         let preset = FamilyAeroPreset.preset(for: family)
         let span = max(0.3, wingSpanM)
@@ -361,7 +365,17 @@ struct FixedWingAerodynamics {
         // being modelled: real altitude performance comes from the thinner air acting
         // on a fixed wing, and that happens in the solver.
         let stallSpeed = max(minSustainableSpeedMps, 3.0)
-        let area = ((2.0 * mass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
+        // ⚠️ Solve the geometry from the mass the stall speed was quoted AT, not from whatever the
+        // aircraft weighs right now. A quoted stall speed belongs to a loaded aeroplane; feeding
+        // the live mass made the wing shrink as the tanks emptied, which is not a thing wings do.
+        //
+        // The effect is not subtle on a fuel-burning jet: the HESA Karrar came out with 0.85 m² of
+        // wing against roughly 2.35 m² at its own maximum weight, so its drag was a third of what
+        // it should be and its engine simply pushed it through its published top speed — measured
+        // at 340 m/s against a catalogued 250. Inertia below still uses the live mass, because
+        // that genuinely does change as fuel burns.
+        let geometryMass = max(mass, designMassKg ?? mass)
+        let area = ((2.0 * geometryMass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
         let chord = area / span
         // Effective aspect ratio, back-derived from the calibrated area, used
         // only for induced drag — clamped to a believable range so a

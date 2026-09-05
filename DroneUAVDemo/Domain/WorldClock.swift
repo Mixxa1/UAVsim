@@ -148,6 +148,18 @@ struct WorldClock: Equatable {
         1.0 - smoothstep(from: 0.0, to: 22.0, value: sunElevationDegrees)
     }
 
+    /// Brightness for surfaces drawn with a constant lighting model, which no lamp reaches.
+    ///
+    /// These exist for cost — the simplified/LOD environment layer is drawn unlit so it can be
+    /// batched — but "unlit" is not "self-luminous", and without this they kept their full daylight
+    /// colour all night. The floor is above the ambient floor because a flat multiply has no
+    /// specular or bounce to fall back on; taken to zero these objects vanish rather than
+    /// silhouette.
+    var unlitSurfaceBrightness: Double {
+        let nightFloor = 0.055
+        return nightFloor + (1.0 - nightFloor) * smoothstep(from: -8.0, to: 6.0, value: sunElevationDegrees)
+    }
+
     /// How far the *sky* has gone over to night, 0 (full daylight gradient) to 1 (night).
     ///
     /// Spans civil twilight rather than cutting at the horizon: the sky keeps light in it for a

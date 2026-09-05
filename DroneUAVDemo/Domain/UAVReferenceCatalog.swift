@@ -888,7 +888,14 @@ enum UAVReferenceCatalog {
             massCategory: .heavy,
             specConfidence: .partial,
             payloadCapabilityMode: .modular,
-            baseMass: nil,
+            // ⚠️ DRY mass, and it has to be stated explicitly now that this airframe carries fuel.
+            // A nil `baseMass` is back-derived from the maximum takeoff weight, which already
+            // includes a full load — adding 2,721 kg of fuel on top of that put the aircraft over
+            // its own MTOW and it could not leave the runway. GA-ASI does not publish an empty
+            // weight for the MQ-9B; this is the MQ-9A's empty-to-MTOW ratio (2,223 / 4,763)
+            // applied to this airframe's 5,670 kg, which leaves the fuel and payload figures
+            // consistent with each other.
+            baseMass: 2650.0,
             batteryMass: nil,
             estimatedBatteryMass: 0.0,
             maxPayloadMass: 2177.0,
@@ -900,8 +907,30 @@ enum UAVReferenceCatalog {
             payloadMountOffset: SIMD3<Float>(0.0, -0.18, 0.30),
             visualPreset: .mq9bSkyGuardian,
             shortDescription: "Large MALE fixed-wing platform with long wings, nose sensor architecture, and multi-hardpoint payload capacity.",
-            notes: "GA-ASI official MQ-9B technical material lists 24 m wingspan, 11.7 m length, 5,670 kg max gross takeoff weight, and 2,177 kg payload capacity across nine hardpoints.",
-            missionRole: "Long-endurance ISR and multi-mission patrol"
+            notes: "GA-ASI official MQ-9B technical material lists 24 m wingspan, 11.7 m length, 5,670 kg max gross takeoff weight, and 2,177 kg payload capacity across nine hardpoints. It is powered by a Honeywell TPE331-10 turboprop driving a four-blade pusher propeller, and GA-ASI quotes over 40 hours of endurance. The 2,721 kg (6,000 lb) fuel load modelled here is the published capacity; propeller diameter and shaft speed are carried across from the MQ-9A, which uses the same engine, and are estimates rather than separately published figures for this variant. Without a powerplant entry this airframe fell back to the battery-electric thrust model, which is calibrated from weight rather than from an engine — the aircraft flew on a propulsion system it does not have.",
+            missionRole: "Long-endurance ISR and multi-mission patrol",
+            nominalFlightTimeSec: 144000,
+            nominalCruiseSpeedMps: 90.0,
+            nominalMaxRangeM: 11100000,
+            nominalLinkRangeM: 370000,
+            estimatedDataQuality: .official,
+            powerplant: UAVPowerplantSpec(
+                engineType: .turboprop,
+                engineDesignation: "Honeywell TPE331-10",
+                ratedShaftPowerKW: 701.0,
+                propellerPlacement: .pusher,
+                propellerDiameterM: 2.3,
+                ratedShaftRPM: 1591.0,
+                propellerBladeCount: 4,
+                starter: .electricStarter,
+                startPolicy: .groundStartBeforeLaunch,
+                fuel: UAVFuelSpec(
+                    fuelType: .turbineKerosene,
+                    usableFuelMassKg: 2721.0,
+                    reserveFraction: 0.15,
+                    tankCount: 3
+                )
+            )
         ),
         UAVProfile(
             id: "hermes-900",

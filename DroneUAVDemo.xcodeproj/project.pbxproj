@@ -22,6 +22,7 @@
 		A9F000000000000000000102 /* RFPropagationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000003 /* RFPropagationEngine.swift */; };
 		A9F000000000000000000103 /* RFSystemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000004 /* RFSystemManager.swift */; };
 		A9F000000000000000000104 /* RFCompatibilityPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000005 /* RFCompatibilityPreset.swift */; };
+		A9A000000000000000000119 /* ELRSLinkCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000015 /* ELRSLinkCatalog.swift */; };
 		A9F000000000000000000105 /* RFSpatialModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000006 /* RFSpatialModel.swift */; };
 		A9F000000000000000000106 /* RFPacketRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000007 /* RFPacketRuntime.swift */; };
 		A9F000000000000000000107 /* RFEnvironmentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F000000000000000000008 /* RFEnvironmentModel.swift */; };
@@ -161,6 +162,7 @@
 		00000000000001266C166A59 /* FiberSpoolVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000001266C1676F0 /* FiberSpoolVisualFactory.swift */; };
 		100000000000000000000241 /* PayloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000144 /* PayloadView.swift */; };
 		0000000000000457E1277D5F /* CommsLinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000457E18C7DC4 /* CommsLinkView.swift */; };
+		A9A00000000000000000011A /* ControlLinkRadioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000016 /* ControlLinkRadioView.swift */; };
 		100000000000000000000242 /* PayloadMountState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000145 /* PayloadMountState.swift */; };
 		100000000000000000000243 /* PayloadToolbarEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000146 /* PayloadToolbarEntry.swift */; };
 		00000000000003AD9089DF4C /* CommsLinkToolbarEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000003AD90967EE7 /* CommsLinkToolbarEntry.swift */; };
@@ -540,6 +542,7 @@
 		A9F000000000000000000003 /* RFPropagationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFPropagationEngine.swift; sourceTree = "<group>"; };
 		A9F000000000000000000004 /* RFSystemManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSystemManager.swift; sourceTree = "<group>"; };
 		A9F000000000000000000005 /* RFCompatibilityPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFCompatibilityPreset.swift; sourceTree = "<group>"; };
+		A9A000000000000000000015 /* ELRSLinkCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ELRSLinkCatalog.swift; sourceTree = "<group>"; };
 		A9F000000000000000000006 /* RFSpatialModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFSpatialModel.swift; sourceTree = "<group>"; };
 		A9F000000000000000000007 /* RFPacketRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFPacketRuntime.swift; sourceTree = "<group>"; };
 		A9F000000000000000000008 /* RFEnvironmentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RFEnvironmentModel.swift; sourceTree = "<group>"; };
@@ -691,6 +694,7 @@
 		00000000000001266C1676F0 /* FiberSpoolVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FiberSpoolVisualFactory.swift; sourceTree = "<group>"; };
 		100000000000000000000144 /* PayloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadView.swift; sourceTree = "<group>"; };
 		0000000000000457E18C7DC4 /* CommsLinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsLinkView.swift; sourceTree = "<group>"; };
+		A9A000000000000000000016 /* ControlLinkRadioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlLinkRadioView.swift; sourceTree = "<group>"; };
 		100000000000000000000145 /* PayloadMountState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadMountState.swift; sourceTree = "<group>"; };
 		100000000000000000000146 /* PayloadToolbarEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayloadToolbarEntry.swift; sourceTree = "<group>"; };
 		00000000000003AD90967EE7 /* CommsLinkToolbarEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsLinkToolbarEntry.swift; sourceTree = "<group>"; };
@@ -1282,6 +1286,7 @@
 				A9F000000000000000000003 /* RFPropagationEngine.swift */,
 				A9F000000000000000000004 /* RFSystemManager.swift */,
 				A9F000000000000000000005 /* RFCompatibilityPreset.swift */,
+				A9A000000000000000000015 /* ELRSLinkCatalog.swift */,
 				A9F000000000000000000006 /* RFSpatialModel.swift */,
 				A9F000000000000000000007 /* RFPacketRuntime.swift */,
 				A9F000000000000000000008 /* RFEnvironmentModel.swift */,
@@ -1498,6 +1503,7 @@
 				100000000000000000000104 /* TelemetryPanelView.swift */,
 				100000000000000000000144 /* PayloadView.swift */,
 				0000000000000457E18C7DC4 /* CommsLinkView.swift */,
+				A9A000000000000000000016 /* ControlLinkRadioView.swift */,
 				100000000000000000000146 /* PayloadToolbarEntry.swift */,
 				00000000000003AD90967EE7 /* CommsLinkToolbarEntry.swift */,
 				10000000000000000000013A /* UAVCatalogView.swift */,
@@ -1952,6 +1958,7 @@
 				A9F000000000000000000102 /* RFPropagationEngine.swift in Sources */,
 				A9F000000000000000000103 /* RFSystemManager.swift in Sources */,
 				A9F000000000000000000104 /* RFCompatibilityPreset.swift in Sources */,
+				A9A000000000000000000119 /* ELRSLinkCatalog.swift in Sources */,
 				A9F000000000000000000105 /* RFSpatialModel.swift in Sources */,
 				A9F000000000000000000106 /* RFPacketRuntime.swift in Sources */,
 				A9F000000000000000000107 /* RFEnvironmentModel.swift in Sources */,
@@ -2249,6 +2256,7 @@
 				00000000000001266C166A59 /* FiberSpoolVisualFactory.swift in Sources */,
 				100000000000000000000241 /* PayloadView.swift in Sources */,
 				0000000000000457E1277D5F /* CommsLinkView.swift in Sources */,
+				A9A00000000000000000011A /* ControlLinkRadioView.swift in Sources */,
 				100000000000000000000242 /* PayloadMountState.swift in Sources */,
 				100000000000000000000243 /* PayloadToolbarEntry.swift in Sources */,
 				00000000000003AD9089DF4C /* CommsLinkToolbarEntry.swift in Sources */,

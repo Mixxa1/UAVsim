@@ -97,7 +97,11 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
         peak = max(peak, state.forwardAirspeed)
     }
 
-    let declared = max(1.0, wing.maxAirspeed)
+    // ⚠️ Compare against what the CATALOGUE publishes, not against `wing.maxAirspeed` — that one is
+    // derived (cruise × 1.35) whenever a profile does not state it, and it lands below the real
+    // published maximum. A senseFly eBee TAC is catalogued at 30 m/s, reached 30.9, and was
+    // reported as flying at 117% because the yardstick said 26.3.
+    let declared = max(1.0, max(wing.maxAirspeed, profile.maxHorizontalSpeedMps))
     let ratio = peak / declared
     let mach = peak / air.speedOfSoundMps
     if ratio > 1.15 {

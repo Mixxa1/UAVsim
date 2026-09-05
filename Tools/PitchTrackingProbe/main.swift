@@ -29,13 +29,15 @@ let engine = SimpleDronePhysicsEngine()
 let dt: Float = 1.0 / 90.0
 let commandedPitchDeg: Float = 8.0
 
-struct Result {
+/// Renamed from `Result`: a top-level type of that name shadows Swift's own generic `Result`
+/// for every file the probe compiles alongside it, and the RF layer uses `Result<_, _>`.
+struct PitchTrackingResult {
     let settled: Float
     let riseSeconds: Float
     let overshoot: Float
 }
 
-func trackPitch(profile: DroneModelProfile, wing: FixedWingParameters, bankDeg: Float) -> Result? {
+func trackPitch(profile: DroneModelProfile, wing: FixedWingParameters, bankDeg: Float) -> PitchTrackingResult? {
     let massModel = VehicleMassModel.baseline(for: profile, uavProfile: nil)
     let fuelState: FuelSystemState? = profile.resolvedUAVProfile?.powerplant?.fuel.map {
         .full(capacityKg: $0.usableFuelMassKg, reserveFraction: $0.reserveFraction)
@@ -117,7 +119,7 @@ func trackPitch(profile: DroneModelProfile, wing: FixedWingParameters, bankDeg: 
     let threshold = settled * 0.9
     let rise = samples.first(where: { $0.1 >= threshold })?.0 ?? -1.0
     let peak = samples.map(\.1).max() ?? settled
-    return Result(settled: settled, riseSeconds: rise, overshoot: max(0.0, peak - settled))
+    return PitchTrackingResult(settled: settled, riseSeconds: rise, overshoot: max(0.0, peak - settled))
 }
 
 print("Pitch tracking: commanded \(Int(commandedPitchDeg))° step, level and in a 28° banked turn")

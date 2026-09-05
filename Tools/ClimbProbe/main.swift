@@ -10,6 +10,10 @@ import simd
 //
 // Run: Tools/ClimbProbe/run.sh
 
+extension Float {
+    func clamped(to lower: Float, _ upper: Float) -> Float { Swift.min(upper, Swift.max(lower, self)) }
+}
+
 let repository = LIPODroneModelRepository()
 let engine = SimpleDronePhysicsEngine()
 let dt: Float = 1.0 / 60.0
@@ -81,10 +85,21 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
     // then average the vertical rate over the following ten seconds.
     var samples: [Float] = []
     var speedSamples: [Float] = []
+    var climbPitchCommand = wing.initialClimbPitchDeg * .pi / 180.0
     for tick in 0..<(60 * 40) {
+        // Pitch for speed: nose up when fast, nose down when slow, bounded to sane attitudes.
+        let speedError = state.forwardAirspeed - wing.climbAirspeed
+        climbPitchCommand = (climbPitchCommand + speedError * 0.02 * dt)
+            .clamped(to: -0.10, 0.45)
         let control = DroneControlInput(
             targetPosition: SIMD3<Float>(state.position.x, state.position.y + 500, state.position.z),
-            targetOrientation: SIMD3<Float>(0, wing.initialClimbPitchDeg * .pi / 180.0, 0),
+            // ⚠️ Fly the climb SPEED, not a fixed pitch attitude. A best-rate climb is defined at a
+            // particular airspeed, and holding an attitude instead lets the aircraft accelerate to
+            // wherever thrust and drag happen to balance — measured at 89 m/s on an MQ-9B whose
+            // climb speed is 65. Now that thrust falls with airspeed (constant-power propeller),
+            // that difference is most of the climb rate. A real autopilot pitches for speed; so
+            // does this probe.
+            targetOrientation: SIMD3<Float>(0, climbPitchCommand, 0),
             yawIntent: 0.0,
             throttle: 1.0,
             isArmed: true,

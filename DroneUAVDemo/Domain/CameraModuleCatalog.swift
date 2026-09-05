@@ -81,6 +81,10 @@ struct CameraAutoExposure: Hashable, Sendable {
     /// video camera's shutter is already pinned near the frame interval, so the only headroom left
     /// for a dark scene is analogue gain. A symmetric range let a night field be pulled all the way
     /// back to daylight, which is not something any camera can do.
+    ///
+    /// Composite cameras sit lowest of all. A digital camera can spend coding gain on a dark scene;
+    /// a composite one has only the sensor's own amplifier, and it runs out while the picture is
+    /// still dark. Set too high they turned a moonless field into late dusk.
     let gainUpStops: Double
     /// How far the loop may darken, in stops. Generous — in daylight the shutter can go very short.
     let gainDownStops: Double
@@ -280,7 +284,7 @@ enum CameraModuleCatalog {
                     // before a slow loop would finish.
                     targetLevel: 0.45,
                     responseSeconds: 0.15,
-                    gainUpStops: 1.6,
+                    gainUpStops: 1.1,
                     gainDownStops: 4.0
                 ),
                 colorResponse: CameraColorResponse(
@@ -633,7 +637,7 @@ enum CameraModuleCatalog {
                 autoExposure: CameraAutoExposure(
                     targetLevel: 0.46,
                     responseSeconds: 0.12,
-                    gainUpStops: 1.6,
+                    gainUpStops: 1.1,
                     gainDownStops: 4.0
                 ),
                 colorResponse: CameraColorResponse(
@@ -668,7 +672,7 @@ enum CameraModuleCatalog {
                 autoExposure: CameraAutoExposure(
                     targetLevel: 0.45,
                     responseSeconds: 0.15,
-                    gainUpStops: 1.9,
+                    gainUpStops: 1.3,
                     gainDownStops: 4.5
                 ),
                 colorResponse: CameraColorResponse(
@@ -703,7 +707,7 @@ enum CameraModuleCatalog {
                 autoExposure: CameraAutoExposure(
                     targetLevel: 0.44,
                     responseSeconds: 0.22,
-                    gainUpStops: 2.8,
+                    gainUpStops: 2.0,
                     gainDownStops: 5.0
                 ),
                 colorResponse: CameraColorResponse(

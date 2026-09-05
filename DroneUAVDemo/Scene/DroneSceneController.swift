@@ -5497,13 +5497,13 @@ final class DroneSceneController {
             scene.fogStartDistance = 760
             scene.fogEndDistance = 2600
             scene.fogDensityExponent = 1.18
-            scene.fogColor = NSColor(calibratedRed: 0.62, green: 0.74, blue: 0.86, alpha: 1.0)
+            setFogColor(NSColor(calibratedRed: 0.62, green: 0.74, blue: 0.86, alpha: 1.0))
 
         case .wind:
             scene.fogStartDistance = 580 - intensity * 90
             scene.fogEndDistance = 2200 - intensity * 360
             scene.fogDensityExponent = 1.16 + intensity * 0.34
-            scene.fogColor = NSColor(calibratedRed: 0.58, green: 0.68, blue: 0.76, alpha: 1.0)
+            setFogColor(NSColor(calibratedRed: 0.58, green: 0.68, blue: 0.76, alpha: 1.0))
 
         case .rain, .snow, .fog, .smog, .thunderstorm:
             let factors = weather.effectiveFactors
@@ -5513,15 +5513,15 @@ final class DroneSceneController {
 
             switch weather.preset {
             case .rain:
-                scene.fogColor = NSColor(calibratedRed: 0.38, green: 0.42, blue: 0.49, alpha: 1.0)
+                setFogColor(NSColor(calibratedRed: 0.38, green: 0.42, blue: 0.49, alpha: 1.0))
             case .snow:
-                scene.fogColor = NSColor(calibratedRed: 0.82, green: 0.86, blue: 0.90, alpha: 1.0)
+                setFogColor(NSColor(calibratedRed: 0.82, green: 0.86, blue: 0.90, alpha: 1.0))
             case .fog:
-                scene.fogColor = NSColor(calibratedWhite: 0.84, alpha: 1.0)
+                setFogColor(NSColor(calibratedWhite: 0.84, alpha: 1.0))
             case .smog:
-                scene.fogColor = NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0)
+                setFogColor(NSColor(calibratedRed: 0.56, green: 0.54, blue: 0.50, alpha: 1.0))
             case .thunderstorm:
-                scene.fogColor = NSColor(calibratedRed: 0.22, green: 0.24, blue: 0.29, alpha: 1.0)
+                setFogColor(NSColor(calibratedRed: 0.22, green: 0.24, blue: 0.29, alpha: 1.0))
             case .normal, .wind:
                 break
             }
@@ -8994,6 +8994,10 @@ final class DroneSceneController {
 
     private func updateTerrainDetailGeometry(for terrain: TerrainConfiguration) {
         terrainDetailNode.childNodes.forEach { $0.removeFromParentNode() }
+        // The materials go with the nodes, so the light-level bookkeeping goes with them too —
+        // otherwise the base-emission map grows by three entries on every terrain rebuild.
+        emissiveTerrainDetailMaterials.removeAll(keepingCapacity: true)
+        baseTerrainDetailEmission.removeAll(keepingCapacity: true)
 
         switch terrain.preset {
         case .field, .forest:
@@ -9042,6 +9046,11 @@ final class DroneSceneController {
             diffuse: NSColor(calibratedWhite: 0.02, alpha: 0.28),
             roughness: 1.0
         )
+        // Emission is light the surface makes itself, so no lamp in the scene can take it away.
+        // These patches therefore stayed lit after dark and read as olive ellipses scattered over
+        // black ground. Held here so the lighting pass can fade them with the world.
+        emissiveTerrainDetailMaterials = [primaryMaterial, accentMaterial, shadowMaterial]
+        applyUnlitSurfaceBrightness(CGFloat(worldClock.unlitSurfaceBrightness))
 
         for index in 0..<primaryCount {
             let radiusX = Float.random(
@@ -9092,6 +9101,24 @@ final class DroneSceneController {
         }
     }
 
+    /// Ground-detail materials whose own emission has to be faded with the world light.
+    private var emissiveTerrainDetailMaterials: [SCNMaterial] = []
+    /// Their daylight emission, so the fade is a scale of the authored value rather than a guess.
+    private var baseTerrainDetailEmission: [ObjectIdentifier: NSColor] = [:]
+
+    private func applyUnlitSurfaceBrightness(_ level: CGFloat) {
+        let clamped = max(0, min(1, level))
+        for material in emissiveTerrainDetailMaterials {
+            guard let base = baseTerrainDetailEmission[ObjectIdentifier(material)] else { continue }
+            material.emission.contents = NSColor(
+                calibratedRed: base.redComponent * clamped,
+                green: base.greenComponent * clamped,
+                blue: base.blueComponent * clamped,
+                alpha: base.alphaComponent
+            )
+        }
+    }
+
     private func terrainDetailMaterial(
         diffuse: NSColor,
         emission: NSColor = .clear,
@@ -9103,6 +9130,9 @@ final class DroneSceneController {
         material.roughness.contents = roughness
         material.metalness.contents = 0.0
         material.emission.contents = emission
+        if let rgb = emission.usingColorSpace(.deviceRGB) {
+            baseTerrainDetailEmission[ObjectIdentifier(material)] = rgb
+        }
         return material
     }
 
@@ -9177,6 +9207,19 @@ final class DroneSceneController {
         ambientLightNode.light?.intensity = SceneFactory.ambientLightBaseIntensity * envFactor
         fillLightNode.light?.intensity = SceneFactory.fillLightBaseIntensity * envFactor
 
+        // Objects drawn with a constant lighting model ignore every lamp above, so they have to be
+        // told the light level directly — otherwise the whole simplified/LOD layer stays at full
+        // daylight colour after dark and reads as glowing blobs scattered over black ground.
+        EnvironmentProceduralVisualFactory.applyAmbientLightLevel(
+            CGFloat(worldClock.unlitSurfaceBrightness)
+        )
+        applyUnlitSurfaceBrightness(CGFloat(worldClock.unlitSurfaceBrightness))
+
+        // ⚠️ The haze colour is picked in `applyWeatherVisual`, which runs only when the weather
+        // changes — so tinting it there alone computed the tint once, in daylight, and never
+        // again. Re-applied here, on the pass that does run as the clock advances.
+        scene.fogColor = nightAdjustedFogColor(baseFogColor)
+
     }
 
     /// Sun colour for the current world time: the terrain's own daylight tint high in the sky,
@@ -9235,6 +9278,36 @@ final class DroneSceneController {
     /// background independently (terrain vs. weather change at different times), so the night
     /// override has to live here and be called from both, or whichever ran most recently silently
     /// wins and undoes the other's night sky / thermal-restore snapshot.
+    /// The haze colour the weather asked for, before the time of day is applied to it.
+    private var baseFogColor = NSColor(calibratedRed: 0.62, green: 0.74, blue: 0.86, alpha: 1.0)
+
+    /// Sets the weather's haze colour and remembers it, so the lighting pass can re-tint it as the
+    /// clock advances.
+    private func setFogColor(_ base: NSColor) {
+        baseFogColor = base
+        scene.fogColor = nightAdjustedFogColor(base)
+    }
+
+    /// Haze is lit by the same sky the terrain fades into, so it has to darken with it.
+    ///
+    /// ⚠️ Every one of the fog colours above is a daylight haze — pale blue, or nearly white for
+    /// snow. Written unconditionally they stayed that colour after dark, so distant terrain faded
+    /// out into a bright band along the horizon while the ground in front of it was black. That
+    /// glowing horizon line was fog, not the sky and not the camera.
+    private func nightAdjustedFogColor(_ base: NSColor) -> NSColor {
+        let amount = CGFloat(worldClock.nightBlend)
+        guard amount > 0.002 else { return base }
+        return blend(base, Self.nightHorizonColor, amount: amount)
+    }
+
+    /// What the sky and the haze both go to after dark. Shared so they cannot drift apart.
+    private static let nightHorizonColor = NSColor(
+        calibratedRed: 0.03,
+        green: 0.045,
+        blue: 0.085,
+        alpha: 1.0
+    )
+
     private func nightOverriddenBackground(_ base: Any) -> Any {
         // ⚠️ This was `missionTimeOfDay == .night ? nightColour : base` — a binary switch, so the
         // whole sky went from the full daylight gradient to a flat dark blue in one frame the
@@ -9242,7 +9315,7 @@ final class DroneSceneController {
         // lights off" the operator reported, and it was the sky doing it, not the lamps: the
         // ground was already fading continuously while the sky was still waiting to snap.
         let blend = CGFloat(worldClock.nightBlend)
-        let night = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.085, alpha: 1.0)
+        let night = Self.nightHorizonColor
         guard blend > 0.002 else { return base }
         guard blend < 0.998, let image = base as? NSImage else { return night }
         return image.tinted(with: night, alpha: blend)
@@ -11411,12 +11484,19 @@ final class DroneSceneController {
             sunLightNode.light?.shadowColor = NSColor.black.withAlphaComponent(Self.clearWeatherShadowAlpha)
         }
 
+        // ⚠️ The sun does not shine at night, and this line ran every single frame. It rebuilt the
+        // lamp's intensity from weather alone and wrote it straight over the day/night value
+        // `applyWorldClockLighting` had just computed, so the directional sun stayed at full
+        // daylight strength around the clock. The ambient, fill and IBL lights were all being
+        // dimmed correctly, which is why night came out as a lit ground under a dark sky rather
+        // than as darkness — and why dimming them further never helped.
+        //
         // Lightning used to also jolt sunLightNode.light.intensity here on a 0.6-2.2s random
         // pulse — a full-screen brightness spike on every flash. The user explicitly found that
         // unpleasant ("резкие вспышки на экране... не по себе от этого"), so strikes are now a
         // real 3D event instead: see `triggerLightningStrike`, scheduled minutes apart by the
         // view model, with its own small localized light that never touches the global sun.
-        sunLightNode.light?.intensity = baseSun
+        sunLightNode.light?.intensity = baseSun * CGFloat(worldClock.sunIntensityMultiplier)
     }
 
     private func applyPayloadOpticsShadowQuality(isActive: Bool, weather: WeatherModel) {

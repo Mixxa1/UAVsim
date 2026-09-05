@@ -261,6 +261,10 @@ struct ProjectSnapshot: Codable {
     /// Optional so every project saved before imported worlds existed still decodes.
     var meshWorld: MeshWorld? = nil
     var openDataWorld: OpenDataWorld? = nil
+    /// The ExpressLRS fit on the control link. Optional for the same reason as the two above: a
+    /// project saved before the control link was modelled decodes with nil and gets the
+    /// back-computed link the aircraft has always had.
+    var controlLink: ELRSConfiguration? = nil
 }
 
 protocol ProjectStorageManaging {

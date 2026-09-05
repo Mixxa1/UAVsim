@@ -2093,6 +2093,11 @@ struct ContentView: View {
                             onDetach: viewModel.detachFiberSpoolModule,
                             onClose: {
                                 viewModel.setCommsLinkPanelVisible(false)
+                            },
+                            // Radio and fiber are two media of one control link, so the radio
+                            // equipment is a section of this window rather than a panel of its own.
+                            radioEquipment: {
+                                ControlLinkRadioView(viewModel: viewModel)
                             }
                         )
                         .disabled(viewModel.hasMissionScenario)

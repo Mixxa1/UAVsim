@@ -198,13 +198,25 @@ enum FlightBaselineResolver {
             let loadDelta = max(0.0, normalizedLoadFactor - 1.0)
             let payloadBoost = payloadRatio * hybrid.payloadThrustCompensationFactor
             let hoverModeBias: Float = flightMode == .hover || flightMode == .takeoff || flightMode == .landing ? 1.02 : 1.0
-            let effectiveHoverThrottle = (hybrid.hoverThrottleBaseline * (1.0 + loadDelta * 0.48 + payloadBoost * 0.18) * hoverModeBias).clamped(to: 0.24...0.88)
-            let effectiveTransitionThrottle = (hybrid.transitionThrottleBaseline * (1.0 + loadDelta * 0.30 + payloadBoost * 0.14) * hoverModeBias).clamped(to: 0.26...0.84)
+            // Rotor-borne lift runs through the same non-linear thrust curve a multirotor's does —
+            // it is the same propeller doing the same job — so every throttle reference that feeds
+            // it has to be expressed in that curve's scale. The profile constants were chosen
+            // against the old linear law and therefore mean "this fraction of full thrust", which
+            // stops being the same number once the law is curved.
+            //
+            // ⚠️ Only the lift-side references move. `cruiseThrottleBaseline` and the minimum-safe
+            // figure feed `wingborneThrustMagnitude`, which is a wholly separate propeller model
+            // with its own calibration, and translating those would double-count.
+            let declaredHoverThrottle = (hybrid.hoverThrottleBaseline * (1.0 + loadDelta * 0.48 + payloadBoost * 0.18) * hoverModeBias).clamped(to: 0.24...0.88)
+            let effectiveHoverThrottle = throttle(forThrustFraction: declaredHoverThrottle)
+            let hybridStabilizationThrust = (1.70 + payloadBoost * 0.06 + loadDelta * 0.08).clamped(to: 1.46...2.00)
+            let effectiveTransitionThrottle = throttle(forThrustFraction:
+                (hybrid.transitionThrottleBaseline * (1.0 + loadDelta * 0.30 + payloadBoost * 0.14) * hoverModeBias).clamped(to: 0.26...0.84))
             let effectiveCruiseThrottle = (hybrid.cruiseThrottleBaseline * (1.0 + loadDelta * 0.22 + payloadBoost * 0.10)).clamped(to: 0.24...0.80)
             let effectiveVerticalResponseFactor = (hybrid.verticalResponseFactor / (0.96 + loadDelta * 0.55)).clamped(to: 0.58...1.18)
             let effectiveTransitionResponseFactor = (hybrid.transitionResponseFactor / (0.96 + loadDelta * 0.45)).clamped(to: 0.58...1.18)
             let effectiveMinimumSafeFlightThrottle = max(effectiveCruiseThrottle * 0.92, 0.28)
-            let effectiveClimbThrottle = max(effectiveTransitionThrottle, effectiveHoverThrottle * 0.96).clamped(to: 0.30...0.88)
+            let effectiveClimbThrottle = max(effectiveTransitionThrottle, effectiveHoverThrottle * 0.96).clamped(to: 0.30...0.95)
 
             return ResolvedFlightBaseline(
                 vehicleType: .hybridVTOL,
@@ -215,7 +227,7 @@ enum FlightBaselineResolver {
                 normalizedLoadFactor: normalizedLoadFactor,
                 payloadRatio: payloadRatio,
                 effectiveHoverThrottle: effectiveHoverThrottle,
-                effectiveStabilizationThrust: (1.70 + payloadBoost * 0.06 + loadDelta * 0.08).clamped(to: 1.46...2.00),
+                effectiveStabilizationThrust: hybridStabilizationThrust,
                 effectiveCruiseThrottle: effectiveCruiseThrottle,
                 effectiveMinimumSafeFlightThrottle: effectiveMinimumSafeFlightThrottle,
                 effectiveClimbThrottle: effectiveClimbThrottle,
@@ -242,7 +254,7 @@ enum FlightBaselineResolver {
             // the number it started from. See the note in `resolveVerticalHoldBaseline`.
             let declaredHoverThrottle = (custom.configurableHoverThrottleBaseline * (1.0 + loadDelta * 0.44 + payloadRatio * 0.14)).clamped(to: 0.22...0.84)
             let effectiveStabilizationThrust = (1.0 / max(0.36, declaredHoverThrottle)).clamped(to: 1.46...2.04)
-            let effectiveHoverThrottle = (1.0 / (effectiveStabilizationThrust + 0.35)).clamped(to: 0.20...0.88)
+            let effectiveHoverThrottle = hoverThrottle(forThrustToWeight: effectiveStabilizationThrust + 0.35)
             let effectiveCruiseThrottle = (custom.configurableCruiseThrottleBaseline * (1.0 + loadDelta * 0.20 + payloadRatio * 0.10)).clamped(to: 0.22...0.80)
             let effectiveVerticalResponseFactor = (custom.configurableVerticalResponseFactor / (0.96 + loadDelta * 0.50)).clamped(to: 0.60...1.20)
             let effectiveThrottleAuthority = (custom.configurableThrottleAuthority * (1.0 - payloadRatio * 0.10)).clamped(to: 0.58...1.08)
@@ -271,6 +283,36 @@ enum FlightBaselineResolver {
                 payloadCruisePenaltyMultiplier: (1.0 - payloadRatio * 0.10).clamped(to: 0.80...1.00)
             )
         }
+    }
+
+
+    /// Throttle at which the airframe's thrust equals its weight.
+    ///
+    /// ⚠️ Not `1 / thrustToWeight`. The engine's stick-to-thrust curve is `0.4·t² + 0.6·t`, because
+    /// a propeller's thrust follows the square of its speed — so hovering happens where that curve
+    /// reaches `1 / thrustToWeight`, which is the positive root below, not at the reciprocal. With
+    /// the linear assumption a camera platform hovered near 44% of its stick where measurement
+    /// puts it around half, and the whole bottom of the throttle range was overstated.
+    ///
+    /// Must stay in step with `SimpleDronePhysicsEngine.multirotorThrustCurve`: this is that
+    /// function inverted, and if the two disagree the aircraft sinks at its own declared hover.
+    private static func hoverThrottle(forThrustToWeight thrustToWeight: Float) -> Float {
+        throttle(forThrustFraction: 1.0 / max(1.05, thrustToWeight))
+    }
+
+    /// Stick position that produces a given fraction of maximum thrust — the engine's
+    /// `multirotorThrustCurve` inverted.
+    ///
+    /// ⚠️ Every throttle constant in these profiles was chosen against the old linear law, so each
+    /// one means "this fraction of full thrust" and not "this stick position". With a curved law
+    /// the two stop being the same number, and a reference point left untranslated silently
+    /// commands less thrust than it was written to: a Wingtra's 0.53 transition setting delivered
+    /// 0.44 of its thrust and the aircraft could no longer accelerate into its cruise transition
+    /// at all. Anything feeding rotor-borne lift has to come through here.
+    private static func throttle(forThrustFraction fraction: Float) -> Float {
+        let target = fraction.clamped(to: 0.0...1.0)
+        let root = (-0.6 + (0.36 + 1.6 * target).squareRoot()) / 0.8
+        return root.clamped(to: 0.12...0.95)
     }
 
     private static func resolveVerticalHoldBaseline(
@@ -319,7 +361,7 @@ enum FlightBaselineResolver {
         // Load is already in `effectiveStabilizationThrust`, so it does not need applying a second
         // time here — the old form multiplied the throttle by load as well, which double-counted
         // it against a thrust model that scales with the mass being carried.
-        let effectiveHoverThrottle = (1.0 / (effectiveStabilizationThrust + 0.35)).clamped(to: 0.20...0.88)
+        let effectiveHoverThrottle = hoverThrottle(forThrustToWeight: effectiveStabilizationThrust + 0.35)
         let effectiveVerticalResponseFactor = (verticalResponseFactor / (0.92 + loadDelta * 0.70)).clamped(to: 0.55...2.40)
         let effectiveThrottleAuthority = (throttleAuthority * (1.0 - payloadRatio * maneuverPenaltyFactor * 0.18)).clamped(to: 0.45...1.60)
         let maneuverAuthorityMultiplier = (1.0 - loadDelta * maneuverPenaltyFactor * 0.35).clamped(to: 0.48...1.00)
@@ -374,8 +416,8 @@ enum FlightBaselineResolver {
             totalMass: totalMass,
             normalizedLoadFactor: normalizedLoadFactor,
             payloadRatio: payloadRatio,
-            // 1 / (1.80 + 0.35): the same reciprocal contract the real branches hold to.
-            effectiveHoverThrottle: 0.465,
+            // The thrust curve inverted at 1.80 + 0.35, matching the real branches.
+            effectiveHoverThrottle: hoverThrottle(forThrustToWeight: 2.15),
             effectiveStabilizationThrust: 1.80,
             effectiveCruiseThrottle: 0.48,
             effectiveMinimumSafeFlightThrottle: 0.36,

@@ -433,14 +433,80 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             - (state.angularVelocity - desiredRates) * angularDamping
 
         let liftPenalty = baseline.liftPenaltyMultiplier.clamped(to: 0.78...1.02)
+        let thrustDensityRatio = (context.atmosphere.state(worldY: state.position.y).airDensity / 1.225)
+            .clamped(to: 0.15...1.15)
+        let groundEffect = multirotorGroundEffect(
+            profile: profile,
+            rotorModel: context.rotorModel,
+            heightAboveGround: heightAboveGround
+        )
         let commandedThrust = rotorBorneThrustMagnitude(
             motorThrottle: motorThrottle,
             baseline: baseline,
             authority: authority,
             mass: mass,
             batteryFactor: batteryFactor,
-            liftPenalty: liftPenalty
+            liftPenalty: liftPenalty,
+            densityRatio: thrustDensityRatio,
+            groundEffectFactor: groundEffect,
+            usesThrustCurve: true
         )
+
+        // ⚠️ A gust does not just push a multirotor, it rocks it — and until now the air could only
+        // ever produce a force through the centre of mass, never a moment. Drag is carried by the
+        // frame and the rotor discs, which sit above the centre of mass, so a sideways gust has a
+        // lever on the airframe. Measured before this: a 65 mm whoop was rocked 1.9° by a
+        // thunderstorm, which is to say it did not notice one.
+        //
+        // Only the *gust* part of the wind is used, not the steady flow. The standing weathercock
+        // moment of cruising flight is something a real machine trims out and a real flight
+        // controller integrates away; this engine's attitude loop is proportional, with no
+        // integrator to absorb a constant disturbance, so feeding it the steady term cost every
+        // airframe part of its commanded bank (25° held as 18°) and a third of its top speed. The
+        // unsteady part has no such standing component and is what a pilot actually feels.
+        let aeroDisturbanceMoment: SIMD3<Float> = {
+            let gustWorld = windGustState
+            guard simd_length(gustWorld) > 0.01 else { return .zero }
+            let previousAirBody = simd_act(state.attitudeQuat.conjugate, state.velocity - context.windVector)
+            let referenceSpeed = max(2.0, simd_length(previousAirBody))
+            let dragEstimate = multirotorQuadraticDrag(
+                profile: profile,
+                baseline: baseline,
+                controlMode: effectiveControl.controlMode,
+                authority: authority,
+                mass: mass,
+                weather: weather
+            )
+            // Linearised about the current flow: a gust of Δw changes the drag force by
+            // k·m·|v|·Δw, in the direction of the gust.
+            let gustBody = simd_act(state.attitudeQuat.conjugate, gustWorld)
+            let force = SIMD2<Float>(
+                gustBody.x * referenceSpeed * mass * dragEstimate.horizontal,
+                gustBody.z * referenceSpeed * mass * dragEstimate.horizontal
+            )
+            let centreOfPressureLever = max(0.005, 0.25 * context.profile.dimensionsUnfoldedMm.meters.z)
+            // r = (0, lever, 0); M = r × F is (lever·F_z, 0, −lever·F_x) in body x/y/z, remapped
+            // to the engine's (roll, pitch, yaw) order.
+            let raw = SIMD3<Float>(
+                -centreOfPressureLever * force.x,
+                centreOfPressureLever * force.y,
+                0.0
+            )
+            // ⚠️ Capped as a disturbance. Height-to-span varies enough across the fleet — a ducted
+            // cinewhoop is tall for its size, a flat racer is not — that the same lever rule
+            // produces a nudge on one airframe and something that overwhelms the attitude loop on
+            // another (a 3-inch cinewhoop held 6.9 m/s against a catalogued 19). A gust rocks an
+            // aircraft; it does not out-muscle its controls, so this is bounded to a couple of
+            // rad/s² of angular acceleration whatever the geometry says.
+            let disturbanceAccelLimit: Float = 0.6
+            let inertiaForLimit = simd_max(
+                estimatedMultirotorInertia(context: context),
+                SIMD3<Float>(repeating: 0.0005)
+            )
+            let limit = disturbanceAccelLimit * simd_length(inertiaForLimit)
+            let magnitude = simd_length(raw)
+            return magnitude > limit && magnitude > 1e-9 ? raw * (limit / magnitude) : raw
+        }()
 
         // --- Per-rotor control allocation. A pristine aircraft deliberately
         // stays on the legacy symmetric baseline: catalog geometry is visual
@@ -479,7 +545,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 authority: authority,
                 mass: mass,
                 batteryFactor: batteryFactor,
-                liftPenalty: liftPenalty
+                liftPenalty: liftPenalty,
+                densityRatio: thrustDensityRatio,
+                groundEffectFactor: groundEffect,
+                usesThrustCurve: true
             )
             let requiredTorque = commandedAngularAccel * inertiaRates
             let capacity = multirotorControlMomentCapacity(
@@ -501,7 +570,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             // so a fast roll with any yaw rate on genuinely produces pitch out of nowhere. That
             // coupling is most of what makes acro feel like flying a real airframe.
             angularAccel = rotationalAcceleration(
-                momentBody: actualTorque,
+                momentBody: actualTorque + aeroDisturbanceMoment + propellerGyroscopicMoment(
+                    rotorModel: rotorModel,
+                    profile: profile,
+                    rotorAngularSpeed: state.rotorAngularSpeed,
+                    bodyRates: state.angularVelocity
+                ),
                 omegaBody: state.angularVelocity,
                 inertiaRateOrdered: inertiaRates
             )
@@ -525,7 +599,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 authority: authority,
                 mass: mass,
                 batteryFactor: batteryFactor,
-                liftPenalty: liftPenalty
+                liftPenalty: liftPenalty,
+                densityRatio: thrustDensityRatio,
+                groundEffectFactor: groundEffect,
+                usesThrustCurve: true
             )
             let maxRotorThrust = maxTotalThrust / Float(max(1, rotorModel.rotors.count))
             let allocation = rotorModel.allocate(
@@ -535,7 +612,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             )
 
             var accel = rotationalAcceleration(
-                momentBody: allocation.actualTorque,
+                momentBody: allocation.actualTorque + aeroDisturbanceMoment + propellerGyroscopicMoment(
+                    rotorModel: rotorModel,
+                    profile: profile,
+                    rotorAngularSpeed: state.rotorAngularSpeed,
+                    bodyRates: state.angularVelocity
+                ),
                 omegaBody: state.angularVelocity,
                 inertiaRateOrdered: inertiaRates
             )
@@ -610,7 +692,19 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // The air the rotors are working in, in the frame the rotors live in. Both the inflow
         // model and the anisotropic drag below need this, and it must be the same vector for both
         // or the aircraft would be flying through two different airflows at once.
-        let airVelocityBodyForFlow = simd_act(q.conjugate, state.velocity - context.windVector)
+        // ⚠️ Gusts, not just the steady wind vector. Removing the old `windCompensation` term took
+        // `turbulenceFactor` out of the multirotor path entirely — it was that term's only input —
+        // so weather stopped roughing up the one airframe class that feels it most. This is the
+        // same gust filter the fixed wings use, and it must be called exactly once per substep
+        // because it carries its own state.
+        let multirotorWind = effectiveWindWithGusts(
+            baseWind: context.windVector,
+            altitudeM: state.position.y,
+            turbulenceFactor: context.weather.effectiveFactors.turbulenceFactor,
+            dt: dt,
+            referenceAirspeed: max(simd_length(state.velocity), 1.0)
+        )
+        let airVelocityBodyForFlow = simd_act(q.conjugate, state.velocity - multirotorWind)
         let inflowThrustFactor = multirotorInflowThrustFactor(
             profile: profile,
             rotorModel: rotorModel,
@@ -667,9 +761,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let airVelocityBody = airVelocityBodyForFlow
         let airspeedNow = simd_length(airVelocityBody)
         let axialToFrontalRatio: Float = 2.5
+        // The normaliser has to use the SAME anisotropy the flow will actually see at the reference
+        // lean, not the raw ratio — at 48° of lean the axiality gate below only lets about half of
+        // it through, and calibrating against the full figure left the frontal coefficient too
+        // small, which showed up as the acro fleet flying 28% over its catalogued speed.
         let referenceLeanForDrag = drag.referenceLeanRad
+        let referenceAxialness = sin(referenceLeanForDrag)
+        let referenceAnisotropy = 1.0
+            + (axialToFrontalRatio - 1.0) * smoothstepFloat(0.5, 0.95, referenceAxialness)
         let anisotropyNormalizer = cos(referenceLeanForDrag) * cos(referenceLeanForDrag)
-            + axialToFrontalRatio * sin(referenceLeanForDrag) * sin(referenceLeanForDrag)
+            + referenceAnisotropy * referenceAxialness * referenceAxialness
         let frontalCoefficient = drag.horizontal / max(0.2, anisotropyNormalizer)
         // ⚠️ The disc's own resistance only applies when the flow is genuinely axial.
         //
@@ -686,7 +787,19 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // of descent path. That is also where the vortex ring lives, and for the same reason.
         let axialness = airspeedNow > 0.05 ? abs(airVelocityBody.y) / airspeedNow : 0.0
         let discFlowBlend = smoothstepFloat(0.90, 1.0, axialness)
-        let bodyAxialCoefficient = frontalCoefficient * axialToFrontalRatio
+        // ⚠️ The frame's own anisotropy has to fade in with axiality too, not just the disc's.
+        //
+        // Applied flat, it produces a force component perpendicular to the flight path whenever the
+        // aircraft is leaned over — which is to say it acts like negative lift. On a 34 kg Avidrone
+        // holding its reference lean that came to 95 N against a 334 N weight, and four heavy
+        // airframes sank 2.4-4.9 m/s in what should have been level flight. Nothing about a
+        // multirotor's shape justifies that: leaned into a fast pass it meets the air roughly
+        // end-on, and its resistance is close to along-flow. Anisotropy is a property of how the
+        // flow meets the frame, so it belongs behind the same axiality gate the disc uses, just a
+        // gentler one.
+        let frameAnisotropyBlend = smoothstepFloat(0.5, 0.95, axialness)
+        let bodyAxialCoefficient = frontalCoefficient
+            * (1.0 + (axialToFrontalRatio - 1.0) * frameAnisotropyBlend)
         let discCoefficient = airVelocityBody.y >= 0.0 ? drag.ascent : drag.descent
         let axialCoefficient = bodyAxialCoefficient
             + (max(discCoefficient, bodyAxialCoefficient) - bodyAxialCoefficient) * discFlowBlend
@@ -824,10 +937,61 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         authority: Float,
         mass: Float,
         batteryFactor: Float,
-        liftPenalty: Float
+        liftPenalty: Float,
+        densityRatio: Float = 1.0,
+        groundEffectFactor: Float = 1.0,
+        usesThrustCurve: Bool = false
     ) -> Float {
-        let maxThrust = mass * Tuning.gravity * (baseline.effectiveStabilizationThrust + authority * 0.35) * batteryFactor * liftPenalty
-        return motorThrottle * maxThrust
+        // ⚠️ A rotor makes thrust out of air, so its thrust falls with the air's density — and this
+        // did not, at all. Measured before: a Mavic hovering at 9 km, where there is 38% of the
+        // air there is at sea level, held station on exactly the sea-level throttle. Multirotors
+        // had no ceiling of any kind; the atmosphere model existed, the fixed wings used it, and
+        // it simply never reached this line. Sea level is unchanged (ratio 1.0), so nothing at
+        // normal mission altitudes moves.
+        let maxThrust = mass * Tuning.gravity
+            * (baseline.effectiveStabilizationThrust + authority * 0.35)
+            * batteryFactor * liftPenalty * densityRatio * groundEffectFactor
+        return (usesThrustCurve ? multirotorThrustCurve(motorThrottle) : motorThrottle) * maxThrust
+    }
+
+    /// Fraction of maximum thrust a commanded throttle actually produces.
+    ///
+    /// ⚠️ Not the throttle itself. A propeller's thrust goes with the square of its speed, and an
+    /// ESC command maps roughly to speed, so the stick-to-thrust curve is quadratic: the bottom
+    /// half of the throttle range is worth about a quarter of the thrust, not half of it. Treating
+    /// it as linear is why hover used to land at implausible parts of the range and why the first
+    /// centimetre of stick felt as strong as the last.
+    ///
+    /// Blended rather than pure. A pure square assumes shaft speed follows the command exactly;
+    /// real hardware is flatter than that, because the motor sags under load as it is asked for
+    /// more current and the ESC's own mapping is not linear in speed either. The mix is set by
+    /// where hover is known to land: 0.4 of the square plus 0.6 of the line puts a camera platform
+    /// at 0.54 of its stick and a racing quad at 0.36, against the roughly 0.50-0.55 and 0.30-0.35
+    /// those classes actually hover at. A pure square would have said 0.67 and 0.52; the old
+    /// linear law said 0.44 and 0.27, and both ends of the throttle were wrong in opposite ways.
+    private func multirotorThrustCurve(_ throttle: Float) -> Float {
+        let t = throttle.clamped(to: 0.0...1.0)
+        return 0.4 * t * t + 0.6 * t
+    }
+
+    /// Thrust multiplier from the ground cushion, and how far above the surface it still matters.
+    ///
+    /// Close to the ground a rotor's wake cannot expand and spill the way it does in free air, so
+    /// the same disc supports more weight — this is why a multirotor feels like it "floats" on the
+    /// last half metre of a landing and why a heavy one lifts off more easily than it hovers.
+    /// Standard momentum-theory form, `1 / (1 − (R/4z)²)`, which is a few percent at a rotor
+    /// diameter and gone by two, capped so the singularity as z approaches R/2 cannot run away.
+    private func multirotorGroundEffect(
+        profile: DroneModelProfile,
+        rotorModel: VehicleRotorModel,
+        heightAboveGround: Float
+    ) -> Float {
+        let footprint = profile.dimensionsUnfoldedMm.meters
+        let rotorRadius = max(0.02, 0.25 * max(footprint.x, footprint.y))
+        _ = rotorModel
+        let height = max(rotorRadius * 0.75, heightAboveGround)
+        let ratio = rotorRadius / (4.0 * height)
+        return (1.0 / max(0.55, 1.0 - ratio * ratio)).clamped(to: 1.0...1.45)
     }
 
     /// Propulsive thrust available in wing-borne flight at a commanded throttle, in newtons.
@@ -856,11 +1020,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// Battery, damage and per-unit factors belong to the caller: a fixed wing scales one pusher,
     /// a VTOL divides this among tilting units that each carry their own damage state.
     private func wingborneThrustMagnitude(
+        airspeed: Float,
         commandedThrottle: Float,
         aero: FixedWingAerodynamics,
         wing: FixedWingParameters,
         cruiseReferenceThrottle: Float,
         mass: Float,
+        maxLevelSpeed: Float,
         airDensity: Float
     ) -> Float {
         let cruiseSpeed = max(wing.cruiseSpeedMps, wing.minSustainableSpeedMps, 1.0)
@@ -883,22 +1049,161 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let dragAtCruise = cruiseDynamicPressure * aero.wingArea * cdTrim
         let referenceThrottle = max(0.2, cruiseReferenceThrottle)
         let nominalClimbRate = max(0.0, wing.nominalClimbRateMps)
-        let climbSizedThrust = dragAtCruise + weightNewtons * nominalClimbRate / cruiseSpeed
-        let fullThrottleThrust = max(
-            0.5,
-            dragAtCruise / referenceThrottle,
-            climbSizedThrust
-        )
-        if commandedThrottle <= referenceThrottle {
-            return max(0.0, dragAtCruise * (commandedThrottle / referenceThrottle))
+
+        // ⚠️ A propeller's thrust falls as the aircraft speeds up — it is a power device, not a
+        // force device — and this used to return the same thrust at every airspeed. Two separate
+        // failures came out of that single assumption:
+        //
+        // * The climb margin was sized as `W · ROC / cruiseSpeed`, so the declared rate of climb
+        //   was only delivered at cruise speed. Climbs are flown slower than cruise, and the
+        //   achieved rate came out scaled by exactly `climbSpeed / cruiseSpeed` — measured 11.19
+        //   against 15.6 declared on the MQ-9B (predicted 11.27), and 2.94 against 4.2 on the
+        //   MQ-9A (predicted 2.99). Two airframes were "below 75% of declared climb" for a reason
+        //   that was pure arithmetic.
+        // * With thrust independent of speed there is nothing to stop an aircraft accelerating
+        //   except drag alone, which is why the fleet overran its catalogued top speeds.
+        //
+        // Modelled as constant power instead: full throttle is sized to deliver the declared climb
+        // rate *at climb speed*, and the same power gives correspondingly less thrust higher up the
+        // speed range, which is what sets a maximum speed without any clamp.
+        let climbSpeed = max(wing.climbAirspeed, wing.minSustainableSpeedMps, 1.0)
+        let climbDynamicPressure = 0.5 * airDensity * climbSpeed * climbSpeed
+        var lowClimbAlpha: Float = 0.0
+        var highClimbAlpha: Float = 12.0 * Float.pi / 180.0
+        for _ in 0..<12 {
+            let midAlpha = (lowClimbAlpha + highClimbAlpha) * 0.5
+            let lift = climbDynamicPressure * aero.wingArea * aero.liftDrag(alphaRad: midAlpha).cl
+            if lift < weightNewtons {
+                lowClimbAlpha = midAlpha
+            } else {
+                highClimbAlpha = midAlpha
+            }
         }
-        let span = max(0.001, 1.0 - referenceThrottle)
-        return max(
+        let (_, cdClimb) = aero.liftDrag(alphaRad: (lowClimbAlpha + highClimbAlpha) * 0.5)
+        let dragAtClimb = climbDynamicPressure * aero.wingArea * cdClimb
+
+        // ⚠️ Propeller efficiency is not flat across the speed range, and pretending it is makes a
+        // catalogue's two headline numbers contradict each other. Sizing power from the declared
+        // climb and then spending all of it at high speed puts most of the fleet over its
+        // published maximum — measured 145% on a senseFly eBee TAC, 130% on an RQ-21. It is not
+        // that the aircraft are too fast; it is that the climb figure needs 1.5x to 3x the power
+        // the top-speed figure needs, and a fixed-pitch propeller resolves that by being efficient
+        // near its design point and wasteful away from it.
+        //
+        // Modelled as a parabola about cruise speed, floored so a dive never drives thrust to
+        // zero. This is a shape, not a measurement: no profile in the catalogue publishes a
+        // propeller diagram.
+        let propellerEfficiency: (Float) -> Float = { speed in
+            let ratio = speed / max(1.0, cruiseSpeed)
+            let offset = ratio - 1.0
+            return (1.0 - 1.2 * offset * offset).clamped(to: 0.35...1.0)
+        }
+        // Shaft power the airframe has at full throttle, from the climb it is required to deliver —
+        // corrected for the efficiency the propeller actually achieves at climb speed.
+        let climbEfficiency = max(0.3, propellerEfficiency(climbSpeed))
+        let climbSizedPower = (dragAtClimb + weightNewtons * nominalClimbRate / climbSpeed) * climbSpeed / climbEfficiency
+
+        // ⚠️ The catalogue's climb rate and its top speed frequently need different engines, and no
+        // single power figure satisfies both. Measured over the fleet, the climb number asks for
+        // 1.5x to 3x the power the top-speed number asks for (Zipline 3.1x, Hermes 2.0x, FT5 1.8x,
+        // RQ-21 1.7x, eBee 1.6x, MQ-9B 1.5x).
+        //
+        // Capping power at what the published top speed implies was tried and is worse: it broke
+        // the climb on five airframes and barely moved the overspeed, because most of the aircraft
+        // still over their published maximum are jets, which are fed by the engine model and never
+        // reach this function at all. Sizing on the climb is what remains, and the residual
+        // overspeed on the propeller-driven airframes is a contradiction in their own data — it
+        // has to be settled there, by revising a climb rate or a maximum speed, not here.
+        _ = maxLevelSpeed
+        let fullPower = max(1.0, climbSizedPower)
+        // Fraction of that power the cruise reference setting represents, so level cruise still
+        // trims exactly where the profile says it does.
+        let cruisePowerFraction = (dragAtCruise * cruiseSpeed / (fullPower * propellerEfficiency(cruiseSpeed)))
+            .clamped(to: 0.05...0.95)
+
+        let powerFraction: Float
+        if commandedThrottle <= referenceThrottle {
+            powerFraction = cruisePowerFraction * (commandedThrottle / referenceThrottle)
+        } else {
+            let span = max(0.001, 1.0 - referenceThrottle)
+            powerFraction = cruisePowerFraction
+                + (1.0 - cruisePowerFraction) * ((commandedThrottle - referenceThrottle) / span)
+        }
+
+        // ⚠️ `η·P/V` is a cruise formula and it collapses at low speed: propulsive efficiency goes to
+        // zero as the aircraft slows, so the expression predicts a *weak* propeller exactly where a
+        // real one is at its strongest. Flooring the speed and the efficiency papered over the
+        // singularity but kept the shape — measured, it cost the MQ-9B its takeoff run, 834 m
+        // against a declared 520.
+        //
+        // What a stationary propeller actually makes is the momentum-theory static thrust,
+        // `(2ρA)^(1/3)·(ηP)^(2/3)`, which is finite and large. Disc area is estimated from the
+        // span — no profile on this path publishes a propeller diameter — and the two laws are
+        // blended over the low-speed range so the answer is static thrust at rest, the power law
+        // at cruise, and continuous in between.
+        let availablePower = powerFraction * fullPower
+        let discDiameter = max(0.3, 0.11 * aero.wingSpan)
+        let discArea = Float.pi * discDiameter * discDiameter / 4.0
+        let staticThrust = pow(2.0 * airDensity * discArea, 1.0 / 3.0)
+            * pow(max(1.0, 0.85 * availablePower), 2.0 / 3.0)
+
+        let effectiveSpeed = max(airspeed, climbSpeed * 0.35)
+        let powerLawThrust = availablePower * propellerEfficiency(effectiveSpeed) / effectiveSpeed
+        // Fully static below a tenth of cruise, fully power-law by half of it.
+        let blend = smoothstepFloat(0.10 * cruiseSpeed, 0.50 * cruiseSpeed, airspeed)
+        return max(0.0, staticThrust * (1.0 - blend) + powerLawThrust * blend)
+    }
+
+    /// Gyroscopic reaction of the spinning propellers themselves, in the engine's (roll, pitch,
+    /// yaw) order, N·m.
+    ///
+    /// The airframe's own `ω × (I·ω)` is already handled by `rotationalAcceleration`. This is the
+    /// separate effect of the discs: each spinning propeller is a gyroscope, and rotating the
+    /// aircraft about an axis perpendicular to its shaft produces a moment about the third axis.
+    ///
+    /// On an intact quad it very nearly cancels — half the props spin one way and half the other,
+    /// which is exactly why a multirotor does not precess the way a single-rotor helicopter does,
+    /// and the sum below comes out near zero without anything special being written for it. What
+    /// this earns is the asymmetric case: lose a propeller, or run one lane down after damage, and
+    /// the residual angular momentum is real. That is when a pilot discovers the airframe now
+    /// yaws when they pitch.
+    private func propellerGyroscopicMoment(
+        rotorModel: VehicleRotorModel,
+        profile: DroneModelProfile,
+        rotorAngularSpeed: SIMD4<Float>,
+        bodyRates: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        guard !rotorModel.isEmpty else { return .zero }
+        // Disc inertia from the same radius estimate the inflow model uses, treating a propeller
+        // as a thin rod about its hub: I = m·L²/12, with blade mass scaled off the airframe.
+        let footprint = profile.dimensionsUnfoldedMm.meters
+        let rotorRadius = max(0.02, 0.25 * max(footprint.x, footprint.y))
+        let bladeMass = max(0.0005, 0.004 * rotorRadius / 0.0635)
+        let propellerInertia = bladeMass * (2.0 * rotorRadius) * (2.0 * rotorRadius) / 12.0
+
+        // Net angular momentum along the body-up axis: spin direction times shaft speed, summed.
+        var netSpin: Float = 0.0
+        for (index, rotor) in rotorModel.rotors.enumerated() {
+            let speed: Float
+            if let lane = rotor.laneIndex, lane < 4 {
+                speed = rotorAngularSpeed[lane]
+            } else {
+                speed = index < 4 ? rotorAngularSpeed[index] : 0.0
+            }
+            netSpin += rotor.spinSign * speed * rotor.thrustFactor.clamped(to: 0.0...1.0)
+        }
+        let netAngularMomentum = propellerInertia * netSpin
+        guard abs(netAngularMomentum) > 1e-6 else { return .zero }
+
+        // M = -ω × H, with H along body +Y. In (x, y, z) body axes that is
+        // -(ω_x, ω_y, ω_z) × (0, H, 0) = (ω_z·H, 0, -ω_x·H), then mapped back to rate order.
+        let omegaXYZ = SIMD3<Float>(bodyRates.y, bodyRates.z, bodyRates.x)
+        let momentXYZ = SIMD3<Float>(
+            omegaXYZ.z * netAngularMomentum,
             0.0,
-            dragAtCruise
-                + (fullThrottleThrust - dragAtCruise)
-                    * ((commandedThrottle - referenceThrottle) / span)
+            -omegaXYZ.x * netAngularMomentum
         )
+        return SIMD3<Float>(momentXYZ.z, momentXYZ.x, momentXYZ.y)
     }
 
     /// What the air the rotors are actually flying through does to the thrust they make.
@@ -1414,7 +1719,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             fuselageLengthM: realFuselageLengthMm / 1000.0,
             heightM: realHeightMm / 1000.0,
             turnAuthority: wing.turnAuthority,
-            minSustainableSpeedMps: wing.minSustainableSpeedMps
+            minSustainableSpeedMps: wing.minSustainableSpeedMps,
+            designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass }
         ).applyingDamage(context.aeroDamage)
 
         // --- Airflow state.
@@ -1712,11 +2018,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 * context.rotorModel.cruiseThrustFactor
         } else {
             thrustMagnitude = wingborneThrustMagnitude(
+                airspeed: airspeed,
                 commandedThrottle: commandedThrottle,
                 aero: aero,
                 wing: wing,
                 cruiseReferenceThrottle: baseline.cruiseReferenceThrottle,
                 mass: mass,
+                maxLevelSpeed: context.profile.maxHorizontalSpeedMps,
                 airDensity: airDensity
             ) * batteryFactor * context.rotorModel.cruiseThrustFactor
         }
@@ -2216,7 +2524,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             fuselageLengthM: realFuselageLengthMm / 1000.0,
             heightM: realHeightMm / 1000.0,
             turnAuthority: wing.turnAuthority,
-            minSustainableSpeedMps: wing.minSustainableSpeedMps
+            minSustainableSpeedMps: wing.minSustainableSpeedMps,
+            designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass }
         ).applyingDamage(context.aeroDamage)
 
         // --- 2. Airflow state, ahead of the surfaces for the same reason as
@@ -2777,11 +3086,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // wing-borne VTOL's throttle floor *is* the cruise reference, the aircraft was pinned above
         // its published cruise speed for the whole leg.
         let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : wingborneThrustMagnitude(
+            airspeed: s.airspeed,
             commandedThrottle: s.motorThrottle,
             aero: s.aero,
             wing: s.wing,
             cruiseReferenceThrottle: s.baseline.cruiseReferenceThrottle,
             mass: s.mass,
+            maxLevelSpeed: context.profile.maxHorizontalSpeedMps,
             airDensity: airDensity
         ) * s.batteryFactor
 
@@ -2791,7 +3102,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             authority: s.authority,
             mass: s.mass,
             batteryFactor: s.batteryFactor,
-            liftPenalty: s.liftPenalty
+            liftPenalty: s.liftPenalty,
+            // Rotor-borne lift thins out with the air for a VTOL exactly as it does for a
+            // multirotor — it is the same disc doing the same job, and it follows the same
+            // non-linear stick-to-thrust curve.
+            densityRatio: (context.atmosphere.state(worldY: state.position.y).airDensity / 1.225)
+                .clamped(to: 0.15...1.15),
+            usesThrustCurve: true
         )
         let totalLiftCapableThrustMagnitude = hoverSizedThrustMagnitude * (1.0 - s.wingborneBlend) + cruiseSizedThrustMagnitude * s.wingborneBlend
         let perLiftUnitThrustMagnitude = liftCapableUnits.isEmpty ? 0.0 : totalLiftCapableThrustMagnitude / Float(liftCapableUnits.count)
@@ -2924,11 +3241,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // wing-borne VTOL's throttle floor *is* the cruise reference, the aircraft was pinned above
         // its published cruise speed for the whole leg.
         let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : wingborneThrustMagnitude(
+            airspeed: s.airspeed,
             commandedThrottle: s.motorThrottle,
             aero: s.aero,
             wing: s.wing,
             cruiseReferenceThrottle: s.baseline.cruiseReferenceThrottle,
             mass: s.mass,
+            maxLevelSpeed: context.profile.maxHorizontalSpeedMps,
             airDensity: airDensity
         ) * s.batteryFactor
         let hoverSizedThrustMagnitude = units.isEmpty ? 0.0 : rotorBorneThrustMagnitude(
@@ -2937,7 +3256,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             authority: s.authority,
             mass: s.mass,
             batteryFactor: s.batteryFactor,
-            liftPenalty: s.liftPenalty
+            liftPenalty: s.liftPenalty,
+            // Rotor-borne lift thins out with the air for a VTOL exactly as it does for a
+            // multirotor — it is the same disc doing the same job, and it follows the same
+            // non-linear stick-to-thrust curve.
+            densityRatio: (context.atmosphere.state(worldY: state.position.y).airDensity / 1.225)
+                .clamped(to: 0.15...1.15),
+            usesThrustCurve: true
         )
         let totalThrustMagnitude = hoverSizedThrustMagnitude * (1.0 - s.wingborneBlend) + cruiseSizedThrustMagnitude * s.wingborneBlend
         let perUnitThrustMagnitude = units.isEmpty ? 0.0 : totalThrustMagnitude / Float(units.count)
@@ -4062,7 +4387,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let highSigma = clearAirGustSigma(altitudeM: altitudeM, turbulenceFactor: turbulenceFactor)
         let highScale: Float = 1750.0 * 0.3048
 
-        let intensityBoost = 0.6 + 0.4 * turbulenceFactor.clamped(to: 0.0...1.0)
+        // ⚠️ Turbulence intensity spanned 0.6 to 1.0 — a range of two thirds between still air and a
+        // thunderstorm, when the standard's own categories differ by a factor of three or more.
+        // MIL-F-8785C sizes low-altitude turbulence as sigma_w = 0.1 * W20 for *light* conditions;
+        // moderate and severe scale that up several times over. Compressed into 0.6...1.0, a storm
+        // moved a hovering multirotor less than still air did, because the extra drag the same
+        // weather brings outweighed the gusts it was allowed to make.
+        let intensityBoost = 0.5 + 2.5 * turbulenceFactor.clamped(to: 0.0...1.0)
         // Blend the *parameters*, not two independent gust states. Running two filters and
         // cross-fading their outputs would make the gust jump every time the aircraft
         // crossed the blend band, because the two states are uncorrelated; blending the

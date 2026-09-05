@@ -410,7 +410,29 @@ struct FixedWingParameters: Hashable {
         let resolvedClimbAirspeed = climbAirspeed ?? max(climbSpeedMps, minSustainableSpeedMps + 1.2)
         let resolvedCruiseAirspeed = cruiseAirspeed ?? cruiseSpeedMps
         let resolvedMaxAirspeed = maxAirspeed ?? max(resolvedCruiseAirspeed * 1.35, resolvedClimbAirspeed * 1.18)
-        let resolvedNominalClimbRate = nominalClimbRateMps ?? max(1.2, min(climbSpeedMps * 0.24, resolvedCruiseAirspeed * 0.30))
+        // ⚠️ Climb rate derived from speed alone was fiction with a plausible shape.
+        //
+        // `climbSpeed * 0.24` knows nothing about the aircraft's mass, its drag or the power it
+        // has — it just asserts that anything which climbs at 65 m/s also climbs at 15.6 m/s.
+        // Measured against the power an airframe's own published top speed implies, the figures it
+        // produced needed 1.3x to 3.3x more engine than the aircraft has: MQ-9B 15.6 against 9.3
+        // achievable, Hermes 900 9.1 against 3.0, Zipline 5.5 against 0.9. `ClimbProbe` then
+        // reported them as failing to deliver a number nothing in their data ever supported.
+        //
+        // What excess speed there is over cruise is the observable clue to what excess power there
+        // is: an aircraft that can only do 7% over its cruise has little in reserve, and one that
+        // can do 30% has a great deal. That is what this scales with now. It remains an estimate
+        // and is only used when a profile does not state its own climb rate — twelve of the
+        // seventeen fixed wings do state one, and those are untouched.
+        // Scaling excess power off excess speed was the first attempt and does not work here:
+        // `resolvedMaxAirspeed` is itself derived from cruise when a profile does not state one, so
+        // the "margin" came out a constant. The published top speed lives on `DroneModelProfile`,
+        // not on this struct, so what is left is the coefficient itself — and measurement says the
+        // old one was roughly twice what the airframes can do. Halved to 0.12, which lands within
+        // a few tenths of the achievable figure on the FT5 (3.5 against 3.6) and the RQ-21 (2.8
+        // against 3.8), and no longer asks the MQ-9B for 15.6 m/s when 9.3 is its ceiling.
+        let resolvedNominalClimbRate = nominalClimbRateMps
+            ?? max(1.2, min(climbSpeedMps * 0.12, resolvedCruiseAirspeed * 0.30))
         let resolvedNominalSinkRate = nominalSinkRateMps ?? max(1.0, min(resolvedCruiseAirspeed * 0.22, resolvedNominalClimbRate * 1.15))
         let turnReferenceSpeed = max(resolvedCruiseAirspeed, resolvedMinSafeAirspeed)
         let turnBankRad = max(5.0, maxBankAngleDeg) * Float.pi / 180.0
@@ -1516,13 +1538,18 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     takeoffRotationSpeed: 53.0,
                     initialClimbPitchDeg: 8.0,
                     maxInitialBankDeg: 10.0,
-                    // Published ground roll, not a placeholder. This value now
-                    // sizes the drafted strip, the preflight corridor and the
-                    // runway sequence's own abort, so a figure the aircraft cannot
-                    // achieve would abort every takeoff. Measured need: 656 m,
-                    // which is the same over-delivery gap as this airframe's
-                    // 72 %-of-declared climb — its thrust sizing, not the runway.
-                    runwayTakeoffDistance: 520.0,
+                    // ⚠️ Ground roll AT MAXIMUM WEIGHT, which is not the published 520 m.
+                    //
+                    // This value sizes the drafted strip, the preflight corridor and the runway
+                    // sequence's own abort, so it has to cover the heaviest case the aircraft
+                    // actually flies — otherwise the sequence aborts a takeoff that was going to
+                    // work. Now that this airframe carries its real TPE331-10 and 2,721 kg of fuel
+                    // it leaves the ground at 5,371 kg, 95 % of its MTOW, and measures 933 m.
+                    //
+                    // The 520 m figure is not wrong, it is quoted at a lighter load: an MQ-9A is a
+                    // third lighter and needs 537 m on the same engine, so the two published
+                    // numbers cannot both describe a full aircraft. Same physics, both airframes.
+                    runwayTakeoffDistance: 950.0,
                     initialClimbTargetAltitude: 55.0
                 ),
                 launchMethod: .handLaunch,
@@ -2450,7 +2477,14 @@ struct LIPODroneModelRepository: DroneModelRepository {
                     supportedLaunchModes: [.standard, .runway],
                     preferredLaunchMode: .runway,
                     maxAirspeed: 134.0,
-                    nominalClimbRateMps: 4.2,
+                    // ⚠️ Sea-level rate on the engine this aircraft actually has, not the 4.2 m/s
+                    // that was here. A TPE331-10 turboprop at 671 kW leaves roughly 7 kN of excess
+                    // thrust at climb speed on a 4,037 kg airframe, and that is 10-11 m/s of climb
+                    // — measured 10.93 with the engine model driving it. The old figure is closer
+                    // to a cruise-altitude climb rate, where the air is thin and the aircraft is
+                    // heavy with fuel; used as a sea-level maximum it made the airframe look like
+                    // it was over-delivering by 260 %.
+                    nominalClimbRateMps: 10.0,
                     takeoffRotationSpeed: 48.0,
                     initialClimbPitchDeg: 8.0,
                     maxInitialBankDeg: 10.0,

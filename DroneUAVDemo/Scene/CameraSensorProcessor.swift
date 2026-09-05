@@ -106,7 +106,6 @@ final class CameraSensorProcessor: @unchecked Sendable {
     private var workingBuffer: [UInt8] = []
     /// Only used when the sensor out-resolves nothing — that is, when the feed has to be scaled up
     /// from the sensor grid to the display.
-    private var displayBuffer: [UInt8] = []
     private var matrixBuffer: [UInt8] = []
     /// Tone curves, one per colour channel: exposure gain, white balance, black lift and the
     /// highlight roll-off composed into a single 256-entry lookup.
@@ -139,28 +138,35 @@ final class CameraSensorProcessor: @unchecked Sendable {
         // carry. Running everything at the sensor size made a 42 MP full-frame come out no sharper
         // than a 1.2 MP FPV camera.
         let aspect = Double(sourceImage.height) / Double(max(1, sourceImage.width))
-        let displayWidth = max(32, min(Self.maximumWorkingWidth, max(1, sourceImage.width)))
-        let displayHeight = max(24, Int((Double(displayWidth) * aspect).rounded()))
+        let costLimitedWidth = max(32, min(Self.maximumWorkingWidth, max(1, sourceImage.width)))
+        let costLimitedHeight = max(24, Int((Double(costLimitedWidth) * aspect).rounded()))
 
         // Everything the camera does happens on its own grid: the readout skews sensor lines, noise
-        // is generated at the photosite, and the ISP sharpens what the sensor gave it. Only the
-        // final scaling to the display sits above that, which is also why it is the last step and
-        // uses no smoothing — a 640x512 core is shown as the pixels it has.
-        let sensorLimited = parameters.horizontalResolution < displayWidth
-        let width = sensorLimited ? max(16, parameters.horizontalResolution) : displayWidth
+        // is generated at the photosite, and the ISP sharpens what the sensor gave it.
+        //
+        // The finished frame is then handed over at that resolution and scaled once, by the view.
+        // It used to be resampled up to the display width first, with no smoothing — but that ratio
+        // is rarely a whole number (1920 into 2048 is 1.067x), so nearest-neighbour there did not
+        // show "the pixels it has", it duplicated an irregular one column in fifteen and then let
+        // the view resample the result again. Two extra resamples, both pure loss, and a visible
+        // part of why the picture read as soft.
+        let sensorLimited = parameters.horizontalResolution < costLimitedWidth
+        let width = sensorLimited ? max(16, parameters.horizontalResolution) : costLimitedWidth
         let height = sensorLimited
             ? max(12, min(
                 max(1, parameters.verticalResolution),
                 Int((Double(width) * aspect).rounded())
             ))
-            : displayHeight
+            : costLimitedHeight
 
         guard draw(
             sourceImage,
             into: &workingBuffer,
             width: width,
             height: height,
-            interpolation: .medium
+            // The one resample the pass owns, so it is worth filtering properly: Core Graphics
+            // costs a fraction of a millisecond here next to the per-pixel work that follows.
+            interpolation: .high
         ) else {
             return sourceImage
         }
@@ -194,21 +200,7 @@ final class CameraSensorProcessor: @unchecked Sendable {
         // Sharpening last, as an ISP does it: on the finished picture, at sensor resolution.
         applyEdgeEnhancement(width: width, height: height, amount: parameters.color.edgeEnhancement)
 
-        guard sensorLimited else {
-            return makeImage(from: &workingBuffer, width: width, height: height) ?? sourceImage
-        }
-        guard let sensorImage = makeImage(from: &workingBuffer, width: width, height: height),
-              draw(
-                sensorImage,
-                into: &displayBuffer,
-                width: displayWidth,
-                height: displayHeight,
-                interpolation: .none
-              ) else {
-            return sourceImage
-        }
-        return makeImage(from: &displayBuffer, width: displayWidth, height: displayHeight)
-            ?? sourceImage
+        return makeImage(from: &workingBuffer, width: width, height: height) ?? sourceImage
     }
 
     // MARK: - Buffers
@@ -335,22 +327,49 @@ final class CameraSensorProcessor: @unchecked Sendable {
         // Fixed point, and a shift rather than a divide. The divide that used to be here cost more
         // than every other stage of the pass put together.
         let scale = Int32((amplitude * 2).rounded())
+
+        // ⚠️ The noise cannot be larger than the signal it sits on. Applied flat, the negative half
+        // of the distribution was clamped away at zero and the mean rose with it — +26 % on a
+        // signal of 3/255 and +56 % on 2/255, which is exactly where a night ground sits. That
+        // lift, not the exposure loop, was what kept black from being black.
+        //
+        // The guard is deliberately *only* a guard. An earlier attempt scaled the amplitude by the
+        // square root of the level, on the grounds that shot noise grows that way — true in linear
+        // light, but these values are gamma-encoded, and carrying the same shot noise through the
+        // encoding leaves it very nearly flat across the range. That version made a bright daylight
+        // frame about a third noisier than it had been, for no physical reason. Midtones and
+        // highlights are therefore left exactly as they were, and only levels the clamp would
+        // actually bite into are held back.
+        //
+        // A real sensor solves the same problem with its black level, which is why a composite
+        // camera has a pedestal at all: it keeps the noise off the clip.
+        var levelScale = [Int32](repeating: 0, count: 256)
+        for level in 0..<256 {
+            let headroom = min(1.0, Double(level) / max(1.0, amplitude))
+            levelScale[level] = Int32((Double(scale) * headroom).rounded())
+        }
+
         var state = frameIndex &* 0x9E37_79B9_7F4A_7C15 &+ 0xD1B5_4A32_D192_ED03
         let count = width * height
         pixels.withUnsafeMutableBufferPointer { buffer in
+        levelScale.withUnsafeBufferPointer { levels in
             for pixel in 0..<count {
                 let index = pixel * 4
                 state = state &* 6364136223846793005 &+ 1442695040888963407
                 // One luminance-correlated sample per pixel: sensor noise is not three independent
                 // colour channels dancing separately.
                 let sample = Int32(truncatingIfNeeded: state >> 56) - 128
-                let offset = (sample &* scale) >> 8
+                // Green carries most of the luminance, so it stands in for the signal level.
+                let offset = (sample &* levels[Int(buffer[index + 1])]) >> 8
                 buffer[index] = clampByte(Int32(buffer[index]) &+ offset)
                 buffer[index + 1] = clampByte(Int32(buffer[index + 1]) &+ offset)
                 buffer[index + 2] = clampByte(Int32(buffer[index + 2]) &+ offset)
             }
         }
+        }
     }
+
+
 
     // MARK: - Auto exposure
 
@@ -403,7 +422,21 @@ final class CameraSensorProcessor: @unchecked Sendable {
         guard weight > 0 else { return }
         let measured = max(0.004, weighted / weight)
 
-        let desired = settings.targetLevel / measured
+        // A rendered frame is already a correctly exposed picture. A loop that drives every frame
+        // to a fixed mid-grey therefore *re-exposes* it, and in ordinary daylight that came out as
+        // a flat, dull image where the camera had quietly pulled the whole scene down toward 42 %
+        // grey for no reason. Real metering has a dead band for the same reason: a camera that is
+        // close enough does not hunt. Outside the band the loop pulls only as far as its edge.
+        let floorLevel = settings.targetLevel * 0.62
+        let ceilingLevel = settings.targetLevel * 1.55
+        let desired: Double
+        if measured < floorLevel {
+            desired = floorLevel / measured
+        } else if measured > ceilingLevel {
+            desired = ceilingLevel / measured
+        } else {
+            desired = 1
+        }
         let target = min(
             pow(2.0, settings.gainUpStops),
             max(1.0 / pow(2.0, settings.gainDownStops), desired)

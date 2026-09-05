@@ -226,7 +226,53 @@ enum EnvironmentProceduralVisualFactory {
         }
     }
 
+    /// One material per kind of simplified object, shared by every instance of that kind.
+    ///
+    /// The `key` argument was already here and already unused, so each of the thousands of LOD
+    /// nodes carried its own identical material. Sharing them is what makes the light level below
+    /// a single write per kind rather than a walk over the whole scene — and it gives the renderer
+    /// fewer distinct materials to batch on the way.
+    private static var simplifiedMaterials: [String: SCNMaterial] = [:]
+    private static let simplifiedMaterialsLock = NSLock()
+    /// Current light level for the unlit layer. Applied to materials created later too, so an
+    /// object streamed in after dark does not arrive glowing.
+    private static var ambientLightLevel: CGFloat = 1
+
+    /// Tells the unlit layer how bright the world is.
+    ///
+    /// A constant lighting model ignores every lamp in the scene, which is the point — it is what
+    /// makes this layer cheap. But it also meant the simplified trees, buildings, poles and markers
+    /// kept their full daylight colour after sunset and read as pale blobs scattered over black
+    /// ground. `multiply` scales the finished colour, so one write per kind covers every instance.
+    static func applyAmbientLightLevel(_ level: CGFloat) {
+        let clamped = max(0, min(1, level))
+        simplifiedMaterialsLock.lock()
+        defer { simplifiedMaterialsLock.unlock() }
+        guard abs(clamped - ambientLightLevel) > 0.002 else { return }
+        ambientLightLevel = clamped
+        let tint = NSColor(calibratedWhite: clamped, alpha: 1.0)
+        for material in simplifiedMaterials.values {
+            material.multiply.contents = tint
+        }
+    }
+
     private static func simplifiedMaterial(key: String, color: NSColor) -> SCNMaterial {
+        // Keyed on the colour as well as the name: `makeSimplifiedBoxNode` passes its colour in,
+        // and two kinds of box share a name prefix, so keying on the name alone would have made
+        // them all one colour.
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        let cacheKey = String(
+            format: "%@|%.3f,%.3f,%.3f",
+            key,
+            rgb.redComponent,
+            rgb.greenComponent,
+            rgb.blueComponent
+        )
+        simplifiedMaterialsLock.lock()
+        defer { simplifiedMaterialsLock.unlock() }
+        if let existing = simplifiedMaterials[cacheKey] {
+            return existing
+        }
         let material = SCNMaterial()
         material.lightingModel = .constant
         material.diffuse.contents = color
@@ -234,6 +280,8 @@ enum EnvironmentProceduralVisualFactory {
         material.emission.contents = color.withAlphaComponent(0.12)
         material.isDoubleSided = true
         material.writesToDepthBuffer = true
+        material.multiply.contents = NSColor(calibratedWhite: ambientLightLevel, alpha: 1.0)
+        simplifiedMaterials[cacheKey] = material
         return material
     }
 

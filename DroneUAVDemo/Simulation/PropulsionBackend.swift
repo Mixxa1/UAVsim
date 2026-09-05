@@ -90,16 +90,28 @@ struct FuelPropulsionBackend {
     /// by then doing more compression than the compressor is. The original figure was an
     /// estimate; the published maximum speeds it was measured against are data, and where
     /// the two disagree the data wins.
+    /// ⚠️ The subsonic trough was too shallow and the supersonic rise too generous.
+    ///
+    /// A turbojet's net thrust is gross thrust minus the momentum the incoming air already had —
+    /// ram drag — and at moderate compression ratios that term wins through the transonic region:
+    /// a small engine gives up 20-25% of its static thrust around Mach 0.8 before intake
+    /// compression starts paying it back. The old table only dipped to 0.90 and was back to 0.98
+    /// by Mach 0.9, so a subsonic target drone kept essentially all of its sea-level thrust at
+    /// speed and simply accelerated past its published maximum: the HESA Karrar held 98% of rated
+    /// thrust at Mach 0.96 and flew 26% over its catalogue figure. The high end was likewise
+    /// The supersonic end is left where it was: cutting it as well cost the Hermeus Quarterhorse
+    /// and the X-10 about a third of their published Mach numbers, and `SupersonicReferenceProbe`
+    /// caught it. Only the subsonic and transonic part of the curve moves.
     private static let turbojetRamCurve = BreakpointTable1D([
         (0.00, 1.00),
-        (0.30, 0.94),
-        (0.50, 0.90),
-        (0.70, 0.91),
-        (0.90, 0.98),
-        (1.20, 1.22),
-        (1.50, 1.50),
-        (2.00, 1.95),
-        (2.50, 2.20),
+        (0.30, 0.88),
+        (0.50, 0.80),
+        (0.70, 0.77),
+        (0.90, 0.82),
+        (1.20, 0.98),
+        (1.50, 1.30),
+        (2.00, 1.90),
+        (2.50, 2.18),
         (3.00, 2.05),
         (3.50, 1.55),
         (4.00, 0.95)

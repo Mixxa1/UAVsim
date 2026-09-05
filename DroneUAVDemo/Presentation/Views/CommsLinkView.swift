@@ -3,7 +3,7 @@ import SwiftUI
 /// Fiber-optic control-link equipment — a sibling section to the mission payload panel above it,
 /// not a payload type itself (see `UAVControlLinkType`/`FiberSpoolModule`). An aircraft can carry
 /// this alongside a camera/sprayer/etc. since it occupies its own equipment slot.
-struct CommsLinkView: View {
+struct CommsLinkView<RadioEquipment: View>: View {
     let controlLinkType: UAVControlLinkType
     let operationalStatus: MissionOperationalStatus
     let linkLossPolicy: LinkLossPolicy
@@ -15,6 +15,10 @@ struct CommsLinkView: View {
     let onAttach: () -> Void
     let onDetach: () -> Void
     let onClose: (() -> Void)?
+    /// The radio equipment section, supplied by the caller and rendered inside this window rather
+    /// than as a card of its own: radio and fiber are two media of one control link, and shown as
+    /// two floating panels they read as unrelated windows.
+    @ViewBuilder var radioEquipment: RadioEquipment
 
     /// Physical fiber remaining on the spool (not the margin-adjusted usable budget) — what
     /// actually determines the reel's live mass, mirrored from `updateFiberOpticTether`.
@@ -61,6 +65,7 @@ struct CommsLinkView: View {
 
                 if controlLinkType == .radio {
                     radioLinkSection
+                    radioEquipment
                 }
 
                 // Only configurable before mounting — a real reel isn't swapped mid-flight, and a

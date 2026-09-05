@@ -408,7 +408,16 @@ final class EngineRuntimeService {
                 // the disc; below that it would simply stall, which is a separate
                 // failure and not something a cruise throttle should cause.
                 let minimumOmega = ratedRPM * envelope.idleSpeedFraction * 0.72 * Float.pi / 30.0
-                let maximumOmega = ratedRPM * 1.25 * Float.pi / 30.0
+                // ⚠️ 1.25 was an overspeed allowance, and in level flight it acted as a performance
+                // figure. A fixed-pitch disc unloads as the aircraft accelerates, so the shaft
+                // climbs, the advance ratio falls back, the thrust coefficient recovers — and the
+                // aircraft accelerates further. That loop is what put the propeller-driven jets
+                // and loitering munitions over their published top speeds: an IAI Harpy reaches
+                // zero net thrust at 61 m/s on rated RPM, and only passes it by overspeeding the
+                // engine. A rated shaft speed is where the engine makes its rated power; a real
+                // one is governed, throttled or simply out of breath above it, and none of them
+                // sit a quarter over rating in cruise.
+                let maximumOmega = ratedRPM * 1.05 * Float.pi / 30.0
                 next.shaftRPM = omegaNext.clamped(to: minimumOmega...maximumOmega) * 30.0 / Float.pi
             } else {
                 // No disc to load a turbojet: the rotor follows the lever through

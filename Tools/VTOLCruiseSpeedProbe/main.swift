@@ -295,9 +295,16 @@ for profile in winged.sorted(by: { $0.displayName < $1.displayName }) {
     if descentRatio > 1.0 + tolerance {
         overspeedingDescent.append(profile.displayName)
     }
-    // Idle from cruise must actually decelerate. A wing-borne airframe that cannot shed speed with
-    // the throttle closed has a floor where a limit should be.
-    if idled.settledSpeed >= level.settledSpeed - 0.5 {
+    // Idle from cruise must actually shed ENERGY, which is not the same as shedding speed.
+    //
+    // ⚠️ The old test compared airspeeds alone, and a clean airframe with the throttle closed does
+    // not slow down — it descends, trading height for the speed it keeps. At L/D 20 that is
+    // correct behaviour, and the check was flagging it as "thrust has no anchor": seven airframes
+    // failed, of which the well-behaved ones were simply gliding. What a missing throttle anchor
+    // actually looks like is an aircraft that holds BOTH its speed and its altitude at idle,
+    // because something is still pushing it.
+    let glidingDown = idled.settledSinkRate > 0.5
+    if idled.settledSpeed >= level.settledSpeed - 0.5, !glidingDown {
         cannotDecelerate.append(profile.displayName)
     }
 }

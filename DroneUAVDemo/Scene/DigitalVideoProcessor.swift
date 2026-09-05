@@ -8,6 +8,9 @@ import Foundation
 final class DigitalVideoProcessor: @unchecked Sendable {
     private var previousDeliveredFrame: CGImage?
     private var frameIndex: UInt64 = 0
+    /// Frames still undecodable after a loss. Packet loss does not cost one frame — it costs
+    /// everything up to the next keyframe.
+    private var stallFramesRemaining = 0
 
     func process(
         sourceImage: CGImage,
@@ -23,7 +26,17 @@ final class DigitalVideoProcessor: @unchecked Sendable {
             previousDeliveredFrame = retained
             return retained
         }
+        if stallFramesRemaining > 0 {
+            stallFramesRemaining -= 1
+            return nil
+        }
         guard random.unit > parameters.frameDropProbability else {
+            // A lost packet takes out a whole group of pictures, so the picture holds for a
+            // fraction of a second and then jumps to catch up. Dropping frames independently
+            // produced an even jitter instead, which is not what a digital link looks like when it
+            // starts to go — the recognisable behaviour is the short freeze.
+            let severity = min(1, parameters.frameDropProbability / 0.4)
+            stallFramesRemaining = Int((2 + severity * 16).rounded())
             return nil
         }
 
@@ -99,6 +112,7 @@ final class DigitalVideoProcessor: @unchecked Sendable {
     func reset() {
         previousDeliveredFrame = nil
         frameIndex = 0
+        stallFramesRemaining = 0
     }
 
     private func detailReducedImage(

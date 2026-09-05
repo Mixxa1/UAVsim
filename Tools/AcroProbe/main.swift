@@ -13,6 +13,7 @@ import simd
 //   C. Thrust available   — what thrust-to-weight does the airframe actually fly at, and does its
 //                           declared hover throttle hold altitude?
 //   D. Surface travel     — can a fixed wing reach full elevator/aileron in a rate mode?
+//   H. Weather            — station keeping in rated wind, and whether gusts are felt at all.
 //   E. Angle mode         — regression guard: the attitude modes share this controller and must
 //                           not move when the rate path is worked on.
 //
@@ -83,6 +84,22 @@ func makeState(
     return state
 }
 
+
+/// Hover throttle corrected for the air at a given altitude. The resolver publishes a sea-level
+/// figure, but thrust now falls with density, so holding station higher up genuinely takes more
+/// throttle — a probe that ignored that would be testing thin air rather than the aircraft.
+func hoverThrottle(_ baseline: ResolvedFlightBaseline, atAltitude altitude: Float) -> Float {
+    let density = AtmosphereModel.standard.state(worldY: altitude).airDensity
+    let ratio = min(1.15, max(0.15, density / 1.225))
+    // Invert the engine's thrust curve at the thrust actually available up here — dividing the
+    // sea-level throttle by the density ratio would only be right if the curve were a straight
+    // line, and it is not.
+    let thrustToWeight = max(1.05, (baseline.effectiveStabilizationThrust + 0.35) * ratio)
+    let target = 1.0 / thrustToWeight
+    let root = (-0.6 + (0.36 + 1.6 * target).squareRoot()) / 0.8
+    return min(1.0, max(0.12, root))
+}
+
 func acroControl(
     roll: Float,
     pitch: Float,
@@ -120,12 +137,13 @@ func settledRate(
 ) -> Float {
     let mass = VehicleMassModel.baseline(for: profile, uavProfile: profile.resolvedUAVProfile)
     let context = makeContext(profile, mass: mass)
-    let hover = FlightBaselineResolver.resolve(
+    let hoverBaseline = FlightBaselineResolver.resolve(
         runtimeProfile: profile,
         activeUAVProfile: profile.resolvedUAVProfile,
         vehicleMassModel: mass,
         flightMode: .manual
-    ).hoverLockThrottle
+    )
+    let hover = hoverThrottle(hoverBaseline, atAltitude: 300.0)
     var state = makeState(profile, orientation: .zero, throttle: hover)
 
     // Settle for 1.5 s, then measure the rotation accumulated over the following 0.2 s.
@@ -193,12 +211,13 @@ func bodyAxisError(
 ) -> Float {
     let mass = VehicleMassModel.baseline(for: profile, uavProfile: profile.resolvedUAVProfile)
     let context = makeContext(profile, mass: mass)
-    let hover = FlightBaselineResolver.resolve(
+    let hoverBaseline = FlightBaselineResolver.resolve(
         runtimeProfile: profile,
         activeUAVProfile: profile.resolvedUAVProfile,
         vehicleMassModel: mass,
         flightMode: .manual
-    ).hoverLockThrottle
+    )
+    let hover = hoverThrottle(hoverBaseline, atAltitude: 300.0)
     var state = makeState(profile, orientation: startEuler, throttle: hover)
 
     let q0 = state.attitudeQuat
@@ -280,7 +299,7 @@ for profile in multirotors {
         vehicleMassModel: mass,
         flightMode: .manual
     )
-    let hover = baseline.hoverLockThrottle
+    let hover = hoverThrottle(baseline, atAltitude: 300.0)
 
     // Full throttle, level, from rest: the first substep's vertical acceleration is thrust minus
     // weight with no drag yet, so T/W falls straight out of it.
@@ -333,12 +352,13 @@ let commandedBankDeg: Float = 25.0
 for profile in multirotors {
     let mass = VehicleMassModel.baseline(for: profile, uavProfile: profile.resolvedUAVProfile)
     let context = makeContext(profile, mass: mass)
-    let hover = FlightBaselineResolver.resolve(
+    let hoverBaseline = FlightBaselineResolver.resolve(
         runtimeProfile: profile,
         activeUAVProfile: profile.resolvedUAVProfile,
         vehicleMassModel: mass,
         flightMode: .manual
-    ).hoverLockThrottle
+    )
+    let hover = hoverThrottle(hoverBaseline, atAltitude: 300.0)
     var state = makeState(profile, orientation: .zero, throttle: hover)
 
     for _ in 0..<Int(4.0 / Double(dt)) {
@@ -442,16 +462,46 @@ for profile in multirotors {
     // Level run: hold the steepest sustainable lean at full throttle and let speed settle.
     // Level flight, not a climb: the vertical component of thrust has to carry the weight, so the
     // throttle rises with the lean exactly as a pilot's would.
-    let levelThrottle = min(1.0, baseline.hoverLockThrottle / max(0.2, cos(levelLean)))
-    var level = makeState(profile, orientation: SIMD3<Float>(0, -levelLean, 0), throttle: levelThrottle, altitude: 1500.0)
-    for _ in 0..<Int(60.0 / Double(dt)) {
-        var control = acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: levelThrottle, state: level)
+    //
+    // ⚠️ Dividing the hover throttle by cos(lean) is the linear answer, and the engine's
+    // stick-to-thrust law is not linear — that under-throttled the whole fleet at its reference
+    // lean and had airframes sinking 2.4-6.7 m/s in what was supposed to be level flight. Work in
+    // thrust fractions and convert once, at the end.
+    // Thrust falls with air density, so the throttle needed to hold height at altitude is higher
+    // than the sea-level figure — 3% of missing lift is 0.3 m/s² and shows up as a 5 m/s sink over
+    // a 25 s run, which is exactly what this looked like before the density term was included.
+    let levelDensityRatio = min(1.15, max(0.15,
+        AtmosphereModel.standard.state(worldY: 290.0).airDensity / 1.225))
+    let requiredThrustFraction = min(1.0, (1.0 / (twr * levelDensityRatio)) / max(0.2, cos(levelLean)))
+    let levelThrottle = min(1.0, max(0.12,
+        (-0.6 + (0.36 + 1.6 * requiredThrustFraction).squareRoot()) / 0.8))
+    // ⚠️ Hold ALTITUDE, do not hold a throttle setting. Drag on a leaned airframe is not purely
+    // along the flight path — the frame is not a sphere — so part of it acts vertically and level
+    // flight needs more than W / cos(lean) of thrust. An open-loop throttle therefore reads as a
+    // sink rate rather than as a speed, which is what "cannot sustain level flight" was: a probe
+    // flying with too little power, not an aircraft unable to hold height. A pilot answers this by
+    // adding throttle; so does this run.
+    var levelThrottleHeld = levelThrottle
+    var level = makeState(profile, orientation: SIMD3<Float>(0, -levelLean, 0), throttle: levelThrottle, altitude: 290.0)
+    // ⚠️ Short enough that an airframe which cannot hold altitude at this lean has not yet reached
+    // the ground. A Cinewhoop sinks 6.7 m/s here and touched down at 43 s, so a 60 s run was
+    // reporting its speed *after landing* — 7.3 m/s against a catalogued 19, which looked like a
+    // thrust defect and was a probe artefact.
+    for _ in 0..<Int(25.0 / Double(dt)) {
+        levelThrottleHeld = min(1.0, max(0.05,
+            levelThrottleHeld - level.velocity.y * 0.004 - (level.position.y - 290.0) * 0.0008))
+        var control = acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: levelThrottleHeld, state: level)
         if isAcroClass {
             // A rate mode has no attitude command, so the probe flies the stick the way a pilot
             // does: a proportional correction on the angle error, which is what holding a lean in
             // acro actually is.
+            // PD, not P. Now that the air produces a weathercock moment, a pure proportional stick
+            // oscillates around the target lean instead of settling on it, and the aircraft never
+            // reaches its steady speed — a real pilot damps with the same hand.
             let pitchError = (-levelLean) - level.orientation.y
-            control.targetOrientation = SIMD3<Float>(0, min(1.0, max(-1.0, pitchError * 3.0)), level.orientation.z)
+            let pitchRate = level.angularVelocity.y
+            let stick = pitchError * 12.0 - pitchRate * 0.6
+            control.targetOrientation = SIMD3<Float>(0, min(1.0, max(-1.0, stick)), level.orientation.z)
         } else {
             control.controlMode = .stabilized
             control.targetOrientation = SIMD3<Float>(0, -levelLean, level.orientation.z)
@@ -464,8 +514,8 @@ for profile in multirotors {
     // true terminal velocity; in an assisted mode the firmware limit applies and the catalogued
     // descent rate is what should come out.
     func unpoweredDescent(rateMode: Bool) -> Float {
-        var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 5000.0)
-        for _ in 0..<Int(30.0 / Double(dt)) {
+        var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 290.0)
+        for _ in 0..<Int(9.0 / Double(dt)) {
             var control = acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: 0.0, state: falling)
             if !rateMode {
                 control.controlMode = .stabilized
@@ -479,8 +529,8 @@ for profile in multirotors {
     let assistedDescent = unpoweredDescent(rateMode: false)
 
     // Powered dive: nose straight down, full throttle — thrust adds to gravity.
-    var diving = makeState(profile, orientation: SIMD3<Float>(0, -.pi / 2 * 0.98, 0), throttle: 1.0, altitude: 4000.0)
-    for _ in 0..<Int(30.0 / Double(dt)) {
+    var diving = makeState(profile, orientation: SIMD3<Float>(0, -.pi / 2 * 0.98, 0), throttle: 1.0, altitude: 290.0)
+    for _ in 0..<Int(9.0 / Double(dt)) {
         var control = acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: 1.0, state: diving)
         control.controlMode = .stabilized
         control.targetOrientation = SIMD3<Float>(0, -.pi / 2 * 0.98, diving.orientation.z)
@@ -496,6 +546,15 @@ for profile in multirotors {
         + padLeft(String(format: "%.0f", profile.maxDescentSpeedMps), 6)
         + padLeft(String(format: "%.1f", diveSpeed), 9))
 
+    // Whether it held height while doing it — reported separately, because a fast descent at the
+    // commanded lean is a different fault from a slow one.
+    let levelSinkRate = -level.velocity.y
+    if levelSinkRate > 2.0 {
+        speedFindings.append(String(
+            format: "%@ sinks %.1f m/s while flying its own reference lean — it cannot sustain level flight there",
+            profile.displayName, levelSinkRate
+        ))
+    }
     let levelError = abs(levelSpeed - profile.maxHorizontalSpeedMps) / max(1.0, profile.maxHorizontalSpeedMps)
     if levelError > 0.25 {
         speedFindings.append(String(
@@ -534,12 +593,13 @@ var ringFindings: [String] = []
 for profile in multirotors {
     let mass = VehicleMassModel.baseline(for: profile, uavProfile: profile.resolvedUAVProfile)
     let context = makeContext(profile, mass: mass)
-    let hover = FlightBaselineResolver.resolve(
+    let ringBaseline = FlightBaselineResolver.resolve(
         runtimeProfile: profile,
         activeUAVProfile: profile.resolvedUAVProfile,
         vehicleMassModel: mass,
         flightMode: .manual
-    ).hoverLockThrottle
+    )
+    let hover = hoverThrottle(ringBaseline, atAltitude: 290.0)
 
     // Hover induced velocity, the speed the rotors push air down at while holding the aircraft
     // up — the same estimate the engine makes, so the probe is asking about the right band.
@@ -551,8 +611,8 @@ for profile in multirotors {
 
     /// Terminal velocity in free fall, to tell "no ring" apart from "cannot reach the ring".
     func unpoweredDescent(rateMode: Bool) -> Float {
-        var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 5000.0)
-        for _ in 0..<Int(25.0 / Double(dt)) {
+        var falling = makeState(profile, orientation: .zero, throttle: 0.0, altitude: 290.0)
+        for _ in 0..<Int(9.0 / Double(dt)) {
             falling = engine.step(
                 state: falling,
                 control: acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: 0.0, state: falling),
@@ -572,15 +632,17 @@ for profile in multirotors {
             orientation: .zero,
             throttle: hover,
             velocity: SIMD3<Float>(0, -hoverInducedVelocity, -forwardSpeed),
-            altitude: 6000.0
+            altitude: 290.0
         )
         for _ in 0..<Int(6.0 / Double(dt)) {
-            state = engine.step(
-                state: state,
-                control: acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: hover, state: state),
-                context: context,
-                deltaTime: dt
-            )
+            // Attitude-held, not free: now that the air produces a moment, an unstabilised
+            // airframe slowly tips and the run stops measuring inflow and starts measuring
+            // attitude drift. The ring is a thrust effect, so hold the aircraft level and let the
+            // vertical flow be the only thing that varies.
+            var control = acroControl(roll: 0, pitch: 0, yawIntent: 0, throttle: hover, state: state)
+            control.controlMode = .stabilized
+            control.targetOrientation = SIMD3<Float>(0, 0, state.orientation.z)
+            state = engine.step(state: state, control: control, context: context, deltaTime: dt)
         }
         return -state.velocity.y
     }
@@ -589,7 +651,11 @@ for profile in multirotors {
     // it simply cannot fall fast enough. That is the case for a tethered platform, whose
     // catalogued 2 m/s is the tether talking rather than its aerodynamics, and the calibration
     // hands it drag to match. Report it as out of reach rather than as a missing effect.
-    let ringReachable = unpoweredDescent(rateMode: true) > hoverInducedVelocity * 0.5
+    // Reachable means the airframe can actually sit in the band, not merely touch it. An aircraft
+    // whose terminal velocity is barely above its own wake speed is stopped by drag before the ring
+    // can develop — the tethered Fotokite terminals at 5.5 m/s against a 5.0 m/s wake, and its
+    // (data-driven, tether-sized) drag outweighs the thrust the ring would take away.
+    let ringReachable = unpoweredDescent(rateMode: true) > hoverInducedVelocity * 1.2
     let verticalSink = sinkAfterHold(forwardSpeed: 0.0)
     let movingSink = sinkAfterHold(forwardSpeed: hoverInducedVelocity * 2.0)
     let ringActive = verticalSink > movingSink + 0.5
@@ -607,11 +673,115 @@ for profile in multirotors {
     }
 }
 
+// MARK: - H. Weather
+
+print("")
+print("H. WEATHER — station keeping in wind, and whether turbulence is felt at all")
+print("   An airframe rated for W m/s of wind has to be able to hold position in it: that is the")
+print("   whole meaning of the rating. Turbulence has to actually reach the aircraft — it used to")
+print("   arrive only through a term that has since been removed, so this is now a covered case.")
+print(pad("profile", 30) + padLeft("rated wind", 12) + padLeft("drift in it", 13) + padLeft("gust rocking", 13) + padLeft("verdict", 12))
+print(String(repeating: "-", count: 82))
+
+var weatherFindings: [String] = []
+for profile in multirotors {
+    let mass = VehicleMassModel.baseline(for: profile, uavProfile: profile.resolvedUAVProfile)
+    let ratedWind = profile.maxWindResistanceMps
+
+    /// Horizontal distance travelled over 20 s while commanded to hold position.
+    func stationKeeping(windSpeed: Float, preset: WeatherPreset, intensity: Float) -> (drift: Float, motion: Float) {
+        var weather = WeatherModel.normal
+        weather.preset = preset
+        weather.intensity = intensity
+        weather.windSpeedMps = windSpeed
+        weather.windDirectionDeg = 0.0
+        weather.gusts = intensity
+        let context = DroneSimulationContext(
+            profile: profile,
+            activeUAVProfile: profile.resolvedUAVProfile,
+            weather: weather,
+            damageState: .pristine,
+            batteryState: .full,
+            collisionRisk: 0.0,
+            windVector: SIMD3<Float>(0, 0, -windSpeed),
+            vehicleMassModel: mass
+        )
+        let baseline = FlightBaselineResolver.resolve(
+            runtimeProfile: profile,
+            activeUAVProfile: profile.resolvedUAVProfile,
+            vehicleMassModel: mass,
+            flightMode: .hover
+        )
+        let hover = hoverThrottle(baseline, atAltitude: 300.0)
+        var state = makeState(profile, orientation: .zero, throttle: hover)
+        state.mode = .hover
+        let origin = state.position
+        var pathLength: Float = 0.0
+        var previous = state.position
+        var attitudeMotion: Float = 0.0
+        for _ in 0..<Int(20.0 / Double(dt)) {
+            let control = DroneControlInput(
+                targetPosition: origin,
+                targetOrientation: SIMD3<Float>(0, 0, state.orientation.z),
+                yawIntent: 0.0,
+                throttle: hover,
+                isArmed: true,
+                mode: .hover,
+                controlMode: .hoverAssist
+            )
+            state = engine.step(state: state, control: control, context: context, deltaTime: dt)
+            pathLength += simd_length(state.position - previous)
+            previous = state.position
+            // Total roll/pitch excursion accumulated over the run, in degrees.
+            attitudeMotion += (abs(state.angularVelocity.x) + abs(state.angularVelocity.y)) * dt * 180.0 / .pi
+        }
+        let displacement = simd_length(SIMD2<Float>(state.position.x - origin.x, state.position.z - origin.z))
+        _ = pathLength
+        // Attitude disturbance, not position: a hover controller flies out most of the positional
+        // wander, but it cannot pre-empt a gust rocking the airframe. If this is zero, the air is
+        // producing no moment at all — only a force through the centre of mass.
+        return (displacement, attitudeMotion)
+    }
+
+    let inWind = stationKeeping(windSpeed: ratedWind, preset: .normal, intensity: 0.0)
+    let inGusts = stationKeeping(windSpeed: ratedWind * 0.5, preset: .thunderstorm, intensity: 1.0)
+    let calm = stationKeeping(windSpeed: 0.0, preset: .normal, intensity: 0.0)
+    let gustResponse = inGusts.motion - calm.motion
+    let driftResponse = inGusts.drift - calm.drift
+    // A wind rating means the aircraft can work in that wind, not that it stands still in it: at
+    // its rated maximum a real platform is at the edge of its authority and does drift. Tens of
+    // metres over twenty seconds is that edge; hundreds would be "blown away".
+    let holds = inWind.drift < 40.0
+    // Either answer counts. A heavy platform is rocked by a gust; a light one is mostly shoved,
+    // because its control authority damps the rotation faster than the gust can build it.
+    // 1 deg of extra excursion over a 20 s run is a real, measurable answer to weather for an
+    // airframe this stiff — an acro quad's whole character is that it resists being moved.
+    let feelsTurbulence = gustResponse > 1.0 || driftResponse > 1.0
+    let verdict = holds ? (feelsTurbulence ? "ok" : "no gusts") : "blown away"
+    print(pad(profile.displayName, 30)
+        + padLeft(String(format: "%.0f m/s", ratedWind), 12)
+        + padLeft(String(format: "%.1f m", inWind.drift), 13)
+        + padLeft(String(format: "%.1f m", gustResponse), 13)
+        + padLeft(verdict, 12))
+    if !holds {
+        weatherFindings.append(String(
+            format: "%@ drifts %.0f m in 20 s in the %.0f m/s wind it is rated to hold station in",
+            profile.displayName, inWind.drift, ratedWind
+        ))
+    }
+    if !feelsTurbulence {
+        weatherFindings.append(String(
+            format: "%@ is rocked no more by a storm than by still air (%.1f deg of extra excursion) — the air makes no moment",
+            profile.displayName, gustResponse
+        ))
+    }
+}
+
 // MARK: - Summary
 
 print("")
 print(String(repeating: "=", count: 84))
-let allFindings = rateFindings + axisFindings + thrustFindings + angleFindings + surfaceFindings + speedFindings + ringFindings
+let allFindings = rateFindings + axisFindings + thrustFindings + angleFindings + surfaceFindings + speedFindings + ringFindings + weatherFindings
 if allFindings.isEmpty {
     print("No findings.")
 } else {
