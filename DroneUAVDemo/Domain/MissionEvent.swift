@@ -81,6 +81,7 @@ enum MissionEventCode: String, Codable, Equatable {
     case payloadActionTriggered
     case payloadActionCompleted
     case diagnosticsCritical
+    case interceptionEvent
 
     var titleKey: String {
         "mission.event.code.\(rawValue)"
@@ -107,6 +108,9 @@ struct MissionEventContext: Codable, Equatable {
     var payloadStateRaw: String?
     var warningReasonRaw: String?
     var noteKey: String?
+    /// The interception mission's own ordered event, carried whole so the timeline entry keeps
+    /// the run ID, the sequence number and the authority that produced it.
+    var interception: InterceptMissionEvent?
 
     static let empty = MissionEventContext(
         projectID: nil,

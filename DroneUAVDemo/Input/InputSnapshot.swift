@@ -5,6 +5,10 @@ struct InputSnapshot {
     var pitch: Double
     var roll: Double
     var throttle: Double
+    /// Non-nil when the source is reporting an absolute throttle setting (0…1) rather than a
+    /// rate to add to the current one. A throttle stick reports this; the keyboard and the
+    /// triggers do not, because a control that springs back to centre cannot mean "idle".
+    var absoluteThrottle: Double?
     var cameraPan: Double
     var cameraTilt: Double
     var uiPointerX: Double

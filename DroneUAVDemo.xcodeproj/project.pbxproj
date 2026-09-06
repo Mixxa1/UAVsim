@@ -272,6 +272,8 @@
 		1000000000000000000002A3 /* UIScrollRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AC /* UIScrollRouter.swift */; };
 		1000000000000000000002A4 /* ControllerHubOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AD /* ControllerHubOverlay.swift */; };
 		1000000000000000000002A5 /* ControllerSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000001AE /* ControllerSettingsStore.swift */; };
+		AD5300000000000000000000 /* ControllerAxisMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5300000000000000000001 /* ControllerAxisMap.swift */; };
+		AD5500000000000000000000 /* ControllerRateProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5500000000000000000001 /* ControllerRateProfile.swift */; };
 		1000000000000000000002AF /* AirframeArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A6 /* AirframeArchitecture.swift */; };
 		1000000000000000000002B0 /* MissionLeg.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A7 /* MissionLeg.swift */; };
 		1000000000000000000002B1 /* MulticopterRouteBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002A8 /* MulticopterRouteBuilder.swift */; };
@@ -384,6 +386,8 @@
 		ACAF00000000000000000001 /* Flag_Blade.usdz in Resources */ = {isa = PBXBuildFile; fileRef = ACAF00000000000000000002 /* Flag_Blade.usdz */; };
 		100000000000000000000A01 /* ManAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A02 /* ManAssetLoader.swift */; };
 		AD5000000000000000000000 /* RaceBuilderPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5000000000000000000001 /* RaceBuilderPanelView.swift */; };
+		AD5100000000000000000000 /* InterceptMissionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5100000000000000000001 /* InterceptMissionPanelView.swift */; };
+		AD5400000000000000000000 /* ControllerAxisSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5400000000000000000001 /* ControllerAxisSettingsView.swift */; };
 		AD4000000000000000000000 /* RaceTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000001 /* RaceTrack.swift */; };
 		AD4000000000000000000002 /* RaceTrackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000003 /* RaceTrackStore.swift */; };
 		AD4000000000000000000004 /* RaceTrackGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000005 /* RaceTrackGenerator.swift */; };
@@ -524,6 +528,14 @@
 		E4DA452F20BA177F7709D69F /* LidarSurfaceClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98E36D74AF6EB000928EFE17 /* LidarSurfaceClass.swift */; };
 		2EC6C01263C7D050CDD47CA1 /* LidarFoliageIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40157DEA5897B2156CC14FC3 /* LidarFoliageIndex.swift */; };
 		CF5A7FA2F1F316ECBD696373 /* LidarRawStreamWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B40C5E52ED7C5C71E5C4E65 /* LidarRawStreamWriter.swift */; };
+		E674A341A2228183E6F622D0 /* InterceptMission.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B1CFDBC9054C9459201686A /* InterceptMission.swift */; };
+		28C31361A7F89D796E65675C /* InterceptMissionRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3107B55159E1F7E3B3ED0CA4 /* InterceptMissionRuntime.swift */; };
+		3999C19918C5F639CAF0963A /* InterceptObservationRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1DBE9287B7D3D83AE541CA /* InterceptObservationRuntime.swift */; };
+		E10A9E38E1388EF799DCA0F3 /* InterceptVehicleRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00B15CCAF2CE71525231B43 /* InterceptVehicleRuntime.swift */; };
+		CAF641E7CBA26659570ACA2D /* InterceptMissionSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D4A7851E1B94ED24399095D /* InterceptMissionSession.swift */; };
+		741C0C9BB6966239D9A58E2A /* VehiclePairContactService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B95881AB4D554AC8255B836 /* VehiclePairContactService.swift */; };
+		AD5200000000000000000000 /* InterceptTargetGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5200000000000000000001 /* InterceptTargetGuidance.swift */; };
+		D7BB5B9FFE84DE90212BE7F9 /* InterceptMissionScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -804,6 +816,8 @@
 		1000000000000000000001AC /* UIScrollRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIScrollRouter.swift; sourceTree = "<group>"; };
 		1000000000000000000001AD /* ControllerHubOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerHubOverlay.swift; sourceTree = "<group>"; };
 		1000000000000000000001AE /* ControllerSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerSettingsStore.swift; sourceTree = "<group>"; };
+		AD5300000000000000000001 /* ControllerAxisMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerAxisMap.swift; sourceTree = "<group>"; };
+		AD5500000000000000000001 /* ControllerRateProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerRateProfile.swift; sourceTree = "<group>"; };
 		1000000000000000000002A6 /* AirframeArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirframeArchitecture.swift; sourceTree = "<group>"; };
 		1000000000000000000002A7 /* MissionLeg.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionLeg.swift; sourceTree = "<group>"; };
 		1000000000000000000002A8 /* MulticopterRouteBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MulticopterRouteBuilder.swift; sourceTree = "<group>"; };
@@ -920,6 +934,8 @@
 		ACAF00000000000000000002 /* Flag_Blade.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/Racing/Flag_Blade.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A02 /* ManAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManAssetLoader.swift; sourceTree = "<group>"; };
 		AD5000000000000000000001 /* RaceBuilderPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceBuilderPanelView.swift; sourceTree = "<group>"; };
+		AD5100000000000000000001 /* InterceptMissionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMissionPanelView.swift; sourceTree = "<group>"; };
+		AD5400000000000000000001 /* ControllerAxisSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerAxisSettingsView.swift; sourceTree = "<group>"; };
 		AD4000000000000000000001 /* RaceTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrack.swift; sourceTree = "<group>"; };
 		AD4000000000000000000003 /* RaceTrackStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackStore.swift; sourceTree = "<group>"; };
 		AD4000000000000000000005 /* RaceTrackGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackGenerator.swift; sourceTree = "<group>"; };
@@ -1057,6 +1073,14 @@
 		98E36D74AF6EB000928EFE17 /* LidarSurfaceClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarSurfaceClass.swift; sourceTree = "<group>"; };
 		40157DEA5897B2156CC14FC3 /* LidarFoliageIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarFoliageIndex.swift; sourceTree = "<group>"; };
 		1B40C5E52ED7C5C71E5C4E65 /* LidarRawStreamWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LidarRawStreamWriter.swift; sourceTree = "<group>"; };
+		9B1CFDBC9054C9459201686A /* InterceptMission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMission.swift; sourceTree = "<group>"; };
+		3107B55159E1F7E3B3ED0CA4 /* InterceptMissionRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMissionRuntime.swift; sourceTree = "<group>"; };
+		7A1DBE9287B7D3D83AE541CA /* InterceptObservationRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptObservationRuntime.swift; sourceTree = "<group>"; };
+		A00B15CCAF2CE71525231B43 /* InterceptVehicleRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptVehicleRuntime.swift; sourceTree = "<group>"; };
+		1D4A7851E1B94ED24399095D /* InterceptMissionSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMissionSession.swift; sourceTree = "<group>"; };
+		5B95881AB4D554AC8255B836 /* VehiclePairContactService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehiclePairContactService.swift; sourceTree = "<group>"; };
+		AD5200000000000000000001 /* InterceptTargetGuidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptTargetGuidance.swift; sourceTree = "<group>"; };
+		C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMissionScene.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1108,6 +1132,7 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				9B1CFDBC9054C9459201686A /* InterceptMission.swift */,
 				A9A000000000000000000001 /* FPV */,
 				A9F000000000000000000001 /* RF */,
 				40157DEA5897B2156CC14FC3 /* LidarFoliageIndex.swift */,
@@ -1299,6 +1324,12 @@
 		100000000000000000000012 /* Simulation */ = {
 			isa = PBXGroup;
 			children = (
+				5B95881AB4D554AC8255B836 /* VehiclePairContactService.swift */,
+				AD5200000000000000000001 /* InterceptTargetGuidance.swift */,
+				1D4A7851E1B94ED24399095D /* InterceptMissionSession.swift */,
+				A00B15CCAF2CE71525231B43 /* InterceptVehicleRuntime.swift */,
+				7A1DBE9287B7D3D83AE541CA /* InterceptObservationRuntime.swift */,
+				3107B55159E1F7E3B3ED0CA4 /* InterceptMissionRuntime.swift */,
 				100000000000000000000122 /* AutoPathPlannerService.swift */,
 				100000000000000000000152 /* AutoNavigationController.swift */,
 				100000000000000000000117 /* BatteryThermalSimulationService.swift */,
@@ -1366,6 +1397,7 @@
 		100000000000000000000013 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
+				C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */,
 				3536A3A22D175347C0EBA163 /* World */,
 				F1000000000000000000000C /* WorkbenchModelBuilder.swift */,
 				10000000000000000000010E /* DroneModelBuilder.swift */,
@@ -1481,6 +1513,8 @@
 				100000000000000000000A0A /* MissionSetupView.swift */,
 				100000000000000000000A0C /* MissionScenarioHUDView.swift */,
 				AD5000000000000000000001 /* RaceBuilderPanelView.swift */,
+				AD5100000000000000000001 /* InterceptMissionPanelView.swift */,
+				AD5400000000000000000001 /* ControllerAxisSettingsView.swift */,
 				100000000000000000000A0E /* PayloadGimbalSliderControls.swift */,
 				100000000000000000000A10 /* SettingsView.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
@@ -1548,6 +1582,8 @@
 				1000000000000000000001A2 /* AutopilotInputProvider.swift */,
 				1000000000000000000001A0 /* GameControllerInputProvider.swift */,
 				1000000000000000000001AE /* ControllerSettingsStore.swift */,
+				AD5300000000000000000001 /* ControllerAxisMap.swift */,
+				AD5500000000000000000001 /* ControllerRateProfile.swift */,
 				1000000000000000000002AD /* InputCaptureCoordinator.swift */,
 				1000000000000000000002AC /* InputBindingsStore.swift */,
 				10000000000000000000019E /* InputManager.swift */,
@@ -1950,6 +1986,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D7BB5B9FFE84DE90212BE7F9 /* InterceptMissionScene.swift in Sources */,
+				741C0C9BB6966239D9A58E2A /* VehiclePairContactService.swift in Sources */,
+				AD5200000000000000000000 /* InterceptTargetGuidance.swift in Sources */,
+				CAF641E7CBA26659570ACA2D /* InterceptMissionSession.swift in Sources */,
+				E10A9E38E1388EF799DCA0F3 /* InterceptVehicleRuntime.swift in Sources */,
+				3999C19918C5F639CAF0963A /* InterceptObservationRuntime.swift in Sources */,
+				28C31361A7F89D796E65675C /* InterceptMissionRuntime.swift in Sources */,
+				E674A341A2228183E6F622D0 /* InterceptMission.swift in Sources */,
 				A9A000000000000000000101 /* FPVOSDModels.swift in Sources */,
 				A9A000000000000000000102 /* MCMFontLoader.swift in Sources */,
 				A9A000000000000000000103 /* FPVOSDRenderer.swift in Sources */,
@@ -2101,6 +2145,8 @@
 				1000000000000000000002A3 /* UIScrollRouter.swift in Sources */,
 				1000000000000000000002A4 /* ControllerHubOverlay.swift in Sources */,
 				1000000000000000000002A5 /* ControllerSettingsStore.swift in Sources */,
+				AD5300000000000000000000 /* ControllerAxisMap.swift in Sources */,
+				AD5500000000000000000000 /* ControllerRateProfile.swift in Sources */,
 				10000000000000000000021B /* TelemetryExportService.swift in Sources */,
 				10000000000000000000021C /* EnvironmentObjectFactory.swift in Sources */,
 				100000000000000000000257 /* EnvironmentProceduralMaterials.swift in Sources */,
@@ -2112,6 +2158,8 @@
 				100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */,
 				100000000000000000000A01 /* ManAssetLoader.swift in Sources */,
 				AD5000000000000000000000 /* RaceBuilderPanelView.swift in Sources */,
+				AD5100000000000000000000 /* InterceptMissionPanelView.swift in Sources */,
+				AD5400000000000000000000 /* ControllerAxisSettingsView.swift in Sources */,
 				AD4000000000000000000000 /* RaceTrack.swift in Sources */,
 				AD4000000000000000000002 /* RaceTrackStore.swift in Sources */,
 				AD4000000000000000000004 /* RaceTrackGenerator.swift in Sources */,

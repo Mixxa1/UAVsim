@@ -56,6 +56,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     videoSection
+                    controlsSection
                     resolutionSection
                     audioSection
                     languageSection
@@ -92,6 +93,15 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .background(Color.white.opacity(0.04))
+    }
+
+    /// Sticks, rates and the throttle curve. Lives here rather than behind its own main-menu
+    /// button: it is a setting like graphics or audio, and it is also reachable mid-flight from
+    /// the key-bindings screen — both edit the one shared store.
+    private var controlsSection: some View {
+        sectionCard(titleKey: "settings.section.controls") {
+            ControllerAxisSettingsView(store: .shared)
+        }
     }
 
     private var videoSection: some View {

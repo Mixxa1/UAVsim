@@ -291,6 +291,19 @@ struct SignalInterferencePresentation: Equatable {
     var isInteractionBlocking: Bool {
         state.isInteractionBlocking
     }
+
+    /// Nothing to show. Used where another system has taken over the message about the link — a
+    /// mission that owns its own feed overlay, for instance.
+    static let clear = SignalInterferencePresentation(
+        state: .normal,
+        countdownText: nil,
+        intensity: 0,
+        warningTitle: nil,
+        warningDetail: nil,
+        lostTitle: nil,
+        lostMessage: nil,
+        recoveryButtonTitle: nil
+    )
 }
 
 private enum CollisionAftermathState: String {
@@ -856,6 +869,25 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var simulationLaunchConfiguration: SimulationLaunchConfiguration?
     // Mission scenario (SAR) runtime state, surfaced for the in-sim HUD.
     @Published private(set) var missionScenarioObjectiveState: MissionScenarioObjectiveState?
+    /// Attached-payload interception. Everything the mission's HUD is allowed to see, republished
+    /// a few times a second rather than every physics tick.
+    @Published private(set) var interceptHUD = InterceptMissionHUDState()
+    private var interceptSession: InterceptMissionSession?
+    private var interceptScene: InterceptMissionScene?
+    /// Ordered idempotency for the run's event log; rebuilt on every restart.
+    private var interceptEventGate: InterceptEventGate?
+    /// The player's undamaged radio layout, captured once at launch so the per-tick damage
+    /// adapter has something to apply itself to without rebuilding the whole configuration.
+    private var interceptBaseRFConfiguration: RFSystemConfiguration?
+    /// Cached line-of-sight answers, keyed by call sign. Raycasts are sampled, not run per frame.
+    private var interceptLineOfSight: [String: Bool] = [:]
+    private var interceptLineOfSightAccumulator: Float = 0
+    private var interceptHUDAccumulator: Float = 0
+    private static let interceptHUDInterval: Float = 0.1
+    private static let interceptLineOfSightInterval: Float = 0.2
+    /// Height above the local ground at which an aeroplane target transits. Clear of the treeline
+    /// by a wide margin: the mission is an interception in open air, not an obstacle course.
+    private static let interceptTransitAltitude: Float = 110
     @Published private(set) var missionScenarioRemainingSeconds: Double = 0.0
     @Published private(set) var missionScenarioDetectionProgress: Double = 0.0
     @Published private(set) var fireResponseObjectiveState: FireResponseObjectiveState?
@@ -924,7 +956,8 @@ final class DroneSimulationViewModel: ObservableObject {
         return AnalogVideoRFMapper().parameters(for: evaluation)
     }
     var digitalVideoParameters: DigitalVideoParameters {
-        guard let state = rfVideoPresentationState, state.mode == .digital else { return .clean }
+        let state = activeVideoPresentationState
+        guard state.mode == .digital else { return .clean }
         return DigitalVideoRFMapper().parameters(
             for: state,
             nominalBitrateBPS: activeVideoNominalBitrateBPS,
@@ -932,7 +965,8 @@ final class DroneSimulationViewModel: ObservableObject {
         )
     }
     var fiberVideoParameters: FiberVideoParameters {
-        guard let state = rfVideoPresentationState, state.mode == .fiber else { return .clean }
+        let state = activeVideoPresentationState
+        guard state.mode == .fiber else { return .clean }
         return FiberVideoRFMapper().parameters(for: state)
     }
     @Published private(set) var fpvFontPreset: FPVFontPreset = {
@@ -993,7 +1027,6 @@ final class DroneSimulationViewModel: ObservableObject {
     @Published private(set) var activeInputSourceKind: InputSourceKind?
     @Published private(set) var activeGameControllerName: String?
     @Published private(set) var connectedGameControllers: [GameControllerDeviceSummary] = []
-    @Published private(set) var gameControllerRightStickHorizontalMode: GameControllerRightStickHorizontalMode = .yawLeftRight
     @Published private(set) var isControllerCursorEnabled: Bool = false
     @Published private(set) var isControllerHubVisible: Bool = false
     @Published var controllerHubSection: ControllerHubSection = .connectedDevices
@@ -1432,6 +1465,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var signalInterferencePresentation: SignalInterferencePresentation {
+        // The mission's source-specific overlay owns VIDEO loss. A failure of the player's
+        // CONTROL receiver must not cover an independent observer's working feed.
+        if suppressesLinkLossOverlay { return .clear }
         let intensity: Double
         switch signalState {
         case .normal:
@@ -1583,7 +1619,8 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var activeFPVVideoMode: RFVideoTransmissionMode {
-        (rfSystemManager?.configuration ?? resolvedRFConfiguration())
+        if isObservingRemoteInterceptFeed, let source = interceptSession?.observation.active { return source.video.mode }
+        return (rfSystemManager?.configuration ?? resolvedRFConfiguration())
             .logicalLinks.video?.videoMode ?? .digital
     }
 
@@ -1600,6 +1637,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     var activeVideoPresentationState: RFVideoPresentationState {
+        if isObservingRemoteInterceptFeed, let source = interceptSession?.observation.active { return source.video }
         if let state = rfVideoPresentationState, state.mode == activeFPVVideoMode {
             return state
         }
@@ -3297,6 +3335,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func stopRuntimeForExit() {
+        clearInterceptMission()
         simulationTimer?.invalidate()
         simulationTimer = nil
         keyboardInputService.stop()
@@ -3354,8 +3393,11 @@ final class DroneSimulationViewModel: ObservableObject {
             #endif
         }
 
-        // v1.4: record start time for collision grace period.
-        onlineTrialStartedAt = Date().timeIntervalSince1970
+        // v1.4: record start time for collision grace period. Monotonic, because the only thing
+        // it is ever compared against is the tick's own `CACurrentMediaTime()` — stamping it with
+        // wall-clock time left the difference around −1.7e9 s, permanently inside the grace
+        // window, which silently disabled local collision reporting for the whole trial.
+        onlineTrialStartedAt = CACurrentMediaTime()
 
         if context.isLocalSpectator {
             isToolPanelVisible = false
@@ -4264,6 +4306,10 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func reset() {
+        // An interception run belongs to the aircraft being respawned: its actors, effects and
+        // event ledger go with it. `restartInterceptMission()` puts a fresh one back afterwards
+        // without regenerating the world around it.
+        clearInterceptMission()
         ensureSimulationRunning()
         clearMissionPlan()
         clearTargetMarker()
@@ -4418,6 +4464,10 @@ final class DroneSimulationViewModel: ObservableObject {
         telemetryExporter.append(snapshot: telemetry)
         hasUnsavedChanges = true
         emitLaunchDiagnostics(context: "reset")
+        // The interception run was torn down at the top of this method along with the aircraft it
+        // belonged to. Now that the world and the spawn point are settled again, put a fresh one
+        // back — same terrain, same weather, same clock, new run ID.
+        rebuildInterceptMissionAfterReset()
     }
 
     func recoverSignal() {
@@ -6156,10 +6206,63 @@ final class DroneSimulationViewModel: ObservableObject {
         }
     }
 
-    func setGameControllerRightStickHorizontalMode(_ mode: GameControllerRightStickHorizontalMode) {
-        gameControllerInputProvider.setRightStickHorizontalMode(mode)
-        refreshGameControllerPresentation(force: true)
+    // MARK: - Controller axes
+
+    /// Which physical axis flies what. Republished so the settings screen redraws when it changes.
+    var controllerAxisMap: ControllerAxisMap { gameControllerInputProvider.settingsStore.axisMap }
+
+    func setControllerAxisBinding(_ binding: ControllerAxisBinding, for function: ControllerAxisFunction) {
+        gameControllerInputProvider.settingsStore.setAxisBinding(binding, for: function)
+        objectWillChange.send()
     }
+
+    /// Applies a transmitter layout to the four flight axes. Everything the operator tuned by hand
+    /// — expo, deadzone, camera and cursor — is left alone.
+    func applyControllerStickMode(_ mode: ControllerStickMode) {
+        gameControllerInputProvider.settingsStore.applyStickMode(mode)
+        objectWillChange.send()
+    }
+
+    func setControllerThrottleMode(_ mode: ControllerThrottleMode) {
+        gameControllerInputProvider.settingsStore.setThrottleMode(mode)
+        objectWillChange.send()
+    }
+
+    func resetControllerAxisMap() {
+        gameControllerInputProvider.settingsStore.resetAxisMap()
+        objectWillChange.send()
+    }
+
+    /// One line describing the current stick layout, for the controller hub.
+    var controllerStickLayoutSummary: String {
+        switch controllerAxisMap.stickMode {
+        case .mode1: return "Mode 1"
+        case .mode2: return "Mode 2"
+        case .mode3: return "Mode 3"
+        case .mode4: return "Mode 4"
+        case .custom: return "Custom"
+        }
+    }
+
+    /// What a given stick actually does right now, read from the map rather than assumed.
+    func controllerAxisSummary(for vertical: ControllerAxisSource, and horizontal: ControllerAxisSource) -> String {
+        func name(_ source: ControllerAxisSource) -> String {
+            let map = controllerAxisMap
+            guard let function = ControllerAxisFunction.allCases
+                .first(where: { map.binding(for: $0).source == source }) else { return "—" }
+            switch function {
+            case .throttle: return "throttle"
+            case .yaw: return "yaw"
+            case .pitch: return "pitch"
+            case .roll: return "roll"
+            case .cameraPan: return "camera pan"
+            case .cameraTilt: return "camera tilt"
+            case .cursorX, .cursorY: return "cursor"
+            }
+        }
+        return "vertical: \(name(vertical)) · horizontal: \(name(horizontal))"
+    }
+
 
     func handlePointerLook(deltaX: Float, deltaY: Float) {
         noteUserInteraction()
@@ -6978,6 +7081,8 @@ final class DroneSimulationViewModel: ObservableObject {
         // before the still-pending debounced regen (scheduled above) fires, so this terrain
         // mutation rides along with the others into the same regeneration pass.
         switch params.kind {
+        case .attachedPayloadIntercept:
+            bootstrapInterceptMission(config: config, dock: dock)
         case .searchAndRescue:
             let placement = MissionScenarioPlacement.generate(
                 parameters: params,
@@ -7058,6 +7163,377 @@ final class DroneSimulationViewModel: ObservableObject {
                 setRaceTrackBuilder(active: true)
             }
         }
+    }
+
+    // MARK: - Mission scenario (Attached-payload interception)
+
+    /// Identifies the feed currently on screen. The render coordinator keys its pipeline reset on
+    /// this string, so it has to change exactly when the source does — and the run ID is part of
+    /// it so a restart is a different feed even if the call sign is the same.
+    var observationSourceIdentity: String {
+        guard let session = interceptSession else { return "player" }
+        return "\(session.director.runID)/\(session.observation.activeVehicleID)/\(session.observation.revision)"
+    }
+
+    /// True while the operator is watching an aircraft that is not theirs. The FPV lens
+    /// distortion and the sensor/ISP pass describe the player's own camera and must not be
+    /// stamped onto somebody else's picture.
+    var isObservingRemoteInterceptFeed: Bool {
+        interceptSession?.observation.isObservingRemoteSource == true
+    }
+
+    /// The control-link overlay stays out of the way for the whole run: video loss here is a
+    /// property of the source being watched, and the operator may well be watching an independent
+    /// observer with a perfectly good picture while their own receiver is gone.
+    /// `InterceptFeedOverlayView` says what happened to the feed instead.
+    var suppressesLinkLossOverlay: Bool { interceptSession != nil }
+
+    // MARK: Operator actions
+
+    /// Declares an approach. Closing to attempt range does the same thing on its own — this is
+    /// how the operator says so early, and gets an attempt in the log for a run they set up
+    /// deliberately rather than one the geometry noticed for them.
+    func beginInterceptAttempt() {
+        guard let session = interceptSession else { return }
+        session.director.beginAttempt(vehicles: session.snapshots(player: state))
+        publishInterceptHUD()
+    }
+
+    func abortInterceptAttempt() {
+        guard let session = interceptSession else { return }
+        session.director.abortAttempt(vehicles: session.snapshots(player: state))
+        publishInterceptHUD()
+    }
+
+    /// Manual source selection. Refuses a source that has no usable picture rather than showing
+    /// a black viewport, and never moves the aircraft the camera is bolted to.
+    func selectInterceptObservation(_ vehicleID: String) {
+        guard let session = interceptSession, session.observation.select(vehicleID) else { return }
+        session.director.record(.observationSource(vehicleID))
+        synchronizeInterceptCamera()
+        publishInterceptHUD()
+    }
+
+    /// Starts the run again without rebuilding the world around it: same terrain, same weather,
+    /// same clock, fresh mission. Everything belonging to the previous run — actors, effects,
+    /// debris, payload state, the event ledger and the log — goes with it.
+    func restartInterceptMission() {
+        guard activeMissionScenarioKind == .attachedPayloadIntercept else { return }
+        reset()
+    }
+
+    /// Called at the end of every `reset()`. An interception mission is part of the run being
+    /// restarted, so respawning the aircraft — by the panel's button or by the operator's own
+    /// reset key — reinstates the mission rather than quietly leaving the world empty.
+    private func rebuildInterceptMissionAfterReset() {
+        guard let config = missionScenarioConfiguration,
+              config.parameters.kind == .attachedPayloadIntercept,
+              didBootstrapMissionScenario else { return }
+        bootstrapInterceptMission(config: config, dock: sceneController.currentDockSpawnPoint())
+    }
+
+    // MARK: Lifecycle
+
+    private func bootstrapInterceptMission(config: MissionScenarioConfiguration, dock: SIMD3<Float>) {
+        clearInterceptMission()
+
+        var settings = config.interception ?? .make(difficulty: config.parameters.difficulty)
+        settings.timeLimit = config.parameters.timeLimitSeconds
+        // The escape boundary has to fit inside the world the mission is actually flown in,
+        // whatever the setup screen asked for.
+        settings.areaRadius = min(settings.areaRadius, terrain.worldHalfExtent * 0.8)
+        settings = settings.validated
+
+        let adapter = InterceptMissionScene(scene: scene, showsCallsigns: config.parameters.difficulty != .hard)
+        let catalogue = LIPODroneModelRepository().allProfiles
+        let targetProfile = interceptProfile(settings.targetProfileID, in: catalogue, allowingFixedWing: true)
+        // An aeroplane is not a hovering target parked next to the dock: it enters the area on a
+        // transit, above the treeline, and crosses it. It therefore starts further out, higher,
+        // and pointed at the middle of the area rather than away from it.
+        let isTransitingTarget = targetProfile.airframeClass == .fixedWing
+        let targetOffset = isTransitingTarget
+            ? SIMD3<Float>(0, Self.interceptTransitAltitude, -settings.areaRadius * 0.7)
+            : settings.targetOffset
+        let targetCourse = isTransitingTarget ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(0, 0, -1)
+
+        let target = adapter.makeActor(
+            id: InterceptCallsign.target,
+            role: .target,
+            profile: targetProfile,
+            position: interceptSpawn(dock: dock, offset: targetOffset),
+            payload: interceptTargetPayload(settings: settings),
+            seed: config.parameters.seed &+ 101,
+            initialCourse: targetCourse
+        )
+        target.cruiseSpeedScale = settings.targetAgility
+        let observer = adapter.makeActor(
+            id: InterceptCallsign.observer,
+            role: .observer,
+            profile: interceptProfile(settings.observerProfileID, in: catalogue, allowingFixedWing: false),
+            position: interceptSpawn(dock: dock, offset: settings.observerOffset),
+            payload: nil,
+            seed: config.parameters.seed &+ 202
+        )
+        interceptScene = adapter
+
+        let session = InterceptMissionSession(configuration: settings, target: target, observer: observer, origin: dock)
+        // Nothing is mounted, so there is nothing to spend on contact. The run is still flyable —
+        // it just cannot be won, and the HUD says why from the first frame.
+        if payloadState != .attached { session.playerPayload.state = .inert }
+        interceptSession = session
+        interceptEventGate = InterceptEventGate(runID: session.director.runID, authorityID: session.director.authorityID)
+        interceptBaseRFConfiguration = resolvedRFConfiguration()
+
+        missionTimeline = missionEventRecorder.beginSession(
+            projectID: settings.missionID,
+            projectName: NSLocalizedString("intercept.title", comment: ""),
+            missionPlanID: session.director.runID
+        )
+        setCameraMode(.fpv)
+        adapter.update(session, deltaTime: 0)
+        publishInterceptHUD()
+    }
+
+    /// The mission's aircraft are picked from the multirotor catalogue; an unknown or empty ID
+    /// falls back to the generic abstract airframe rather than failing the launch.
+    private func interceptProfile(
+        _ id: String,
+        in catalogue: [DroneModelProfile],
+        allowingFixedWing: Bool
+    ) -> DroneModelProfile {
+        // The observer has to hold a station, so it is always a rotorcraft. The target may be
+        // either, and only an aeroplane with real wing parameters can be flown by the route
+        // follower — one without them would fall out of the sky on the first tick.
+        func isEligible(_ profile: DroneModelProfile) -> Bool {
+            switch profile.airframeClass {
+            case .multirotor: return true
+            case .fixedWing: return allowingFixedWing && profile.fixedWingParameters != nil
+            default: return false
+            }
+        }
+        return catalogue.first { $0.id == id && isEligible($0) }
+            ?? catalogue.first { $0.airframeClass == .multirotor }
+            ?? LIPODroneModelRepository.abstractProfile(from: .default)
+    }
+
+    /// Spawn offsets are given relative to the dock, with y above the local ground — so an actor
+    /// placed over a hill starts above the hill, not inside it.
+    private func interceptSpawn(dock: SIMD3<Float>, offset: SIMD3<Float>) -> SIMD3<Float> {
+        var point = dock + offset
+        let ground = sceneController.supportSurfaceHeight(
+            at: SIMD2<Float>(point.x, point.z),
+            clearanceRadius: 1,
+            maximumHeight: .greatestFiniteMagnitude
+        ) ?? dock.y
+        point.y = max(point.y, ground + offset.y)
+        return point
+    }
+
+    private func interceptTargetPayload(settings: InterceptMissionConfiguration) -> AttachedPayloadComponent? {
+        guard settings.targetCarriesPayload else { return nil }
+        return AttachedPayloadComponent(
+            ownerVehicleID: InterceptCallsign.target,
+            state: settings.targetPayloadInert ? .inert : .armedByMission,
+            profile: settings.payloadProfile,
+            triggerPolicy: .ownerCritical,
+            secondary: true,
+            visualModelID: "sensorModule"
+        )
+    }
+
+    private func clearInterceptMission() {
+        sceneController.observationPointOfView = nil
+        interceptScene?.clear()
+        interceptScene = nil
+        interceptSession = nil
+        interceptEventGate = nil
+        interceptBaseRFConfiguration = nil
+        interceptHUDAccumulator = 0
+        interceptLineOfSightAccumulator = 0
+        interceptLineOfSight = [:]
+        interceptHUD = InterceptMissionHUDState()
+    }
+
+    // MARK: Per-tick
+
+    /// Runs the mission's own world: the two actors' flight, and every vehicle-to-vehicle contact
+    /// including the player's. Called from inside the physics step, so the player's aircraft is
+    /// still mid-tick and its impacts go through the app's normal consequences afterwards.
+    private func simulateInterceptWorld(previousState: DroneState, deltaTime: Float) {
+        guard let session = interceptSession else { return }
+        let reports = session.simulate(
+            deltaTime: deltaTime,
+            playerPrevious: previousState,
+            player: &state,
+            playerGraph: &componentGraph,
+            playerContacts: vehicleContactProfile,
+            playerClass: selectedDroneProfile.airframeClass,
+            weather: weather,
+            wind: weather.windVector,
+            ground: { [sceneController] position, radius in
+                sceneController.supportSurfaceHeight(
+                    at: SIMD2<Float>(position.x, position.z),
+                    clearanceRadius: radius,
+                    maximumHeight: position.y + radius
+                ) ?? 0
+            },
+            obstacles: { [sceneController] from, to, margin in
+                sceneController.nearbyEnvironmentObstacles(from: from, to: to, margin: margin)
+            }
+        )
+        for report in reports { applyImpactConsequences(report) }
+        if !reports.isEmpty { refreshDamagePhysicsModels() }
+    }
+
+    /// The scenario half of the tick: radios, observation sources, rules, log, HUD. Runs after
+    /// the physics step so everything it reads has already been resolved.
+    private func updateInterceptMission(deltaTime: Float) {
+        guard let session = interceptSession else { return }
+        interceptScene?.update(session, deltaTime: deltaTime)
+        refreshInterceptLineOfSight(session: session, deltaTime: deltaTime)
+
+        // The target is flown and damaged like any other actor, but it is not one of the
+        // operator's screens — so it neither runs a link budget nor registers as a source. Only
+        // the player's aircraft and the observers do.
+        for actor in session.actors where actor.role == .observer {
+            actor.updateRadio(
+                deltaTime: deltaTime,
+                now: session.worldTime,
+                home: homePosition,
+                environment: currentRFEnvironmentContext(),
+                path: { [sceneController] query, pose in
+                    sceneController.rfPathContext(for: query, aircraftPose: pose)
+                }
+            )
+            let camera = interceptScene?.camera(for: actor.id)
+            session.observation.register(InterceptObservationSource(
+                vehicleID: actor.id,
+                role: actor.role,
+                position: camera?.simdWorldPosition ?? actor.state.position,
+                orientation: camera?.simdWorldOrientation ?? actor.state.attitudeQuat,
+                video: actor.video,
+                hasLineOfSight: interceptLineOfSight[actor.id] ?? false,
+                cameraFunctional: InterceptRFDamageAdapter.cameraFactor(graph: actor.graph, failures: actor.failures) > 0.05,
+                controlRSSIDBm: actor.controlEvaluation?.rf.receivedPowerDBm,
+                controlLQ: actor.controlEvaluation.map { linkQualityPercent(for: $0) }
+            ))
+        }
+        let playerControl = rfLinkEvaluations[.control]
+        session.observation.register(InterceptObservationSource(
+            vehicleID: InterceptCallsign.attacker,
+            role: .attacker,
+            position: state.position,
+            orientation: state.attitudeQuat,
+            video: rfVideoPresentationState ?? .unavailable(mode: activeFPVVideoMode),
+            hasLineOfSight: true,
+            cameraFunctional: InterceptRFDamageAdapter.cameraFactor(graph: componentGraph, failures: componentFailureRuntime) > 0.05,
+            controlRSSIDBm: playerControl?.rf.receivedPowerDBm,
+            controlLQ: playerControl.map { linkQualityPercent(for: $0) }
+        ))
+
+        let previousSource = session.observation.activeVehicleID
+        session.assess(
+            deltaTime: deltaTime,
+            player: state,
+            graph: componentGraph,
+            targetVisible: interceptLineOfSight[InterceptCallsign.attacker] ?? false
+        )
+        if previousSource != session.observation.activeVehicleID { synchronizeInterceptCamera() }
+
+        let events = session.drainEvents()
+        recordInterceptEvents(events)
+        interceptHUDAccumulator += deltaTime
+        if interceptHUDAccumulator >= Self.interceptHUDInterval || !events.isEmpty {
+            interceptHUDAccumulator = 0
+            publishInterceptHUD()
+        }
+    }
+
+    /// Line of sight is a scene raycast, and three of them per physics tick is a cost the stage
+    /// plan explicitly does not want. Neither an observer's view of a target nor an operator's
+    /// sight picture changes meaningfully between two frames, so it is sampled a few times a
+    /// second and cached.
+    private func refreshInterceptLineOfSight(session: InterceptMissionSession, deltaTime: Float) {
+        interceptLineOfSightAccumulator += deltaTime
+        guard interceptLineOfSightAccumulator >= Self.interceptLineOfSightInterval || interceptLineOfSight.isEmpty else { return }
+        interceptLineOfSightAccumulator = 0
+        let target = session.target.state.position
+        interceptLineOfSight[InterceptCallsign.attacker] = sceneController.isLineOfSightClearToMissionTarget(
+            from: state.position,
+            to: target
+        )
+        for actor in session.actors where actor.role == .observer {
+            let eye = interceptScene?.camera(for: actor.id)?.simdWorldPosition ?? actor.state.position
+            interceptLineOfSight[actor.id] = sceneController.isLineOfSightClearToMissionTarget(from: eye, to: target)
+        }
+    }
+
+    /// Writes the run's events into the mission timeline, once each. The gate — not the
+    /// timeline's own 256-entry window — is what makes that true: an event that has scrolled off
+    /// the end of the log is still an event that already happened.
+    private func recordInterceptEvents(_ events: [InterceptMissionEvent]) {
+        guard !events.isEmpty else { return }
+        let records = events.compactMap { event -> MissionEvent? in
+            guard interceptEventGate?.accept(event) == true else { return nil }
+            var context = MissionEventContext.empty
+            context.interception = event
+            return MissionEvent(
+                id: event.id,
+                missionID: event.runID,
+                category: .execution,
+                severity: event.kind.severity,
+                code: .interceptionEvent,
+                detailKey: event.kind.detailKey,
+                context: context
+            )
+        }
+        guard !records.isEmpty else { return }
+        missionTimeline = missionEventRecorder.record(contentsOf: records)
+    }
+
+    private func synchronizeInterceptCamera() {
+        guard let session = interceptSession else { return }
+        let isRemote = session.observation.isObservingRemoteSource
+        sceneController.observationPointOfView = isRemote
+            ? interceptScene?.camera(for: session.observation.activeVehicleID)
+            : nil
+        // A handoff is a change of picture, so the operator has to be looking at the picture for
+        // it to mean anything. Returning to their own aircraft leaves the camera where it is.
+        if isRemote { setCameraMode(.fpv) }
+    }
+
+    private func publishInterceptHUD() {
+        guard let session = interceptSession else { return }
+        let value = InterceptMissionHUDState(
+            phase: session.director.phase,
+            observationPhase: session.observation.phase,
+            sourceID: session.observation.activeVehicleID,
+            remaining: session.director.remaining,
+            attempts: session.director.attempts.count,
+            maximumAttempts: session.director.configuration.maximumAttempts,
+            payloadState: session.playerPayload.state,
+            targetState: session.target.snapshot.functionalState,
+            distance: simd_distance(state.position, session.target.state.position),
+            canAttempt: session.director.canBeginAttempt(vehicles: session.snapshots(player: state)),
+            observerAvailable: session.observation.observerCanConfirm,
+            result: session.director.result,
+            sourceRSSIDBm: session.observation.active?.controlRSSIDBm,
+            sourceLinkQuality: session.observation.active?.controlLQ,
+            isSourceFrozen: session.observation.active?.video.isFrozen ?? false,
+            sourceAltitude: session.observation.active?.position.y ?? state.position.y,
+            sourceToTargetRange: simd_distance(
+                session.observation.active?.position ?? state.position,
+                session.target.state.position
+            ),
+            sourceHasTargetInView: session.observation.active?.hasLineOfSight ?? false,
+            hidesRanges: session.director.configuration.hidesRangeReadouts
+        )
+        if interceptHUD != value { interceptHUD = value }
+    }
+
+    /// Link quality as the OSD reports it: the share of packets that are still arriving.
+    private func linkQualityPercent(for evaluation: RFLinkEvaluation) -> Int {
+        Int(max(0, min(100, (1 - evaluation.quality.packetLoss) * 100)))
     }
 
     // MARK: - Mission scenario (Drone racing)
@@ -7793,7 +8269,10 @@ final class DroneSimulationViewModel: ObservableObject {
         //     remote replicas stay smooth between 30 Hz full ticks.
         //   • stopRendering=true (minimized/hidden): skip-ticks do nothing but TX rate-check;
         //     full tick (5 Hz) handles cleanup, interpolation, and scene apply.
-        if performancePolicy.isThrottled {
+        // The interception mission opts out: two independently integrated actors, their contacts
+        // and their radios are a running world, not a paused one, and dropping to a 5 Hz tick
+        // makes their flight and their collisions unfaithful rather than merely coarse.
+        if performancePolicy.isThrottled, interceptSession == nil {
             backgroundTickSkipCounter += 1
             if backgroundTickSkipCounter < performancePolicy.backgroundTickDivisor {
                 if onlineRuntimeContext != nil {
@@ -7925,7 +8404,10 @@ final class DroneSimulationViewModel: ObservableObject {
         simulationTime += dt
         advanceWorldClock(bySimulatedSeconds: Double(dt))
 
-        let blocksSimulationForSignalLoss = signalState.isInteractionBlocking &&
+        // Losing the picture never freezes an interception run. The target keeps flying, the
+        // observer keeps watching, and the assessment keeps counting down — which is exactly the
+        // situation the handoff exists to cover.
+        let blocksSimulationForSignalLoss = interceptSession == nil && signalState.isInteractionBlocking &&
             signalLossCause != .impactDamage
         if blocksSimulationForSignalLoss {
             syncMissionDeliveryState(triggerAutoRelease: false)
@@ -8637,6 +9119,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 deltaTime: dt
             )
         }
+        simulateInterceptWorld(previousState: previousState, deltaTime: dt)
         enforceComponentFunctionalState()
 
         if needsCollisionAnalysisRefresh {
@@ -8798,6 +9281,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
         syncPayloadLifecycleEvents()
         updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
+        updateInterceptMission(deltaTime: dt)
         updateFireResponseRuntime(deltaTime: TimeInterval(dt))
         updateAgriSprayRuntime(deltaTime: TimeInterval(dt))
         updateRaceRuntime(deltaTime: TimeInterval(dt))
@@ -8941,6 +9425,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// actually took out the radio/flight controller
     /// (`evaluateImpactInternalFailures`).
     private func applyImpactConsequences(_ report: ImpactReport) {
+        // Vehicle-to-vehicle contacts were already normalised into mission impacts by the session
+        // that resolved them; only terrain and environment hits arrive here needing one.
+        if report.obstacleSource != InterceptContactSource.vehicle { interceptSession?.recordEnvironment(report) }
         applyImpactAudio(report)
         let wasAlreadyDamaged = recordedPhysicalImpactCount > 0
         lastCollisionSource = report.obstacleSource ?? lastCollisionSource
@@ -9834,6 +10321,20 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
+        // The interception mission's own aircraft. They are locally simulated rather than
+        // networked, so the mixer hears them through the same one-loop-per-aircraft path as a
+        // wingman: full state available, no inference needed beyond an aeroplane's shaft speed.
+        for actor in interceptSession?.actors ?? [] {
+            sources.append(RemoteVehicleAudioSource(
+                id: actor.audioID,
+                profile: actor.audioProfile,
+                worldPosition: actor.state.position,
+                worldVelocity: actor.state.velocity,
+                isRunning: actor.state.armState == .armed && actor.state.physicalState != .crashed,
+                shaftSpeedRadPerSec: actor.audioShaftSpeedRadPerSec
+            ))
+        }
+
         for remote in onlineInterpolatedRemoteStates {
             // A snapshot that stopped arriving is an aircraft that is no longer there. Sounding
             // a frozen replica is worse than silence: it is a machine hovering in place with a
@@ -10432,7 +10933,10 @@ final class DroneSimulationViewModel: ObservableObject {
             componentGraph.component(id: id) != nil && componentGraph.integrity(id: id) <= 0.001
         }
 
-        if !radioAvailable, signalLossCause == nil {
+        // In an interception run a dead radio is not a latched "signal lost" state either: the
+        // link budget already carries the damage (see `InterceptRFDamageAdapter`), and latching
+        // here would take control away before the mission could resolve what happened.
+        if !radioAvailable, signalLossCause == nil, interceptSession == nil {
             signalLossCause = .impactDamage
             damageEventRecorder.record(
                 timestamp: TimeInterval(simulationTime),
@@ -11584,8 +12088,16 @@ final class DroneSimulationViewModel: ObservableObject {
         updateControlValues({ values in
             values.y = (values.y + Double(climb)).clamped(to: 0.0...maxAltitude)
 
-            let verticalThrottleDelta = Double(effectiveAxis.vertical) * (effectiveAxis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
-            values.throttle = (values.throttle + verticalThrottleDelta).clamped(to: 0.0...1.0)
+            // A throttle stick commands a setting; a key or a trigger commands a change to it.
+            // Integrating a stick would mean the aircraft climbing for as long as the stick was
+            // held forward, which is not what any transmitter does and not what the operator's
+            // hand expects.
+            if let commanded = effectiveAxis.absoluteThrottle {
+                values.throttle = Double(commanded).clamped(to: 0.0...1.0)
+            } else {
+                let verticalThrottleDelta = Double(effectiveAxis.vertical) * (effectiveAxis.speedBoost ? 0.40 : 0.26) * Double(deltaTime)
+                values.throttle = (values.throttle + verticalThrottleDelta).clamped(to: 0.0...1.0)
+            }
             values.yaw = Double(state.orientation.z.radiansToDegrees)
 
             switch effectiveControlMode {
@@ -17958,6 +18470,7 @@ final class DroneSimulationViewModel: ObservableObject {
             pitch: snapshot.pitch,
             roll: snapshot.roll,
             throttle: snapshot.throttle,
+            absoluteThrottle: snapshot.absoluteThrottle,
             cameraPan: snapshot.cameraPan,
             cameraTilt: snapshot.cameraTilt,
             uiPointerX: snapshot.uiPointerX,
@@ -17996,10 +18509,6 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
-        let nextRightStickMode = gameControllerInputProvider.currentRightStickHorizontalMode
-        if force || gameControllerRightStickHorizontalMode != nextRightStickMode {
-            gameControllerRightStickHorizontalMode = nextRightStickMode
-        }
 
         if nextControllers.isEmpty {
             syncControllerInteractionMode()
@@ -28638,6 +29147,19 @@ final class DroneSimulationViewModel: ObservableObject {
                 return
             }
             rfSystemManager = RFSystemManager(configuration: configuration)
+        }
+        // The interception mission is the one place the player's own radio degrades gradually
+        // with the airframe rather than switching off when a component dies: a wrecked camera or
+        // a battered antenna has to move RSSI/LQ through the existing propagation model, because
+        // that is what eventually produces NO SIGNAL and the handoff. The undamaged layout is
+        // cached at launch so this is an adapter pass, not a full rebuild, every tick.
+        if let base = interceptBaseRFConfiguration, var manager = rfSystemManager {
+            manager.configuration = InterceptRFDamageAdapter.configuration(
+                base: base,
+                graph: componentGraph,
+                failures: componentFailureRuntime
+            )
+            rfSystemManager = manager
         }
         guard let manager = rfSystemManager else { return }
 

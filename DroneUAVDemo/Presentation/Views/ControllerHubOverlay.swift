@@ -228,11 +228,11 @@ struct ControllerHubOverlay: View {
             subtitle: "Current routing for flight controls and UI mode."
         ) {
             VStack(spacing: 10) {
-                profileRow(title: "Left Stick", value: "Flight movement in flight; cursor movement when the controller cursor is visible.")
-                profileRow(
-                    title: "Right Stick",
-                    value: "\(viewModel.gameControllerRightStickHorizontalMode.title) in flight; vertical panel scroll in UI."
-                )
+                // Read from the axis map rather than described in prose: the operator can rebind
+                // every one of these, so a fixed sentence here would be a lie the moment they did.
+                profileRow(title: "Stick layout", value: viewModel.controllerStickLayoutSummary)
+                profileRow(title: "Left Stick", value: viewModel.controllerAxisSummary(for: .leftStickY, and: .leftStickX))
+                profileRow(title: "Right Stick", value: viewModel.controllerAxisSummary(for: .rightStickY, and: .rightStickX))
                 profileRow(title: "Confirm", value: settingsStore.binding(for: .confirm).title)
                 profileRow(title: "Cancel", value: settingsStore.binding(for: .cancel).title)
                 profileRow(title: "Toggle Cursor", value: settingsStore.binding(for: .toggleCursor).title)

@@ -37,6 +37,7 @@ struct FlightInputState {
             forward: Float(controlState.pitch),
             strafe: Float(controlState.roll),
             vertical: Float(controlState.throttle),
+            absoluteThrottle: controlState.absoluteThrottle.map(Float.init),
             speedBoost: controlState.boostMode
         )
     }

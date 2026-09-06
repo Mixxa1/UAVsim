@@ -18,6 +18,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
 
     private let transport: LANSessionTransport
     private var sharedEventSequenceNumber: UInt64 = 0
+    private var sharedEventLedger = OnlineSharedEventLedger()
     // P2P v1.2: host deduplication — pairKey → last accepted timestamp.
     private var recentEventPairKeys: [String: TimeInterval] = [:]
     private let sharedEventPairCooldownSeconds: TimeInterval = 2.0
@@ -211,10 +212,8 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         launchDescriptor = nil
         shouldOpenTrialRuntime = false
         remoteSnapshotState = OnlineRemoteVehicleSnapshotState()
-        sharedEvents = []
-        onlineDamageState = OnlineVehicleDamageState()
+        resetSharedEventState()
         onlineDiagnostics = OnlineRuntimeNetworkDiagnostics()
-        recentEventPairKeys = [:]
         pendingPingID = nil
         pendingPingSentAt = nil
         state = .idle
@@ -268,9 +267,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         #endif
 
         // v1.4: reset per-trial state so no damage or events carry over from previous trial.
-        sharedEvents = []
-        onlineDamageState = OnlineVehicleDamageState()
-        recentEventPairKeys = [:]
+        resetSharedEventState()
 
         state.trialPhase = .launching
         applyLaunchDescriptor(descriptor)
@@ -367,7 +364,10 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
 
         case .sharedEvent:
             // P2P v1.2: host receives owner-reported event, orders/deduplicates, relays to all.
-            if let event = message.sharedEvent {
+            // A participant may only report as itself: the reporter named inside the payload has
+            // to be the peer the message actually arrived from, or one client could invent damage
+            // on another's behalf.
+            if let event = message.sharedEvent, event.reporterParticipantID == message.senderID {
                 acceptAndBroadcastSharedEvent(event)
             }
 
@@ -409,9 +409,7 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             print("[LAN][CLIENT] localParticipant in descriptor: \(localInDescriptor)")
             #endif
             // v1.4: clear per-trial state before entering runtime.
-            sharedEvents = []
-            onlineDamageState = OnlineVehicleDamageState()
-            recentEventPairKeys = [:]
+            resetSharedEventState()
             applyLaunchDescriptor(descriptor)
             state.connectionState = .connected
             state.trialPhase = .running
@@ -449,8 +447,10 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
             }
 
         case .sharedEvent:
-            // P2P v1.2: clients receive host-ordered events and apply them directly.
-            if let event = message.sharedEvent {
+            // P2P v1.2: clients receive host-ordered events and apply them directly — but only
+            // from the host. Ordering and sequence numbers are the host's to assign, so an event
+            // arriving straight from a peer has not been through them.
+            if let event = message.sharedEvent, message.senderID == launchDescriptor?.hostParticipantID {
                 applySharedEvent(event)
             }
 
@@ -581,10 +581,29 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
         }
     }
 
+    /// Everything belonging to one trial's shared-event stream. Called on teardown and before
+    /// every trial on both sides, so a sequence number, a ledger entry or a damage record from a
+    /// previous trial can never be mistaken for this one's.
+    private func resetSharedEventState() {
+        sharedEvents = []
+        sharedEventLedger = OnlineSharedEventLedger()
+        sharedEventSequenceNumber = 0
+        onlineDamageState = OnlineVehicleDamageState()
+        recentEventPairKeys = [:]
+    }
+
     // Host-only: assigns sequence number, deduplicates, applies locally, and broadcasts.
     private func acceptAndBroadcastSharedEvent(_ event: OnlineSharedEvent) {
         guard state.localParticipant?.isHost == true,
-              let hostID = state.localParticipant?.id else { return }
+              let hostID = state.localParticipant?.id,
+              let descriptor = launchDescriptor,
+              event.sessionID == descriptor.id,
+              !sharedEventLedger.contains(event.id) else { return }
+        if event.reporterParticipantID != hostID {
+            guard let assignment = descriptor.assignment(for: event.reporterParticipantID),
+                  let vehicleID = assignment.vehicleID,
+                  event.reporterObjectID == vehicleID else { return }
+        }
 
         // Dedup by pairKey + cooldown.
         let now = Date().timeIntervalSince1970
@@ -612,7 +631,8 @@ final class LANSessionViewModel: ObservableObject, OnlineTrialSnapshotTransport,
 
     // All participants (host + clients) apply accepted shared events.
     func applySharedEvent(_ event: OnlineSharedEvent) {
-        guard !sharedEvents.contains(where: { $0.id == event.id }) else { return }
+        guard let runID = launchDescriptor?.id,
+              sharedEventLedger.accept(event, activeRunID: runID) else { return }
         onlineDiagnostics.sharedEventReceivedCount += 1
 
         sharedEvents.append(event)

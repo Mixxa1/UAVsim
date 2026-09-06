@@ -63,6 +63,8 @@ struct OnlineSharedEvent: Identifiable, Codable, Equatable {
     var result: OnlineSharedEventResult
     var participants: [OnlineSharedEventParticipant]
     var note: String?
+    /// Resolved independently by the authority; legacy events retain their shared result.
+    var vehicleResults: [String: OnlineSharedEventResult]? = nil
 
     init(
         id: UUID = UUID(),
@@ -103,4 +105,26 @@ struct OnlineSharedEvent: Identifiable, Codable, Equatable {
             p.objectKind == .vehicle ? p.objectID : p.ownerVehicleID
         }
     }
+}
+
+/// Session-long deduplication for shared events.
+///
+/// Deliberately independent of the events list the UI keeps: that list is trimmed for display,
+/// and an event that has scrolled out of it is still an event that already happened. Checking
+/// against the visible history instead is how the same collision gets applied twice.
+struct OnlineSharedEventLedger {
+    private var eventIDs: Set<UUID> = []
+
+    /// Accepts an event exactly once, and only if it belongs to the trial currently running, has
+    /// been ordered by the host, and carries a usable position.
+    mutating func accept(_ event: OnlineSharedEvent, activeRunID: UUID) -> Bool {
+        guard event.sessionID == activeRunID,
+              event.sequenceNumber > 0,
+              event.positionX.isFinite,
+              event.positionY.isFinite,
+              event.positionZ.isFinite else { return false }
+        return eventIDs.insert(event.id).inserted
+    }
+
+    func contains(_ id: UUID) -> Bool { eventIDs.contains(id) }
 }

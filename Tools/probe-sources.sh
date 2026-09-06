@@ -24,5 +24,7 @@ done
   find DroneUAVDemo/Domain DroneUAVDemo/Simulation -name '*.swift' "${FIND_ARGS[@]}"
   find DroneUAVDemo/Input \( -name 'ResolvedControlState.swift' \
     -o -name 'KeyboardInputService.swift' \
-    -o -name 'InputSourceKind.swift' \)
+    -o -name 'InputSourceKind.swift' \
+    -o -name 'ControllerAxisMap.swift' \
+    -o -name 'ControllerRateProfile.swift' \)
 } | sort -u

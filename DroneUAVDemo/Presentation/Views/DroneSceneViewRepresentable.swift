@@ -34,6 +34,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
     private var fpvPipelineActive = false
     private var postProcessingRequired = false
     private var pipelineRevision: UInt64 = 0
+    private var observationSourceIdentity = "player"
     private var fpvVideoMode: RFVideoTransmissionMode?
     private var videoPresentationState: RFVideoPresentationState?
     private var fpvOSDState: FPVOSDState?
@@ -113,6 +114,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
 
     @MainActor
     fileprivate func configureFPVPipeline(
+        sourceIdentity: String,
         mode: RFVideoTransmissionMode,
         presentationState: RFVideoPresentationState,
         osdState: FPVOSDState?,
@@ -142,8 +144,10 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         // Only a different camera restarts the exposure loop. Keying this on the whole parameter
         // block meant every zoom step and every lens toggle reset the gain to 1 and let the loop
         // converge again from scratch, which is what the second-long flashes were.
-        let cameraChanged = self.fpvSensorParameters?.cameraIdentity != fpvSensorParameters?.cameraIdentity
-        let pipelineChanged = fpvVideoMode != mode
+        let sourceChanged = observationSourceIdentity != sourceIdentity
+        observationSourceIdentity = sourceIdentity
+        let cameraChanged = sourceChanged || self.fpvSensorParameters?.cameraIdentity != fpvSensorParameters?.cameraIdentity
+        let pipelineChanged = sourceChanged || fpvVideoMode != mode
             || postProcessingRequired != nextPostProcessingRequired
         if pipelineChanged {
             pipelineRevision &+= 1
@@ -829,6 +833,10 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
     var usesBuilderMouseLook: Bool = false
     /// The installed VIDEO logical link is the sole selector for the presentation processor.
     var fpvVideoMode: RFVideoTransmissionMode? = nil
+    /// Which aircraft's camera the feed is coming from. A change means a different physical
+    /// camera, so the exposure loop and the video processor start over instead of carrying the
+    /// previous one's state across the cut.
+    var observationSourceIdentity: String = "player"
     var fpvVideoPresentationState: RFVideoPresentationState? = nil
     /// Non-nil only for analog. The glyph grid is composited into the NTSC processor's RGB input.
     var analogFPVOSDState: FPVOSDState? = nil
@@ -947,6 +955,7 @@ struct DroneSceneViewRepresentable: NSViewRepresentable {
                 guard coordinator.fpvFontAtlas != nil else { return }
             }
             coordinator.configureFPVPipeline(
+                sourceIdentity: observationSourceIdentity,
                 mode: mode,
                 presentationState: presentationState,
                 osdState: analogFPVOSDState,

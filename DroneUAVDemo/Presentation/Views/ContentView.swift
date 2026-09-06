@@ -1519,6 +1519,24 @@ struct ContentView: View {
                                     .allowsHitTesting(false)
                             }
 
+                            if viewModel.activeMissionScenarioKind == .attachedPayloadIntercept {
+                                InterceptFeedOverlayView(
+                                    state: viewModel.interceptHUD,
+                                    isFeedCamera: viewModel.cameraConfiguration.mode == .fpv,
+                                    onSelectObserver: {
+                                        viewModel.selectInterceptObservation(InterceptCallsign.observer)
+                                    }
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                                HStack {
+                                    Spacer()
+                                    InterceptMissionPanelView(viewModel: viewModel)
+                                        .padding(.trailing, 16)
+                                        .padding(.top, 12)
+                                }
+                            }
+
                             if viewModel.isRaceBuilderActive {
                                 HStack {
                                     Spacer()

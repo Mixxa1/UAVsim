@@ -3306,3 +3306,215 @@
 "payload.stations.show_feed" = "Show feed";
 "payload.stations.on_air" = "On air";
 "payload.stations.feed_hint" = "The payload camera view shows the station marked on air — switch to it with the payload optics camera.";
+
+/* Attached-payload interception mission */
+"intercept.title" = "Attached payload interception";
+"intercept.subtitle" = "Moving target, physical contact and an independent observer";
+"intercept.payload.hint" = "The module stays mounted. A miss preserves it; its configured effect can occur once.";
+
+/* Setup */
+"intercept.setup.briefing" = "Mission area %.0f m · acquisition %.0f m";
+"intercept.setup.attempts_unlimited" = "No approach limit. What ends the run is the aircraft, the module or the clock.";
+"intercept.setup.attempts_limited" = "Three approaches. Running out of them ends the mission.";
+"intercept.target.behavior" = "Target behavior";
+"intercept.target.profile" = "Target aircraft";
+"intercept.observer.profile" = "Observer aircraft";
+"intercept.target.payload" = "Target carries a module";
+"intercept.target.inert" = "Target module is inert";
+"intercept.target.inert.hint" = "An inert module produces no secondary effect, whatever happens to the target.";
+"intercept.effect.profile" = "Module effect";
+"intercept.effect.contactOnly" = "Contact only";
+"intercept.effect.equipmentDisruption" = "Equipment disruption";
+"intercept.confirmation" = "Confirmation";
+"intercept.confirmation.authoritativeWorld" = "World state";
+"intercept.confirmation.observerRequired" = "Observer";
+"intercept.confirmation.authoritativeWorld.hint" = "The resolved state of the target is enough to close the mission.";
+"intercept.confirmation.observerRequired.hint" = "An observer with a working camera and line of sight has to see the result. Without one the mission fails on the assessment timeout.";
+"intercept.behavior.routeFollower" = "Follow route";
+"intercept.behavior.evasiveBasic" = "Vary course and altitude";
+"intercept.behavior.escapeBoundary" = "Leave mission area";
+"intercept.behavior.damagedRecovery" = "Attempt hover after damage";
+
+/* HUD */
+"intercept.hud.range" = "%.0f m";
+"intercept.hud.attempts" = "Approaches: %lld";
+"intercept.hud.attempts_limited" = "Approaches: %lld / %lld";
+"intercept.hud.score" = "%lld pts";
+"intercept.success" = "Mission completed";
+"intercept.failure" = "Mission failed";
+
+/* Panel */
+"intercept.panel.title" = "Interception";
+"intercept.panel.source" = "Observation source";
+"intercept.panel.hint" = "An approach also starts by itself once you close on the target while armed. The observer becomes selectable while its camera and link are working.";
+"intercept.begin" = "Begin approach";
+"intercept.abort" = "Abort approach";
+"intercept.restart" = "Restart mission";
+
+/* Feed */
+"intercept.feed.handoff" = "SWITCHING SOURCE";
+"intercept.feed.no_observer" = "No observer with a working camera and a clear view of the target.";
+
+/* Outcome */
+"intercept.result.targetNeutralized" = "Target is confirmed disabled or destroyed";
+"intercept.result.attackerLost" = "Player aircraft lost before target neutralization";
+"intercept.result.targetEscaped" = "Target left the mission area";
+"intercept.result.timeExpired" = "Mission time expired";
+"intercept.result.assessmentExpired" = "Result could not be confirmed in time";
+"intercept.result.attemptsExhausted" = "Approach limit reached";
+"intercept.result.payloadUnavailable" = "Attached module is unavailable";
+
+/* Phases */
+"intercept.phase.idle" = "Idle";
+"intercept.phase.preparing" = "Preparing world";
+"intercept.phase.acquiringTarget" = "Acquire target";
+"intercept.phase.intercepting" = "Approach target";
+"intercept.phase.attackRun" = "Approach in progress";
+"intercept.phase.reattack" = "Another approach available";
+"intercept.phase.impactResolution" = "Resolving contact";
+"intercept.phase.assessingResult" = "Assessing result";
+"intercept.phase.completed" = "Completed";
+"intercept.phase.failed" = "Failed";
+
+/* Observation */
+"intercept.observation.watchingAttacker" = "Your aircraft's camera";
+"intercept.observation.attackerLinkDegrading" = "Video link degrading";
+"intercept.observation.noSignal" = "No image from the current source";
+"intercept.observation.observationHandoff" = "Switching to the observer";
+"intercept.observation.watchingObserver" = "Observer's camera";
+"intercept.observation.unavailable" = "No image, and no observer available yet";
+
+/* Module state */
+"intercept.payload.attachedReady" = "Module ready";
+"intercept.payload.armedByMission" = "Module ready";
+"intercept.payload.contactTriggered" = "Module triggered";
+"intercept.payload.degraded" = "Module damaged";
+"intercept.payload.inert" = "Module inert";
+"intercept.payload.consumed" = "Module spent";
+"intercept.payload.destroyed" = "Module lost";
+
+/* Target state */
+"intercept.target.nominal" = "Target operational";
+"intercept.target.damaged" = "Target damaged";
+"intercept.target.degraded" = "Target degraded";
+"intercept.target.uncontrolled" = "Target uncontrolled";
+"intercept.target.disabled" = "Target disabled";
+"intercept.target.destroyed" = "Target destroyed";
+"intercept.target.crashed" = "Target crashed";
+
+/* Mission log */
+"mission.event.code.interceptionEvent" = "Interception";
+"mission.event.detail.interceptionEvent" = "Interception event";
+"intercept.log.phase.idle" = "Mission idle";
+"intercept.log.phase.preparing" = "Preparing the world";
+"intercept.log.phase.acquiringTarget" = "Acquiring the target";
+"intercept.log.phase.intercepting" = "Closing on the target";
+"intercept.log.phase.attackRun" = "Approach under way";
+"intercept.log.phase.reattack" = "Ready for another approach";
+"intercept.log.phase.impactResolution" = "Resolving the contact";
+"intercept.log.phase.assessingResult" = "Assessing the result";
+"intercept.log.phase.completed" = "Mission completed";
+"intercept.log.phase.failed" = "Mission failed";
+"intercept.log.attempt_started" = "Approach started";
+"intercept.log.attempt.miss" = "Approach ended without contact";
+"intercept.log.attempt.contact" = "Approach ended in contact";
+"intercept.log.attempt.aborted" = "Approach aborted";
+"intercept.log.attempt.attackerLost" = "Approach ended with the aircraft lost";
+"intercept.log.impact.vehicle" = "Aircraft-to-aircraft contact";
+"intercept.log.impact.terrain" = "Terrain impact";
+"intercept.log.impact.environment" = "Environment impact";
+"intercept.log.vehicle.nominal" = "Aircraft operational";
+"intercept.log.vehicle.damaged" = "Aircraft damaged";
+"intercept.log.vehicle.degraded" = "Aircraft degraded";
+"intercept.log.vehicle.uncontrolled" = "Aircraft uncontrolled";
+"intercept.log.vehicle.disabled" = "Aircraft disabled";
+"intercept.log.vehicle.destroyed" = "Aircraft destroyed";
+"intercept.log.vehicle.crashed" = "Aircraft crashed";
+"intercept.log.payload.attachedReady" = "Module ready";
+"intercept.log.payload.armedByMission" = "Module ready";
+"intercept.log.payload.contactTriggered" = "Module triggered on contact";
+"intercept.log.payload.degraded" = "Module damaged";
+"intercept.log.payload.inert" = "Module inert";
+"intercept.log.payload.consumed" = "Module spent";
+"intercept.log.payload.destroyed" = "Module lost";
+"intercept.log.video_lost" = "Video link lost";
+"intercept.log.observation_source" = "Observation source changed";
+"intercept.log.effect.contact" = "Contact effect";
+"intercept.log.effect.smoke" = "Smoke";
+"intercept.log.effect.fire" = "Fire";
+"intercept.log.effect.secondary" = "Secondary module effect";
+"intercept.log.result.success" = "Mission completed";
+"intercept.log.result.failure" = "Mission failed";
+
+/* Interception: aircraft classes and feed */
+"intercept.setup.class.multirotor" = "rotorcraft";
+"intercept.setup.class.fixed_wing" = "aeroplane";
+"intercept.setup.fixed_wing.hint" = "An aeroplane target transits the area at about 110 m, well above the treeline, and cannot hover — it has to be met on a crossing or head-on pass.";
+"intercept.feed.switch_to" = "Watch from %@";
+"intercept.feed.degrading" = "LINK DEGRADING";
+"intercept.feed.no_image" = "NO IMAGE";
+"intercept.feed.lost_from" = "Video downlink from %@ lost after the contact.";
+"intercept.feed.handoff_to" = "Observation is moving to %@.";
+"intercept.feed.observer_title" = "OBSERVATION";
+"intercept.feed.tracking" = "TARGET IN VIEW";
+"intercept.feed.searching" = "TARGET OBSCURED";
+"intercept.feed.altitude" = "ALT %.0f m";
+"intercept.feed.range" = "RNG %.0f m";
+"intercept.setup.hide_ranges" = "Hide distance readouts";
+"intercept.setup.hide_ranges.hint" = "Removes every range and altitude figure from the mission's overlays. Closure is judged by eye.";
+"mission.setup.aircraft.change" = "Change";
+"mission.setup.aircraft.done" = "Done";
+"controls.menu.entry" = "Controls";
+"common.close" = "Close";
+"controls.section.layout" = "Stick layout";
+"controls.section.rates" = "Rates";
+"controls.section.throttle" = "Throttle";
+"controls.section.axes" = "Axes";
+"controls.reset" = "Reset";
+"controls.conflict" = "Two flight axes are on the same physical stick — the aircraft cannot be flown like that.";
+"controls.mode1.summary" = "Mode 1 — left: pitch and yaw, right: throttle and roll.";
+"controls.mode2.summary" = "Mode 2 — left: throttle and yaw, right: pitch and roll.";
+"controls.mode3.summary" = "Mode 3 — left: pitch and roll, right: throttle and yaw.";
+"controls.mode4.summary" = "Mode 4 — left: throttle and roll, right: pitch and yaw.";
+"controls.mode.custom.summary" = "Custom layout.";
+"controls.axis.roll" = "Roll";
+"controls.axis.pitch" = "Pitch";
+"controls.axis.yaw" = "Yaw";
+"controls.axis.invert" = "Invert";
+"controls.axis.deadzone" = "Dead zone";
+"controls.rates.sensitivity" = "Sensitivity";
+"controls.rates.super" = "Super rate";
+"controls.rates.expo" = "Expo";
+"controls.rates.half_stick" = "At half stick";
+"controls.rates.calm" = "Calm";
+"controls.rates.standard" = "Standard";
+"controls.rates.sharp" = "Sharp";
+"controls.rates.plot_caption" = "Stick position against commanded rate.";
+"controls.rates.hint" = "Sensitivity is a share of the aircraft's own maximum rate at full stick — an airframe cannot be given authority its motors do not have, so 1.00 means everything it has. Super rate keeps the middle of the travel soft and puts the sharpness at the ends; expo softens the centre without changing what full stick does.";
+"controls.throttle.absolute" = "Stick position";
+"controls.throttle.rate" = "Increment";
+"controls.throttle.mid" = "Mid point";
+"controls.throttle.expo" = "Expo";
+"controls.throttle.idle" = "Idle";
+"controls.throttle.hint" = "«Stick position» is what a transmitter does: bottom is zero, top is full. «Increment» is what the keyboard does — the axis adds to and subtracts from the current setting, and it applies on its own whenever throttle is not on a stick. Put the mid point at the hover throttle and the stick becomes fine where it matters.";
+"controls.function.throttle" = "Throttle";
+"controls.function.yaw" = "Yaw";
+"controls.function.pitch" = "Pitch";
+"controls.function.roll" = "Roll";
+"controls.function.cameraPan" = "Camera pan";
+"controls.function.cameraTilt" = "Camera tilt";
+"controls.function.cursorX" = "Cursor X";
+"controls.function.cursorY" = "Cursor Y";
+"controls.source.none" = "Unassigned";
+"controls.source.leftStickX" = "Left stick, horizontal";
+"controls.source.leftStickY" = "Left stick, vertical";
+"controls.source.rightStickX" = "Right stick, horizontal";
+"controls.source.rightStickY" = "Right stick, vertical";
+"controls.source.leftTrigger" = "Left trigger";
+"controls.source.rightTrigger" = "Right trigger";
+"controls.source.triggerPair" = "Triggers (RT − LT)";
+"controls.source.shoulderPair" = "Bumpers (RB − LB)";
+"controls.source.dpadX" = "D-pad, horizontal";
+"controls.source.dpadY" = "D-pad, vertical";
+"settings.section.controls" = "Controls";
+"mission.setup.uav.payload_too_heavy" = "Cannot carry the selected payload.";

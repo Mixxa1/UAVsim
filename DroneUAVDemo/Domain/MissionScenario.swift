@@ -9,6 +9,7 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
     case fireResponse
     case agriculturalSpraying
     case droneRacing
+    case attachedPayloadIntercept
 
     var id: String { rawValue }
 
@@ -22,6 +23,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "mission.scenario.agricultural_spraying.title"
         case .droneRacing:
             return "mission.scenario.drone_racing.title"
+        case .attachedPayloadIntercept:
+            return "intercept.title"
         }
     }
 
@@ -35,6 +38,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "mission.scenario.agricultural_spraying.subtitle"
         case .droneRacing:
             return "mission.scenario.drone_racing.subtitle"
+        case .attachedPayloadIntercept:
+            return "intercept.subtitle"
         }
     }
 
@@ -48,12 +53,20 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "leaf.fill"
         case .droneRacing:
             return "flag.checkered.2.crossed"
+        case .attachedPayloadIntercept:
+            return "scope"
         }
     }
 
     /// Payload types whose camera can accomplish this scenario's detection objective.
     var compatiblePayloads: [PayloadType] {
         switch self {
+        case .attachedPayloadIntercept:
+            // Not a camera choice: this *is* the attached module the aircraft carries into
+            // contact. Both are inert boxes as far as the payload system is concerned — the
+            // effect they produce belongs to the mission's `AttachedPayloadProfile`, not to the
+            // hardware — and neither is launched at anything.
+            return [.sensorModule, .cargoBox]
         case .searchAndRescue:
             return [.thermalCamera, .cameraGimbal]
         case .fireResponse:
@@ -370,6 +383,7 @@ struct MissionScenarioConfiguration: Equatable {
     /// and build one", which is a legitimate way to enter the racing scenario.
     var raceTrack: RaceTrack?
     var raceMode: RaceMode = .timed
+    var interception: InterceptMissionConfiguration? = nil
 }
 
 // MARK: - Derived placement (computed at launch from parameters + world)

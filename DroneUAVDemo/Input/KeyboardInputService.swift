@@ -4,10 +4,13 @@ import Foundation
 struct KeyboardAxisInput {
     var forward: Float
     var strafe: Float
+    /// Throttle as a *rate*: how fast the setting is being moved, not where it is.
     var vertical: Float
+    /// Throttle as a *position*, 0…1, when the source has one. A throttle stick does.
+    var absoluteThrottle: Float?
     var speedBoost: Bool
 
-    static let zero = KeyboardAxisInput(forward: 0.0, strafe: 0.0, vertical: 0.0, speedBoost: false)
+    static let zero = KeyboardAxisInput(forward: 0.0, strafe: 0.0, vertical: 0.0, absoluteThrottle: nil, speedBoost: false)
 }
 
 struct KeyboardYawInput {
@@ -577,6 +580,8 @@ final class KeyboardInputService: KeyboardInputProviding {
             forward: forward,
             strafe: strafe,
             vertical: vertical,
+            // A key is held or it is not; there is no throttle position to report.
+            absoluteThrottle: nil,
             speedBoost: speedBoost
         )
     }

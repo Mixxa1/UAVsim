@@ -247,7 +247,10 @@ struct PayloadStationsView: View {
                 .font(.system(size: 9).monospaced())
                 .foregroundStyle(GroundControlPalette.textSecondary)
                 HStack(spacing: 4) {
-                    Text(LocalizedStringKey("camera.spectrum.\(module.spectrum.rawValue)"))
+                    // A LocalizedStringKey built from an interpolated literal becomes the format key
+                    // "camera.spectrum.%@" and never resolves; the String initialiser looks up the
+                    // key that was actually written.
+                    Text(LocalizedStringKey("camera.spectrum." + module.spectrum.rawValue))
                         .font(.system(size: 9))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                     // A hybrid turret carries more than one sensor, and which ones it has decides

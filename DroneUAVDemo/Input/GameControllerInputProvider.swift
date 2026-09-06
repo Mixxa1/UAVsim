@@ -12,52 +12,32 @@ struct GameControllerDeviceSummary: Identifiable, Equatable {
     let isActive: Bool
 }
 
-enum GameControllerRightStickHorizontalMode: String, CaseIterable, Identifiable {
-    case yawLeftRight
-    case cameraPan
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .yawLeftRight:
-            return "Yaw (J / L)"
-        case .cameraPan:
-            return "Camera pan"
-        }
-    }
-}
-
 final class GameControllerInputProvider: InputProvider {
     private enum Mapping {
         static let stickDeadzone: Float = 0.04
         static let triggerDeadzone: Float = 0.02
     }
 
-    private enum Persistence {
-        static let rightStickHorizontalModeKey = "input.gamecontroller.rightStickHorizontalMode.v1"
-    }
-
     let sourceKind: InputSourceKind = .gameController
     var isEnabled: Bool = true
 
     private let userDefaults: UserDefaults
-    private let settingsStore: ControllerSettingsStore
+    /// Button and axis bindings. Exposed so the settings screen edits the same store the
+    /// provider reads, rather than a copy that has to be pushed back in.
+    let settingsStore: ControllerSettingsStore
     private var activeController: GCController?
     private var previousButtonStates: [InputAction: Bool] = [:]
     private var snapshot: InputSnapshot = .neutral(source: .gameController)
-    private var rightStickHorizontalMode: GameControllerRightStickHorizontalMode
 
     private var connectObserver: Any?
     private var disconnectObserver: Any?
 
     init(
         userDefaults: UserDefaults = .standard,
-        settingsStore: ControllerSettingsStore = ControllerSettingsStore()
+        settingsStore: ControllerSettingsStore = .shared
     ) {
         self.userDefaults = userDefaults
         self.settingsStore = settingsStore
-        self.rightStickHorizontalMode = Self.loadRightStickHorizontalMode(from: userDefaults)
         selectInitialController()
         registerControllerObservers()
     }
@@ -90,41 +70,51 @@ final class GameControllerInputProvider: InputProvider {
         let actions = risingEdgeActions(from: currentButtons)
         previousButtonStates = currentButtons
 
-        let roll = normalizedSignedAxis(gamepad.leftThumbstick.xAxis.value)
-        let pitch = normalizedSignedAxis(gamepad.leftThumbstick.yAxis.value)
-        let rightStickX = normalizedSignedAxis(gamepad.rightThumbstick.xAxis.value)
-        let rightStickY = -normalizedSignedAxis(gamepad.rightThumbstick.yAxis.value)
+        // Every flight axis comes from the operator's map. Nothing here decides that the left
+        // stick is roll: the map does, and it defaults to Mode 2 — left stick throttle and yaw,
+        // right stick pitch and roll.
+        let map = settingsStore.axisMap
+        // The binding says where the number comes from; the rate profile says what it is worth.
+        let rates = settingsStore.rateProfile
+        let throttle = value(of: .throttle, in: map, on: gamepad)
+        let yawFromStick = rates.yaw.command(value(of: .yaw, in: map, on: gamepad))
+        // The shoulders stay a yaw trim regardless of the map, because they are how anyone
+        // without a second stick yaws at all. They add to the bound axis rather than replacing it.
         let shoulderYaw = normalizedSignedAxis(gamepad.leftShoulder.value) - normalizedSignedAxis(gamepad.rightShoulder.value)
-        let yaw = min(
-            1.0,
-            max(
-                -1.0,
-                shoulderYaw + (rightStickHorizontalMode == .yawLeftRight ? rightStickX : 0.0)
-            )
-        )
-        let throttleUp = normalizedTrigger(gamepad.rightTrigger.value)
-        let throttleDown = normalizedTrigger(gamepad.leftTrigger.value)
-        let cameraPan = rightStickHorizontalMode == .cameraPan ? rightStickX : 0.0
-        let cameraTilt = rightStickY
-        let uiPointerX = normalizedSignedAxis(gamepad.leftThumbstick.xAxis.value)
-        let uiPointerY = -normalizedSignedAxis(gamepad.leftThumbstick.yAxis.value)
-        let uiScrollX = rightStickX
-        let uiScrollY = rightStickY
+        let yaw = min(1.0, max(-1.0, yawFromStick + Double(shoulderYaw)))
+        let pitch = rates.pitch.command(value(of: .pitch, in: map, on: gamepad))
+        let roll = rates.roll.command(value(of: .roll, in: map, on: gamepad))
+        let cameraPan = value(of: .cameraPan, in: map, on: gamepad)
+        let cameraTilt = value(of: .cameraTilt, in: map, on: gamepad)
+
+        // The UI pointer has its own axes. Sharing the flight stick meant the cursor drifted
+        // across the screen for as long as the aircraft was being flown, and settled onto
+        // whatever the drift happened to point at.
+        let uiPointerX = value(of: .cursorX, in: map, on: gamepad)
+        let uiPointerY = value(of: .cursorY, in: map, on: gamepad)
+        let uiScrollX = uiPointerX
+        let uiScrollY = uiPointerY
         let boostMode = false
         let precisionMode = false
         let isHoseSprayHeld = false
 
         let nextSnapshot = InputSnapshot(
-            yaw: Double(yaw),
-            pitch: Double(pitch),
-            roll: Double(roll),
-            throttle: Double(throttleUp - throttleDown),
-            cameraPan: Double(cameraPan),
-            cameraTilt: Double(cameraTilt),
-            uiPointerX: Double(uiPointerX),
-            uiPointerY: Double(uiPointerY),
-            uiScrollX: Double(uiScrollX),
-            uiScrollY: Double(uiScrollY),
+            yaw: yaw,
+            pitch: pitch,
+            roll: roll,
+            throttle: throttle,
+            // A throttle on a stick *is* the setting, not a nudge to it. On the triggers, or on
+            // anything else that springs back to centre, it stays a rate the way the keyboard's
+            // has always been.
+            absoluteThrottle: map.throttleMode == .absolute && map.binding(for: .throttle).source.isStick
+                ? rates.throttle.shaped((throttle + 1) / 2)
+                : nil,
+            cameraPan: cameraPan,
+            cameraTilt: cameraTilt,
+            uiPointerX: uiPointerX,
+            uiPointerY: uiPointerY,
+            uiScrollX: uiScrollX,
+            uiScrollY: uiScrollY,
             precisionMode: precisionMode,
             boostMode: boostMode,
             isHoseSprayHeld: isHoseSprayHeld,
@@ -144,10 +134,6 @@ final class GameControllerInputProvider: InputProvider {
         snapshot
     }
 
-    var currentRightStickHorizontalMode: GameControllerRightStickHorizontalMode {
-        rightStickHorizontalMode
-    }
-
     var activeControllerName: String? {
         activeController?.displayName
     }
@@ -165,16 +151,6 @@ final class GameControllerInputProvider: InputProvider {
                 isActive: activeController === controller
             )
         }
-    }
-
-    func setRightStickHorizontalMode(_ mode: GameControllerRightStickHorizontalMode) {
-        guard rightStickHorizontalMode != mode else {
-            return
-        }
-
-        rightStickHorizontalMode = mode
-        userDefaults.set(mode.rawValue, forKey: Persistence.rightStickHorizontalModeKey)
-        debugLog("Right stick X -> \(mode.rawValue)")
     }
 
     private func registerControllerObservers() {
@@ -323,6 +299,45 @@ final class GameControllerInputProvider: InputProvider {
             }
     }
 
+    /// One bound function's current value, shaped by its own deadzone, expo and inversion.
+    private func value(
+        of function: ControllerAxisFunction,
+        in map: ControllerAxisMap,
+        on gamepad: GCExtendedGamepad
+    ) -> Double {
+        let binding = map.binding(for: function)
+        return binding.apply(to: rawValue(of: binding.source, on: gamepad))
+    }
+
+    /// The unshaped reading of a physical axis, in −1…1. A single trigger reports 0…1 and is left
+    /// that way; the paired sources fold two of them into one signed axis.
+    private func rawValue(of source: ControllerAxisSource, on gamepad: GCExtendedGamepad) -> Double {
+        switch source {
+        case .none:
+            return 0
+        case .leftStickX:
+            return Double(gamepad.leftThumbstick.xAxis.value)
+        case .leftStickY:
+            return Double(gamepad.leftThumbstick.yAxis.value)
+        case .rightStickX:
+            return Double(gamepad.rightThumbstick.xAxis.value)
+        case .rightStickY:
+            return Double(gamepad.rightThumbstick.yAxis.value)
+        case .leftTrigger:
+            return Double(gamepad.leftTrigger.value)
+        case .rightTrigger:
+            return Double(gamepad.rightTrigger.value)
+        case .triggerPair:
+            return Double(gamepad.rightTrigger.value - gamepad.leftTrigger.value)
+        case .shoulderPair:
+            return Double(gamepad.rightShoulder.value - gamepad.leftShoulder.value)
+        case .dpadX:
+            return Double(gamepad.dpad.xAxis.value)
+        case .dpadY:
+            return Double(gamepad.dpad.yAxis.value)
+        }
+    }
+
     private func normalizedSignedAxis(_ value: Float) -> Float {
         let magnitude = abs(value)
         guard magnitude > Mapping.stickDeadzone else {
@@ -442,17 +457,6 @@ final class GameControllerInputProvider: InputProvider {
         }
 
         return false
-    }
-
-    private static func loadRightStickHorizontalMode(
-        from userDefaults: UserDefaults
-    ) -> GameControllerRightStickHorizontalMode {
-        guard let rawValue = userDefaults.string(forKey: Persistence.rightStickHorizontalModeKey),
-              let mode = GameControllerRightStickHorizontalMode(rawValue: rawValue) else {
-            return .yawLeftRight
-        }
-
-        return mode
     }
 
     private static func playerIndexLabel(

@@ -8,12 +8,15 @@ struct MissionScenarioHUDView: View {
     private var isFireResponse: Bool { viewModel.activeMissionScenarioKind == .fireResponse }
     private var isAgriSpraying: Bool { viewModel.activeMissionScenarioKind == .agriculturalSpraying }
     private var isRacing: Bool { viewModel.activeMissionScenarioKind == .droneRacing }
+    private var isIntercepting: Bool { viewModel.activeMissionScenarioKind == .attachedPayloadIntercept }
 
     var body: some View {
         if viewModel.hasMissionScenario {
             VStack(spacing: 8) {
                 header
-                if isRacing {
+                if isIntercepting {
+                    interceptObjectiveRow
+                } else if isRacing {
                     raceObjectiveRow
                 } else if isAgriSpraying {
                     if let outcome = viewModel.agriSprayOutcome {
@@ -60,11 +63,152 @@ struct MissionScenarioHUDView: View {
     }
 
     private var remainingSeconds: Double {
+        if isIntercepting { return viewModel.interceptHUD.remaining }
         // Racing counts up, not down: the header shows the running lap instead of a budget.
         if isRacing { return viewModel.raceCurrentLapSeconds }
         if isAgriSpraying { return viewModel.agriSprayRemainingSeconds }
         if isFireResponse { return viewModel.fireResponseRemainingSeconds }
         return viewModel.missionScenarioRemainingSeconds
+    }
+
+    // MARK: - Attached payload interception
+
+    /// Status only. Everything the operator can *press* during this mission lives in
+    /// `InterceptMissionPanelView`, because this HUD is drawn over the viewport with hit testing
+    /// off so it never eats a mouse-look drag.
+    @ViewBuilder
+    private var interceptObjectiveRow: some View {
+        let state = viewModel.interceptHUD
+        VStack(alignment: .leading, spacing: 7) {
+            if let result = state.result {
+                interceptOutcomeBanner(result)
+            } else {
+                Label {
+                    Text(LocalizedStringKey(state.phase.titleKey))
+                        .font(.caption.weight(.semibold))
+                } icon: {
+                    Image(systemName: interceptPhaseIcon(state.phase))
+                }
+                .foregroundStyle(GroundControlPalette.accent)
+            }
+
+            HStack {
+                Text(state.sourceID)
+                    .font(.caption.weight(.bold).monospaced())
+                    .foregroundStyle(state.isObservingObserver ? GroundControlPalette.warning : .white)
+                Spacer()
+                // With the readouts hidden the operator judges the closure by eye, which is the
+                // whole point of the option — so there is no approximate figure here either.
+                if !state.hidesRanges {
+                    Text(String(
+                        format: NSLocalizedString("intercept.hud.range", comment: ""),
+                        Double(state.distance)
+                    ))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.75))
+                }
+            }
+
+            Text(LocalizedStringKey(state.observationPhase.titleKey))
+                .font(.caption2)
+                .foregroundStyle(interceptObservationTint(state.observationPhase))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Text(interceptAttemptsText(state))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.65))
+                Spacer()
+                Text(LocalizedStringKey(state.payloadState.titleKey))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(interceptPayloadTint(state.payloadState))
+            }
+
+            Text(LocalizedStringKey(state.targetState.targetTitleKey))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(interceptTargetTint(state.targetState))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func interceptAttemptsText(_ state: InterceptMissionHUDState) -> String {
+        // An unlimited run says how many approaches have been flown; a capped one says how many
+        // are left, because that is the number the operator is actually flying against.
+        state.maximumAttempts > 0
+            ? String(
+                format: NSLocalizedString("intercept.hud.attempts_limited", comment: ""),
+                state.attempts,
+                state.maximumAttempts
+            )
+            : String(format: NSLocalizedString("intercept.hud.attempts", comment: ""), state.attempts)
+    }
+
+    private func interceptOutcomeBanner(_ result: InterceptMissionResult) -> some View {
+        let tint = result.success ? GroundControlPalette.success : GroundControlPalette.danger
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: result.success ? "checkmark.seal.fill" : "xmark.octagon.fill")
+                    .foregroundStyle(tint)
+                Text(LocalizedStringKey(result.success ? "intercept.success" : "intercept.failure"))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                Spacer()
+                if result.success {
+                    Text(String(format: NSLocalizedString("intercept.hud.score", comment: ""), result.score))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(GroundControlPalette.success)
+                }
+            }
+            Text(LocalizedStringKey(result.reason.titleKey))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func interceptPhaseIcon(_ phase: InterceptMissionPhase) -> String {
+        switch phase {
+        case .idle, .preparing: return "hourglass"
+        case .acquiringTarget: return "binoculars.fill"
+        case .intercepting, .reattack: return "arrow.triangle.merge"
+        case .attackRun: return "scope"
+        case .impactResolution: return "burst.fill"
+        case .assessingResult: return "checklist"
+        case .completed: return "checkmark.seal.fill"
+        case .failed: return "xmark.octagon.fill"
+        }
+    }
+
+    private func interceptObservationTint(_ phase: InterceptObservationPhase) -> Color {
+        switch phase {
+        case .noSignal, .unavailable: return GroundControlPalette.danger
+        case .attackerLinkDegrading, .observationHandoff: return GroundControlPalette.warning
+        case .watchingObserver: return GroundControlPalette.accent
+        case .watchingAttacker: return .white.opacity(0.6)
+        }
+    }
+
+    private func interceptPayloadTint(_ state: AttachedPayloadState) -> Color {
+        switch state {
+        case .attachedReady, .armedByMission: return .white.opacity(0.75)
+        case .degraded: return GroundControlPalette.warning
+        case .contactTriggered, .consumed: return GroundControlPalette.accent
+        case .inert, .destroyed: return GroundControlPalette.danger
+        }
+    }
+
+    /// Tinted from the operator's point of view: a target that has stopped flying is progress.
+    private func interceptTargetTint(_ state: InterceptFunctionalState) -> Color {
+        switch state {
+        case .nominal: return .white.opacity(0.6)
+        case .damaged, .degraded: return GroundControlPalette.warning
+        case .uncontrolled: return GroundControlPalette.accent
+        case .disabled, .destroyed, .crashed: return GroundControlPalette.success
+        }
     }
 
     // MARK: - Drone racing
@@ -426,6 +570,10 @@ struct MissionScenarioHUDView: View {
     }
 
     private var timerColor: Color {
+        if isIntercepting {
+            if viewModel.interceptHUD.result != nil { return .white.opacity(0.7) }
+            return viewModel.interceptHUD.remaining <= 60 ? GroundControlPalette.danger : .white
+        }
         if isRacing {
             return viewModel.raceObjectiveState == .finished ? GroundControlPalette.success : .white
         }

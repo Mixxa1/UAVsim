@@ -3301,3 +3301,215 @@
 "payload.stations.show_feed" = "Смотреть";
 "payload.stations.on_air" = "В эфире";
 "payload.stations.feed_hint" = "Камера ПН показывает станцию, отмеченную «В эфире». Переключитесь на режим камеры ПН, чтобы увидеть изображение.";
+
+/* Перехват с закреплённой нагрузкой */
+"intercept.title" = "Перехват с закреплённой нагрузкой";
+"intercept.subtitle" = "Движущаяся цель, физический контакт и независимый наблюдатель";
+"intercept.payload.hint" = "Модуль остаётся закреплённым. Промах его сохраняет; заданный эффект возникает однократно.";
+
+/* Подготовка */
+"intercept.setup.briefing" = "Район %.0f м · обнаружение %.0f м";
+"intercept.setup.attempts_unlimited" = "Заходы не ограничены по числу. Прогон заканчивают аппарат, модуль или время.";
+"intercept.setup.attempts_limited" = "Три захода. Когда они кончатся, миссия завершится.";
+"intercept.target.behavior" = "Поведение цели";
+"intercept.target.profile" = "Аппарат цели";
+"intercept.observer.profile" = "Аппарат наблюдателя";
+"intercept.target.payload" = "Модуль на цели";
+"intercept.target.inert" = "Инертный модуль цели";
+"intercept.target.inert.hint" = "Инертный модуль не даёт вторичного эффекта, что бы с целью ни случилось.";
+"intercept.effect.profile" = "Эффект модуля";
+"intercept.effect.contactOnly" = "Только контакт";
+"intercept.effect.equipmentDisruption" = "Отказ оборудования";
+"intercept.confirmation" = "Подтверждение";
+"intercept.confirmation.authoritativeWorld" = "Состояние мира";
+"intercept.confirmation.observerRequired" = "Наблюдатель";
+"intercept.confirmation.authoritativeWorld.hint" = "Для завершения миссии достаточно фактического состояния цели.";
+"intercept.confirmation.observerRequired.hint" = "Результат должен увидеть наблюдатель с исправной камерой и прямой видимостью. Без этого миссия завершится по тайм-ауту оценки.";
+"intercept.behavior.routeFollower" = "Движение по маршруту";
+"intercept.behavior.evasiveBasic" = "Изменение курса и высоты";
+"intercept.behavior.escapeBoundary" = "Выход из района";
+"intercept.behavior.damagedRecovery" = "Стабилизация после повреждения";
+
+/* HUD */
+"intercept.hud.range" = "%.0f м";
+"intercept.hud.attempts" = "Заходов: %lld";
+"intercept.hud.attempts_limited" = "Заходов: %lld / %lld";
+"intercept.hud.score" = "%lld очк.";
+"intercept.success" = "Миссия выполнена";
+"intercept.failure" = "Миссия не выполнена";
+
+/* Панель */
+"intercept.panel.title" = "Перехват";
+"intercept.panel.source" = "Источник наблюдения";
+"intercept.panel.hint" = "Заход начнётся и сам, если подойти к цели во взведённом состоянии. Наблюдатель доступен, пока исправны его камера и канал связи.";
+"intercept.begin" = "Начать заход";
+"intercept.abort" = "Прервать заход";
+"intercept.restart" = "Перезапустить миссию";
+
+/* Видеотракт */
+"intercept.feed.handoff" = "СМЕНА ИСТОЧНИКА";
+"intercept.feed.no_observer" = "Нет наблюдателя с исправной камерой и прямой видимостью цели.";
+
+/* Результат */
+"intercept.result.targetNeutralized" = "Подтверждена потеря работоспособности цели";
+"intercept.result.attackerLost" = "Аппарат игрока потерян раньше цели";
+"intercept.result.targetEscaped" = "Цель покинула район";
+"intercept.result.timeExpired" = "Время миссии истекло";
+"intercept.result.assessmentExpired" = "Результат не подтверждён за отведённое время";
+"intercept.result.attemptsExhausted" = "Лимит заходов исчерпан";
+"intercept.result.payloadUnavailable" = "Закреплённый модуль недоступен";
+
+/* Фазы */
+"intercept.phase.idle" = "Ожидание";
+"intercept.phase.preparing" = "Подготовка мира";
+"intercept.phase.acquiringTarget" = "Обнаружение цели";
+"intercept.phase.intercepting" = "Сближение с целью";
+"intercept.phase.attackRun" = "Выполняется заход";
+"intercept.phase.reattack" = "Доступен повторный заход";
+"intercept.phase.impactResolution" = "Обработка контакта";
+"intercept.phase.assessingResult" = "Оценка результата";
+"intercept.phase.completed" = "Выполнено";
+"intercept.phase.failed" = "Не выполнено";
+
+/* Наблюдение */
+"intercept.observation.watchingAttacker" = "Камера своего аппарата";
+"intercept.observation.attackerLinkDegrading" = "Видеоканал ухудшается";
+"intercept.observation.noSignal" = "Нет изображения с текущего источника";
+"intercept.observation.observationHandoff" = "Переход на наблюдателя";
+"intercept.observation.watchingObserver" = "Камера наблюдателя";
+"intercept.observation.unavailable" = "Изображения нет, наблюдатель пока недоступен";
+
+/* Состояние модуля */
+"intercept.payload.attachedReady" = "Модуль готов";
+"intercept.payload.armedByMission" = "Модуль готов";
+"intercept.payload.contactTriggered" = "Модуль сработал";
+"intercept.payload.degraded" = "Модуль повреждён";
+"intercept.payload.inert" = "Модуль инертен";
+"intercept.payload.consumed" = "Модуль использован";
+"intercept.payload.destroyed" = "Модуль потерян";
+
+/* Состояние цели */
+"intercept.target.nominal" = "Цель работоспособна";
+"intercept.target.damaged" = "Цель повреждена";
+"intercept.target.degraded" = "Работа цели нарушена";
+"intercept.target.uncontrolled" = "Цель потеряла управление";
+"intercept.target.disabled" = "Цель неработоспособна";
+"intercept.target.destroyed" = "Цель разрушена";
+"intercept.target.crashed" = "Цель разбилась";
+
+/* Журнал миссии */
+"mission.event.code.interceptionEvent" = "Перехват";
+"mission.event.detail.interceptionEvent" = "Событие перехвата";
+"intercept.log.phase.idle" = "Миссия в ожидании";
+"intercept.log.phase.preparing" = "Подготовка мира";
+"intercept.log.phase.acquiringTarget" = "Обнаружение цели";
+"intercept.log.phase.intercepting" = "Сближение с целью";
+"intercept.log.phase.attackRun" = "Выполняется заход";
+"intercept.log.phase.reattack" = "Возможен повторный заход";
+"intercept.log.phase.impactResolution" = "Обработка контакта";
+"intercept.log.phase.assessingResult" = "Оценка результата";
+"intercept.log.phase.completed" = "Миссия выполнена";
+"intercept.log.phase.failed" = "Миссия не выполнена";
+"intercept.log.attempt_started" = "Начат заход";
+"intercept.log.attempt.miss" = "Заход завершён без контакта";
+"intercept.log.attempt.contact" = "Заход завершён контактом";
+"intercept.log.attempt.aborted" = "Заход прерван";
+"intercept.log.attempt.attackerLost" = "Заход завершён потерей аппарата";
+"intercept.log.impact.vehicle" = "Контакт двух аппаратов";
+"intercept.log.impact.terrain" = "Удар о землю";
+"intercept.log.impact.environment" = "Удар о препятствие";
+"intercept.log.vehicle.nominal" = "Аппарат работоспособен";
+"intercept.log.vehicle.damaged" = "Аппарат повреждён";
+"intercept.log.vehicle.degraded" = "Работа аппарата нарушена";
+"intercept.log.vehicle.uncontrolled" = "Аппарат потерял управление";
+"intercept.log.vehicle.disabled" = "Аппарат неработоспособен";
+"intercept.log.vehicle.destroyed" = "Аппарат разрушен";
+"intercept.log.vehicle.crashed" = "Аппарат разбился";
+"intercept.log.payload.attachedReady" = "Модуль готов";
+"intercept.log.payload.armedByMission" = "Модуль готов";
+"intercept.log.payload.contactTriggered" = "Модуль сработал при контакте";
+"intercept.log.payload.degraded" = "Модуль повреждён";
+"intercept.log.payload.inert" = "Модуль инертен";
+"intercept.log.payload.consumed" = "Модуль использован";
+"intercept.log.payload.destroyed" = "Модуль потерян";
+"intercept.log.video_lost" = "Потеря видеоканала";
+"intercept.log.observation_source" = "Смена источника наблюдения";
+"intercept.log.effect.contact" = "Эффект контакта";
+"intercept.log.effect.smoke" = "Дым";
+"intercept.log.effect.fire" = "Огонь";
+"intercept.log.effect.secondary" = "Вторичный эффект модуля";
+"intercept.log.result.success" = "Миссия выполнена";
+"intercept.log.result.failure" = "Миссия не выполнена";
+
+/* Перехват: классы аппаратов и видеотракт */
+"intercept.setup.class.multirotor" = "мультиротор";
+"intercept.setup.class.fixed_wing" = "самолёт";
+"intercept.setup.fixed_wing.hint" = "Самолётная цель проходит район на высоте около 110 м, заметно выше деревьев, и не умеет висеть — её перехватывают на пересекающемся или встречном курсе.";
+"intercept.feed.switch_to" = "Смотреть с %@";
+"intercept.feed.degrading" = "СВЯЗЬ УХУДШАЕТСЯ";
+"intercept.feed.no_image" = "НЕТ ИЗОБРАЖЕНИЯ";
+"intercept.feed.lost_from" = "Видеоканал с %@ потерян после контакта.";
+"intercept.feed.handoff_to" = "Наблюдение переходит к %@.";
+"intercept.feed.observer_title" = "НАБЛЮДЕНИЕ";
+"intercept.feed.tracking" = "ЦЕЛЬ В КАДРЕ";
+"intercept.feed.searching" = "ЦЕЛЬ НЕ ВИДНА";
+"intercept.feed.altitude" = "ВЫС %.0f м";
+"intercept.feed.range" = "ДАЛЬН %.0f м";
+"intercept.setup.hide_ranges" = "Скрыть дальности";
+"intercept.setup.hide_ranges.hint" = "Убирает из накладок миссии все цифры дальности и высоты. Сближение оценивается на глаз.";
+"mission.setup.aircraft.change" = "Выбрать";
+"mission.setup.aircraft.done" = "Готово";
+"controls.menu.entry" = "Управление";
+"common.close" = "Закрыть";
+"controls.section.layout" = "Раскладка стиков";
+"controls.section.rates" = "Рейты";
+"controls.section.throttle" = "Газ";
+"controls.section.axes" = "Оси";
+"controls.reset" = "Сбросить";
+"controls.conflict" = "Две лётные оси назначены на один физический стик — аппарат так не полетит.";
+"controls.mode1.summary" = "Mode 1 — левый: тангаж и рыскание, правый: газ и крен.";
+"controls.mode2.summary" = "Mode 2 — левый: газ и рыскание, правый: тангаж и крен.";
+"controls.mode3.summary" = "Mode 3 — левый: тангаж и крен, правый: газ и рыскание.";
+"controls.mode4.summary" = "Mode 4 — левый: газ и крен, правый: тангаж и рыскание.";
+"controls.mode.custom.summary" = "Своя раскладка.";
+"controls.axis.roll" = "Крен";
+"controls.axis.pitch" = "Тангаж";
+"controls.axis.yaw" = "Рыскание";
+"controls.axis.invert" = "Инверсия";
+"controls.axis.deadzone" = "Мёртвая зона";
+"controls.rates.sensitivity" = "Чувствительность";
+"controls.rates.super" = "Супер-рейт";
+"controls.rates.expo" = "Экспонента";
+"controls.rates.half_stick" = "На полстика";
+"controls.rates.calm" = "Спокойный";
+"controls.rates.standard" = "Обычный";
+"controls.rates.sharp" = "Резкий";
+"controls.rates.plot_caption" = "Положение стика к запрошенной угловой скорости.";
+"controls.rates.hint" = "Чувствительность — доля собственной максимальной угловой скорости аппарата на полном стике. Дать аппарату больше, чем могут его моторы, ползунок не может, поэтому 1.00 — это всё, что у него есть. Супер-рейт оставляет середину хода мягкой и уводит резкость к краям; экспонента смягчает центр, не меняя того, что делает полный стик.";
+"controls.throttle.absolute" = "Положение стика";
+"controls.throttle.rate" = "Приращение";
+"controls.throttle.mid" = "Середина";
+"controls.throttle.expo" = "Экспонента";
+"controls.throttle.idle" = "Холостой ход";
+"controls.throttle.hint" = "«Положение стика» — как на аппаратуре: низ это ноль, верх это полный газ. «Приращение» — как на клавиатуре: ось добавляет и убавляет текущее значение, и применяется сама, если газ назначен не на стик. Поставьте середину на газ висения — и стик станет точным там, где это нужно.";
+"controls.function.throttle" = "Газ";
+"controls.function.yaw" = "Рыскание";
+"controls.function.pitch" = "Тангаж";
+"controls.function.roll" = "Крен";
+"controls.function.cameraPan" = "Камера, поворот";
+"controls.function.cameraTilt" = "Камера, наклон";
+"controls.function.cursorX" = "Курсор, X";
+"controls.function.cursorY" = "Курсор, Y";
+"controls.source.none" = "Не назначено";
+"controls.source.leftStickX" = "Левый стик, гориз.";
+"controls.source.leftStickY" = "Левый стик, верт.";
+"controls.source.rightStickX" = "Правый стик, гориз.";
+"controls.source.rightStickY" = "Правый стик, верт.";
+"controls.source.leftTrigger" = "Левый триггер";
+"controls.source.rightTrigger" = "Правый триггер";
+"controls.source.triggerPair" = "Триггеры (RT − LT)";
+"controls.source.shoulderPair" = "Бамперы (RB − LB)";
+"controls.source.dpadX" = "Крестовина, гориз.";
+"controls.source.dpadY" = "Крестовина, верт.";
+"settings.section.controls" = "Управление";
+"mission.setup.uav.payload_too_heavy" = "Не поднимет выбранную нагрузку.";

@@ -163,29 +163,7 @@ struct KeyBindingsSettingsView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Правый стик X")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(GameControllerRightStickHorizontalMode.allCases) { mode in
-                            rightStickModeButton(for: mode)
-                        }
-                    }
-
-                    VStack(spacing: 8) {
-                        ForEach(GameControllerRightStickHorizontalMode.allCases) { mode in
-                            rightStickModeButton(for: mode)
-                        }
-                    }
-                }
-
-                Text("По умолчанию горизонтальная ось правого стика соответствует рысканию (клавиши J / L на клавиатуре).")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            ControllerAxisSettingsView(store: .shared)
         }
     }
 
@@ -244,27 +222,6 @@ struct KeyBindingsSettingsView: View {
         .controllerButtonTarget(id: "keybind.resetDefaults") {
             stopRebindingCapture()
             bindingsViewModel.resetToDefaults()
-        }
-    }
-
-    private func rightStickModeButton(for mode: GameControllerRightStickHorizontalMode) -> some View {
-        Button {
-            simulationViewModel.setGameControllerRightStickHorizontalMode(mode)
-        } label: {
-            Text(mode.title)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(
-            simulationViewModel.gameControllerRightStickHorizontalMode == mode
-                ? .accentColor
-                : .gray.opacity(0.6)
-        )
-        .controllerButtonTarget(id: "gamepad.rightStick.\(mode.rawValue)") {
-            simulationViewModel.setGameControllerRightStickHorizontalMode(mode)
         }
     }
 

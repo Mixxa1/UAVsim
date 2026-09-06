@@ -37,10 +37,16 @@ struct SceneViewportView: View {
                 isHandLaunchPOV: viewModel.isHandLaunchPOVActive,
                 usesBuilderMouseLook: viewModel.isRaceBuilderActive,
                 fpvVideoMode: fpvHUDActive ? fpvVideoMode : nil,
+                observationSourceIdentity: viewModel.observationSourceIdentity,
                 fpvVideoPresentationState: fpvHUDActive
                     ? viewModel.activeVideoPresentationState
                     : nil,
-                analogFPVOSDState: analogFPVOSDActive ? viewModel.fpvOSDState : nil,
+                // An observer's downlink is not the pilot's FPV feed: it carries no racing OSD, no
+                // artificial horizon for an aircraft nobody is flying, and no lens of the
+                // operator's own. `InterceptObserverOverlayView` captions it instead.
+                analogFPVOSDState: analogFPVOSDActive && !viewModel.isObservingRemoteInterceptFeed
+                    ? viewModel.fpvOSDState
+                    : nil,
                 analogNTSCParameters: analogFPVOSDActive ? viewModel.analogNTSCParameters : nil,
                 digitalVideoParameters: fpvVideoMode == .digital
                     ? viewModel.digitalVideoParameters
@@ -53,10 +59,14 @@ struct SceneViewportView: View {
                 // The bow and the coverage both come from the fitted pilot camera unless the
                 // operator has taken manual control of the lens, and both are resolved in the view
                 // model so the render and the remap cannot disagree about the same angle.
-                fpvLensStrength: viewModel.fpvLensDistortion,
+                // Another aircraft's feed is not the player's lens: the barrel distortion and the
+                // sensor/ISP pass below both describe hardware that is not the one filming.
+                fpvLensStrength: viewModel.isObservingRemoteInterceptFeed ? 0 : viewModel.fpvLensDistortion,
                 fpvLensHalfAngleDegrees: viewModel.fpvFieldOfViewDegrees / 2,
                 osdAvailability: viewModel.osdElementAvailability,
-                fpvSensorParameters: fpvHUDActive ? viewModel.fpvSensorParameters : nil,
+                fpvSensorParameters: fpvHUDActive && !viewModel.isObservingRemoteInterceptFeed
+                    ? viewModel.fpvSensorParameters
+                    : nil,
                 payloadSensorParameters: payloadOpticsActive
                     ? viewModel.payloadSensorParameters
                     : nil,
@@ -196,7 +206,12 @@ struct SceneViewportView: View {
                     .allowsHitTesting(false)
             }
 
-            if viewModel.isSpectatorMode || payloadOpticsActive || analogFPVOSDActive {
+            // Watching another aircraft's downlink: the pilot's own instruments have nothing to do
+            // with the picture on screen. Flight mode, battery, sticks and the recording dot all
+            // describe the aircraft in the operator's hands, not the one holding the camera, and
+            // painting them over an observation feed is how it ends up looking wrong.
+            if viewModel.isSpectatorMode || payloadOpticsActive || analogFPVOSDActive
+                || viewModel.isObservingRemoteInterceptFeed {
                 EmptyView()
             } else if fpvHUDActive, !analogFPVOSDActive {
                 FPVViewportOverlayView(

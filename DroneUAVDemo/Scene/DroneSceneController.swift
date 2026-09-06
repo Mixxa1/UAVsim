@@ -112,6 +112,9 @@ private struct CityCleanupStats {
 
 final class DroneSceneController {
     let scene: SCNScene
+    /// Set while a mission is showing another aircraft's feed instead of the player's own (see
+    /// `pointOfView(for:)`). Nil the rest of the time, which is every mission but interception.
+    var observationPointOfView: SCNNode?
 
     private let freeCameraNode: SCNNode
     private let followRigNode = SCNNode()
@@ -764,6 +767,13 @@ final class DroneSceneController {
     }
 
     func pointOfView(for mode: CameraMode) -> SCNNode {
+        // A mission observation source stands in for the aircraft's own downlink — the FPV feed
+        // and the payload optics. It deliberately does not hijack the free/orbit/top cameras:
+        // those are how the operator looks at the world, not at the picture coming down a link,
+        // and a feed handoff must not take them away.
+        if let observationPointOfView, mode == .fpv || mode == .payloadOptics || mode == .payload {
+            return observationPointOfView
+        }
         if cameraTransitionActive {
             return cameraTransitionNode
         }
@@ -10085,7 +10095,7 @@ final class DroneSceneController {
     /// replaces (which had no searchMode option at all, i.e. the exhaustive default) was itself a
     /// 30ms-class per-tick cost the instant detection became possible. The mannequin and the
     /// drone aren't in the obstacle catalog, so the old self-hit filtering is unnecessary.
-    private func isLineOfSightClearToMissionTarget(from: SIMD3<Float>, to: SIMD3<Float>) -> Bool {
+    func isLineOfSightClearToMissionTarget(from: SIMD3<Float>, to: SIMD3<Float>) -> Bool {
         let targetDistance = simd_distance(from, to)
         guard targetDistance > 0.6 else { return true }
         // Same 0.5m tolerance as before: anything the ray strikes meaningfully closer than the

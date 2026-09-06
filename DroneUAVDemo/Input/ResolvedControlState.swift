@@ -5,6 +5,8 @@ struct ResolvedControlState {
     var pitch: Double
     var roll: Double
     var throttle: Double
+    /// See `InputSnapshot.absoluteThrottle`.
+    var absoluteThrottle: Double?
     var cameraPan: Double
     var cameraTilt: Double
     var uiPointerX: Double
@@ -44,6 +46,7 @@ struct ResolvedControlState {
         pitch: 0.0,
         roll: 0.0,
         throttle: 0.0,
+        absoluteThrottle: nil,
         cameraPan: 0.0,
         cameraTilt: 0.0,
         uiPointerX: 0.0,

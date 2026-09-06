@@ -26,6 +26,29 @@ struct MissionSetupView: View {
     @State private var raceTrackSource: RaceTrackSource = .generated
     @State private var raceLibrary: [RaceTrackStore.Summary] = []
     @State private var selectedRaceTrackID: UUID?
+    @State private var interception = InterceptMissionConfiguration()
+    @State private var aircraftPickerSlot: AircraftSlot?
+
+    /// One of the three aircraft an interception run puts in the air.
+    enum AircraftSlot: String, Identifiable {
+        case player
+        case target
+        case observer
+
+        var id: String { rawValue }
+
+        var titleKey: String {
+            switch self {
+            case .player: return "mission.setup.uav"
+            case .target: return "intercept.target.profile"
+            case .observer: return "intercept.observer.profile"
+            }
+        }
+    }
+
+    /// One height for every scenario chip, so the grid reads as a row of buttons rather than a
+    /// set of differently-sized boxes.
+    private static let scenarioChipHeight: CGFloat = 46
 
     /// Where the track for a racing mission comes from.
     private enum RaceTrackSource: String, CaseIterable, Identifiable {
@@ -63,8 +86,41 @@ struct MissionSetupView: View {
         } else if payload == .fireCapsuleLauncher {
             configuration.payloadMass = FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)
         }
-        return availableProfiles.filter {
-            PayloadController.capabilityCheck(for: configuration, profile: $0.resolvedUAVProfile).isAllowed
+        return availableProfiles.filter { canCarry(payloadConfiguration: configuration, profile: $0) }
+    }
+
+    private func canCarry(payloadConfiguration: PayloadConfiguration, profile: DroneModelProfile) -> Bool {
+        guard let uav = profile.resolvedUAVProfile else { return true }
+        return PayloadController.capabilityCheck(for: payloadConfiguration, profile: uav).isAllowed
+    }
+
+    private func canCarrySelectedPayload(_ profile: DroneModelProfile) -> Bool {
+        guard kind.requiresPayload else { return true }
+        return canCarry(payloadConfiguration: currentPayloadConfiguration, profile: profile)
+    }
+
+    private var currentPayloadConfiguration: PayloadConfiguration {
+        var configuration = PayloadConfiguration(payloadType: payload)
+        if payload == .fireHose {
+            configuration.payloadMass = hoseDiameterClass.massForLength(Float(hoseLengthMeters))
+        } else if payload == .fireCapsuleLauncher {
+            configuration.payloadMass = FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)
+        }
+        return configuration
+    }
+
+    /// Everything the operator could fly, with the aircraft that can carry the chosen payload
+    /// first and the rest still listed underneath.
+    ///
+    /// A Workbench build is a real aircraft with real numbers, so a light one genuinely fails the
+    /// payload check — but silently deleting it from the picker is how "I cannot find the drone I
+    /// built" happens. The card says why instead, and the choice stays the operator's.
+    private var playerPickerProfiles: [DroneModelProfile] {
+        let compatible = Set(compatibleProfiles.map(\.id))
+        return availableProfiles.sorted { lhs, rhs in
+            let lhsOK = compatible.contains(lhs.id)
+            let rhsOK = compatible.contains(rhs.id)
+            return lhsOK == rhsOK ? lhs.uiDisplayName < rhs.uiDisplayName : lhsOK
         }
     }
 
@@ -109,6 +165,8 @@ struct MissionSetupView: View {
 
     private var payloadHintKey: String {
         switch kind {
+        case .attachedPayloadIntercept:
+            return "intercept.payload.hint"
         case .searchAndRescue:
             return "mission.setup.payload.hint"
         case .fireResponse:
@@ -148,6 +206,9 @@ struct MissionSetupView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.18), lineWidth: 1)
         )
+        .sheet(item: $aircraftPickerSlot) { slot in
+            aircraftPickerSheet(slot)
+        }
         .onAppear {
             if selectedProfileID.isEmpty {
                 selectedProfileID = availableProfiles.first?.id ?? ""
@@ -158,6 +219,8 @@ struct MissionSetupView: View {
             if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
                 selectedProfileID = compatibleProfiles.first?.id ?? ""
             }
+            applyInterceptDifficulty(difficulty)
+            resolveInterceptProfiles()
         }
         .onChange(of: kind) { _, newValue in
             if !compatiblePayloads.contains(payload) {
@@ -190,6 +253,13 @@ struct MissionSetupView: View {
                 if selectedRaceTrackID == nil {
                     selectedRaceTrackID = raceLibrary.first?.id
                 }
+            }
+            // An interception is flown in open air between three aircraft: the ambient forest is
+            // horizon scenery, and a dense one only puts obstacles between the observer and the
+            // thing it is supposed to be watching.
+            if newValue == .attachedPayloadIntercept {
+                terrainDensity = .sparse
+                resolveInterceptProfiles()
             }
             timeLimitMinutes = defaultTimeLimit(for: newValue, difficulty: difficulty)
         }
@@ -243,13 +313,7 @@ struct MissionSetupView: View {
     private var scenarioSection: some View {
         sectionCard(titleKey: "mission.setup.section.scenario") {
             VStack(alignment: .leading, spacing: 14) {
-                Picker("", selection: $kind) {
-                    ForEach(MissionScenarioKind.allCases) { value in
-                        Text(LocalizedStringKey(value.titleKey)).tag(value)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                scenarioChooser
 
                 HStack(spacing: 12) {
                     Image(systemName: kind.iconSystemName)
@@ -279,6 +343,58 @@ struct MissionSetupView: View {
         }
     }
 
+    /// A wrapping grid of chips rather than a segmented control. A segmented control divides the
+    /// available width equally and refuses to go below its content's intrinsic width, so a
+    /// scenario with a long name pushed the whole card wider than the dialog and everything
+    /// inside it sat visibly off-centre. Chips wrap onto a second row instead.
+    private var scenarioChooser: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 168, maximum: 300), spacing: 8)],
+            alignment: .leading,
+            spacing: 8
+        ) {
+            ForEach(MissionScenarioKind.allCases) { value in
+                Button {
+                    kind = value
+                } label: {
+                    scenarioChip(value)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func scenarioChip(_ value: MissionScenarioKind) -> some View {
+        let isSelected = value == kind
+        return HStack(spacing: 8) {
+            Image(systemName: value.iconSystemName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isSelected ? GroundControlPalette.accent : .white.opacity(0.7))
+                .frame(width: 16)
+            // Every chip is the same box. A name long enough to wrap shrinks inside it instead of
+            // making its whole row taller than the others, which is what left the grid looking
+            // like a set of mismatched buttons.
+            Text(LocalizedStringKey(value.titleKey))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: Self.scenarioChipHeight, maxHeight: Self.scenarioChipHeight, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isSelected ? GroundControlPalette.accent.opacity(0.28) : Color.white.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isSelected ? GroundControlPalette.accent : Color.clear, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+    }
+
     @ViewBuilder
     private var parametersFields: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -292,6 +408,7 @@ struct MissionSetupView: View {
                 .labelsHidden()
                 .onChange(of: difficulty) { _, newValue in
                     timeLimitMinutes = defaultTimeLimit(for: kind, difficulty: newValue)
+                    applyInterceptDifficulty(newValue)
                 }
             }
 
@@ -301,6 +418,10 @@ struct MissionSetupView: View {
 
             if kind == .droneRacing {
                 raceFields
+            }
+
+            if kind == .attachedPayloadIntercept {
+                interceptFields
             }
 
             labeledRow("mission.setup.time_of_day") {
@@ -408,6 +529,294 @@ struct MissionSetupView: View {
         .padding(10)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
     }
+
+    // MARK: Attached payload interception
+
+    /// Aircraft the mission may fly as the target: a multirotor that manoeuvres against the
+    /// interceptor, or an aeroplane transiting the area at altitude. Never a tethered one — a
+    /// fibre spool has nothing to pay out to on an aircraft nobody is flying.
+    private var interceptTargetProfiles: [DroneModelProfile] {
+        availableProfiles
+            .filter { ($0.airframeClass == .multirotor || $0.airframeClass == .fixedWing) && $0.defaultVideoMode != .fiber }
+            .sorted {
+                $0.airframeClass == $1.airframeClass
+                    ? $0.displayName < $1.displayName
+                    : $0.airframeClass == .multirotor
+            }
+    }
+
+    /// The observer holds a station and watches. Only a rotorcraft can do that, so an aeroplane is
+    /// not offered here even though it is a legitimate target.
+    private var interceptObserverProfiles: [DroneModelProfile] {
+        availableProfiles
+            .filter { $0.airframeClass == .multirotor && $0.defaultVideoMode != .fiber }
+            .sorted { $0.displayName < $1.displayName }
+    }
+
+    /// The three aircraft this mission puts in the air, side by side: the one the operator flies,
+    /// the one being intercepted, and the one watching. They belong together — the whole run is
+    /// the relationship between them — and each opens its own picker rather than unrolling another
+    /// scrolling grid into the middle of the form.
+    private var aircraftSlotRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            aircraftSlot(.player, titleKey: "mission.setup.uav")
+            aircraftSlot(.target, titleKey: "intercept.target.profile")
+            aircraftSlot(.observer, titleKey: "intercept.observer.profile")
+        }
+    }
+
+    private func aircraftSlot(_ slot: AircraftSlot, titleKey: String) -> some View {
+        let profile = profiles(for: slot).first { $0.id == selection(for: slot) }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(LocalizedStringKey(titleKey))
+                .font(.caption).foregroundStyle(.white.opacity(0.8))
+                .lineLimit(1)
+            Button {
+                aircraftPickerSlot = slot
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    UAVLivePreviewView(
+                        profile: profile.flatMap(previewProfile(for:)),
+                        runtimeProfile: profile
+                    )
+                    .frame(height: 84)
+                    .background(GroundControlPalette.shell, in: RoundedRectangle(cornerRadius: 8))
+
+                    Text(profile?.uiDisplayName ?? "—")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text("mission.setup.aircraft.change")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(GroundControlPalette.accent)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(GroundControlPalette.accent)
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The picker itself, in a sheet. One grid, once, instead of three of them stacked inside a
+    /// form the operator has to scroll past to reach the start button.
+    private func aircraftPickerSheet(_ slot: AircraftSlot) -> some View {
+        let list = profiles(for: slot)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(LocalizedStringKey(slot.titleKey))
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Spacer()
+                Button("mission.setup.aircraft.done") { aircraftPickerSlot = nil }
+                    .buttonStyle(.borderedProminent)
+            }
+
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 10)], spacing: 10) {
+                    ForEach(list) { profile in
+                        Button {
+                            select(profile.id, for: slot)
+                            aircraftPickerSlot = nil
+                        } label: {
+                            UAVSelectionCardView(
+                                name: profile.uiDisplayName,
+                                manufacturer: profile.manufacturer,
+                                previewProfile: previewProfile(for: profile),
+                                runtimePreviewProfile: profile,
+                                massKg: profile.takeoffMassKg,
+                                speedMps: profile.resolvedUAVProfile?.nominalCruiseSpeedMps ?? profile.maxHorizontalSpeedMps,
+                                flightTimeSec: profile.resolvedUAVProfile?.nominalFlightTimeSec,
+                                rangeMeters: profile.resolvedUAVProfile?.nominalMaxRangeM,
+                                badgeText: profileBadgeText(for: profile),
+                                badgeTint: profileBadgeTint(for: profile),
+                                isSelected: profile.id == selection(for: slot)
+                            ) {
+                                if slot == .player, !canCarrySelectedPayload(profile) {
+                                    Text("mission.setup.uav.payload_too_heavy")
+                                        .font(.caption2)
+                                        .foregroundStyle(GroundControlPalette.warning)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(2)
+            }
+        }
+        .padding(18)
+        .frame(width: 720, height: 560)
+        .background(GroundControlPalette.shell)
+    }
+
+    private func profiles(for slot: AircraftSlot) -> [DroneModelProfile] {
+        switch slot {
+        case .player: return playerPickerProfiles
+        case .target: return interceptTargetProfiles
+        case .observer: return interceptObserverProfiles
+        }
+    }
+
+    private func selection(for slot: AircraftSlot) -> String {
+        switch slot {
+        case .player: return selectedProfileID
+        case .target: return interception.targetProfileID
+        case .observer: return interception.observerProfileID
+        }
+    }
+
+    private func select(_ id: String, for slot: AircraftSlot) {
+        switch slot {
+        case .player: selectedProfileID = id
+        case .target: interception.targetProfileID = id
+        case .observer: interception.observerProfileID = id
+        }
+    }
+
+    private var interceptFields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            interceptBriefingRow
+
+            aircraftSlotRow
+
+            if isFixedWingTargetSelected {
+                Text("intercept.setup.fixed_wing.hint")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            labeledRow("intercept.target.behavior") {
+                Picker("", selection: $interception.targetBehavior) {
+                    ForEach(InterceptTargetBehavior.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(.white)
+            }
+
+            labeledRow("intercept.effect.profile") {
+                Picker("", selection: $interception.payloadProfile) {
+                    ForEach(AttachedPayloadProfile.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            labeledRow("intercept.confirmation") {
+                Picker("", selection: $interception.confirmationPolicy) {
+                    ForEach(InterceptConfirmationPolicy.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            Text(LocalizedStringKey(interception.confirmationPolicy.hintKey))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.8))
+            if interception.targetCarriesPayload {
+                Toggle("intercept.target.inert", isOn: $interception.targetPayloadInert)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("intercept.target.inert.hint")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Toggle("intercept.setup.hide_ranges", isOn: $interception.hidesRangeReadouts)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.8))
+            Text("intercept.setup.hide_ranges.hint")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// What the chosen difficulty actually changes, spelled out before launch. The mission has no
+    /// visible sector or gate to look at, so without this the difficulty knob would be invisible
+    /// until the operator is already airborne wondering why the target keeps slipping away.
+    private var interceptBriefingRow: some View {
+        let settings = InterceptMissionConfiguration.make(difficulty: difficulty)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "scope")
+                    .foregroundStyle(GroundControlPalette.accent)
+                Text(String(
+                    format: NSLocalizedString("intercept.setup.briefing", comment: ""),
+                    Double(settings.areaRadius),
+                    Double(settings.acquisitionRange)
+                ))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            Text(LocalizedStringKey(
+                settings.maximumAttempts > 0
+                    ? "intercept.setup.attempts_limited"
+                    : "intercept.setup.attempts_unlimited"
+            ))
+            .font(.caption2)
+            .foregroundStyle(.white.opacity(0.55))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Difficulty owns the geometry and the approach budget; it never overrides the operator's
+    /// choice of target behaviour, module effect or confirmation policy.
+    private func applyInterceptDifficulty(_ difficulty: MissionDifficulty) {
+        let defaults = InterceptMissionConfiguration.make(difficulty: difficulty)
+        interception.areaRadius = defaults.areaRadius
+        interception.acquisitionRange = defaults.acquisitionRange
+        interception.attemptRange = defaults.attemptRange
+        interception.targetAgility = defaults.targetAgility
+        interception.maximumAttempts = defaults.maximumAttempts
+    }
+
+    private var isFixedWingTargetSelected: Bool {
+        interceptTargetProfiles.first { $0.id == interception.targetProfileID }?.airframeClass == .fixedWing
+    }
+
+    /// The two aircraft have to name something that exists. An empty or stale ID would leave the
+    /// list with nothing highlighted and the mission falling back to a generic airframe.
+    private func resolveInterceptProfiles() {
+        if !interceptTargetProfiles.contains(where: { $0.id == interception.targetProfileID }) {
+            interception.targetProfileID = interceptTargetProfiles.first?.id ?? ""
+        }
+        if !interceptObserverProfiles.contains(where: { $0.id == interception.observerProfileID }) {
+            interception.observerProfileID = interceptObserverProfiles.first?.id ?? ""
+        }
+    }
+
+    // MARK: Drone racing
 
     /// Racing setup: how the run is scored, how many laps, and where the track comes from.
     @ViewBuilder
@@ -518,7 +927,11 @@ struct MissionSetupView: View {
     private var platformSection: some View {
         sectionCard(titleKey: "mission.setup.section.platform") {
             VStack(alignment: .leading, spacing: 14) {
-                labeledRow("mission.setup.uav") {
+                // The interception setup already shows this aircraft beside the target and the
+                // observer, where the choice actually belongs. Repeating the whole grid here would
+                // be a second, disagreeing place to pick the same thing.
+                if kind != .attachedPayloadIntercept {
+                    labeledRow("mission.setup.uav") {
                     if compatibleProfiles.isEmpty {
                         Text("mission.setup.uav.none_compatible")
                             .font(.caption2)
@@ -547,6 +960,7 @@ struct MissionSetupView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                    }
                     }
                 }
 
@@ -702,7 +1116,8 @@ struct MissionSetupView: View {
             fireCapsuleSize: capsuleSize,
             fireCapsuleCount: capsuleCount,
             raceTrack: resolvedRaceTrack(parameters: parameters),
-            raceMode: raceMode
+            raceMode: raceMode,
+            interception: kind == .attachedPayloadIntercept ? interception : nil
         )
         onStart(config)
     }

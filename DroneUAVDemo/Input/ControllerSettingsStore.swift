@@ -116,6 +116,11 @@ private struct PersistedControllerSettings: Codable {
     var bindings: [String: String]
     var cursorSpeedMultiplier: Double
     var scrollBehavior: String
+    /// Absent in settings written before axes were bindable. Those installs get the Mode 2
+    /// default rather than the old hard-coded layout, which was not a layout anyone chose.
+    var axisMap: ControllerAxisMap?
+    /// Absent in settings written before rates existed; those installs get the default profile.
+    var rateProfile: ControllerRateProfile?
 }
 
 final class ControllerSettingsStore: ObservableObject {
@@ -132,12 +137,21 @@ final class ControllerSettingsStore: ObservableObject {
         .nextSection: .rightShoulder
     ]
 
+    /// One instance for the whole app. The controls screen is reachable from the main menu, where
+    /// no simulation exists, and from inside a flight — both have to be editing the same settings
+    /// rather than two copies that overwrite each other on the next write.
+    static let shared = ControllerSettingsStore()
+
     private let userDefaults: UserDefaults
 
     @Published private(set) var bindings: [ControllerUIBindingAction: ControllerButtonBinding]
     @Published private(set) var cursorSpeedMultiplier: Double
     @Published private(set) var scrollBehavior: ControllerScrollBehavior
     @Published private(set) var validationIssues: [String] = []
+    /// Which physical axis flies what. See `ControllerAxisMap`.
+    @Published private(set) var axisMap: ControllerAxisMap
+    /// How the sticks are shaped once the hardware has been read. See `ControllerRateProfile`.
+    @Published private(set) var rateProfile: ControllerRateProfile
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -147,10 +161,14 @@ final class ControllerSettingsStore: ObservableObject {
             self.bindings = Self.decodeBindings(from: persisted.bindings)
             self.cursorSpeedMultiplier = Self.clampedCursorSpeed(persisted.cursorSpeedMultiplier)
             self.scrollBehavior = ControllerScrollBehavior(rawValue: persisted.scrollBehavior) ?? .rightStickWithTriggerBoost
+            self.axisMap = persisted.axisMap ?? .default
+            self.rateProfile = persisted.rateProfile ?? .default
         } else {
             self.bindings = Self.defaultBindings
             self.cursorSpeedMultiplier = 1.0
             self.scrollBehavior = .rightStickWithTriggerBoost
+            self.axisMap = .default
+            self.rateProfile = .default
         }
 
         ensureDefaultBindingsPresent()
@@ -160,6 +178,66 @@ final class ControllerSettingsStore: ObservableObject {
 
     func binding(for action: ControllerUIBindingAction) -> ControllerButtonBinding {
         bindings[action] ?? Self.defaultBindings[action] ?? .buttonA
+    }
+
+    // MARK: - Axes
+
+    func axisBinding(for function: ControllerAxisFunction) -> ControllerAxisBinding {
+        axisMap.binding(for: function)
+    }
+
+    func setAxisBinding(_ binding: ControllerAxisBinding, for function: ControllerAxisFunction) {
+        var updated = axisMap
+        updated.setBinding(binding, for: function)
+        axisMap = updated
+        persist()
+    }
+
+    func setThrottleMode(_ mode: ControllerThrottleMode) {
+        guard axisMap.throttleMode != mode else { return }
+        axisMap.throttleMode = mode
+        persist()
+    }
+
+    /// Applies a transmitter layout to the four flight axes and leaves everything else — camera,
+    /// cursor, per-axis expo and deadzone — exactly as the operator had set it.
+    func applyStickMode(_ mode: ControllerStickMode) {
+        guard mode != .custom else { return }
+        let preset = ControllerAxisMap.preset(mode)
+        var updated = axisMap
+        for function in ControllerAxisFunction.flightAxes {
+            var binding = updated.binding(for: function)
+            let template = preset.binding(for: function)
+            binding.source = template.source
+            binding.isInverted = template.isInverted
+            updated.setBinding(binding, for: function)
+        }
+        axisMap = updated
+        persist()
+    }
+
+    func resetAxisMap() {
+        axisMap = .default
+        persist()
+    }
+
+    // MARK: - Rates
+
+    func setRates(_ rates: ControllerAxisRates, for function: ControllerAxisFunction) {
+        var updated = rateProfile
+        updated.setRates(rates, for: function)
+        rateProfile = updated
+        persist()
+    }
+
+    func setThrottleCurve(_ curve: ControllerThrottleCurve) {
+        rateProfile.throttle = curve
+        persist()
+    }
+
+    func applyRateProfile(_ profile: ControllerRateProfile) {
+        rateProfile = profile
+        persist()
     }
 
     func setBinding(_ binding: ControllerButtonBinding, for action: ControllerUIBindingAction) {
@@ -237,7 +315,9 @@ final class ControllerSettingsStore: ObservableObject {
                 result[entry.key.rawValue] = entry.value.rawValue
             },
             cursorSpeedMultiplier: cursorSpeedMultiplier,
-            scrollBehavior: scrollBehavior.rawValue
+            scrollBehavior: scrollBehavior.rawValue,
+            axisMap: axisMap,
+            rateProfile: rateProfile
         )
 
         if let data = try? JSONEncoder().encode(persisted) {
